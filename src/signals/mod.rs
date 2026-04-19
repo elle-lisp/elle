@@ -197,6 +197,23 @@ impl Signal {
             .into_iter()
             .fold(Signal::silent(), |a, b| a.combine(b))
     }
+
+    /// Compute the compile-time signal after squelching the given mask.
+    ///
+    /// Mirrors `Closure::effective_signal()` at runtime: if the mask
+    /// suppresses signals this function actually emits, those bits are
+    /// cleared and SIG_ERROR is added (squelch converts to error).
+    /// When the mask doesn't suppress anything, returns self unchanged.
+    pub const fn squelch(self, mask: SignalBits) -> Signal {
+        let actually_squelched = self.bits.intersection(mask);
+        if actually_squelched.is_empty() {
+            return self;
+        }
+        Signal {
+            bits: self.bits.subtract(mask).union(SIG_ERROR),
+            propagates: self.propagates,
+        }
+    }
 }
 
 // ── Predicates ──────────────────────────────────────────────────────
@@ -478,5 +495,72 @@ mod tests {
         let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
         assert_eq!(bit_pos, 12);
         assert_eq!(SignalBits::from_bit(bit_pos), SIG_FUEL);
+    }
+
+    #[test]
+    fn test_squelch_noop_when_mask_irrelevant() {
+        // Squelching :yield on a silent function changes nothing.
+        let sig = Signal::errors();
+        let result = sig.squelch(SIG_YIELD);
+        assert_eq!(result, sig);
+    }
+
+    #[test]
+    fn test_squelch_clears_bits_adds_error() {
+        // Squelching :yield on a yields function clears yield, adds error.
+        let sig = Signal::yields();
+        let result = sig.squelch(SIG_YIELD);
+        assert!(!result.may_yield());
+        assert!(result.may_error());
+        assert!(!result.may_suspend());
+    }
+
+    #[test]
+    fn test_squelch_preserves_propagates() {
+        // Squelch preserves the propagates mask.
+        let sig = Signal {
+            bits: SIG_YIELD.union(SIG_ERROR),
+            propagates: 0b101,
+        };
+        let result = sig.squelch(SIG_YIELD);
+        assert_eq!(result.propagates, 0b101);
+        assert!(!result.bits.intersects(SIG_YIELD));
+        assert!(result.bits.intersects(SIG_ERROR));
+    }
+
+    #[test]
+    fn test_squelch_multiple_bits() {
+        // Squelch a set of signals.
+        let sig = Signal {
+            bits: SIG_YIELD.union(SIG_IO).union(SIG_ERROR),
+            propagates: 0,
+        };
+        let mask = SIG_YIELD.union(SIG_IO);
+        let result = sig.squelch(mask);
+        assert!(!result.bits.intersects(SIG_YIELD));
+        assert!(!result.bits.intersects(SIG_IO));
+        assert!(result.bits.intersects(SIG_ERROR));
+    }
+
+    #[test]
+    fn test_squelch_yields_errors_becomes_silent_errors() {
+        // Squelching :yield on yields+errors → errors only.
+        let sig = Signal::yields_errors();
+        let result = sig.squelch(SIG_YIELD);
+        assert!(!result.may_yield());
+        assert!(result.may_error());
+        assert!(!result.may_suspend());
+    }
+
+    #[test]
+    fn test_squelch_all_bits_leaves_error() {
+        // Squelching everything still leaves error (from squelch itself).
+        let sig = Signal {
+            bits: SIG_YIELD.union(SIG_IO),
+            propagates: 0,
+        };
+        let mask = SIG_YIELD.union(SIG_IO);
+        let result = sig.squelch(mask);
+        assert_eq!(result.bits, SIG_ERROR);
     }
 }

@@ -27,8 +27,12 @@ impl<'a> Analyzer<'a> {
         // Phase 1: Analyze all value expressions in the OUTER scope.
         // For destructuring bindings, we record the pattern syntax for Phase 2.
         // Bindings are flat pairs: [name1 value1 name2 value2 ...]
+        struct TransientState {
+            import_projection: Option<HashMap<String, Signal>>,
+            squelch_signal: Option<Signal>,
+        }
         enum LetBinding<'s> {
-            Simple(&'s str, Vec<ScopeId>, Hir),
+            Simple(&'s str, Vec<ScopeId>, Hir, TransientState),
             Destructure(&'s Syntax, Hir),
         }
         let mut analyzed = Vec::new();
@@ -49,8 +53,19 @@ impl<'a> Analyzer<'a> {
             let value = self.analyze_expr(value_syn)?;
             signal = signal.combine(value.signal);
 
+            // Capture transient state set during analyze_expr
+            let transient = TransientState {
+                import_projection: self.last_import_projection.take(),
+                squelch_signal: self.last_squelch_signal.take(),
+            };
+
             if let Some(name) = name_syn.as_symbol() {
-                analyzed.push(LetBinding::Simple(name, name_syn.scopes.clone(), value));
+                analyzed.push(LetBinding::Simple(
+                    name,
+                    name_syn.scopes.clone(),
+                    value,
+                    transient,
+                ));
             } else if Self::is_destructure_pattern(name_syn) {
                 analyzed.push(LetBinding::Destructure(name_syn, value));
             } else {
@@ -70,7 +85,7 @@ impl<'a> Analyzer<'a> {
 
         for item in analyzed {
             match item {
-                LetBinding::Simple(name, name_scopes, value) => {
+                LetBinding::Simple(name, name_scopes, value, transient) => {
                     let (actual_name, is_mutable) = super::strip_at_prefix(name);
                     let binding = self.bind(actual_name, &name_scopes, BindingScope::Local);
                     if self.immutable_by_default && !is_mutable {
@@ -92,6 +107,13 @@ impl<'a> Analyzer<'a> {
                             lambda_params.len(),
                         );
                         self.arity_env.insert(binding, arity);
+                    }
+                    // Apply import projection and squelch signal
+                    if let Some(proj) = transient.import_projection {
+                        self.projection_env.insert(binding, proj);
+                    }
+                    if let Some(sig) = transient.squelch_signal {
+                        self.signal_env.insert(binding, sig);
                     }
                     bindings.push((binding, value));
                 }
@@ -293,6 +315,7 @@ impl<'a> Analyzer<'a> {
                         );
                         self.arity_env.insert(*binding, arity);
                     }
+                    self.apply_transient_binding_state(*binding);
                     bindings.push((*binding, value));
                 }
                 LetrecEntry::Destructure {
@@ -460,6 +483,7 @@ impl<'a> Analyzer<'a> {
                     Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);
             }
+            self.apply_transient_binding_state(binding);
 
             let value_signal = value.signal;
             Ok(Hir::new(
@@ -514,6 +538,7 @@ impl<'a> Analyzer<'a> {
                     Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);
             }
+            self.apply_transient_binding_state(binding);
 
             let value_signal = value.signal;
             Ok(Hir::new(
@@ -574,5 +599,19 @@ impl<'a> Analyzer<'a> {
             span,
             signal,
         ))
+    }
+
+    /// Consume transient analysis state (import projection, squelch signal)
+    /// and apply them to a binding. Called after analyzing a binding's value
+    /// expression in `def`, `let`, `letrec`, and file-scope letrec.
+    pub(crate) fn apply_transient_binding_state(&mut self, binding: Binding) {
+        // Import projection: the value was `((import "literal"))`
+        if let Some(proj) = self.last_import_projection.take() {
+            self.projection_env.insert(binding, proj);
+        }
+        // Compile-time squelch: the value was `(squelch f mask)`
+        if let Some(sig) = self.last_squelch_signal.take() {
+            self.signal_env.insert(binding, sig);
+        }
     }
 }

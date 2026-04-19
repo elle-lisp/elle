@@ -142,6 +142,20 @@ pub struct Analyzer<'a> {
     /// correctly disabling the primitive arity check.
     arity_env: HashMap<Binding, Arity>,
 
+    /// Signal projections for bindings initialized from imported modules.
+    /// Maps a binding to a keyword→signal projection so that qualified
+    /// access (`module:field`) uses the projected signal instead of the
+    /// conservative `Polymorphic` fallback.
+    projection_env: HashMap<Binding, HashMap<String, Signal>>,
+    /// Compile-time squelch result signal. Set during call analysis when
+    /// the analyzer detects `(squelch f mask)` and computes the resulting
+    /// closure's signal statically. Consumed by binding analysis to seed
+    /// the binding's signal_env entry.
+    last_squelch_signal: Option<Signal>,
+    /// Import projection detected during call analysis. Set when the
+    /// analyzer sees `((import "literal"))` and the target file has a
+    /// projection. Consumed by binding analysis to populate projection_env.
+    last_import_projection: Option<HashMap<String, Signal>>,
     /// Tracks signal sources within the current lambda body for polymorphic inference
     current_signal_sources: SignalSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
@@ -181,6 +195,9 @@ pub struct Analyzer<'a> {
     current_silence_assert: bool,
     /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
     current_numeric_assert: bool,
+    /// Signal projection computed by `analyze_file_letrec`. Retrieved by
+    /// the pipeline to store on `Bytecode.signal_projection`.
+    last_signal_projection: Option<HashMap<String, Signal>>,
     /// Set by `(immutable! x)` assertion form. Consumed by `analyze_lambda`.
     current_immutability_asserts: HashSet<Binding>,
     /// When true, bindings without `@` prefix are immutable.
@@ -221,6 +238,9 @@ impl<'a> Analyzer<'a> {
             primitive_signals,
             arity_env: HashMap::new(),
 
+            projection_env: HashMap::new(),
+            last_squelch_signal: None,
+            last_import_projection: None,
             current_signal_sources: SignalSources::default(),
             current_lambda_params: Vec::new(),
             block_contexts: Vec::new(),
@@ -234,6 +254,7 @@ impl<'a> Analyzer<'a> {
             errors: Vec::new(),
             current_silence_assert: false,
             current_numeric_assert: false,
+            last_signal_projection: None,
             current_immutability_asserts: HashSet::new(),
             immutable_by_default: true,
         };
@@ -259,6 +280,11 @@ impl<'a> Analyzer<'a> {
     /// Return accumulated errors (for the pipeline to check).
     pub fn take_errors(&mut self) -> Vec<LError> {
         std::mem::take(&mut self.errors)
+    }
+
+    /// Take the signal projection computed by `analyze_file_letrec`.
+    pub fn take_signal_projection(&mut self) -> Option<HashMap<String, Signal>> {
+        self.last_signal_projection.take()
     }
 
     /// Set whether bindings without `@` are immutable by default.

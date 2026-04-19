@@ -10,7 +10,8 @@ mod eval;
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
 pub use cache::{
-    lookup_stdlib_value, register_repl_binding, register_repl_macros, update_cache_with_stdlib,
+    get_or_compile_projection, lookup_stdlib_value, register_repl_binding, register_repl_macros,
+    update_cache_with_stdlib,
 };
 pub use compile::{
     compile, compile_file, compile_file_repl, compile_file_to_lir, compile_to_lir, splice_includes,

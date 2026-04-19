@@ -92,6 +92,42 @@ impl<'a> Analyzer<'a> {
 
         signal = signal.combine(callee_signal);
 
+        // ── Import projection detection ────────────────────────────────
+        // Pattern: ((import "literal")) — the outer call's func is itself
+        // a Call to `import` with a literal string argument. If so, look up
+        // the target file's signal projection and stash it for the binding
+        // analysis to pick up via `last_import_projection`.
+        self.last_import_projection = None;
+        if let HirKind::Call {
+            func: inner_func,
+            args: inner_args,
+            ..
+        } = &func.kind
+        {
+            if self.is_import(inner_func) {
+                if let Some(first) = inner_args.first() {
+                    if let HirKind::String(spec) = &first.expr.kind {
+                        if let Some(resolved) = crate::primitives::modules::resolve_import(spec) {
+                            self.last_import_projection =
+                                crate::pipeline::get_or_compile_projection(&resolved);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Compile-time squelch detection ─────────────────────────────
+        // Pattern: (squelch f :keyword) or (squelch f |:kw1 :kw2|)
+        // Compute the resulting closure's signal statically and stash it
+        // for binding analysis to seed the binding's signal_env entry.
+        self.last_squelch_signal = None;
+        if self.is_squelch(&func) && args.len() == 2 {
+            let target_signal = self.resolve_arg_signal(&args[0].expr);
+            if let Some(mask) = self.resolve_squelch_mask(&args[1].expr) {
+                self.last_squelch_signal = Some(target_signal.squelch(mask));
+            }
+        }
+
         Ok(Hir::new(
             HirKind::Call {
                 func: Box::new(func),
@@ -159,8 +195,23 @@ impl<'a> Analyzer<'a> {
 
     /// Check if the callee is the `emit` primitive.
     fn is_emit(&self, func: &Hir) -> bool {
+        self.is_primitive_named(func, "emit")
+    }
+
+    /// Check if the callee is the `squelch` primitive.
+    fn is_squelch(&self, func: &Hir) -> bool {
+        self.is_primitive_named(func, "squelch")
+    }
+
+    /// Check if the callee is the `import` primitive.
+    fn is_import(&self, func: &Hir) -> bool {
+        self.is_primitive_named(func, "import")
+    }
+
+    /// Check if a callee HIR node refers to a named primitive.
+    fn is_primitive_named(&self, func: &Hir, name: &str) -> bool {
         if let HirKind::Var(binding) = &func.kind {
-            self.symbols.name(self.arena.get(*binding).name) == Some("emit")
+            self.symbols.name(self.arena.get(*binding).name) == Some(name)
         } else {
             false
         }
@@ -334,6 +385,45 @@ impl<'a> Analyzer<'a> {
         Signal {
             bits: bound_bits.union(non_suspension_bits),
             propagates,
+        }
+    }
+
+    /// Resolve a compile-time squelch mask from a keyword or set literal.
+    ///
+    /// Returns `Some(mask)` for:
+    /// - `:keyword` → single signal bit
+    /// - `|:kw1 :kw2|` → union of signal bits (set literal in HIR)
+    ///
+    /// Returns `None` for dynamic values.
+    fn resolve_squelch_mask(&self, arg: &Hir) -> Option<crate::value::fiber::SignalBits> {
+        use crate::value::fiber::SignalBits;
+        match &arg.kind {
+            HirKind::Keyword(kw) => {
+                let reg = crate::signals::registry::global_registry().lock().unwrap();
+                reg.lookup(kw).map(SignalBits::from_bit)
+            }
+            // Set literal: Call to the `set` primitive with keyword args
+            HirKind::Call { func, args, .. } => {
+                if let HirKind::Var(binding) = &func.kind {
+                    let name = self.symbols.name(self.arena.get(*binding).name)?;
+                    if name != "set" {
+                        return None;
+                    }
+                    let reg = crate::signals::registry::global_registry().lock().unwrap();
+                    let mut mask = SignalBits::EMPTY;
+                    for call_arg in args {
+                        if let HirKind::Keyword(kw) = &call_arg.expr.kind {
+                            mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
+                        } else {
+                            return None;
+                        }
+                    }
+                    Some(mask)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 }

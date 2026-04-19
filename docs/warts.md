@@ -1,13 +1,17 @@
 # Warts
 
-### RC without cycle collection
+### Rc in mutable collections
 
-No GC, no weak-ref discipline for user values, no cycle detector. A
-closure that captures its own binding (natural in any recursive local
-function via letrec) creates an Rc cycle that lives forever. Long-running
-programs using self-referencing actors leak silently with no diagnostic.
-The fiber tree uses WeakFiberHandle for parent pointers - but user data
-has no such protection. Fix is a tracing GC or cycle collector.
+Closure environments are now `InlineSlice<Value>` in the bump arena —
+self-referencing closures (letrec recursion) create arena pointer cycles,
+not Rc cycles, and are reclaimed by scope exit or fiber death.
+
+Mutable collections (`@array`, `@struct`, `@set`, `@string`, `@bytes`)
+and `CaptureCell` still use `Rc<RefCell<_>>`. A mutable container that
+stores a reference to itself (e.g., an `@array` that `push`es itself)
+creates an Rc cycle. This is rare in practice — it requires explicit
+self-insertion, not the natural letrec pattern that was the original
+concern.
 
 ### Thread-local singletons in multiple modules
 

@@ -888,7 +888,16 @@ impl<'a> Analyzer<'a> {
         for segment in &segments[1..] {
             let get_func = Hir::silent(HirKind::Var(get_binding), span.clone());
             let key = Hir::silent(HirKind::Keyword(segment.to_string()), span.clone());
-            let call_signal = result.signal;
+            // Use projected signal if the binding has a projection for this field.
+            let call_signal = if let HirKind::Var(binding) = &result.kind {
+                if let Some(proj) = self.projection_env.get(binding) {
+                    proj.get(*segment).copied().unwrap_or(result.signal)
+                } else {
+                    result.signal
+                }
+            } else {
+                result.signal
+            };
             result = Hir::new(
                 HirKind::Call {
                     func: Box::new(get_func),
