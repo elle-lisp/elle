@@ -10,6 +10,7 @@ use crate::value::{
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[cfg(feature = "jit")]
 use crate::jit::{JitCode, JitRejectionInfo};
@@ -71,7 +72,13 @@ pub struct VM {
     pub(crate) error_loc: Option<SourceLoc>,
     /// JIT code cache: bytecode pointer → compiled native code.
     #[cfg(feature = "jit")]
-    pub jit_cache: FxHashMap<*const u8, Rc<JitCode>>,
+    pub jit_cache: FxHashMap<*const u8, Arc<JitCode>>,
+    /// Background JIT compilation worker (spawned lazily).
+    #[cfg(feature = "jit")]
+    pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,
+    /// Bytecode pointers currently being compiled in background.
+    #[cfg(feature = "jit")]
+    pub(crate) jit_pending: rustc_hash::FxHashSet<usize>,
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
@@ -196,6 +203,10 @@ impl VM {
             error_loc: None,
             #[cfg(feature = "jit")]
             jit_cache: FxHashMap::default(),
+            #[cfg(feature = "jit")]
+            jit_worker: None,
+            #[cfg(feature = "jit")]
+            jit_pending: rustc_hash::FxHashSet::default(),
             #[cfg(feature = "jit")]
             jit_rejections: FxHashMap::default(),
             docs: HashMap::new(),

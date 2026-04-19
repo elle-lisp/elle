@@ -487,7 +487,9 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
 }
 
 #[cfg(feature = "jit")]
-fn print_jit_stats(vm: &VM) {
+fn print_jit_stats(vm: &mut VM) {
+    // Drain pending background compilations so stats are complete.
+    vm.drain_jit_pending();
     let compiled = vm.jit_cache.len();
     let rejected = vm.jit_rejections.len();
 
@@ -632,7 +634,7 @@ fn main() {
             eprint!("{}", scope_stats);
         }
         #[cfg(feature = "jit")]
-        print_jit_stats(&vm);
+        print_jit_stats(&mut vm);
         let cvc = elle::lir::closure_value_const_count();
         if cvc > 0 {
             eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);

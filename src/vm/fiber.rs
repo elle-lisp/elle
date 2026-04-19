@@ -449,6 +449,67 @@ impl VM {
             child_handle.with_mut(|c| c.param_frames = vec![flat]);
         }
 
+        // ── Direct fiber resumption optimization ───────────────────
+        //
+        // For subsequent resumes whose first suspended frame is FiberResume,
+        // the full swap protocol (take/wire/swap/install-heap/outbox/execute/
+        // swap-back/put) is wasted: resume_suspended would immediately set
+        // pending_fiber_resume and return SIG_SWITCH without executing any
+        // bytecode. Short-circuit: consume the FiberResume frame, wire the
+        // inner fiber's signal, set pending_fiber_resume, and return
+        // SIG_SWITCH directly. The trampoline in do_fiber_resume handles
+        // the rest identically. Chains naturally through N levels.
+        if !is_first_resume {
+            let skip = child_handle.with(|c| {
+                c.suspended.as_ref().is_some_and(|frames| {
+                    matches!(frames.first(), Some(SuspendedFrame::FiberResume { .. }))
+                })
+            });
+
+            if skip {
+                let (inner_handle, inner_fv, remaining) = child_handle.with_mut(|c| {
+                    let mut frames = c.suspended.take().unwrap();
+                    let first = frames.remove(0);
+                    match first {
+                        SuspendedFrame::FiberResume {
+                            handle,
+                            fiber_value,
+                        } => {
+                            let rest = if frames.is_empty() {
+                                None
+                            } else {
+                                Some(frames)
+                            };
+                            (handle, fiber_value, rest)
+                        }
+                        _ => unreachable!(),
+                    }
+                });
+
+                // Preserve remaining frames for the unwind-resume path.
+                child_handle.with_mut(|c| c.suspended = remaining);
+
+                // Propagate withheld capabilities: parent → intermediate → inner.
+                let intermediate_withheld = child_handle.with_mut(|c| {
+                    c.withheld |= self.fiber.withheld;
+                    c.withheld
+                });
+                inner_handle.with_mut(|f| f.withheld |= intermediate_withheld);
+
+                // Deliver the resume value to the inner fiber (matches what
+                // resume_suspended does at the FiberResume arm).
+                inner_handle.with_mut(|f| f.signal = Some((SIG_OK, resume_value)));
+
+                // Set up the trampoline to descend into the inner fiber.
+                self.pending_fiber_resume = Some(super::core::PendingFiberResume {
+                    handle: inner_handle,
+                    fiber_value: inner_fv,
+                });
+
+                return (SIG_SWITCH, Value::NIL);
+            }
+        }
+
         self.with_child_fiber(child_handle, child_value, |vm| {
             vm.fiber.status = FiberStatus::Alive;
 

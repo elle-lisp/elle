@@ -11,6 +11,7 @@ use crate::jit::{
 };
 use crate::value::{SignalBits, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use super::core::VM;
 
@@ -21,6 +22,11 @@ impl VM {
     /// Option follows handle_call's convention), or `None` to fall through
     /// to the interpreter path. Caller is responsible for decrementing
     /// call_depth on the `Some` path.
+    ///
+    /// Compilation is asynchronous: when a function becomes hot, its LIR
+    /// is sent to a background thread for Cranelift compilation. The
+    /// interpreter continues running the function until compiled code
+    /// is ready. Zero stall on the event loop.
     pub(super) fn try_jit_call(
         &mut self,
         closure: &crate::value::Closure,
@@ -33,101 +39,135 @@ impl VM {
         let bytecode_ptr = closure.template.bytecode.as_ptr();
         let is_hot = self.record_closure_call(bytecode_ptr);
 
-        // Check if we already have JIT code for this closure
+        // Poll for completed background compilations (cheap: non-blocking recv)
+        self.poll_jit_completions();
+
+        // Check cache (may have been populated by poll above)
         if let Some(jit_code) = self.jit_cache.get(&bytecode_ptr).cloned() {
             return Some(self.run_jit(&jit_code, closure, args, func));
         }
 
-        // If hot, attempt JIT compilation
-        if is_hot {
+        // If hot and not already pending, submit background compilation
+        if is_hot && !self.jit_pending.contains(&(bytecode_ptr as usize)) {
             if let Some(ref lir_func) = closure.template.lir_function {
-                // Hoist the SymbolId lookup — needed for both batch and solo paths
-                let self_sym = self.find_global_sym_for_bytecode(bytecode_ptr);
-
-                // Try batch compilation first for capture-free functions
-                if lir_func.num_captures == 0 {
-                    if let Some(result) =
-                        self.try_batch_jit(lir_func, bytecode_ptr, closure, args, func, self_sym)
-                    {
-                        return Some(result);
-                    }
-                }
-
-                // Solo compilation — pass self_sym for direct self-calls
-                match JitCompiler::new() {
-                    Ok(compiler) => match compiler.compile(
-                        lir_func,
-                        self_sym,
-                        (*closure.template.symbol_names).clone(),
-                        Vec::new(),
-                    ) {
-                        Ok(jit_code) => {
-                            if self
-                                .runtime_config
-                                .has_trace_bit(crate::config::trace_bits::JIT)
-                            {
-                                // Dump first few LIR blocks to identify the function
-                                let block_info: Vec<String> = lir_func
-                                    .blocks
-                                    .iter()
-                                    .map(|b| {
-                                        let instrs: Vec<String> = b
-                                            .instructions
-                                            .iter()
-                                            .map(|i| format!("{:?}", i.instr))
-                                            .collect();
-                                        format!(
-                                            "L{}:[{}] term={:?}",
-                                            b.label.0,
-                                            instrs.join(", "),
-                                            b.terminator.terminator
-                                        )
-                                    })
-                                    .collect();
-                                eprintln!(
-                                    "[jit] compiled: name={} arity={} nargs={} num_params={} bc_len={} vararg={:?} lir={}",
-                                    closure.template.name.as_deref().unwrap_or("<anon>"),
-                                    lir_func.arity,
-                                    args.len(),
-                                    lir_func.num_params,
-                                    closure.template.bytecode.len(),
-                                    lir_func.vararg_kind,
-                                    block_info.join(" "),
-                                );
-                            }
-                            let jit_code = Rc::new(jit_code);
-                            self.jit_cache.insert(bytecode_ptr, jit_code.clone());
-                            return Some(self.run_jit(&jit_code, closure, args, func));
-                        }
-                        Err(e) => match &e {
-                            crate::jit::JitError::UnsupportedInstruction(_)
-                            | crate::jit::JitError::Polymorphic
-                            | crate::jit::JitError::Yielding => {
-                                // Expected rejection — record and fall back to interpreter.
-                                self.record_jit_rejection(bytecode_ptr, closure, e);
-                            }
-                            _ => {
-                                panic!(
-                                    "JIT compilation failed for function: {}. Error: {}",
-                                    closure
-                                        .template
-                                        .lir_function
-                                        .as_ref()
-                                        .map(|f| f.name.as_deref().unwrap_or("<anon>"))
-                                        .unwrap_or("<no lir>"),
-                                    e
-                                );
-                            }
-                        },
-                    },
-                    Err(e) => {
-                        panic!("JIT compiler creation failed: {}. This is a bug.", e);
-                    }
-                }
+                self.submit_jit_task(lir_func, closure, bytecode_ptr);
             }
         }
 
-        None // Fall through to interpreter
+        None // Interpreter fallback while compilation proceeds in background
+    }
+
+    /// Poll the background JIT worker for completed compilations.
+    /// Inserts successful results into jit_cache; records rejections.
+    fn poll_jit_completions(&mut self) {
+        let worker = match self.jit_worker.as_ref() {
+            Some(w) => w,
+            None => return,
+        };
+        let results: Vec<_> = worker.poll().collect();
+        for result in results {
+            self.jit_pending.remove(&result.bytecode_key);
+            match result.result {
+                Ok(jit_code) => {
+                    let bytecode_ptr = result.bytecode_key as *const u8;
+                    if self
+                        .runtime_config
+                        .has_trace_bit(crate::config::trace_bits::JIT)
+                    {
+                        eprintln!(
+                            "[jit] background compiled: bc_ptr={:#x}",
+                            result.bytecode_key,
+                        );
+                    }
+                    self.jit_cache.insert(bytecode_ptr, Arc::new(jit_code));
+                }
+                Err(e) => match &e {
+                    crate::jit::JitError::UnsupportedInstruction(_)
+                    | crate::jit::JitError::Polymorphic
+                    | crate::jit::JitError::Yielding => {
+                        // Expected rejection — record for diagnostics.
+                        let bytecode_ptr = result.bytecode_key as *const u8;
+                        self.jit_rejections.entry(bytecode_ptr).or_insert_with(|| {
+                            JitRejectionInfo {
+                                name: None,
+                                reason: e,
+                            }
+                        });
+                    }
+                    _ => {
+                        eprintln!("[jit] background compilation failed: {}", e);
+                    }
+                },
+            }
+        }
+    }
+
+    /// Submit a background JIT compilation task for a hot function.
+    fn submit_jit_task(
+        &mut self,
+        lir_func: &crate::lir::LirFunction,
+        closure: &crate::value::Closure,
+        bytecode_ptr: *const u8,
+    ) {
+        let self_sym = self.find_global_sym_for_bytecode(bytecode_ptr);
+        let task = crate::jit::worker::prepare_task(
+            lir_func,
+            self_sym,
+            (*closure.template.symbol_names).clone(),
+            bytecode_ptr as usize,
+        );
+
+        // Lazily spawn the worker thread on first use
+        let worker = self
+            .jit_worker
+            .get_or_insert_with(crate::jit::worker::JitWorker::new);
+
+        if worker.submit(task) {
+            self.jit_pending.insert(bytecode_ptr as usize);
+            if self
+                .runtime_config
+                .has_trace_bit(crate::config::trace_bits::JIT)
+            {
+                eprintln!(
+                    "[jit] submitted background compilation: name={} bc_ptr={:#x}",
+                    closure.template.name.as_deref().unwrap_or("<anon>"),
+                    bytecode_ptr as usize,
+                );
+            }
+        }
+    }
+
+    /// Block until all pending background JIT compilations complete.
+    /// Used by `jit/rejections` and `--stats` to ensure all results
+    /// are available before reporting.
+    pub fn drain_jit_pending(&mut self) {
+        while !self.jit_pending.is_empty() {
+            let worker = match self.jit_worker.as_ref() {
+                Some(w) => w,
+                None => break,
+            };
+            match worker.recv_blocking() {
+                Some(result) => {
+                    self.jit_pending.remove(&result.bytecode_key);
+                    match result.result {
+                        Ok(jit_code) => {
+                            let bytecode_ptr = result.bytecode_key as *const u8;
+                            self.jit_cache.insert(bytecode_ptr, Arc::new(jit_code));
+                        }
+                        Err(e) => {
+                            let bytecode_ptr = result.bytecode_key as *const u8;
+                            self.jit_rejections.entry(bytecode_ptr).or_insert_with(|| {
+                                JitRejectionInfo {
+                                    name: None,
+                                    reason: e,
+                                }
+                            });
+                        }
+                    }
+                }
+                None => break, // Worker exited
+            }
+        }
     }
 
     /// Run JIT-compiled code and handle the result.
@@ -287,6 +327,10 @@ impl VM {
     ///
     /// Returns `Some` if batch compilation succeeded and the hot function
     /// was executed. Returns `None` to fall through to solo compilation.
+    ///
+    /// Currently always returns `None` (discover_compilation_group returns
+    /// empty with globals removed). Retained for future batch compilation.
+    #[allow(dead_code)]
     fn try_batch_jit(
         &mut self,
         lir_func: &Rc<crate::lir::LirFunction>,
@@ -349,7 +393,7 @@ impl VM {
         // Insert all compiled functions into cache and find the hot one
         let mut hot_jit_code = None;
         for (sym, jit_code) in results {
-            let jit_code = Rc::new(jit_code);
+            let jit_code = Arc::new(jit_code);
             if sym == hot_sym {
                 let bc_ptr = closure.template.bytecode.as_ptr();
                 self.jit_cache.insert(bc_ptr, jit_code.clone());
@@ -366,6 +410,7 @@ impl VM {
 
     /// Record a JIT rejection for a closure. Only the first rejection per
     /// closure template is stored (deduplicated by bytecode pointer).
+    #[allow(dead_code)]
     fn record_jit_rejection(
         &mut self,
         bytecode_ptr: *const u8,

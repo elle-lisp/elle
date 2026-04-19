@@ -598,6 +598,10 @@ impl VM {
                 use crate::value::heap::TableKey;
                 use std::collections::BTreeMap;
 
+                // Drain pending background compilations so all rejections
+                // are available before reporting.
+                self.drain_jit_pending();
+
                 // Sort by call count ascending (coldest first, hottest last).
                 let mut entries: Vec<_> = self.jit_rejections.iter().collect();
                 entries.sort_by_key(|(ptr, _)| {
