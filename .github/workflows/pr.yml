@@ -149,11 +149,15 @@ jobs:
         run: cargo build --release -p elle
       - name: Run smoke tests
         run: make smoke
+      - name: Build release binary (no JIT)
+        run: cargo build --release --no-default-features -p elle
+      - name: Run smoke tests (VM only, no JIT)
+        run: make smoke-vm
 
   android:
     name: Android Cross-Check
     needs: changes
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     steps:
       - uses: actions/checkout@v4
@@ -163,26 +167,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: android
-      - uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: r27d
       - name: Configure NDK toolchain
         run: |
-          PREBUILT=$(ls -d "${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/"* | head -1)
-          echo "$PREBUILT/bin" >> "$GITHUB_PATH"
+          NDK=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* | sort -V | tail -1)
+          echo "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
           echo "CC_aarch64_linux_android=aarch64-linux-android24-clang" >> "$GITHUB_ENV"
           echo "AR_aarch64_linux_android=llvm-ar" >> "$GITHUB_ENV"
       - name: Cross-check Android target
         run: cargo check --target aarch64-linux-android --no-default-features -p elle
-      - name: Install GNU parallel
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y parallel
-      - name: Build host binary (no JIT)
-        run: cargo build --release --no-default-features -p elle
-      - name: Run smoke tests (VM only)
-        run: make smoke-vm
 
   macos:
     name: macOS Build & Smoke
