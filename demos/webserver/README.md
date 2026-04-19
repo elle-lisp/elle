@@ -65,48 +65,32 @@ Produces three charts:
 
 ![throughput](throughput.svg)
 
-Peak throughput is ~2500 req/s at c=5–25, dropping at higher concurrency
-as scheduler contention grows.
+Peak throughput is ~3450 req/s at c=5, sustaining >3100 req/s through
+c=50 before dropping to ~2560 at c=100 as scheduler contention grows.
 
 ### Latency percentiles vs concurrency
 
 ![latency](latency.svg)
 
-p50/p95/p99 scale roughly linearly with concurrency. The tight spread
-between percentiles means tail latency tracks the median — no outlier
-storms.
+p50/p95/p99 scale roughly linearly with concurrency. At c=1, p50 is
+0.3ms; at c=100, p50 is 32ms. The tight spread between percentiles
+means tail latency tracks the median — no outlier storms.
 
 ### Latency distribution at peak concurrency
 
 ![histogram](histogram.svg)
 
-Bell curve centered around 45ms at c=100, with a small tail to ~60ms.
+Bell curve centered around 32ms at c=100, with a tail to ~49ms.
 
-## Known issue: keepalive latency regression
+## JIT compilation
 
-Keep-alive connections through `http:serve`'s `connection-loop` exhibit
-a 150x latency regression compared to equivalent raw TCP operations:
-
-| Path | Latency per request |
-|------|---------------------|
-| Raw TCP (1 write + 1 read per side) | 0.26ms |
-| Transport-wrapped (same ops) | 0.26ms |
-| HTTP string parsing alone | 0.001ms |
-| `protect` overhead | 0.003ms |
-| **`connection-loop` via `http:serve`** | **40ms** |
-
-The regression is not in HTTP parsing, `protect`, transport wrapping,
-or the number of I/O operations — all of these were individually
-measured at sub-millisecond cost. The overhead appears when the same
-operations run inside `connection-loop`'s nested `defer`/`protect`/
-`forever`/`break` control flow, suggesting a runtime interaction
-between fiber scheduling and deeply nested control forms.
-
-Fresh connections are unaffected (~0.4ms per request) because each
-request runs in an independent fiber without the keep-alive loop
-overhead.
-
-See the investigation plan at `.claude/plans/keepalive-regression.md`.
+JIT compilation runs on a background thread. When a function becomes
+hot (called 10+ times by default), its LIR is sent to a worker thread
+for Cranelift compilation. The interpreter continues running the
+function while native code is generated. When compilation finishes,
+the next call picks up the compiled code from cache. This eliminates
+the ~17ms event-loop stall that synchronous Cranelift compilation
+caused on keepalive connections.
 
 ## Features demonstrated
 
