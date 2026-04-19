@@ -16,6 +16,7 @@
 //! the tier rather than failing.
 
 use crate::value::{error_val_extra, SignalBits, Value, SIG_ERROR, SIG_OK};
+#[cfg(any(feature = "jit", feature = "wasm"))]
 use std::rc::Rc;
 
 use super::core::VM;
@@ -121,6 +122,7 @@ impl VM {
     ///
     /// Force-compiles the closure if it's not already cached; rejects
     /// with `:tier-rejected` if it has no LIR or the JIT compiler refuses.
+    #[cfg(feature = "jit")]
     pub fn invoke_closure_jit(
         &mut self,
         closure_val: Value,
@@ -325,6 +327,17 @@ impl VM {
         }
 
         (SIG_OK, result_jv.to_value())
+    }
+
+    /// Stub when JIT feature is disabled — always rejects with `:tier-rejected`.
+    #[cfg(not(feature = "jit"))]
+    pub fn invoke_closure_jit(
+        &mut self,
+        _closure_val: Value,
+        _closure: &crate::value::Closure,
+        _args: &[Value],
+    ) -> (SignalBits, Value) {
+        (SIG_ERROR, rejected("jit", "JIT feature not compiled in"))
     }
 
     /// Run a closure via the WASM backend (Wasmtime tiered compilation).

@@ -11,6 +11,7 @@ use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+#[cfg(feature = "jit")]
 use crate::jit::{JitCode, JitRejectionInfo};
 
 pub(crate) struct TailCallInfo {
@@ -69,6 +70,7 @@ pub struct VM {
     /// overwriting the child fiber's error origin.
     pub(crate) error_loc: Option<SourceLoc>,
     /// JIT code cache: bytecode pointer → compiled native code.
+    #[cfg(feature = "jit")]
     pub jit_cache: FxHashMap<*const u8, Rc<JitCode>>,
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
@@ -76,6 +78,7 @@ pub struct VM {
     /// JIT rejection log: bytecode pointer → rejection info.
     /// Records first rejection per closure template. Used by
     /// `(jit/rejections)` primitive and `--stats` CLI flag.
+    #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
@@ -191,7 +194,9 @@ impl VM {
             pending_tail_call: None,
             pending_fiber_resume: None,
             error_loc: None,
+            #[cfg(feature = "jit")]
             jit_cache: FxHashMap::default(),
+            #[cfg(feature = "jit")]
             jit_rejections: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
@@ -235,6 +240,7 @@ impl VM {
         self.pending_fiber_resume = None;
         self.error_loc = None;
         self.closure_call_counts.clear();
+        #[cfg(feature = "jit")]
         self.jit_rejections.clear();
         self.location_map = LocationMap::new();
         self.loading_modules.clear();

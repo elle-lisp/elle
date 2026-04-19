@@ -12,6 +12,7 @@ pub mod env;
 pub mod eval;
 pub mod execute;
 pub mod fiber;
+#[cfg(feature = "jit")]
 mod jit_entry;
 pub mod literals;
 #[cfg(feature = "mlir")]

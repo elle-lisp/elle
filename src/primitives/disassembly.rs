@@ -95,6 +95,7 @@ pub(crate) fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+    #[cfg(feature = "jit")]
     if let Some(closure) = args[0].as_closure() {
         let lir = match &closure.template.lir_function {
             Some(lir) => lir.clone(),
@@ -105,21 +106,26 @@ pub(crate) fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
             Err(_) => return (SIG_OK, Value::NIL),
         };
         match compiler.clif_text(&lir, None) {
-            Ok(lines) => (
-                SIG_OK,
-                Value::array_mut(lines.into_iter().map(Value::string).collect()),
-            ),
-            Err(_) => (SIG_OK, Value::NIL),
+            Ok(lines) => {
+                return (
+                    SIG_OK,
+                    Value::array_mut(lines.into_iter().map(Value::string).collect()),
+                )
+            }
+            Err(_) => return (SIG_OK, Value::NIL),
         }
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                "disjit: argument must be a closure".to_string(),
-            ),
-        )
     }
+    #[cfg(not(feature = "jit"))]
+    if args[0].as_closure().is_some() {
+        return (SIG_OK, Value::NIL);
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            "disjit: argument must be a closure".to_string(),
+        ),
+    )
 }
 
 /// Build the CFG struct from a closure's LIR.

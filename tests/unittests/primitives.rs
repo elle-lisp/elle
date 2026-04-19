@@ -1741,6 +1741,7 @@ fn test_json_serialize_errors() {
 }
 
 // Disassembly tests
+#[cfg(feature = "jit")]
 #[test]
 fn test_disjit_returns_array_for_pure_closure() {
     let (_vm, mut symbols, meta) = setup();
@@ -1839,6 +1840,7 @@ fn test_call_count_uncalled_closure() {
     );
 }
 
+#[cfg(feature = "jit")]
 #[test]
 fn test_call_count_after_calls() {
     let result = eval_full("(let [f (fn (x) x)] (f 1) (f 2) (f 3) (call-count f))").unwrap();

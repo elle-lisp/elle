@@ -324,7 +324,7 @@ No errors are silently swallowed.
 6. **Module lifetime.** `JitCode` keeps the `JITModule` alive via `Arc` so the
    native code isn't freed while still in use.
 
-7. **Always enabled.** JIT is a required dependency (Cranelift). No feature gate.
+7. **Enabled by default via `jit` Cargo feature.** Disable with `--no-default-features`.
 
 8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
    function calls, fiber access, and yield side-exit helpers.

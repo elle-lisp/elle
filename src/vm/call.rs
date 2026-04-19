@@ -267,6 +267,7 @@ impl VM {
             // JIT compilation and dispatch.
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).
+            #[cfg(feature = "jit")]
             if closure.template.lir_function.is_some() {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;

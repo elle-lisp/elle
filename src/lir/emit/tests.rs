@@ -134,6 +134,7 @@ fn test_yield_point_info_collected() {
     assert!(yield_points[0].stack_regs.is_empty());
 }
 
+#[cfg(feature = "jit")]
 #[test]
 fn test_yield_sentinel_distinct() {
     use crate::jit::dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};

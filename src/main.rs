@@ -486,6 +486,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
     }
 }
 
+#[cfg(feature = "jit")]
 fn print_jit_stats(vm: &VM) {
     let compiled = vm.jit_cache.len();
     let rejected = vm.jit_rejections.len();
@@ -630,6 +631,7 @@ fn main() {
         if scope_stats.scopes_analyzed > 0 {
             eprint!("{}", scope_stats);
         }
+        #[cfg(feature = "jit")]
         print_jit_stats(&vm);
         let cvc = elle::lir::closure_value_const_count();
         if cvc > 0 {
