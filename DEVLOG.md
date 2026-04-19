@@ -96,6 +96,84 @@ end-devlog-instructions -->
 Per-PR entries capturing significant development work, generated from
 git history by reading actual diffs. Most recent first.
 
+## [#757](https://github.com/elle-lisp/elle/pull/757) — Gate libffi behind `ffi` feature flag (default on)
+[`63d7d564`](https://github.com/elle-lisp/elle/commit/63d7d564) · 2026-04-19 · `ffi` `build`
+
+Companion to #750 (JIT feature gate). `libffi` becomes an optional Cargo dependency behind the `ffi` feature (default on). The gating is deeper than just the crate — `ffi/call.rs`, `ffi/callback.rs`, `ffi/marshal.rs`, `ffi/from_c.rs`, `ffi/to_c.rs` are all `#[cfg(feature = "ffi")]`. The `HeapObject::FFISignature` variant introduces a `CifCache` type alias: `RefCell<Option<Cif>>` when ffi is on, `()` when off, so signatures can exist without libffi but `ffi/call` is unavailable. `ffi/read` and `ffi/write` for struct/array types get explicit not-compiled stubs. The `calling` module and `loading::CALLBACK_PRIMITIVES` are separated from `ALL_TABLES` and appended via `ffi_tables()` since const arrays can't contain conditional entries. FFI tests move from `primitives.lisp` to `ffi.lisp`. New `smoke-noffi` Makefile target skips FFI-dependent test files (ffi, compress, sqlite, zmq, git, http). CI gains a dedicated `aarch64-noffi` job.
+
+---
+
+## [#756](https://github.com/elle-lisp/elle/pull/756) — Link libgcc on Android to resolve `__clear_cache` from libffi
+[`229b4819`](https://github.com/elle-lisp/elle/commit/229b4819) · 2026-04-19 · `ffi` `build`
+
+New `build.rs` file (the project didn't have one before): checks `CARGO_CFG_TARGET_OS == "android"` and emits `cargo:rustc-link-lib=gcc`. libffi's callback trampolines call `__clear_cache` for ARM instruction cache coherence — on Linux it's in libc, on Android it's in libgcc. Note: #757 (next commit) gates this behind `CARGO_FEATURE_FFI` since libgcc is only needed for libffi.
+
+---
+
+## [#755](https://github.com/elle-lisp/elle/pull/755) — Fix def-shadow bug: RHS of redefined binding sees uninitialized value
+[`c0b604c8`](https://github.com/elle-lisp/elle/commit/c0b604c8) · 2026-04-19 · `compiler` `bugfix`
+
+Two separate bugs in binding resolution when a name is redefined.
+
+**File-scope letrec** (`fileletrec.rs`): Pass 2 processes `PreBound::Simple` entries — for duplicate names, it called `register_binding` (making the new binding visible in scope) **before** `analyze_expr` on the RHS. So `(def @x @[1 2 3]) (def x (freeze x))` would resolve the `x` inside `(freeze x)` to the new uninitialized binding instead of `@x`. Fix: swap the two calls — `analyze_expr` first, `register_binding` after. Same fix applied to the `PreBound::Destructure` arm's `deferred_leaves`. Comments updated throughout to document the "AFTER analyzing the value" invariant.
+
+**Explicit letrec** (`binding.rs`): no duplicate detection existed. `(letrec [x 1 x 2] x)` silently created two bindings named "x" — the last (uninitialized until fixpoint) won. Fix: a `seen_names: HashMap<String, Span>` tracks previous definitions; duplicates are rejected at compile time with a message citing the previous definition's location. Checked in both the simple-binding and destructure-binding paths.
+
+Tests in `tests/elle/def-shadow.lisp` cover file-scope sequential shadowing (`@x` then `x`, plain `a` then `a`), and explicit letrec duplicate rejection (both `[x 1 x 2]` and `[@x ... x ...]` via `protect`+`eval`).
+
+---
+
+## [#753](https://github.com/elle-lisp/elle/pull/753) — HTTP server demo, load generator, and off-thread JIT compilation
+[`7ffed20f`](https://github.com/elle-lisp/elle/commit/7ffed20f) · 2026-04-19 · `demos` `jit` `http` `performance`
+
+**Demo.** `demos/webserver/` adds three Elle scripts: `server.lisp` (6 endpoints including delay and stats), `loadgen.lisp` (concurrent load generator with fresh and keepalive modes using `ev/map-limited`), and `bench.lisp` (concurrency sweep that charts throughput, latency percentiles, and histogram via plugin/plotters as SVG). Also `bench-fiber.lisp` — a micro-benchmark isolating fiber nesting overhead with four modes (flat, protect, defer, defer+protect).
+
+**TCP_NODELAY.** New `set_tcp_nodelay()` in `io/completion.rs` calls `setsockopt(IPPROTO_TCP, TCP_NODELAY, 1)` on every TCP fd — applied in both the connect completion and accept completion paths. Previously Nagle's algorithm was on by default, batching small writes into 40ms windows.
+
+**HTTP write buffering.** `tcp-transport` in `lib/http.lisp` gains a `@wbuf` mutable string buffer. `:write` pushes to the buffer; `:flush` sends a single `port/write` and resets. This coalesces per-header writes (status line, each header, body) into one io_uring submission instead of 5-10 separate yields.
+
+**Off-thread JIT compilation** (`src/jit/worker.rs`, 137 lines). `JitWorker` owns a `crossbeam_channel` pair and a dedicated `elle-jit` thread. The thread installs a persistent `FiberHeap` via `install_root_heap()` — required because `translate_const` allocates String/Keyword/Symbol Values for constants embedded in native code, and those allocations must outlive any individual compilation. `JitTask` wraps a cloned LIR with syntax/doc stripped (non-Send `Rc<Syntax>` removed) and carries the bytecode pointer as `usize` cache key. `unsafe impl Send` is justified because the JIT reads Value tag/payload as i64 immediates and never dereferences heap pointers during compilation. `try_jit_call` is rewritten: `poll_jit_completions()` drains completed results via non-blocking `try_recv()`, inserting `Arc<JitCode>` into `jit_cache` or recording rejections in `jit_rejections`. If the function is hot and not already pending, `submit_jit_task` clones the LIR and sends it. The worker is lazily spawned on first submission. `drain_jit_pending()` blocks until all pending compilations finish, used by `--stats` and `jit/rejections` for complete diagnostics. `Rc<JitCode>` → `Arc<JitCode>` throughout `jit_cache`, `jit_entry`, `run_on`, `suspend`.
+
+**Direct fiber resumption.** New optimization in `fiber.rs`: when resuming a fiber whose first suspended frame is `FiberResume`, the full swap protocol (take/wire/swap/install-heap/execute/swap-back/put) is bypassed — the `FiberResume` frame is consumed directly, capabilities propagated, resume value delivered, and `pending_fiber_resume` set for the trampoline. This chains naturally through N nesting levels.
+
+---
+
+## [#752](https://github.com/elle-lisp/elle/pull/752) — Android compilation support and CI cross-check
+[`f44741b2`](https://github.com/elle-lisp/elle/commit/f44741b2) · 2026-04-19 · `build` `ci`
+
+Three cfg gate changes: the `platform` module in `io/watch.rs` (`FsWatcher` via inotify) adds `target_os = "android"` alongside `linux`, and `watch_read_blocking` in `io/threadpool.rs` gets the same treatment. The `pub use platform::FsWatcher` re-export gains a third `target_os = "macos"` alongside. One type-level fix: `libc::inotify_rm_watch` takes `u32` on Android vs `i32` on Linux — fixed with `as _` cast. Several `#[allow(unused_variables)]` added to functions that dispatch across `PlatformBackend` arms to suppress warnings when only one arm compiles.
+
+CI gains an "Android Cross-Check" job on ubuntu-latest: discovers the NDK from `ANDROID_SDK_ROOT`, sets `CC_aarch64_linux_android` to the API-versioned clang wrapper, and runs `cargo check --target aarch64-linux-android --no-default-features`. The existing aarch64 job gains a `--no-default-features` smoke-vm step. The all-checks gate adds `android` as a required dependency. Six squash fixups in the commit trace the CI iteration: NDK path discovery, host tag construction, `setup-ndk` action, x86_64 runner split.
+
+---
+
+## [#750](https://github.com/elle-lisp/elle/pull/750) — Gate Cranelift JIT behind `jit` feature flag (default on)
+[`1d113840`](https://github.com/elle-lisp/elle/commit/1d113840) · 2026-04-19 · `jit` `build`
+
+All six Cranelift crates (`cranelift-codegen`, `-frontend`, `-module`, `-jit`, `-native`, `target-lexicon`) become optional dependencies. `src/jit/` and `src/vm/jit_entry.rs` are gated with `#[cfg(feature = "jit")]`. On the VM struct, `jit_cache` and `jit_rejections` fields are conditional; `closure_call_counts`, `jit_enabled`, and `jit_hotness_threshold` stay unconditional because the WASM tier reads them. Three JIT-using fiber helpers (`handle_fiber_resume_signal_jit`, `handle_fiber_propagate_signal_jit`, `handle_fiber_abort_signal_jit`) are gated. The `try_jit_call` call site in `vm/call.rs` gets a `#[cfg(feature = "jit")]` guard. Stub implementations: `invoke_closure_jit` returns `rejected("jit", "JIT feature not compiled in")`, `"jit?"` signal returns `false`, `"jit/rejections"` returns empty list, `disjit` returns nil. `prim_disjit` is restructured from if-else to early-return so the `#[cfg(not(feature = "jit"))]` stub compiles cleanly. Test modules (`integration::jit`, `unittests::jit`, `test_yield_sentinel_distinct`, `test_disjit_returns_array`, `test_call_count_after_calls`) are gated. Test harness `jit_cache.clear()` guarded.
+
+---
+
+## [#749](https://github.com/elle-lisp/elle/pull/749) — Signal projection and compile-time squelch
+[`69010a7d`](https://github.com/elle-lisp/elle/commit/69010a7d) · 2026-04-18 · `signals` `compiler`
+
+**Signal projection.** `Bytecode` gains a `signal_projection: Option<HashMap<String, Signal>>` field. `compute_signal_projection` in `fileletrec.rs` (100 lines) walks the file's last binding's init expression — unwrapping through Lambda bodies, Begin blocks, Let/Letrec bodies, and If branches — to find a struct literal (`HirKind::Call` to `struct`). For each keyword-value pair, `hir_signal()` extracts the signal from lambda `inferred_signals` or `signal_env`. The projection is stashed on `Analyzer.last_signal_projection` and retrieved by the pipeline to store on `Bytecode`. A thread-local `PROJECTION_CACHE` in `pipeline/cache.rs` maps resolved file paths to projections, with `get_or_compile_projection()` compiling the file on cache miss.
+
+**Projection consumption.** In `forms.rs`, colon-qualified access (`module:field`) checks `projection_env` for the binding — if a projection exists, the field's signal is used instead of the conservative Polymorphic. The `projection_env` is populated during binding analysis: `last_import_projection` is set by call analysis when it detects `((import "literal"))` (the module invocation pattern), and consumed by `apply_transient_binding_state()` to seed the binding's projection. Same method handles `last_squelch_signal`.
+
+**Compile-time squelch.** Call analysis detects `(squelch f :kw)` — checks `is_squelch(&func)` and arity 2, resolves the target signal via `resolve_arg_signal`, resolves the mask via `resolve_squelch_mask` (handles both `:keyword` and `|:kw1 :kw2|` set literals by looking up the signal registry), then computes `target_signal.squelch(mask)`. The new `Signal::squelch(mask)` method (15 lines) mirrors `Closure::effective_signal()`: clears squelched bits, adds `SIG_ERROR`. Seven unit tests and 218-line integration test suite in `tests/integration/projection.rs` covering projection computation, struct unwrapping, squelch algebra, and the full compose-with-squelch pipeline.
+
+---
+
+## [#748](https://github.com/elle-lisp/elle/pull/748) — Migrate MCP server to epoch 8; disable static TLS re-exec hack
+[`3076d1d3`](https://github.com/elle-lisp/elle/commit/3076d1d3) · 2026-04-18 · `mcp` `epoch`
+
+Two changes. The MCP submodule pointer updates (a09833df → 07c704c9), picking up epoch 8 migration across all MCP `.lisp` files. The server was broken by epochs 7+8 landing without migrating the submodule — `var` (removed in epoch 8) parsed as a malformed let binding.
+
+In `main.rs`, the `GLIBC_TUNABLES` static TLS re-exec hack is replaced with a detailed comment explaining why it was removed: it changed PID (broke strace/gdb), `current_exe()` fails in chroots/containers, and MCP server + all plugins load fine without it on glibc 2.39+. The 28-line re-exec block (env var check, merge with existing tunables, `Command::exec`) becomes a 13-line comment with restoration instructions.
+
+---
+
 ## [#737](https://github.com/elle-lisp/elle/pull/737) — MLIR/SPIR-V float support, differential testing harness, epoch 8 immutable-by-default bindings
 [`19fd778a`](https://github.com/elle-lisp/elle/commit/19fd778a) · 2026-04-18 · `compiler` `lir` `jit` `epoch`
 

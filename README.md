@@ -796,6 +796,9 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `tls` | TLS client and server (wraps `tls` plugin) |
   | `uuid` | UUID generation and parsing |
   | `watch` | Event-driven filesystem watcher |
+  | `gpu` | GPU compute via MLIR → SPIR-V → Vulkan |
+  | `spirv` | Hand-written SPIR-V compute shader DSL |
+  | `wayland` | Wayland compositor bindings via FFI |
   | `zmq` | ZeroMQ bindings via FFI |
 
 ## Plugins
@@ -809,7 +812,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
-- **22 plugins ship with Elle.** See [docs/plugins.md](docs/plugins.md) for details.
+- **Plugins are maintained in a [separate repository](https://github.com/elle-lisp/plugins).** See [docs/plugins.md](docs/plugins.md) for details.
 
   | Plugin | Description |
   |--------|-------------|
@@ -819,6 +822,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `egui` | Immediate-mode GUI (egui + winit + glow) |
   | `hash` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
   | `image` | Raster image I/O, transforms, drawing, and analysis |
+  | `plotters` | Chart and plot generation (line, bar, histogram, scatter) |
   | `jiff` | Date, time, and duration arithmetic |
   | `mqtt` | MQTT packet codec |
   | `msgpack` | MessagePack serialization |
@@ -833,6 +837,8 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `tls` | TLS client and server via rustls |
   | `toml` | TOML parsing and generation |
   | `tree-sitter` | Multi-language parsing and structural queries |
+  | `vulkan` | Vulkan compute dispatch (async fence, buffer pooling) |
+  | `wayland` | Wayland compositor interaction |
   | `xml` | XML parsing and generation |
   | `yaml` | YAML parsing and generation |
 
@@ -868,7 +874,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
 
 - **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
 
-- **MCP server for AI coding assistants.** ([docs/mcp.md](docs/mcp.md)) An [MCP](https://modelcontextprotocol.io) server written in Elle that gives AI agents deep structural access to the codebase. Maintains a persistent RDF knowledge graph of both Elle and Rust source. 15 tools for static analysis, refactoring, and cross-language tracing. Complements the LSP server — LSP handles real-time editing; MCP handles AI-driven code understanding.
+- **MCP server for AI coding assistants.** ([docs/mcp.md](docs/mcp.md)) An [MCP](https://modelcontextprotocol.io) server written in Elle that gives AI agents deep structural access to the codebase. Maintained in a [separate repository](https://github.com/elle-lisp/mcp) and included as a git submodule. Maintains a persistent RDF knowledge graph of both Elle and Rust source. 21 tools for static analysis, evaluation, refactoring, test orchestration, and cross-language tracing. Complements the LSP server — LSP handles real-time editing; MCP handles AI-driven code understanding.
 
   **What can an AI agent do with it?**
 
@@ -879,7 +885,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   - *"Rename `helper` to `utils` across the whole file."* — `compile_rename` rewrites all references, respecting lexical scope.
   - *"Find all Rust structs that have a `signal` field."* — direct SPARQL: `SELECT ?name WHERE { ?s a rust:Struct ; rust:field "signal" ; rust:name ?name }`
 
-  See [`tools/demo-queries.lisp`](tools/demo-queries.lisp) for more examples.
+  See [`docs/mcp.md`](docs/mcp.md) for the full tool reference.
 
 ## Documentation
 
@@ -974,7 +980,9 @@ make smoke                                # run all tests (~30s)
 ```
 
 Plugins live in a [separate repository](https://github.com/elle-lisp/plugins)
-and use a stable ABI — they can be built independently from elle.
+and use a stable ABI — they can be built independently from elle. The
+[MCP server](https://github.com/elle-lisp/mcp) is also maintained
+separately. Both are included as git submodules.
 
 ### Subcommands
 

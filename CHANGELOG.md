@@ -96,6 +96,8 @@ multi-function compilation, yield side-exit, polymorphic dispatch, and
 cross-thread LIR transfer. Current state: all instruction types supported,
 adaptive tiering, direct self-calls and intra-group calls.
 
+- #753: Off-thread JIT compilation via background worker thread; eliminates event-loop stalls
+- #750: Gate Cranelift behind `jit` feature flag (default on) for Android builds
 - #737: JIT tail-call trampoline; squelch enforcement in compile/run-on
 - #736: Upgrade Cranelift 0.116 to 0.130 (deduplicate with Wasmtime 43)
 - #720: Sendable channels; JIT SuspendingCall fix; LIR transfer for worker-thread JIT
@@ -158,6 +160,7 @@ They evolved from a Pure/Yields enum through interprocedural inference to
 a full compile-time tracking and runtime enforcement system with
 capabilities, squelch (blacklist), and emit as a special form.
 
+- #749: Signal projection (cross-file keyword→signal mapping) and compile-time squelch narrowing
 - #723: Capability enforcement (fiber/new :deny), emit special form replaces yield IR, defmacro &opt
 - #704: Encapsulate SignalBits (private inner field, named methods) for u32-to-u64 migration
 - #590: Squelch redesign: runtime closure transform instead of compile-time special form
@@ -281,6 +284,8 @@ Each consumes `LirModule`. The WASM backend compiles per-closure with
 disk caching. The MLIR backend branches to LLVM JIT (CPU) or SPIR-V
 (GPU).
 
+- #755: Fix def-shadow: deferred binding registration order in fileletrec; reject duplicate letrec names
+- #749: Signal projection caching for cross-file module imports; compile-time squelch narrowing
 - #732: Python surface syntax reader (indentation-aware, Pratt parser)
 - #731: JavaScript surface syntax reader (Pratt parser, template literals)
 - #728: Macro hygiene fix: SyntaxLiteral preserves definition-site scopes
@@ -365,6 +370,8 @@ are NaN-boxed (later tagged-union) with ref-counted prevent
 use-after-free. `ffi/native nil` loads the current process for libc
 access on all Unix platforms.
 
+- #757: Gate libffi behind `ffi` feature flag (default on) for minimal builds
+- #756: Link libgcc on Android for `__clear_cache` resolution
 - #343: Rebuild FFI on libffi: type descriptors, marshaller, callbacks, ffi/defbind
 - #351: Managed FFI pointers prevent use-after-free and double-free
 - #566: ffi/signature accepts immutable arrays as arg-types
@@ -411,6 +418,7 @@ model through JSON-RPC. Tools include eval (monadic bind over persistent
 image), portrait, trace, SPARQL, test orchestration, and push gating.
 Server lives in a separate repo (elle-lisp/mcp) as a submodule.
 
+- #748: Migrate MCP server to epoch 8; disable static TLS re-exec hack
 - #739: Add eval MCP tool: monadic bind over persistent Elle image; 10 operational risk hardening items
 - #734: RuntimeConfig on VM; --trace flag; 6 MCP test orchestration tools (test_run/status/history/gate, push_ready/wip)
 - #725: MCP server async startup via yield-based population fiber (<10s init)
@@ -426,6 +434,9 @@ CLI uses subcommands (lint, lsp, rewrite) with all configuration via flags
 parsed into a global Config struct. No more ELLE_* environment variables.
 The binary includes lint and LSP server.
 
+- #752: Android compilation support (inotify cfg gates, NDK cross-check CI)
+- #750: Gate Cranelift behind `jit` feature flag; `--no-default-features` builds
+- #757: Gate libffi behind `ffi` feature flag; `smoke-noffi` Makefile target
 - #734: RuntimeConfig, --trace=call/signal/fiber/jit, --jit=off/eager/adaptive, --wasm modes
 - #712: CLI args replace all ELLE_* env vars; --jit, --wasm, --cache, --json, --eval
 - #648: Epoch-based migration; `elle rewrite` for source file updates
@@ -499,6 +510,7 @@ for understanding when large structural changes occurred.
 Notable demos that exercise significant language features or serve as
 performance benchmarks.
 
+- #753: HTTP server demo with load generator, concurrency-sweep benchmark, SVG charts
 - #729: Rewrite microgpt demo: Gaussian init, fused vdot/vsum, 2.7x faster
 - #675: Conway's Game of Life (SDL2) and Mandelbrot Explorer (GTK4+Cairo)
 - #516: MicroGPT: minimal GPT with scalar autograd

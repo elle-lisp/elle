@@ -39,6 +39,7 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 | `elle-csv` | `"plugin/csv"` | CSV reading and writing |
 | `elle-egui` | `"plugin/egui"` | Immediate-mode GUI |
 | `elle-hash` | `"plugin/hash"` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
+| `elle-image` | `"plugin/image"` | Raster image I/O, transforms, drawing, and analysis |
 | `elle-jiff` | `"plugin/jiff"` | Date/time operations |
 | `elle-mqtt` | `"plugin/mqtt"` | MQTT client |
 | `elle-msgpack` | `"plugin/msgpack"` | MessagePack serialization |
@@ -47,11 +48,14 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 | `elle-protobuf` | `"plugin/protobuf"` | Protocol Buffers |
 | `elle-random` | `"plugin/random"` | Pseudo-random numbers |
 | `elle-regex` | `"plugin/regex"` | Regular expressions |
+| `elle-plotters` | `"plugin/plotters"` | Chart and plot generation |
 | `elle-selkie` | `"plugin/selkie"` | Mermaid diagram rendering |
+| `elle-svg` | `"plugin/svg"` | SVG rasterization (resvg) |
 | `elle-syn` | `"plugin/syn"` | Rust source parsing |
 | `elle-tls` | `"plugin/tls"` | TLS client/server (rustls) |
 | `elle-toml` | `"plugin/toml"` | TOML parsing |
 | `elle-tree-sitter` | `"plugin/tree-sitter"` | Multi-language parsing |
+| `elle-vulkan` | `"plugin/vulkan"` | Vulkan compute dispatch |
 | `elle-wayland` | `"plugin/wayland"` | Wayland compositor interaction |
 | `elle-xml` | `"plugin/xml"` | XML parsing |
 | `elle-yaml` | `"plugin/yaml"` | YAML parsing |
