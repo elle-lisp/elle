@@ -6,6 +6,7 @@ pub mod array;
 pub mod bitwise;
 pub mod r#box;
 pub mod bytes;
+#[cfg(feature = "ffi")]
 pub mod calling;
 pub mod chan;
 pub mod comparison;

@@ -626,7 +626,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::FFISignature(sig, _) => Some(sig),
+            HeapObject::FFISignature(sig, ..) => Some(sig),
             _ => None,
         }
     }
@@ -648,6 +648,7 @@ impl Value {
     /// Returns None if this is not an FFI signature.
     ///
     /// The CIF is lazily prepared on first access and cached for reuse.
+    #[cfg(feature = "ffi")]
     pub fn get_or_prepare_cif(&self) -> Option<std::cell::Ref<'_, libffi::middle::Cif>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_ffi_sig() {

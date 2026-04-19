@@ -302,6 +302,7 @@ pub fn prim_ffi_read(args: &[Value]) -> (SignalBits, Value) {
                     error_val("ffi-error", "ffi/read: cannot read void"),
                 )
             }
+            #[cfg(feature = "ffi")]
             TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
                 match crate::ffi::marshal::read_value_from_buffer(ptr, &desc) {
                     Ok(val) => val,
@@ -312,6 +313,13 @@ pub fn prim_ffi_read(args: &[Value]) -> (SignalBits, Value) {
                         )
                     }
                 }
+            }
+            #[cfg(not(feature = "ffi"))]
+            TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
+                return (
+                    SIG_ERROR,
+                    error_val("ffi-error", "ffi/read: struct/array requires `ffi` feature"),
+                )
             }
         };
         (SIG_OK, val)
@@ -506,6 +514,7 @@ pub fn prim_ffi_write(args: &[Value]) -> (SignalBits, Value) {
                     error_val("ffi-error", "ffi/write: use ptr type for writing pointers"),
                 )
             }
+            #[cfg(feature = "ffi")]
             TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
                 match crate::ffi::marshal::write_value_to_buffer(ptr, value, &desc) {
                     Ok(_owned) => {
@@ -520,6 +529,16 @@ pub fn prim_ffi_write(args: &[Value]) -> (SignalBits, Value) {
                         )
                     }
                 }
+            }
+            #[cfg(not(feature = "ffi"))]
+            TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "ffi-error",
+                        "ffi/write: struct/array requires `ffi` feature",
+                    ),
+                )
             }
         }
     }

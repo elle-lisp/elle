@@ -1,5 +1,5 @@
 .PHONY: all elle dev docs docgen smoke test test-git clean help \
-       smoke-vm smoke-jit smoke-wasm smoke-diff doctest
+       smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-diff doctest
 
 .DEFAULT_GOAL := all
 
@@ -58,6 +58,9 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
 
+# FFI skip list: tests requiring libffi (skipped when built --no-default-features)
+ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
+
 # WASM backend skip list: tests requiring features not yet in WASM backend
 # (eval = dynamic compilation)
 WASM_SKIP := -e eval.lisp
@@ -69,6 +72,14 @@ smoke-vm:
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
+
+smoke-noffi:
+	@echo "=== elle scripts (VM, no JIT, no FFI) ==="
+	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
+		|| { echo "FAILED: elle scripts VM-only pass (no JIT, no FFI)"; exit 1; }
 
 smoke-jit:
 	@echo "=== elle scripts (JIT enabled, threshold=1) ==="
