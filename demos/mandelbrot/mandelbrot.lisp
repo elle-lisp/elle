@@ -19,7 +19,8 @@
 (def cr  ((import "std/cairo")))
 (def b   ((import "std/gtk4/bind")))
 
-(def [gpu-ok? gpu] (protect ((import "std/gpu"))))
+(def [vk-ok? vk-plugin] (protect (import "plugin/vulkan")))
+(def [gpu-ok? gpu] (when vk-ok? (protect ((import "std/gpu") :vulkan vk-plugin))))
 (def gpu-ctx
   (when gpu-ok?
     (let [[ok? ctx] (protect (gpu:init))]
@@ -79,7 +80,7 @@
 
 # ── GPU backend ──────────────────────────────────────────────────
 
-(def gpu-plugin (when gpu-ctx (import "plugin/vulkan")))
+(def gpu-plugin (when gpu-ctx vk-plugin))
 
 # Shader compiled once — max-iter passed via params buffer, not baked in
 (def gpu-shader

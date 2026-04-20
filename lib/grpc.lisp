@@ -1,0 +1,118 @@
+## lib/grpc.lisp — gRPC client for Elle
+##
+## Layers on lib/http2 for transport; adds gRPC framing and trailer handling.
+##
+## Usage:
+##   (def pb    (import "plugin/protobuf"))
+##   (def http2 ((import "std/http2")))
+##   (def grpc  ((import "std/grpc") :http2 http2 :protobuf pb))
+##
+##   (def schema (pb:schema (port/read-all (port/open "service.proto" :read))))
+##   (def conn   (grpc:connect "/run/user/1000/myservice.sock"))
+##   (def resp   (grpc:call-decode conn schema "/pkg.Svc/Method"
+##                  "pkg.Request" {} "pkg.Response"))
+##   (grpc:close conn)
+
+(elle/epoch 8)
+
+(fn [&named http2 protobuf]
+
+  ## ── gRPC message framing ─────────────────────────────────────────────
+  ## Each gRPC message: 1 byte compressed flag + 4 byte big-endian length + payload
+
+  (defn grpc-encode [message-bytes]
+    "Wrap protobuf bytes in gRPC length-prefixed frame."
+    (let [len (length message-bytes)]
+      (concat (bytes 0                              # not compressed
+                     (bit/shr len 24)
+                     (bit/and (bit/shr len 16) 0xff)
+                     (bit/and (bit/shr len 8) 0xff)
+                     (bit/and len 0xff))
+              message-bytes)))
+
+  (defn grpc-decode [frame-bytes]
+    "Extract protobuf bytes from gRPC length-prefixed frame.
+     Returns the payload bytes, or nil if frame is empty."
+    (when (and frame-bytes (>= (length frame-bytes) 5))
+      (let [len (bit/or (bit/shl (get frame-bytes 1) 24)
+                        (bit/shl (get frame-bytes 2) 16)
+                        (bit/shl (get frame-bytes 3) 8)
+                        (get frame-bytes 4))]
+        (when (>= (length frame-bytes) (+ 5 len))
+          (slice frame-bytes 5 (+ 5 len))))))
+
+  ## ── Connect ────────────────────────────────────────────────────────
+
+  (defn grpc-connect [socket-path]
+    "Connect to a gRPC server over a Unix socket. Returns an h2 session."
+    (let* [port (unix/connect socket-path)
+           transport (http2:unix-transport port)]
+      (http2:connect nil :transport transport)))
+
+  ## ── Collect gRPC response from stream ──────────────────────────────
+
+  (defn collect-grpc-response [s]
+    "Read data + trailers from an h2 stream. Returns raw gRPC frame bytes.
+     Raises on grpc-status != 0."
+    (let [@resp-headers nil
+          @resp-data @[]
+          @done false]
+      (while (not done)
+        (let [msg (s:data-queue:take)]
+          (cond
+            ((= msg:type :headers)
+             (if (nil? resp-headers)
+               (assign resp-headers msg:headers)
+               ## Trailers — check grpc-status
+               (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
+                 (when (and status-pair (not (= (get status-pair 1) "0")))
+                   (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
+                     (error {:error :grpc-error
+                             :code (parse-int (get status-pair 1))
+                             :message (if msg-pair (get msg-pair 1) "unknown error")})))))
+             (when msg:end-stream (assign done true)))
+            ((= msg:type :data)
+             (push resp-data msg:data)
+             (when msg:end-stream (assign done true)))
+            ((= msg:type :rst)
+             (error {:error :grpc-error :reason :stream-reset
+                     :code msg:code}))
+            (true (assign done true)))))
+      (let [all-data (if (empty? resp-data)
+                       (bytes)
+                       (apply concat (freeze resp-data)))]
+        (grpc-decode all-data))))
+
+  ## ── Unary RPC call ─────────────────────────────────────────────────
+
+  (defn grpc-call [session schema method request-type request-struct]
+    "Make a unary gRPC call. Returns raw protobuf bytes of response."
+    (let* [body (grpc-encode (protobuf:encode schema request-type request-struct))
+           stream (http2:send-raw session "POST" method
+                    :body body
+                    :headers [["content-type" "application/grpc"]
+                              ["te" "trailers"]])]
+      (collect-grpc-response stream)))
+
+  (defn grpc-call-decode [session schema method request-type request-struct response-type]
+    "Make a unary gRPC call and decode the response.
+     Returns the decoded Elle struct."
+    (let [raw (grpc-call session schema method request-type request-struct)]
+      (if (nil? raw)
+        {}
+        (protobuf:decode schema response-type raw))))
+
+  ## ── Close ──────────────────────────────────────────────────────────
+
+  (defn grpc-close [session]
+    "Close a gRPC connection gracefully."
+    (http2:close session))
+
+  ## ── Exports ────────────────────────────────────────────────────────
+
+  {:connect    grpc-connect
+   :call       grpc-call
+   :call-decode grpc-call-decode
+   :close      grpc-close
+   :encode     grpc-encode
+   :decode     grpc-decode})

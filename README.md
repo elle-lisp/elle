@@ -778,7 +778,9 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `glob` | Filesystem glob pattern matching |
   | `gtk4` | GTK4 bindings via FFI (pure Elle, no plugin) |
   | `hash` | Streaming hash helpers (ports, coroutines) |
+  | `grpc` | gRPC client over HTTP/2 with length-prefixed framing |
   | `http` | Pure Elle HTTP/1.1 client and server |
+  | `http2` | HTTP/2 client and server (h2 over TLS + h2c cleartext) |
   | `irc` | Coroutine-based IRCv3 client with SASL |
   | `lua` | Lua compatibility prelude |
   | `mqtt` | MQTT client (uses the `mqtt` plugin for packet codec) |
@@ -799,6 +801,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `gpu` | GPU compute via MLIR → SPIR-V → Vulkan |
   | `spirv` | Hand-written SPIR-V compute shader DSL |
   | `wayland` | Wayland compositor bindings via FFI |
+  | `websocket` | WebSocket client and server (RFC 6455, ws:// and wss://) |
   | `zmq` | ZeroMQ bindings via FFI |
 
 ## Plugins

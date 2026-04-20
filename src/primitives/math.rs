@@ -212,6 +212,33 @@ fn prim_nan(_args: &[Value]) -> (SignalBits, Value) {
 }
 
 // ---------------------------------------------------------------------------
+// IEEE 754 bitcast
+// ---------------------------------------------------------------------------
+
+fn prim_f32_bits(args: &[Value]) -> (SignalBits, Value) {
+    match require_number("math/f32-bits", &args[0]) {
+        Ok(f) => (SIG_OK, Value::int((f as f32).to_bits() as i64)),
+        Err(e) => e,
+    }
+}
+
+fn prim_f32_from_bits(args: &[Value]) -> (SignalBits, Value) {
+    match args[0].as_int() {
+        Some(i) => (SIG_OK, Value::float(f32::from_bits(i as u32) as f64)),
+        None => (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "math/f32-from-bits: expected int, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Registration table
 // ---------------------------------------------------------------------------
 
@@ -389,6 +416,18 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(0), doc: "Not-a-number (IEEE 754 NaN).",
         params: &[], category: "math", example: "(math/nan)",
         aliases: &["nan"],
+    },
+    PrimitiveDef {
+        name: "math/f32-bits", func: prim_f32_bits, signal: Signal::errors(),
+        arity: Arity::Exact(1), doc: "Return the IEEE 754 f32 bit pattern of a number as an integer.",
+        params: &["x"], category: "math", example: "(math/f32-bits 1.0)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "math/f32-from-bits", func: prim_f32_from_bits, signal: Signal::errors(),
+        arity: Arity::Exact(1), doc: "Reinterpret an integer as an IEEE 754 f32 bit pattern.",
+        params: &["bits"], category: "math", example: "(math/f32-from-bits 1065353216)",
+        aliases: &[],
     },
 ];
 

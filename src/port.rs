@@ -173,7 +173,9 @@ impl Port {
             fd: RefCell::new(Some(fd)),
             kind: PortKind::UnixStream,
             direction: Direction::ReadWrite,
-            encoding: Encoding::Text,
+            // Binary encoding: Unix streams are byte streams, same as TCP.
+            // port/read returns bytes for binary protocols (h2, gRPC, etc.).
+            encoding: Encoding::Binary,
             closed: Cell::new(false),
             path: Some(peer_path),
             timeout: Cell::new(None),
@@ -456,7 +458,7 @@ mod tests {
     fn test_new_unix_stream_kind() {
         let p = Port::new_unix_stream(devnull_fd(), "/tmp/test.sock".into());
         assert_eq!(p.kind(), PortKind::UnixStream);
-        assert_eq!(p.encoding(), Encoding::Text);
+        assert_eq!(p.encoding(), Encoding::Binary);
     }
 
     #[test]
