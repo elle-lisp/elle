@@ -462,6 +462,61 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::closure(new_closure))
 }
 
+/// Transform a closure by applying a permit mask (inverse of squelch).
+///
+/// `(attune |:yield :error| closure)` returns a new closure that permits ONLY
+/// the specified signals — everything else is intercepted and converted to
+/// `:error`. This is the positive dual of `squelch`: squelch says "block
+/// these", attune says "allow only these."
+///
+/// Argument order is mask-first: the signal spec declares intent, the closure
+/// follows. This reads as "attune to yield+error: this function."
+pub(crate) fn prim_attune(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("attune: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    // First argument: signal spec (keyword, set, array, list, or integer)
+    let permitted_bits = match crate::primitives::fibers::resolve_signal_bits(&args[0], "attune") {
+        Ok(bits) => bits,
+        Err(err) => return err,
+    };
+
+    // Second argument: closure to wrap
+    let closure_rc = match args[1].as_closure() {
+        Some(c) => c,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "attune: second argument must be a closure, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+
+    // Suppress everything the user DIDN'T permit (within the user-producible set).
+    let suppress_bits = crate::signals::CAP_MASK.subtract(permitted_bits);
+
+    let new_closure = Closure {
+        template: closure_rc.template.clone(),
+        env: closure_rc.env,
+        squelch_mask: closure_rc.squelch_mask.union(suppress_bits),
+    };
+
+    (SIG_OK, Value::closure(new_closure))
+}
+
 /// Return the source location of a closure as `{:file :line :col}`, or `nil`.
 ///
 /// `(meta/origin f)` extracts the span from the closure's stored syntax node.
@@ -762,6 +817,19 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["closure", "signals"],
         category: "fn",
         example: "(squelch (fn () (yield 1)) |:yield|)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "attune",
+        func: prim_attune,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Return a new closure that permits ONLY the specified signals — all others are \
+              intercepted and converted to :error. Dual of squelch: squelch blocks specific \
+              signals, attune allows only specific signals. Mask-first argument order.",
+        params: &["signals", "closure"],
+        category: "fn",
+        example: "(attune |:yield :error| (fn () (yield 1)))",
         aliases: &[],
     },
     PrimitiveDef {

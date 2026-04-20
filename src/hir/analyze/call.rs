@@ -116,8 +116,9 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // ── Compile-time squelch detection ─────────────────────────────
+        // ── Compile-time squelch/attune detection ─────────────────────
         // Pattern: (squelch f :keyword) or (squelch f |:kw1 :kw2|)
+        //          (attune f :keyword) or (attune f |:kw1 :kw2|)
         // Compute the resulting closure's signal statically and stash it
         // for binding analysis to seed the binding's signal_env entry.
         self.last_squelch_signal = None;
@@ -125,6 +126,14 @@ impl<'a> Analyzer<'a> {
             let target_signal = self.resolve_arg_signal(&args[0].expr);
             if let Some(mask) = self.resolve_squelch_mask(&args[1].expr) {
                 self.last_squelch_signal = Some(target_signal.squelch(mask));
+            }
+        } else if self.is_attune(&func) && args.len() == 2 {
+            // attune is mask-first: (attune |:yield| closure)
+            let target_signal = self.resolve_arg_signal(&args[1].expr);
+            if let Some(permitted) = self.resolve_squelch_mask(&args[0].expr) {
+                // attune permits only these bits; suppress everything else.
+                let suppress = crate::signals::CAP_MASK.subtract(permitted);
+                self.last_squelch_signal = Some(target_signal.squelch(suppress));
             }
         }
 
@@ -201,6 +210,11 @@ impl<'a> Analyzer<'a> {
     /// Check if the callee is the `squelch` primitive.
     fn is_squelch(&self, func: &Hir) -> bool {
         self.is_primitive_named(func, "squelch")
+    }
+
+    /// Check if the callee is the `attune` primitive.
+    fn is_attune(&self, func: &Hir) -> bool {
+        self.is_primitive_named(func, "attune")
     }
 
     /// Check if the callee is the `import` primitive.

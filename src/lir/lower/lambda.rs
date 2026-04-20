@@ -113,11 +113,9 @@ impl<'a> Lowerer<'a> {
         )?;
         nested_lir.closure_id = Some(closure_id);
 
-        // Check assert-numeric assertion after lowering
+        // Check numeric! assertion after lowering
         if assert_numeric && !nested_lir.is_gpu_eligible() {
-            return Err(
-                "assert-numeric assertion failed: function is not GPU-eligible".to_string(),
-            );
+            return Err("numeric! assertion failed: function is not GPU-eligible".to_string());
         }
 
         // Fill the reserved slot
