@@ -18,9 +18,10 @@
 
 (fn []
 
-(def b  ((import "std/gtk4/bind")))
-(def w  ((import "std/gtk4/widgets")))
-(def wv ((import "std/gtk4/webview")))
+(def b   ((import "std/gtk4/bind")))
+(def w   ((import "std/gtk4/widgets")))
+(def wv  ((import "std/gtk4/webview")))
+(def app ((import "std/gtk4/app")))
 
 # ── Callback signatures ──────────────────────────────────────────
 
@@ -32,18 +33,13 @@
   "Initialize GTK and create a window. Returns a mutable window handle."
   (b:gtk-init)
   (let* [win-ptr (b:gtk-window-new)
-         handle @{:window win-ptr
-                   :widgets @{}
-                   :events @[]
-                   :close-requested false
-                   :callbacks @[]
-                   :css-provider nil}]
+         handle  (w:make-handle win-ptr)]
     (b:gtk-window-set-title win-ptr (or opts:title "Elle"))
     (when (and opts:width opts:height)
       (b:gtk-window-set-default-size win-ptr opts:width opts:height))
     (let [cb (ffi/callback sig-close
                 (fn (widget)
-                  (put handle :close-requested true)
+                  (put handle :open false)
                   1))]
       (push handle:callbacks cb)
       (b:g-signal-connect-data win-ptr "close-request" cb nil nil 0))
@@ -52,23 +48,34 @@
 
 (defn gtk4/open? (handle)
   "Check if the window is still open."
-  (not handle:close-requested))
+  handle:open)
 
 (defn gtk4/close (handle)
   "Destroy the window."
   (b:gtk-window-destroy handle:window)
-  (put handle :close-requested true)
+  (put handle :open false)
   nil)
 
+(defn drain-events (handle)
+  "Freeze and clear the event queue, returning the events."
+  (let [events (freeze handle:events)]
+    (put handle :events @[])
+    events))
+
 (defn gtk4/poll (handle)
-  "Pump the GLib main loop, drain and return events."
+  "Pump the GLib main loop non-blocking, drain and return events."
   (let [ctx (b:g-main-context-default)]
     (while (nonzero? (b:g-main-context-pending ctx))
       (b:g-main-context-iteration ctx 0)))
-  (let [events (freeze handle:events)]
-    (while (nonempty? handle:events)
-      (pop handle:events))
-    events))
+  (drain-events handle))
+
+(defn gtk4/wait (handle)
+  "Block until GTK events arrive, then drain and return them.
+   Yields to the Elle scheduler via ev/poll-fd on GLib's event sources."
+  (let [ctx (b:g-main-context-default)]
+    (while (empty? handle:events)
+      (b:glib-wait ctx)))
+  (drain-events handle))
 
 # ── Tree builder ──────────────────────────────────────────────────
 
@@ -120,6 +127,8 @@
            (:center-box  (w:make-center-box handle props))
            (:overlay     (w:make-overlay handle props))
            (:revealer    (w:make-revealer handle props))
+           # drawing
+           (:drawing-area (w:make-drawing-area handle props))
            # special
            (:webview     (wv:make-webview handle props))
            (_            (error (string "gtk4:build: unknown widget type " tag))))]
@@ -131,19 +140,19 @@
   (match tag
     ((or :v-box :h-box)
       (each child in children
-        (w:box-append widget (build-widget handle child))))
+        (b:gtk-box-append widget (build-widget handle child))))
     (:scroll-area
       (when (nonempty? children)
-        (w:scroll-set-child widget (build-widget handle (children 0)))))
+        (b:gtk-scrolled-window-set-child widget (build-widget handle (children 0)))))
     (:expander
       (when (nonempty? children)
-        (w:expander-set-child widget (build-widget handle (children 0)))))
+        (b:gtk-expander-set-child widget (build-widget handle (children 0)))))
     (:frame
       (when (nonempty? children)
-        (w:frame-set-child widget (build-widget handle (children 0)))))
+        (b:gtk-frame-set-child widget (build-widget handle (children 0)))))
     (:revealer
       (when (nonempty? children)
-        (w:revealer-set-child widget (build-widget handle (children 0)))))
+        (b:gtk-revealer-set-child widget (build-widget handle (children 0)))))
     (:grid
       (add-grid-children handle widget props children))
     (:stack
@@ -184,7 +193,7 @@
              row   (or cp:row auto-row)
              cs    (or cp:col-span 1)
              rs    (or cp:row-span 1)]
-        (w:grid-attach grid cw col row cs rs)
+        (b:gtk-grid-attach grid cw col row cs rs)
         (assign auto-col (+ col cs))
         (when (>= auto-col cols)
           (assign auto-col 0)
@@ -219,70 +228,70 @@
 
 (defn gtk4/rebuild (handle id spec)
   "Replace a container's children by rebuilding from spec."
-  (when-let [{:ptr ptr :type type} (handle:widgets id)]
-    (let [child (build-widget handle spec)]
+  (when-let [wgt (handle:widgets id)]
+    (let [{:ptr ptr :type type} wgt
+          child (build-widget handle spec)]
       (match type
-        ((or :box :scroll-area :frame :expander :revealer)
-          (match type
-            (:box         (b:gtk-box-append ptr child))
-            (:scroll-area (b:gtk-scrolled-window-set-child ptr child))
-            (:frame       (b:gtk-frame-set-child ptr child))
-            (:expander    (b:gtk-expander-set-child ptr child))
-            (:revealer    (b:gtk-revealer-set-child ptr child))
-            (_            nil)))
+        (:box         (b:gtk-box-append ptr child))
+        (:scroll-area (b:gtk-scrolled-window-set-child ptr child))
+        (:frame       (b:gtk-frame-set-child ptr child))
+        (:expander    (b:gtk-expander-set-child ptr child))
+        (:revealer    (b:gtk-revealer-set-child ptr child))
         (_ nil)))))
 
 # ── Widget access ─────────────────────────────────────────────────
 
 (defn gtk4/set (handle id value)
   "Set a widget's text or value by id."
-  (when-let [{:ptr ptr :type type} (handle:widgets id)]
-    (match type
-      ((or :label :heading) (b:gtk-label-set-text ptr (string value)))
-      (:button        (b:gtk-button-set-label ptr (string value)))
-      (:text-input    (b:gtk-editable-set-text ptr (string value)))
-      (:text-edit     (-> (b:gtk-text-view-get-buffer ptr)
-                       (b:gtk-text-buffer-set-text (string value) -1)))
-      (:checkbox      (b:gtk-check-button-set-active ptr (w:bool->int value)))
-      (:switch        (b:gtk-switch-set-active ptr (w:bool->int value)))
-      (:toggle-button (b:gtk-toggle-button-set-active ptr (w:bool->int value)))
-      (:slider        (b:gtk-range-set-value ptr value))
-      (:spin-button   (b:gtk-spin-button-set-value ptr value))
-      (:combo-box     (b:gtk-drop-down-set-selected ptr value))
-      (:progress-bar  (b:gtk-progress-bar-set-fraction ptr value))
-      (:spinner       (if value (b:gtk-spinner-start ptr) (b:gtk-spinner-stop ptr)))
-      (_ nil))))
+  (when-let [wgt (handle:widgets id)]
+    (let [{:ptr ptr :type type} wgt]
+      (match type
+        ((or :label :heading) (b:gtk-label-set-text ptr (string value)))
+        (:button        (b:gtk-button-set-label ptr (string value)))
+        (:text-input    (b:gtk-editable-set-text ptr (string value)))
+        (:text-edit     (-> (b:gtk-text-view-get-buffer ptr)
+                         (b:gtk-text-buffer-set-text (string value) -1)))
+        (:checkbox      (b:gtk-check-button-set-active ptr (w:bool->int value)))
+        (:switch        (b:gtk-switch-set-active ptr (w:bool->int value)))
+        (:toggle-button (b:gtk-toggle-button-set-active ptr (w:bool->int value)))
+        (:slider        (b:gtk-range-set-value ptr value))
+        (:spin-button   (b:gtk-spin-button-set-value ptr value))
+        (:combo-box     (b:gtk-drop-down-set-selected ptr value))
+        (:progress-bar  (b:gtk-progress-bar-set-fraction ptr value))
+        (:spinner       (if value (b:gtk-spinner-start ptr) (b:gtk-spinner-stop ptr)))
+        (_ nil)))))
 
 (defn gtk4/get (handle id)
   "Get a widget's current text or value by id."
-  (when-let [{:ptr ptr :type type} (handle:widgets id)]
-    (match type
-      ((or :label :heading) (ffi/string (b:gtk-label-get-text ptr)))
-      (:button        (ffi/string (b:gtk-button-get-label ptr)))
-      (:text-input    (ffi/string (b:gtk-editable-get-text ptr)))
-      (:text-edit     (let [buf (b:gtk-text-view-get-buffer ptr)]
-                        (ffi/with-stack [[start 80] [end 80]]
-                          (b:gtk-text-buffer-get-start-iter buf start)
-                          (b:gtk-text-buffer-get-end-iter buf end)
-                          (ffi/string (b:gtk-text-buffer-get-text buf start end 0)))))
-      (:checkbox      (nonzero? (b:gtk-check-button-get-active ptr)))
-      (:switch        (nonzero? (b:gtk-switch-get-active ptr)))
-      (:toggle-button (nonzero? (b:gtk-toggle-button-get-active ptr)))
-      (:slider        (b:gtk-range-get-value ptr))
-      (:spin-button   (b:gtk-spin-button-get-value ptr))
-      (:combo-box     (b:gtk-drop-down-get-selected ptr))
-      (:progress-bar  (b:gtk-progress-bar-get-fraction ptr))
-      (_ nil))))
+  (when-let [wgt (handle:widgets id)]
+    (let [{:ptr ptr :type type} wgt]
+      (match type
+        ((or :label :heading) (ffi/string (b:gtk-label-get-text ptr)))
+        (:button        (ffi/string (b:gtk-button-get-label ptr)))
+        (:text-input    (ffi/string (b:gtk-editable-get-text ptr)))
+        (:text-edit     (let [buf (b:gtk-text-view-get-buffer ptr)]
+                          (ffi/with-stack [[start 80] [end 80]]
+                            (b:gtk-text-buffer-get-start-iter buf start)
+                            (b:gtk-text-buffer-get-end-iter buf end)
+                            (ffi/string (b:gtk-text-buffer-get-text buf start end 0)))))
+        (:checkbox      (nonzero? (b:gtk-check-button-get-active ptr)))
+        (:switch        (nonzero? (b:gtk-switch-get-active ptr)))
+        (:toggle-button (nonzero? (b:gtk-toggle-button-get-active ptr)))
+        (:slider        (b:gtk-range-get-value ptr))
+        (:spin-button   (b:gtk-spin-button-get-value ptr))
+        (:combo-box     (b:gtk-drop-down-get-selected ptr))
+        (:progress-bar  (b:gtk-progress-bar-get-fraction ptr))
+        (_ nil)))))
 
 (defn gtk4/set-visible (handle id visible)
   "Show or hide a widget."
-  (when-let [{:ptr ptr} (handle:widgets id)]
-    (b:gtk-widget-set-visible ptr (w:bool->int visible))))
+  (when-let [wgt (handle:widgets id)]
+    (b:gtk-widget-set-visible wgt:ptr (w:bool->int visible))))
 
 (defn gtk4/set-sensitive (handle id sensitive)
   "Enable or disable a widget."
-  (when-let [{:ptr ptr} (handle:widgets id)]
-    (b:gtk-widget-set-sensitive ptr (w:bool->int sensitive))))
+  (when-let [wgt (handle:widgets id)]
+    (b:gtk-widget-set-sensitive wgt:ptr (w:bool->int sensitive))))
 
 (defn gtk4/set-title (handle title)
   "Change the window title."
@@ -301,8 +310,8 @@
 
 (defn gtk4/set-stack-page (handle id page-name)
   "Switch the visible page of a GtkStack."
-  (when-let [{:ptr ptr} (handle:widgets id)]
-    (b:gtk-stack-set-visible-child-name ptr (string page-name))))
+  (when-let [wgt (handle:widgets id)]
+    (b:gtk-stack-set-visible-child-name wgt:ptr (string page-name))))
 
 # ── WebView passthrough ───────────────────────────────────────────
 
@@ -315,8 +324,9 @@
 
 (defn gtk4/add (handle parent-id spec)
   "Add a widget to a container."
-  (when-let [{:ptr ptr :type type} (handle:widgets parent-id)]
-    (let [child (build-widget handle spec)]
+  (when-let [wgt (handle:widgets parent-id)]
+    (let [{:ptr ptr :type type} wgt
+          child (build-widget handle spec)]
       (match type
         (:box         (b:gtk-box-append ptr child))
         (:scroll-area (b:gtk-scrolled-window-set-child ptr child))
@@ -324,9 +334,31 @@
 
 (defn gtk4/remove (handle id)
   "Remove a widget from its parent."
-  (when-let [{:ptr ptr} (handle:widgets id)]
-    (b:gtk-widget-unparent ptr)
+  (when-let [wgt (handle:widgets id)]
+    (b:gtk-widget-unparent wgt:ptr)
     (put handle:widgets id nil)))
+
+(defn gtk4/queue-draw (handle id)
+  "Invalidate a widget, triggering a redraw."
+  (when-let [wgt (handle:widgets id)]
+    (b:gtk-widget-queue-draw wgt:ptr)))
+
+# ── Event controllers ────────────────────────────────────────────
+
+(defn gtk4/on-click (handle id handler)
+  "Add a click handler to a widget. handler: (fn [gesture n x y])."
+  (when-let [wgt (handle:widgets id)]
+    (w:add-click handle wgt:ptr handler)))
+
+(defn gtk4/on-scroll (handle id handler)
+  "Add a scroll handler to a widget. handler: (fn [dx dy]) → int."
+  (when-let [wgt (handle:widgets id)]
+    (w:add-scroll handle wgt:ptr handler)))
+
+(defn gtk4/on-key (handle id handler)
+  "Add a key handler to a widget. handler: (fn [keyval keycode state]) → int."
+  (when-let [wgt (handle:widgets id)]
+    (w:add-key handle wgt:ptr handler)))
 
 # ── Export ────────────────────────────────────────────────────────
 
@@ -334,6 +366,7 @@
  :close      gtk4/close
  :open?      gtk4/open?
  :poll       gtk4/poll
+ :wait       gtk4/wait
  :build      gtk4/build
  :rebuild    gtk4/rebuild
  :set        gtk4/set
@@ -345,9 +378,19 @@
  :set-stack-page gtk4/set-stack-page
  :add        gtk4/add
  :remove     gtk4/remove
+ :queue-draw gtk4/queue-draw
+ :on-click   gtk4/on-click
+ :on-scroll  gtk4/on-scroll
+ :on-key     gtk4/on-key
  :eval       gtk4/eval
  :send       gtk4/send
  :load-html  gtk4/load-html
- :load-url   gtk4/load-url}
+ :load-url   gtk4/load-url
+ # app lifecycle
+ :app/new    app:new
+ :app/run    app:run
+ :app/window app:window
+ :parse-spec parse-spec
+ :json-escape wv:json-escape}
 
 ) # end (fn [])

@@ -1,7 +1,8 @@
 (elle/epoch 8)
-## lib/gtk4/bind.lisp — Raw FFI bindings to GTK4, GLib, GObject, WebKit
+## lib/gtk4/bind.lisp — FFI bindings and low-level helpers for GTK4, GLib, GObject, WebKit
 ##
-## Pure ffi/defbind declarations. No logic.
+## Raw ffi/defbind declarations plus glib-wait (scheduler integration)
+## and run-app (GApplication event loop).
 
 (fn []
 
@@ -44,7 +45,29 @@
 (ffi/defbind gtk-widget-set-margin-bottom libgtk "gtk_widget_set_margin_bottom" :void [:ptr :int])
 (ffi/defbind gtk-widget-set-halign libgtk "gtk_widget_set_halign"        :void  [:ptr :int])
 (ffi/defbind gtk-widget-set-valign libgtk "gtk_widget_set_valign"        :void  [:ptr :int])
-(ffi/defbind gtk-widget-unparent  libgtk "gtk_widget_unparent"           :void  [:ptr])
+(ffi/defbind gtk-widget-unparent       libgtk "gtk_widget_unparent"           :void  [:ptr])
+(ffi/defbind gtk-widget-queue-draw     libgtk "gtk_widget_queue_draw"          :void  [:ptr])
+(ffi/defbind gtk-widget-add-controller libgtk "gtk_widget_add_controller"      :void  [:ptr :ptr])
+
+# ── GtkDrawingArea ──────────────────────────────────────────────
+
+(ffi/defbind gtk-drawing-area-new              libgtk "gtk_drawing_area_new"               :ptr  [])
+(ffi/defbind gtk-drawing-area-set-content-width  libgtk "gtk_drawing_area_set_content_width"  :void [:ptr :int])
+(ffi/defbind gtk-drawing-area-set-content-height libgtk "gtk_drawing_area_set_content_height" :void [:ptr :int])
+(ffi/defbind gtk-drawing-area-set-draw-func    libgtk "gtk_drawing_area_set_draw_func"     :void [:ptr :ptr :ptr :ptr])
+
+# ── GtkApplication ──────────────────────────────────────────────
+
+(ffi/defbind gtk-application-new        libgtk "gtk_application_new"        :ptr [:string :u32])
+(ffi/defbind gtk-application-window-new libgtk "gtk_application_window_new" :ptr [:ptr])
+
+# ── Event controllers ───────────────────────────────────────────
+
+(ffi/defbind gtk-gesture-click-new          libgtk "gtk_gesture_click_new"              :ptr  [])
+(ffi/defbind gtk-gesture-single-set-button  libgtk "gtk_gesture_single_set_button"      :void [:ptr :u32])
+(ffi/defbind gtk-gesture-single-get-current-button libgtk "gtk_gesture_single_get_current_button" :u32 [:ptr])
+(ffi/defbind gtk-event-controller-scroll-new libgtk "gtk_event_controller_scroll_new"   :ptr  [:u32])
+(ffi/defbind gtk-event-controller-key-new    libgtk "gtk_event_controller_key_new"      :ptr  [])
 
 # ── GtkBox ────────────────────────────────────────────────────────
 
@@ -229,6 +252,36 @@
 (ffi/defbind g-main-context-default   libglib "g_main_context_default"   :ptr   [])
 (ffi/defbind g-main-context-iteration libglib "g_main_context_iteration" :int   [:ptr :int])
 (ffi/defbind g-main-context-pending   libglib "g_main_context_pending"   :int   [:ptr])
+(ffi/defbind g-main-context-prepare   libglib "g_main_context_prepare"   :int   [:ptr :ptr])
+(ffi/defbind g-main-context-query     libglib "g_main_context_query"     :int   [:ptr :int :ptr :ptr :int])
+(ffi/defbind g-main-context-check     libglib "g_main_context_check"     :int   [:ptr :int :ptr :int])
+(ffi/defbind g-main-context-dispatch  libglib "g_main_context_dispatch"  :void  [:ptr])
+
+(def MAX_POLL_FDS 64)
+(def GPOLLFD_SIZE 8)
+
+(defn glib-wait (ctx)
+  "Yield to Elle's scheduler until GLib has events ready, then dispatch.
+   Uses prepare/query/check/dispatch with ev/poll-fd on the primary fd."
+  (ffi/with-stack [[priority 4] [timeout 4] [fds (* MAX_POLL_FDS GPOLLFD_SIZE)]]
+    (g-main-context-prepare ctx priority)
+    (let* [pri  (ffi/read priority :int)
+           nfds (g-main-context-query ctx pri timeout fds MAX_POLL_FDS)
+           tms  (ffi/read timeout :int)]
+      # Zero all revents fields
+      (each i in (range nfds)
+        (ffi/write (ptr/add fds (+ (* i GPOLLFD_SIZE) 6)) :u16 0))
+      # Block on the primary fd or respect the timeout
+      (when (not (zero? tms))
+        (if (> nfds 0)
+          (let* [fd0     (ffi/read fds :int)
+                 tsec    (if (< tms 0) 60.0 (/ tms 1000.0))
+                 revents (ev/poll-fd fd0 :read-write tsec)]
+            (when (> revents 0)
+              (ffi/write (ptr/add fds 6) :u16 revents)))
+          (ev/sleep (if (> tms 0) (/ tms 1000.0) 0))))
+      (when (nonzero? (g-main-context-check ctx pri fds nfds))
+        (g-main-context-dispatch ctx)))))
 
 # ── GApplication ─────────────────────────────────────────────────
 
@@ -241,17 +294,16 @@
 
 (defn run-app [app &named @quit]
   "Cooperative GTK event loop. Registers and activates the app, then
-   pumps g_main_context_iteration non-blocking, yielding to Elle's
-   scheduler between iterations.
+   blocks on GLib's event sources via ev/poll-fd, yielding to Elle's
+   scheduler between dispatches.
    quit: a nullary function returning true when the loop should exit.
          If omitted, runs forever."
   (default quit (fn [] false))
   (g-application-register app nil nil)
   (g-application-activate app)
-  (def ctx (g-main-context-default))
-  (while (not (quit))
-    (g-main-context-iteration ctx 0)
-    (ev/sleep 0.001)))
+  (let [ctx (g-main-context-default)]
+    (while (not (quit))
+      (glib-wait ctx))))
 
 # ── GObject signals ──────────────────────────────────────────────
 
@@ -321,6 +373,22 @@
  :gtk-widget-set-halign gtk-widget-set-halign
  :gtk-widget-set-valign gtk-widget-set-valign
  :gtk-widget-unparent gtk-widget-unparent
+ :gtk-widget-queue-draw gtk-widget-queue-draw
+ :gtk-widget-add-controller gtk-widget-add-controller
+ # drawing area
+ :gtk-drawing-area-new gtk-drawing-area-new
+ :gtk-drawing-area-set-content-width gtk-drawing-area-set-content-width
+ :gtk-drawing-area-set-content-height gtk-drawing-area-set-content-height
+ :gtk-drawing-area-set-draw-func gtk-drawing-area-set-draw-func
+ # application
+ :gtk-application-new gtk-application-new
+ :gtk-application-window-new gtk-application-window-new
+ # event controllers
+ :gtk-gesture-click-new gtk-gesture-click-new
+ :gtk-gesture-single-set-button gtk-gesture-single-set-button
+ :gtk-gesture-single-get-current-button gtk-gesture-single-get-current-button
+ :gtk-event-controller-scroll-new gtk-event-controller-scroll-new
+ :gtk-event-controller-key-new gtk-event-controller-key-new
  # box
  :gtk-box-new gtk-box-new
  :gtk-box-append gtk-box-append
@@ -447,6 +515,7 @@
  :g-main-context-default g-main-context-default
  :g-main-context-iteration g-main-context-iteration
  :g-main-context-pending g-main-context-pending
+ :glib-wait glib-wait
  # gio / application
  :g-application-register g-application-register
  :g-application-activate g-application-activate

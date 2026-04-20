@@ -15,6 +15,11 @@
 
 (fn []
 
+  # ── Helpers ────────────────────────────────────────────────────────
+
+  (defn clamp01 [x] (max 0.0 (min 1.0 x)))
+  (defn normalize-hue [h] (if (< h 0.0) (+ h 360.0) h))
+
   # ── Construction ───────────────────────────────────────────────────
 
   (defn rgb [r g b]
@@ -47,7 +52,7 @@
   # ── sRGB ↔ HSL ────────────────────────────────────────────────────
 
   (defn rgb->hsl [c]
-    (let* [r (get c :r) g (get c :g) b (get c :b)
+    (let* [r c:r g c:g b c:b
            mx (max r (max g b))
            mn (min r (min g b))
            d  (- mx mn)
@@ -60,12 +65,12 @@
                    ((= mx g) (* 60.0 (+ (/ (- b r) d) 2.0)))
                    (true     (* 60.0 (+ (/ (- r g) d) 4.0)))))]
       {:space :hsl
-       :h (if (< h 0.0) (+ h 360.0) h)
-       :s (max 0.0 (min 1.0 s))
-       :l (max 0.0 (min 1.0 l))}))
+       :h (normalize-hue h)
+       :s (clamp01 s)
+       :l (clamp01 l)}))
 
   (defn hsl->rgb [c]
-    (let* [h (get c :h) s (get c :s) l (get c :l)
+    (let* [h c:h s c:s l c:l
            ch  (* (- 1.0 (abs (- (* 2.0 l) 1.0))) s)
            hp  (/ (fmod h 360.0) 60.0)
            x   (* ch (- 1.0 (abs (- (fmod hp 2.0) 1.0))))
@@ -83,23 +88,23 @@
   # ── sRGB ↔ XYZ (D65) ──────────────────────────────────────────────
 
   (defn rgb->xyz [c]
-    (let* [rl (srgb-to-linear (get c :r))
-           gl (srgb-to-linear (get c :g))
-           bl (srgb-to-linear (get c :b))]
+    (let* [rl (srgb-to-linear c:r)
+           gl (srgb-to-linear c:g)
+           bl (srgb-to-linear c:b)]
       {:space :xyz
        :x (+ (* 0.4124564 rl) (* 0.3575761 gl) (* 0.1804375 bl))
        :y (+ (* 0.2126729 rl) (* 0.7151522 gl) (* 0.0721750 bl))
        :z (+ (* 0.0193339 rl) (* 0.1191920 gl) (* 0.9503041 bl))}))
 
   (defn xyz->rgb [c]
-    (let* [x (get c :x) y (get c :y) z (get c :z)
+    (let* [x c:x y c:y z c:z
            rl (+ (* 3.2404542  x) (* -1.5371385 y) (* -0.4985314 z))
            gl (+ (* -0.9692660 x) (* 1.8760108  y) (* 0.0415560  z))
            bl (+ (* 0.0556434  x) (* -0.2040259 y) (* 1.0572252  z))]
       {:space :srgb
-       :r (max 0.0 (min 1.0 (linear-to-srgb rl)))
-       :g (max 0.0 (min 1.0 (linear-to-srgb gl)))
-       :b (max 0.0 (min 1.0 (linear-to-srgb bl)))}))
+       :r (clamp01 (linear-to-srgb rl))
+       :g (clamp01 (linear-to-srgb gl))
+       :b (clamp01 (linear-to-srgb bl))}))
 
   # ── XYZ ↔ Lab (D65) ───────────────────────────────────────────────
 
@@ -120,16 +125,16 @@
         (/ (- (* 116.0 t) 16.0) LAB-K))))
 
   (defn xyz->lab [c]
-    (let* [fx (lab-f (/ (get c :x) D65-X))
-           fy (lab-f (/ (get c :y) D65-Y))
-           fz (lab-f (/ (get c :z) D65-Z))]
+    (let* [fx (lab-f (/ c:x D65-X))
+           fy (lab-f (/ c:y D65-Y))
+           fz (lab-f (/ c:z D65-Z))]
       {:space :lab
        :l (- (* 116.0 fy) 16.0)
        :a (* 500.0 (- fx fy))
        :b (* 200.0 (- fy fz))}))
 
   (defn lab->xyz [c]
-    (let* [l (get c :l) a (get c :a) b (get c :b)
+    (let* [l c:l a c:a b c:b
            fy (/ (+ l 16.0) 116.0)
            fx (+ (/ a 500.0) fy)
            fz (- fy (/ b 200.0))]
@@ -148,9 +153,9 @@
   ## sRGB → Linear → Oklab → Oklch
 
   (defn rgb->oklab [c]
-    (let* [rl (srgb-to-linear (get c :r))
-           gl (srgb-to-linear (get c :g))
-           bl (srgb-to-linear (get c :b))
+    (let* [rl (srgb-to-linear c:r)
+           gl (srgb-to-linear c:g)
+           bl (srgb-to-linear c:b)
            l_ (+ (* 0.4122214708 rl) (* 0.5363325363 gl) (* 0.0514459929 bl))
            m_ (+ (* 0.2119034982 rl) (* 0.6806995451 gl) (* 0.1073969566 bl))
            s_ (+ (* 0.0883024619 rl) (* 0.2817188376 gl) (* 0.6299787005 bl))
@@ -161,7 +166,7 @@
        :b (+ (* 0.0259040371 l) (* 0.7827717662 m) (* -0.8086757660 s))}))
 
   (defn oklab->rgb [c]
-    (let* [L (get c :l) A (get c :a) B (get c :b)
+    (let* [L c:l A c:a B c:b
            l_ (+ L (* 0.3963377774 A) (* 0.2158037573 B))
            m_ (+ L (* -0.1055613458 A) (* -0.0638541728 B))
            s_ (+ L (* -0.0894841775 A) (* -1.2914855480 B))
@@ -170,28 +175,22 @@
            gl (+ (* -1.2684380046 l) (* 2.6097574011 m) (* -0.3413193965 s))
            bl (+ (* -0.0041960863 l) (* -0.7034186147 m) (* 1.7076147010 s))]
       {:space :srgb
-       :r (max 0.0 (min 1.0 (linear-to-srgb rl)))
-       :g (max 0.0 (min 1.0 (linear-to-srgb gl)))
-       :b (max 0.0 (min 1.0 (linear-to-srgb bl)))}))
+       :r (clamp01 (linear-to-srgb rl))
+       :g (clamp01 (linear-to-srgb gl))
+       :b (clamp01 (linear-to-srgb bl))}))
 
   (def DEG (/ 180.0 (math/pi)))
   (def RAD (/ (math/pi) 180.0))
 
   (defn oklab->oklch [c]
-    (let* [a (get c :a) b (get c :b)
+    (let* [a c:a b c:b
            ch (math/sqrt (+ (* a a) (* b b)))
            h  (* (math/atan2 b a) DEG)]
-      {:space :oklch
-       :l (get c :l)
-       :c ch
-       :h (if (< h 0.0) (+ h 360.0) h)}))
+      {:space :oklch :l c:l :c ch :h (normalize-hue h)}))
 
   (defn oklch->oklab [c]
-    (let* [ch (get c :c) h (* (get c :h) RAD)]
-      {:space :oklab
-       :l (get c :l)
-       :a (* ch (math/cos h))
-       :b (* ch (math/sin h))}))
+    (let* [ch c:c h (* c:h RAD)]
+      {:space :oklab :l c:l :a (* ch (math/cos h)) :b (* ch (math/sin h))}))
 
   (defn rgb->oklch [c] (oklab->oklch (rgb->oklab c)))
   (defn oklch->rgb [c] (oklab->rgb (oklch->oklab c)))
@@ -199,14 +198,14 @@
   # ── Conversion dispatch ───────────────────────────────────────────
 
   (defn to-srgb [c]
-    (match (get c :space)
+    (match c:space
       (:srgb  c)
       (:hsl   (hsl->rgb c))
       (:lab   (lab->rgb c))
       (:xyz   (xyz->rgb c))
       (:oklab (oklab->rgb c))
       (:oklch (oklch->rgb c))
-      (_      (error {:error :color-error :message (string "unknown space " (get c :space))}))))
+      (_      (error {:error :color-error :message (string "unknown space " c:space)}))))
 
   (defn convert [c space]
     (let [s (to-srgb c)]
@@ -225,9 +224,9 @@
     (let* [a (to-srgb c1) b (to-srgb c2)
            t (float t) inv (- 1.0 t)]
       {:space :srgb
-       :r (+ (* (get a :r) inv) (* (get b :r) t))
-       :g (+ (* (get a :g) inv) (* (get b :g) t))
-       :b (+ (* (get a :b) inv) (* (get b :b) t))}))
+       :r (+ (* a:r inv) (* b:r t))
+       :g (+ (* a:g inv) (* b:g t))
+       :b (+ (* a:b inv) (* b:b t))}))
 
   (defn gradient [c1 c2 n]
     (let [steps (max 2 n)]
@@ -236,28 +235,28 @@
 
   (defn lighten [c amount]
     (let [h (convert c :hsl)]
-      (hsl->rgb (put h :l (max 0.0 (min 1.0 (+ (get h :l) (float amount))))))))
+      (hsl->rgb (put h :l (clamp01 (+ h:l (float amount)))))))
 
   (defn darken [c amount]
     (lighten c (- (float amount))))
 
   (defn saturate [c amount]
     (let [h (convert c :hsl)]
-      (hsl->rgb (put h :s (max 0.0 (min 1.0 (+ (get h :s) (float amount))))))))
+      (hsl->rgb (put h :s (clamp01 (+ h:s (float amount)))))))
 
   (defn desaturate [c amount]
     (saturate c (- (float amount))))
 
   (defn complement [c]
     (let [h (convert c :hsl)]
-      (hsl->rgb (put h :h (fmod (+ (get h :h) 180.0) 360.0)))))
+      (hsl->rgb (put h :h (fmod (+ h:h 180.0) 360.0)))))
 
   # ── CIEDE2000 color distance ───────────────────────────────────────
 
   (defn distance [c1 c2]
     (let* [a (convert c1 :lab) b (convert c2 :lab)
-           l1 (get a :l) a1 (get a :a) b1 (get a :b)
-           l2 (get b :l) a2 (get b :a) b2 (get b :b)
+           l1 a:l a1 a:a b1 a:b
+           l2 b:l a2 b:a b2 b:b
            dl (- l2 l1)
            lb (/ (+ l1 l2) 2.0)
            c1s (math/sqrt (+ (* a1 a1) (* b1 b1)))
@@ -309,10 +308,10 @@
 
   (defn to-rgba8 [c]
     (let [s (to-srgb c)]
-      [(integer (* (max 0.0 (min 1.0 (get s :r))) 255.0))
-       (integer (* (max 0.0 (min 1.0 (get s :g))) 255.0))
-       (integer (* (max 0.0 (min 1.0 (get s :b))) 255.0))
-       (integer (* (max 0.0 (min 1.0 (or (get s :a) 1.0))) 255.0))]))
+      [(integer (* (clamp01 s:r) 255.0))
+       (integer (* (clamp01 s:g) 255.0))
+       (integer (* (clamp01 s:b) 255.0))
+       (integer (* (clamp01 (or s:a 1.0)) 255.0))]))
 
   (defn from-rgba8 [r g b a]
     {:space :srgb
