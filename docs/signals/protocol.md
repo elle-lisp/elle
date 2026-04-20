@@ -4,8 +4,10 @@
 
 ### Signal Types
 
-Signal types are bit positions in a bitfield. The first 16 are
-compiler-reserved:
+Signal types are bit positions in a 64-bit bitfield (`SignalBits` is `u64`).
+The lower 32 bits are reserved for the runtime; the upper 32 bits are
+available for user-defined signals. Within the runtime's 32 bits, the
+first 16 are compiler-known:
 
 | Bit | Name | Value | Meaning |
 |-----|------|-------|---------|
@@ -22,7 +24,8 @@ compiler-reserved:
 | 9 | io | 512 | I/O request to scheduler |
 | 10 | terminal | 1024 | Uncatchable — passes through mask checks |
 | 11–15 | reserved | — | Future compiler-known signals |
-| 16+ | user | — | User-defined signal types |
+| 16–31 | runtime | — | Runtime-reserved signals |
+| 32–63 | user | — | User-defined signal types |
 
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
 signal bitfield.
@@ -83,9 +86,9 @@ semantics of combinations.
 **Fiber masks work the same way.** A fiber mask like `|:yield :io|` catches
 fibers that have either bit set. The mask is a bitmask, not an enum.
 
-**User-defined signals (bits 16–31) compose freely** with built-in bits. A
+**User-defined signals (bits 32–63) compose freely** with built-in bits. A
 user-defined signal can be combined with `:yield`, `:error`, `:io`, or any
-other bit.
+other bit. Bits 0–31 are reserved for the runtime.
 
 ### Terminal vs Resumable Signals
 
