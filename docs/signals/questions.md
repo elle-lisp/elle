@@ -4,8 +4,8 @@
 
 ### Signal bit allocation
 
-32 bits: 7 used (0–6) + 9 reserved (7–15) + 16 user-defined (16–31). If
-users need more than 16 signal types, bump SignalBits to u64.
+64 bits (SignalBits is u64): bits 0–15 compiler-known, bits 16–31
+runtime-reserved, bits 32–63 user-defined (up to 32 user signals).
 
 ### Interaction with the type system
 

@@ -737,8 +737,8 @@ mod tests {
         assert!(!mask.contains(SIG_DEBUG));
         assert!(!mask.contains(SIG_RESUME));
 
-        // User-defined signals in upper 16 bits
-        let user_sig = SignalBits::new(1 << 16);
+        // User-defined signals in bits 32-63
+        let user_sig = SignalBits::new(1 << 32);
         assert!(!user_sig.contains(mask));
     }
 

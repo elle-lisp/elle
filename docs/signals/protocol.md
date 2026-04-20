@@ -346,7 +346,7 @@ the scheduler, not by the language.
 
 ## Signal Registry
 
-The signal registry maps signal keywords to bit positions. Built-in signals occupy bits 0–15; user-defined signals use bits 16–31.
+The signal registry maps signal keywords to bit positions. Built-in signals occupy bits 0–15; bits 16–31 are runtime-reserved; user-defined signals use bits 32–63.
 
 ### Built-in Signals
 
@@ -365,7 +365,7 @@ VM-internal (terminal, exec, fuel, switch, wait). Bit 15 is reserved.
 ### User-Defined Signals
 
 User-defined signals are registered via the `(signal :keyword)` special
-form and allocated bits 16–31 sequentially. Up to 16 user signals are
+form and allocated bits 32–63 sequentially. Up to 32 user signals are
 supported. Registration happens at analysis time.
 
 ```lisp

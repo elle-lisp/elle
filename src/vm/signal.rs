@@ -115,7 +115,7 @@ impl VM {
             return Some(bits);
         }
 
-        // Any suspending signal: SIG_YIELD, user-defined (bits 16+),
+        // Any suspending signal: SIG_YIELD, user-defined (bits 32+),
         // or any combination. All remaining signals after the checks above
         // are suspension signals — save the stack into a SuspendedFrame so
         // call.rs can build the caller frame chain on resume.

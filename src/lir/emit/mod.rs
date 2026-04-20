@@ -1027,9 +1027,9 @@ impl Emitter {
             } => {
                 self.ensure_on_top(*value);
                 // Emit instruction with signal bits as u16 operand.
-                // Signal bits fit in u16 (bits 0-15 are built-in,
-                // 16-31 are user-defined; u16 truncates user bits
-                // but those are rare in emit — revisit if needed).
+                // Only bits 0-15 (built-in) are encoded here; user-defined
+                // signals (bits 32-63) are resolved at runtime via the
+                // signal registry, not baked into bytecode.
                 self.bytecode.emit(Instruction::Emit);
                 self.bytecode.emit_u16(signal.raw() as u16);
                 self.pop();
