@@ -1,5 +1,6 @@
 .PHONY: all elle dev docs docgen smoke test test-git clean help \
-       smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-diff doctest
+       smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-diff doctest \
+       plugins plugins-all mcp
 
 .DEFAULT_GOAL := all
 
@@ -26,9 +27,14 @@ dev:  ## Build the Elle binary (debug, fast compile)
 
 MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
 
+plugins:  ## Build all portable plugins (from plugins submodule)
+	$(MAKE) -C plugins portable
+
+plugins-all:  ## Build all plugins including system-dep ones (vulkan, egui, etc.)
+	$(MAKE) -C plugins all
+
 mcp: elle  ## Build elle + MCP plugins (oxigraph, syn)
-	cargo build --release --manifest-path plugins/Cargo.toml --target-dir target \
-		-p elle-oxigraph -p elle-syn $(MCP_PATCH)
+	$(MAKE) -C plugins mcp
 
 # ── Docs ────────────────────────────────────────────────────────────
 

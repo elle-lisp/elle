@@ -40,18 +40,23 @@ search-path resolution and virtual prefixes:
 | `std/X` | `<root>/lib/X.lisp` | `(import "std/portrait")` |
 | `plugin/X` | `<root>/target/<profile>/libelle_X.so` | `(import "plugin/regex")` |
 
-The project root is `ELLE_HOME`, or auto-detected by walking up from the
-binary to find `Cargo.toml`. Plugin resolution prefers the same build
-profile as the running binary and falls back to the other.
+The project root is `--home` (or `ELLE_HOME`), or auto-detected by
+walking up from the elle binary to find `Cargo.toml`. Plugin resolution
+prefers the same build profile as the running binary (release or debug)
+and falls back to the other.
 
-When no virtual prefix matches, `import` searches:
+When no virtual prefix matches, `import` searches these directories in
+order:
 
 1. Current working directory
-2. `ELLE_PATH` entries (colon-separated)
-3. `ELLE_HOME` (or directory of the elle binary)
+2. `--path` / `ELLE_PATH` entries (colon-separated)
+3. `--home` / `ELLE_HOME` (or directory of the elle binary)
 
-For each directory, it tries `<dir>/<spec>.lisp`, `<dir>/<spec>` as-is,
-and `<dir>/libelle_<leaf>.so`.
+For each directory, it tries:
+- `<dir>/<spec>.lisp`
+- `<dir>/<spec>` (as-is)
+- `<dir>/<spec_dir>/libelle_<leaf>.so` (hierarchical plugin layout)
+- `<dir>/libelle_<leaf>.so` (flat plugin layout)
 
 ```lisp
 # (import "std/portrait")         — virtual prefix: std/portrait → lib/portrait.lisp

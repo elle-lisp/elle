@@ -12,9 +12,43 @@ and loaded at runtime without version matching. The ABI uses a named
 function lookup pattern (like `vkGetInstanceProcAddr`). Adding API
 functions to elle never breaks existing plugins.
 
-Plugins live in a [separate repository](https://github.com/elle-lisp/plugins).
+Plugins live in a [separate repository](https://github.com/elle-lisp/plugins),
+available as a git submodule at `plugins/`.
 See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for a step-by-step
 guide to writing a plugin.
+
+## Building plugins
+
+Plugins are in the `plugins/` submodule. Initialize it first:
+
+```bash
+git submodule update --init plugins
+```
+
+Then build from the elle repo root:
+
+```bash
+make plugins          # portable plugins (no system deps)
+make plugins-all      # all plugins (requires vulkan, wayland, egui libs)
+make mcp              # just oxigraph + syn (for the MCP server)
+```
+
+Or build individual plugins:
+
+```bash
+make -C plugins portable                          # all portable
+cargo build --release --manifest-path plugins/Cargo.toml \
+    --target-dir target -p elle-crypto             # single plugin
+```
+
+The `--target-dir target` flag (or `make` from the root) places `.so` files
+in elle's `target/release/`, where the `plugin/` import prefix looks. If
+you build from inside `plugins/` directly with plain `cargo build`, the
+output lands in `plugins/target/release/` instead — elle won't find it
+unless you move the `.so` files or use `--path` (see below).
+
+The plugins submodule's own Makefile handles this automatically when it
+detects it's inside the elle repo, so `cd plugins && make` also works.
 
 ## Usage pattern
 
@@ -28,7 +62,40 @@ guide to writing a plugin.
 (b64:encode "hello")
 ```
 
-Build plugins before use: `cargo build --release -p elle-crypto`.
+## Module search path
+
+When `import` resolves a specifier, it searches in order:
+
+**1. Virtual prefixes** (checked first, before the search path):
+
+| Prefix | Resolves to |
+|--------|-------------|
+| `std/X` | `<root>/lib/X.lisp` |
+| `plugin/X` | `<root>/target/<profile>/libelle_X.so` |
+
+The root is `--home` (or `ELLE_HOME`), or auto-detected by walking up
+from the elle binary to find `Cargo.toml`. Plugin resolution prefers the
+same build profile as the running binary (release or debug) and falls
+back to the other.
+
+**2. Search path** (for specifiers that don't match a virtual prefix):
+
+For each directory in the search path, `import` tries:
+- `<dir>/<spec>.lisp`
+- `<dir>/<spec>` (as-is)
+- `<dir>/<spec_dir>/libelle_<leaf>.so` (hierarchical plugin)
+- `<dir>/libelle_<leaf>.so` (flat plugin)
+
+Search directories, in order:
+1. Current working directory
+2. `--path` / `ELLE_PATH` entries (colon-separated)
+3. `--home` / `ELLE_HOME` (or directory of the elle binary)
+
+**Example:** if you built plugins somewhere else, point elle at them:
+
+```bash
+elle --path=/opt/elle-plugins/target/release my-script.lisp
+```
 
 ## Rust plugins
 
