@@ -17,7 +17,8 @@ a closure returning a struct.
 | dns | `(import "std/dns")` | DNS resolution |
 | egui | `(import "std/egui")` | GUI helpers (wraps egui plugin) |
 | hash | `(import "std/hash")` | Streaming hash convenience |
-| http | `(import "std/http")` | HTTP client |
+| http | `(import "std/http")` | HTTP/1.1 client and server |
+| http2 | `(import "std/http2")` | HTTP/2 client and server (h2 + h2c) |
 | lua | `(import "std/lua")` | Lua compat helpers |
 | mqtt | `(import "std/mqtt")` | MQTT client wrapper |
 | portrait | `(import "std/portrait")` | Semantic portraits |

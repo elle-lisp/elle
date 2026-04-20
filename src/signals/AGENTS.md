@@ -73,7 +73,7 @@ Bits 3, 5, 6, 7, 10, 15 are VM-internal.
 
 ### User-Defined Signals
 
-User signals are allocated bits 16–31 (up to 16 user signals per compilation unit). The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process.
+User signals are allocated bits 32–63 (up to 32 user signals per compilation unit). Bits 16–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process.
 
 ### Registry Interface
 
