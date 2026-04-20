@@ -351,10 +351,11 @@ impl<'a> Analyzer<'a> {
 
                         "silence" => return self.analyze_silence(items, span),
                         "muffle" => return self.analyze_muffle(items, span),
+                        "attune!" => return self.analyze_attune_assert(items, span),
 
-                        "assert-silent" => return self.analyze_silence_assert(items, span),
-                        "assert-numeric" => return self.analyze_numeric_assert(items, span),
-                        "assert-immutable" => return self.analyze_immutable_assert(items, span),
+                        "silent!" => return self.analyze_silence_assert(items, span),
+                        "numeric!" => return self.analyze_numeric_assert(items, span),
+                        "immutable!" => return self.analyze_immutable_assert(items, span),
 
                         "signal" => {
                             if items.len() != 2 {

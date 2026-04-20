@@ -257,17 +257,17 @@ impl<'a> Analyzer<'a> {
         // compute_inferred_signal reads them for bounded params.
         let mut inferred_signals = self.compute_inferred_signal(&body, &params);
 
-        // Check assert-silent assertion (before ceiling/muffle adjustments)
+        // Check silent! assertion (before ceiling/muffle adjustments)
         if self.current_silence_assert && (inferred_signals != Signal::silent()) {
             let reg = registry::global_registry().lock().unwrap();
             return Err(format!(
-                "{}: assert-silent assertion failed: function may emit {}",
+                "{}: silent! assertion failed: function may emit {}",
                 span,
                 reg.format_signal_bits(inferred_signals.bits),
             ));
         }
 
-        // Check assert-immutable assertions
+        // Check immutable! assertions
         for binding in &self.current_immutability_asserts {
             if self.arena.get(*binding).is_mutated {
                 let name = self
@@ -275,7 +275,7 @@ impl<'a> Analyzer<'a> {
                     .name(self.arena.get(*binding).name)
                     .unwrap_or("?");
                 return Err(format!(
-                    "{}: assert-immutable assertion failed: '{}' is assigned in body",
+                    "{}: immutable! assertion failed: '{}' is assigned in body",
                     span, name
                 ));
             }

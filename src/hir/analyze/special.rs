@@ -91,6 +91,45 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
+    /// Analyze an `(attune! signal-spec)` form.
+    ///
+    /// attune! is a compile-time preamble declaration. It sets the function's
+    /// signal ceiling to the specified bits — the function may emit at most
+    /// these signals. Generalizes `(silence)`: `(silence)` is `(attune!)` with
+    /// no signals permitted.
+    ///
+    /// Forms:
+    /// - `(attune! :keyword)` — ceiling = single signal
+    /// - `(attune! |:kw1 :kw2|)` — ceiling = set of signals
+    pub(crate) fn analyze_attune_assert(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        if self.fn_depth == 0 {
+            return Err(format!(
+                "{}: attune! must appear inside a function body",
+                span
+            ));
+        }
+
+        let args = &items[1..];
+        if args.len() != 1 {
+            return Err(format!(
+                "{}: attune! requires exactly one argument (signal keyword or set)",
+                span
+            ));
+        }
+
+        let bits = self.resolve_static_signal(&args[0])?;
+        self.current_declared_ceiling = Some(Signal {
+            bits,
+            propagates: 0,
+        });
+
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
+
     /// Analyze a `(muffle signal-spec)` form.
     ///
     /// muffle is a declaration, not an expression. It must appear inside
@@ -556,9 +595,9 @@ impl<'a> Analyzer<'a> {
         Ok(HirPattern::Or(patterns))
     }
 
-    // === Compile-time assertion forms ===
+    // === Compile-time assertion forms (! suffix) ===
 
-    /// `(assert-silent)` — assert that the current function is silent (no signals).
+    /// `(silent!)` — assert that the current function is silent (no signals).
     pub(crate) fn analyze_silence_assert(
         &mut self,
         items: &[Syntax],
@@ -566,18 +605,19 @@ impl<'a> Analyzer<'a> {
     ) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
-                "{}: assert-silent must appear inside a function body",
+                "{}: silent! must appear inside a function body",
                 span
             ));
         }
         if items.len() != 1 {
-            return Err(format!("{}: assert-silent takes no arguments", span));
+            return Err(format!("{}: silent! takes no arguments", span));
         }
         self.current_silence_assert = true;
         Ok(Hir::silent(HirKind::Nil, span))
     }
 
-    /// `(assert-numeric)` — assert that the current function is GPU-eligible.
+    /// `(numeric!)` — assert that the current function is GPU-eligible
+    /// (all parameters are numeric, enabling type check elision).
     pub(crate) fn analyze_numeric_assert(
         &mut self,
         items: &[Syntax],
@@ -585,18 +625,18 @@ impl<'a> Analyzer<'a> {
     ) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
-                "{}: assert-numeric must appear inside a function body",
+                "{}: numeric! must appear inside a function body",
                 span
             ));
         }
         if items.len() != 1 {
-            return Err(format!("{}: assert-numeric takes no arguments", span));
+            return Err(format!("{}: numeric! takes no arguments", span));
         }
         self.current_numeric_assert = true;
         Ok(Hir::silent(HirKind::Nil, span))
     }
 
-    /// `(assert-immutable x)` — assert that binding `x` is never assigned in the body.
+    /// `(immutable! x)` — assert that binding `x` is never assigned in the body.
     pub(crate) fn analyze_immutable_assert(
         &mut self,
         items: &[Syntax],
@@ -604,26 +644,26 @@ impl<'a> Analyzer<'a> {
     ) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
-                "{}: assert-immutable must appear inside a function body",
+                "{}: immutable! must appear inside a function body",
                 span
             ));
         }
         if items.len() != 2 {
             return Err(format!(
-                "{}: assert-immutable requires exactly one argument (a symbol)",
+                "{}: immutable! requires exactly one argument (a symbol)",
                 span
             ));
         }
         let name = items[1].as_symbol().ok_or_else(|| {
             format!(
-                "{}: assert-immutable argument must be a symbol, got {}",
+                "{}: immutable! argument must be a symbol, got {}",
                 items[1].span,
                 items[1].kind_label()
             )
         })?;
         let binding = self
             .lookup(name, items[1].scopes.as_slice())
-            .ok_or_else(|| format!("{}: assert-immutable: undefined variable '{}'", span, name))?;
+            .ok_or_else(|| format!("{}: immutable!: undefined variable '{}'", span, name))?;
         self.current_immutability_asserts.insert(binding);
         Ok(Hir::silent(HirKind::Nil, span))
     }

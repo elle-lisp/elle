@@ -305,6 +305,114 @@ additional cross-file visibility via SPARQL queries. See
 query cross-file dependencies.
 
 
+### `attune` Primitive: Positive Runtime Enforcement
+
+`attune` is the dual of `squelch`: where squelch says "block these signals"
+(negative/blacklist), attune says "allow only these signals"
+(positive/whitelist). Everything not in the permitted set is intercepted
+and converted to `:error`.
+
+**Syntax:** `(attune signals closure)` — mask-first argument order.
+
+**Runtime semantics:**
+
+- Returns a new closure whose squelch mask suppresses `CAP_MASK - permitted`
+- Same mechanism as squelch (Rc clone, near-zero cost)
+- Composable with squelch: layers OR their masks together
+
+**Compile-time semantics:**
+
+When the analyzer sees `(attune |:yield| f)` with a static mask, it
+computes the resulting signal: `f_signal.squelch(CAP_MASK - permitted)`.
+This enables interprocedural signal narrowing.
+
+**Examples:**
+```text
+# Allow only :yield and :error — block everything else
+(def safe-handler (attune |:yield :error| (get-handler)))
+
+# Equivalent to (squelch f |:io :ffi :exec :halt :debug|) — but readable
+(def no-side-effects (attune |:yield :error| some-callback))
+
+# Compose with squelch
+(def only-error (squelch (attune |:yield :error| f) :yield))
+```
+
+### `(attune! signal-spec)` Form
+
+Compile-time preamble declaration that sets the function's signal ceiling.
+Generalizes `(silence)`: where silence means "emits nothing", attune!
+means "emits at most these signals."
+
+**Syntax:**
+```text
+(attune! :keyword)           # ceiling = single signal
+(attune! |:kw1 :kw2|)       # ceiling = set of signals
+```
+
+**Semantics:**
+
+- Declares the maximum signal this function may emit
+- Compiler verifies the body's inferred signal fits within the ceiling
+- If the body exceeds the ceiling, compile-time error
+- Composes with `(muffle ...)`: muffled bits expand the ceiling
+
+**Examples:**
+```text
+# Function may yield but nothing else
+(defn generator [n]
+  (attune! :yield)
+  (yield n))
+
+# Function may yield and error, but no I/O
+(defn parser [input]
+  (attune! |:yield :error|)
+  (if (empty? input)
+    (error {:error :parse-error})
+    (yield (first input))))
+
+# Exceeding the ceiling is a compile-time error:
+# (defn bad []
+#   (attune! :yield)
+#   (println "oops"))   # => error: function restricted to {:yield} but body may emit {:io}
+```
+
+## Compile-Time Assertions (`!` Convention)
+
+Forms ending with `!` are compile-time assertions with implications for
+analysis. They are promises the programmer makes that the compiler
+verifies and uses to unlock optimizations. If violated, the program is
+rejected at compile time.
+
+| Form | Assertion | Optimization unlocked |
+|------|-----------|----------------------|
+| `(silent!)` | Function emits no signals | Skip signal dispatch, JIT without suspension |
+| `(numeric!)` | All values are numeric | Elide type checks, enable GPU lowering |
+| `(immutable! x)` | Binding x is never assigned | SSA treatment, avoid cell indirection |
+| `(attune! spec)` | Function emits at most spec | Narrow signal ceiling for callers |
+
+**Rules:**
+
+- Must appear inside a lambda body (preamble position)
+- Multiple `!` forms allowed in one lambda
+- Violation is always a compile-time error, never a runtime check
+- These are NOT runtime guards — they inform the compiler's static model
+
+**Examples:**
+```text
+# GPU kernel: numeric + silent
+(defn mandel-pixel [cx cy max-iter]
+  (numeric!)
+  (silent!)
+  (let [@x 0.0  @y 0.0  @i 0]
+    (while (and (< (+ (* x x) (* y y)) 4.0) (< i max-iter))
+      (let [xt (+ (- (* x x) (* y y)) cx)]
+        (assign y (+ (* 2.0 x y) cy))
+        (assign x xt)
+        (assign i (+ i 1))))
+    i))
+```
+
 ## Runtime Verification
 
 When a closure is passed to a function with a signal bound, the runtime checks that the closure's signal satisfies the bound. This is necessary for dynamic arguments where the signal cannot be determined at compile time.

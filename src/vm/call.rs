@@ -241,6 +241,24 @@ impl VM {
                 return None;
             }
 
+            // GPU capability check: if this closure has been GIT'd (has SPIR-V),
+            // it requires GPU hardware. Check capability before dispatch.
+            if closure.template.spirv.get().is_some() {
+                let gpu_bit = crate::signals::SIG_GPU;
+                let blocked = gpu_bit
+                    .intersection(self.fiber.withheld)
+                    .intersection(crate::signals::CAP_MASK);
+                if !blocked.is_empty() {
+                    self.fiber.call_depth -= 1;
+                    self.fiber.call_stack.pop();
+                    self.fiber.signal = Some((
+                        blocked,
+                        Value::cons(Value::keyword("capability-denied"), Value::keyword("gpu")),
+                    ));
+                    return None;
+                }
+            }
+
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
             #[cfg(feature = "wasm")]

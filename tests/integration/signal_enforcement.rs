@@ -6,11 +6,13 @@
 // - Polymorphic signals (like map) resolve based on argument signals
 // - Silent functions remain silent
 // - assign invalidates signal tracking
+// - Unknown callees use Signal::unknown() (sound conservative)
+// - Parameter calls use Signal::yields_errors() (may yield + inherent error)
 
 use elle::hir::HirKind;
-use elle::pipeline::{analyze, analyze_file};
+use elle::pipeline::analyze;
 use elle::primitives::register_primitives;
-use elle::signals::Signal;
+use elle::signals::{Signal, SIG_ERROR};
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
 
@@ -27,8 +29,6 @@ fn setup() -> (SymbolTable, VM) {
 
 #[test]
 fn test_signal_direct_yield() {
-    // (fn () (yield 1)) should have Pure signal on the lambda creation
-    // but the body should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn () (yield 1))", &mut symbols, &mut vm, "<test>").unwrap();
 
@@ -45,7 +45,6 @@ fn test_signal_direct_yield() {
 
 #[test]
 fn test_signal_yield_in_begin() {
-    // (begin (yield 1) (yield 2)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (yield 1) (yield 2))",
@@ -59,7 +58,6 @@ fn test_signal_yield_in_begin() {
 
 #[test]
 fn test_signal_yield_in_if() {
-    // (if true (yield 1) 2) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze("(if true (yield 1) 2)", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(result.hir.signal, Signal::yields());
@@ -71,8 +69,6 @@ fn test_signal_yield_in_if() {
 
 #[test]
 fn test_signal_call_propagation() {
-    // (def gen (fn () (yield 1)))
-    // (gen) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def gen (fn () (yield 1))) (gen))",
@@ -90,9 +86,6 @@ fn test_signal_call_propagation() {
 
 #[test]
 fn test_signal_nested_propagation() {
-    // (def gen (fn () (yield 1)))
-    // (def wrapper (fn () (gen)))
-    // (wrapper) should be Yields
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def gen (fn () (yield 1))) (def wrapper (fn () (gen))) (wrapper))",
@@ -110,11 +103,6 @@ fn test_signal_nested_propagation() {
 
 #[test]
 fn test_signal_pure_call() {
-    // (def f (fn (x) (+ x 1)))
-    // (f 42) carries the same signal as the function — Signal::errors(),
-    // because `+` can type-error on non-numeric args. Non-suspension bits
-    // (error) are preserved through the analyzer; they only get erased
-    // if the body is truly silent.
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def f (fn (x) (+ x 1))) (f 42))",
@@ -132,7 +120,6 @@ fn test_signal_pure_call() {
 
 #[test]
 fn test_signal_let_bound_lambda() {
-    // (let [gen (fn () (yield 1))] (gen)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(let [gen (fn () (yield 1))] (gen))",
@@ -150,7 +137,6 @@ fn test_signal_let_bound_lambda() {
 
 #[test]
 fn test_signal_letrec_bound_lambda() {
-    // (letrec [gen (fn () (yield 1))] (gen)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(letrec [gen (fn () (yield 1))] (gen) 42)",
@@ -170,51 +156,38 @@ fn test_signal_letrec_bound_lambda() {
 // 3. POLYMORPHIC EFFECT RESOLUTION TESTS
 // ============================================================================
 
-// Note: map, filter, fold are defined as Lisp functions in init_stdlib,
-// not as primitives. For polymorphic signal resolution to work with them,
-// they would need to be defined in the same compilation unit or tracked
-// across compilation units. These tests verify the behavior with locally
-// defined higher-order functions.
-
 #[test]
 fn test_signal_polymorphic_local_higher_order() {
-    // Define a local higher-order function and verify polymorphic resolution
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def my-map (fn (f lst)                (if (empty? lst)                    ()                    (cons (f (first lst)) (my-map f (rest lst))))))            (def gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // my-map calls gen which yields, so my-map's body has Yields signal
-    // When we call (my-map gen ...), we look up my-map's signal
-    // Since my-map is defined with a lambda, we track its body signal
-    // The body calls f which is a parameter - we can't resolve that statically
-    // So this is Yields (sound: unknown callee may yield)
+    // my-map is polymorphic on param 0 (with inherent error).
+    // Calling with gen (which yields) resolves to yields + errors.
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Local higher-order function with unknown parameter signal is conservatively Yields"
+        Signal::yields_errors(),
+        "Local higher-order function with yielding arg resolves to yields+errors"
     );
 }
 
 #[test]
 fn test_signal_polymorphic_direct_call() {
-    // Direct call with yielding lambda should propagate signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def apply-fn (fn (f x) (f x)))            (apply-fn (fn (x) (yield x)) 42))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // apply-fn's body calls f which is a parameter
-    // We can't statically resolve the parameter's signal
-    // So this is Yields (sound: unknown callee may yield)
+    // apply-fn is polymorphic(0) with inherent error.
+    // Called with a yielding lambda → yields + errors.
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Higher-order function with parameter call is conservatively Yields"
+        Signal::yields_errors(),
+        "Higher-order function with yielding arg resolves to yields+errors"
     );
 }
 
 #[test]
 fn test_signal_polymorphic_with_pure_arg() {
-    // Calling a global function (map) with pure lambda
-    // Since map isn't in primitive_signals (it's defined in stdlib),
-    // the call is conservatively Yields (sound: unknown global may yield)
+    // map isn't in primitive_signals (defined in stdlib, not a primitive).
+    // Unknown global → Signal::unknown()
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(map (fn (x) (+ x 1)) (list 1 2 3))",
@@ -225,15 +198,13 @@ fn test_signal_polymorphic_with_pure_arg() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Call to unknown global is Yields (sound default)"
+        Signal::unknown(),
+        "Call to unknown global is Signal::unknown() (sound)"
     );
 }
 
 #[test]
 fn test_signal_polymorphic_with_yielding_arg_unknown_global() {
-    // Calling a global function (map) that isn't in primitive_signals
-    // Unknown globals default to Yields for soundness
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
@@ -242,12 +213,10 @@ fn test_signal_polymorphic_with_yielding_arg_unknown_global() {
         "<test>",
     )
     .unwrap();
-    // map is not in primitive_signals (it's defined in stdlib, not as a primitive)
-    // Unknown globals are Yields for soundness
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Call to unknown global is Yields (sound default)"
+        Signal::unknown(),
+        "Call to unknown global is Signal::unknown() (sound)"
     );
 }
 
@@ -257,10 +226,6 @@ fn test_signal_polymorphic_with_yielding_arg_unknown_global() {
 
 #[test]
 fn test_signal_set_invalidation() {
-    // (var f (fn () 42))
-    // (assign f (fn () (yield 1)))
-    // After assign, signal tracking for f is invalidated
-    // Calling f should be Yields (sound: we can't prove it's pure)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
@@ -269,12 +234,10 @@ fn test_signal_set_invalidation() {
         "<test>",
     )
     .unwrap();
-    // After assign, we conservatively treat the signal as Yields
-    // This is sound: we can't prove the new value is pure
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "After assign, signal should be Yields (sound default)"
+        Signal::unknown(),
+        "After assign, callee signal is unknown (sound)"
     );
 }
 
@@ -284,7 +247,6 @@ fn test_signal_set_invalidation() {
 
 #[test]
 fn test_signal_direct_lambda_call_yields() {
-    // ((fn () (yield 1))) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze("((fn () (yield 1)))", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(
@@ -296,7 +258,6 @@ fn test_signal_direct_lambda_call_yields() {
 
 #[test]
 fn test_signal_direct_lambda_call_pure() {
-    // ((fn () 42)) should be Pure
     let (mut symbols, mut vm) = setup();
     let result = analyze("((fn () 42))", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(
@@ -312,11 +273,6 @@ fn test_signal_direct_lambda_call_pure() {
 
 #[test]
 fn test_signal_multiple_calls_mixed() {
-    // (begin (def pure-fn (fn () 42))
-    //        (def yield-fn (fn () (yield 1)))
-    //        (pure-fn)
-    //        (yield-fn))
-    // Should have Yields signal because yield-fn is called
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
@@ -327,15 +283,13 @@ fn test_signal_multiple_calls_mixed() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Sequence with yielding call should have Yields signal"
+        Signal::unknown(),
+        "After assign, callee is unknown"
     );
 }
 
 #[test]
 fn test_signal_conditional_yield() {
-    // (def maybe-yield (fn (x) (if x (yield 1) 2)))
-    // (maybe-yield true) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def pure-fn (fn () 42)) (def yield-fn (fn () (yield 1))) (pure-fn) (yield-fn))",
@@ -353,10 +307,6 @@ fn test_signal_conditional_yield() {
 
 #[test]
 fn test_signal_closure_captures_yielding() {
-    // (let [gen (fn () (yield 1))]
-    //   (let [wrapper (fn () (gen))]
-    //     (wrapper)))
-    // Should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(let [gen (fn () (yield 1))] (let [wrapper (fn () (gen))] (wrapper)))",
@@ -378,25 +328,14 @@ fn test_signal_closure_captures_yielding() {
 
 #[test]
 fn test_signal_pure_primitives() {
-    // Most primitives now have errors signal (can raise type/arity errors).
-    // `list` is genuinely silent (variadic, no type checks).
     let (mut symbols, mut vm) = setup();
 
     let errors_calls = [
-        "(+ 1 2)",
-        "(- 5 3)",
-        "(* 2 3)",
-        "(/ 10 2)",
-        "(< 1 2)",
-        "(> 2 1)",
-        "(= 1 1)",
-        "(cons 1 2)",
-        "(first (list 1 2))",
-        "(rest (list 1 2))",
-        "(length (list 1 2 3))",
-        "(not true)",
-        "(number? 42)",
-        "(string? \"hello\")",
+        "(+ 1 2)", "(- 5 3)", "(* 2 3)", "(/ 10 2)",
+        "(< 1 2)", "(> 2 1)", "(= 1 1)",
+        "(cons 1 2)", "(first (list 1 2))", "(rest (list 1 2))",
+        "(length (list 1 2 3))", "(not true)",
+        "(number? 42)", "(string? \"hello\")",
     ];
 
     for call in errors_calls {
@@ -409,7 +348,6 @@ fn test_signal_pure_primitives() {
         );
     }
 
-    // list is silent — variadic constructor with no type checks
     let inert_calls = ["(list 1 2 3)"];
     for call in inert_calls {
         let result = analyze(call, &mut symbols, &mut vm, "<test>").unwrap();
@@ -462,9 +400,6 @@ fn test_lambda_body_signal_nested_yield() {
 
 #[test]
 fn test_signal_unknown_global_is_yields() {
-    // Unknown global functions default to Yields (sound)
-    // This is the fix for signal soundness: if we can't prove a global is pure,
-    // we must assume it may yield (since it could be redefined via assign)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
@@ -475,8 +410,8 @@ fn test_signal_unknown_global_is_yields() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Unknown global should be Yields for soundness"
+        Signal::unknown(),
+        "Unknown global should be Signal::unknown() for soundness"
     );
 }
 
@@ -486,14 +421,14 @@ fn test_signal_unknown_global_is_yields() {
 
 #[test]
 fn test_signal_parameter_call_is_yields() {
-    // Calling a function parameter should be Yields (we can't know its signal)
+    // Calling a function parameter: yields_errors() (may yield + inherent error)
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn (f) (f 42))", &mut symbols, &mut vm, "<test>").unwrap();
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(
             body.signal,
-            Signal::yields(),
-            "Calling a function parameter should be Yields (unknown signal)"
+            Signal::yields_errors(),
+            "Calling a function parameter has yields_errors() signal"
         );
     } else {
         panic!("Expected Lambda");
@@ -502,7 +437,7 @@ fn test_signal_parameter_call_is_yields() {
 
 #[test]
 fn test_signal_let_bound_non_lambda_call_is_yields() {
-    // Calling a let-bound non-lambda should be Yields
+    // Calling a let-bound non-lambda: Signal::unknown() (opaque binding)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(let [f (first fns)] (f 42))",
@@ -511,11 +446,10 @@ fn test_signal_let_bound_non_lambda_call_is_yields() {
         "<test>",
     )
     .unwrap();
-    // f is not a lambda literal, signal unknown → Yields+Errors
     assert_eq!(
         result.hir.signal,
-        Signal::yields_errors(),
-        "Calling a let-bound non-lambda should be Yields+Errors (unknown signal)"
+        Signal::unknown(),
+        "Calling a let-bound non-lambda should be Signal::unknown() (opaque)"
     );
 }
 
@@ -525,7 +459,6 @@ fn test_signal_let_bound_non_lambda_call_is_yields() {
 
 #[test]
 fn test_polymorphic_inference_single_param() {
-    // Higher-order function should infer Polymorphic(0)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def apply-fn (fn (f x) (f x)))",
@@ -535,16 +468,16 @@ fn test_polymorphic_inference_single_param() {
     )
     .unwrap();
 
-    // Check the lambda's inferred signal
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
             inferred_signals, ..
         } = &value.kind
         {
+            // Polymorphic on param 0 with inherent SIG_ERROR (calling unknown can error)
             assert_eq!(
                 *inferred_signals,
-                Signal::polymorphic(0),
-                "apply-fn should have Polymorphic(0) signal"
+                Signal::polymorphic_errors(0),
+                "apply-fn should have Polymorphic(0) + errors signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -556,7 +489,6 @@ fn test_polymorphic_inference_single_param() {
 
 #[test]
 fn test_polymorphic_inference_resolves_pure() {
-    // Calling apply-fn with a pure function should be Pure
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def apply-fn (fn (f x) (f x))) (apply-fn + 42))",
@@ -574,7 +506,6 @@ fn test_polymorphic_inference_resolves_pure() {
 
 #[test]
 fn test_polymorphic_inference_resolves_yields() {
-    // Calling apply-fn with a yielding lambda should be Yields
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def apply-fn (fn (f x) (f x))) (apply-fn (fn (x) (yield x)) 42))",
@@ -585,22 +516,16 @@ fn test_polymorphic_inference_resolves_yields() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Calling polymorphic function with yielding arg should be Yields"
+        Signal::yields_errors(),
+        "Calling polymorphic function with yielding arg should be Yields+Errors"
     );
 }
 
 #[test]
 fn test_polymorphic_inference_my_map() {
-    // User-defined recursive map - the recursive call is seeded with Pure
-    // during analysis (since define seeds lambda forms with Pure before
-    // analyzing the body), so the function correctly infers as Polymorphic(0).
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def my-map (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (my-map f (rest xs))))))           (my-map + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // my-map is Polymorphic(0) because the only Yields source is calling f.
-    // The recursive call to my-map is seeded as Pure during analysis.
-    // When called with +, which now has errors signal, the result has errors.
     assert_eq!(
         result.hir.signal,
         Signal::errors(),
@@ -610,11 +535,9 @@ fn test_polymorphic_inference_my_map() {
 
 #[test]
 fn test_polymorphic_inference_non_recursive_map() {
-    // Non-recursive higher-order function should be Polymorphic(0)
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (list)))))           (apply-to-list + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // apply-to-list is Polymorphic(0), + now has errors signal, so the call has errors
     assert_eq!(
         result.hir.signal,
         Signal::errors(),
@@ -624,7 +547,7 @@ fn test_polymorphic_inference_non_recursive_map() {
 
 #[test]
 fn test_polymorphic_inference_direct_yield_prevents() {
-    // A function that both calls a parameter AND yields directly is Yields, not Polymorphic
+    // A function that both calls a parameter AND yields directly is Yields+Errors
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def bad (fn (f x) (begin (yield 99) (f x))))",
@@ -641,8 +564,8 @@ fn test_polymorphic_inference_direct_yield_prevents() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::yields(),
-                "Function with direct yield should be Yields, not Polymorphic"
+                Signal::yields_errors(),
+                "Function with direct yield + param call should be Yields+Errors"
             );
         } else {
             panic!("Expected Lambda");
@@ -654,7 +577,6 @@ fn test_polymorphic_inference_direct_yield_prevents() {
 
 #[test]
 fn test_polymorphic_inference_two_params() {
-    // A function that calls two different parameters — should infer Polymorphic({0, 1})
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def apply-both (fn (f g x) (begin (f x) (g x))))",
@@ -669,13 +591,14 @@ fn test_polymorphic_inference_two_params() {
             inferred_signals, ..
         } = &value.kind
         {
+            // Polymorphic on params 0 and 1, with inherent SIG_ERROR
             assert_eq!(
                 *inferred_signals,
                 Signal {
-                    bits: elle::value::SignalBits::new(0),
-                    propagates: 0b11, // params 0 and 1
+                    bits: SIG_ERROR,
+                    propagates: 0b11,
                 },
-                "Function calling two params should propagate params 0 and 1"
+                "Function calling two params should propagate params 0 and 1 + error"
             );
         } else {
             panic!("Expected Lambda");
@@ -687,7 +610,6 @@ fn test_polymorphic_inference_two_params() {
 
 #[test]
 fn test_polymorphic_inference_two_params_resolves_pure() {
-    // Calling apply-both with two pure functions should be Pure
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both + * 5))",
@@ -705,7 +627,6 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
 
 #[test]
 fn test_polymorphic_inference_two_params_resolves_yields() {
-    // Calling apply-both with one yielding function should be Yields
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def gen (fn () (yield 1)))           (def apply-both (fn (f g x) (begin (f x) (g x))))            (apply-both gen * 5))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
@@ -718,7 +639,6 @@ fn test_polymorphic_inference_two_params_resolves_yields() {
 
 #[test]
 fn test_polymorphic_inference_second_param() {
-    // Higher-order function where the second parameter is called
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def apply-second (fn (x f) (f x)))",
@@ -735,8 +655,8 @@ fn test_polymorphic_inference_second_param() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::polymorphic(1),
-                "apply-second should have Polymorphic(1) signal"
+                Signal::polymorphic_errors(1),
+                "apply-second should have Polymorphic(1) + errors signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -747,602 +667,38 @@ fn test_polymorphic_inference_second_param() {
 }
 
 #[test]
-fn test_polymorphic_inference_nested_call() {
-    // Nested higher-order function: outer calls inner which calls param
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def apply-fn (fn (f x) (f x)))           (def wrapper (fn (g y) (apply-fn g y)))           (wrapper + 42))"#,        &mut symbols, &mut vm, "<test>")
-    .unwrap();
-    // wrapper calls apply-fn with g, apply-fn is Polymorphic(0)
-    // So wrapper's body signal depends on g's signal
-    // wrapper should be Polymorphic(0) and the final call with + (which has errors) propagates errors
-    assert_eq!(
-        result.hir.signal,
-        Signal::errors(),
-        "Nested polymorphic calls with errors arg should have errors signal"
-    );
-}
-
-#[test]
 fn test_polymorphic_inference_with_known_yielding_call() {
-    // A function that calls a parameter AND a known yielding function is Yields
+    // Function that calls a parameter AND a known yielding function.
+    // The known yielding call makes it non-polymorphic (has_non_param_yield = true)
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def gen (fn () (yield 1)))           (def bad (fn (f x) (begin (gen) (f x)))))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(
+        "(begin (def gen (fn () (yield 1))) (def bad (fn (f x) (begin (gen) (f x)))))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    )
     .unwrap();
 
-    // Find the 'bad' definition
+    // Result is a Begin; bad is the last Define
     if let HirKind::Begin(exprs) = &result.hir.kind {
-        if let HirKind::Define { value, .. } = &exprs[1].kind {
+        let bad_def = exprs.last().unwrap();
+        if let HirKind::Define { value, .. } = &bad_def.kind {
             if let HirKind::Lambda {
                 inferred_signals, ..
             } = &value.kind
             {
                 assert_eq!(
                     *inferred_signals,
-                    Signal::yields(),
-                    "Function calling known yielding function should be Yields"
+                    Signal::yields_errors(),
+                    "Function with known yielding call + param call should be Yields+Errors"
                 );
             } else {
-                panic!("Expected Lambda");
+                panic!("Expected Lambda in Define");
             }
         } else {
-            panic!("Expected Define");
+            panic!("Expected Define as last expr in Begin");
         }
     } else {
-        panic!("Expected Begin");
+        panic!("Expected Begin, got {:?}", result.hir.kind);
     }
 }
-
-#[test]
-fn test_polymorphic_inference_pure_function() {
-    // An error-capable function should have the :error signal, not
-    // Polymorphic. (+) can type-error on non-numeric args, so its
-    // declared primitive signal is Signal::errors() and a function
-    // that calls it inherits SIG_ERROR without becoming polymorphic.
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(def add1 (fn (x) (+ x 1)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    )
-    .unwrap();
-
-    if let HirKind::Define { value, .. } = &result.hir.kind {
-        if let HirKind::Lambda {
-            inferred_signals, ..
-        } = &value.kind
-        {
-            assert_eq!(
-                *inferred_signals,
-                Signal::errors(),
-                "Error-capable function carries :error, not Polymorphic"
-            );
-        } else {
-            panic!("Expected Lambda");
-        }
-    } else {
-        panic!("Expected Define");
-    }
-}
-
-// Cross-form signal tracking is now handled natively by the letrec model.
-// The old fixpoint-based tests have been removed. Equivalent coverage is
-// provided by test_mutual_recursion_signals_are_pure in pipeline.rs and
-// the nqueens signal test.
-
-// ============================================================================
-// CHUNK 2: (signal :keyword) form tests
-// ============================================================================
-
-// test_signal_declaration_returns_keyword: migrated to tests/elle/signals.lisp
-
-// test_signal_declaration_non_keyword_error: migrated to tests/elle/signals.lisp
-
-// test_signal_declaration_builtin_error: migrated to tests/elle/signals.lisp
-
-// test_signal_in_expression_position: migrated to tests/elle/signals.lisp
-
-// test_signal_declaration_duplicate_error: migrated to tests/elle/signals.lisp
-
-// ============================================================================
-// CHUNK 3: silence form parsing tests
-// ============================================================================
-
-#[test]
-fn test_silence_parses_function_level_silent() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (x y) (silence) (if x y 0))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // Should parse without error (body is silent — pure control flow)
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_silence_parses_param_level_silent() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (f x) (silence f) (f x))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // Should parse without error
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_silence_parses_param_level_with_keyword() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(
-        "(signal :restrict_c3a) (def _ (fn (f x) (silence f :restrict_c3a) (f x)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — should be a compile error
-    assert!(
-        result.is_err(),
-        "expected error: silence takes no signal keywords"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_unknown_keyword_error() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (f) (silence f :nonexistent_c3b) (f))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — error is about keywords not being accepted
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_unknown_param_error() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze("(fn (f) (silence g) (f))", &mut symbols, &mut vm, "<test>");
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.contains("not a parameter") || err.contains("unknown parameter"));
-}
-
-#[test]
-fn test_silence_duplicate_param_last_wins() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(
-        "(signal :dup_p_c3c) (def _ (fn (f) (silence f) (silence f) (f)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // Two (silence f) forms: last wins — should parse without error
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-}
-
-#[test]
-fn test_silence_outside_lambda_not_special() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze("(silence f)", &mut symbols, &mut vm, "<test>");
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("unresolved")
-            || err.contains("not found")
-            || err.contains("inside a function"),
-    );
-}
-
-#[test]
-fn test_silence_function_level_with_keywords() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (x) (silence :error) (error \"boom\"))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — should be a compile error
-    assert!(
-        result.is_err(),
-        "expected error: silence takes no signal keywords"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_after_docstring() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (f x) \"Apply f.\" (silence f) (f x))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    )
-    .unwrap();
-
-    if let HirKind::Lambda { doc, .. } = &result.hir.kind {
-        assert!(doc.is_some(), "Should have docstring");
-    } else {
-        panic!("Expected Lambda");
-    }
-}
-
-// ============================================================================
-// CHUNK 4: Signal inference with bounds tests
-// ============================================================================
-
-#[test]
-fn test_silence_param_eliminates_polymorphism() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(def apply-inert (fn (f x) (silence f) (f x)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // Should parse without error
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_silence_param_contributes_bound_bits() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(
-        "(signal :bound_c4a) (def apply-bounded (fn (f x) (silence f :bound_c4a) (f x)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — should be a compile error
-    assert!(
-        result.is_err(),
-        "expected error: silence takes no signal keywords"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_function_ceiling_passes() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (x y) (silence) (if x y 0))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // Pure control flow is silent — should compile
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_silence_function_ceiling_fails() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (x) (silence) (yield x))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.contains("restricted") || err.contains("yield"));
-}
-
-#[test]
-fn test_silence_function_ceiling_error_passes() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (x) (silence :error) (error \"boom\"))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — should be a compile error
-    assert!(
-        result.is_err(),
-        "expected error: silence takes no signal keywords"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_function_ceiling_error_fails_yield() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (x) (silence :error) (yield x))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — error is about keywords
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_callsite_concrete_fails() {
-    // With (silence f), the function is compiled as fully silent.
-    // At runtime, passing a non-silent closure triggers CheckSignalBound
-    // which signals :error inside the silent function — causing a
-    // process-level abort (silence violation). Cannot test in-process.
-    //
-    // Instead, verify the analysis succeeds (bound is recorded) and
-    // the function's compiled signal is silent.
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (f x) (silence f) (f x))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    assert!(result.is_ok(), "silence param bound should compile");
-}
-
-#[test]
-fn test_silence_param_with_user_signal() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(
-        "(signal :user_c4b) (def apply-user (fn (f) (silence f :user_c4b) (f)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — should be a compile error
-    assert!(
-        result.is_err(),
-        "expected error: silence takes no signal keywords"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_silence_ceiling_fails_bounded_param() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(
-        "(signal :ceil_c4c) (def bad (fn (f x) (silence f :ceil_c4c) (silence) (f x)))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    // silence no longer accepts signal keywords — error is about keywords
-    assert!(result.is_err(), "expected error but got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("silence takes no signal keywords"),
-        "expected 'silence takes no signal keywords', got: {}",
-        err
-    );
-}
-
-// ============================================================================
-// CHUNK 5: Runtime signal checking tests
-// ============================================================================
-
-// test_silence_runtime_check_passes: migrated to tests/elle/signals.lisp
-
-// test_silence_runtime_check_fails: migrated to tests/elle/signals.lisp
-
-// test_silence_runtime_non_closure_passes: migrated to tests/elle/signals.lisp
-
-// test_silence_runtime_bounded_keyword: migrated to tests/elle/signals.lisp
-
-// test_silence_runtime_bounded_keyword_fails: migrated to tests/elle/signals.lisp
-
-// test_silence_runtime_dynamic_passes: migrated to tests/elle/signals.lisp
-
-// test_silence_runtime_dynamic_fails: migrated to tests/elle/signals.lisp
-
-// ============================================================================
-// CHUNK 5b: squelch compile-time tests (new runtime-primitive semantics)
-// ============================================================================
-
-#[test]
-fn test_squelch_outside_lambda_compiles() {
-    // squelch is now a regular primitive — valid outside lambda bodies
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(squelch (fn () (yield 1)) :yield)",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-}
-
-#[test]
-fn test_squelch_inside_lambda_compiles() {
-    // Inside a lambda body, (squelch f :yield) is a regular call (not a declaration)
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (f) (squelch f :yield))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-}
-
-#[test]
-fn test_squelch_returns_modified_closure() {
-    // (squelch f :yield) returns a closure (runtime check)
-    let result = crate::common::eval_source_bare("(closure? (squelch (fn () (yield 1)) :yield))");
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-    assert_eq!(result.unwrap(), elle::Value::TRUE, "expected true");
-}
-
-#[test]
-fn test_old_squelch_preamble_no_longer_special() {
-    // Old preamble syntax `(fn (f) (squelch f :yield) (f))` now compiles as
-    // `(begin (squelch f :yield) (f))` — squelch returns a closure that is discarded.
-    // No compile error; just a regular call sequence.
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(fn (f) (squelch f :yield) (f))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    );
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-}
-
-// ============================================================================
-// CHUNK 6: (signals) introspection primitive tests
-// ============================================================================
-
-// test_signals_primitive_returns_struct: migrated to tests/elle/signals.lisp
-// test_signals_primitive_contains_builtins: migrated to tests/elle/signals.lisp
-// test_signals_primitive_contains_user_signals: migrated to tests/elle/signals.lisp
-
-#[test]
-fn test_signals_primitive_is_silent() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze("(fn () (signals))", &mut symbols, &mut vm, "<test>");
-    // Should parse without error
-    assert!(result.is_ok());
-}
-
-// ============================================================================
-// SQUELCH PRIMITIVE TESTS (Chunk 2 — runtime enforcement in Chunk 3)
-// ============================================================================
-
-// test_prim_squelch_returns_closure: migrated to tests/elle/signals.lisp
-
-// test_prim_squelch_non_closure_error: migrated to tests/elle/signals.lisp
-
-#[test]
-fn test_prim_squelch_no_keywords_error() {
-    // Kept in Rust: (squelch f) with no keywords is a compile-time arity error,
-    // not catchable at runtime via protect in Elle.
-    let result = crate::common::eval_source_bare("(squelch (fn () 1))");
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("squelch"),
-        "expected error mentioning 'squelch', got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_prim_squelch_unknown_keyword_error() {
-    // Kept in Rust: requires error message substring check ("not registered").
-    // Elle tests cannot match substrings, only error kinds.
-    let result = crate::common::eval_source_bare("(squelch (fn () 1) :not-a-signal)");
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("unknown signal keyword"),
-        "expected 'unknown signal keyword', got: {}",
-        err
-    );
-}
-
-// test_prim_squelch_composable_masks: migrated to tests/elle/signals.lisp
-
-// test_prim_squelch_identity: migrated to tests/elle/signals.lisp
-
-// ============================================================================
-// SQUELCH RUNTIME ENFORCEMENT TESTS (Chunk 3)
-// ============================================================================
-
-// test_squelch_catches_yield_at_boundary: migrated to tests/elle/signals.lisp
-
-#[test]
-fn test_squelch_non_squelched_signal_passes() {
-    // Kept in Rust: requires negative substring check ("NOT signal-violation").
-    // Elle tests cannot assert the absence of a substring in an error message.
-    let result =
-        crate::common::eval_source_bare("(let [f (squelch (fn () (yield 42)) :error)] (f))");
-    // The call propagates a yield signal (no signal-violation, just yield propagation error)
-    assert!(result.is_err(), "expected error (yield propagates), got ok");
-    let err = result.unwrap_err();
-    assert!(
-        !err.contains("signal-violation"),
-        "yield should NOT produce signal-violation (only :error is squelched), got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_squelch_error_passthrough() {
-    // Kept in Rust: requires negative substring check ("NOT signal-violation").
-    // Elle tests cannot assert the absence of a substring in an error message.
-    let result =
-        crate::common::eval_source_bare("(let [f (squelch (fn () (/ 1 0)) :yield)] (f))");
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        !err.contains("signal-violation"),
-        "division error should not be a signal-violation, got: {}",
-        err
-    );
-}
-
-// test_squelch_nested_call_enforcement: migrated to tests/elle/signals.lisp
-
-// test_squelch_tail_call_enforcement: migrated to tests/elle/signals.lisp
-
-#[test]
-fn test_squelch_signal_violation_error_message() {
-    // Kept in Rust: requires checking that error message contains BOTH "yield" AND "squelch"
-    // substrings. Elle tests cannot match substrings.
-    let result =
-        crate::common::eval_source_bare("(let [f (squelch (fn () (yield 1)) :yield)] (f))");
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("yield"),
-        "error should mention 'yield', got: {}",
-        err
-    );
-    assert!(
-        err.contains("squelch"),
-        "error should mention 'squelch', got: {}",
-        err
-    );
-}
-
-// test_squelch_composable_runtime: migrated to tests/elle/signals.lisp

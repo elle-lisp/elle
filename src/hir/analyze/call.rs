@@ -116,8 +116,9 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // ── Compile-time squelch detection ─────────────────────────────
+        // ── Compile-time squelch/attune detection ─────────────────────
         // Pattern: (squelch f :keyword) or (squelch f |:kw1 :kw2|)
+        //          (attune f :keyword) or (attune f |:kw1 :kw2|)
         // Compute the resulting closure's signal statically and stash it
         // for binding analysis to seed the binding's signal_env entry.
         self.last_squelch_signal = None;
@@ -125,6 +126,14 @@ impl<'a> Analyzer<'a> {
             let target_signal = self.resolve_arg_signal(&args[0].expr);
             if let Some(mask) = self.resolve_squelch_mask(&args[1].expr) {
                 self.last_squelch_signal = Some(target_signal.squelch(mask));
+            }
+        } else if self.is_attune(&func) && args.len() == 2 {
+            // attune is mask-first: (attune |:yield| closure)
+            let target_signal = self.resolve_arg_signal(&args[1].expr);
+            if let Some(permitted) = self.resolve_squelch_mask(&args[0].expr) {
+                // attune permits only these bits; suppress everything else.
+                let suppress = crate::signals::CAP_MASK.subtract(permitted);
+                self.last_squelch_signal = Some(target_signal.squelch(suppress));
             }
         }
 
@@ -203,6 +212,11 @@ impl<'a> Analyzer<'a> {
         self.is_primitive_named(func, "squelch")
     }
 
+    /// Check if the callee is the `attune` primitive.
+    fn is_attune(&self, func: &Hir) -> bool {
+        self.is_primitive_named(func, "attune")
+    }
+
     /// Check if the callee is the `import` primitive.
     fn is_import(&self, func: &Hir) -> bool {
         self.is_primitive_named(func, "import")
@@ -226,14 +240,31 @@ impl<'a> Analyzer<'a> {
             HirKind::Var(binding) => {
                 if let Some(signal) = self.signal_env.get(binding) {
                     *signal
+                } else if let Some(signal) = self
+                    .primitive_signals
+                    .get(&self.arena.get(*binding).name)
+                    .cloned()
+                {
+                    signal
+                } else if matches!(self.arena.get(*binding).scope, BindingScope::Parameter)
+                    && self.current_lambda_params.contains(binding)
+                {
+                    // Parameter call: signal depends on what the caller passes.
+                    // SIG_YIELD triggers the polymorphic inference path in
+                    // compute_inferred_signal; SIG_ERROR is inherently sound
+                    // because calling an unknown value can always fail (not
+                    // callable, wrong arity, callback errors).
+                    Signal::yields_errors()
                 } else {
-                    self.primitive_signals
-                        .get(&self.arena.get(*binding).name)
-                        .cloned()
-                        .unwrap_or(Signal::yields())
+                    // Calling a value whose origin is opaque to static analysis
+                    // (e.g., bound to a dynamic expression result). We cannot
+                    // determine its effects — use the sound conservative signal.
+                    Signal::unknown()
                 }
             }
-            _ => Signal::yields(),
+            // Opaque expression in callee position (result of a call, conditional,
+            // etc.) — effects are statically indeterminate.
+            _ => Signal::unknown(),
         }
     }
 
@@ -286,15 +317,20 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Resolve a polymorphic signal by examining the arguments at the specified indices.
+    /// Preserves inherent bits (non-polymorphic signals) and combines with resolved args.
     pub(crate) fn resolve_polymorphic_signal(&self, signal: &Signal, args: &[&Hir]) -> Signal {
         if signal.is_polymorphic() {
-            let mut resolved = Signal::silent();
+            // Start with inherent bits (signals that don't depend on parameters)
+            let mut resolved = Signal {
+                bits: signal.bits,
+                propagates: 0,
+            };
             for param_idx in signal.propagated_params() {
                 if param_idx < args.len() {
                     resolved = resolved.combine(self.resolve_arg_signal(args[param_idx]));
                 } else {
-                    // Parameter index out of bounds - conservatively Yields
-                    return Signal::yields();
+                    // Parameter index out of bounds — sound conservative signal.
+                    return Signal::unknown();
                 }
             }
             resolved
@@ -320,9 +356,9 @@ impl<'a> Analyzer<'a> {
                         .get(&self.arena.get(*binding).name)
                         .cloned()
                 })
-                .unwrap_or(Signal::yields()),
-            // Unknown argument signal - conservatively Yields for soundness
-            _ => Signal::yields(),
+                .unwrap_or(Signal::unknown()),
+            // Opaque expression as argument — effects are indeterminate.
+            _ => Signal::unknown(),
         }
     }
 
