@@ -3,6 +3,7 @@
 //! syntax->list, syntax-first, syntax-rest, syntax-e, squelch, meta/origin)
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
+use crate::signals::SIG_GPU;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::closure::Closure;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
@@ -846,7 +847,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "git",
         func: prim_git,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR).union(SIG_GPU), propagates: 0 },
         arity: Arity::Range(1, 2),
         doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache on its template. \
               Returns the closure. All closures sharing the same template see the cached SPIR-V. \

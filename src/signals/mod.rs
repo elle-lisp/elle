@@ -65,6 +65,7 @@ pub const SIG_EXEC: SignalBits = SignalBits::new(1 << 11); // subprocess capabil
 pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget exhaustion
 pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch trampoline (VM-internal)
 pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurrency wait request
+pub const SIG_GPU: SignalBits = SignalBits::new(1 << 15); // GPU hardware dispatch (capability bit)
 
 /// VM-internal signal bits: infrastructure signals that user code cannot
 /// produce. These are emitted exclusively by the VM's own dispatch machinery.
