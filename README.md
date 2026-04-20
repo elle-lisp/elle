@@ -267,7 +267,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
 ## Types
 
-Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a raw pointer into a slab-allocated `HeapObject` owned by the fiber's heap.
+Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a raw pointer into a bump-allocated `HeapObject` owned by the fiber's heap.
 
 ### Immediate types
 
@@ -597,13 +597,13 @@ concurrency layer.
 
 - **No garbage collector.** ([docs/memory.md](docs/memory.md)) Memory is reclaimed deterministically through three mechanisms, all derived from the same static analysis that drives the signal system:
 
-  - **Per-fiber heaps:** Each fiber owns a slab allocator (`FiberHeap`) with 256-slot chunks and an intrusive free list. When a fiber finishes, its entire heap is freed — no traversal, no mark phase, no sweep. Slab allocation is O(1) with strong cache locality.
+  - **Per-fiber bump arenas:** Each fiber owns a `FiberHeap` backed by a bump arena (sequential 64KB pages). When a fiber finishes, its entire arena is freed — no traversal, no mark phase, no sweep. Bump allocation is O(1) with strong cache locality and zero fragmentation.
 
-  - **Zero-copy inter-fiber sharing:** The compiler knows at fiber-creation time whether a fiber can yield (signal inference). Yielding fibers route all allocations to a `SharedAllocator` owned by the parent — the parent reads yielded values directly from shared memory. Silent fibers skip this entirely and allocate into their own slab with no indirection. No deep copy, no serialization, no runtime decision.
+  - **Zero-copy inter-fiber sharing:** The compiler knows at fiber-creation time whether a fiber can yield (signal inference). Yielding fibers route all allocations to a `SharedAllocator` owned by the parent — the parent reads yielded values directly from shared memory. Silent fibers skip this entirely and allocate into their own arena with no indirection. No deep copy, no serialization, no runtime decision.
 
-  - **Escape-analysis-driven scope reclamation:** The compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it emits `RegionEnter`/`RegionExit` bytecodes that return slab slots to the free list at scope exit, recycling memory without waiting for fiber death.
+  - **Escape-analysis-driven scope reclamation:** The compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it emits `RegionEnter`/`RegionExit` bytecodes that rewind the arena to a mark at scope exit, recycling memory without waiting for fiber death.
 
-- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Scope reclamation recycles memory within a fiber's lifetime. The ownership topology — private slab per fiber, shared slab per yield boundary — is the minimal structure that gives per-fiber lifecycle management and zero-copy yield simultaneously. See [`docs/memory.md`](docs/memory.md) for the full model.
+- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Scope reclamation recycles memory within a fiber's lifetime. The ownership topology — private arena per fiber, shared arena per yield boundary — is the minimal structure that gives per-fiber lifecycle management and zero-copy yield simultaneously. See [`docs/memory.md`](docs/memory.md) for the full model.
 
 ## Execution Backends
 
