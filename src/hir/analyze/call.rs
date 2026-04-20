@@ -317,9 +317,14 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Resolve a polymorphic signal by examining the arguments at the specified indices.
+    /// Preserves inherent bits (non-polymorphic signals) and combines with resolved args.
     pub(crate) fn resolve_polymorphic_signal(&self, signal: &Signal, args: &[&Hir]) -> Signal {
         if signal.is_polymorphic() {
-            let mut resolved = Signal::silent();
+            // Start with inherent bits (signals that don't depend on parameters)
+            let mut resolved = Signal {
+                bits: signal.bits,
+                propagates: 0,
+            };
             for param_idx in signal.propagated_params() {
                 if param_idx < args.len() {
                     resolved = resolved.combine(self.resolve_arg_signal(args[param_idx]));
