@@ -178,13 +178,10 @@
 
 (defn format-ipv6 [buf offset]
   "Format 16 bytes at offset as colon-separated IPv6 address (full form)."
-  (def @groups @[])
-  (def @i 0)
-  (while (< i 8)
-    (let [val (read-u16 buf (+ offset (* i 2)))]
-      (push groups (number->string val 16)))
-    (assign i (+ i 1)))
-  (string/join (freeze groups) ":"))
+  (string/join
+    (map (fn [i] (number->string (read-u16 buf (+ offset (* i 2))) 16))
+         (range 8))
+    ":"))
 
 (defn parse-records [buf offset count]
   "Parse 'count' resource records starting at offset.
@@ -253,16 +250,13 @@
 
 (defn parse-resolv-conf [text]
   "Parse /etc/resolv.conf and return a list of nameserver IP strings."
-  (def @servers @[])
-  (each line in (string/split text "\n")
-    (let [trimmed (string/trim line)]
-      (when (string/starts-with? trimmed "nameserver")
-        (let [parts (string/split trimmed " ")]
-          (when (>= (length parts) 2)
-            (let [addr (string/trim (get parts 1))]
-              (unless (empty? addr)
-                (push servers addr))))))))
-  (freeze servers))
+  (let* [lines   (map string/trim (string/split text "\n"))
+         ns-lines (filter (fn [l] (string/starts-with? l "nameserver")) lines)
+         addrs   (map (fn [l]
+                    (let [parts (string/split l " ")]
+                      (when (>= (length parts) 2) (string/trim (parts 1)))))
+                  ns-lines)]
+    (freeze (filter (fn [a] (and a (not (empty? a)))) addrs))))
 
 (defn read-nameservers []
   "Read nameserver list from /etc/resolv.conf. Returns array of IP strings.

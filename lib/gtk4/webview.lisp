@@ -30,49 +30,42 @@
   "Create a WebKit WebView with JS→Elle IPC via user content manager."
   (let* [ptr (b:webkit-web-view-new)
          id  props:id
-         ucm (b:webkit-web-view-get-user-content-manager ptr)]
-    (b:webkit-ucm-register-script-message-handler ucm "elle" nil)
-    (let [cb (ffi/callback sig-void-ptr-ptr-ptr
+         ucm (b:webkit-web-view-get-user-content-manager ptr)
+         cb  (ffi/callback sig-void-ptr-ptr-ptr
                 (fn (manager js-value data)
                   (let [cstr (b:jsc-value-to-string js-value)]
                     (unless (w:null? cstr)
                       (w:emit win-handle
                         {:type :webview :id id
                          :value (ffi/string cstr)})))))]
-      (w:connect win-handle ucm "script-message-received::elle"
-                 sig-void-ptr-ptr-ptr cb))
-    (when props:height (b:gtk-widget-set-size-request ptr -1 props:height))
-    (when props:width  (b:gtk-widget-set-size-request ptr props:width -1))
-    (b:gtk-widget-set-hexpand ptr 1)
-    (b:gtk-widget-set-vexpand ptr 1)
-    (w:apply-common-props ptr props)
+    (b:webkit-ucm-register-script-message-handler ucm "elle" nil)
+    (w:connect win-handle ucm "script-message-received::elle" cb)
     (when props:html (b:webkit-web-view-load-html ptr props:html nil))
     (when props:url  (b:webkit-web-view-load-uri ptr props:url))
-    (w:register-widget win-handle id ptr :webview)
-    ptr))
+    (w:make-widget win-handle (merge props {:hexpand true :vexpand true}) ptr :webview)))
 
 # ── Operations ────────────────────────────────────────────────────
 
 (defn webview-eval (win-handle id js)
   "Evaluate JavaScript in a webview. Fire-and-forget."
-  (when-let [{:ptr ptr} (win-handle:widgets id)]
-    (b:webkit-web-view-evaluate-javascript ptr js -1 nil nil nil nil)))
+  (when-let [wgt (win-handle:widgets id)]
+    (b:webkit-web-view-evaluate-javascript wgt:ptr js -1 nil nil nil nil)))
 
 (defn webview-send (win-handle id msg)
   "Send a string message to webview JS via window.elle.onMessage callback."
-  (-> (string "if(window.elle&&window.elle.onMessage)window.elle.onMessage("
-              (json-escape msg) ")")
-    (webview-eval win-handle id)))
+  (webview-eval win-handle id
+    (string "if(window.elle&&window.elle.onMessage)window.elle.onMessage("
+            (json-escape msg) ")")))
 
 (defn webview-load-html (win-handle id html)
   "Load HTML string into webview."
-  (when-let [{:ptr ptr} (win-handle:widgets id)]
-    (b:webkit-web-view-load-html ptr html nil)))
+  (when-let [wgt (win-handle:widgets id)]
+    (b:webkit-web-view-load-html wgt:ptr html nil)))
 
 (defn webview-load-url (win-handle id url)
   "Navigate webview to URL."
-  (when-let [{:ptr ptr} (win-handle:widgets id)]
-    (b:webkit-web-view-load-uri ptr url)))
+  (when-let [wgt (win-handle:widgets id)]
+    (b:webkit-web-view-load-uri wgt:ptr url)))
 
 # ── Export ────────────────────────────────────────────────────────
 
@@ -80,6 +73,7 @@
  :eval webview-eval
  :send webview-send
  :load-html webview-load-html
- :load-url webview-load-url}
+ :load-url webview-load-url
+ :json-escape json-escape}
 
 ) # end (fn [])

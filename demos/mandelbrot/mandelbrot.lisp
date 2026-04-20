@@ -15,7 +15,9 @@
 
 # ── Libraries ─────────────────────────────────────────────────────
 
-(def b ((import "std/gtk4/bind")))
+(def gtk ((import "std/gtk4")))
+(def cr  ((import "std/cairo")))
+(def b   ((import "std/gtk4/bind")))
 
 (def [gpu-ok? gpu] (protect ((import "std/gpu"))))
 (def gpu-ctx
@@ -24,30 +26,6 @@
       (when ok? (println "GPU: enabled") ctx))))
 
 (when (not gpu-ctx) (println "GPU: not available, using CPU"))
-
-(def cairo (ffi/native "libcairo.so.2"))
-
-# ── GTK bindings not yet in lib/gtk4/bind ─────────────────────────
-
-(ffi/defbind gtk-app-new     b:libgtk "gtk_application_new"                :ptr  [:string :u32])
-(ffi/defbind gtk-app-win-new b:libgtk "gtk_application_window_new"         :ptr  [:ptr])
-(ffi/defbind gtk-queue-draw  b:libgtk "gtk_widget_queue_draw"              :void [:ptr])
-(ffi/defbind gtk-da-new      b:libgtk "gtk_drawing_area_new"               :ptr  [])
-(ffi/defbind gtk-da-set-cw   b:libgtk "gtk_drawing_area_set_content_width" :void [:ptr :int])
-(ffi/defbind gtk-da-set-ch   b:libgtk "gtk_drawing_area_set_content_height" :void [:ptr :int])
-(ffi/defbind gtk-da-draw-fn  b:libgtk "gtk_drawing_area_set_draw_func"     :void [:ptr :ptr :ptr :ptr])
-(ffi/defbind gtk-add-ctrl    b:libgtk "gtk_widget_add_controller"          :void [:ptr :ptr])
-(ffi/defbind gtk-click-new   b:libgtk "gtk_gesture_click_new"              :ptr  [])
-(ffi/defbind gtk-gesture-btn b:libgtk "gtk_gesture_single_set_button"      :void [:ptr :u32])
-(ffi/defbind gtk-get-btn     b:libgtk "gtk_gesture_single_get_current_button" :u32 [:ptr])
-(ffi/defbind gtk-scroll-new  b:libgtk "gtk_event_controller_scroll_new"    :ptr  [:u32])
-(ffi/defbind gtk-key-new     b:libgtk "gtk_event_controller_key_new"       :ptr  [])
-
-(ffi/defbind cairo-img-surface cairo "cairo_image_surface_create_for_data"  :ptr  [:ptr :int :int :int :int])
-(ffi/defbind cairo-set-source  cairo "cairo_set_source_surface"            :void [:ptr :ptr :double :double])
-(ffi/defbind cairo-paint       cairo "cairo_paint"                         :void [:ptr])
-(ffi/defbind cairo-surf-free   cairo "cairo_surface_destroy"               :void [:ptr])
-(ffi/defbind cairo-scale       cairo "cairo_scale"                         :void [:ptr :double :double])
 
 # ── Constants ─────────────────────────────────────────────────────
 
@@ -64,8 +42,7 @@
 # ── Mutable state ────────────────────────────────────────────────
 
 (def @view @{:cx -0.5  :cy 0.0  :scale 3.5  :iter (if gpu-ctx 256 32)})
-(def @da-widget nil)
-(def @app-window nil)
+(def @handle nil)
 (def @quit? false)
 (def @actual-w WIDTH)
 (def @actual-h HEIGHT)
@@ -275,31 +252,28 @@
 (defn refresh []
   (ev/spawn (fn []
     (compute-mandelbrot)
-    (when app-window
-      (b:gtk-window-set-title app-window
+    (when handle
+      (gtk:set-title handle
         (string "Mandelbrot — " (view :cx) " + " (view :cy)
-                "i  scale=" (view :scale) "  iter=" (view :iter))))
-    (when da-widget (gtk-queue-draw da-widget)))))
+                "i  scale=" (view :scale) "  iter=" (view :iter)))
+      (gtk:queue-draw handle :canvas)))))
 
 # ── GTK callbacks ────────────────────────────────────────────────
 
-(def CAIRO_FORMAT_ARGB32 0)
-(def SCROLL_VERTICAL     2)
-
-(defn on-draw [_da cr w h _data]
+(defn on-draw [_da cairo-ctx w h _data]
   (assign actual-w w)
   (assign actual-h h)
-  (def s (min (/ (float w) (float WIDTH)) (/ (float h) (float HEIGHT))))
-  (def ox (/ (- (float w) (* s (float WIDTH))) 2.0))
-  (def oy (/ (- (float h) (* s (float HEIGHT))) 2.0))
-  (def surf (cairo-img-surface pixel-buf CAIRO_FORMAT_ARGB32 WIDTH HEIGHT STRIDE))
-  (cairo-scale cr s s)
-  (cairo-set-source cr surf (/ ox s) (/ oy s))
-  (cairo-paint cr)
-  (cairo-surf-free surf))
+  (let* [s    (min (/ (float w) (float WIDTH)) (/ (float h) (float HEIGHT)))
+         ox   (/ (- (float w) (* s (float WIDTH))) 2.0)
+         oy   (/ (- (float h) (* s (float HEIGHT))) 2.0)
+         surf (cr:image-surface-for-data pixel-buf cr:FORMAT_ARGB32 WIDTH HEIGHT STRIDE)]
+    (cr:scale cairo-ctx s s)
+    (cr:set-source-surface cairo-ctx surf (/ ox s) (/ oy s))
+    (cr:paint cairo-ctx)
+    (cr:surface-destroy surf)))
 
-(defn on-click [gesture _n x y _data]
-  (let* [btn    (gtk-get-btn gesture)
+(defn on-click [gesture n x y]
+  (let* [btn    (b:gtk-gesture-single-get-current-button gesture)
          aspect (/ (float HEIGHT) (float WIDTH))
          scale  (view :scale)
          nx     (/ x (float actual-w))
@@ -313,16 +287,16 @@
       (put view :scale (* scale factor))
       (refresh))))
 
-(defn on-scroll [_ctrl _dx dy _data]
+(defn on-scroll [dx dy]
   (put view :scale (* (view :scale) (if (< dy 0.0) (/ 1.0 1.5) 1.5)))
   (refresh)
   1)
 
-(defn on-key [_ctrl keyval _keycode _state _data]
+(defn on-key [keyval keycode state]
   (let [step (/ (view :scale) 4.0)]
     (cond
       ((or (= keyval 0xff1b) (= keyval 0x71))           # ESC / Q
-        (when app-window (b:gtk-window-destroy app-window))
+        (gtk:close handle)
         (assign quit? true) 1)
       ((= keyval 0x72)                                    # R
         (put view :cx -0.5) (put view :cy 0.0)
@@ -340,58 +314,25 @@
         (refresh) 1)
       (true 0))))
 
-# ── Activate ─────────────────────────────────────────────────────
-
-(defn on-activate [app _data]
-  (def win (gtk-app-win-new app))
-  (assign app-window win)
-  (b:gtk-window-set-default-size win WIDTH HEIGHT)
-
-  (def da (gtk-da-new))
-  (assign da-widget da)
-  (gtk-da-set-cw da WIDTH)
-  (gtk-da-set-ch da HEIGHT)
-
-  (gtk-da-draw-fn da
-    (ffi/callback (ffi/signature :void [:ptr :ptr :int :int :ptr]) on-draw)
-    nil nil)
-
-  (let [click (gtk-click-new)]
-    (gtk-gesture-btn click 0)
-    (b:g-signal-connect-data click "pressed"
-      (ffi/callback (ffi/signature :void [:ptr :int :double :double :ptr]) on-click)
-      nil nil 0)
-    (gtk-add-ctrl da click))
-
-  (let [scroll (gtk-scroll-new SCROLL_VERTICAL)]
-    (b:g-signal-connect-data scroll "scroll"
-      (ffi/callback (ffi/signature :int [:ptr :double :double :ptr]) on-scroll)
-      nil nil 0)
-    (gtk-add-ctrl da scroll))
-
-  (let [keys (gtk-key-new)]
-    (b:g-signal-connect-data keys "key-pressed"
-      (ffi/callback (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]) on-key)
-      nil nil 0)
-    (gtk-add-ctrl win keys))
-
-  (b:gtk-window-set-child win da)
-  (when gpu-ctx (b:gtk-window-fullscreen win))
-  (b:gtk-window-present win)
-
-  (when (not gpu-ctx) (init-workers)))
-
 # ── Main ─────────────────────────────────────────────────────────
 
 (println "Mandelbrot Explorer")
 (println "  left-click: zoom in    right-click: zoom out    scroll: zoom")
 (println "  arrows: pan    +/-: iterations    r: reset    q: quit")
 
-(b:gtk-init)
-(def app (gtk-app-new "org.elle.mandelbrot" 32))
-(b:g-signal-connect-data app "activate"
-  (ffi/callback (ffi/signature :void [:ptr :ptr]) on-activate)
-  nil nil 0)
+(assign handle
+  (gtk:app/new "org.elle.mandelbrot"
+    (fn [h]
+      (b:gtk-window-set-default-size h:window WIDTH HEIGHT)
+      (gtk:build h
+        [:drawing-area {:id :canvas :width WIDTH :height HEIGHT
+                        :on-draw on-draw}])
+      (gtk:on-click h :canvas on-click)
+      (gtk:on-scroll h :canvas on-scroll)
+      (gtk:on-key h :window on-key)
+      (when gpu-ctx (b:gtk-window-fullscreen h:window))
+      (when (not gpu-ctx) (init-workers)))
+    :flags 32))
 
 (ev/spawn (fn [] (refresh)))
-(b:run-app app :quit (fn [] quit?))
+(gtk:app/run handle :quit (fn [] quit?))

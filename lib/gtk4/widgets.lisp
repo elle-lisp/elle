@@ -47,8 +47,13 @@
       (b:gtk-widget-set-margin-end ptr m)
       (b:gtk-widget-set-margin-top ptr m)
       (b:gtk-widget-set-margin-bottom ptr m)))
-  (when props:width  (b:gtk-widget-set-size-request ptr props:width -1))
-  (when props:height (b:gtk-widget-set-size-request ptr -1 props:height)))
+  (when (or props:width props:height)
+    (b:gtk-widget-set-size-request ptr (or props:width -1) (or props:height -1))))
+
+(defn make-handle (win-ptr)
+  "Create a mutable window handle with standard fields."
+  @{:window win-ptr :widgets @{} :events @[]
+    :open true :callbacks @[] :css-provider nil})
 
 (defn register-widget (win-handle id ptr type)
   "Store widget in the registry by id."
@@ -116,21 +121,13 @@
                   {:type type :id id :active (nonzero? (getter ptr))})))]
     (connect win-handle ptr "toggled" cb)))
 
-(defn on-changed (win-handle ptr id type getter)
-  "Wire a change signal that emits {:type type :id id :value string}."
+(defn on-changed (win-handle ptr id type getter signal)
+  "Wire a change signal that emits {:type type :id id :value value}."
   (let [cb (ffi/callback sig-clicked
               (fn (widget data)
                 (emit win-handle
                   {:type type :id id :value (getter ptr)})))]
-    (connect win-handle ptr "changed" cb)))
-
-(defn on-value-changed (win-handle ptr id type getter)
-  "Wire a 'value-changed' signal."
-  (let [cb (ffi/callback sig-clicked
-              (fn (widget data)
-                (emit win-handle
-                  {:type type :id id :value (getter ptr)})))]
-    (connect win-handle ptr "value-changed" cb)))
+    (connect win-handle ptr signal cb)))
 
 (defn make-button (win-handle props text)
   (let [ptr (b:gtk-button-new-with-label (or text ""))]
@@ -150,7 +147,7 @@
     (when props:hint  (b:gtk-entry-set-placeholder-text ptr props:hint))
     (when props:value (b:gtk-editable-set-text ptr props:value))
     (on-changed win-handle ptr props:id :text
-      (fn (p) (ffi/string (b:gtk-editable-get-text p))))
+      (fn (p) (ffi/string (b:gtk-editable-get-text p))) "changed")
     (make-widget win-handle props ptr :text-input)))
 
 (defn make-text-edit (win-handle props)
@@ -169,15 +166,15 @@
     (make-widget win-handle props ptr :checkbox)))
 
 (defn make-switch (win-handle props)
-  (let [ptr (b:gtk-switch-new)
-        id  props:id]
-    (when props:active (b:gtk-switch-set-active ptr 1))
-    (let [cb (ffi/callback sig-state-set
+  (let* [ptr (b:gtk-switch-new)
+         id  props:id
+         cb  (ffi/callback sig-state-set
                 (fn (widget state data)
                   (emit win-handle
                     {:type :switch :id id :active (nonzero? state)})
                   0))]
-      (connect win-handle ptr "state-set" cb))
+    (when props:active (b:gtk-switch-set-active ptr 1))
+    (connect win-handle ptr "state-set" cb)
     (make-widget win-handle props ptr :switch)))
 
 (defn make-slider (win-handle props)
@@ -186,7 +183,7 @@
          step (or props:step 1.0)
          ptr (b:gtk-scale-new-with-range b:GTK_ORIENTATION_HORIZONTAL mn mx step)]
     (when props:value (b:gtk-range-set-value ptr props:value))
-    (on-value-changed win-handle ptr props:id :slider b:gtk-range-get-value)
+    (on-changed win-handle ptr props:id :slider b:gtk-range-get-value "value-changed")
     (make-widget win-handle props ptr :slider)))
 
 (defn make-spin-button (win-handle props)
@@ -195,7 +192,7 @@
          step (or props:step 1.0)
          ptr (b:gtk-spin-button-new-with-range mn mx step)]
     (when props:value (b:gtk-spin-button-set-value ptr props:value))
-    (on-value-changed win-handle ptr props:id :spin b:gtk-spin-button-get-value)
+    (on-changed win-handle ptr props:id :spin b:gtk-spin-button-get-value "value-changed")
     (make-widget win-handle props ptr :spin-button)))
 
 (defn make-combo-box (win-handle props items)
@@ -220,21 +217,21 @@
     (make-widget win-handle props ptr :combo-box)))
 
 (defn make-search-entry (win-handle props)
-  (let [ptr (b:gtk-search-entry-new)]
-    (let [cb (ffi/callback sig-clicked
+  (let* [ptr (b:gtk-search-entry-new)
+         cb  (ffi/callback sig-clicked
                 (fn (widget data)
                   (emit win-handle
                     {:type :search :id props:id
                      :value (ffi/string (b:gtk-editable-get-text ptr))})))]
-      (connect win-handle ptr "search-changed" cb))
+    (connect win-handle ptr "search-changed" cb)
     (make-widget win-handle props ptr :search-entry)))
 
 (defn make-calendar (win-handle props)
-  (let [ptr (b:gtk-calendar-new)]
-    (let [cb (ffi/callback sig-clicked
+  (let* [ptr (b:gtk-calendar-new)
+         cb  (ffi/callback sig-clicked
                 (fn (widget data)
                   (emit win-handle {:type :calendar :id props:id})))]
-      (connect win-handle ptr "day-selected" cb))
+    (connect win-handle ptr "day-selected" cb)
     (make-widget win-handle props ptr :calendar)))
 
 # ── Layout widgets ────────────────────────────────────────────────
@@ -303,20 +300,63 @@
     (when props:revealed (b:gtk-revealer-set-reveal-child ptr 1))
     (make-widget win-handle props ptr :revealer)))
 
-# ── Container child helpers (called by tree builder) ──────────────
+# ── Drawing ──────────────────────────────────────────────────────
 
-(defn box-append (parent child) (b:gtk-box-append parent child))
-(defn scroll-set-child (p c)   (b:gtk-scrolled-window-set-child p c))
-(defn expander-set-child (p c) (b:gtk-expander-set-child p c))
-(defn frame-set-child (p c)    (b:gtk-frame-set-child p c))
-(defn revealer-set-child (p c) (b:gtk-revealer-set-child p c))
-(defn grid-attach (p c col row cs rs) (b:gtk-grid-attach p c col row cs rs))
+(def sig-draw (ffi/signature :void [:ptr :ptr :int :int :ptr]))
+
+(defn make-drawing-area (win-handle props)
+  (let [ptr (b:gtk-drawing-area-new)]
+    (when props:width  (b:gtk-drawing-area-set-content-width ptr props:width))
+    (when props:height (b:gtk-drawing-area-set-content-height ptr props:height))
+    (when props:on-draw
+      (let [cb (ffi/callback sig-draw props:on-draw)]
+        (push win-handle:callbacks cb)
+        (b:gtk-drawing-area-set-draw-func ptr cb nil nil)))
+    (make-widget win-handle props ptr :drawing-area)))
+
+# ── Event controllers ────────────────────────────────────────────
+
+(def sig-click-pressed (ffi/signature :void [:ptr :int :double :double :ptr]))
+(def sig-scroll        (ffi/signature :int  [:ptr :double :double :ptr]))
+(def sig-key-pressed   (ffi/signature :int  [:ptr :u32 :u32 :u32 :ptr]))
+
+(def SCROLL_VERTICAL 2)
+
+(defn add-click (win-handle ptr handler)
+  "Add a click controller. handler: (fn [gesture n x y])."
+  (let* [click (b:gtk-gesture-click-new)
+         cb    (ffi/callback sig-click-pressed
+                 (fn (gesture n x y data) (handler gesture n x y)))]
+    (b:gtk-gesture-single-set-button click 0)
+    (push win-handle:callbacks cb)
+    (b:g-signal-connect-data click "pressed" cb nil nil 0)
+    (b:gtk-widget-add-controller ptr click)))
+
+(defn add-scroll (win-handle ptr handler)
+  "Add a scroll controller. handler: (fn [dx dy]) → int."
+  (let* [scroll (b:gtk-event-controller-scroll-new SCROLL_VERTICAL)
+         cb     (ffi/callback sig-scroll
+                  (fn (ctrl dx dy data) (handler dx dy)))]
+    (push win-handle:callbacks cb)
+    (b:g-signal-connect-data scroll "scroll" cb nil nil 0)
+    (b:gtk-widget-add-controller ptr scroll)))
+
+(defn add-key (win-handle ptr handler)
+  "Add a key controller. handler: (fn [keyval keycode state]) → int."
+  (let* [keys (b:gtk-event-controller-key-new)
+         cb   (ffi/callback sig-key-pressed
+                (fn (ctrl keyval keycode state data)
+                  (handler keyval keycode state)))]
+    (push win-handle:callbacks cb)
+    (b:g-signal-connect-data keys "key-pressed" cb nil nil 0)
+    (b:gtk-widget-add-controller ptr keys)))
 
 # ── Export ────────────────────────────────────────────────────────
 
 {:null? null? :bool->int bool->int
  :connect connect :emit emit
  :apply-common-props apply-common-props
+ :make-handle make-handle
  :register-widget register-widget :make-widget make-widget
  # display
  :make-label make-label :make-heading make-heading
@@ -337,9 +377,10 @@
  :make-notebook make-notebook :make-paned make-paned
  :make-center-box make-center-box :make-overlay make-overlay
  :make-revealer make-revealer
- # child ops
- :box-append box-append :scroll-set-child scroll-set-child
- :expander-set-child expander-set-child :frame-set-child frame-set-child
- :revealer-set-child revealer-set-child :grid-attach grid-attach}
+ # drawing
+ :make-drawing-area make-drawing-area
+ # event controllers
+ :add-click add-click :add-scroll add-scroll :add-key add-key
+ :SCROLL_VERTICAL SCROLL_VERTICAL}
 
 ) # end (fn [])
