@@ -19,6 +19,8 @@ a closure returning a struct.
 | hash | `(import "std/hash")` | Streaming hash convenience |
 | http | `(import "std/http")` | HTTP/1.1 client and server |
 | http2 | `(import "std/http2")` | HTTP/2 client and server (h2 + h2c) |
+| websocket | `(import "std/websocket")` | WebSocket client and server (RFC 6455) |
+| grpc | `(import "std/grpc")` | gRPC client over HTTP/2 |
 | lua | `(import "std/lua")` | Lua compat helpers |
 | mqtt | `(import "std/mqtt")` | MQTT client wrapper |
 | portrait | `(import "std/portrait")` | Semantic portraits |
@@ -80,6 +82,13 @@ enumerate, or `(doc fn-name)` for documentation.
 (doc +)                    # shows arity, params, examples
 (vm/primitive-meta "+")    # returns full metadata struct
 ```
+
+### IEEE 754 bitcast
+
+| Primitive | Arity | Description |
+|-----------|-------|-------------|
+| `math/f32-bits` | 1 | Return the IEEE 754 f32 bit pattern of a number as an integer |
+| `math/f32-from-bits` | 1 | Reinterpret an integer as an IEEE 754 f32 bit pattern |
 
 ---
 

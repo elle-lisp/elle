@@ -103,10 +103,14 @@
         {:transport (tcp-transport (tcp/connect ip url-parsed:port)) :tls-conn nil})))
 
   ## ── Default settings ───────────────────────────────────────────────────
+  ## 1MB windows and 256KB frames for large gRPC responses.
+
+  (def INITIAL-WINDOW (* 1024 1024))
+  (def MAX-FRAME (* 256 1024))
 
   (def default-settings
-    [[C:settings-initial-window-size 65535]
-     [C:settings-max-frame-size      16384]
+    [[C:settings-initial-window-size INITIAL-WINDOW]
+     [C:settings-max-frame-size      MAX-FRAME]
      [C:settings-enable-push         0]])
 
   ## ── Session struct ─────────────────────────────────────────────────────
@@ -114,24 +118,25 @@
   ##   :hpack-encoder :hpack-decoder :local-settings :remote-settings
   ##   :conn-flow :write-queue :reader-fiber :writer-fiber :closed? :host}
 
-  (defn make-session [transport host is-server?]
+  (defn make-session [transport host is-server? &named scheme]
     @{:transport      transport
       :is-server?     is-server?
       :host           host
+      :scheme         (or scheme "http")
       :streams        @{}
       :next-stream-id (if is-server? 2 1)
       :hpack-encoder  (hpack:make-encoder)
       :hpack-decoder  (hpack:make-decoder)
       :local-settings {:header-table-size 4096
-                       :initial-window-size 65535
-                       :max-frame-size 16384
+                       :initial-window-size INITIAL-WINDOW
+                       :max-frame-size MAX-FRAME
                        :max-concurrent-streams 100
                        :enable-push 0}
       :remote-settings {:header-table-size 4096
                         :initial-window-size 65535
                         :max-frame-size 16384
                         :max-concurrent-streams 100}
-      :conn-flow      (stream:make-flow-control 65535)
+      :conn-flow      (stream:make-flow-control INITIAL-WINDOW)
       :write-queue    (sync:make-queue 256)
       :reader-fiber   nil
       :writer-fiber   nil
@@ -329,6 +334,12 @@
     # Send our SETTINGS
     (let [[ftype flags sid payload] (frame:make-settings-frame default-settings)]
       (frame:write-frame session:transport ftype flags sid payload))
+    # Connection window starts at 65535 per RFC 9113 regardless of SETTINGS.
+    # Send WINDOW_UPDATE on stream 0 to bring it up to INITIAL-WINDOW.
+    (let [delta (- INITIAL-WINDOW 65535)]
+      (when (> delta 0)
+        (let [[ftype flags sid payload] (frame:make-window-update-frame 0 delta)]
+          (frame:write-frame session:transport ftype flags sid payload))))
     (session:transport:flush)
     # Read the server's SETTINGS (first frame must be SETTINGS)
     (let [f (frame:read-frame session:transport
@@ -344,14 +355,17 @@
 
   ## ── Client: connect ────────────────────────────────────────────────────
 
-  (defn h2-connect [url]
-    "Open an HTTP/2 session. Returns a session struct."
-    (let* [parsed (parse-url url)
-           {:transport t :tls-conn tc} (open-transport parsed)
-           session (make-session t parsed:host false)]
-      # Perform the handshake synchronously before starting fibers
+  (defn h2-connect [url &named transport host]
+    "Open an HTTP/2 session. Returns a session struct.
+     When :transport is provided, uses it directly (for Unix sockets etc.)
+     instead of parsing URL and opening TCP. Optional :host sets authority header."
+    (let [session
+          (if transport
+            (make-session transport (or host "localhost") false)
+            (let* [parsed (parse-url url)
+                   {:transport t :tls-conn tc} (open-transport parsed)]
+              (make-session t parsed:host false :scheme parsed:scheme)))]
       (client-handshake session)
-      # Start reader and writer fibers
       (put session :writer-fiber
            (ev/spawn (fn [] (writer-loop session))))
       (put session :reader-fiber
@@ -371,7 +385,7 @@
            authority session:host
            pseudo [[":method" method]
                    [":path" path]
-                   [":scheme" "https"]
+                   [":scheme" (or session:scheme "http")]
                    [":authority" authority]]
            all-headers (if (nil? headers) pseudo (concat pseudo headers))
            header-block (hpack:encode session:hpack-encoder all-headers)
@@ -430,6 +444,64 @@
                       (bytes)
                       (apply concat (freeze resp-body)))}))))
 
+  ## ── Client: send-raw (returns stream for caller to collect) ────────────
+
+  (defn h2-send-raw [session method path &named body headers]
+    "Send request, return stream for caller to collect response.
+     Unlike h2:send, does NOT wait for or collect the response."
+    (when session:closed?
+      (error {:error :h2-error :reason :connection-closed
+              :message "session is closed"}))
+    (let* [sid session:next-stream-id
+           _ (put session :next-stream-id (+ sid 2))
+           s (get-stream session sid)
+           authority session:host
+           pseudo [[":method" method]
+                   [":path" path]
+                   [":scheme" (or session:scheme "http")]
+                   [":authority" authority]]
+           all-headers (if (nil? headers) pseudo (concat pseudo headers))
+           header-block (hpack:encode session:hpack-encoder all-headers)
+           has-body (and body (> (length body) 0))]
+      # Send HEADERS
+      (let [[ftype flags sid2 payload]
+            (frame:make-headers-frame sid header-block (not has-body) true)]
+        (stream:transition s :send-headers)
+        (send-frame session ftype flags sid2 payload))
+      # Send DATA if body present
+      (when has-body
+        (let* [body-bytes (if (string? body) (bytes body) body)
+               max-frame (get session:remote-settings :max-frame-size)
+               @offset 0
+               total (length body-bytes)]
+          (while (< offset total)
+            (let* [remaining (- total offset)
+                   chunk-size (min remaining max-frame)
+                   chunk (slice body-bytes offset (+ offset chunk-size))
+                   end? (= (+ offset chunk-size) total)
+                   [ftype flags sid2 payload]
+                   (frame:make-data-frame sid chunk end?)]
+              (send-frame session ftype flags sid2 payload)
+              (assign offset (+ offset chunk-size))))
+          (stream:transition s :send-end-stream)))
+      s))
+
+  ## ── Unix socket transport ────────────────────────────────────────────
+
+  (defn unix-transport [port]
+    "Wrap a Unix socket port as an HTTP/2 transport."
+    (def @wbuf-parts @[])
+    {:read  (fn [n] (port/read port n))
+     :write (fn [data]
+              (let [d (if (bytes? data) data (bytes data))]
+                (push wbuf-parts d)))
+     :flush (fn []
+              (when (> (length wbuf-parts) 0)
+                (let [combined (apply concat (freeze wbuf-parts))]
+                  (port/write port combined)
+                  (assign wbuf-parts @[]))))
+     :close (fn [] (port/close port))})
+
   ## ── Client: one-shot API ───────────────────────────────────────────────
 
   (defn h2-request [method url &named body headers]
@@ -459,9 +531,14 @@
       (send-goaway session session:last-stream-id C:err-no-error)
       # Shutdown writer
       (session:write-queue:put :shutdown)
-      # Close transport
+      # Close transport — unblocks reader fiber's read
       (let [[ok? _] (protect (session:transport:close))]
-        nil))
+        nil)
+      # Wait for fibers to exit so the scheduler has no dangling work
+      (when session:writer-fiber
+        (ev/join-protected session:writer-fiber))
+      (when session:reader-fiber
+        (ev/join-protected session:reader-fiber)))
     nil)
 
   ## ── Server ─────────────────────────────────────────────────────────────
@@ -706,7 +783,9 @@
    :request  h2-request
    :connect  h2-connect
    :send     h2-send
+   :send-raw h2-send-raw
    :close    h2-close
    :serve    h2-serve
    :parse-url parse-url
+   :unix-transport unix-transport
    :test     run-tests})

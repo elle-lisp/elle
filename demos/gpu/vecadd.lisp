@@ -5,7 +5,8 @@
 ## is compiled from SPIR-V emitted at runtime — no GLSL, no offline
 ## tools, just Elle generating GPU bytecode.
 
-(def gpu ((import "std/gpu")))
+(def vk  (import "plugin/vulkan"))
+(def gpu ((import "std/gpu") :vulkan vk))
 
 (def ctx (gpu:init))
 (println "GPU initialized")

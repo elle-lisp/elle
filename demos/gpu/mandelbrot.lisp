@@ -7,7 +7,8 @@
 ## The shader uses loops and local variables (Phase 1a builder extensions).
 ## Output is iteration counts as f32 values.
 
-(def gpu ((import "std/gpu")))
+(def vk  (import "plugin/vulkan"))
+(def gpu ((import "std/gpu") :vulkan vk))
 
 (def ctx (gpu:init))
 (println "GPU initialized")

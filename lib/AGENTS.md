@@ -11,6 +11,8 @@ depend on other modules or plugins take them as arguments.
 | `http.lisp` | HTTP/1.1 client and server over TCP |
 | `http2.lisp` | HTTP/2 client and server (h2 over TLS + h2c cleartext) |
 | `http2/` | HTTP/2 submodules (huffman, hpack, frame, stream) — see [`http2/AGENTS.md`](http2/AGENTS.md) |
+| `websocket.lisp` | WebSocket client and server (RFC 6455, ws:// and wss://) |
+| `grpc.lisp` | gRPC client over HTTP/2 with length-prefixed framing |
 | `tls.lisp` | TLS 1.2/1.3 client and server (with ALPN support) |
 | `redis.lisp` | Redis client (RESP2) over TCP |
 | `dns.lisp` | DNS client (RFC 1035) |

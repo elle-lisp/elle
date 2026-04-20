@@ -74,3 +74,13 @@ fn caps() {
 fn emit() {
     run_elle_script("emit");
 }
+
+#[test]
+fn grpc() {
+    run_elle_script("grpc");
+}
+
+#[test]
+fn websocket() {
+    run_elle_script("websocket");
+}
