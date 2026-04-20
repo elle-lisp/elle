@@ -70,6 +70,7 @@
   (def client-state-fn        (get plugin :client-state))
   (def server-state-fn        (get plugin :server-state))
   (def server-config-fn       (get plugin :server-config))
+  (def alpn-protocol-fn       (get plugin :alpn-protocol))
 
   ## ── Private: handshake driver ───────────────────────────────────────────
 
@@ -323,15 +324,22 @@
             (begin (tls/close conn) (break))
             (tls/write conn val)))))))
 
+  ## ── Public: ALPN protocol query ──────────────────────────────────────
+
+  (defn tls/alpn-protocol [conn]
+    "Return the negotiated ALPN protocol string (e.g. \"h2\"), or nil."
+    (alpn-protocol-fn conn:tls))
+
   ## ── Export struct ──────────────────────────────────────────────────────
-  {:connect       tls/connect
-   :accept        tls/accept
-   :server-config server-config-fn
-   :read          tls/read
-   :read-line     tls/read-line
-   :read-all      tls/read-all
-   :write         tls/write
-   :close         tls/close
-   :lines         tls/lines
-   :chunks        tls/chunks
-   :writer        tls/writer})
+  {:connect        tls/connect
+   :accept         tls/accept
+   :server-config  server-config-fn
+   :read           tls/read
+   :read-line      tls/read-line
+   :read-all       tls/read-all
+   :write          tls/write
+   :close          tls/close
+   :lines          tls/lines
+   :chunks         tls/chunks
+   :writer         tls/writer
+   :alpn-protocol  tls/alpn-protocol})

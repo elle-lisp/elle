@@ -164,14 +164,17 @@
     "Wrap a plain TCP (or file) port as a transport.
      Writes are buffered in user space; flush sends a single port/write
      to avoid per-line scheduler yields on the io_uring path."
-    (def @wbuf @"")
+    (def @wbuf-parts @[])
     {:read      (fn [n] (port/read port n))
      :read-line (fn [] (port/read-line port))
-     :write     (fn [data] (push wbuf (if (string? data) data (string data))))
+     :write     (fn [data]
+                  (let [d (if (bytes? data) data (bytes data))]
+                    (push wbuf-parts d)))
      :flush     (fn []
-                  (when (> (string/size-of wbuf) 0)
-                    (port/write port (string wbuf))
-                    (assign wbuf @"")))
+                  (when (> (length wbuf-parts) 0)
+                    (let [combined (apply concat (freeze wbuf-parts))]
+                      (port/write port combined)
+                      (assign wbuf-parts @[]))))
      :close     (fn [] (port/close port))})
 
   (defn strip-line-terminator [s]

@@ -146,6 +146,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | conway | `demos/conway/` | Conway's Game of Life (SDL3 demo) |
 | lib/sdl3.lisp | `lib/` | SDL3 bindings via FFI (window, renderer, events, audio, TTF) |
 | lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
+| lib/http2.lisp | `lib/` | HTTP/2 client and server (h2 + h2c) |
 | lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
 | lib/gtk4.lisp | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
 | lib/sdl.lisp | `lib/` | SDL3 bindings for games/graphics |

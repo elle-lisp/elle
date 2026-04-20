@@ -930,7 +930,7 @@ mod tests {
 
     #[test]
     fn user_defined_signal_treated_as_suspension() {
-        let user_bit = SignalBits::from_bit(16);
+        let user_bit = SignalBits::from_bit(32);
         let mut vm = make_vm();
         vm.fiber.signal = Some((user_bit, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL);

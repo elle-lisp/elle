@@ -8,7 +8,8 @@ pattern and are imported via `(import "std/<name>")`.
 | Module | Import | Description |
 |--------|--------|-------------|
 | http | `(import "std/http")` | Pure Elle HTTP/1.1 client and server |
-| tls | `(import "std/tls")` | TLS client and server (wraps tls plugin) |
+| http2 | `(import "std/http2")` | HTTP/2 client and server (h2 over TLS, h2c cleartext) |
+| tls | `(import "std/tls")` | TLS client and server (wraps tls plugin, ALPN support) |
 | dns | `(import "std/dns")` | Pure Elle DNS client (RFC 1035) |
 | aws | `(import "std/aws")` | Elle-native AWS client (S3, etc.) |
 | redis | `(import "std/redis")` | Pure Elle Redis client (RESP2) |

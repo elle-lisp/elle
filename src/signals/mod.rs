@@ -47,7 +47,8 @@ use std::fmt;
 //   Bit  13:    Switch - fiber switch trampoline
 //   Bit  14:    Wait - structured concurrency wait request
 //   Bit  15:    GPU
-//   Bits 16-31: User-defined signal types
+//   Bits 16-31: Runtime-reserved (future runtime signals)
+//   Bits 32-63: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
 pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
@@ -79,11 +80,12 @@ const VM_INTERNAL: SignalBits = SIG_RESUME
 
 /// Capability mask: all signals that user code can produce.
 ///
-/// Defined as the complement of VM-internal bits within the 32-bit signal
-/// space (bits 0-15 compiler-reserved, bits 16-31 user-defined). Used for
-/// capability enforcement (which operations a fiber can be denied) and for
-/// static analysis (what an unknown callee might emit).
-pub const CAP_MASK: SignalBits = SignalBits::new(VM_INTERNAL.raw() ^ 0xFFFF_FFFF);
+/// Defined as the complement of VM-internal bits within the 64-bit signal
+/// space (bits 0-15 compiler-reserved, bits 16-31 runtime-reserved,
+/// bits 32-63 user-defined). Used for capability enforcement (which
+/// operations a fiber can be denied) and for static analysis (what an
+/// unknown callee might emit).
+pub const CAP_MASK: SignalBits = SignalBits::new(VM_INTERNAL.raw() ^ 0xFFFF_FFFF_FFFF_FFFF);
 
 /// Signal classification for expressions and functions.
 ///

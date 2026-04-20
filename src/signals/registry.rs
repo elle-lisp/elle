@@ -5,8 +5,9 @@ use super::{
 /// Signal registry for mapping signal keywords to bit positions.
 ///
 /// The registry maintains a global mapping of signal keywords (`:error`, `:yield`, etc.)
-/// to their corresponding bit positions. Built-in signals occupy bits 0-15, while
-/// user-defined signals are allocated from bits 16-31.
+/// to their corresponding bit positions. Built-in signals occupy bits 0-15,
+/// bits 16-31 are runtime-reserved, and user-defined signals are allocated
+/// from bits 32-63.
 use std::sync::{Mutex, OnceLock};
 
 /// An entry in the signal registry mapping a keyword name to its bit position.
@@ -22,8 +23,8 @@ pub struct SignalEntry {
 /// pre-registered at bits 0, 1, 2, 4, 8, 9, 11, 12 respectively. Bits 3, 5, 6, 7, 10 are
 /// reserved for VM-internal use and not registered.
 ///
-/// User-defined signals are allocated starting at bit 16 and proceeding upward.
-/// The registry can support up to 16 user-defined signals (bits 16-31).
+/// User-defined signals are allocated starting at bit 32 and proceeding upward.
+/// The registry can support up to 32 user-defined signals (bits 32-63).
 pub struct SignalRegistry {
     entries: Vec<SignalEntry>,
     next_user_bit: u32,
@@ -34,7 +35,7 @@ impl SignalRegistry {
     pub fn new() -> Self {
         SignalRegistry {
             entries: Vec::new(),
-            next_user_bit: 16,
+            next_user_bit: 32,
         }
     }
 
@@ -82,17 +83,17 @@ impl SignalRegistry {
     ///
     /// Returns the bit position allocated to this signal, or an error if:
     /// - The signal name is already registered (built-in or user-defined)
-    /// - All 16 user bits (16-31) are exhausted
+    /// - All 32 user bits (32-63) are exhausted
     pub fn register(&mut self, name: &str) -> Result<u32, String> {
         // Check if already registered (built-in or user)
         if self.entries.iter().any(|e| e.name == name) {
             return Err(format!("Signal '{}' already registered", name));
         }
 
-        // Check if we've exhausted user bits (16-31)
-        if self.next_user_bit > 31 {
+        // Check if we've exhausted user bits (32-63)
+        if self.next_user_bit > 63 {
             return Err(format!(
-                "Cannot register signal '{}': all 16 user signal bits (16-31) are exhausted",
+                "Cannot register signal '{}': all 32 user signal bits (32-63) are exhausted",
                 name
             ));
         }
@@ -203,8 +204,8 @@ mod tests {
     fn test_user_registration() {
         let mut registry = SignalRegistry::with_builtins();
         let bit = registry.register("heartbeat").unwrap();
-        assert_eq!(bit, 16);
-        assert_eq!(registry.lookup("heartbeat"), Some(16));
+        assert_eq!(bit, 32);
+        assert_eq!(registry.lookup("heartbeat"), Some(32));
     }
 
     #[test]
@@ -212,8 +213,8 @@ mod tests {
         let mut registry = SignalRegistry::with_builtins();
         let bit1 = registry.register("signal1").unwrap();
         let bit2 = registry.register("signal2").unwrap();
-        assert_eq!(bit1, 16);
-        assert_eq!(bit2, 17);
+        assert_eq!(bit1, 32);
+        assert_eq!(bit2, 33);
     }
 
     #[test]
@@ -235,14 +236,14 @@ mod tests {
     #[test]
     fn test_overflow() {
         let mut registry = SignalRegistry::with_builtins();
-        // Register 16 user signals (bits 16-31)
-        for i in 0..16 {
+        // Register 32 user signals (bits 32-63)
+        for i in 0..32 {
             let name = format!("user_{}", i);
             let result = registry.register(&name);
             assert!(result.is_ok(), "Failed to register user signal {}", i);
         }
-        // 17th should fail
-        let result = registry.register("user_16");
+        // 33rd should fail
+        let result = registry.register("user_32");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("exhausted"));
     }
