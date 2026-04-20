@@ -9,7 +9,9 @@ depend on other modules or plugins take them as arguments.
 | File | Purpose |
 |------|---------|
 | `http.lisp` | HTTP/1.1 client and server over TCP |
-| `tls.lisp` | TLS 1.2/1.3 client and server |
+| `http2.lisp` | HTTP/2 client and server (h2 over TLS + h2c cleartext) |
+| `http2/` | HTTP/2 submodules (huffman, hpack, frame, stream) — see [`http2/AGENTS.md`](http2/AGENTS.md) |
+| `tls.lisp` | TLS 1.2/1.3 client and server (with ALPN support) |
 | `redis.lisp` | Redis client (RESP2) over TCP |
 | `dns.lisp` | DNS client (RFC 1035) |
 | `aws.lisp` | AWS client: SigV4 signing, HTTPS, service dispatch |
@@ -278,6 +280,70 @@ than `:conn`; the underlying port or TLS conn is reachable via
 
 ```bash
 ./target/debug/elle tests/elle/http.lisp
+```
+
+---
+
+# lib/http2
+
+Agent guide for `lib/http2.lisp` — HTTP/2 client and server (RFC 9113 + RFC 7541).
+
+## Purpose
+
+HTTP/2 over TCP (h2c cleartext) and TLS (h2 with ALPN). Submodules in
+`lib/http2/` handle Huffman coding, HPACK header compression, frame codec,
+and stream state management.
+
+## Loading
+
+```lisp
+# h2c only (cleartext HTTP/2)
+(def http2 ((import "std/http2")))
+
+# h2 over TLS (requires TLS plugin)
+(def tls-plug ((import "plugin/tls")))
+(def tls ((import "std/tls") tls-plug))
+(def http2 ((import "std/http2") :tls tls))
+```
+
+## Exported functions
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `get` | `(fn [url &named headers])` | response struct |
+| `post` | `(fn [url body &named headers])` | response struct |
+| `request` | `(fn [method url &named body headers])` | response struct |
+| `connect` | `(fn [url])` | session struct |
+| `send` | `(fn [session method path &named body headers])` | response struct |
+| `close` | `(fn [session])` | nil |
+| `serve` | `(fn [listener handler &named tls-config on-error])` | nil (runs forever) |
+| `parse-url` | `(fn [url])` | url struct |
+
+## Struct shapes
+
+**Response**: `{:status 200 :headers {:content-type "text/html"} :body <bytes>}`
+
+**Session**: `@{:transport :is-server? :streams :next-stream-id :hpack-encoder :hpack-decoder :local-settings :remote-settings :conn-flow :write-queue :reader-fiber :writer-fiber :closed? :host}`
+
+## Architecture
+
+Fiber-per-stream multiplexing: one reader fiber dispatches frames to
+per-stream queues, one writer fiber drains a bounded write queue. Stream
+fibers block on their data queue waiting for response frames.
+
+## Invariants
+
+1. Frame payloads are bytes. The tcp-transport buffers bytes, not strings.
+2. HPACK dynamic tables are per-session, per-direction.
+3. The writer fiber is the only writer after handshake. Handshake writes
+   bypass the queue (writer not started yet).
+4. PUSH_PROMISE is rejected with RST_STREAM REFUSED_STREAM.
+5. Stream IDs: client odd (1, 3, 5...), server even (2, 4, 6...).
+
+## Running tests
+
+```bash
+elle tests/elle/http2.lisp
 ```
 
 ---
