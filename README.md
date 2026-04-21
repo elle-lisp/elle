@@ -136,9 +136,9 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
   (defmacro my-swap (a b)
     `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-  (var tmp 100)
-  (var x 1)
-  (var y 2)
+  (def @tmp 100)
+  (def @x 1)
+  (def @y 2)
   (my-swap x y)
   tmp  # => 100, not 1
   ```
@@ -318,7 +318,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (concat a [4 5])        # => [1 2 3 4 5]
 ```
 
-**struct** — sorted dictionary. Keys are typically keywords, stored in sorted order.
+**struct** — dictionary with deterministic key order. Keys are typically keywords.
 
 ```lisp
 (def s {:name "Bob" :age 25})
