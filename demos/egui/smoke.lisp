@@ -1,7 +1,7 @@
 (elle/epoch 8)
 ## demos/egui/smoke.lisp — headless smoke test for egui plugin
 
-(def egui-plugin (import "egui"))
+(def egui-plugin (import "plugin/egui"))
 (def ui ((import "std/egui") egui-plugin))
 
 (def win (ui:open :title "Smoke Test"))
