@@ -80,8 +80,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
-      - name: make smoke
-        run: make smoke
+      - name: make elle
+        run: make elle
+      - name: make doctest
+        run: make doctest
+      - name: make smoke-vm
+        run: make smoke-vm
+      - name: make smoke-jit
+        run: make smoke-jit
+      - name: make smoke-diff
+        run: make smoke-diff
 
   tests-combined:
     name: Rust Tests
@@ -121,8 +129,14 @@ jobs:
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22 parallel
+      - name: make elle-mlir
+        run: make elle-mlir
+      - name: make doctest
+        run: make doctest
       - name: make smoke-mlir
         run: make smoke-mlir
+      - name: make smoke-diff
+        run: make smoke-diff
 
   wasm:
     name: WASM Tests
@@ -139,8 +153,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
+      - name: make elle-wasm
+        run: make elle-wasm
+      - name: make doctest
+        run: make doctest
       - name: make smoke-wasm
         run: make smoke-wasm
+      - name: make smoke-diff
+        run: make smoke-diff
 
   aarch64:
     name: AArch64 Smoke
@@ -185,6 +205,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
+      - name: make elle-noffi
+        run: make elle-noffi
+      - name: make doctest
+        run: make doctest
       - name: make smoke-noffi
         run: make smoke-noffi
 
