@@ -289,6 +289,7 @@ impl VM {
             if closure.template.lir_function.is_some() {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
+                    self.fiber.call_stack.pop();
                     match bits {
                         Some(sig) if !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) => {
                             // JIT function suspended — any bits except SIG_ERROR/SIG_HALT
