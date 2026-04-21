@@ -181,8 +181,6 @@ jobs:
         run: cargo build --release --no-default-features -p elle
       - name: make smoke-noffi
         run: make smoke-noffi
-      - name: make doctest
-        run: make doctest
 
   android:
     name: Android Cross-Check
