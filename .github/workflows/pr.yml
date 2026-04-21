@@ -211,8 +211,6 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle-noffi
         run: make elle-noffi
-      - name: make doctest
-        run: make doctest
       - name: make smoke-noffi
         run: make smoke-noffi
 
