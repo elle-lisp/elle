@@ -204,6 +204,9 @@ elle_api! {
     fn array_len(ElleValue) -> isize;
     fn array_get(ElleValue, usize) -> ElleValue;
 
+    // ── List → array ──────────────────────────────────────────────
+    fn list_to_array(ElleValue) -> ElleValue;
+
     // ── Equality ──────────────────────────────────────────────────
     fn value_eq(ElleValue, ElleValue) -> bool;
 
@@ -400,6 +403,17 @@ impl Api {
 
     pub fn get_array_item(&self, v: ElleValue, idx: usize) -> ElleValue {
         (self.array_get)(v, idx)
+    }
+
+    /// Convert a proper list (cons chain) to an immutable array.
+    /// Returns `None` if the value is not a proper list.
+    pub fn list_to_array(&self, v: ElleValue) -> Option<ElleValue> {
+        let result = (self.list_to_array)(v);
+        if self.check_nil(result) {
+            None
+        } else {
+            Some(result)
+        }
     }
 
     pub fn get_struct_field(&self, v: ElleValue, key: &str) -> ElleValue {
