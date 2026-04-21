@@ -10,8 +10,8 @@
 (defmacro defn (name params & body)
   `(def ,name (fn ,params ,;body)))
 
-## let* - sequential bindings (flat pairs)
-## (let* [a 1 b a] body...) => (let [a 1] (let [b a] (begin body...)))
+## let* - alias for let (retained for Scheme familiarity)
+## let is already sequential; let* expands to nested single-binding lets
 (defmacro let* (bindings & body)
   (if (empty? bindings)
     `(begin ,;body)

@@ -15,8 +15,8 @@ Read these first — they cause the most bugs.
 - **Only `nil` and `false` are falsy** — `0`, `""`, and `()` are truthy.
 - **Bare = immutable; `@` = mutable** — `[1 2]` is immutable, `@[1 2]`
   is mutable.
-- **`let` is parallel; `let*` is sequential** — bindings are flat pairs
-  `[a 1 b 2]`. Use `let*` when a binding depends on a previous one.
+- **`let` is sequential** (Clojure-style) — bindings are flat pairs
+  `[a 1 b 2]`; each binding sees all previous ones. `let*` is an alias.
 
 ## Running
 
@@ -34,7 +34,7 @@ make smoke                 # run all tests (~30s)
 |------|---------|
 | [syntax](docs/syntax.md) | Literals, comments, splice, quoting, collection literals |
 | [types](docs/types.md) | Type predicates, conversions, truthiness, equality |
-| [bindings](docs/bindings.md) | def, var, let, let*, letrec, assign, scope rules |
+| [bindings](docs/bindings.md) | def, var, let, letrec, assign, scope rules |
 | [destructuring](docs/destructuring.md) | List, array, struct patterns |
 | [destructuring-advanced](docs/destructuring-advanced.md) | Rest, wildcard, nested, match integration |
 | [functions](docs/functions.md) | fn, defn, closures, higher-order, sorting |

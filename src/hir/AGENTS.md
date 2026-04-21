@@ -111,12 +111,13 @@ Lowerer (&BindingArena) — read-only access to binding metadata
    etc. The type system enforces this: the analyzer holds `&mut BindingArena`,
    the lowerer holds `&BindingArena`.
 
-10. **`Destructure` decomposes values into pattern bindings.** 
+10. **`Destructure` decomposes values into pattern bindings.**
     `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is
     produced by the analyzer for `def`, `var`, `let`, and `fn` parameter
     destructuring. The pattern's leaf `Var` bindings are created in the
-    current scope. `let*` is desugared to nested `let` in the expander,
-    so the analyzer never sees `let*`.
+    current scope. `let` is sequential (Clojure-style): multi-binding lets
+    are desugared to nested single-binding lets by the analyzer.
+    `let*` is a prelude macro alias that also desugars to nested `let`.
 
 11. **Destructured bindings use silent nil semantics.** Missing list/@array/@struct
      elements produce `nil`, not errors. Wrong-type values produce `nil`

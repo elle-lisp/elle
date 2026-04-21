@@ -44,19 +44,18 @@ counter              # => 1
 **`assign` is not `set`.** `set` creates a set collection. `assign` mutates
 a binding.
 
-## let — parallel bindings
+## let — sequential bindings
 
-All right-hand sides are evaluated in the outer scope. No binding sees
-any other binding in the same `let`. Bindings are flat pairs inside a
-single bracket form: `[name1 value1 name2 value2 ...]`.
+Each binding sees all previous bindings (Clojure-style). Bindings are
+flat pairs inside a single bracket form: `[name1 value1 name2 value2 ...]`.
 
 Bindings are immutable unless prefixed with `@`.
 
 ```lisp
-(def outer-a 100)
-(let [a 1
-      b (+ outer-a 1)]   # b sees outer-a (100), not a
-  b)                       # => 101
+(let [x 5
+      y (* x 2)          # y sees x
+      z (+ x y)]         # z sees both x and y
+  z)                       # => 15
 ```
 
 ```lisp
@@ -65,17 +64,7 @@ Bindings are immutable unless prefixed with `@`.
   x)                      # => 10
 ```
 
-## let* — sequential bindings
-
-Each binding sees all previous bindings. Use this when later bindings
-depend on earlier ones. Bindings are immutable unless prefixed with `@`.
-
-```lisp
-(let* [x 5
-       y (* x 2)         # y sees x
-       z (+ x y)]        # z sees both x and y
-  z)                       # => 15
-```
+`let*` is kept as an alias for `let`.
 
 ## letrec — recursive bindings
 

@@ -6,7 +6,7 @@ Hygienic macro expansion: macro definition, macro calls, quasiquote, and introsp
 
 - Expand macros with hygiene (scope sets prevent accidental capture)
 - Handle `defmacro` definitions
-- Desugar `let*` to nested `let`
+- Expand `let*` (alias for `let`, defined in prelude)
 - Desugar `defn` to `(def name (fn ...))`
 - Expand quasiquote to runtime list construction
 - Provide `macro?` and `expand-macro` introspection
@@ -35,7 +35,7 @@ Syntax (from reader)
 Expander
     ├─► load prelude macros (when, unless, try, protect, defer, with, etc.)
     ├─► desugar defn to (def name (fn params body...))
-    ├─► desugar let* to nested let (one binding at a time)
+    ├─► expand let* (prelude alias for let)
     ├─► check for macro calls
     ├─► compile & eval macro body in VM via pipeline::eval_syntax()
     ├─► convert result Value back to Syntax via from_value()
@@ -119,7 +119,7 @@ The `Expander` maintains:
 
 The standard prelude (`prelude.lisp`) defines:
 - `defn` — shorthand for `(def name (fn ...))`
-- `let*` — sequential let bindings (desugared to nested `let`)
+- `let*` — alias for `let` (retained for Scheme familiarity)
 - `->` — thread-first macro
 - `->>` — thread-last macro
 - `as->` — thread with explicit binding name: `(as-> val x (f x) (g x))`
