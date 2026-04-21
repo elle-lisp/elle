@@ -154,17 +154,20 @@
       (forever
         (let [item (q:take)]
           (when (= item :shutdown) (break nil))
-          (let [[ok? _] (protect
-            (begin
-              (let [[ftype flags sid payload] item]
-                (frame:write-frame t ftype flags sid payload))
-              (while (> (q:size) 0)
-                (let [next (q:take)]
-                  (when (= next :shutdown) (break nil))
-                  (let [[ftype flags sid payload] next]
-                    (frame:write-frame t ftype flags sid payload))))
-              (t:flush)))]
-            (unless ok? (break nil)))))))
+          (let [@shutting-down false
+                [ok? _] (protect
+                  (begin
+                    (let [[ftype flags sid payload] item]
+                      (frame:write-frame t ftype flags sid payload))
+                    (while (> (q:size) 0)
+                      (let [next (q:take)]
+                        (when (= next :shutdown)
+                          (assign shutting-down true)
+                          (break nil))
+                        (let [[ftype flags sid payload] next]
+                          (frame:write-frame t ftype flags sid payload))))
+                    (t:flush)))]
+            (when (or (not ok?) shutting-down) (break nil)))))))
 
   ## ── Send helpers ───────────────────────────────────────────────────────
 
