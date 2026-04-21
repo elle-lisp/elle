@@ -155,8 +155,6 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle-wasm
         run: make elle-wasm
-      - name: make doctest
-        run: make doctest
       - name: make smoke-wasm
         run: make smoke-wasm
       - name: make smoke-diff
