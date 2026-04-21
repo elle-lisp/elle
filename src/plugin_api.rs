@@ -132,6 +132,7 @@ extern "C" fn api_resolve(name_ptr: *const u8, name_len: usize) -> *const c_void
         struct_value,
         array_len,
         array_get,
+        list_to_array,
         value_eq,
         make_poll_fd,
         intern_keyword,
@@ -588,6 +589,18 @@ extern "C" fn array_get(val: [u64; 2], idx: usize) -> [u64; 2] {
             }
             _ => from_value(Value::NIL),
         }
+    }
+}
+
+// ── List → array conversion ───────────────────────────────────────────
+
+/// Convert a proper list (cons chain) to an immutable array.
+/// Returns nil if the value is not a proper list.
+extern "C" fn list_to_array(val: [u64; 2]) -> [u64; 2] {
+    let v = unsafe { to_value(val) };
+    match v.list_to_vec() {
+        Ok(items) => from_value(Value::array(items)),
+        Err(_) => from_value(Value::NIL),
     }
 }
 
