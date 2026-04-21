@@ -111,14 +111,14 @@ smoke-mlir: elle-mlir
 
 elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
 	@echo "=== build elle with WASM ==="
-	cargo build -p elle --features wasm -q
+	cargo build $(CARGO_PROFILE) -p elle --features wasm -q
 
 smoke-wasm: elle-wasm
 	@echo "=== elle scripts (WASM) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout 300s ./target/debug/elle --wasm=full {}' \
+			'timeout 60s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass (full)"; exit 1; }
 
 doctest: elle ## Test code examples in documentation (literate mode)
