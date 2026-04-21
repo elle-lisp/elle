@@ -121,9 +121,9 @@
 
 ## === Let Binding Semantics ===
 
-(assert (= (let [x 10 y 20] (+ x y)) 30) "let parallel binding")
+(assert (= (let [x 10 y 20] (+ x y)) 30) "let independent bindings")
 
-(assert (= (begin (def @x 999) (let [x 10 y x] y)) 999) "let parallel binding shadowing")
+(assert (= (begin (def @x 999) (let [x 10 y x] y)) 10) "let sequential binding sees previous")
 
 (assert (= (begin (def @x 999) (let* [x 10 y x] y)) 10) "let* sequential binding")
 

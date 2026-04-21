@@ -15,8 +15,8 @@ Read these first — they cause the most bugs.
 - **Only `nil` and `false` are falsy** — `0`, `""`, and `()` are truthy.
 - **Bare = immutable; `@` = mutable** — `[1 2]` is immutable, `@[1 2]`
   is mutable.
-- **`let` is parallel; `let*` is sequential** — bindings are flat pairs
-  `[a 1 b 2]`. Use `let*` when a binding depends on a previous one.
+- **`let` is sequential** (Clojure-style) — bindings are flat pairs
+  `[a 1 b 2]`; each binding sees all previous ones. `let*` is an alias.
 
 ## Running
 

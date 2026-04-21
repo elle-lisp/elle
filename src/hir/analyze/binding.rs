@@ -24,20 +24,9 @@ impl<'a> Analyzer<'a> {
             }
         })?;
 
-        // Phase 1: Analyze all value expressions in the OUTER scope.
-        // For destructuring bindings, we record the pattern syntax for Phase 2.
-        // Bindings are flat pairs: [name1 value1 name2 value2 ...]
-        struct TransientState {
-            import_projection: Option<HashMap<String, Signal>>,
-            squelch_signal: Option<Signal>,
-        }
-        enum LetBinding<'s> {
-            Simple(&'s str, Vec<ScopeId>, Hir, TransientState),
-            Destructure(&'s Syntax, Hir),
-        }
-        let mut analyzed = Vec::new();
-        let mut signal = Signal::silent();
-
+        // Sequential bindings (Clojure-style): each binding sees all
+        // previous bindings. Implemented by nesting single-binding lets.
+        // (let [a 1 b (+ a 1)] body) → (let [a 1] (let [b (+ a 1)] body))
         if bindings_syntax.len() % 2 != 0 {
             return Err(format!(
                 "{}: let bindings must have an even number of forms (name/value pairs)",
@@ -45,129 +34,103 @@ impl<'a> Analyzer<'a> {
             ));
         }
 
-        let mut i = 0;
-        while i < bindings_syntax.len() {
-            let name_syn = &bindings_syntax[i];
-            let value_syn = &bindings_syntax[i + 1];
+        self.analyze_sequential_let(bindings_syntax, &items[2..], span)
+    }
 
-            let value = self.analyze_expr(value_syn)?;
-            signal = signal.combine(value.signal);
-
-            // Capture transient state set during analyze_expr
-            let transient = TransientState {
-                import_projection: self.last_import_projection.take(),
-                squelch_signal: self.last_squelch_signal.take(),
-            };
-
-            if let Some(name) = name_syn.as_symbol() {
-                analyzed.push(LetBinding::Simple(
-                    name,
-                    name_syn.scopes.clone(),
-                    value,
-                    transient,
-                ));
-            } else if Self::is_destructure_pattern(name_syn) {
-                analyzed.push(LetBinding::Destructure(name_syn, value));
+    /// Recursively build nested single-binding lets for sequential semantics.
+    /// Each binding pair becomes its own Let scope so the next pair sees it.
+    fn analyze_sequential_let(
+        &mut self,
+        bindings: &[Syntax],
+        body_items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        if bindings.is_empty() {
+            // Base case: no more bindings — analyze body
+            return if body_items.is_empty() {
+                Ok(Hir::silent(HirKind::Nil, span))
             } else {
-                return Err(format!(
-                    "{}: let binding name must be a symbol, list, or array",
-                    span
-                ));
-            }
-            i += 2;
+                self.analyze_body(body_items, span)
+            };
         }
 
-        // Phase 2: Push scope and create all bindings
+        let name_syn = &bindings[0];
+        let value_syn = &bindings[1];
+        let rest = &bindings[2..];
+
+        // Analyze this single binding using the original (non-sequential)
+        // let machinery: push scope, analyze value in outer scope, create
+        // binding, then analyze inner body (which is the rest of the chain).
         self.push_scope(false);
 
-        let mut bindings = Vec::new();
-        let mut destructures = Vec::new();
+        let value = self.analyze_expr(value_syn)?;
+        let mut signal = value.signal;
 
-        for item in analyzed {
-            match item {
-                LetBinding::Simple(name, name_scopes, value, transient) => {
-                    let (actual_name, is_mutable) = super::strip_at_prefix(name);
-                    let binding = self.bind(actual_name, &name_scopes, BindingScope::Local);
-                    if self.immutable_by_default && !is_mutable {
-                        self.arena.get_mut(binding).is_immutable = true;
-                    }
-                    // Track signal and arity for interprocedural analysis
-                    if let HirKind::Lambda {
-                        params: lambda_params,
-                        num_required,
-                        rest_param,
-                        inferred_signals,
-                        ..
-                    } = &value.kind
-                    {
-                        self.signal_env.insert(binding, *inferred_signals);
-                        let arity = Arity::for_lambda(
-                            rest_param.is_some(),
-                            *num_required,
-                            lambda_params.len(),
-                        );
-                        self.arity_env.insert(binding, arity);
-                    }
-                    // Apply import projection and squelch signal
-                    if let Some(proj) = transient.import_projection {
-                        self.projection_env.insert(binding, proj);
-                    }
-                    if let Some(sig) = transient.squelch_signal {
-                        self.signal_env.insert(binding, sig);
-                    }
-                    bindings.push((binding, value));
-                }
-                LetBinding::Destructure(pattern_syntax, value) => {
-                    // Create a temp binding for the value
-                    let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
-                    bindings.push((tmp, value));
-                    // Analyze the pattern (creates leaf bindings in this scope)
-                    // Immutable by default; individual leaves with @ opt into mutability
-                    let pattern = self.analyze_destructure_pattern(
-                        pattern_syntax,
-                        BindingScope::Local,
-                        self.immutable_by_default,
-                        &span,
-                    )?;
-                    destructures.push((pattern, tmp));
-                }
+        let mut let_bindings = Vec::new();
+        let mut destructure = None;
+
+        if let Some(name) = name_syn.as_symbol() {
+            let (actual_name, is_mutable) = super::strip_at_prefix(name);
+            let binding = self.bind(actual_name, &name_syn.scopes, BindingScope::Local);
+            if self.immutable_by_default && !is_mutable {
+                self.arena.get_mut(binding).is_immutable = true;
             }
+            if let HirKind::Lambda {
+                params: lambda_params,
+                num_required,
+                rest_param,
+                inferred_signals,
+                ..
+            } = &value.kind
+            {
+                self.signal_env.insert(binding, *inferred_signals);
+                let arity =
+                    Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
+                self.arity_env.insert(binding, arity);
+            }
+            self.apply_transient_binding_state(binding);
+            let_bindings.push((binding, value));
+        } else if Self::is_destructure_pattern(name_syn) {
+            let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
+            let_bindings.push((tmp, value));
+            let pattern = self.analyze_destructure_pattern(
+                name_syn,
+                BindingScope::Local,
+                self.immutable_by_default,
+                &span,
+            )?;
+            destructure = Some((pattern, tmp));
+        } else {
+            return Err(format!(
+                "{}: let binding name must be a symbol, list, or array",
+                span
+            ));
         }
 
-        // Analyze body expressions (empty body returns nil)
-        let body = if items.len() > 2 {
-            self.analyze_body(&items[2..], span.clone())?
-        } else {
-            Hir::silent(HirKind::Nil, span.clone())
-        };
-        signal = signal.combine(body.signal);
+        // Recursively analyze remaining bindings + body as the inner expression
+        let inner = self.analyze_sequential_let(rest, body_items, span.clone())?;
+        signal = signal.combine(inner.signal);
 
         self.pop_scope();
 
-        // If there are destructures, wrap the body with Destructure nodes
-        let final_body = if destructures.is_empty() {
-            body
+        // Wrap with destructure if needed
+        let final_body = if let Some((pattern, tmp)) = destructure {
+            let destr = Hir::silent(
+                HirKind::Destructure {
+                    pattern,
+                    value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
+                    strict: true,
+                },
+                span.clone(),
+            );
+            Hir::new(HirKind::Begin(vec![destr, inner]), span.clone(), signal)
         } else {
-            let mut exprs: Vec<Hir> = destructures
-                .into_iter()
-                .map(|(pattern, tmp)| {
-                    Hir::silent(
-                        HirKind::Destructure {
-                            pattern,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
-                            strict: true,
-                        },
-                        span.clone(),
-                    )
-                })
-                .collect();
-            exprs.push(body);
-            Hir::new(HirKind::Begin(exprs), span.clone(), signal)
+            inner
         };
 
         Ok(Hir::new(
             HirKind::Let {
-                bindings,
+                bindings: let_bindings,
                 body: Box::new(final_body),
             },
             span,
