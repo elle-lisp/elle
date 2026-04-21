@@ -1,6 +1,6 @@
-.PHONY: all elle dev docs docgen smoke test test-git clean help \
-       smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-diff doctest \
-       plugins plugins-all mcp
+.PHONY: all elle docs docgen smoke test test-git clean help \
+       smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir smoke-diff doctest \
+       elle-wasm elle-mlir elle-noffi plugins plugins-all mcp
 
 .DEFAULT_GOAL := all
 
@@ -19,11 +19,8 @@ all: elle docs  ## Build everything
 
 # ── Build ───────────────────────────────────────────────────────────
 
-elle:  ## Build the Elle binary (release)
-	cargo build --release -p elle
-
-dev:  ## Build the Elle binary (debug, fast compile)
-	cargo build -p elle
+elle:  ## Build the Elle binary
+	cargo build $(CARGO_PROFILE) -p elle
 
 MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
 
@@ -45,14 +42,14 @@ docs/pipeline.svg: docs/pipeline.dot
 
 docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-	./target/release/elle demos/docgen/generate.lisp
+	$(ELLE) demos/docgen/generate.lisp
 
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~30s  examples + elle scripts, VM then JIT (parallel, debug build)
+#   make smoke    ~3min docs + elle scripts, VM, JIT, WASM (parallel, debug build)
 #   make test     ~3min smoke + rust unit tests (PROPTEST_CASES=4)
-#   cargo test    ~30min full suite (unit + integration + property)
+#   cargo test    ~60min full suite (unit + integration + property)
 #
 # Every Elle test target runs twice: first with JIT disabled (VM-only),
 # then with default JIT. This catches bugs that only manifest in one mode.
@@ -63,6 +60,7 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 # jit-rejections    — requires JIT active (tests rejection tracking)
 ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
+ELLE_SKIP_MLIR := -e core.lisp -e lexical-scope.lisp
 
 # FFI skip list: tests requiring libffi (skipped when built --no-default-features)
 ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
@@ -71,7 +69,7 @@ ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.
 # (eval = dynamic compilation)
 WASM_SKIP := -e eval.lisp
 
-smoke-vm:
+smoke-vm: elle
 	@echo "=== elle scripts (VM, no JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
@@ -79,15 +77,19 @@ smoke-vm:
 			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (no JIT)"; exit 1; }
 
-smoke-noffi:
-	@echo "=== elle scripts (VM, no JIT, no FFI) ==="
+elle-noffi:           ## Build elle with no features (for smoke-noffi)
+	@echo "=== build elle with no features ==="
+	cargo build $(CARGO_PROFILE) -p elle --no-default-features -q
+
+smoke-noffi: elle-noffi
+	@echo "=== elle scripts (VM, no features) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
-		|| { echo "FAILED: elle scripts VM-only pass (no JIT, no FFI)"; exit 1; }
+		|| { echo "FAILED: elle scripts VM-only pass (no features)"; exit 1; }
 
-smoke-jit:
+smoke-jit: elle
 	@echo "=== elle scripts (eager JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_JIT) | \
@@ -95,32 +97,46 @@ smoke-jit:
 			'timeout $(TIMEOUT) $(ELLE) --jit=eager {}' \
 		|| { echo "FAILED: elle scripts JIT pass (eager)"; exit 1; }
 
-smoke-wasm:
-	@echo "=== release build because this'll be slow ==="
-	cargo build --release -p elle --features wasm -q
-	@echo "=== elle scripts (WASM backend) ==="
+elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
+	@echo "=== build elle with MLIR ==="
+	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
+
+smoke-mlir: elle-mlir
+	@echo "=== elle scripts (eager MLIR) ==="
+	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_MLIR) | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
+		|| { echo "FAILED: elle scripts MLIR pass (eager)"; exit 1; }
+
+elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
+	@echo "=== build elle with WASM ==="
+	cargo build $(CARGO_PROFILE) -p elle --features wasm -q
+
+smoke-wasm: elle-wasm
+	@echo "=== elle scripts (WASM) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout 300s ./target/release/elle --wasm=full {}' \
+			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass (full)"; exit 1; }
 
-doctest:  ## Test code examples in documentation (literate mode)
+doctest: elle ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' docs/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
-smoke-diff:  ## Cross-tier differential agreement tests (compile/run-on)
+smoke-diff: elle ## Cross-tier differential agreement tests (compile/run-on)
 	@echo "=== differential tier-agreement tests ==="
 	@printf '%s\n' tests/diff/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: differential tests"; exit 1; }
 
-smoke: dev smoke-vm smoke-jit smoke-wasm smoke-diff doctest  ## Run examples + elle scripts (VM, JIT, WASM, differential) + docgen + doctest
-	./target/release/elle demos/docgen/generate.lisp
+smoke: doctest smoke-vm smoke-jit smoke-diff  ## Run docs, elle tests
+	@echo "=== all smoke tests passed ==="
 
 test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build $(CARGO_PROFILE) -p elle

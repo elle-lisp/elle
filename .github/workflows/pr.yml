@@ -67,7 +67,7 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
 
   tests:
-    name: Elle Tests
+    name: VM+JIT Tests
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
@@ -80,8 +80,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
-      - name: Release Build
-        run: cargo build --release -p elle
       - name: make smoke
         run: make smoke
 
@@ -123,14 +121,26 @@ jobs:
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22 parallel
-      - name: MLIR Build
-        run: cargo build --release -p elle --features mlir
-      - name: Run MLIR and SPIR-V tests
+      - name: make smoke-mlir
+        run: make smoke-mlir
+
+  wasm:
+    name: WASM Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+      - name: Install GNU parallel
         run: |
-          ./target/release/elle tests/elle/mlir.lisp
-          ./target/release/elle tests/elle/spirv.lisp
-      - name: make smoke
-        run: make smoke
+          sudo apt-get update
+          sudo apt-get install -y parallel
+      - name: make smoke-wasm
+        run: make smoke-wasm
 
   aarch64:
     name: AArch64 Smoke
@@ -150,8 +160,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
-      - name: Release Build
-        run: cargo build --release -p elle
       - name: make smoke
         run: make smoke
       - name: Run integration tests
@@ -177,8 +185,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
-      - name: Release Build
-        run: cargo build --release --no-default-features -p elle
       - name: make smoke-noffi
         run: make smoke-noffi
 
@@ -220,8 +226,6 @@ jobs:
           shared-key: macos
       - name: Install GNU parallel and coreutils
         run: brew install parallel coreutils
-      - name: Release Build
-        run: cargo build --release -p elle
       - name: make smoke
         run: make smoke
       - name: Run integration tests
@@ -231,7 +235,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, tests-combined, tests, mlir, aarch64, aarch64-noffi, android, macos]
+    needs: [changes, qa, tests-combined, tests, wasm, mlir, aarch64, aarch64-noffi, android, macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -246,6 +250,9 @@ jobs:
         run: exit 1
       - name: Check MLIR
         if: needs.mlir.result == 'failure'
+        run: exit 1
+      - name: Check WASM
+        if: needs.wasm.result == 'failure'
         run: exit 1
       - name: Check aarch64
         if: needs.aarch64.result == 'failure'
