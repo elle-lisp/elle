@@ -10,7 +10,7 @@
 
 (def epoch (parse-int (first args)))
 
-(def glob-plugin (import "glob"))
+(def glob-plugin (import "plugin/glob"))
 (def do-glob (get glob-plugin :glob))
 
 (def files (append
