@@ -118,17 +118,16 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 - **A sound signal system, inferred not declared.** Every function is automatically classified as `Silent`, `Yields`, or `Polymorphic`. The compiler enforces this: a silent context cannot call a yielding function. No annotations required.
 
   ```lisp
-  # Silent — inferred automatically
-  (defn add (a b) (+ a b))
+  # Silent — no primitive in the body can signal
+  (defn pick (b x y) (if b x y))
 
   # Yields — inferred from emit call
   (defn fetch-data (url)
     (emit :http-request url)
     (emit :http-wait))
 
-  # Polymorphic — signal depends on the callback
-  (defn map-signal (f xs)
-    (map f xs))  # signal = signal of f
+  # Errors — inferred from arithmetic (+ can fail on non-numbers)
+  (defn add (a b) (+ a b))
   ```
 
 - **Fully hygienic macros that operate on syntax objects, not text or s-expressions.** ([docs/macros.md](docs/macros.md)) Macros receive and return `Syntax` objects carrying scope information (Racket-style scope sets). Name capture is structurally impossible, not just conventionally avoided.
@@ -137,9 +136,11 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
   (defmacro my-swap (a b)
     `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-  (let [tmp 100 x 1 y 2]
-    (my-swap x y)
-    tmp)  # => 100, not 1
+  (var tmp 100)
+  (var x 1)
+  (var y 2)
+  (my-swap x y)
+  tmp  # => 100, not 1
   ```
 
   The `tmp` introduced by the macro does not shadow the caller's `tmp`. This is guaranteed by scope sets, not by convention.
@@ -317,13 +318,13 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (concat a [4 5])        # => [1 2 3 4 5]
 ```
 
-**struct** — ordered dictionary. Keys are typically keywords.
+**struct** — sorted dictionary. Keys are typically keywords, stored in sorted order.
 
 ```lisp
 (def s {:name "Bob" :age 25})
 (get s :name)           # => "Bob"
-(keys s)                # => (:name :age)
-(values s)              # => ("Bob" 25)
+(keys s)                # => (:age :name)
+(values s)              # => (25 "Bob")
 (has? s :name)          # => true
 ```
 
@@ -343,7 +344,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 ```lisp
 (def b b[1 2 3])
-(def b2 (string->bytes "hello"))
+(def b2 (bytes "hello"))
 (get b 0)               # => 1
 (length b)              # => 3
 (bytes->hex b2)         # => "68656c6c6f"
@@ -353,7 +354,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 ```lisp
 (def b @b[1 2 3])
-(def b2 (string->@bytes "hello"))
+(def b2 (thaw (bytes "hello")))
 (get b 0)               # => 1
 (length b)              # => 3
 (bytes->hex b2)         # => "68656c6c6f"
@@ -377,7 +378,7 @@ Singly-linked cons cells. Proper lists terminate with `()` (empty list), **not**
 (nil? nil)              # => true
 (nil? ())               # => false  — empty list is not nil
 (empty? ())             # => true
-(empty? nil)            # => false  — nil is not an empty list
+(empty? nil)            # => error  — nil is not a collection
 ```
 
 Lists are linked; tuples and arrays are contiguous in memory. They are not interchangeable.
@@ -539,8 +540,8 @@ Elle has three concurrency layers, each built on the one below:
 ```lisp
 # Parallel work with automatic error propagation
 (ev/scope (fn [spawn]
-  (let ([users    (spawn (fn [] (fetch-users)))]
-        [settings (spawn (fn [] (fetch-settings))])
+  (let [users    (spawn (fn [] (fetch-users)))
+        settings (spawn (fn [] (fetch-settings)))]
     {:users (ev/join users) :settings (ev/join settings)})))
 
 # Race: first to complete wins, rest are aborted
@@ -863,12 +864,10 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
 
   ```lisp
   # Compile-time errors caught by elle lint:
-  (defn foo [x y] (+ x))  # Error: missing argument y
-  (let [[unused 42]] 100) # Warning: unused binding
-  (fn [a b] (yield))      # Error: silent context, can't yield
-  (match x
-    ([a b c] a)           # Error: pattern expects 3 elements
-    (v v))                # Error: duplicate pattern variable
+  (defn foo [x y] (+ x))     # Warning: + expects 2 arguments, got 1
+  (cons 1)                    # Error: cons expects 2 arguments, got 1
+  (defn f [x] x)
+  (f 1 2)                     # Error: f expects 1 argument, got 2
   ```
 
 - **Match exhaustiveness is checked at compile time.** The compiler warns when a match expression has patterns that can never be reached, and when the match may not cover all cases for a known type.
