@@ -111,7 +111,7 @@ smoke-mlir: elle-mlir
 
 elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
 	@echo "=== build elle with WASM ==="
-	cargo build $(CARGO_PROFILE) -p elle --release --features wasm -q
+	cargo build -p elle --features wasm -q
 
 smoke-wasm: elle-wasm
 	@echo "=== elle scripts (WASM) ==="
