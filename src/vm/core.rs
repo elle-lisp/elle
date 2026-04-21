@@ -469,6 +469,16 @@ impl VM {
         self.read_u16(bytecode, ip) as i16
     }
 
+    #[inline(always)]
+    pub fn read_i32(&self, bytecode: &[u8], ip: &mut usize) -> i32 {
+        let b0 = bytecode[*ip] as u32;
+        let b1 = bytecode[*ip + 1] as u32;
+        let b2 = bytecode[*ip + 2] as u32;
+        let b3 = bytecode[*ip + 3] as u32;
+        *ip += 4;
+        ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) as i32
+    }
+
     pub(crate) fn ffi(&self) -> &FFISubsystem {
         &self.ffi
     }

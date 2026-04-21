@@ -43,13 +43,13 @@ pub enum Instruction {
     /// Return from function
     Return,
 
-    /// Jump unconditionally (offset i16)
+    /// Jump unconditionally (offset i32)
     Jump,
 
-    /// Jump if false (offset i16)
+    /// Jump if false (offset i32)
     JumpIfFalse,
 
-    /// Jump if true (offset i16)
+    /// Jump if true (offset i32)
     JumpIfTrue,
 
     /// Create closure (const_idx, num_upvalues)
@@ -364,15 +364,27 @@ impl Bytecode {
         self.emit_u16(value as u16);
     }
 
+    /// Emit an i32 (big-endian)
+    pub fn emit_i32(&mut self, value: i32) {
+        let bytes = value.to_be_bytes();
+        self.instructions.push(bytes[0]);
+        self.instructions.push(bytes[1]);
+        self.instructions.push(bytes[2]);
+        self.instructions.push(bytes[3]);
+    }
+
     /// Get current position for jump patching
     pub fn current_pos(&self) -> usize {
         self.instructions.len()
     }
 
-    /// Patch a jump instruction at a given position
-    pub fn patch_jump(&mut self, pos: usize, offset: i16) {
-        self.instructions[pos] = (offset >> 8) as u8;
-        self.instructions[pos + 1] = (offset & 0xff) as u8;
+    /// Patch a jump instruction at a given position (i32 big-endian)
+    pub fn patch_jump(&mut self, pos: usize, offset: i32) {
+        let bytes = offset.to_be_bytes();
+        self.instructions[pos] = bytes[0];
+        self.instructions[pos + 1] = bytes[1];
+        self.instructions[pos + 2] = bytes[2];
+        self.instructions[pos + 3] = bytes[3];
     }
 
     pub fn patch_u16(&mut self, pos: usize, value: u16) {
@@ -407,14 +419,17 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 2;
             }
             Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue
-                if i + 1 < instructions.len() =>
+                if i + 3 < instructions.len() =>
             {
-                let high = instructions[i] as i8 as i16;
-                let low = instructions[i + 1] as i16;
-                let offset = (high << 8) | (low & 0xFF);
-                let target = (i + 2) as i32 + offset as i32;
+                let offset = i32::from_be_bytes([
+                    instructions[i],
+                    instructions[i + 1],
+                    instructions[i + 2],
+                    instructions[i + 3],
+                ]);
+                let target = (i + 4) as i64 + offset as i64;
                 line.push_str(&format!(" (offset={}, target={})", offset, target));
-                i += 2;
+                i += 4;
             }
             Instruction::LoadLocal | Instruction::StoreLocal if i + 1 < instructions.len() => {
                 let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
