@@ -206,10 +206,10 @@ impl Emitter {
             self.emit_block(block, func);
         }
 
-        // Patch jumps (relative offsets)
+        // Patch jumps (relative i32 offsets)
         for (pos, label) in &self.pending_jumps {
             if let Some(&target) = self.label_offsets.get(label) {
-                let offset = (target as i32 - *pos as i32 - 2) as i16;
+                let offset = target as i32 - *pos as i32 - 4;
                 self.bytecode.patch_jump(*pos, offset);
             }
         }
@@ -980,7 +980,7 @@ impl Emitter {
 
                 self.bytecode.emit(Instruction::Jump);
                 let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0); // placeholder
+                self.bytecode.emit_i32(0); // placeholder
                 self.pending_jumps.push((pos, *label));
             }
 
@@ -1010,13 +1010,13 @@ impl Emitter {
                 // JumpIfFalse to else_label
                 self.bytecode.emit(Instruction::JumpIfFalse);
                 let else_pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0); // placeholder
+                self.bytecode.emit_i32(0); // placeholder
                 self.pending_jumps.push((else_pos, *else_label));
 
                 // Fall through or jump to then_label
                 self.bytecode.emit(Instruction::Jump);
                 let then_pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0); // placeholder
+                self.bytecode.emit_i32(0); // placeholder
                 self.pending_jumps.push((then_pos, *then_label));
             }
 
@@ -1049,7 +1049,7 @@ impl Emitter {
 
                 self.bytecode.emit(Instruction::Jump);
                 let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0);
+                self.bytecode.emit_i32(0); // placeholder
                 self.pending_jumps.push((pos, *resume_label));
             }
 

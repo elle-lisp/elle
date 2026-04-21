@@ -142,9 +142,9 @@ impl VM {
 
                 // Control flow
                 Instruction::Jump => {
-                    // Peek offset (big-endian i16, matching read_i16) to determine
+                    // Peek offset (big-endian i32, matching read_i32) to determine
                     // direction WITHOUT consuming bytes — handle_jump re-reads them.
-                    let offset = i16::from_be_bytes([bc[ip], bc[ip + 1]]);
+                    let offset = i32::from_be_bytes([bc[ip], bc[ip + 1], bc[ip + 2], bc[ip + 3]]);
                     if offset < 0 {
                         check_fuel!(self, instr_ip);
                     }
