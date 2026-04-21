@@ -238,6 +238,14 @@ pub struct Lowerer<'a> {
     /// lowering so that `body_escapes_heap_values` can check callees
     /// transitively: a call to a rotation-safe function doesn't escape.
     callee_rotation_safe: HashMap<Binding, bool>,
+    /// Binding → return_safe for function definitions.
+    /// A function is return-safe if its body never returns a freshly
+    /// heap-allocated value (returns immediates, Vars, or results of
+    /// other return-safe calls). Precomputed via fixpoint iteration.
+    /// Used by `tail_arg_is_safe_extended` and `result_is_safe_extended`
+    /// to see through call boundaries that `call_result_is_safe` rejects
+    /// (e.g. letrec-bound functions).
+    callee_return_safe: HashMap<Binding, bool>,
     /// Binding → result_is_immediate for function definitions.
     /// Precomputed via fixpoint iteration so that `call_result_is_safe`
     /// can identify user functions that always return immediates.
@@ -300,6 +308,7 @@ impl<'a> Lowerer<'a> {
             immediate_primitives: FxHashSet::default(),
             mutating_primitives: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
+            callee_return_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
             callee_return_params: HashMap::new(),
             callee_rest_index: HashMap::new(),
@@ -371,12 +380,13 @@ impl<'a> Lowerer<'a> {
 
         // Precompute callee properties for scope allocation decisions.
         // These scan the HIR for lambda defs and record per-binding
-        // properties (result_is_immediate, return_params, rotation_safe)
-        // which checks callee_result_immediate; rotation_safety depends on
-        // the callee having been lowered, so it reads from closures[].
+        // properties (result_is_immediate, return_params, return_safe,
+        // rotation_safe). Order matters: return_safe depends on nothing;
+        // rotation_safety depends on return_safe (via tail_arg_is_safe_extended).
         self.precompute_result_immediate(hir);
         self.precompute_return_params(hir);
         self.precompute_rest_index(hir);
+        self.precompute_return_safe(hir);
         self.precompute_rotation_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
@@ -821,6 +831,46 @@ impl<'a> Lowerer<'a> {
                 let was_imm = self.callee_result_immediate[&binding];
                 if was_imm && !is_imm {
                     self.callee_result_immediate.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Precompute `callee_return_safe` for all function definitions.
+    ///
+    /// A function is return-safe if its body's result is provably non-heap-
+    /// allocated, considering calls to other return-safe functions as safe.
+    /// Uses `result_is_safe_extended` (which trusts `callee_return_safe`)
+    /// in a fixpoint iteration: seed all functions as return-safe, then
+    /// iterate until stable. Only transitions safe→unsafe (monotone).
+    ///
+    /// This enables `tail_arg_is_safe_extended` to see through call
+    /// boundaries that `call_result_is_safe` conservatively rejects
+    /// (e.g. letrec-bound functions like nqueens' `search`).
+    fn precompute_return_safe(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_lambda_defs(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically return-safe.
+        for &(binding, _) in &defs {
+            self.callee_return_safe.insert(binding, true);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                let is_safe = self.result_is_safe_extended(body, &[]);
+                let was_safe = self.callee_return_safe[&binding];
+                if was_safe && !is_safe {
+                    self.callee_return_safe.insert(binding, false);
                     changed = true;
                 }
             }
