@@ -155,6 +155,8 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle-wasm
         run: make elle-wasm
+      - name: make doctest
+        run: make doctest
       - name: make smoke-wasm
         run: make smoke-wasm
       - name: make smoke-diff
@@ -178,6 +180,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
+      - name: make elle
+        run: make elle
+      - name: make doctest
+        run: make doctest
       - name: make smoke
         run: make smoke
       - name: Run integration tests
@@ -248,6 +254,10 @@ jobs:
           shared-key: macos
       - name: Install GNU parallel and coreutils
         run: brew install parallel coreutils
+      - name: make elle
+        run: make elle
+      - name: make doctest
+        run: make doctest
       - name: make smoke
         run: make smoke
       - name: Run integration tests
