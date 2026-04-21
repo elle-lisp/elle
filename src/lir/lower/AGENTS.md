@@ -113,6 +113,26 @@ For `block`: conditions 1-4 plus all break values targeting this block are safe 
 
 **Compile-time scope stats** (`ScopeStats`): The lowerer counts how many scopes were analyzed, how many qualified for scope allocation, and the first-failing condition for each rejected scope (captured, suspends, unsafe-result, outward-set, break). Access via `lowerer.scope_stats()` after `lower()` completes. Pass `--stats` to the elle CLI to print the aggregated stats to stderr on program exit (alongside JIT stats).
 
+**`callee_return_safe` fixpoint analysis:**
+
+`precompute_return_safe()` determines whether each function's return value is
+provably non-heap-allocated (returns immediates, Vars, or results of other
+return-safe calls). Uses `result_is_safe_extended()` — identical to
+`result_is_safe()` but additionally trusts calls to functions already proven
+return-safe. This enables `tail_arg_is_safe_extended()` to see through call
+boundaries that `call_result_is_safe()` conservatively rejects (e.g.
+letrec-bound functions). Critical for backtracking patterns like nqueens where
+a non-tail call to a return-safe function appears inside an `if` in a
+tail-call argument.
+
+**`tail_arg_is_safe_extended`:**
+
+Extended version of `tail_arg_is_safe` that recurses into control flow (If,
+Cond, Begin, And, Or, Let, Letrec, Block, Match, While, Parameterize) and
+checks `callee_result_immediate` or `callee_return_safe` for Call expressions
+at any depth. Used by `body_escapes_heap_values` (rotation safety) when the
+standard flat check fails.
+
 **Known limitations and why they exist:**
 
 - **`suspends` (condition 2)**: Any let body that calls a polymorphic-signal
@@ -122,8 +142,9 @@ For `block`: conditions 1-4 plus all break values targeting this block are safe 
 
 - **`unsafe-result` (condition 3)**: Calls to user-defined functions fail
   `result_is_safe` because we don't know their return type at the call site.
-  Fixing this requires return-type inference or a return-type annotation system.
-  The whitelist in `IMMEDIATE_PRIMITIVES` covers built-in primitives only.
+  `callee_return_safe` partially mitigates this for rotation-safety analysis
+  and call-scoped reclamation, but `result_is_safe` remains conservative for
+  let-scope allocation decisions.
 
 These are accepted limitations. The analysis is maximally conservative to
 avoid use-after-free. False negatives (missed optimizations) are preferable

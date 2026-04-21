@@ -1865,4 +1865,63 @@ fn call_scoped_does_not_wrap_intrinsics() {
     assert!(!closure_has_region(source));
 }
 
+// ── callee_return_safe / tail_arg_is_safe_extended ──────────────────────────
+
+#[test]
+fn call_scoped_nqueens_search_gets_region() {
+    // Simplified nqueens pattern: try-col self-tail-calls with arg 4
+    // being (if cond (search ... (cons ...) ...) count). The search call
+    // is non-tail inside an If — before callee_return_safe analysis,
+    // tail_arg_is_safe can't see through the If to prove the arg safe,
+    // so try-col is NOT rotation-safe, and search's call doesn't get
+    // call-scoped reclamation.
+    //
+    // After the fix: callee_return_safe[search] = true (search returns
+    // immediates or tail-calls try-col with Var args), tail_arg_is_safe_extended
+    // recurses into the If and trusts callee_return_safe, try-col becomes
+    // rotation-safe, and the (search ... (cons col queens) ...) call
+    // gets RegionEnter/RegionExitCall.
+    let source = r#"(letrec
+        [search (fn [n row queens count]
+          (if (= row n) (+ count 1)
+            (try-col n 0 queens row count)))
+         try-col (fn [n col queens row count]
+          (if (= col n) count
+            (try-col n (+ col 1) queens row
+              (if (< col row)
+                (search n (+ row 1) (cons col queens) count)
+                count))))]
+        (search 5 0 (list) 0))
+    "#;
+    assert!(
+        closure_bytecode_contains(source, "RegionExitCall"),
+        "search call with heap arg (cons col queens) should get call-scoped reclamation"
+    );
+}
+
+#[test]
+fn return_safe_mutual_recursion_enables_rotation_safety() {
+    // f and g are mutually recursive. Both return immediates (ints).
+    // g calls f non-tail inside an If in a self-tail-call argument.
+    // callee_return_safe should prove both return-safe, enabling
+    // rotation safety for g, which enables call-scoped reclamation
+    // for the (f (cons ...)) call.
+    //
+    // Key: g's self-tail-call args are (x, <if>). x is a Var (safe).
+    // The If wraps a call to f which is return-safe — tail_arg_is_safe_extended
+    // recurses into the If and trusts callee_return_safe[f].
+    let source = r#"(letrec
+        [f (fn [x count]
+          (if (empty? x) count
+            (g x count)))
+         g (fn [x count]
+          (g x (if true (f (cons 1 x) (+ count 1)) count)))]
+        (g (list 1 2 3) 0))
+    "#;
+    assert!(
+        closure_bytecode_contains(source, "RegionExitCall"),
+        "f call with heap arg should get call-scoped reclamation after return-safe analysis"
+    );
+}
+
 

@@ -57,6 +57,26 @@ impl<'a> Lowerer<'a> {
     /// Returns `false` for anything that might produce a heap-allocated
     /// value: non-intrinsic calls, lambdas, strings, quotes, etc.
     pub(super) fn result_is_safe(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
+        self.result_is_safe_impl(hir, scope_bindings, false)
+    }
+
+    /// Extended version that also trusts calls to `callee_return_safe`
+    /// functions. Used only by `precompute_return_safe` for fixpoint
+    /// iteration — not for general scope allocation decisions.
+    pub(super) fn result_is_safe_extended(
+        &self,
+        hir: &Hir,
+        scope_bindings: &[(Binding, &Hir)],
+    ) -> bool {
+        self.result_is_safe_impl(hir, scope_bindings, true)
+    }
+
+    fn result_is_safe_impl(
+        &self,
+        hir: &Hir,
+        scope_bindings: &[(Binding, &Hir)],
+        trust_return_safe: bool,
+    ) -> bool {
         match &hir.kind {
             // Literals: all immediates
             HirKind::Int(_)
@@ -72,7 +92,9 @@ impl<'a> Lowerer<'a> {
             HirKind::Var(binding) => {
                 match scope_bindings.iter().find(|(b, _)| b == binding) {
                     None => true, // outer binding — safe
-                    Some((_, init)) => self.result_is_safe(init, scope_bindings),
+                    Some((_, init)) => {
+                        self.result_is_safe_impl(init, scope_bindings, trust_return_safe)
+                    }
                 }
             }
 
@@ -82,8 +104,8 @@ impl<'a> Lowerer<'a> {
                 else_branch,
                 ..
             } => {
-                self.result_is_safe(then_branch, scope_bindings)
-                    && self.result_is_safe(else_branch, scope_bindings)
+                self.result_is_safe_impl(then_branch, scope_bindings, trust_return_safe)
+                    && self.result_is_safe_impl(else_branch, scope_bindings, trust_return_safe)
             }
 
             HirKind::Begin(exprs) => {
@@ -123,7 +145,7 @@ impl<'a> Lowerer<'a> {
                         _ => {}
                     }
                 }
-                self.result_is_safe(last, &extended)
+                self.result_is_safe_impl(last, &extended, trust_return_safe)
             }
 
             HirKind::Cond {
@@ -131,12 +153,14 @@ impl<'a> Lowerer<'a> {
                 else_branch,
             } => {
                 // All clause bodies must be safe
-                let clauses_safe = clauses
-                    .iter()
-                    .all(|(_, body)| self.result_is_safe(body, scope_bindings));
+                let clauses_safe = clauses.iter().all(|(_, body)| {
+                    self.result_is_safe_impl(body, scope_bindings, trust_return_safe)
+                });
                 // Missing else produces nil (safe); present else must be safe
                 let else_safe = match else_branch {
-                    Some(branch) => self.result_is_safe(branch, scope_bindings),
+                    Some(branch) => {
+                        self.result_is_safe_impl(branch, scope_bindings, trust_return_safe)
+                    }
                     None => true,
                 };
                 clauses_safe && else_safe
@@ -144,7 +168,9 @@ impl<'a> Lowerer<'a> {
 
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 // Short-circuit: any sub-expression could be the result
-                exprs.iter().all(|e| self.result_is_safe(e, scope_bindings))
+                exprs
+                    .iter()
+                    .all(|e| self.result_is_safe_impl(e, scope_bindings, trust_return_safe))
             }
 
             // Tail call: replaces the frame, so the scope's allocations are
@@ -157,14 +183,34 @@ impl<'a> Lowerer<'a> {
                 func,
                 args,
             } => {
-                self.result_is_safe(func, scope_bindings)
-                    && args
-                        .iter()
-                        .all(|a| self.result_is_safe(&a.expr, scope_bindings))
+                self.result_is_safe_impl(func, scope_bindings, trust_return_safe)
+                    && args.iter().all(|a| {
+                        self.result_is_safe_impl(&a.expr, scope_bindings, trust_return_safe)
+                    })
             }
 
             // Non-tail calls that return immediates
-            HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
+            HirKind::Call { func, args, .. } => {
+                if self.call_result_is_safe(func, args) {
+                    return true;
+                }
+                // Extended mode: also trust calls to callee_return_safe functions.
+                // These are user functions proven (by fixpoint) to never return
+                // freshly heap-allocated values.
+                if trust_return_safe {
+                    if let HirKind::Var(binding) = &func.kind {
+                        if self
+                            .callee_return_safe
+                            .get(binding)
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
 
             // Nested let/letrec: the result is the body's result.
             // Extend scope_bindings with the inner let's bindings so that
@@ -174,7 +220,7 @@ impl<'a> Lowerer<'a> {
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                 let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
                 extended.extend(bindings.iter().map(|(b, init)| (*b, init)));
-                self.result_is_safe(body, &extended)
+                self.result_is_safe_impl(body, &extended, trust_return_safe)
             }
 
             // Nested block: the result is either the last expression or a
@@ -182,7 +228,7 @@ impl<'a> Lowerer<'a> {
             // Blocks introduce no bindings, so scope_bindings is unchanged.
             HirKind::Block { block_id, body, .. } => {
                 let last_safe = match body.last() {
-                    Some(last) => self.result_is_safe(last, scope_bindings),
+                    Some(last) => self.result_is_safe_impl(last, scope_bindings, trust_return_safe),
                     None => true, // empty block → nil → safe
                 };
                 last_safe && self.all_break_values_safe(body, *block_id, scope_bindings)
@@ -190,9 +236,9 @@ impl<'a> Lowerer<'a> {
 
             // Match: all arm bodies must produce safe results.
             // Exactly one arm executes, analogous to If/Cond.
-            HirKind::Match { arms, .. } => arms
-                .iter()
-                .all(|(_, _, body)| self.result_is_safe(body, scope_bindings)),
+            HirKind::Match { arms, .. } => arms.iter().all(|(_, _, body)| {
+                self.result_is_safe_impl(body, scope_bindings, trust_return_safe)
+            }),
 
             // While always returns nil (an immediate).
             HirKind::While { .. } => true,
@@ -209,7 +255,9 @@ impl<'a> Lowerer<'a> {
             HirKind::Break { .. } => true,
 
             // Parameterize: result is the body's result
-            HirKind::Parameterize { body, .. } => self.result_is_safe(body, scope_bindings),
+            HirKind::Parameterize { body, .. } => {
+                self.result_is_safe_impl(body, scope_bindings, trust_return_safe)
+            }
 
             // String constants live in the constant pool (LoadConst),
             // not on the fiber heap. Safe to return from a scope.
@@ -246,7 +294,102 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
-        false
+        // Fall back to extended check: recurse into control flow and
+        // trust callee_return_safe for Call nodes at any depth.
+        self.tail_arg_is_safe_extended(hir)
+    }
+
+    /// Extended tail-arg safety check that recurses into control flow
+    /// (If, Cond, Begin, And, Or, Let, Letrec, Block, Match, While,
+    /// Parameterize) and checks `callee_result_immediate` or
+    /// `callee_return_safe` for Call expressions at any depth.
+    ///
+    /// This handles the nqueens pattern where a tail-call argument is
+    /// `(if cond (search ...) count)` — the If wraps a Call that returns
+    /// an immediate, but `result_is_safe` can't see through the Call
+    /// boundary for letrec-bound callees.
+    fn tail_arg_is_safe_extended(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            // Literals: always safe
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_) => true,
+
+            // Var: safe (pre-existing value, not freshly allocated)
+            HirKind::Var(_) => true,
+
+            // Control flow: recurse into all result positions
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.tail_arg_is_safe_extended(then_branch)
+                    && self.tail_arg_is_safe_extended(else_branch)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, body)| self.tail_arg_is_safe_extended(body))
+                    && else_branch
+                        .as_ref()
+                        .is_none_or(|b| self.tail_arg_is_safe_extended(b))
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_some_and(|e| self.tail_arg_is_safe_extended(e)),
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                exprs.iter().all(|e| self.tail_arg_is_safe_extended(e))
+            }
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.tail_arg_is_safe_extended(body)
+            }
+            HirKind::Block { body, .. } => body
+                .last()
+                .is_some_and(|e| self.tail_arg_is_safe_extended(e)),
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| self.tail_arg_is_safe_extended(body)),
+            HirKind::While { .. } | HirKind::Destructure { .. } => true, // returns nil
+            HirKind::Parameterize { body, .. } => self.tail_arg_is_safe_extended(body),
+
+            // Call: check callee_result_immediate OR callee_return_safe
+            HirKind::Call { func, args, .. } => {
+                // Intrinsics and whitelisted primitives
+                if self.call_result_is_safe(func, args) {
+                    return true;
+                }
+                if let HirKind::Var(binding) = &func.kind {
+                    if self
+                        .callee_result_immediate
+                        .get(binding)
+                        .copied()
+                        .unwrap_or(false)
+                    {
+                        return true;
+                    }
+                    if self
+                        .callee_return_safe
+                        .get(binding)
+                        .copied()
+                        .unwrap_or(false)
+                    {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            // Everything else: conservatively unsafe
+            _ => false,
+        }
     }
 
     pub(super) fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
