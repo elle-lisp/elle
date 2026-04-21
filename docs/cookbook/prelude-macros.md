@@ -56,7 +56,7 @@ That's it. No Rust changes needed.
 | Macro | Expansion |
 |-------|-----------|
 | `defn` | `(def name (fn params body...))` |
-| `let*` | Nested `let` (one binding per level) |
+| `let*` | Alias for `let` (retained for Scheme familiarity) |
 | `->` | Thread-first |
 | `->>` | Thread-last |
 | `when` | `(if test (begin body...) nil)` |

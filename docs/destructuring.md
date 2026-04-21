@@ -1,7 +1,7 @@
 # Destructuring
 
 Destructuring unpacks collections into bindings. It works in `def`, `var`,
-`let`, `let*`, `fn`, `defn`, and `match`.
+`let`, `fn`, `defn`, and `match`.
 
 Destructuring is strict — missing elements or keys signal an error.
 Extra elements are silently ignored.
@@ -93,15 +93,15 @@ target    # => :target
 (magnitude {:x 3 :y 4})   # => 7
 ```
 
-## In let / let*
+## In let
 
 ```lisp
 (let [(a b) (list 10 20)]
   (+ a b))                 # => 30
 
-# let* — sequential: second binding depends on first
-(let* [(a b) (list 3 4)
-       total (+ a b)]
+# let is sequential: second binding depends on first
+(let [(a b) (list 3 4)
+      total (+ a b)]
   total)                    # => 7
 ```
 
@@ -134,6 +134,6 @@ q     # => 2
 ## See also
 
 - [destructuring-advanced.md](destructuring-advanced.md) — guards, match patterns
-- [bindings.md](bindings.md) — def, var, let, let*, scope rules
+- [bindings.md](bindings.md) — def, var, let, letrec, scope rules
 - [match.md](match.md) — pattern matching with dispatch
 - [functions.md](functions.md) — destructuring in function params

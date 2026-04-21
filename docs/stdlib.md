@@ -39,7 +39,7 @@ Macros loaded before user code. These define fundamental control flow:
 
 ```text
 defn        function definition sugar
-let*        sequential bindings
+let*        alias for let (sequential bindings)
 ->          thread-first
 ->>         thread-last
 when        one-armed conditional

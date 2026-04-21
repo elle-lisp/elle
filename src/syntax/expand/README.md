@@ -14,7 +14,7 @@ The macro expansion module transforms macro calls into their expanded forms usin
 The expander loads prelude macros before user code:
 
 - `defn` — Define a function (desugars to `def` + `fn`)
-- `let*` — Sequential let bindings (desugars to nested `let`)
+- `let*` — Alias for `let` (retained for Scheme familiarity)
 - `when` — Conditional without else (desugars to `if`)
 - `unless` — Conditional with inverted test (desugars to `if`)
 - `try`/`catch` — Exception handling

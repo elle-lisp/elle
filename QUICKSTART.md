@@ -34,7 +34,7 @@ make smoke                 # run all tests (~30s)
 |------|---------|
 | [syntax](docs/syntax.md) | Literals, comments, splice, quoting, collection literals |
 | [types](docs/types.md) | Type predicates, conversions, truthiness, equality |
-| [bindings](docs/bindings.md) | def, var, let, let*, letrec, assign, scope rules |
+| [bindings](docs/bindings.md) | def, var, let, letrec, assign, scope rules |
 | [destructuring](docs/destructuring.md) | List, array, struct patterns |
 | [destructuring-advanced](docs/destructuring-advanced.md) | Rest, wildcard, nested, match integration |
 | [functions](docs/functions.md) | fn, defn, closures, higher-order, sorting |
