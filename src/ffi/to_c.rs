@@ -245,74 +245,92 @@ impl MarshalledArg {
 }
 
 fn marshal_struct(value: &Value, sd: &StructDesc, desc: &TypeDesc) -> LResult<MarshalledArg> {
-    let arr = value.as_array_mut().ok_or_else(|| {
-        LError::ffi_type_error(
-            "struct",
-            format!("expected array, got {}", value.type_name()),
-        )
-    })?;
-    let elems = arr.borrow();
-    if elems.len() != sd.fields.len() {
-        return Err(LError::ffi_type_error(
-            "struct",
-            format!(
-                "struct has {} fields, got {} values",
-                sd.fields.len(),
-                elems.len()
-            ),
-        ));
-    }
     let (offsets, total_size) = sd.field_offsets().ok_or_else(|| {
         LError::ffi_error("marshal", "cannot compute struct layout (contains void?)")
     })?;
     let align = desc.align().unwrap_or(1);
-    let buf = AlignedBuffer::new(total_size, align);
-    let mut owned = Vec::new();
-    for (i, (field_desc, &field_offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
-        let field_owned = write_value_to_buffer(
-            unsafe { buf.as_mut_ptr().add(field_offset) },
-            &elems[i],
-            field_desc,
-        )?;
-        owned.extend(field_owned);
+
+    // Accept both mutable @[...] and immutable [...] arrays.
+    let write_fields = |elems: &[Value]| -> LResult<MarshalledArg> {
+        if elems.len() != sd.fields.len() {
+            return Err(LError::ffi_type_error(
+                "struct",
+                format!(
+                    "struct has {} fields, got {} values",
+                    sd.fields.len(),
+                    elems.len()
+                ),
+            ));
+        }
+        let buf = AlignedBuffer::new(total_size, align);
+        let mut owned = Vec::new();
+        for (i, (field_desc, &field_offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
+            let field_owned = write_value_to_buffer(
+                unsafe { buf.as_mut_ptr().add(field_offset) },
+                &elems[i],
+                field_desc,
+            )?;
+            owned.extend(field_owned);
+        }
+        Ok(MarshalledArg {
+            storage: ArgStorage::Struct(buf, owned),
+        })
+    };
+
+    if let Some(arr) = value.as_array_mut() {
+        let elems = arr.borrow();
+        write_fields(&elems)
+    } else if let Some(elems) = value.as_array() {
+        write_fields(elems)
+    } else {
+        Err(LError::ffi_type_error(
+            "struct",
+            format!("expected array, got {}", value.type_name()),
+        ))
     }
-    Ok(MarshalledArg {
-        storage: ArgStorage::Struct(buf, owned),
-    })
 }
 
 fn marshal_array(value: &Value, elem_desc: &TypeDesc, count: usize) -> LResult<MarshalledArg> {
-    let arr = value.as_array_mut().ok_or_else(|| {
-        LError::ffi_type_error(
-            "array",
-            format!("expected array, got {}", value.type_name()),
-        )
-    })?;
-    let elems = arr.borrow();
-    if elems.len() != count {
-        return Err(LError::ffi_type_error(
-            "array",
-            format!("array has {} elements, got {} values", count, elems.len()),
-        ));
-    }
     let elem_size = elem_desc
         .size()
         .ok_or_else(|| LError::ffi_error("marshal", "cannot compute array element size"))?;
     let total_size = elem_size * count;
     let align = elem_desc.align().unwrap_or(1);
-    let buf = AlignedBuffer::new(total_size, align);
-    let mut owned = Vec::new();
-    for (i, elem_val) in elems.iter().enumerate() {
-        let elem_owned = write_value_to_buffer(
-            unsafe { buf.as_mut_ptr().add(i * elem_size) },
-            elem_val,
-            elem_desc,
-        )?;
-        owned.extend(elem_owned);
+
+    // Accept both mutable @[...] and immutable [...] arrays.
+    let write_elems = |elems: &[Value]| -> LResult<MarshalledArg> {
+        if elems.len() != count {
+            return Err(LError::ffi_type_error(
+                "array",
+                format!("array has {} elements, got {} values", count, elems.len()),
+            ));
+        }
+        let buf = AlignedBuffer::new(total_size, align);
+        let mut owned = Vec::new();
+        for (i, elem_val) in elems.iter().enumerate() {
+            let elem_owned = write_value_to_buffer(
+                unsafe { buf.as_mut_ptr().add(i * elem_size) },
+                elem_val,
+                elem_desc,
+            )?;
+            owned.extend(elem_owned);
+        }
+        Ok(MarshalledArg {
+            storage: ArgStorage::Struct(buf, owned),
+        })
+    };
+
+    if let Some(arr) = value.as_array_mut() {
+        let elems = arr.borrow();
+        write_elems(&elems)
+    } else if let Some(elems) = value.as_array() {
+        write_elems(elems)
+    } else {
+        Err(LError::ffi_type_error(
+            "array",
+            format!("expected array, got {}", value.type_name()),
+        ))
     }
-    Ok(MarshalledArg {
-        storage: ArgStorage::Struct(buf, owned),
-    })
 }
 
 /// Write a single Elle Value into a C buffer at the given pointer.
