@@ -72,37 +72,38 @@ ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.
 WASM_SKIP := -e eval.lisp
 
 smoke-vm:
-	@echo "=== elle scripts (VM, JIT disabled) ==="
+	@echo "=== elle scripts (VM, no JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
-		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
+			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
+		|| { echo "FAILED: elle scripts VM-only pass (no JIT)"; exit 1; }
 
 smoke-noffi:
 	@echo "=== elle scripts (VM, no JIT, no FFI) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
+			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (no JIT, no FFI)"; exit 1; }
 
 smoke-jit:
-	@echo "=== elle scripts (JIT enabled, threshold=1) ==="
+	@echo "=== elle scripts (eager JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_JIT) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=1 {}' \
-		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
+			'timeout $(TIMEOUT) $(ELLE) --jit=eager {}' \
+		|| { echo "FAILED: elle scripts JIT pass (eager)"; exit 1; }
 
 smoke-wasm:
+	@echo "=== release build because this'll be slow ==="
 	cargo build --release -p elle --features wasm -q
 	@echo "=== elle scripts (WASM backend) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout 300s ./target/release/elle --wasm=full {}' \
-		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
+		|| { echo "FAILED: elle scripts WASM pass (full)"; exit 1; }
 
 doctest:  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="

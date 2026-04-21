@@ -3,7 +3,7 @@ name: PR
 on:
   pull_request:
     branches: [ main, develop ]
-    types: [ opened, synchronize, reopened, labeled, unlabeled ]
+    types: [ opened, synchronize, reopened]
 
 concurrency:
   group: pr-${{ github.ref }}
@@ -80,18 +80,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
-      - name: Build release binary
+      - name: Release Build
         run: cargo build --release -p elle
-      - name: Run examples and Elle script tests
+      - name: make smoke
         run: make smoke
 
   tests-combined:
-    name: Integration & Property Tests
+    name: Rust Tests
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
-      PROPTEST_CASES: 8
+      PROPTEST_CASES: 16
       RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
@@ -103,7 +103,7 @@ jobs:
         run: "cargo test --test lib property::"
 
   mlir:
-    name: MLIR Backend Tests
+    name: MLIR Tests
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
@@ -123,18 +123,23 @@ jobs:
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22 parallel
-      - name: Build with MLIR
+      - name: MLIR Build
         run: cargo build --release -p elle --features mlir
       - name: Run MLIR and SPIR-V tests
         run: |
           ./target/release/elle tests/elle/mlir.lisp
           ./target/release/elle tests/elle/spirv.lisp
+      - name: make smoke
+        run: make smoke
 
   aarch64:
-    name: AArch64 Build & Smoke
+    name: AArch64 Smoke
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -145,16 +150,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
-      - name: Build release binary
+      - name: Release Build
         run: cargo build --release -p elle
-      - name: Run smoke tests
+      - name: make smoke
         run: make smoke
+      - name: Run integration tests
+        run: cargo test --test '*' -- --skip property
+      - name: Run property tests
+        run: "cargo test --test lib property::"
 
   aarch64-noffi:
-    name: AArch64 No-FFI Smoke
+    name: AArch64 No-Features
     needs: changes
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -165,10 +177,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
-      - name: Build release binary (no JIT, no FFI)
+      - name: Release Build
         run: cargo build --release --no-default-features -p elle
-      - name: Run smoke tests (VM only, no JIT, no FFI)
+      - name: make smoke-noffi
         run: make smoke-noffi
+      - name: make doctest
+        run: make doctest
 
   android:
     name: Android Cross-Check
@@ -189,14 +203,17 @@ jobs:
           echo "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
           echo "CC_aarch64_linux_android=aarch64-linux-android24-clang" >> "$GITHUB_ENV"
           echo "AR_aarch64_linux_android=llvm-ar" >> "$GITHUB_ENV"
-      - name: Cross-check Android target
+      - name: Cross-check Android
         run: cargo check --target aarch64-linux-android --no-default-features -p elle
 
   macos:
-    name: macOS Build & Smoke
+    name: macOS Smoke
     needs: changes
     runs-on: macos-latest
     if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -205,10 +222,14 @@ jobs:
           shared-key: macos
       - name: Install GNU parallel and coreutils
         run: brew install parallel coreutils
-      - name: Build release binary
+      - name: Release Build
         run: cargo build --release -p elle
-      - name: Run smoke tests
+      - name: make smoke
         run: make smoke
+      - name: Run integration tests
+        run: cargo test --test '*' -- --skip property
+      - name: Run property tests
+        run: "cargo test --test lib property::"
 
   all-checks:
     name: All Checks Passed
