@@ -2,7 +2,7 @@
 ## query.lisp — run a SPARQL query against the store
 ## Usage: tools/run-elle.sh tools/query.lisp -- 'SELECT ...'
 
-(def ox (import "oxigraph"))
+(def ox (import "plugin/oxigraph"))
 (def store (ox:store-open ".elle-mcp/store"))
 
 (def args (drop 1 (sys/args)))

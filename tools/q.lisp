@@ -1,5 +1,5 @@
 (elle/epoch 8)
-(def ox (import "oxigraph"))
+(def ox (import "plugin/oxigraph"))
 (def store (ox:store-open ".elle-mcp/store"))
 
 (def args (drop 1 (sys/args)))

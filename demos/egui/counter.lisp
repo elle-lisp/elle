@@ -1,7 +1,7 @@
 (elle/epoch 8)
 ## examples/egui-counter.lisp — minimal egui counter app
 
-(def egui-plugin (import "egui"))
+(def egui-plugin (import "plugin/egui"))
 (def ui ((import "std/egui") egui-plugin))
 
 (def @count 0)
