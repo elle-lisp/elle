@@ -204,7 +204,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 - **Strings are sequences of grapheme clusters.** ([docs/strings.md](docs/strings.md)) `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
 
   ```lisp
-  (length "café")           # => 4, not 5 bytes
+  (length "café")           # => 4, not 5
   (get "café" 3)              # => "é"
   (slice "café" 0 2)        # => "ca"
   (first "café")            # => "c"
@@ -236,9 +236,9 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
   (c)  # => 2
   ```
 
-   <details><summary>More: Automatic LBox Wrapping</summary>
+   <details><summary>More: Automatic Box Wrapping</summary>
 
-   The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in an lbox automatically. No explicit `box` or `ref` needed.
+   The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in a box automatically. No explicit `box` or `ref` needed.
    </details>
 
 - **Full tail-call optimisation.** All tail calls are optimised — not just self-recursion. Mutually recursive functions, continuation-passing style, and trampolining all work without stack overflow.
