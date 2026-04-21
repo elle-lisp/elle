@@ -5,6 +5,11 @@ use crate::value::types::Arity;
 use crate::value::{error_val, error_val_extra, Value};
 use std::path::{Path, PathBuf};
 
+/// Check whether a file path has a native shared library extension.
+fn is_native_library(path: &str) -> bool {
+    path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll")
+}
+
 /// Resolve the Elle project root.
 /// Checks `--home` config first, then walks up from the binary to find `Cargo.toml`.
 fn elle_root() -> Option<PathBuf> {
@@ -39,7 +44,7 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
         }
     }
 
-    // Virtual prefix: plugin/X → <repo-root>/target/<profile>/libelle_X.so
+    // Virtual prefix: plugin/X → <repo-root>/target/<profile>/libelle_X.{so,dylib,dll}
     // Prefer the same profile as the running binary, fallback to the other.
     if let Some(rest) = spec.strip_prefix("plugin/") {
         if let Some(root) = elle_root() {
@@ -48,11 +53,12 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
             } else {
                 &["release", "debug"]
             };
+            let ext = std::env::consts::DLL_EXTENSION;
             for profile in profiles {
                 let path = root
                     .join("target")
                     .join(profile)
-                    .join(format!("libelle_{}.so", rest));
+                    .join(format!("libelle_{}.{}", rest, ext));
                 if path.is_file() {
                     return Some(path.to_string_lossy().into_owned());
                 }
@@ -100,6 +106,7 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
 
     // Derive the leaf name for plugin probing: "plugin/glob" → "glob"
     let leaf = as_path.file_name().and_then(|n| n.to_str()).unwrap_or(spec);
+    let ext = std::env::consts::DLL_EXTENSION;
 
     for dir in &search_dirs {
         // Try <dir>/<spec>.lisp
@@ -114,17 +121,17 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
             return Some(bare.to_string_lossy().into_owned());
         }
 
-        // Try <dir>/<spec_dir>/libelle_<leaf>.so  (plugin convention)
-        let so_name = format!("libelle_{}.so", leaf);
+        // Try <dir>/<spec_dir>/libelle_<leaf>.{so,dylib,dll}  (plugin convention)
+        let lib_name = format!("libelle_{}.{}", leaf, ext);
         let plugin_in_dir = dir
             .join(as_path.parent().unwrap_or(Path::new("")))
-            .join(&so_name);
+            .join(&lib_name);
         if plugin_in_dir.is_file() {
             return Some(plugin_in_dir.to_string_lossy().into_owned());
         }
 
-        // Try <dir>/libelle_<leaf>.so  (flat layout)
-        let plugin_flat = dir.join(&so_name);
+        // Try <dir>/libelle_<leaf>.{so,dylib,dll}  (flat layout)
+        let plugin_flat = dir.join(&lib_name);
         if plugin_flat.is_file() {
             return Some(plugin_flat.to_string_lossy().into_owned());
         }
@@ -219,8 +226,8 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 
         let symbols = &mut *symbols_ptr;
 
-        // Plugin loading for .so files
-        if path.ends_with(".so") {
+        // Plugin loading for native shared libraries (.so, .dylib, .dll)
+        if is_native_library(&path) {
             // Return cached value if already loaded (avoids re-registering primitives)
             if let Some(&cached) = vm.loaded_plugins.get(&path) {
                 vm.unmark_module_loading(&path);
@@ -244,10 +251,34 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             return result;
         }
 
-        // Elle source file loading
+        // Elle source file loading — fall back to plugin loading on UTF-8 failure
         let contents = match std::fs::read_to_string(&path) {
             Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                // File exists but isn't valid UTF-8 — try loading as a plugin
+                let result = match crate::plugin::load_plugin(&path, vm, symbols) {
+                    Ok(value) => {
+                        vm.loaded_plugins.insert(path.clone(), value);
+                        (SIG_OK, value)
+                    }
+                    Err(plugin_err) => (
+                        SIG_ERROR,
+                        error_val_extra(
+                            "io-error",
+                            format!(
+                                "import: '{}' is not valid Elle source ({}), \
+                                 and plugin loading also failed: {}",
+                                path, e, plugin_err
+                            ),
+                            &[("path", Value::string(path.as_str()))],
+                        ),
+                    ),
+                };
+                vm.unmark_module_loading(&path);
+                return result;
+            }
             Err(e) => {
+                vm.unmark_module_loading(&path);
                 return (
                     SIG_ERROR,
                     error_val_extra(
@@ -331,9 +362,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     func: prim_import_file,
     signal: Signal::errors(),
     arity: Arity::Exact(1),
-    doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, libelle_<name>.so).",
+    doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, native plugins). Binary files that fail UTF-8 reading are automatically tried as plugins.",
     params: &["spec"],
     category: "",
-    example: "(import \"lib/http\")",
+    example: "(import \"std/http\")",
     aliases: &["import-file", "module/import"],
 }];
