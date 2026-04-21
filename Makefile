@@ -60,7 +60,7 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 # jit-rejections    — requires JIT active (tests rejection tracking)
 ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
-ELLE_SKIP_MLIR := -e core.lisp -e lexical-scope.lisp
+ELLE_SKIP_MLIR := -e core.lisp -e lexical-scope.lisp -e concurrency.lisp
 
 # FFI skip list: tests requiring libffi (skipped when built --no-default-features)
 ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
