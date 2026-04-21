@@ -4,6 +4,12 @@
 //! compilation environment for subsequent inputs via the compilation
 //! cache (same mechanism as stdlib). Multi-line accumulation detects
 //! incomplete input by checking for "unterminated" reader errors.
+//!
+//! Forward references and mutual recursion are supported via deferred
+//! compilation: when a def/defn form fails due to undefined variables,
+//! it is saved and retried after subsequent definitions arrive.
+//! Mutually recursive definitions are batch-compiled as a single
+//! letrec unit.
 
 use crate::pipeline::{compile_file_repl, register_repl_binding, register_repl_macros};
 use crate::reader::read_syntax_all;
@@ -25,6 +31,7 @@ const HISTORY_FILE: &str = ".elle_history";
 pub struct Repl {
     editor: DefaultEditor,
     accumulated: String,
+    deferred: Vec<DeferredForm>,
 }
 
 impl Repl {
@@ -34,6 +41,7 @@ impl Repl {
         Ok(Self {
             editor,
             accumulated: String::new(),
+            deferred: Vec::new(),
         })
     }
 
@@ -91,6 +99,8 @@ impl Repl {
             had_errors = true;
         }
 
+        had_errors |= report_unresolved(&self.deferred);
+
         let _ = self.editor.save_history(&Self::history_path());
         had_errors
     }
@@ -101,6 +111,7 @@ impl Repl {
 
         println!("Elle v1.0.0 (type (help) for commands)");
         let mut accumulated = String::new();
+        let mut deferred: Vec<DeferredForm> = Vec::new();
         let mut had_errors = false;
         let stdin = io::stdin();
 
@@ -133,13 +144,15 @@ impl Repl {
 
             accumulated.push_str(&line);
 
-            had_errors |= try_eval_accumulated(&mut accumulated, vm, symbols);
+            had_errors |= try_eval_accumulated(&mut accumulated, vm, symbols, &mut deferred);
         }
 
         if !accumulated.trim().is_empty() {
             eprintln!("✗ <repl>: unterminated input at end of stream");
             had_errors = true;
         }
+
+        had_errors |= report_unresolved(&deferred);
 
         had_errors
     }
@@ -156,7 +169,7 @@ impl Repl {
     /// Try to parse and evaluate accumulated input.
     /// Returns true if an error occurred.
     fn try_eval(&mut self, vm: &mut VM, symbols: &mut SymbolTable) -> bool {
-        try_eval_accumulated(&mut self.accumulated, vm, symbols)
+        try_eval_accumulated(&mut self.accumulated, vm, symbols, &mut self.deferred)
     }
 }
 
@@ -165,7 +178,12 @@ impl Repl {
 /// Try to parse and evaluate accumulated input.
 /// Clears `accumulated` on success or hard error. Leaves it intact on
 /// incomplete input. Returns true if an error occurred.
-fn try_eval_accumulated(accumulated: &mut String, vm: &mut VM, symbols: &mut SymbolTable) -> bool {
+fn try_eval_accumulated(
+    accumulated: &mut String,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    deferred: &mut Vec<DeferredForm>,
+) -> bool {
     let mut had_errors = false;
 
     match try_read(accumulated) {
@@ -179,10 +197,16 @@ fn try_eval_accumulated(accumulated: &mut String, vm: &mut VM, symbols: &mut Sym
                         }
                     }
                     Err(e) => {
-                        eprintln!("✗ {}", e);
-                        had_errors = true;
+                        if let Some(d) = try_defer(form, &e) {
+                            eprintln!("{}: deferred ({} undefined)", d.name, d.missing.join(", "));
+                            deferred.push(d);
+                        } else {
+                            eprintln!("✗ {}", e);
+                            had_errors = true;
+                        }
                     }
                 }
+                try_resolve_deferred(deferred, vm, symbols);
             }
         }
         ReadResult::Incomplete => {}
@@ -194,6 +218,164 @@ fn try_eval_accumulated(accumulated: &mut String, vm: &mut VM, symbols: &mut Sym
     }
 
     had_errors
+}
+
+// ── Deferred compilation ─────────────────────────────────────────────
+
+/// A def/defn form whose compilation was deferred due to undefined
+/// variable references. Retried after subsequent definitions arrive.
+struct DeferredForm {
+    source: String,
+    name: String,
+    missing: Vec<String>,
+}
+
+/// Check whether a compilation error is a deferrable undefined-variable
+/// error on a def/defn form. Only simple (non-destructuring) defs are
+/// deferred.
+fn try_defer(form: &FormInfo, error: &str) -> Option<DeferredForm> {
+    if form.bindings.len() != 1 {
+        return None;
+    }
+    if !error.contains("undefined variable:") {
+        return None;
+    }
+    let undefined_vars = extract_undefined_vars(error);
+    if undefined_vars.is_empty() {
+        return None;
+    }
+    Some(DeferredForm {
+        source: form.source.clone(),
+        name: form.bindings[0].name.clone(),
+        missing: undefined_vars,
+    })
+}
+
+/// Extract undefined variable names from a compilation error message.
+fn extract_undefined_vars(error: &str) -> Vec<String> {
+    let mut vars = Vec::new();
+    for line in error.lines() {
+        if let Some(idx) = line.find("undefined variable: ") {
+            let rest = &line[idx + "undefined variable: ".len()..];
+            let name: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != '(')
+                .collect();
+            if !name.is_empty() {
+                vars.push(name);
+            }
+        }
+    }
+    vars
+}
+
+/// Try to resolve deferred forms. Two phases:
+///
+/// 1. **Individual**: recompile each deferred form alone. If its
+///    missing references are now in the compilation cache, it
+///    compiles and gets registered. Repeat until no progress.
+///
+/// 2. **Batch**: compile all remaining deferred forms together as a
+///    single letrec. This handles mutual recursion: the letrec
+///    pre-binds all names, allowing them to reference each other.
+fn try_resolve_deferred(deferred: &mut Vec<DeferredForm>, vm: &mut VM, symbols: &mut SymbolTable) {
+    if deferred.is_empty() {
+        return;
+    }
+
+    // Phase 1: individual resolution (fixpoint loop)
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let mut i = 0;
+        while i < deferred.len() {
+            if try_resolve_single(&deferred[i], vm, symbols) {
+                eprintln!("{}: resolved", deferred[i].name);
+                deferred.remove(i);
+                changed = true;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Phase 2: batch resolution for mutual recursion
+    if deferred.len() >= 2 && try_batch_resolve(deferred, vm, symbols) {
+        // Batch resolved some forms; try individual again
+        // (resolving a batch may unblock other deferred forms).
+        try_resolve_deferred(deferred, vm, symbols);
+    }
+}
+
+/// Try to compile and register a single deferred form.
+fn try_resolve_single(form: &DeferredForm, vm: &mut VM, symbols: &mut SymbolTable) -> bool {
+    let Ok((result, expander)) = compile_file_repl(&form.source, symbols, "<repl>") else {
+        return false;
+    };
+    register_repl_macros(expander.macros());
+    let Ok(value) = vm.execute_scheduled(&result.bytecode, symbols) else {
+        return false;
+    };
+    let sym_id = symbols.intern(&form.name);
+    let (signal, arity) = extract_signal_arity(&value);
+    register_repl_binding(sym_id, value, signal, arity);
+    true
+}
+
+/// Batch-compile all deferred forms as a single letrec. The letrec
+/// pre-binds every name, enabling mutual recursion among the group.
+/// A trailing tuple expression extracts each binding's value.
+fn try_batch_resolve(
+    deferred: &mut Vec<DeferredForm>,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+) -> bool {
+    let mut combined = String::new();
+    let mut all_names: Vec<String> = Vec::new();
+
+    for form in deferred.iter() {
+        combined.push_str(&form.source);
+        combined.push('\n');
+        all_names.push(form.name.clone());
+    }
+
+    // Trailing tuple: [name1 name2 ...]
+    combined.push_str(&format!("[{}]", all_names.join(" ")));
+
+    let Ok((result, expander)) = compile_file_repl(&combined, symbols, "<repl>") else {
+        return false;
+    };
+    register_repl_macros(expander.macros());
+    let Ok(tuple_val) = vm.execute_scheduled(&result.bytecode, symbols) else {
+        return false;
+    };
+
+    if let Some(items) = tuple_val.as_array() {
+        for (form, val) in deferred.iter().zip(items.iter()) {
+            let sym_id = symbols.intern(&form.name);
+            let (signal, arity) = extract_signal_arity(val);
+            register_repl_binding(sym_id, *val, signal, arity);
+        }
+        let names: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
+        eprintln!("{}: resolved", names.join(", "));
+        deferred.clear();
+        true
+    } else {
+        false
+    }
+}
+
+/// Report unresolved deferred forms at session end. Returns true if
+/// any exist (indicating an error).
+fn report_unresolved(deferred: &[DeferredForm]) -> bool {
+    for form in deferred {
+        eprintln!(
+            "✗ {}: unresolved ({} undefined)",
+            form.name,
+            form.missing.join(", ")
+        );
+    }
+    !deferred.is_empty()
 }
 
 // ── Reading ──────────────────────────────────────────────────────────
