@@ -49,10 +49,14 @@
   ## ── Wait + frame ──────────────────────────────────────────────────
 
   (defn wait-event [handle &named timeout]
-    "Block until display events. Fiber yields via io_uring PollFd."
-    (if (nil? timeout)
-      (ev/poll-fd (plugin:display-fd handle) :read)
-      (ev/poll-fd (plugin:display-fd handle) :read timeout)))
+    "Block until display events. On Linux, yields via io_uring poll on
+     the display fd. On macOS (no display fd), yields for 16ms."
+    (def fd (plugin:display-fd handle))
+    (if (nil? fd)
+      (ev/sleep (or timeout 16))
+      (if (nil? timeout)
+        (ev/poll-fd fd :read)
+        (ev/poll-fd fd :read timeout))))
 
   (defn frame [handle tree]
     "Render one frame. Synchronous — pumps events, renders, returns interactions."
