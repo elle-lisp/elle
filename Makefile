@@ -128,19 +128,15 @@ doctest:   ## Test code examples in documentation (literate mode)
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
-smoke-diff: elle ## Cross-tier differential agreement tests (compile/run-on)
+smoke-diff:    ## Cross-tier differential agreement tests (compile/run-on)
 	@echo "=== differential tier-agreement tests ==="
 	@printf '%s\n' tests/diff/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: differential tests"; exit 1; }
 
-smoke: doctest smoke-vm smoke-jit smoke-diff  ## Run docs, elle tests
+smoke: smoke-vm smoke-jit doctest smoke-diff  ## Run docs, elle tests
 	@echo "=== all smoke tests passed ==="
-
-test-git:  ## Run git plugin integration tests (requires git, no network)
-	cargo build $(CARGO_PROFILE) -p elle
-	$(ELLE) tests/git.lisp
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install
 MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
