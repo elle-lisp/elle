@@ -1,6 +1,6 @@
 .PHONY: all elle docs docgen smoke test test-git clean help \
        smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir smoke-diff doctest \
-       elle-wasm elle-mlir elle-noffi plugins plugins-all mcp
+       elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding
 
 .DEFAULT_GOAL := all
 
@@ -135,7 +135,15 @@ smoke-diff:    ## Cross-tier differential agreement tests (compile/run-on)
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: differential tests"; exit 1; }
 
-smoke: smoke-vm smoke-jit doctest smoke-diff  ## Run docs, elle tests
+EMBED_TARGET_DIR = $(CURDIR)/target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
+
+embedding: elle  ## Build + run embedding demos (Rust + C hosts)
+	cargo build $(CARGO_PROFILE) -p elle-embed
+	cargo run $(CARGO_PROFILE) -p elle-embed --bin host
+	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
+	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
+
+smoke: smoke-vm smoke-jit doctest smoke-diff embedding  ## Run docs, elle tests
 	@echo "=== all smoke tests passed ==="
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install

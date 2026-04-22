@@ -678,6 +678,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "elle-embed"
+version = "0.1.0"
+dependencies = [
+ "elle",
+]
+
+[[package]]
 name = "elle-plugin"
 version = "1.0.0"
 

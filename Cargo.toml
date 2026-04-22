@@ -2,6 +2,7 @@
 members = [
     ".",
     "elle-plugin",
+    "demos/embedding",
 ]
 resolver = "2"
 

@@ -1,0 +1,15 @@
+[package]
+name = "elle-embed"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "host"
+path = "src/main.rs"
+
+[dependencies]
+elle = { path = "../.." }

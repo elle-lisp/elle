@@ -76,6 +76,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 | [modules.md](modules.md) | Import system |
 | [macros.md](macros.md) | Macro system |
 | [ffi.md](ffi.md) | C interop |
+| [embedding.md](embedding.md) | Embedding Elle in Rust/C |
 
 ## Quick Navigation
 
