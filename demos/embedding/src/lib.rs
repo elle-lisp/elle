@@ -43,8 +43,11 @@ pub extern "C" fn elle_init() -> *mut c_void {
 }
 
 /// Destroy an Elle runtime context.
+///
+/// # Safety
+/// `ctx` must be a pointer returned by `elle_init`, or null.
 #[no_mangle]
-pub extern "C" fn elle_destroy(ctx: *mut c_void) {
+pub unsafe extern "C" fn elle_destroy(ctx: *mut c_void) {
     if ctx.is_null() {
         return;
     }
@@ -58,8 +61,12 @@ pub extern "C" fn elle_destroy(ctx: *mut c_void) {
 // ── Eval ────────────────────────────────────────────────────────────
 
 /// Compile and execute Elle source code. Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `ctx` must be a valid `elle_init` pointer. `src` must point to `len`
+/// bytes of valid UTF-8.
 #[no_mangle]
-pub extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize) -> i32 {
+pub unsafe extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize) -> i32 {
     if ctx.is_null() || src.is_null() {
         return -1;
     }
@@ -84,8 +91,11 @@ pub extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize) -> i32
 // ── Result access ───────────────────────────────────────────────────
 
 /// Get the result as an integer. Returns false if not an int.
+///
+/// # Safety
+/// `ctx` must be a valid `elle_init` pointer. `out` must be non-null.
 #[no_mangle]
-pub extern "C" fn elle_result_int(ctx: *mut c_void, out: *mut i64) -> bool {
+pub unsafe extern "C" fn elle_result_int(ctx: *mut c_void, out: *mut i64) -> bool {
     if ctx.is_null() {
         return false;
     }
@@ -107,9 +117,11 @@ pub extern "C" fn elle_result_int(ctx: *mut c_void, out: *mut i64) -> bool {
 /// Register a host primitive. The func pointer uses the same ABI as plugins:
 /// `unsafe extern "C" fn(args: *const Value, nargs: usize) -> PrimResult`.
 ///
-/// The name must point to valid UTF-8 that outlives the context.
+/// # Safety
+/// `name` must point to `name_len` bytes of valid UTF-8 that outlive the
+/// context. `func` must be a valid function pointer.
 #[no_mangle]
-pub extern "C" fn elle_register_prim(
+pub unsafe extern "C" fn elle_register_prim(
     ctx: *mut c_void,
     name: *const u8,
     name_len: usize,
