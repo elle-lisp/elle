@@ -53,7 +53,7 @@
      the display fd. On macOS (no display fd), yields for 16ms."
     (def fd (plugin:display-fd handle))
     (if (nil? fd)
-      (ev/sleep (or timeout 16))
+      (ev/sleep (or timeout 0.016))
       (if (nil? timeout)
         (ev/poll-fd fd :read)
         (ev/poll-fd fd :read timeout))))
