@@ -109,6 +109,9 @@ mod flip_cli {
 mod mutability {
     include!("mutability.rs");
 }
+mod embedding {
+    include!("embedding.rs");
+}
 mod projection {
     include!("projection.rs");
 }

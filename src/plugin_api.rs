@@ -36,13 +36,13 @@ const _: () = assert!(std::mem::align_of::<PrimResult>() == 8);
 /// Raw plugin primitive result, layout-compatible with `ElleResult` in
 /// elle-plugin: `{ signal: u32, [4 pad], value: [u64; 2] }`.
 #[repr(C)]
-pub(crate) struct PrimResult {
+pub struct PrimResult {
     pub signal: u32,
     pub value: Value,
 }
 
 /// Plugin primitive function pointer (C ABI).
-pub(crate) type PluginPrimFn = unsafe extern "C" fn(args: *const Value, nargs: usize) -> PrimResult;
+pub type PluginPrimFn = unsafe extern "C" fn(args: *const Value, nargs: usize) -> PrimResult;
 
 /// Sentinel function used as the `func` field of plugin PrimitiveDefs.
 /// Never actually called — the VM checks for this and dispatches through
@@ -52,14 +52,14 @@ fn plugin_sentinel(_args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// The sentinel as a PrimFn value, for comparison in the VM.
-pub(crate) const PLUGIN_SENTINEL: PrimFn = plugin_sentinel;
+pub const PLUGIN_SENTINEL: PrimFn = plugin_sentinel;
 
 /// Address-keyed table of plugin function pointers.
 /// Key = `&'static PrimitiveDef` pointer cast to usize.
 static PLUGIN_FUNCS: RwLock<Option<HashMap<usize, PluginPrimFn>>> = RwLock::new(None);
 
 /// Register a plugin function pointer for a PrimitiveDef.
-pub(crate) fn register_plugin_fn(def: &'static PrimitiveDef, func: PluginPrimFn) {
+pub fn register_plugin_fn(def: &'static PrimitiveDef, func: PluginPrimFn) {
     let mut table = PLUGIN_FUNCS.write().unwrap();
     let map = table.get_or_insert_with(HashMap::new);
     map.insert(def as *const PrimitiveDef as usize, func);

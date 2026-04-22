@@ -1197,9 +1197,9 @@
               (true (begin (fiber/resume fiber)
                            (handle-fiber-after-resume fiber))))))))
 
-    (defn process-completions []
+    (defn process-completions [timeout-ms]
       "Wait for I/O completions and route fibers."
-      (let [completions (io/wait backend (- 0 1))]
+      (let [completions (io/wait backend timeout-ms)]
         (each c in completions
           (let* [id    (get c :id)
                  fiber (get pending id)]
@@ -1252,28 +1252,35 @@
         (let [fiber (pop runnable)]
           (protect (fiber/cancel fiber {:error :shutdown})))))
 
+    (defn step [timeout-ms]
+      "Execute one tick of the event loop. Returns :done or :pending."
+      (block :tick
+        (drain-runnable)
+        (when (and (= (length pending) 0)
+                   (= (length waiters) 0)
+                   (= (length select-sets) 0)
+                   (= (length park-queues) 0))
+          (break :tick :done))
+        (let [timeout (get shutdown-req 0)]
+          (unless (nil? timeout)
+            (do-shutdown timeout)
+            (break :tick :done)))
+        (process-completions timeout-ms)
+        :pending))
+
     {:spawn
       # scheduler-fn: register fiber
       (fn (fiber)
         (push runnable fiber)
         fiber)
+     :step step
      :pump
       # pump-fn: event loop
       (fn ()
         (block :loop
           (forever
-            (drain-runnable)
-            (when (and (= (length pending) 0)
-                       (= (length waiters) 0)
-                       (= (length select-sets) 0)
-                       (= (length park-queues) 0))
-              (break :loop nil))
-            # Check for shutdown request
-            (let [timeout (get shutdown-req 0)]
-              (unless (nil? timeout)
-                (do-shutdown timeout)
-                (break :loop nil)))
-            (process-completions)))
+            (when (= (step (- 0 1)) :done)
+              (break :loop nil))))
         # Crash on unjoined errored fibers — never swallow errors silently
         (each [fiber status] in (pairs completed)
           (when (and (= status :error) (not (contains? joined fiber)))
@@ -1297,6 +1304,12 @@
     (when (nil? shutdown-fn)
       (error {:error :state-error :reason :no-event-loop :message "not inside an event loop"}))
     (shutdown-fn timeout-ms)))
+
+(defn ev/step [& args]
+  "Step the current event loop once. timeout-ms defaults to 0 (non-blocking).
+   Returns :done when all fibers have completed, :pending otherwise."
+  (let [timeout (or (get args 0) 0)]
+    ((get (*scheduler*) :step) timeout)))
 
 (defn ev/with-scheduler [sched & thunks]
   "Run thunks under the given scheduler.
@@ -1658,7 +1671,7 @@
     :print print :println println :eprint eprint :eprintln eprintln
     :*spawn* *spawn* :*scheduler* *scheduler* :*io-backend* *io-backend*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
-     :ev/run ev/run :ev/with-scheduler ev/with-scheduler
+     :ev/run ev/run :ev/step ev/step :ev/with-scheduler ev/with-scheduler
      :ev/join ev/join :ev/join-protected ev/join-protected
      :ev/abort ev/abort :ev/as-completed ev/as-completed
      :ev/select ev/select :ev/race ev/race

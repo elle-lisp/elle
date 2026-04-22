@@ -19,6 +19,7 @@ These demos validate that Elle can express the same algorithms as other Lisps (C
 | `microgpt/` | Micro GPT autograd/neural network | Autograd engine, backpropagation, table operations |
 | `nqueens/` | N-Queens backtracking algorithm | Recursion, list operations, functional predicates, backtracking |
 | `scope-alloc/` | Allocator scope testing | Memory management, region-based allocation |
+| `embedding/` | Elle as a shared library | Custom primitives, C-ABI surface, step-based scheduling |
 
 ## Running demos
 

@@ -22,6 +22,7 @@ Design documents, language references, and contributor guides for Elle.
 | `cookbook.md` | Step-by-step recipes for common changes: new primitives, heap types, bytecode instructions, special forms, lint rules, macros | Root AGENTS.md |
 | `testing.md` | Testing strategy: decision tree, test categories, property tests, CI structure, running tests | Root AGENTS.md |
 | `pipeline.md` | Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching | Root AGENTS.md |
+| `embedding.md` | Embedding Elle as a library: Rust/C hosts, step-based scheduler, custom primitives | Root AGENTS.md |
 | `debugging.md` | Debugging toolkit: introspection primitives, time API, signal system, memory profiling | Root AGENTS.md |
 | `oddities.md` | Intentional design choices that look wrong: nil vs empty list, comment/splice syntax, mutation, collection literals | Root AGENTS.md |
 
