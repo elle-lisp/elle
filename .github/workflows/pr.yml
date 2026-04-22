@@ -180,6 +180,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
+      - name: make elle
+        run: make elle
+      - name: make doctest
+        run: make doctest
       - name: make smoke
         run: make smoke
       - name: Run integration tests
@@ -207,8 +211,6 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle-noffi
         run: make elle-noffi
-      - name: make doctest
-        run: make doctest
       - name: make smoke-noffi
         run: make smoke-noffi
 
@@ -250,6 +252,10 @@ jobs:
           shared-key: macos
       - name: Install GNU parallel and coreutils
         run: brew install parallel coreutils
+      - name: make elle
+        run: make elle
+      - name: make doctest
+        run: make doctest
       - name: make smoke
         run: make smoke
       - name: Run integration tests

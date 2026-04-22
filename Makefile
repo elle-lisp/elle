@@ -121,7 +121,7 @@ smoke-wasm: elle-wasm
 			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass (full)"; exit 1; }
 
-doctest: elle ## Test code examples in documentation (literate mode)
+doctest:   ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' docs/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
