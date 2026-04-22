@@ -102,6 +102,69 @@
         {}
         (protobuf:decode schema response-type raw))))
 
+  ## ── Server-streaming RPC ──────────────────────────────────────────
+
+  (defn grpc-call-stream [session schema method request-type request-struct response-type]
+    "Open a server-streaming gRPC call. Returns a reader function.
+     Call (reader) repeatedly; returns the next decoded message, or nil
+     at end-of-stream. Each call blocks until a message is available.
+     gRPC frames may span h2 DATA boundaries — the reader buffers and
+     splits on the 5-byte length-prefixed frame headers."
+    (def body (grpc-encode (protobuf:encode schema request-type request-struct)))
+    (def s (http2:send-raw session "POST" method
+              :body body
+              :headers [["content-type" "application/grpc"]
+                        ["te" "trailers"]]))
+    (def @buf (bytes))
+    (def @done false)
+
+    ## Return reader closure
+    (fn []
+      ## Try to extract a complete gRPC frame from buf
+      (def @result nil)
+      (when (>= (length buf) 5)
+        (let [len (bit/or (bit/shl (get buf 1) 24)
+                          (bit/shl (get buf 2) 16)
+                          (bit/shl (get buf 3) 8)
+                          (get buf 4))
+              frame-end (+ 5 len)]
+          (when (>= (length buf) frame-end)
+            (let [payload (slice buf 5 frame-end)]
+              (assign buf (slice buf frame-end))
+              (assign result (protobuf:decode schema response-type payload))))))
+
+      ## If nothing in buffer, read h2 frames until we get a complete message
+      (while (and (nil? result) (not done))
+        (let [msg (s:data-queue:take)]
+          (cond
+            ((= msg:type :headers)
+             (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
+               (when (and status-pair (not (= (get status-pair 1) "0")))
+                 (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
+                   (error {:error :grpc-error
+                           :code (parse-int (get status-pair 1))
+                           :message (if msg-pair (get msg-pair 1) "unknown error")}))))
+             (when msg:end-stream (assign done true)))
+            ((= msg:type :data)
+             (assign buf (concat buf msg:data))
+             (when msg:end-stream (assign done true))
+             ## Try to extract after each data frame
+             (when (and (nil? result) (>= (length buf) 5))
+               (let [len (bit/or (bit/shl (get buf 1) 24)
+                                 (bit/shl (get buf 2) 16)
+                                 (bit/shl (get buf 3) 8)
+                                 (get buf 4))
+                     frame-end (+ 5 len)]
+                 (when (>= (length buf) frame-end)
+                   (let [payload (slice buf 5 frame-end)]
+                     (assign buf (slice buf frame-end))
+                     (assign result (protobuf:decode schema response-type payload)))))))
+            ((= msg:type :rst)
+             (error {:error :grpc-error :reason :stream-reset
+                     :code msg:code}))
+            (true (assign done true)))))
+      result))
+
   ## ── Close ──────────────────────────────────────────────────────────
 
   (defn grpc-close [session]
@@ -110,9 +173,10 @@
 
   ## ── Exports ────────────────────────────────────────────────────────
 
-  {:connect    grpc-connect
-   :call       grpc-call
-   :call-decode grpc-call-decode
-   :close      grpc-close
-   :encode     grpc-encode
-   :decode     grpc-decode})
+  {:connect      grpc-connect
+   :call         grpc-call
+   :call-decode  grpc-call-decode
+   :call-stream  grpc-call-stream
+   :close        grpc-close
+   :encode       grpc-encode
+   :decode       grpc-decode})

@@ -292,34 +292,37 @@
                    (stream:transition s :recv-rst)
                    (let [err-code (frame:read-u32 payload 0)]
                      (put s :error-code err-code)
-                     (s:data-queue:put {:type :rst :code err-code})))))
+                     (s:data-queue:put {:type :rst :code err-code}))
+                   (del session:streams sid))))
 
               ## ── HEADERS ──
               ((= ftype C:type-headers)
                (let [s (get-stream session sid)]
                  (when (= s:state :idle)
                    (stream:transition s :recv-headers))
-                 (let [headers (hpack:decode session:hpack-decoder payload)]
+                 (let [headers (hpack:decode session:hpack-decoder payload)
+                       end? (has-flag? flags C:flag-end-stream)]
                    (put s :headers headers)
-                   (when (has-flag? flags C:flag-end-stream)
-                     (stream:transition s :recv-end-stream))
+                   (when end? (stream:transition s :recv-end-stream))
                    (s:data-queue:put {:type :headers
                                       :headers headers
-                                      :end-stream (has-flag? flags C:flag-end-stream)}))))
+                                      :end-stream end?})
+                   (when end? (del session:streams sid)))))
 
               ## ── DATA ──
               ((= ftype C:type-data)
                (let [s (get session:streams sid)]
                  (when s
-                   (s:data-queue:put {:type :data :data payload
-                                      :end-stream (has-flag? flags C:flag-end-stream)})
-                   (when (has-flag? flags C:flag-end-stream)
-                     (stream:transition s :recv-end-stream))
-                   # Auto WINDOW_UPDATE for connection + stream
-                   (let [len (length payload)]
-                     (when (> len 0)
-                       (send-window-update session 0 len)
-                       (send-window-update session sid len))))))
+                   (let [end? (has-flag? flags C:flag-end-stream)]
+                     (s:data-queue:put {:type :data :data payload
+                                        :end-stream end?})
+                     (when end? (stream:transition s :recv-end-stream))
+                     # Auto WINDOW_UPDATE for connection + stream
+                     (let [len (length payload)]
+                       (when (> len 0)
+                         (send-window-update session 0 len)
+                         (send-window-update session sid len)))
+                     (when end? (del session:streams sid))))))
 
               ## ── PUSH_PROMISE — reject ──
               ((= ftype C:type-push-promise)
@@ -672,20 +675,22 @@
               ((= ftype C:type-data)
                (let [s (get session:streams sid)]
                  (when s
-                   (s:data-queue:put {:type :data :data payload
-                                      :end-stream (has-flag? flags C:flag-end-stream)})
-                   (when (has-flag? flags C:flag-end-stream)
-                     (stream:transition s :recv-end-stream))
-                   (let [len (length payload)]
-                     (when (> len 0)
-                       (send-window-update session 0 len)
-                       (send-window-update session sid len))))))
+                   (let [end? (has-flag? flags C:flag-end-stream)]
+                     (s:data-queue:put {:type :data :data payload
+                                        :end-stream end?})
+                     (when end? (stream:transition s :recv-end-stream))
+                     (let [len (length payload)]
+                       (when (> len 0)
+                         (send-window-update session 0 len)
+                         (send-window-update session sid len)))
+                     (when end? (del session:streams sid))))))
 
               ((= ftype C:type-rst-stream)
                (let [s (get session:streams sid)]
                  (when s
                    (stream:transition s :recv-rst)
-                   (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)}))))
+                   (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)})
+                   (del session:streams sid))))
 
               (true nil)))))))
 
@@ -775,6 +780,9 @@
         (let [resp (h2-send session "GET" "/test")]
           (assert (= resp:status 200) "loopback: status 200")
           (assert (= (string resp:body) "hello /test") "loopback: body"))
+        # Stream leak regression: completed streams must be removed
+        (assert (= (length (keys session:streams)) 0)
+                "loopback: stream removed after response")
         (h2-close session)))
 
     true)
