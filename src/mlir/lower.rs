@@ -237,6 +237,10 @@ pub fn lower_to_module<'c>(
     let mut regs: HashMap<u32, Value> = HashMap::new();
     // Type map: LIR Reg → ScalarType (Int or Float)
     let mut types: HashMap<u32, ScalarType> = HashMap::new();
+    // Environment values: env index → (MLIR Value, ScalarType).
+    // Separate from `regs` so LoadCapture lookups are never clobbered by
+    // destination register writes (LIR reg indices can collide with env indices).
+    let mut env_vals: HashMap<u32, (Value, ScalarType)> = HashMap::new();
     // Local slot types: slot index → ScalarType
     let mut slot_types: HashMap<u32, ScalarType> = HashMap::new();
     // Return type: determined from Return terminators
@@ -251,18 +255,16 @@ pub fn lower_to_module<'c>(
     if !blocks.is_empty() {
         let entry = &blocks[0];
 
-        // Pre-populate regs with entry block arguments.
+        // Pre-populate env_vals with entry block arguments.
         // MLIR signature: [captures..., params...], all i64.
         // Captures marked as Float in capture_types get bitcast i64→f64.
         for i in 0..num_captures as usize {
             let raw: Value = entry.argument(i).unwrap().into();
             if capture_types & (1u64 << i) != 0 {
                 let bc = entry.append_operation(arith::bitcast(raw, f64_type, location));
-                regs.insert(i as u32, bc.result(0).unwrap().into());
-                types.insert(i as u32, ScalarType::Float);
+                env_vals.insert(i as u32, (bc.result(0).unwrap().into(), ScalarType::Float));
             } else {
-                regs.insert(i as u32, raw);
-                types.insert(i as u32, ScalarType::Int);
+                env_vals.insert(i as u32, (raw, ScalarType::Int));
             }
         }
         // Params follow captures in the MLIR argument list.
@@ -271,11 +273,12 @@ pub fn lower_to_module<'c>(
             let raw: Value = entry.argument(arg_idx).unwrap().into();
             if param_types & (1u64 << i) != 0 {
                 let bc = entry.append_operation(arith::bitcast(raw, f64_type, location));
-                regs.insert(arg_idx as u32, bc.result(0).unwrap().into());
-                types.insert(arg_idx as u32, ScalarType::Float);
+                env_vals.insert(
+                    arg_idx as u32,
+                    (bc.result(0).unwrap().into(), ScalarType::Float),
+                );
             } else {
-                regs.insert(arg_idx as u32, raw);
-                types.insert(arg_idx as u32, ScalarType::Int);
+                env_vals.insert(arg_idx as u32, (raw, ScalarType::Int));
             }
         }
 
@@ -305,20 +308,16 @@ pub fn lower_to_module<'c>(
                     // to the MLIR block argument index.
                     let idx = *index as usize;
                     if idx < total_args {
-                        let t = if idx < num_captures as usize {
-                            // Capture — type already set during entry setup
-                            types.get(&(idx as u32)).copied().unwrap_or(ScalarType::Int)
-                        } else {
-                            // Parameter — type already set during entry setup
-                            types.get(&(idx as u32)).copied().unwrap_or(ScalarType::Int)
-                        };
-                        // Use the pre-computed (possibly bitcast) value from regs
-                        if let Some(&val) = regs.get(&(idx as u32)) {
+                        // Use env_vals (never clobbered by dst writes) to look
+                        // up the (possibly bitcast) MLIR value and its type.
+                        if let Some(&(val, t)) = env_vals.get(&(idx as u32)) {
                             regs.insert(dst.0, val);
+                            types.insert(dst.0, t);
                         } else {
+                            // Fallback: shouldn't happen if env_vals was populated
                             regs.insert(dst.0, blocks[0].argument(idx).unwrap().into());
+                            types.insert(dst.0, ScalarType::Int);
                         }
-                        types.insert(dst.0, t);
                     }
                 }
                 LirInstr::Const { dst, value } => match value {
