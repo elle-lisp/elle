@@ -55,6 +55,10 @@ impl Reader {
     /// Try to read a single value from the token stream.
     /// Returns None if at EOF (not an error), Some(Err(_)) if there's a parse error.
     pub fn try_read(&mut self, symbols: &mut SymbolTable) -> Option<Result<Value, String>> {
+        // Skip comment tokens
+        while matches!(self.current(), Some(OwnedToken::Comment(_))) {
+            self.advance();
+        }
         let token = self.current().cloned()?;
         Some(self.read_one(symbols, &token))
     }
@@ -62,6 +66,12 @@ impl Reader {
     /// Read a single token/form and return result
     fn read_one(&mut self, symbols: &mut SymbolTable, token: &OwnedToken) -> Result<Value, String> {
         match token {
+            // Skip comment tokens — they are handled before reaching here by try_read,
+            // but may appear in recursive read() calls inside compound forms.
+            OwnedToken::Comment(_) => {
+                self.advance();
+                self.read(symbols)
+            }
             OwnedToken::LeftParen => self.read_list(symbols),
             OwnedToken::LeftBracket => self.read_array(symbols),
             OwnedToken::LeftBrace => self.read_struct(symbols),
@@ -91,6 +101,10 @@ impl Reader {
                                     .rev()
                                     .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
                                 return Ok(Value::cons(list_sym, result));
+                            }
+                            Some(OwnedToken::Comment(_)) => {
+                                self.advance();
+                                continue;
                             }
                             _ => elements.push(self.read(symbols)?),
                         }
@@ -253,6 +267,10 @@ impl Reader {
                         .rev()
                         .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc)));
                 }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
+                }
                 _ => elements.push(self.read(symbols)?),
             }
         }
@@ -274,6 +292,10 @@ impl Reader {
                 Some(OwnedToken::RightBracket) => {
                     self.advance();
                     return Ok(Value::array_mut(elements));
+                }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
                 }
                 _ => elements.push(self.read(symbols)?),
             }
@@ -303,6 +325,10 @@ impl Reader {
                         .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
                     return Ok(Value::cons(struct_sym, result));
                 }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
+                }
                 _ => elements.push(self.read(symbols)?),
             }
         }
@@ -324,6 +350,10 @@ impl Reader {
                         .rev()
                         .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
                     return Ok(Value::cons(table_sym, result));
+                }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
                 }
                 _ => elements.push(self.read(symbols)?),
             }

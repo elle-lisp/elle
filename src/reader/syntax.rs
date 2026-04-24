@@ -96,6 +96,10 @@ impl SyntaxReader {
 
     /// Try to read a single syntax form. Returns None at EOF.
     pub fn try_read(&mut self) -> Option<Result<Syntax, String>> {
+        // Skip any leading comment tokens
+        while matches!(self.current(), Some(OwnedToken::Comment(_))) {
+            self.advance();
+        }
         let token = self.current().cloned()?;
         let loc = self.current_location();
         let boff = self.current_byte_offset();
@@ -116,8 +120,8 @@ impl SyntaxReader {
     /// Read all remaining forms
     pub fn read_all(&mut self) -> Result<Vec<Syntax>, String> {
         let mut results = Vec::new();
-        while self.current().is_some() {
-            results.push(self.read()?);
+        while let Some(result) = self.try_read() {
+            results.push(result?);
         }
         Ok(results)
     }
@@ -129,6 +133,11 @@ impl SyntaxReader {
         boff: usize,
     ) -> Result<Syntax, String> {
         match token {
+            // Skip comment tokens inside compound forms
+            OwnedToken::Comment(_) => {
+                self.advance();
+                self.read()
+            }
             OwnedToken::LeftParen => self.read_list(loc, boff),
             OwnedToken::LeftBracket => self.read_array(loc, boff),
             OwnedToken::LeftBrace => self.read_struct(loc, boff),
@@ -237,6 +246,10 @@ impl SyntaxReader {
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Set(elements), span));
                 }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
+                }
                 _ => elements.push(self.read()?),
             }
         }
@@ -260,6 +273,10 @@ impl SyntaxReader {
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::SetMut(elements), span));
                 }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
+                }
                 _ => elements.push(self.read()?),
             }
         }
@@ -281,6 +298,10 @@ impl SyntaxReader {
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Bytes(elements), span));
+                }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
                 }
                 _ => elements.push(self.read()?),
             }
@@ -307,6 +328,10 @@ impl SyntaxReader {
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::BytesMut(elements), span));
+                }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
                 }
                 _ => elements.push(self.read()?),
             }
@@ -342,6 +367,10 @@ impl SyntaxReader {
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::List(elements), span));
                 }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
+                }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
                     let set_boff = self.current_byte_offset();
@@ -376,6 +405,10 @@ impl SyntaxReader {
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Array(elements), span));
                 }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
+                }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
                     let set_boff = self.current_byte_offset();
@@ -404,6 +437,10 @@ impl SyntaxReader {
                     self.advance();
                     let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Struct(elements), span));
+                }
+                Some(OwnedToken::Comment(_)) => {
+                    self.advance();
+                    continue;
                 }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
@@ -443,6 +480,10 @@ impl SyntaxReader {
                             let span = self.make_span(start_boff, end, start_loc);
                             return Ok(Syntax::new(SyntaxKind::ArrayMut(elements), span));
                         }
+                        Some(OwnedToken::Comment(_)) => {
+                            self.advance();
+                            continue;
+                        }
                         _ => elements.push(self.read()?),
                     }
                 }
@@ -466,6 +507,10 @@ impl SyntaxReader {
                             let span = self.make_span(start_boff, end, start_loc);
                             return Ok(Syntax::new(SyntaxKind::StructMut(elements), span));
                         }
+                        Some(OwnedToken::Comment(_)) => {
+                            self.advance();
+                            continue;
+                        }
                         _ => elements.push(self.read()?),
                     }
                 }
@@ -473,12 +518,18 @@ impl SyntaxReader {
             Some(OwnedToken::String(s)) => {
                 // @"..." is sugar for (thaw "...")
                 let string_val = s.clone();
-                let end = self.current_byte_offset() + self.current_length();
+                let str_boff = self.current_byte_offset();
+                let end = str_boff + self.current_length();
                 self.advance(); // skip the string token
-                let span = self.make_span(start_boff, end, start_loc);
-                let sym = Syntax::new(SyntaxKind::Symbol("thaw".to_string()), span.clone());
-                let str_lit = Syntax::new(SyntaxKind::String(string_val), span.clone());
-                Ok(Syntax::new(SyntaxKind::List(vec![sym, str_lit]), span))
+                let outer_span = self.make_span(start_boff, end, start_loc);
+                let sym_span = self.make_span(start_boff, start_boff + 1, start_loc);
+                let str_span = self.make_span(str_boff, end, start_loc);
+                let sym = Syntax::new(SyntaxKind::Symbol("thaw".to_string()), sym_span);
+                let str_lit = Syntax::new(SyntaxKind::String(string_val), str_span);
+                Ok(Syntax::new(
+                    SyntaxKind::List(vec![sym, str_lit]),
+                    outer_span,
+                ))
             }
             _ => Err(format!(
                 "{}: @ must be followed by [...], {{...}}, |...|, or \"...\"",

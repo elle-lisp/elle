@@ -103,17 +103,25 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.current() {
             if c.is_whitespace() {
                 self.advance();
-            } else if c == '#' {
-                // Skip comment until newline
-                while let Some(c) = self.advance() {
-                    if c == '\n' {
-                        break;
-                    }
-                }
             } else {
                 break;
             }
         }
+    }
+
+    /// Read a comment starting at the current `#` character.
+    /// Returns the full comment text including the `#` prefix.
+    /// Leaves the lexer positioned after the newline (or at EOF).
+    fn read_comment(&mut self) -> String {
+        let mut text = String::new();
+        // The caller guarantees current() == Some('#')
+        while let Some(c) = self.advance() {
+            text.push(c);
+            if c == '\n' {
+                break;
+            }
+        }
+        text
     }
 
     fn read_string(&mut self) -> Result<String, String> {
@@ -179,6 +187,16 @@ impl<'a> Lexer<'a> {
 
         match self.current() {
             None => Ok(None),
+            Some('#') => {
+                let text = self.read_comment();
+                let len = self.pos - start_pos;
+                Ok(Some(TokenWithLoc {
+                    token: Token::Comment(text),
+                    loc,
+                    len,
+                    byte_offset: start_pos,
+                }))
+            }
             Some('(') => {
                 self.advance();
                 Ok(Some(TokenWithLoc {
@@ -509,5 +527,52 @@ mod tests {
     #[test]
     fn truetrue_is_symbol() {
         assert!(matches!(lex_single("truetrue"), Token::Symbol("truetrue")));
+    }
+
+    #[test]
+    fn comment_is_token() {
+        let mut lexer = Lexer::new("# hello");
+        let tok = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(tok, Token::Comment(s) if s == "# hello"));
+    }
+
+    #[test]
+    fn doc_comment_is_token() {
+        let mut lexer = Lexer::new("## doc text");
+        let tok = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(tok, Token::Comment(s) if s == "## doc text"));
+    }
+
+    #[test]
+    fn comment_before_code() {
+        let mut lexer = Lexer::new("# comment\n42");
+        let first = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(first, Token::Comment(_)));
+        let second = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(second, Token::Integer(42)));
+    }
+
+    #[test]
+    fn comment_after_code() {
+        let mut lexer = Lexer::new("42 # inline comment");
+        let first = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(first, Token::Integer(42)));
+        let second = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(second, Token::Comment(s) if s.contains("inline comment")));
+    }
+
+    #[test]
+    fn comment_at_eof() {
+        let mut lexer = Lexer::new("# trailing");
+        let tok = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(tok, Token::Comment(s) if s == "# trailing"));
+        assert!(lexer.next_token().unwrap().is_none());
+    }
+
+    #[test]
+    fn comment_with_special_chars() {
+        let mut lexer = Lexer::new("# (parens) [brackets] 'quote");
+        let tok = lexer.next_token().unwrap().unwrap();
+        assert!(matches!(tok, Token::Comment(s) if s.contains("(parens)")));
     }
 }

@@ -31,6 +31,22 @@ impl FormatterConfig {
         self.line_length = length;
         self
     }
+
+    /// Set the line length if Some, otherwise keep default.
+    pub fn maybe_with_line_length(mut self, length: Option<usize>) -> Self {
+        if let Some(l) = length {
+            self.line_length = l;
+        }
+        self
+    }
+
+    /// Set the indent width if Some, otherwise keep default.
+    pub fn maybe_with_indent_width(mut self, width: Option<usize>) -> Self {
+        if let Some(w) = width {
+            self.indent_width = w;
+        }
+        self
+    }
 }
 
 impl Default for FormatterConfig {

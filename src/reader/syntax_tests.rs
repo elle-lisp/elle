@@ -533,3 +533,48 @@ fn test_parse_hex_with_underscore() {
     let result = lex_and_parse("0xFF_FF").unwrap();
     assert!(matches!(result.kind, SyntaxKind::Int(0xFFFF)));
 }
+
+#[test]
+fn test_comment_skipped_before_form() {
+    let result = lex_and_parse_all("# comment\n42").unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(matches!(result[0].kind, SyntaxKind::Int(42)));
+}
+
+#[test]
+fn test_comment_skipped_after_form() {
+    let result = lex_and_parse_all("42 # inline").unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(matches!(result[0].kind, SyntaxKind::Int(42)));
+}
+
+#[test]
+fn test_comment_between_forms() {
+    let result = lex_and_parse_all("1 # mid\n2").unwrap();
+    assert_eq!(result.len(), 2);
+    assert!(matches!(result[0].kind, SyntaxKind::Int(1)));
+    assert!(matches!(result[1].kind, SyntaxKind::Int(2)));
+}
+
+#[test]
+fn test_comment_inside_list() {
+    let result = lex_and_parse_all("(1 # comment\n2)").unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0].kind {
+        SyntaxKind::List(elems) => assert_eq!(elems.len(), 2),
+        other => panic!("expected List, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_file_ends_with_comment() {
+    let result = lex_and_parse_all("42 # trailing").unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(matches!(result[0].kind, SyntaxKind::Int(42)));
+}
+
+#[test]
+fn test_only_comment_produces_empty() {
+    let result = lex_and_parse_all("# just a comment").unwrap();
+    assert_eq!(result.len(), 0);
+}

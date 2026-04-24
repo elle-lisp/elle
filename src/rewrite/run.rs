@@ -11,6 +11,27 @@ use crate::epoch::rules::{
 use crate::reader::{Lexer, Token};
 use std::collections::HashMap;
 
+/// Lex source into tokens, filtering out comment tokens.
+/// The rewrite engine uses positional token matching that assumes
+/// no comment tokens in the stream (they were invisible before the
+/// formatter needed them).
+fn lex_tokens_no_comments(source: &str) -> Result<Vec<(Token<'_>, usize, usize)>, String> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens = Vec::new();
+    loop {
+        match lexer.next_token_with_loc() {
+            Ok(Some(t)) => {
+                if !matches!(t.token, Token::Comment(_)) {
+                    tokens.push((t.token, t.byte_offset, t.len));
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(tokens)
+}
+
 /// Run the rewrite tool. Returns exit code.
 /// Exit codes: 0 = success (or no changes in --check mode), 1 = changes needed (--check) or error.
 pub fn run(args: &[String]) -> i32 {
@@ -137,7 +158,12 @@ pub fn run(args: &[String]) -> i32 {
 
 /// Rewrite a single file's source. Returns `Ok(None)` if no changes needed,
 /// `Ok(Some((new_source, edit_count)))` if changes were made.
-fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>, String> {
+///
+/// `file_path` is used only for error messages.
+pub(crate) fn rewrite_file(
+    source: &str,
+    file_path: &str,
+) -> Result<Option<(String, usize)>, String> {
     // Detect epoch
     let epoch_info = detect_epoch_in_source(source)?;
 
@@ -291,22 +317,14 @@ fn check_removals(
     removals: &HashMap<&str, &str>,
     file_path: &str,
 ) -> Result<(), String> {
-    use crate::reader::{Lexer, Token};
+    let tokens = lex_tokens_no_comments(source)?;
 
-    let mut lexer = Lexer::new(source);
     let mut errors = Vec::new();
-
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(token)) => {
-                if let Token::Symbol(name) = &token.token {
-                    if let Some(msg) = removals.get(*name) {
-                        errors.push(format!("  `{}` has been removed — {}", name, msg));
-                    }
-                }
+    for (token, _, _) in &tokens {
+        if let Token::Symbol(name) = token {
+            if let Some(msg) = removals.get(*name) {
+                errors.push(format!("  `{}` has been removed — {}", name, msg));
             }
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
         }
     }
 
@@ -329,15 +347,7 @@ fn collect_unwrap_edits(
     unwraps: &HashMap<&str, &str>,
     file_path: &str,
 ) -> Result<Vec<Edit>, String> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
+    let tokens = lex_tokens_no_comments(source)?;
 
     let mut edits = Vec::new();
     let mut i = 0;
@@ -452,15 +462,7 @@ fn collect_replace_edits(
     source: &str,
     replaces: &[(&str, usize, &str)],
 ) -> Result<Vec<Edit>, String> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new(); // (token, byte_offset, len)
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
+    let tokens = lex_tokens_no_comments(source)?;
 
     let mut edits = Vec::new();
     let mut i = 0;
@@ -594,15 +596,7 @@ fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize) -> usize {
 /// Matches `( let|letrec [ [p1 v1] [p2 v2] ... ] body... )` and deletes
 /// the inner `[`/`]` (or `(`/`)`) delimiters, leaving the contents flat.
 fn collect_flatten_edits(source: &str, flatten_syms: &[&str]) -> Result<Vec<Edit>, String> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
+    let tokens = lex_tokens_no_comments(source)?;
 
     let mut edits = Vec::new();
     let mut i = 0;
@@ -728,15 +722,7 @@ fn try_match_flatten(
 /// Matches `(let|letrec|let*|if-let|when-let|when-ok (bindings...) body...)`
 /// where the bindings container uses `(...)` and replaces with `[...]`.
 fn collect_bracket_edits(source: &str, binding_forms: &[&str]) -> Result<Vec<Edit>, String> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
-    loop {
-        match lexer.next_token_with_loc() {
-            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
-            Ok(None) => break,
-            Err(e) => return Err(e.to_string()),
-        }
-    }
+    let tokens = lex_tokens_no_comments(source)?;
 
     let mut edits = Vec::new();
     let mut i = 0;

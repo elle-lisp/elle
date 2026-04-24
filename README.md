@@ -872,6 +872,14 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
 
 - **Match exhaustiveness is checked at compile time.** The compiler warns when a match expression has patterns that can never be reached, and when the match may not cover all cases for a known type.
 
+- **Opinionated code formatter.** `elle fmt` formats Elle source to a single canonical style with zero configuration. Wadler-style pretty printing with column-aware alignment. Idempotent — formatting already-formatted code produces identical output. See [`docs/fmt.md`](docs/fmt.md) for the rule set and examples.
+
+  ```
+  elle fmt lib/*.lisp              # format in place
+  elle fmt --check lib/*.lisp      # CI: exit 1 if any file needs formatting
+  cat file.lisp | elle fmt         # stdin → stdout
+  ```
+
 - **Source-to-source rewriting tool.** The `rewrite` subcommand applies pattern-based rules to Elle source files for refactoring and code generation. Rules are pattern-action pairs that match syntax trees and produce transformed output.
 
 - **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
