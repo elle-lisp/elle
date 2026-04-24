@@ -1,272 +1,77 @@
-//! Core formatting logic
+//! Core formatting entry point.
 //!
-//! Implements a recursive pretty-printer for s-expressions.
+//! Implements the full formatting pipeline:
+//!
+//! ```text
+//! Source → strip shebang → lex (separate tokens + comments)
+//!       → parse to Syntax → collect trivia → attach trivia
+//!       → generate Doc → render → prepend shebang + trailing newline
+//! ```
 
+use super::comments::{lex_for_format, strip_shebang};
 use super::config::FormatterConfig;
-use crate::reader::Lexer;
-use crate::symbol::SymbolTable;
-use crate::value::{SymbolId, Value};
-use crate::Reader;
+use super::format::format_forms;
+use super::render::render;
+use super::trivia::{collect_trivia, AnnotatedSyntax};
+use crate::reader::SyntaxReader;
 
-/// Format Elle code with the given configuration
+/// Format Elle source code with the given configuration.
 ///
-/// Parses the input code and returns a formatted version.
-/// Returns an error if parsing fails.
+/// Returns the formatted string, or an error if parsing fails.
 pub fn format_code(source: &str, config: &FormatterConfig) -> Result<String, String> {
-    // Parse the source code
-    let mut lexer = Lexer::new(source);
-    let mut tokens = Vec::new();
+    // 1. Strip shebang (single strip point for consistent byte offsets)
+    let (stripped, shebang) = strip_shebang(source);
 
-    loop {
-        match lexer.next_token() {
-            Ok(Some(token)) => {
-                tokens.push(crate::reader::OwnedToken::from(token));
-            }
-            Ok(None) => break,
-            Err(e) => return Err(format!("Lexer error: {}", e)),
-        }
-    }
+    // 2. Lex: separate regular tokens from comment tokens
+    let lexed = lex_for_format(stripped, "<format>")?;
 
-    let mut reader = Reader::new(tokens);
-    let mut symbol_table = SymbolTable::new();
-    let mut values = Vec::new();
+    // 3. Parse regular tokens to Syntax tree
+    let forms = if lexed.tokens.is_empty() {
+        Vec::new()
+    } else {
+        let mut parser = SyntaxReader::with_byte_offsets(
+            lexed.tokens,
+            lexed.locations,
+            lexed.lengths,
+            lexed.byte_offsets,
+        );
+        parser.read_all()?
+    };
 
-    while let Some(result) = reader.try_read(&mut symbol_table) {
-        match result {
-            Ok(value) => values.push(value),
-            Err(e) => return Err(format!("Reader error: {}", e)),
-        }
-    }
-
-    // Format each value
-    let mut formatted = Vec::new();
-    for value in values {
-        formatted.push(format_value(&value, 0, config, &symbol_table));
-    }
-
-    Ok(formatted.join("\n"))
-}
-
-/// Format a single Value into a string
-fn format_value(
-    value: &Value,
-    indent: usize,
-    config: &FormatterConfig,
-    symbol_table: &SymbolTable,
-) -> String {
-    use crate::value::heap::{deref, HeapObject};
-
-    if value.is_nil() {
-        return "nil".to_string();
-    }
-
-    if let Some(b) = value.as_bool() {
-        return if b { "true" } else { "false" }.to_string();
-    }
-
-    if let Some(n) = value.as_int() {
-        return n.to_string();
-    }
-
-    if let Some(n) = value.as_float() {
-        return n.to_string();
-    }
-
-    if let Some(id) = value.as_symbol() {
-        let sym_id = SymbolId(id);
-        return symbol_table
-            .name(sym_id)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("#{}", id));
-    }
-
-    if let Some(name) = value.as_keyword_name() {
-        return format!(":{}", name);
-    }
-
-    // SSO or heap string
-    if value.is_string() {
-        return value
-            .with_string(|s| format!("\"{}\"", s.escape_default()))
-            .unwrap();
-    }
-
-    // Handle heap values
-    if let Some(_ptr) = value.as_heap_ptr() {
-        let obj = unsafe { deref(*value) };
-        match obj {
-            HeapObject::LArrayMut { data: v, .. } => {
-                if let Ok(elements) = v.try_borrow() {
-                    if elements.is_empty() {
-                        return "[]".to_string();
-                    } else {
-                        let items: Vec<String> = elements
-                            .iter()
-                            .map(|e| format_value(e, indent, config, symbol_table))
-                            .collect();
-                        return format!("[{}]", items.join(" "));
-                    }
-                }
-                return "[<borrowed>]".to_string();
-            }
-            HeapObject::Cons(cons) => {
-                return format_cons(&cons.first, &cons.rest, indent, config, symbol_table);
-            }
-            HeapObject::LStructMut { .. } => {
-                // For Phase 1, just return a placeholder
-                return "{{...}}".to_string();
-            }
-            HeapObject::LStruct { .. } => {
-                // For Phase 1, just return a placeholder
-                return "{{...}}".to_string();
-            }
-            HeapObject::Closure { .. } => return "#<closure>".to_string(),
-            HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
-            HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
-            HeapObject::LArray {
-                elements: elems, ..
-            } => {
-                let items: Vec<String> = elems
-                    .iter()
-                    .map(|e| format_value(e, indent, config, symbol_table))
-                    .collect();
-                return format!("[{}]", items.join(" "));
-            }
-            HeapObject::ThreadHandle { .. } => return "#<thread-handle>".to_string(),
-            HeapObject::LBox { .. } => return "#<box>".to_string(),
-            HeapObject::CaptureCell { .. } => return "#<capture-cell>".to_string(),
-            HeapObject::Float(_) => return "#<float>".to_string(),
-            HeapObject::Fiber { .. } => return "#<fiber>".to_string(),
-            HeapObject::Syntax { syntax: s, .. } => return format!("#<syntax:{}>", s),
-            HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
-            HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
-            HeapObject::LStringMut { .. } => return "@\"...\"".to_string(),
-            HeapObject::LBytes { .. } => return "#bytes[...]".to_string(),
-            HeapObject::LBytesMut { .. } => return "#@bytes[...]".to_string(),
-            HeapObject::ManagedPointer { addr: cell, .. } => {
-                return match cell.get() {
-                    Some(addr) => format!("<pointer 0x{:x}>", addr),
-                    None => "<freed-pointer>".to_string(),
-                }
-            }
-            HeapObject::External { obj: ext, .. } => return format!("#<{}>", ext.type_name),
-            HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
-            HeapObject::LString { s, .. } => {
-                // SAFETY: LString bytes are always valid UTF-8 (enforced by constructors).
-                let as_str = unsafe { std::str::from_utf8_unchecked(s.as_slice()) };
-                return format!("\"{}\"", as_str.escape_default());
-            }
-            HeapObject::LSet { data: s, .. } => {
-                let items: Vec<String> = s
-                    .iter()
-                    .map(|e| format_value(e, indent, config, symbol_table))
-                    .collect();
-                return format!("|{}|", items.join(" "));
-            }
-            HeapObject::LSetMut { data: s_ref, .. } => {
-                if let Ok(s) = s_ref.try_borrow() {
-                    let items: Vec<String> = s
-                        .iter()
-                        .map(|e| format_value(e, indent, config, symbol_table))
-                        .collect();
-                    return format!("@|{}|", items.join(" "));
-                }
-                return "@|<borrowed>|".to_string();
-            }
-        }
-    }
-
-    // Fallback for unknown types
-    "#<unknown>".to_string()
-}
-
-/// Format a cons cell (list)
-fn format_cons(
-    head: &Value,
-    tail: &Value,
-    indent: usize,
-    config: &FormatterConfig,
-    symbol_table: &SymbolTable,
-) -> String {
-    use crate::value::heap::{deref, HeapObject};
-
-    // Collect all elements in the list
-    let mut elements = vec![head];
-    let mut current = tail;
-
-    loop {
-        if current.is_nil() || current.is_empty_list() {
-            break;
-        }
-
-        if let Some(_ptr) = current.as_heap_ptr() {
-            let obj = unsafe { deref(*current) };
-            if let HeapObject::Cons(cons) = obj {
-                elements.push(&cons.first);
-                current = &cons.rest;
-                continue;
-            }
-        }
-
-        // Improper list - not common in well-formed Elle code
-        elements.push(current);
-        break;
-    }
-
-    // Try to format on one line first
-    let one_line = format_list_inline(&elements, config, symbol_table);
-
-    if one_line.len() <= config.line_length - indent {
-        return one_line;
-    }
-
-    // Multi-line formatting
-    format_list_multiline(&elements, indent, config, symbol_table)
-}
-
-/// Format a list on a single line
-fn format_list_inline(
-    elements: &[&Value],
-    config: &FormatterConfig,
-    symbol_table: &SymbolTable,
-) -> String {
-    let formatted: Vec<String> = elements
+    // 4. Collect trivia: merge comments from lexer with blank lines from source
+    let comment_data: Vec<(String, usize, u32)> = lexed
+        .comment_map
+        .comments()
         .iter()
-        .map(|e| format_value(e, 0, config, symbol_table))
+        .map(|c| (c.text.clone(), c.byte_offset, c.line))
         .collect();
-    format!("({})", formatted.join(" "))
-}
+    let trivia = collect_trivia(stripped, &comment_data);
 
-/// Format a list across multiple lines
-fn format_list_multiline(
-    elements: &[&Value],
-    indent: usize,
-    config: &FormatterConfig,
-    symbol_table: &SymbolTable,
-) -> String {
-    if elements.is_empty() {
-        return "()".to_string();
+    // 5. Attach trivia to Syntax nodes
+    let (annotated, dangling) = AnnotatedSyntax::build_toplevel(forms, &trivia, stripped);
+
+    // 6. Generate Doc tree from annotated syntax
+    let doc = format_forms(&annotated, &dangling, stripped, config);
+
+    // 7. Render Doc to string
+    let rendered = render(&doc, config);
+
+    // 8. Assemble output: shebang + rendered + trailing newline
+    //    Strip leading newline from rendered output — format_annotated
+    //    emits HardBreak before leading comments, which produces a
+    //    spurious newline at the document start.
+    let rendered = rendered.trim_start_matches('\n');
+
+    let mut output = String::new();
+    if !shebang.is_empty() {
+        output.push_str(shebang);
+    }
+    output.push_str(rendered);
+    if !output.ends_with('\n') {
+        output.push('\n');
     }
 
-    let new_indent = indent + config.indent_width;
-    let indent_str = " ".repeat(new_indent);
-
-    let mut result = String::from("(");
-
-    // Format first element on the same line as opening paren if it's short
-    let first_formatted = format_value(elements[0], new_indent, config, symbol_table);
-    result.push_str(&first_formatted);
-
-    // Format remaining elements on new lines
-    for element in &elements[1..] {
-        result.push('\n');
-        result.push_str(&indent_str);
-        let formatted = format_value(element, new_indent, config, symbol_table);
-        result.push_str(&formatted);
-    }
-
-    result.push(')');
-    result
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -277,14 +82,13 @@ mod tests {
     fn test_format_simple_number() {
         let config = FormatterConfig::default();
         let formatted = format_code("42", &config).unwrap();
-        assert_eq!(formatted, "42");
+        assert_eq!(formatted, "42\n");
     }
 
     #[test]
     fn test_format_simple_list() {
         let config = FormatterConfig::default();
         let formatted = format_code("(+ 1 2)", &config).unwrap();
-        // Should be formatted, may be on one or multiple lines
         assert!(formatted.contains('('));
         assert!(formatted.contains(')'));
     }
@@ -293,7 +97,7 @@ mod tests {
     fn test_format_nil() {
         let config = FormatterConfig::default();
         let formatted = format_code("nil", &config).unwrap();
-        assert_eq!(formatted, "nil");
+        assert_eq!(formatted, "nil\n");
     }
 
     #[test]
@@ -301,8 +105,8 @@ mod tests {
         let config = FormatterConfig::default();
         let formatted_true = format_code("true", &config).unwrap();
         let formatted_false = format_code("false", &config).unwrap();
-        assert_eq!(formatted_true, "true");
-        assert_eq!(formatted_false, "false");
+        assert_eq!(formatted_true, "true\n");
+        assert_eq!(formatted_false, "false\n");
     }
 
     #[test]
@@ -318,5 +122,426 @@ mod tests {
         let formatted = format_code("[1 2 3]", &config).unwrap();
         assert!(formatted.contains('['));
         assert!(formatted.contains(']'));
+    }
+
+    #[test]
+    fn test_trailing_newline() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("(+ 1 2)", &config).unwrap();
+        assert!(formatted.ends_with('\n'), "must end with newline");
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("", &config).unwrap();
+        assert_eq!(formatted, "\n");
+    }
+
+    #[test]
+    fn test_multiple_forms() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("(def x 5)\n(+ x 1)", &config).unwrap();
+        let lines: Vec<&str> = formatted.trim_end().lines().collect();
+        assert!(lines.len() >= 2, "should have 2+ lines: {:?}", lines);
+    }
+
+    #[test]
+    fn test_idempotent_simple() {
+        let config = FormatterConfig::default();
+        let first = format_code("(+ 1 2)", &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second, "formatter must be idempotent");
+    }
+
+    #[test]
+    fn test_idempotent_defn() {
+        let config = FormatterConfig::default();
+        let input = "(defn foo [x] (+ x 1))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second, "defn formatting must be idempotent");
+    }
+
+    #[test]
+    fn test_idempotent_let() {
+        let config = FormatterConfig::default();
+        let input = "(let [x 5] (+ x 1))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second, "let formatting must be idempotent");
+    }
+
+    #[test]
+    fn test_shebang_preserved() {
+        let config = FormatterConfig::default();
+        let input = "#!/usr/bin/env elle\n(+ 1 2)";
+        let formatted = format_code(input, &config).unwrap();
+        assert!(
+            formatted.starts_with("#!/usr/bin/env elle\n"),
+            "shebang must be preserved"
+        );
+    }
+
+    #[test]
+    fn test_keyword() {
+        let config = FormatterConfig::default();
+        let formatted = format_code(":hello", &config).unwrap();
+        assert_eq!(formatted, ":hello\n");
+    }
+
+    #[test]
+    fn test_set_literal() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("|1 2 3|", &config).unwrap();
+        assert!(formatted.contains('|'));
+    }
+
+    #[test]
+    fn test_quote() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("'foo", &config).unwrap();
+        assert_eq!(formatted, "'foo\n");
+    }
+
+    #[test]
+    fn test_nested_list() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("(defn foo [x] (if (> x 0) x (- x)))", &config).unwrap();
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "nested formatting must be idempotent");
+    }
+
+    #[test]
+    fn test_inspect_defn_output() {
+        let config = FormatterConfig::default();
+        let input = "(defn fib [n] (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))";
+        let formatted = format_code(input, &config).unwrap();
+        // defn always breaks before body
+        assert!(formatted.contains('\n'), "defn should break before body");
+        let lines: Vec<&str> = formatted.trim_end().lines().collect();
+        assert!(
+            lines[0].starts_with("(defn fib [n]"),
+            "first line: {:?}",
+            lines
+        );
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second);
+    }
+
+    #[test]
+    fn test_inspect_let_output() {
+        let config = FormatterConfig::default();
+        let input = "(let [x 5 y 10] (+ x y))";
+        let formatted = format_code(input, &config).unwrap();
+        // let with multiple pairs breaks between pairs
+        assert!(
+            formatted.contains("[x 5\n"),
+            "let bindings should have pairs on separate lines: {:?}",
+            formatted
+        );
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "let must be idempotent");
+    }
+
+    #[test]
+    fn test_inspect_full_file() {
+        let config = FormatterConfig::default();
+        let input = r#"(defn fib [n]
+  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+(def x 5)
+
+(let [a 1 b 2 c 3]
+  (+ a b c))
+
+(begin
+  (print "hello")
+  (print "world"))
+
+(when (> x 0)
+  (print "positive")
+  x)
+
+(cond
+  (< n 0) "negative"
+  (= n 0) "zero"
+  true "positive")
+
+(match x
+  1 "one"
+  2 "two"
+  _ "other")
+
+(-> val
+  (f a)
+  (g b))
+
+(each item in items
+  (print item))
+
+(and a b c)
+
+'foo
+[1 2 3]
+|a b c|
+{:x 1 :y 2}
+"hello world"
+42
+true
+nil
+:keyword"#;
+        let formatted = format_code(input, &config).unwrap();
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "full file must be idempotent");
+    }
+
+    // ── Idempotency tests for each special form ─────────────────
+
+    #[test]
+    fn test_idempotent_if_with_else() {
+        let config = FormatterConfig::default();
+        let input = "(if true 1 2)";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_if_complex() {
+        let config = FormatterConfig::default();
+        let input = "(if (< x 10) (print x) (print (- x 10)))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_fn_single_body() {
+        let config = FormatterConfig::default();
+        let input = "(fn (x) (+ x 1))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_fn_multi_body() {
+        let config = FormatterConfig::default();
+        let input = "(fn (x) (print x) (+ x 1))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_begin() {
+        let config = FormatterConfig::default();
+        let input = "(begin (print 1) (print 2) (print 3))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_when() {
+        let config = FormatterConfig::default();
+        let input = "(when (> x 0) (print x) x)";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_cond() {
+        let config = FormatterConfig::default();
+        let input = "(cond (< x 0) \"neg\" (= x 0) \"zero\" true \"pos\")";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_match() {
+        let config = FormatterConfig::default();
+        let input = "(match x 1 \"one\" 2 \"two\" _ \"other\")";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_threading() {
+        let config = FormatterConfig::default();
+        let input = "(-> x (f 1) (g 2) (h 3))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_each() {
+        let config = FormatterConfig::default();
+        let input = "(each item in items (print item))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_and_or() {
+        let config = FormatterConfig::default();
+        let first_and = format_code("(and a b c)", &config).unwrap();
+        let second_and = format_code(&first_and, &config).unwrap();
+        assert_eq!(first_and, second_and);
+
+        let first_or = format_code("(or x y z)", &config).unwrap();
+        let second_or = format_code(&first_or, &config).unwrap();
+        assert_eq!(first_or, second_or);
+    }
+
+    #[test]
+    fn test_idempotent_defmacro() {
+        let config = FormatterConfig::default();
+        let input = "(defmacro swap (a b) `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_assign() {
+        let config = FormatterConfig::default();
+        let input = "(assign x 42)";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_idempotent_def() {
+        let config = FormatterConfig::default();
+        let input = "(def my-fn (fn (x) (+ x 1)))";
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(first, second);
+    }
+
+    // ── Collection type tests ──────────────────────────────────
+
+    #[test]
+    fn test_format_array() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("[1 2 3]", &config).unwrap();
+        assert_eq!(formatted, "[1 2 3]\n");
+    }
+
+    #[test]
+    fn test_format_set() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("|a b c|", &config).unwrap();
+        assert_eq!(formatted, "|a b c|\n");
+    }
+
+    #[test]
+    fn test_format_struct() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("{:x 1 :y 2}", &config).unwrap();
+        assert_eq!(formatted, "{:x 1 :y 2}\n");
+    }
+
+    #[test]
+    fn test_format_nested_quote() {
+        let config = FormatterConfig::default();
+        assert_eq!(format_code("'foo", &config).unwrap(), "'foo\n");
+        assert_eq!(format_code("'(1 2 3)", &config).unwrap(), "'(1 2 3)\n");
+    }
+
+    #[test]
+    fn test_format_quasiquote() {
+        let config = FormatterConfig::default();
+        let formatted = format_code("`(foo ,bar ;baz)", &config).unwrap();
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second);
+    }
+
+    // ── CommentBreak idempotency tests ──────────────────────────
+
+    fn assert_idempotent(input: &str) {
+        let config = FormatterConfig::default();
+        let first = format_code(input, &config).unwrap();
+        let second = format_code(&first, &config).unwrap();
+        assert_eq!(
+            first, second,
+            "not idempotent:\n--- first ---\n{}\n--- second ---\n{}",
+            first, second
+        );
+    }
+
+    #[test]
+    fn test_idempotent_trailing_comment_non_last() {
+        assert_idempotent("(begin\n  (foo)  # comment\n  (bar))");
+    }
+
+    #[test]
+    fn test_idempotent_trailing_comment_last() {
+        assert_idempotent("(begin\n  (foo)  # comment\n)");
+    }
+
+    #[test]
+    fn test_idempotent_block_comment_between() {
+        assert_idempotent("(begin\n  (foo)\n  # between\n  (bar))");
+    }
+
+    #[test]
+    fn test_idempotent_block_comment_before_close() {
+        assert_idempotent("(defn f [x]\n  # before close\n  x)");
+    }
+
+    #[test]
+    fn test_idempotent_inline_comment_blank_line_next() {
+        assert_idempotent("(foo)  # comment\n\n(bar)");
+    }
+
+    #[test]
+    fn test_idempotent_nested_comments_multi_level() {
+        assert_idempotent("(defn outer [x]\n  (let [a 1]  # bind\n    (inner a)))  # done");
+    }
+
+    #[test]
+    fn test_idempotent_cond_trivial_and_compound() {
+        assert_idempotent(
+            "(cond (< x 0) \"neg\" (= x 0) (begin (print \"zero\") \"zero\") true \"pos\")",
+        );
+    }
+
+    #[test]
+    fn test_idempotent_case_trivial_and_compound() {
+        assert_idempotent("(case x :a 1 :b (begin (print \"b\") 2) :c 3)");
+    }
+
+    #[test]
+    fn test_idempotent_let_star() {
+        assert_idempotent("(let* [x 5 y (+ x 1)] (+ x y))");
+    }
+
+    #[test]
+    fn test_idempotent_when_with_comment() {
+        assert_idempotent("(when (> x 0)  # guard\n  (print x))");
+    }
+
+    #[test]
+    fn test_idempotent_defn_with_comments() {
+        assert_idempotent("(defn foo [x]  # params\n  # body comment\n  (+ x 1))");
+    }
+
+    #[test]
+    fn test_idempotent_generic_call_long_head() {
+        assert_idempotent("(some-very-long-function-name arg1 arg2 arg3 arg4)");
+    }
+
+    #[test]
+    fn test_idempotent_generic_call_short_head() {
+        assert_idempotent("(f arg1 arg2 arg3)");
     }
 }

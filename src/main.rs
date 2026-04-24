@@ -9,6 +9,7 @@ use std::io::{self, Read};
 fn print_help() {
     println!("Elle v1.0.0\n");
     println!("Usage: elle [file...] [-- args...]       Run files or start REPL");
+    println!("       elle fmt [options] <file...>       Format source files");
     println!("       elle lint [options] <file|dir>... Static analysis");
     println!("       elle lsp                          Start language server");
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
@@ -532,6 +533,11 @@ fn main() {
 
     // Subcommand dispatch — no VM setup needed for these
     match args.get(1).map(|s| s.as_str()) {
+        Some("fmt") => {
+            let sub_args: Vec<String> = args[2..].to_vec();
+            let exit_code = elle::formatter::run::run(&sub_args);
+            std::process::exit(exit_code);
+        }
         Some("lint") => {
             let sub_args: Vec<String> = args[2..].to_vec();
             let exit_code = elle::lint::run::run(&sub_args);

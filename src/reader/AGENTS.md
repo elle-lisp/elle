@@ -82,7 +82,7 @@ The lexer recognizes these delimiters (characters that cannot appear in symbol n
 | `;` | `Splice` | Splice reader macro |
 | `:` | `Colon` | Keyword prefix; also `:@name` for mutable type keywords |
 | `@` | `At` | Mutable collection prefix (when not followed by `[`, `{`, or `\|`) |
-| `#` | Comment | Line comment (not a token) |
+| `#` | `Comment` | Line comment (now emitted as a token) |
 
 ## Keyword syntax
 
@@ -125,6 +125,11 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 
 7. **`:@name` keywords are valid.** The lexer recognizes `:@` as a keyword
    prefix variant. The `@` is consumed and prepended to the keyword name.
+
+8. **Comments are tokens.** `#` line comments are emitted as `Token::Comment(String)`
+   by the lexer. Both `SyntaxReader` and `Reader` skip comment tokens during
+   parsing — they do not appear in the output tree. The formatter collects
+   them separately via `lex_with_comments()` for comment preservation.
 
 ## Files
 

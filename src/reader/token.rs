@@ -96,6 +96,7 @@ pub enum Token<'a> {
     String(String),
     Bool(bool),
     Nil,
+    Comment(String),
 }
 
 /// Owned token variant for storage in Reader
@@ -124,6 +125,7 @@ pub enum OwnedToken {
     String(String),
     Bool(bool),
     Nil,
+    Comment(String),
 }
 
 impl<'a> From<Token<'a>> for OwnedToken {
@@ -152,6 +154,7 @@ impl<'a> From<Token<'a>> for OwnedToken {
             Token::String(s) => OwnedToken::String(s),
             Token::Bool(b) => OwnedToken::Bool(b),
             Token::Nil => OwnedToken::Nil,
+            Token::Comment(s) => OwnedToken::Comment(s),
         }
     }
 }

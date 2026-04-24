@@ -55,8 +55,8 @@ mod tests {
 
     #[test]
     fn test_preserves_comments() {
-        // Comments are not tokens — lexer skips them.
-        // So they must survive untouched.
+        // Comments are now tokens but no rewrite rule matches them,
+        // so comment text survives untouched in the source string.
         let source = "# this is a comment\n(path/join a b)";
         let mut renames = HashMap::new();
         renames.insert("path/join".to_string(), "path-join".to_string());
