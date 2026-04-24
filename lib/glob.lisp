@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/glob.lisp — Glob pattern matching and file discovery (pure Elle)
 ##
 ## Supports *, ?, [abc], [!abc], ** (recursive), and character ranges.
@@ -43,10 +43,10 @@
           tlen (length text)]
       (defn go [pi ti]
         (cond
-          ((and (>= pi plen) (>= ti tlen)) true)
-          ((>= pi plen) false)
+          (and (>= pi plen) (>= ti tlen)) true
+          (>= pi plen) false
           ## **
-          ((and (< (inc pi) plen) (= (pat pi) "*") (= (pat (inc pi)) "*"))
+          (and (< (inc pi) plen) (= (pat pi) "*") (= (pat (inc pi)) "*"))
            (let [npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
                         (+ pi 3) (+ pi 2))]
              (def @k ti)
@@ -54,30 +54,26 @@
              (while (and (<= k tlen) (not found))
                (when (go npi k) (assign found true))
                (assign k (inc k)))
-             found))
-          ((>= ti tlen)
-           (if (= (pat pi) "*") (go (inc pi) ti) false))
+             found)
+          (>= ti tlen)
+           (if (= (pat pi) "*") (go (inc pi) ti) false)
           ## *
-          ((= (pat pi) "*")
-           (def @k ti)
-           (def @found false)
-           (while (and (<= k tlen) (not found))
+          (= (pat pi) "*") (begin (def @k ti) (def @found false) (while (and (<= k tlen) (not found))
              (when (go (inc pi) k) (assign found true))
              (when (and (not found) (< k tlen) sep? (= (text k) "/"))
                (assign k tlen))
-             (assign k (inc k)))
-           found)
+             (assign k (inc k))) found)
           ## ?
-          ((= (pat pi) "?")
+          (= (pat pi) "?")
            (if (and sep? (= (text ti) "/")) false
-             (go (inc pi) (inc ti))))
+             (go (inc pi) (inc ti)))
           ## [...]
-          ((= (pat pi) "[")
+          (= (pat pi) "[")
            (let [new-pi (match-class pat (inc pi) (text ti))]
-             (if (nil? new-pi) false (go new-pi (inc ti)))))
+             (if (nil? new-pi) false (go new-pi (inc ti))))
           ## literal
-          ((= (pat pi) (text ti)) (go (inc pi) (inc ti)))
-          (true false)))
+          (= (pat pi) (text ti)) (go (inc pi) (inc ti))
+          true false))
       (go 0 0)))
 
   (defn match? [pattern text]

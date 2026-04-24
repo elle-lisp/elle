@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 ## Macro hygiene tests — counter-factual tests that verify template symbols
 ## resolve to their definition-site bindings, not call-site shadows.

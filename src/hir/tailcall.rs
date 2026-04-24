@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn test_cond_bodies_are_tail() {
         // (fn (x) (cond ((= x 1) (f)) ((= x 2) (g)) (else (h))))
-        let hir = analyze_and_mark("(fn (x) (cond ((= x 1) (f)) ((= x 2) (g)) (else (h))))");
+        let hir = analyze_and_mark("(fn (x) (cond (= x 1) (f) (= x 2) (g) (h)))");
         let calls = find_calls(&hir);
         // Calls: = (not tail), f (tail), = (not tail), g (tail), h (tail)
         assert_eq!(calls, vec![false, true, false, true, true]);

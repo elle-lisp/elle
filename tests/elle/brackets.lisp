@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Bracket syntax tests
 #
 # Migrated from tests/integration/bracket_errors.rs
@@ -49,17 +49,17 @@
 # ============================================================================
 
 (begin
-  (assert (= (cond [true 42]) 42) "cond_clause_bracket"))
+  (assert (= (cond true 42) 42) "cond_clause_bracket"))
 
 (begin
-  (assert (= (cond [false 1] [else 42]) 42) "cond_clause_bracket_else"))
+  (assert (= (cond false 1 42) 42) "cond_clause_bracket_else"))
 
 # ============================================================================
 # Match arm brackets
 # ============================================================================
 
 (begin
-  (assert (= (match 42 [42 "yes"] [_ nil]) "yes") "match_arm_bracket"))
+  (assert (= (match 42 42 "yes" _ nil) "yes") "match_arm_bracket"))
 
 # ============================================================================
 # Error cases: non-list match arms

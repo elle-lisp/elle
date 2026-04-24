@@ -27,10 +27,10 @@ first truthy one.
 ```lisp
 (defn classify [x]
   (cond
-    ((> x 10) :large)
-    ((> x 0)  :small)
-    ((= x 0)  :zero)
-    (true     :negative)))
+    (> x 10) :large
+    (> x 0)  :small
+    (= x 0)  :zero
+    :negative))
 
 (classify 42)              # => :large
 (classify 3)               # => :small

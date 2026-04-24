@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/sync.lisp — Concurrency primitives built on futex (park/notify)
 ##
 ## Loaded via: (def sync ((import-file "lib/sync.lisp")))
@@ -182,14 +182,9 @@
      (fn []
        (let [s (ftx:get)]
          (cond
-           ((= s :done) (result 0))
-           ((= s :running)
-            (ftx:wait :running)
-            (result 0))
-           (true
-            # :pending — we run it
-            (ftx:set :running)
-            (let [[ok? val] (protect (thunk))]
+           (= s :done) (result 0)
+           (= s :running) (begin (ftx:wait :running) (result 0))
+           true (begin (ftx:set :running) (let [[ok? val] (protect (thunk))]
               (put result 0 val)
               (ftx:set :done)
               (ftx:wake 999999999)

@@ -398,7 +398,7 @@ proptest! {
 
     #[test]
     fn match_literal_exact(a in -100i64..100) {
-        let expr = format!("(match {} ({} \"hit\") (_ \"miss\"))", a, a);
+        let expr = format!("(match {} {} \"hit\" _ \"miss\")", a, a);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -409,7 +409,7 @@ proptest! {
     fn match_wildcard_fallback(a in -100i64..100) {
         // Match against a different literal, should fall to wildcard
         let other = a.wrapping_add(1);
-        let expr = format!("(match {} ({} \"hit\") (_ \"miss\"))", a, other);
+        let expr = format!("(match {} {} \"hit\" _ \"miss\")", a, other);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -418,7 +418,7 @@ proptest! {
 
     #[test]
     fn match_with_computed_body(a in -50i64..50, b in -50i64..50) {
-        let expr = format!("(match {} ({} (+ {} {})) (_ 0))", a, a, a, b);
+        let expr = format!("(match {} {} (+ {} {}) _ 0)", a, a, a, b);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -469,7 +469,7 @@ proptest! {
         // First of several literal patterns matches
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
-        let expr = format!("(match {} ({} \"first\") ({} \"second\") ({} \"third\") (_ \"default\"))", a, a, b, c);
+        let expr = format!("(match {} {} \"first\" {} \"second\" {} \"third\" _ \"default\")", a, a, b, c);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -481,7 +481,7 @@ proptest! {
         // Middle of several literal patterns matches
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
-        let expr = format!("(match {} ({} \"first\") ({} \"second\") ({} \"third\") (_ \"default\"))", b, a, b, c);
+        let expr = format!("(match {} {} \"first\" {} \"second\" {} \"third\" _ \"default\")", b, a, b, c);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -493,7 +493,7 @@ proptest! {
         // Last of several literal patterns matches
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
-        let expr = format!("(match {} ({} \"first\") ({} \"second\") ({} \"third\") (_ \"default\"))", c, a, b, c);
+        let expr = format!("(match {} {} \"first\" {} \"second\" {} \"third\" _ \"default\")", c, a, b, c);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -503,7 +503,7 @@ proptest! {
     #[test]
     fn match_with_arithmetic_in_body(a in -50i64..50, b in -50i64..50) {
         // Match with computation in body (the bug we just fixed)
-        let expr = format!("(match {} ({} (+ {} {})) (_ 0))", a, a, a, b);
+        let expr = format!("(match {} {} (+ {} {}) _ 0)", a, a, a, b);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -512,7 +512,7 @@ proptest! {
 
     #[test]
     fn match_nil_pattern(a in -100i64..100) {
-        let expr = format!("(match nil (nil \"is-nil\") ({} \"is-num\") (_ \"other\"))", a);
+        let expr = format!("(match nil nil \"is-nil\" {} \"is-num\" _ \"other\")", a);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -770,7 +770,7 @@ proptest! {
     #[test]
     fn match_in_lambda(a in -50i64..50, b in -50i64..50) {
         let expr = format!(
-            "((fn (x) (match x ({} \"a\") ({} \"b\") (_ \"other\"))) {})",
+            "((fn (x) (match x {} \"a\" {} \"b\" _ \"other\")) {})",
             a, b, a
         );
         let result = eval_reuse_bare(&expr);
@@ -782,7 +782,7 @@ proptest! {
     #[test]
     fn lambda_in_match_body(a in -50i64..50, b in -50i64..50) {
         let expr = format!(
-            "(match {} ({} ((fn (x) (+ x {})) {})) (_ 0))",
+            "(match {} {} ((fn (x) (+ x {})) {}) _ 0)",
             a, a, b, a
         );
         let result = eval_reuse_bare(&expr);
@@ -831,7 +831,7 @@ proptest! {
 
     #[test]
     fn cond_first_true(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
-        let expr = format!("(cond (true {}) (true {}) (else {}))", a, b, c);
+        let expr = format!("(cond true {} true {} {})", a, b, c);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -840,7 +840,7 @@ proptest! {
 
     #[test]
     fn cond_falls_through_to_else(a in -100i64..100) {
-        let expr = format!("(cond (false 1) (false 2) (else {}))", a);
+        let expr = format!("(cond false 1 false 2 {})", a);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -850,7 +850,7 @@ proptest! {
     #[test]
     fn cond_with_computed_conditions(a in -100i64..100, threshold in -100i64..100) {
         let expr = format!(
-            "(cond ((< {} {}) \"less\") ((= {} {}) \"equal\") (else \"greater\"))",
+            "(cond (< {} {}) \"less\" (= {} {}) \"equal\" \"greater\")",
             a, threshold, a, threshold
         );
         let result = eval_reuse_bare(&expr);

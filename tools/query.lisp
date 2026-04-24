@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## query.lisp — run a SPARQL query against the store
 ## Usage: tools/run-elle.sh tools/query.lisp -- 'SELECT ...'
 

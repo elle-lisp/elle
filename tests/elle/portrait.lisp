@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # ── portrait library tests ──────────────────────────────────────────────
 
 (def portrait ((import "std/portrait")))

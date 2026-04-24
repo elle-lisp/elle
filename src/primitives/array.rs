@@ -128,12 +128,81 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
 
+    // Immutable array — return new array with element appended
+    if let Some(elems) = args[0].as_array() {
+        let mut new = elems.to_vec();
+        new.push(args[1]);
+        return (SIG_OK, Value::array(new));
+    }
+
+    // Immutable string — return new string with value appended
+    if args[0].is_string() {
+        let s = match args[1].with_string(|s| s.to_string()) {
+            Some(s) => s,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "push: string value must be string, got {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        return args[0]
+            .with_string(|base| {
+                let mut new = base.to_string();
+                new.push_str(&s);
+                (SIG_OK, Value::string(new))
+            })
+            .unwrap_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val("type-error", "push: unreachable string case".to_string()),
+                )
+            });
+    }
+
+    // Immutable bytes — return new bytes with byte appended
+    if let Some(b) = args[0].as_bytes() {
+        let byte = match args[1].as_int() {
+            Some(n) if (0..=255).contains(&n) => n as u8,
+            Some(n) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!("push: byte value out of range 0-255: {}", n),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "push: bytes value must be integer, got {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+        let mut new = b.to_vec();
+        new.push(byte);
+        return (SIG_OK, Value::bytes(new));
+    }
+
     (
         SIG_ERROR,
         error_val(
             "type-error",
             format!(
-                "push: expected @array, @string, or @bytes, got {}",
+                "push: expected array, @array, string, @string, bytes, or @bytes, got {}",
                 args[0].type_name()
             ),
         ),
@@ -548,10 +617,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_push,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Append element to end of array. Mutates in place, returns the same array.",
+        doc: "Append element to end of array. Mutable: mutates in place. Immutable: returns new collection.",
         params: &["arr", "val"],
         category: "array",
-        example: "(push @[1 2] 3) #=> @[1 2 3]",
+        example: "(push @[1 2] 3) #=> @[1 2 3]\n(push [1 2] 3)  #=> [1 2 3]",
         aliases: &[],
     },
     PrimitiveDef {

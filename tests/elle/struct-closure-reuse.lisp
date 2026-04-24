@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Regression test: cross-function tail calls must not corrupt closures
 # via slab pool rotation. A letrec closure creates capture cells during
 # execution; if slab rotation frees these prematurely (treating a cross-

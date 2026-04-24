@@ -58,8 +58,8 @@ parent (crash propagation). `spawn-monitor` monitors without linking
   (let* ([me (process:self)]
          [peer (process:spawn (fn []
                  (match (process:recv)
-                   ([from :ping] (process:send from :pong))
-                   (_ nil))))])
+                   [from :ping] (process:send from :pong)
+                   _ nil)))])
     (process:send peer [me :ping])
     (assert (= (process:recv) :pong) "ping-pong works"))))
 ```
@@ -107,12 +107,13 @@ crashes too — unless the parent is trapping exits.
   (let ([child (process:spawn-link (fn []
                  (error {:error :boom :message "crash"})))])
     (match (process:recv)
-      ([:EXIT pid reason]
-        (assert (= pid child) "EXIT from child")
-        (match reason
-          ([:error _] (assert true "got error reason"))
-          (_ nil)))
-      (_ nil)))))
+      [:EXIT pid reason]
+        (begin
+          (assert (= pid child) "EXIT from child")
+          (match reason
+            [:error _] (assert true "got error reason")
+            _ nil))
+      _ nil))))
 ```
 
 ## Monitors
@@ -126,12 +127,13 @@ process dies, without affecting the monitoring process.
 (process:start (fn []
   (let ([[child-pid ref] (process:spawn-monitor (fn [] :done))])
     (match (process:recv)
-      ([:DOWN got-ref got-pid reason]
-        (assert (= got-ref ref) "correct ref")
-        (match reason
-          ([:normal val] (assert (= val :done) "normal exit"))
-          (_ nil)))
-      (_ nil)))))
+      [:DOWN got-ref got-pid reason]
+        (begin
+          (assert (= got-ref ref) "correct ref")
+          (match reason
+            [:normal val] (assert (= val :done) "normal exit")
+            _ nil))
+      _ nil))))
 ```
 
 ## Named processes
@@ -148,8 +150,8 @@ by name; `send-named` sends to a registered name.
       (process:register :greeter)
       (let ([msg (process:recv)])
         (match msg
-          ([from name] (process:send from (string "hello, " name)))
-          (_ nil)))))
+          [from name] (process:send from (string "hello, " name))
+          _ nil))))
     # sync to let the child register
     (process:send me :sync)
     (process:recv)
@@ -224,10 +226,10 @@ down after replying.
                {:init        (fn [_] @{})
                 :handle-call (fn [request _from state]
                   (match request
-                    ([:get key]    [:reply (get state key nil) state])
-                    ([:put key val] (put state key val)
+                    [:get key]     [:reply (get state key nil) state]
+                    [:put key val] (begin (put state key val)
                                     [:reply :ok state])
-                    (_ [:reply :unknown state])))}
+                    _              [:reply :unknown state]))}
                nil :name :kv)])
     (process:gen-server-call :kv [:put :lang "elle"])
     (assert (= "elle" (process:gen-server-call :kv [:get :lang]))
@@ -252,9 +254,9 @@ callback runs before it exits.
       nil :name :stoppable)
     (process:gen-server-stop :stoppable :reason :shutdown)
     (match (process:recv)
-      ([:terminated reason]
-        (assert (= reason :shutdown) "clean shutdown"))
-      (_ nil)))))
+      [:terminated reason]
+        (assert (= reason :shutdown) "clean shutdown")
+      _ nil))))
 ```
 
 ## Deferred replies
@@ -348,26 +350,28 @@ Each child is a struct with:
           (process:send me [:started (process:self)])
           (forever
             (match (process:recv)
-              (:crash (error {:error :boom :message "crash"}))
-              (:ping  (process:send me :pong))
-              (_ nil))))}]
+              :crash (error {:error :boom :message "crash"})
+              :ping  (process:send me :pong)
+              _ nil)))}]
       :name :sup)
 
     # Wait for initial start
     (match (process:recv)
-      ([:started pid1]
-        (process:send pid1 :ping)
-        (assert (= :pong (process:recv)) "child responds")
-        # Crash it
-        (process:send pid1 :crash)
-        # Supervisor restarts it
-        (match (process:recv)
-          ([:started pid2]
-            (assert (not (= pid1 pid2)) "new pid")
-            (process:send pid2 :ping)
-            (assert (= :pong (process:recv)) "restarted child responds"))
-          (_ nil)))
-      (_ nil)))))
+      [:started pid1]
+        (begin
+          (process:send pid1 :ping)
+          (assert (= :pong (process:recv)) "child responds")
+          # Crash it
+          (process:send pid1 :crash)
+          # Supervisor restarts it
+          (match (process:recv)
+            [:started pid2]
+              (begin
+                (assert (not (= pid1 pid2)) "new pid")
+                (process:send pid2 :ping)
+                (assert (= :pong (process:recv)) "restarted child responds"))
+            _ nil))
+      _ nil))))
 ```
 
 ## Restart intensity limits

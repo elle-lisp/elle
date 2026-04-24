@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 # Tests for fiber resume through nested FiberResume chains.
 #

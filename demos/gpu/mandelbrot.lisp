@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## demos/gpu/mandelbrot.lisp — GPU Mandelbrot set
 ##
 ## Computes a Mandelbrot set on the GPU using a SPIR-V compute shader

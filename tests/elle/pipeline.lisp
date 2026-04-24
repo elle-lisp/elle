@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 
 ## === Shebang Handling ===
 
@@ -313,7 +313,7 @@
 (let [[ok? _] (protect ((fn () (eval '(push)))))] (assert (not ok?) "push wrong arity no args"))
 (let [[ok? _] (protect ((fn () (eval '(push @[1 2])))))] (assert (not ok?) "push wrong arity one arg"))
 (let [[ok? _] (protect ((fn () (eval '(push @[1 2] 3 4)))))] (assert (not ok?) "push wrong arity too many args"))
-(let [[ok? _] (protect ((fn () (push [1 2] 3))))] (assert (not ok?) "push non-array error"))
+(assert (= (push [1 2] 3) [1 2 3]) "push immutable array returns new array")
 
 ## === pop ===
 

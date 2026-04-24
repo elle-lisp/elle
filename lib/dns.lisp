@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/dns.lisp — Pure Elle DNS client (RFC 1035)
 ##
 ## Loaded via: (def dns ((import-file "lib/dns.lisp")))
@@ -93,23 +93,18 @@
     (let [b (get buf pos)]
       (cond
         # Null terminator — end of name
-        ((= b 0)
-         (unless jumped (assign return-offset (+ pos 1)))
-         (break nil))
+        (= b 0) (begin (unless jumped (assign return-offset (+ pos 1))) (break nil))
 
         # Compression pointer: top 2 bits = 11
-        ((= (bit/and b 0xc0) 0xc0)
-         (unless jumped
-           (assign return-offset (+ pos 2)))
-         (assign jumped true)
-         (assign pos (bit/or (bit/shl (bit/and b 0x3f) 8)
+        (= (bit/and b 0xc0) 0xc0) (begin (unless jumped
+           (assign return-offset (+ pos 2))) (assign jumped true) (assign pos (bit/or (bit/shl (bit/and b 0x3f) 8)
                              (get buf (+ pos 1)))))
 
         # Regular label
-        (true
+        true
          (let [label-len b]
            (push parts (string (slice buf (+ pos 1) (+ pos 1 label-len))))
-           (assign pos (+ pos 1 label-len)))))))
+           (assign pos (+ pos 1 label-len))))))
   {:name (string/join (freeze parts) ".")
    :offset (or return-offset (+ pos 1))})
 

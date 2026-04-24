@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## demos/gpu/vecadd.lisp — GPU vector addition
 ##
 ## Adds two 1024-element float arrays on the GPU. The compute shader

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # SPIR-V builder tests
 #
 # Tests the lib/spirv.lisp builder, including control flow extensions
@@ -16,11 +16,11 @@
 ## interpret the bits, just embeds them as OpConstant operands.
 (defn f32-bits [f]
   (cond
-    [(= f 0.0)  0]
-    [(= f 0.5)  0x3F000000]
-    [(= f 1.0)  0x3F800000]
-    [(= f 4.0)  0x40800000]
-    [true       0]))
+    (= f 0.0)  0
+    (= f 0.5)  0x3F000000
+    (= f 1.0)  0x3F800000
+    (= f 4.0)  0x40800000
+    true       0))
 
 ## ── SPIR-V header constants ──────────────────────────────
 (def spirv-magic 0x07230203)

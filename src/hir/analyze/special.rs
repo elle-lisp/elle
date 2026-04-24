@@ -264,53 +264,44 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(crate) fn analyze_match(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() < 3 {
-            return Err(format!(
-                "{}: match requires value and at least one arm",
-                span
-            ));
+        if items.len() < 4 {
+            return Err(format!("{}: match requires value, pattern, and body", span));
         }
 
         let value = self.analyze_expr(&items[1])?;
         let mut signal = value.signal;
         let mut arms = Vec::new();
 
-        for arm in &items[2..] {
-            let parts = arm.as_list_or_tuple().ok_or_else(|| {
-                if matches!(arm.kind, SyntaxKind::ArrayMut(_)) {
-                    format!(
-                        "{}: match arm must use (...) or [...], not @[...]",
-                        arm.span
-                    )
-                } else {
-                    format!(
-                        "{}: match arm must be a list (...) or [...], got {}",
-                        arm.span,
-                        arm.kind_label()
-                    )
-                }
-            })?;
-            if parts.len() < 2 {
-                return Err(format!("{}: match arm requires pattern and body", span));
+        // Flat parsing: (match val pat1 body1 pat2 when guard body2 ...)
+        let args = &items[2..];
+        let mut i = 0;
+        while i < args.len() {
+            if i + 1 >= args.len() {
+                return Err(format!(
+                    "{}: match arm at position {} has pattern but no body",
+                    span, i
+                ));
             }
 
             self.push_scope(false);
-            let pattern = self.analyze_pattern(&parts[0])?;
+            let pattern = self.analyze_pattern(&args[i])?;
 
-            // Check for guard
-            let (guard, body_idx) = if parts.len() >= 3 && parts[1].as_symbol() == Some("when") {
-                let guard_expr = self.analyze_expr(&parts[2])?;
+            // Check for guard: pattern when guard body
+            let (guard, body_idx) = if i + 3 < args.len() && args[i + 1].as_symbol() == Some("when")
+            {
+                let guard_expr = self.analyze_expr(&args[i + 2])?;
                 signal = signal.combine(guard_expr.signal);
-                (Some(guard_expr), 3)
+                (Some(guard_expr), i + 3)
             } else {
-                (None, 1)
+                (None, i + 1)
             };
 
-            let body = self.analyze_body(&parts[body_idx..], span.clone())?;
+            let body = self.analyze_expr(&args[body_idx])?;
             signal = signal.combine(body.signal);
             self.pop_scope();
 
             arms.push((pattern, guard, body));
+            i = body_idx + 1;
         }
 
         // Exhaustiveness check: non-exhaustive match is a compile-time error

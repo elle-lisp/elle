@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Parametric string formatter module
 # Accepts :prefix, :suffix, :separator keyword configuration
 # Returns a struct of exported functions that close over the config

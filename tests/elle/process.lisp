@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## tests/elle/process.lisp — Tests for lib/process.lisp
 ##
 ## Run: ./target/debug/elle tests/elle/process.lisp
@@ -20,9 +20,9 @@
         ponger (process:spawn (fn ()
                   (let [msg (process:recv)]
                     (match msg
-                      ([from :ping]
-                        (process:send from :pong))
-                      (_ nil)))))]
+                      [from :ping]
+                        (process:send from :pong)
+                      _ nil))))]
     (process:send ponger [me :ping])
     (let [reply (process:recv)]
       (assert (= reply :pong) "ping-pong: reply is :pong")))))
@@ -85,9 +85,9 @@
 
       (let [msg (process:recv)]
         (match msg
-          ([:EXIT pid reason]
-            (assert (= pid worker-a) "link-cascade: EXIT from worker-a"))
-          (_ (assert false "link-cascade: expected EXIT message"))))))))
+          [:EXIT pid reason]
+            (assert (= pid worker-a) "link-cascade: EXIT from worker-a")
+          _ (assert false "link-cascade: expected EXIT message")))))))
 (println "  4. link crash cascade: ok")
 
 
@@ -102,12 +102,13 @@
                   (error {:error :intentional :message "test crash"})))]
     (let [msg (process:recv)]
       (match msg
-        ([:EXIT pid reason]
-          (assert (= pid child) "trap-exit: EXIT from child")
-          (match reason
-            ([:error _] (assert true "trap-exit: got error reason"))
-            (_ (assert false "trap-exit: unexpected reason"))))
-        (_ (assert false "trap-exit: expected EXIT message")))))))
+        [:EXIT pid reason]
+          (begin
+            (assert (= pid child) "trap-exit: EXIT from child")
+            (match reason
+              [:error _] (assert true "trap-exit: got error reason")
+              _ (assert false "trap-exit: unexpected reason")))
+        _ (assert false "trap-exit: expected EXIT message"))))))
 (println "  5. trap-exit: ok")
 
 
@@ -120,13 +121,14 @@
   (let [child (process:spawn-link (fn () 42))]
     (let [msg (process:recv)]
       (match msg
-        ([:EXIT pid reason]
-          (assert (= pid child) "normal-exit: EXIT from child")
-          (match reason
-            ([:normal val]
-              (assert (= val 42) "normal-exit: value is 42"))
-            (_ (assert false "normal-exit: unexpected reason"))))
-        (_ (assert false "normal-exit: expected EXIT message")))))))
+        [:EXIT pid reason]
+          (begin
+            (assert (= pid child) "normal-exit: EXIT from child")
+            (match reason
+              [:normal val]
+                (assert (= val 42) "normal-exit: value is 42")
+              _ (assert false "normal-exit: unexpected reason")))
+        _ (assert false "normal-exit: expected EXIT message"))))))
 (println "  6. normal exit: ok")
 
 
@@ -183,13 +185,14 @@
                              (error {:error :monitored-crash :message "boom"})))]
     (let [msg (process:recv)]
       (match msg
-        ([:DOWN got-ref got-pid reason]
-          (assert (= got-ref ref) "monitor: correct ref")
-          (assert (= got-pid child-pid) "monitor: correct pid")
-          (match reason
-            ([:error _] (assert true "monitor: got error reason"))
-            (_ (assert false "monitor: unexpected reason"))))
-        (_ (assert false "monitor: expected DOWN message")))))))
+        [:DOWN got-ref got-pid reason]
+          (begin
+            (assert (= got-ref ref) "monitor: correct ref")
+            (assert (= got-pid child-pid) "monitor: correct pid")
+            (match reason
+              [:error _] (assert true "monitor: got error reason")
+              _ (assert false "monitor: unexpected reason")))
+        _ (assert false "monitor: expected DOWN message"))))))
 (println "  9. monitors: ok")
 
 
@@ -202,12 +205,13 @@
          [child-pid ref] (process:spawn-monitor (fn () :done))]
     (let [msg (process:recv)]
       (match msg
-        ([:DOWN got-ref got-pid reason]
-          (assert (= got-ref ref) "monitor-normal: correct ref")
-          (match reason
-            ([:normal val] (assert (= val :done) "monitor-normal: value is :done"))
-            (_ (assert false "monitor-normal: unexpected reason"))))
-        (_ (assert false "monitor-normal: expected DOWN message")))))))
+        [:DOWN got-ref got-pid reason]
+          (begin
+            (assert (= got-ref ref) "monitor-normal: correct ref")
+            (match reason
+              [:normal val] (assert (= val :done) "monitor-normal: value is :done")
+              _ (assert false "monitor-normal: unexpected reason")))
+        _ (assert false "monitor-normal: expected DOWN message"))))))
 (println "  10. monitor normal exit: ok")
 
 
@@ -238,9 +242,9 @@
       (process:register :echo-server)
       (let [msg (process:recv)]
         (match msg
-          ([from payload]
-            (process:send from [:echo payload]))
-          (_ nil)))))
+          [from payload]
+            (process:send from [:echo payload])
+          _ nil))))
 
     # Give the echo-server a chance to register by sending ourselves a dummy
     (process:send me :sync)
@@ -252,9 +256,9 @@
     (process:send-named :echo-server [me :hello])
     (let [reply (process:recv)]
       (match reply
-        ([:echo payload]
-          (assert (= payload :hello) "named: echo reply correct"))
-        (_ (assert false "named: expected echo reply")))))))
+        [:echo payload]
+          (assert (= payload :hello) "named: echo reply correct")
+        _ (assert false "named: expected echo reply"))))))
 (println "  12. named processes: ok")
 
 
@@ -372,12 +376,13 @@
     (process:exit victim :test-kill)
     (let [msg (process:recv)]
       (match msg
-        ([:EXIT pid reason]
-          (assert (= pid victim) "exit-kill: EXIT from victim")
-          (match reason
-            ([:killed _] (assert true "exit-kill: killed reason"))
-            (_ (assert false "exit-kill: unexpected reason"))))
-        (_ (assert false "exit-kill: expected EXIT message")))))))
+        [:EXIT pid reason]
+          (begin
+            (assert (= pid victim) "exit-kill: EXIT from victim")
+            (match reason
+              [:killed _] (assert true "exit-kill: killed reason")
+              _ (assert false "exit-kill: unexpected reason")))
+        _ (assert false "exit-kill: expected EXIT message"))))))
 (println "  19. exit/kill: ok")
 
 
@@ -393,9 +398,9 @@
                  (process:send 999 :unreachable)))]
     (let [msg (process:recv)]
       (match msg
-        ([:EXIT pid reason]
-          (assert (= pid child) "self-exit: EXIT from child"))
-        (_ (assert false "self-exit: expected EXIT message")))))))
+        [:EXIT pid reason]
+          (assert (= pid child) "self-exit: EXIT from child")
+        _ (assert false "self-exit: expected EXIT message"))))))
 (println "  20. self-exit: ok")
 
 
@@ -410,10 +415,10 @@
     # We should get DOWN but still be alive
     (let [msg (process:recv)]
       (match msg
-        ([:DOWN _ _ _]
+        [:DOWN _ _ _]
           # We're still running — send ourselves proof
-          (process:send me :still-here))
-        (_ nil)))
+          (process:send me :still-here)
+        _ nil))
     (let [msg (process:recv)]
       (assert (= msg :still-here) "monitor-survives: watcher alive after monitored crash")))))
 (println "  21. monitor doesn't kill watcher: ok")
@@ -459,9 +464,9 @@
     (def @remaining 2)
     (while (> remaining 0)
       (match (process:recv)
-        (:a-done (assign got-a true) (assign remaining (- remaining 1)))
-        (:b-done (assign got-b true) (assign remaining (- remaining 1)))
-        (_ nil)))
+        :a-done (begin (assign got-a true) (assign remaining (- remaining 1)))
+        :b-done (begin (assign got-b true) (assign remaining (- remaining 1)))
+        _ nil))
     (assert got-a "io-process: process A completed")
     (assert got-b "io-process: process B completed"))))
 (println "  23. I/O inside processes: ok")

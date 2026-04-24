@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/svg.lisp — SVG construction and emission (pure Elle)
 ##
 ## Build SVG documents as struct trees, emit as XML strings.
@@ -99,12 +99,12 @@
       (each item in rest
         (cond
           ## Attrs struct (not an SVG element)
-          ((and (struct? item) (nil? (get item :tag)))
-            (assign attrs (merge attrs item)))
+          (and (struct? item) (nil? (get item :tag)))
+            (assign attrs (merge attrs item))
           ## String content
-          ((string? item) (push children item))
+          (string? item) (push children item)
           ## SVG element child (tspan etc.)
-          (true (push children item))))
+          true (push children item)))
       (element :text attrs (freeze children))))
 
   (defn tspan [content & opts]
@@ -185,16 +185,16 @@
 
   (defn emit-attr-value [v]
     (cond
-      ((string? v) (xml-escape-attr v))
-      ((int? v) (string v))
-      ((float? v) (string v))
-      ((keyword? v) (string v))
-      (true nil)))
+      (string? v) (xml-escape-attr v)
+      (int? v) (string v)
+      (float? v) (string v)
+      (keyword? v) (string v)
+      true nil))
 
   (defn emit-element [elem]
     (cond
-      ((string? elem) (xml-escape elem))
-      ((struct? elem)
+      (string? elem) (xml-escape elem)
+      (struct? elem)
         (let* [tag (get elem :tag)
                attrs (get elem :attrs)
                children (get elem :children)
@@ -212,8 +212,8 @@
               (each child in children
                 (append out (emit-element child)))
               (append out (string "</" tag ">"))))
-          (freeze out)))
-      (true "")))
+          (freeze out))
+      true ""))
 
   (defn emit [doc]
     (string "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" (emit-element doc)))

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## examples/portrait-demo.lisp — deep analysis of the pipeline example
 ##
 ## Shows how the living model follows data relationships across the

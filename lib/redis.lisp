@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/redis.lisp — Pure Elle Redis client (RESP2)
 ##
 ## Loaded via: (def redis ((import-file "lib/redis.lisp")))

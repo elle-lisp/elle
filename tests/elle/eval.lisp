@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Integration tests for the eval special form
 #
 # Migrated from tests/integration/eval.rs (46 tests)
@@ -134,7 +134,7 @@
 # ============================================================
 
 # test_eval_with_match — bind match result to var first (known bug workaround)
-(def @match-result (eval '(match 42 (42 "found") (_ "not found"))))
+(def @match-result (eval '(match 42 42 "found" _ "not found")))
 (assert (= match-result "found") "eval with match")
 
 # ============================================================
@@ -163,7 +163,7 @@
 # ============================================================
 
 # test_eval_with_cond
-(assert (= (eval '(cond ((= 1 2) "no") (true "yes"))) "yes") "eval with cond")
+(assert (= (eval '(cond (= 1 2) "no" true "yes")) "yes") "eval with cond")
 
 # ============================================================
 # Eval with while loop

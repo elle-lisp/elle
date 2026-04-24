@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/uuid.lisp — UUID generation and parsing (pure Elle)
 ##
 ## Implements UUID v4 (random), parsing, nil, and version detection.

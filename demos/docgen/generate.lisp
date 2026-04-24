@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Elle Documentation Generator
 ## Renders docs/*.md as HTML pages + auto-generated API reference
 ## with signal profiles from compile/analyze and portrait system.
@@ -25,14 +25,14 @@
 (defn signal-class [bit]
   "CSS class for a signal keyword."
   (cond
-    ((= bit :error) "signal-error")
-    ((= bit :io)    "signal-io")
-    ((= bit :yield) "signal-yield")
-    ((= bit :exec)  "signal-exec")
-    ((= bit :ffi)   "signal-ffi")
-    ((= bit :fuel)  "signal-fuel")
-    ((= bit :wait)  "signal-wait")
-    (true           "signal-badge")))
+    (= bit :error) "signal-error"
+    (= bit :io)    "signal-io"
+    (= bit :yield) "signal-yield"
+    (= bit :exec)  "signal-exec"
+    (= bit :ffi)   "signal-ffi"
+    (= bit :fuel)  "signal-fuel"
+    (= bit :wait)  "signal-wait"
+    true           "signal-badge"))
 
 (defn render-signal-badges [sig]
   "Render signal profile as HTML badges."
@@ -115,10 +115,10 @@
                        resolved (if (= source-dir "")
                                    md-path
                                    (cond
-                                     ((string/starts-with? md-path "../")
-                                      (slice md-path 3 (length md-path)))
-                                     ((string-contains? md-path "/") md-path)
-                                     (true (string source-dir "/" md-path))))
+                                     (string/starts-with? md-path "../")
+                                      (slice md-path 3 (length md-path))
+                                     (string-contains? md-path "/") md-path
+                                     true (string source-dir "/" md-path)))
                        slug (or (get slug-map resolved) resolved)]
                   (push result (slice html pos href-start))
                   (push result slug)
@@ -130,26 +130,26 @@
 
 (defn category-display-name [cat]
   (cond
-    ((= cat "") "Core")
-    ((= cat "math") "Math")
-    ((= cat "string") "String Operations")
-    ((= cat "file") "File I/O")
-    ((= cat "ffi") "FFI (Foreign Function Interface)")
-    ((= cat "fiber") "Fibers")
-    ((= cat "coro") "Coroutines")
-    ((= cat "array") "Arrays")
-    ((= cat "struct") "Structs")
-    ((= cat "json") "JSON")
-    ((= cat "clock") "Clock")
-    ((= cat "time") "Time")
-    ((= cat "meta") "Metaprogramming")
-    ((= cat "debug") "Debugging")
-    ((= cat "fn") "Function Introspection")
-    ((= cat "os") "OS / Process")
-    ((= cat "pkg") "Packages")
-    ((= cat "module") "Modules")
-    ((= cat "bit") "Bitwise Operations")
-    (true cat)))
+    (= cat "") "Core"
+    (= cat "math") "Math"
+    (= cat "string") "String Operations"
+    (= cat "file") "File I/O"
+    (= cat "ffi") "FFI (Foreign Function Interface)"
+    (= cat "fiber") "Fibers"
+    (= cat "coro") "Coroutines"
+    (= cat "array") "Arrays"
+    (= cat "struct") "Structs"
+    (= cat "json") "JSON"
+    (= cat "clock") "Clock"
+    (= cat "time") "Time"
+    (= cat "meta") "Metaprogramming"
+    (= cat "debug") "Debugging"
+    (= cat "fn") "Function Introspection"
+    (= cat "os") "OS / Process"
+    (= cat "pkg") "Packages"
+    (= cat "module") "Modules"
+    (= cat "bit") "Bitwise Operations"
+    true cat))
 
 (def @category-order ["" "math" "string" "array" "struct" "json"
    "file" "fn" "fiber" "coro" "clock" "time"
@@ -230,9 +230,9 @@
       (while (< i n)
         (let [line (get lines i)]
           (cond
-            ((string/starts-with? line "## ")
-             (push comment-lines (slice line 3 (length line))))
-            ((string/starts-with? line "(defmacro ")
+            (string/starts-with? line "## ")
+             (push comment-lines (slice line 3 (length line)))
+            (string/starts-with? line "(defmacro ")
              (let* [after (slice line 10 (length line))
                     parts (string/split after " ")
                     name (get parts 0)
@@ -242,10 +242,10 @@
                (push html (string "<tr><td><code>" (html-escape name) "</code>"
                  " <a class=\"source-link\" href=\"" source-link "\">src</a></td>"
                  "<td>" (format-inline desc) "</td></tr>\n"))
-               (assign comment-lines @[])))
-            (true
+               (assign comment-lines @[]))
+            true
              (when (not (= (string/trim line) ""))
-               (assign comment-lines @[])))))
+               (assign comment-lines @[]))))
         (assign i (+ i 1))))
 
     (push html "</tbody></table>\n")
@@ -294,10 +294,10 @@
               (put section-fns section-name @[]))))
 
         (cond
-          ((string/starts-with? line "## ")
+          (string/starts-with? line "## ")
            (unless (extract-section-name line)
-             (push comment-lines (slice line 3 (length line)))))
-          ((string/starts-with? line "(defn ")
+             (push comment-lines (slice line 3 (length line))))
+          (string/starts-with? line "(defn ")
            (let* [after (slice line 6 (length line))
                   parts (string/split after " ")
                   name (get parts 0)]
@@ -306,13 +306,13 @@
                  (when fns (push fns name))))
              (put fn-comments name (string/join (freeze comment-lines) " "))
              (put fn-lines name (+ i 1))
-             (assign comment-lines @[])))
-          ((string/starts-with? line "(def ")
-           (assign comment-lines @[]))
-          (true
+             (assign comment-lines @[]))
+          (string/starts-with? line "(def ")
+           (assign comment-lines @[])
+          true
            (when (and (not (= (string/trim line) ""))
                       (not (string/starts-with? line "## ")))
-             (assign comment-lines @[])))))
+             (assign comment-lines @[]))))
       (assign i (+ i 1)))
 
     # Render each section
@@ -473,12 +473,12 @@
       (each page-name in pages
         (let* [slug (string "api-" page-name)
                title (cond
-                        ((= page-name "primitives") "Primitives")
-                        ((= page-name "prelude") "Prelude Macros")
-                        ((= page-name "stdlib") "Standard Library")
-                        ((= page-name "libraries") "Libraries")
-                        ((= page-name "plugins") "Plugins")
-                        (true page-name))]
+                        (= page-name "primitives") "Primitives"
+                        (= page-name "prelude") "Prelude Macros"
+                        (= page-name "stdlib") "Standard Library"
+                        (= page-name "libraries") "Libraries"
+                        (= page-name "plugins") "Plugins"
+                        true page-name)]
           (push nav-items {:slug slug :title title})
           (push all-pages {:slug slug :title title
                            :description (string title " API reference")
@@ -523,12 +523,12 @@
     (def @body-html (if api-name
         # Auto-generated API content
         (cond
-          ((= api-name "primitives") (generate-primitives-html))
-          ((= api-name "prelude") (generate-prelude-html))
-          ((= api-name "stdlib") (generate-stdlib-html))
-          ((= api-name "libraries") (generate-libraries-html))
-          ((= api-name "plugins") (generate-plugins-html))
-          (true ""))
+          (= api-name "primitives") (generate-primitives-html)
+          (= api-name "prelude") (generate-prelude-html)
+          (= api-name "stdlib") (generate-stdlib-html)
+          (= api-name "libraries") (generate-libraries-html)
+          (= api-name "plugins") (generate-plugins-html)
+          true "")
         # Markdown content with link rewriting
         (rewrite-md-links (get page :body) source-dir frozen-slug-map)))
 

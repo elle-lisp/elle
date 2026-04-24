@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 # Conway's Game of Life — SDL3 demo
 #
@@ -223,11 +223,11 @@
 (defn handle-events [state]
   (each ev (sdl:poll-events)
     (match ev:type
-      (:quit         (put state :running false))
-      (:key-down     (handle-key state ev))
-      (:mouse-down   (handle-mouse state ev))
-      (:mouse-motion (handle-mouse state ev))
-      (_             nil)))
+      :quit         (put state :running false)
+      :key-down     (handle-key state ev)
+      :mouse-down   (handle-mouse state ev)
+      :mouse-motion (handle-mouse state ev)
+      _             nil))
   state)
 
 

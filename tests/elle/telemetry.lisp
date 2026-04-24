@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 # tests/elle/telemetry.lisp — Unit tests for lib/telemetry.lisp
 #
@@ -262,12 +262,12 @@
 (def @found-sdk-lang false)
 (each kv in sdk-attrs
   (cond
-    ((= (get kv "key") "telemetry.sdk.name")
-     (assign found-sdk-name true))
-    ((= (get kv "key") "telemetry.sdk.version")
-     (assign found-sdk-version true))
-    ((= (get kv "key") "telemetry.sdk.language")
-     (assign found-sdk-lang true))))
+    (= (get kv "key") "telemetry.sdk.name")
+     (assign found-sdk-name true)
+    (= (get kv "key") "telemetry.sdk.version")
+     (assign found-sdk-version true)
+    (= (get kv "key") "telemetry.sdk.language")
+     (assign found-sdk-lang true)))
 
 (assert found-sdk-name "resource has telemetry.sdk.name")
 (assert found-sdk-version "resource has telemetry.sdk.version")

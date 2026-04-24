@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Core integration tests
 #
 # Migrated from tests/integration/core.rs
@@ -534,65 +534,65 @@
 # directly inside assert-eq. Bind results to a var first.
 
 # test_cond_single_true_clause
-(def @cond-r1 (cond (true 42)))
+(def @cond-r1 (cond true 42))
 (assert (= cond-r1 42) "cond single true")
 
 # test_cond_single_false_clause_with_else
-(def @cond-r2 (cond (false 42) (else 100)))
+(def @cond-r2 (cond false 42 100))
 (assert (= cond-r2 100) "cond false with else")
 
 # test_cond_single_false_clause_without_else
-(def @cond-r3 (cond (false 42)))
+(def @cond-r3 (cond false 42))
 (assert (= cond-r3 nil) "cond false without else")
 
 # test_cond_first_clause_matches
-(def @cond-r4 (cond ((> 5 3) 100) ((> 4 2) 200)))
+(def @cond-r4 (cond (> 5 3) 100 (> 4 2) 200))
 (assert (= cond-r4 100) "cond first matches")
 
 # test_cond_second_clause_matches
-(def @cond-r5 (cond ((> 3 5) 100) ((> 4 2) 200)))
+(def @cond-r5 (cond (> 3 5) 100 (> 4 2) 200))
 (assert (= cond-r5 200) "cond second matches")
 
 # test_cond_multiple_clauses_with_else
-(def @cond-r6 (cond ((> 3 5) 100) ((> 2 4) 200) (else 300)))
+(def @cond-r6 (cond (> 3 5) 100 (> 2 4) 200 300))
 (assert (= cond-r6 300) "cond multiple with else")
 
 # test_cond_with_expressions_as_conditions
 (def @cond-r7 (cond
-  ((= 1 2) "one-two")
-  ((= 2 2) "two-two")
-  (else "other")))
+  (= 1 2) "one-two"
+  (= 2 2) "two-two"
+  "other"))
 (assert (= cond-r7 "two-two") "cond with expression conditions")
 
 # test_cond_with_complex_bodies
-(def @cond-r8 (cond (false (+ 1 1)) (true (+ 2 3)) (else (+ 4 5))))
+(def @cond-r8 (cond false (+ 1 1) true (+ 2 3) (+ 4 5)))
 (assert (= cond-r8 5) "cond complex bodies")
 
 # test_cond_with_multiple_body_expressions
-(def @cond-r9 (cond (true (+ 1 1) (+ 2 2) (+ 3 3))))
+(def @cond-r9 (cond true (begin (+ 1 1) (+ 2 2) (+ 3 3))))
 (assert (= cond-r9 6) "cond multiple body exprs")
 
 # test_cond_nested
-(def @cond-r10 (cond (true (cond (true 42) (else 100))) (else 200)))
+(def @cond-r10 (cond true (cond true 42 100) 200))
 (assert (= cond-r10 42) "cond nested")
 
 # test_cond_with_variable_references
 (def @x-cond 10)
 (def @cond-r11 (cond
-  ((< x-cond 5) "small")
-  ((< x-cond 15) "medium")
-  (else "large")))
+  (< x-cond 5) "small"
+  (< x-cond 15) "medium"
+  "large"))
 (assert (= cond-r11 "medium") "cond with variable references")
 
 # test_cond_respects_clause_order
 (def @cond-r12 (cond
-  ((>= 10 5) "first")
-  ((>= 10 3) "second")
-  (else "third")))
+  (>= 10 5) "first"
+  (>= 10 3) "second"
+  "third"))
 (assert (= cond-r12 "first") "cond respects clause order")
 
 # test_cond_with_else_body_multiple_expressions
-(def @cond-r13 (cond (false 100) (else (+ 1 1) (+ 2 2) (* 3 3))))
+(def @cond-r13 (cond false 100 (begin (+ 1 1) (+ 2 2) (* 3 3))))
 (assert (= cond-r13 9) "cond else multiple body exprs")
 
 # ============================================================================

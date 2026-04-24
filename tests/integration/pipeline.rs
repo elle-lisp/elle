@@ -108,7 +108,7 @@ fn test_compile_while() {
 #[test]
 fn test_compile_cond() {
     let (mut symbols, _) = setup();
-    let result = compile("(cond (true 1) (else 2))", &mut symbols, "<test>");
+    let result = compile("(cond true 1 2)", &mut symbols, "<test>");
     assert!(result.is_ok());
 }
 
@@ -251,7 +251,7 @@ fn test_eval_comparison_lt() {
 #[test]
 fn test_eval_cond_first_true() {
     let (mut symbols, mut vm) = setup();
-    let result = eval("(cond (true 42))", &mut symbols, &mut vm, "<test>");
+    let result = eval("(cond true 42)", &mut symbols, &mut vm, "<test>");
     assert_eq!(result.unwrap(), Value::int(42));
 }
 
@@ -259,7 +259,7 @@ fn test_eval_cond_first_true() {
 fn test_eval_cond_second_true() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(cond (false 1) (true 42))",
+        "(cond false 1 true 42)",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -271,7 +271,7 @@ fn test_eval_cond_second_true() {
 fn test_eval_cond_else() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(cond (false 1) (false 2) (else 42))",
+        "(cond false 1 false 2 42)",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -283,7 +283,7 @@ fn test_eval_cond_else() {
 fn test_eval_cond_with_expressions() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(cond ((< 5 10) (+ 20 22)))",
+        "(cond (< 5 10) (+ 20 22))",
         &mut symbols,
         &mut vm,
         "<test>",

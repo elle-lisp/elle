@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/rdf/elle.lisp — RDF triple generation for Elle source analysis
 ##
 ## Canonical representation of Elle semantic data as N-Triples.

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 
 # Scope Allocation Workload — measuring escape analysis tiers
 #
@@ -105,9 +105,9 @@
     (while (< i 10000)
       (let [tag (mod i 3)]
         (match tag
-          (0 :zero)
-          (1 :one)
-          (_ :other)))
+          0 :zero
+          1 :one
+          _ :other))
       (assign i (+ i 1)))
     (- (arena/count) before))))
 
@@ -160,7 +160,7 @@
           (+ n i)))
       # Tier 5: match → keyword
       (let [tag (mod i 2)]
-        (match tag (0 :even) (_ :odd)))
+        (match tag 0 :even _ :odd))
       (assign i (+ i 1)))
     {:net (- (arena/count) before)
      :total total

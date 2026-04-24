@@ -28,11 +28,12 @@ Arrays are indexed sequences. Bare `[...]` is immutable; `@[...]` is mutable.
 
 ## Immutable operations
 
-`put` on an immutable array returns a new array; the original is unchanged.
+`put` and `push` on an immutable array return a new array; the original is unchanged.
 
 ```lisp
 (def arr [10 20 30])
 (put arr 0 99)             # => [99 20 30]
+(push arr 40)              # => [10 20 30 40]
 arr                        # => [10 20 30] (unchanged)
 (concat [1 2] [3 4])       # => [1 2 3 4]
 ```

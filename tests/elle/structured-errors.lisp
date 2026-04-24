@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # ── Structured error tests ─────────────────────────────────────────────
 #
 # Tests for the structured error surface: multi-error accumulation,

@@ -1,6 +1,6 @@
+(elle/epoch 9)
 ## tests/elle/websocket.lisp — WebSocket module tests
 
-(elle/epoch 8)
 
 ## ── Plugin availability check ────────────────────────────────────
 
@@ -77,13 +77,11 @@
              (forever
                (let [msg (ws:recv conn)]
                  (cond
-                   ((= msg:type :close)
-                    (ws:close conn)
-                    (break nil))
-                   ((= msg:type :text)
-                    (ws:send conn (string msg:data)))
-                   ((= msg:type :binary)
-                    (ws:send conn msg:data)))))))))]
+                   (= msg:type :close) (begin (ws:close conn) (break nil))
+                   (= msg:type :text)
+                    (ws:send conn (string msg:data))
+                   (= msg:type :binary)
+                    (ws:send conn msg:data))))))))]
   (let* [url (string "ws://127.0.0.1:" lport "/echo")
          conn (ws:connect url)]
     ## Text echo

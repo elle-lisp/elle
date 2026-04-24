@@ -276,41 +276,41 @@ fn region_emitted_for_deeply_nested_lets() {
 fn region_emitted_for_match_with_keyword_arms() {
     // All match arms return keywords (immediates) → safe
     assert!(has_region(
-        "(let [x 1] (match x (0 :zero) (1 :one) (_ :other)))"
+        "(let [x 1] (match x 0 :zero 1 :one _ :other))"
     ));
 }
 
 #[test]
 fn region_emitted_for_match_with_int_arms() {
     // All match arms return ints → safe
-    assert!(has_region("(let [x 1] (match x (0 0) (1 10) (_ -1)))"));
+    assert!(has_region("(let [x 1] (match x 0 0 1 10 _ -1))"));
 }
 
 #[test]
 fn region_emitted_for_match_with_bool_arms() {
     // All match arms return bools → safe
-    assert!(has_region("(let [x 1] (match x (0 false) (_ true)))"));
+    assert!(has_region("(let [x 1] (match x 0 false _ true))"));
 }
 
 #[test]
 fn region_emitted_for_match_with_intrinsic_arms() {
     // Match arms return intrinsic calls → safe
     assert!(has_region(
-        "(let [x 1 y 2] (match x (0 (+ y 1)) (_ (- y 1))))"
+        "(let [x 1 y 2] (match x 0 (+ y 1) _ (- y 1)))"
     ));
 }
 
 #[test]
 fn no_region_when_match_arm_returns_string() {
     // One match arm returns a list (heap) → unsafe
-    assert!(!has_region(r#"(let [x 1] (match x (0 :ok) (_ (list 1))))"#));
+    assert!(!has_region(r#"(let [x 1] (match x 0 :ok _ (list 1)))"#));
 }
 
 #[test]
 fn no_region_when_match_arm_returns_list() {
     // One match arm returns a list (heap) → unsafe
     assert!(!has_region(
-        "(let [x 1] (match x (0 42) (_ (list 1 2 3))))"
+        "(let [x 1] (match x 0 42 _ (list 1 2 3)))"
     ));
 }
 
@@ -327,7 +327,7 @@ fn region_emitted_for_while_in_result_position() {
 #[test]
 fn correct_match_in_scope_keyword_result() {
     assert_eq!(
-        eval_source("(let [x 1] (match x (0 :zero) (1 :one) (_ :other)))").unwrap(),
+        eval_source("(let [x 1] (match x 0 :zero 1 :one _ :other))").unwrap(),
         Value::keyword("one")
     );
 }
@@ -335,7 +335,7 @@ fn correct_match_in_scope_keyword_result() {
 #[test]
 fn correct_match_in_scope_int_result() {
     assert_eq!(
-        eval_source("(let [x 2] (match x (0 0) (1 10) (_ -1)))").unwrap(),
+        eval_source("(let [x 2] (match x 0 0 1 10 _ -1))").unwrap(),
         Value::int(-1)
     );
 }
@@ -343,7 +343,7 @@ fn correct_match_in_scope_int_result() {
 #[test]
 fn correct_match_in_scope_with_intrinsic() {
     assert_eq!(
-        eval_source("(let [x 0 y 5] (match x (0 (+ y 10)) (_ (- y 1))))").unwrap(),
+        eval_source("(let [x 0 y 5] (match x 0 (+ y 10) _ (- y 1)))").unwrap(),
         Value::int(15)
     );
 }
@@ -731,7 +731,7 @@ fn no_region_when_or_has_unsafe_element() {
 fn no_region_when_cond_clause_body_unsafe() {
     // A cond clause body returns a list → heap-allocated → unsafe
     assert!(!has_region(
-        r#"(let [x 1] (cond (true (list 1)) (else 42)))"#
+        r#"(let [x 1] (cond true (list 1) 42))"#
     ));
 }
 
@@ -739,7 +739,7 @@ fn no_region_when_cond_clause_body_unsafe() {
 fn region_emitted_for_cond_without_else() {
     // cond with no else clause: missing else produces nil (safe).
     // All clause bodies are safe ints → scope allocation should work.
-    assert!(has_region("(let [x 1] (cond ((< x 0) 1) ((> x 0) 2)))"));
+    assert!(has_region("(let [x 1] (cond (< x 0) 1 (> x 0) 2))"));
 }
 
 #[test]

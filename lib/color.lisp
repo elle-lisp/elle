@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/color.lisp — Color science library (pure Elle)
 ##
 ## Color space conversions, mixing, gradients, and perceptual distance.
@@ -61,9 +61,9 @@
                  (/ d (- 1.0 (abs (- (* 2.0 l) 1.0)))))
            h  (if (= d 0.0) 0.0
                  (cond
-                   ((= mx r) (* 60.0 (fmod (/ (- g b) d) 6.0)))
-                   ((= mx g) (* 60.0 (+ (/ (- b r) d) 2.0)))
-                   (true     (* 60.0 (+ (/ (- r g) d) 4.0)))))]
+                   (= mx r) (* 60.0 (fmod (/ (- g b) d) 6.0))
+                   (= mx g) (* 60.0 (+ (/ (- b r) d) 2.0))
+                   true     (* 60.0 (+ (/ (- r g) d) 4.0))))]
       {:space :hsl
        :h (normalize-hue h)
        :s (clamp01 s)
@@ -76,12 +76,12 @@
            x   (* ch (- 1.0 (abs (- (fmod hp 2.0) 1.0))))
            [r1 g1 b1]
             (cond
-              ((< hp 1.0) [ch x  0.0])
-              ((< hp 2.0) [x  ch 0.0])
-              ((< hp 3.0) [0.0 ch x])
-              ((< hp 4.0) [0.0 x  ch])
-              ((< hp 5.0) [x  0.0 ch])
-              (true       [ch 0.0 x]))
+              (< hp 1.0) [ch x  0.0]
+              (< hp 2.0) [x  ch 0.0]
+              (< hp 3.0) [0.0 ch x]
+              (< hp 4.0) [0.0 x  ch]
+              (< hp 5.0) [x  0.0 ch]
+              true       [ch 0.0 x])
            m (- l (/ ch 2.0))]
       {:space :srgb :r (+ r1 m) :g (+ g1 m) :b (+ b1 m)}))
 
@@ -199,24 +199,24 @@
 
   (defn to-srgb [c]
     (match c:space
-      (:srgb  c)
-      (:hsl   (hsl->rgb c))
-      (:lab   (lab->rgb c))
-      (:xyz   (xyz->rgb c))
-      (:oklab (oklab->rgb c))
-      (:oklch (oklch->rgb c))
-      (_      (error {:error :color-error :message (string "unknown space " c:space)}))))
+      :srgb  c
+      :hsl   (hsl->rgb c)
+      :lab   (lab->rgb c)
+      :xyz   (xyz->rgb c)
+      :oklab (oklab->rgb c)
+      :oklch (oklch->rgb c)
+      _      (error {:error :color-error :message (string "unknown space " c:space)})))
 
   (defn convert [c space]
     (let [s (to-srgb c)]
       (match space
-        (:srgb  s)
-        (:hsl   (rgb->hsl s))
-        (:lab   (rgb->lab s))
-        (:xyz   (rgb->xyz s))
-        (:oklab (rgb->oklab s))
-        (:oklch (rgb->oklch s))
-        (_      (error {:error :color-error :message (string "unknown target space " space)})))))
+        :srgb  s
+        :hsl   (rgb->hsl s)
+        :lab   (rgb->lab s)
+        :xyz   (rgb->xyz s)
+        :oklab (rgb->oklab s)
+        :oklch (rgb->oklch s)
+        _      (error {:error :color-error :message (string "unknown target space " space)}))))
 
   # ── Operations ─────────────────────────────────────────────────────
 
@@ -275,16 +275,16 @@
            h2p (let [h (* (math/atan2 b2 a2p) DEG)]
                   (if (< h 0.0) (+ h 360.0) h))
            dhp (cond
-                  ((or (= c1p 0.0) (= c2p 0.0)) 0.0)
-                  ((<= (abs (- h2p h1p)) 180.0) (- h2p h1p))
-                  ((> (- h2p h1p) 180.0) (- (- h2p h1p) 360.0))
-                  (true (+ (- h2p h1p) 360.0)))
+                  (or (= c1p 0.0) (= c2p 0.0)) 0.0
+                  (<= (abs (- h2p h1p)) 180.0) (- h2p h1p)
+                  (> (- h2p h1p) 180.0) (- (- h2p h1p) 360.0)
+                  true (+ (- h2p h1p) 360.0))
            dHp (* 2.0 (math/sqrt (* c1p c2p)) (math/sin (* (/ dhp 2.0) RAD)))
            Hbp (cond
-                  ((or (= c1p 0.0) (= c2p 0.0)) (+ h1p h2p))
-                  ((<= (abs (- h1p h2p)) 180.0) (/ (+ h1p h2p) 2.0))
-                  ((< (+ h1p h2p) 360.0) (/ (+ h1p h2p 360.0) 2.0))
-                  (true (/ (+ h1p h2p -360.0) 2.0)))
+                  (or (= c1p 0.0) (= c2p 0.0)) (+ h1p h2p)
+                  (<= (abs (- h1p h2p)) 180.0) (/ (+ h1p h2p) 2.0)
+                  (< (+ h1p h2p) 360.0) (/ (+ h1p h2p 360.0) 2.0)
+                  true (/ (+ h1p h2p -360.0) 2.0))
            T (+ 1.0
                  (* -0.17 (math/cos (* (- Hbp 30.0) RAD)))
                  (* 0.24  (math/cos (* (* 2.0 Hbp) RAD)))

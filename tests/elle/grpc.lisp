@@ -1,9 +1,9 @@
+(elle/epoch 9)
 ## tests/elle/grpc.lisp — gRPC framing tests
 ##
 ## Tests the pure framing functions (encode/decode) without needing a
 ## running gRPC server or the protobuf plugin.
 
-(elle/epoch 8)
 
 ## ── Init with fake protobuf ──────────────────────────────────────
 

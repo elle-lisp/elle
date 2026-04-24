@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/contract.lisp — Compositional validation system for function boundaries.
 ##
 ## Loaded via:
@@ -57,7 +57,7 @@
    - struct?   → struct shape validator (validates declared keys; extra keys ignored)
    - other     → signals :type-error"
     (cond
-      ((fn? expr)
+      (fn? expr)
        # Wrap a raw predicate: truthy = pass, falsy = fail.
        # Use protect to treat thrown errors as failures (e.g. odd? on non-integer).
        (let [desc (string expr)]
@@ -67,11 +67,11 @@
                (if (and ok result)
                  nil
                  {:error :validation :expected desc :got (type-of value)})))
-           desc)))
-      ((validator? expr)
+           desc))
+      (validator? expr)
        # Already a compiled validator — pass through unchanged.
-       expr)
-      ((struct? expr)
+       expr
+      (struct? expr)
        # Struct shape: compile each declared key's validator recursively.
        # Extra keys in the value are allowed (open-world).
        # Missing keys pass nil to the sub-validator (nil will typically fail).
@@ -100,12 +100,12 @@
                  (if (> (length failures) 0)
                    {:error :validation :fields (freeze failures)}
                    nil))))
-           desc)))
-      (true
+           desc))
+      true
        (error {:error :type-error
                :reason :unsupported-type
                :got (type-of expr)
-               :message "unsupported expression type"})))))
+               :message "unsupported expression type"}))))
 
 # ============================================================================
 # check — multiple predicate functions (all must pass, short-circuits)
@@ -320,36 +320,36 @@
    For :all with plain entries  → v/and failure.
    For :expected/:got           → leaf failure."
   (cond
-    ((has? failure :fields)
+    (has? failure :fields)
      # Struct shape failure
      (let [parts @["struct validation failed:"]]
        (each entry in (get failure :fields)
          (push parts
            (append (append (append "  " (string (get entry :key))) " — ")
                    (explain-failure (get entry :failure)))))
-       (string/join parts "\n")))
-    ((has? failure :any)
+       (string/join parts "\n"))
+    (has? failure :any)
      # v/or failure
      (let [parts @[(append (append "none matched (" (get failure :expected)) "):")]]
        (each sub in (get failure :any)
          (push parts (append "  - " (explain-failure sub))))
-       (string/join parts "\n")))
-    ((has? failure :all)
+       (string/join parts "\n"))
+    (has? failure :all)
      # v/and, v/arrayof, or v/mapof — distinguish by inspecting first entry
      (let [entries (get failure :all)]
        (if (= (length entries) 0)
          "validation failed: (no details)"
          (let [first-entry (get entries 0)]
            (cond
-             ((has? first-entry :index)
+             (has? first-entry :index)
               # v/arrayof
                (let [parts @["array validation failed:"]]
                  (each entry in entries
                    (push parts
                      (append (append (append "  index " (string (get entry :index))) ": ")
                              (explain-failure (get entry :failure)))))
-                 (string/join parts "\n")))
-             ((has? first-entry :kind)
+                 (string/join parts "\n"))
+             (has? first-entry :kind)
               # v/mapof
                (let [parts @["map validation failed:"]]
                  (each entry in entries
@@ -357,20 +357,20 @@
                      (append (append (append (append (append "  " (string (get entry :kind))) " at ")
                                              (string (get entry :key))) ": ")
                              (explain-failure (get entry :failure)))))
-                 (string/join parts "\n")))
-             (true
+                 (string/join parts "\n"))
+             true
               # v/and
               (let [parts @["all of:"]]
                 (each sub in entries
                   (push parts (append "  - " (explain-failure sub))))
-                (string/join parts "\n"))))))))
-    ((and (has? failure :expected) (has? failure :got))
+                (string/join parts "\n"))))))
+    (and (has? failure :expected) (has? failure :got))
      # Leaf failure
      (append (append (append "expected " (string (get failure :expected))) ", got ")
-             (string (get failure :got))))
-    (true
+             (string (get failure :got)))
+    true
      # Unknown failure shape — best effort
-     (string failure))))
+     (string failure)))
 
 (def explain
   (fn [validator value]

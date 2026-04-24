@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/telemetry.lisp — OpenTelemetry metrics (OTLP/HTTP JSON export)
 ##
 ## Loaded via: (def telemetry ((import-file "lib/telemetry.lisp")))
@@ -39,10 +39,10 @@
 (defn encode-value [v]
   "Encode an Elle value as an OTLP AnyValue."
   (cond
-    ((integer? v) {"intValue" (string v)})
-    ((float? v)   {"doubleValue" v})
-    ((boolean? v) {"boolValue" v})
-    (true         {"stringValue" (string v)})))
+    (integer? v) {"intValue" (string v)}
+    (float? v)   {"doubleValue" v}
+    (boolean? v) {"boolValue" v}
+    true         {"stringValue" (string v)}))
 
 (defn encode-attributes [attrs]
   "Encode a struct of {string -> value} as OTLP KeyValue array.

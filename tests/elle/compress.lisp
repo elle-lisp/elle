@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Compress module tests (FFI to libz + libzstd)
 
 (def [ok1? _] (protect ((fn [] (ffi/native "libz.so")))))

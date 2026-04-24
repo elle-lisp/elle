@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## tests/elle/aws-smoke.lisp — verify aws module loads (no creds needed)
 
 (def crypto (import-file "target/debug/libelle_crypto.so"))

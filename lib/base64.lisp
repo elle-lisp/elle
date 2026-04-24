@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/base64.lisp — Base64 encoding/decoding (pure Elle)
 ##
 ## Implements RFC 4648 standard and URL-safe alphabets.
@@ -46,16 +46,16 @@
           (append acc (chars (bit/and c 63))))
         (assign i (+ i 3)))
       (match (- len i)
-        [1 (let [a (input i)]
+        1 (let [a (input i)]
              (append acc (chars (bit/shr a 2)))
              (append acc (chars (bit/shl (bit/and a 3) 4)))
-             (when pad? (append acc "==")))]
-        [2 (let [a (input i) b (input (inc i))]
+             (when pad? (append acc "==")))
+        2 (let [a (input i) b (input (inc i))]
              (append acc (chars (bit/shr a 2)))
              (append acc (chars (bit/or (bit/shl (bit/and a 3) 4) (bit/shr b 4))))
              (append acc (chars (bit/shl (bit/and b 15) 2)))
-             (when pad? (append acc "=")))]
-        [_ nil])
+             (when pad? (append acc "=")))
+        _ nil)
       (freeze acc)))
 
   (defn encode [data]     "Base64-encode (standard, padded)."   (encode-with data std-chars true))
@@ -90,13 +90,13 @@
           (push acc (bit/and (bit/or (bit/shl c 6) d) 255)))
         (assign i (+ i 4)))
       (match (- slen i)
-        [0 nil]
-        [2 (let [a (lookup i) b (lookup (inc i))]
-             (push acc (bit/or (bit/shl a 2) (bit/shr b 4))))]
-        [3 (let [a (lookup i) b (lookup (inc i)) c (lookup (+ i 2))]
+        0 nil
+        2 (let [a (lookup i) b (lookup (inc i))]
+             (push acc (bit/or (bit/shl a 2) (bit/shr b 4))))
+        3 (let [a (lookup i) b (lookup (inc i)) c (lookup (+ i 2))]
              (push acc (bit/or (bit/shl a 2) (bit/shr b 4)))
-             (push acc (bit/and (bit/or (bit/shl b 4) (bit/shr c 2)) 255)))]
-        [_ (error {:error :base64-error :reason :invalid-length :message "invalid length"})])
+             (push acc (bit/and (bit/or (bit/shl b 4) (bit/shr c 2)) 255)))
+        _ (error {:error :base64-error :reason :invalid-length :message "invalid length"}))
       (freeze (bytes ;acc))))
 
   (defn decode [data]     "Base64-decode (standard)."   (decode-with data std-decode))

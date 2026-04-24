@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/semver.lisp — Semantic versioning (pure Elle)
 ##
 ## Implements semver 2.0.0 parsing, comparison, and requirement matching.
@@ -67,10 +67,10 @@
                     (let* [av (as ai) bv (bs bi)
                            an (parse-int av) bn (parse-int bv)
                            r (match [an bn]
-                                [[nil nil] (compare av bv)]
-                                [[nil _]   1]
-                                [[_ nil]  -1]
-                                [_  (compare an bn)])]
+                                [nil nil] (compare av bv)
+                                [nil _]   1
+                                [_ nil]  -1
+                                _  (compare an bn))]
                       (if (zero? r) (cmp-ids (inc ai) (inc bi)) r))))))
             (cmp-ids 0 0))))))
 
@@ -102,26 +102,26 @@
            [ver-str op] (parse-op trimmed)
            c (semver-compare ver ver-str)]
       (match op
-        [">=" (>= c 0)]
-        ["<=" (<= c 0)]
-        [">"  (> c 0)]
-        ["<"  (< c 0)]
-        ["="  (zero? c)]
-        ["!=" (not (zero? c))]
-        ["^"  (let [rv (parse ver-str) pv (parse ver)]
+        ">=" (>= c 0)
+        "<=" (<= c 0)
+        ">"  (> c 0)
+        "<"  (< c 0)
+        "="  (zero? c)
+        "!=" (not (zero? c))
+        "^"  (let [rv (parse ver-str) pv (parse ver)]
                 (and (>= c 0)
                      (if (> rv:major 0)
                        (= pv:major rv:major)
                        (if (> rv:minor 0)
                          (and (zero? pv:major) (= pv:minor rv:minor))
                          (and (zero? pv:major) (zero? pv:minor)
-                              (<= pv:patch rv:patch))))))]
-        ["~"  (let [rv (parse ver-str) pv (parse ver)]
+                              (<= pv:patch rv:patch))))))
+        "~"  (let [rv (parse ver-str) pv (parse ver)]
                 (and (>= c 0)
                      (= pv:major rv:major)
-                     (= pv:minor rv:minor)))]
-        [_    (error {:error :semver-error
-                      :message (string "semver/satisfies?: unknown operator " op)})])))
+                     (= pv:minor rv:minor)))
+        _    (error {:error :semver-error
+                      :message (string "semver/satisfies?: unknown operator " op)}))))
 
   (defn satisfies? [version requirement]
     "Check if version satisfies a requirement string (comma-separated)."
@@ -132,11 +132,11 @@
     "Increment a version part (:major, :minor, or :patch). Clears pre/build."
     (let [v (parse version)]
       (match part
-        [:major (string (inc v:major) ".0.0")]
-        [:minor (string v:major "." (inc v:minor) ".0")]
-        [:patch (string v:major "." v:minor "." (inc v:patch))]
-        [_ (error {:error :semver-error
-                   :message (string "semver/increment: expected :major, :minor, or :patch, got " part)})])))
+        :major (string (inc v:major) ".0.0")
+        :minor (string v:major "." (inc v:minor) ".0")
+        :patch (string v:major "." v:minor "." (inc v:patch))
+        _ (error {:error :semver-error
+                   :message (string "semver/increment: expected :major, :minor, or :patch, got " part)}))))
 
   {:parse parse :valid? valid? :compare semver-compare
    :satisfies? satisfies? :increment increment})

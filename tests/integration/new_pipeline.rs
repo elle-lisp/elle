@@ -64,17 +64,17 @@ fn test_if_nested() {
 
 #[test]
 fn test_cond_simple() {
-    assert!(compiles("(cond (true 1))"));
+    assert!(compiles("(cond true 1)"));
 }
 
 #[test]
 fn test_cond_with_else() {
-    assert!(compiles("(cond (false 1) (else 2))"));
+    assert!(compiles("(cond false 1 2)"));
 }
 
 #[test]
 fn test_cond_multiple_clauses() {
-    assert!(compiles("(cond (false 1) (false 2) (true 3) (else 4))"));
+    assert!(compiles("(cond false 1 false 2 true 3 4)"));
 }
 
 #[test]
@@ -486,7 +486,7 @@ fn test_nested_if() {
 
 #[test]
 fn test_cond_all_false_with_else() {
-    assert!(compiles("(cond (false 1) (false 2) (else 3))"));
+    assert!(compiles("(cond false 1 false 2 3)"));
 }
 
 #[test]
