@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## stdin + ev/spawn interaction
 ##
 ## Regression test: port/read-line on stdin must work when a long-lived
@@ -25,10 +25,10 @@
 # ./target/{release,debug}/elle, so check both paths.
 (def elle-bin
   (cond
-    ((file/exists? "./target/release/elle") "./target/release/elle")
-    ((file/exists? "./target/debug/elle")   "./target/debug/elle")
-    (true (error {:error :test-skip
-                  :message "cannot find elle binary in ./target/"}))))
+    (file/exists? "./target/release/elle") "./target/release/elle"
+    (file/exists? "./target/debug/elle")   "./target/debug/elle"
+    true (error {:error :test-skip
+                  :message "cannot find elle binary in ./target/"})))
 
 (def result
   (subprocess/system "sh"

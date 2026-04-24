@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Markdown-to-HTML parser for the documentation generator
 ##
 ## Parses standard markdown: headings, code fences, tables, lists,
@@ -164,11 +164,11 @@
       (let [line (get lines i)]
         (cond
           # ── Blank line ──
-          ((= (string/trim line) "")
-           (assign i (+ i 1)))
+          (= (string/trim line) "")
+           (assign i (+ i 1))
 
           # ── Code fence ──
-          ((string/starts-with? line "```")
+          (string/starts-with? line "```")
            (let [lang (string/trim (slice line 3 (length line)))]
              (assign i (+ i 1))
              (def @code-lines @[])
@@ -181,10 +181,10 @@
                (html-escape (if (= lang "") "text" lang))
                "\">"
                (html-escape (string/join (freeze code-lines) "\n"))
-               "</code></pre>\n"))))
+               "</code></pre>\n")))
 
           # ── Heading ──
-          ((heading-level line)
+          (heading-level line)
            (let* [level (heading-level line)
                   htext (string/trim (slice line (+ level 1) (length line)))]
              (if (and (= level 1) (nil? title))
@@ -217,16 +217,13 @@
                      " id=\"" (html-escape id) "\">"
                      (format-inline htext)
                      "</h" (string level) ">\n")))
-                 (assign i (+ i 1))))))
+                 (assign i (+ i 1)))))
 
           # ── Table ──
-          ((string/starts-with? (string/trim line) "|")
-           (def @table-lines @[])
-           (while (and (< i n)
+          (string/starts-with? (string/trim line) "|") (begin (def @table-lines @[]) (while (and (< i n)
                        (string/starts-with? (string/trim (get lines i)) "|"))
              (push table-lines (get lines i))
-             (assign i (+ i 1)))
-           (let [tlines (freeze table-lines)]
+             (assign i (+ i 1))) (let [tlines (freeze table-lines)]
              (when (>= (length tlines) 2)
                (let* [headers (parse-table-cells (get tlines 0))
                       has-sep (and (>= (length tlines) 2)
@@ -245,41 +242,28 @@
                  (push body "</tbody></table>\n")))))
 
           # ── Unordered list ──
-          ((is-list-item? line)
-           (def @items @[])
-           (while (and (< i n) (is-list-item? (get lines i)))
+          (is-list-item? line) (begin (def @items @[]) (while (and (< i n) (is-list-item? (get lines i)))
              (push items (slice (get lines i) 2 (length (get lines i))))
-             (assign i (+ i 1)))
-           (push body "<ul>")
-           (each item in items
-             (push body (string "<li>" (format-inline (string/trim item)) "</li>")))
-           (push body "</ul>\n"))
+             (assign i (+ i 1))) (push body "<ul>") (each item in items
+             (push body (string "<li>" (format-inline (string/trim item)) "</li>"))) (push body "</ul>\n"))
 
           # ── Blockquote ──
-          ((string/starts-with? line "> ")
-           (def @quote-lines @[])
-           (while (and (< i n) (string/starts-with? (get lines i) "> "))
+          (string/starts-with? line "> ") (begin (def @quote-lines @[]) (while (and (< i n) (string/starts-with? (get lines i) "> "))
              (push quote-lines (slice (get lines i) 2 (length (get lines i))))
-             (assign i (+ i 1)))
-           (push body (string "<blockquote><p>"
+             (assign i (+ i 1))) (push body (string "<blockquote><p>"
              (format-inline (string/join (freeze quote-lines) " "))
              "</p></blockquote>\n")))
 
           # ── Horizontal rule ──
-          ((or (= (string/trim line) "---")
+          (or (= (string/trim line) "---")
                (= (string/trim line) "***")
-               (= (string/trim line) "___"))
-           (push body "<hr>\n")
-           (assign i (+ i 1)))
+               (= (string/trim line) "___")) (begin (push body "<hr>\n") (assign i (+ i 1)))
 
           # ── Paragraph ──
-          (true
-           (def @para-lines @[])
-           (while (and (< i n)
+          true (begin (def @para-lines @[]) (while (and (< i n)
                        (not (is-block-boundary? (get lines i))))
              (push para-lines (get lines i))
-             (assign i (+ i 1)))
-           (when (not (empty? para-lines))
+             (assign i (+ i 1))) (when (not (empty? para-lines))
              (push body (string "<p>"
                (format-inline (string/join (freeze para-lines) " "))
                "</p>\n")))))))

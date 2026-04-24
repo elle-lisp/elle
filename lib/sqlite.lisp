@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:
@@ -61,13 +61,13 @@
     (def @i 1)
     (each p in params
       (match (type-of p)
-        [:nil     (check db (c-bind-null stmt i) "bind")]
-        [:integer (check db (c-bind-int stmt i p) "bind")]
-        [:float   (check db (c-bind-dbl stmt i p) "bind")]
-        [:string  (check db (c-bind-text stmt i p -1 SQLITE_TRANSIENT) "bind")]
-        [:boolean (check db (c-bind-int stmt i (if p 1 0)) "bind")]
-        [t (error {:error :sqlite-error
-                   :message (string "bind: unsupported type " t)})])
+        :nil     (check db (c-bind-null stmt i) "bind")
+        :integer (check db (c-bind-int stmt i p) "bind")
+        :float   (check db (c-bind-dbl stmt i p) "bind")
+        :string  (check db (c-bind-text stmt i p -1 SQLITE_TRANSIENT) "bind")
+        :boolean (check db (c-bind-int stmt i (if p 1 0)) "bind")
+        t (error {:error :sqlite-error
+                   :message (string "bind: unsupported type " t)}))
       (assign i (inc i))))
 
   (defn read-row [stmt ncols col-names]
@@ -75,10 +75,10 @@
       (each ci in (range ncols)
         (let [name (keyword (col-names ci))
               val (match (c-col-type stmt ci)
-                     [1 (c-col-int stmt ci)]
-                     [2 (c-col-dbl stmt ci)]
-                     [3 (ffi/string (c-col-text stmt ci))]
-                     [_ nil])]
+                     1 (c-col-int stmt ci)
+                     2 (c-col-dbl stmt ci)
+                     3 (ffi/string (c-col-text stmt ci))
+                     _ nil)]
           (put row name val)))
       (freeze row)))
 

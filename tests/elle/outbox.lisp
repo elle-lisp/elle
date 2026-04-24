@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Outbox memory management tests
 #
 # Tests for the outbox-based allocation routing that replaces the

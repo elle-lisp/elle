@@ -162,7 +162,7 @@ fn test_multi_arg_lambda() {
 #[test]
 fn test_cond() {
     assert_eq!(
-        eval("(defn classify [x]\n  (cond\n    ((< x 0) :negative)\n    ((= x 0) :zero)\n    (true :positive)))\n(classify 5)"),
+        eval("(defn classify [x]\n  (cond\n    (< x 0) :negative\n    (= x 0) :zero\n    :positive))\n(classify 5)"),
         ":positive"
     );
 }

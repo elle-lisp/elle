@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## tools/aws/fetch-model.lisp — Download AWS Smithy models via HTTPS
 ##
 ## Usage:
@@ -33,9 +33,7 @@
     (def cl (get headers :content-length))
     (def body
       (cond
-        ((and te (string-contains? (string/lowercase te) "chunked"))
-         (def chunks @[])
-         (forever
+        (and te (string-contains? (string/lowercase te) "chunked")) (begin (def chunks @[]) (forever
            (def sz (parse-int (string/trim (tls:read-line conn)) 16))
            (when (= sz 0)
              (tls:read-line conn)
@@ -43,9 +41,9 @@
            (def chunk (tls:read conn sz))
            (push chunks chunk)
            (tls:read-line conn)))
-        ((not (nil? cl))
-         (tls:read conn (parse-int cl)))
-        (true (tls:read-all conn))))
+        (not (nil? cl))
+         (tls:read conn (parse-int cl))
+        true (tls:read-all conn)))
     {:status status :body body}))
 
 # ── Main ─────────────────────────────────────────────────────────────

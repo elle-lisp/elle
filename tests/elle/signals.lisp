@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection

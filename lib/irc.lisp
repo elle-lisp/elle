@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/irc.lisp -- IRCv3 client for Elle
 ##
 ## Coroutine-based IRC client with IRCv3 capability negotiation and SASL.
@@ -74,12 +74,12 @@
         (let [next (get s (inc i))]
           (append result
             (match next
-              [":" ";"]
-              ["s" " "]
-              ["\\" "\\"]
-              ["r" "\r"]
-              ["n" "\n"]
-              [_ next]))
+              ":" ";"
+              "s" " "
+              "\\" "\\"
+              "r" "\r"
+              "n" "\n"
+              _ next))
           (assign i (+ i 2)))
         (begin
           (append result (get s i))
@@ -351,10 +351,10 @@
     (defn handle-cap [msg]
       (when (>= (length msg:params) 3)
         (match (get msg:params 1)
-          ["LS"  (handle-cap-ls msg)]
-          ["ACK" (handle-cap-ack msg)]
-          ["NAK" (send (build-line "CAP" ["END"]))]
-          [_ nil])))
+          "LS"  (handle-cap-ls msg)
+          "ACK" (handle-cap-ack msg)
+          "NAK" (send (build-line "CAP" ["END"]))
+          _ nil)))
 
     (defn handle-auth [msg]
       (when (and sasl-in-progress (= (get msg:params 0) "+"))
@@ -380,23 +380,22 @@
         (when (nil? msg)
           (error {:error :irc-error :reason :connection-closed :phase :registration :message "connection closed during registration"}))
         (match msg:command
-          ["CAP"          (handle-cap msg)]
-          ["AUTHENTICATE" (handle-auth msg)]
-          ["903"          (assign sasl-in-progress false)
-                          (send (build-line "CAP" ["END"]))]
-          ["904"          (error {:error :irc-error :reason :sasl-failed
-                                  :message "SASL authentication failed"})]
-          ["433"          (handle-nick-collision)]
-          ["004"          (when (>= (length msg:params) 2)
-                            (assign server-name (get msg:params 1)))]
-          ["005"          (handle-isupport msg)]
-          ["PING"         (send (build-line "PONG"
-                                  [(or (get msg:params 0) "")]))]
-          ["001"          (break {:nick current-nick
+          "CAP"          (handle-cap msg)
+          "AUTHENTICATE" (handle-auth msg)
+          "903" (begin (assign sasl-in-progress false) (send (build-line "CAP" ["END"])))
+          "904"          (error {:error :irc-error :reason :sasl-failed
+                                  :message "SASL authentication failed"})
+          "433"          (handle-nick-collision)
+          "004"          (when (>= (length msg:params) 2)
+                            (assign server-name (get msg:params 1)))
+          "005"          (handle-isupport msg)
+          "PING"         (send (build-line "PONG"
+                                  [(or (get msg:params 0) "")]))
+          "001"          (break {:nick current-nick
                                   :caps negotiated-caps
                                   :server (or server-name "unknown")
-                                  :isupport (freeze isupport-map)})]
-          [_ nil]))))
+                                  :isupport (freeze isupport-map)})
+          _ nil))))
 
   ## ── Connect ───────────────────────────────────────────────────────
 

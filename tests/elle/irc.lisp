@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## tests/elle/irc.lisp — IRC module tests
 ##
 ## Pure parsing and formatting tests. No network required.

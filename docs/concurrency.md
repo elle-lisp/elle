@@ -134,8 +134,8 @@ On top of the core process API, the module provides:
   (let* ([me (process:self)]
          [peer (process:spawn (fn []
                  (match (process:recv)
-                   ([from :ping] (process:send from :pong))
-                   (_ nil))))])
+                   [from :ping] (process:send from :pong)
+                   _ nil)))]
     (process:send peer [me :ping])
     (assert (= (process:recv) :pong) "pong received"))))
 ```
@@ -173,8 +173,8 @@ On top of the core process API, the module provides:
       :name :sup
       :max-restarts 3)
     (match (process:recv)
-      ([:started pid] (assert (integer? pid) "worker started"))
-      (_ nil)))))
+      [:started pid] (assert (integer? pid) "worker started")
+      _ nil))))
 ```
 
 See [processes.md](processes.md) for the complete API reference,

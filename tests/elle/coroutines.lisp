@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Coroutine Tests
 ##
 ## Migrated from tests/property/coroutines.rs (behavioral property tests).
@@ -514,9 +514,9 @@
 (begin
   (def gen (fn []
     (cond
-      (false (yield 1))
-      (true (yield 2))
-      (else (yield 3)))))
+      false (yield 1)
+      true (yield 2)
+      (yield 3))))
   (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 2) "CPS: yield in cond"))
 

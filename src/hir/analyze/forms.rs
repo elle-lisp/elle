@@ -806,36 +806,23 @@ impl<'a> Analyzer<'a> {
         let mut else_branch = None;
         let mut signal = Signal::silent();
 
-        for clause in &items[1..] {
-            let parts = clause.as_list_or_tuple().ok_or_else(|| {
-                if matches!(clause.kind, SyntaxKind::ArrayMut(_)) {
-                    format!(
-                        "{}: cond clause must use (...) or [...], not @[...]",
-                        clause.span
-                    )
-                } else {
-                    format!(
-                        "{}: cond clause must be a list (...) or [...], got {}",
-                        clause.span,
-                        clause.kind_label()
-                    )
-                }
-            })?;
-            if parts.is_empty() {
-                continue;
-            }
-
-            if parts[0].as_symbol() == Some("else") {
-                let body = self.analyze_body(&parts[1..], span.clone())?;
+        // Flat pairs: (cond test1 body1 test2 body2 ... [default])
+        let args = &items[1..];
+        let mut i = 0;
+        while i < args.len() {
+            if i + 1 >= args.len() {
+                // Odd trailing element = default branch
+                let body = self.analyze_expr(&args[i])?;
                 signal = signal.combine(body.signal);
                 else_branch = Some(Box::new(body));
                 break;
             }
 
-            let test = self.analyze_expr(&parts[0])?;
-            let body = self.analyze_body(&parts[1..], span.clone())?;
+            let test = self.analyze_expr(&args[i])?;
+            let body = self.analyze_expr(&args[i + 1])?;
             signal = signal.combine(test.signal).combine(body.signal);
             clauses.push((test, body));
+            i += 2;
         }
 
         Ok(Hir::new(

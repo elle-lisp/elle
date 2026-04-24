@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Set types test suite
 ##
 ## Comprehensive tests for set types (immutable and mutable).
@@ -64,15 +64,15 @@
 # Or-Patterns
 # ============================================================================
 
-(assert (= (match 1 ((or 1 3 5) :odd) (_ :even)) :odd) "or-pattern: 1 is odd")
+(assert (= (match 1 (or 1 3 5) :odd _ :even) :odd) "or-pattern: 1 is odd")
 
-(assert (= (match 2 ((or 1 3 5) :odd) (_ :even)) :even) "or-pattern: 2 is even")
+(assert (= (match 2 (or 1 3 5) :odd _ :even) :even) "or-pattern: 2 is even")
 
-(assert (= (match 3 ((or 1 3 5) :odd) (_ :even)) :odd) "or-pattern: 3 is odd")
+(assert (= (match 3 (or 1 3 5) :odd _ :even) :odd) "or-pattern: 3 is odd")
 
-(assert (= (match 5 ((or 1 3 5) :odd) (_ :even)) :odd) "or-pattern: 5 is odd")
+(assert (= (match 5 (or 1 3 5) :odd _ :even) :odd) "or-pattern: 5 is odd")
 
-(assert (= (match 4 ((or 1 3 5) :odd) (_ :even)) :even) "or-pattern: 4 is even")
+(assert (= (match 4 (or 1 3 5) :odd _ :even) :even) "or-pattern: 4 is even")
 
 # ============================================================================
 # Set Inside a List (Set as Expression via Constructor)
@@ -422,17 +422,17 @@
 # ============================================================================
 
 (assert (= (match (set 1 2 3)
-             (|s| (length s))
-             (_ :no-match)) 3) "match immutable set")
+             |s| (length s)
+             _ :no-match) 3) "match immutable set")
 
 (assert (= (match @|1 2|
-             (@|s| (length s))
-             (_ :no-match)) 2) "match mutable set")
+             @|s| (length s)
+             _ :no-match) 2) "match mutable set")
 
 (assert (= (match (set 1 2 3)
-             (@|s| :mutable)
-             (|s| :immutable)
-             (_ :no-match)) :immutable) "match distinguishes set types")
+             @|s| :mutable
+             |s| :immutable
+             _ :no-match) :immutable) "match distinguishes set types")
 
 # ============================================================================
 # Each Iteration

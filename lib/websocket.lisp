@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/websocket.lisp — WebSocket client and server (RFC 6455)
 ##
 ## Parameterized module:
@@ -158,22 +158,10 @@
       (def @header @b[])
       (push header byte0)
       (cond
-        ((< plen 126)
-         (push header (bit/or mask-bit plen)))
-        ((< plen 65536)
-         (push header (bit/or mask-bit 126))
-         (push header (bit/and (bit/shr plen 8) 0xFF))
-         (push header (bit/and plen 0xFF)))
-        (true
-         (push header (bit/or mask-bit 127))
-         (push header (bit/and (bit/shr plen 56) 0xFF))
-         (push header (bit/and (bit/shr plen 48) 0xFF))
-         (push header (bit/and (bit/shr plen 40) 0xFF))
-         (push header (bit/and (bit/shr plen 32) 0xFF))
-         (push header (bit/and (bit/shr plen 24) 0xFF))
-         (push header (bit/and (bit/shr plen 16) 0xFF))
-         (push header (bit/and (bit/shr plen 8) 0xFF))
-         (push header (bit/and plen 0xFF))))
+        (< plen 126)
+         (push header (bit/or mask-bit plen))
+        (< plen 65536) (begin (push header (bit/or mask-bit 126)) (push header (bit/and (bit/shr plen 8) 0xFF)) (push header (bit/and plen 0xFF)))
+        true (begin (push header (bit/or mask-bit 127)) (push header (bit/and (bit/shr plen 56) 0xFF)) (push header (bit/and (bit/shr plen 48) 0xFF)) (push header (bit/and (bit/shr plen 40) 0xFF)) (push header (bit/and (bit/shr plen 32) 0xFF)) (push header (bit/and (bit/shr plen 24) 0xFF)) (push header (bit/and (bit/shr plen 16) 0xFF)) (push header (bit/and (bit/shr plen 8) 0xFF)) (push header (bit/and plen 0xFF))))
       (if do-mask
         (let* [mask-key (random:csprng-bytes 4)
                masked (apply-mask payload-bytes mask-key)]
@@ -194,10 +182,10 @@
                plen (bit/and byte1 0x7F)
                payload-len
                (cond
-                 ((= plen 126)
+                 (= plen 126)
                   (let [ext (read-exact t 2)]
-                    (bit/or (bit/shl (get ext 0) 8) (get ext 1))))
-                 ((= plen 127)
+                    (bit/or (bit/shl (get ext 0) 8) (get ext 1)))
+                 (= plen 127)
                   (let [ext (read-exact t 8)]
                     (bit/or (bit/shl (get ext 0) 56)
                             (bit/shl (get ext 1) 48)
@@ -206,8 +194,8 @@
                             (bit/shl (get ext 4) 24)
                             (bit/shl (get ext 5) 16)
                             (bit/shl (get ext 6) 8)
-                            (get ext 7))))
-                 (true plen))
+                            (get ext 7)))
+                 true plen)
                mask-key (when masked (read-exact t 4))
                raw (if (> payload-len 0) (read-exact t payload-len) (bytes))
                payload (if masked (apply-mask raw mask-key) raw)]
@@ -230,13 +218,13 @@
               (break nil))
             (let [op frame:opcode]
               (cond
-                ((= op OP-PING)
+                (= op OP-PING)
                  (let [pong (encode-frame OP-PONG frame:payload
                               :mask? conn:is-client?)]
                    (t-write t pong)
-                   (t-flush t)))
-                ((= op OP-PONG) nil)
-                ((= op OP-CLOSE)
+                   (t-flush t))
+                (= op OP-PONG) nil
+                (= op OP-CLOSE)
                  (let* [payload frame:payload
                        code (if (>= (length payload) 2)
                               (bit/or (bit/shl (get payload 0) 8) (get payload 1))
@@ -245,12 +233,9 @@
                                 (string (slice payload 2))
                                 "")]
                    (assign result {:type :close :data payload :code code :reason reason})
-                   (break nil)))
-                (true
-                 (when (not (= op OP-CONTINUATION))
-                   (assign msg-opcode op))
-                 (push parts frame:payload)
-                 (when frame:fin
+                   (break nil))
+                true (begin (when (not (= op OP-CONTINUATION))
+                   (assign msg-opcode op)) (push parts frame:payload) (when frame:fin
                    (let* [data (if (= (length parts) 1)
                                  (first (freeze parts))
                                  (apply concat (freeze parts)))

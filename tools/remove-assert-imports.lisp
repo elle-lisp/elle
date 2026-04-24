@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 ## Remove assertion import forms from all test/example files.
 ## Handles both single-line and multi-line (def {...} ((import-file "...assert...")))
 

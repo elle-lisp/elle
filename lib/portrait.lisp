@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis
@@ -29,10 +29,10 @@
 (defn classify-phase [sig]
   "Classify a signal into a phase kind."
   (cond
-    ((get sig :io)                         :io)
-    ((not (empty? (get sig :propagates)))  :delegated)
-    ((get sig :yields)                     :suspending)
-    (true                                  :pure)))
+    (get sig :io)                         :io
+    (not (empty? (get sig :propagates)))  :delegated
+    (get sig :yields)                     :suspending
+    true                                  :pure))
 
 (defn classify-phases [analysis callees]
   "Group callees into sequential phases by effect type."
@@ -196,11 +196,11 @@
         (when (get sig-result 0)
           (let [sig (get sig-result 1)]
             (cond
-              ((get sig :silent)                         (push pure name))
-              ((not (empty? (get sig :propagates)))      (push delegating name))
-              ((get sig :io)                             (push io-boundary name))
-              ((get sig :yields)                         (push yielding name))
-              (true                                      (push io-boundary name)))))))
+              (get sig :silent)                         (push pure name)
+              (not (empty? (get sig :propagates)))      (push delegating name)
+              (get sig :io)                             (push io-boundary name)
+              (get sig :yields)                         (push yielding name)
+              true                                      (push io-boundary name))))))
 
     # Find signal boundaries
     (def @boundaries @[])

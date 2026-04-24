@@ -12,9 +12,9 @@ Literal values (numbers, keywords, strings, booleans) match by equality:
 ```lisp
 (defn describe [val]
   (match val
-    (0      "zero")
-    (1      "one")
-    (_      "other")))
+    0      "zero"
+    1      "one"
+    _      "other"))
 
 (describe 0)               # => "zero"
 (describe 1)               # => "one"
@@ -31,8 +31,8 @@ expressions.
 ```lisp
 (defn first-or-default [lst fallback]
   (match lst
-    ((x & _) x)
-    (_       fallback)))
+    (x & _) x
+    _       fallback))
 
 (first-or-default (list 10 20) :none)  # => 10
 (first-or-default (list) :none)        # => :none
@@ -43,8 +43,8 @@ expressions.
 ```lisp
 (def x 42)
 (match 99
-  (x x)     # x binds to 99, body returns 99
-  (_ :no))  # => 99, NOT :no
+  x x       # x binds to 99, body returns 99
+  _ :no)    # => 99, NOT :no
 ```
 
 To dispatch against a variable's value, use `case` or a guard:
@@ -59,8 +59,8 @@ To dispatch against a variable's value, use `case` or a guard:
 
 # match — guard compares explicitly
 (match etype
-  (t when (= t quit-code) :quit)
-  (_ :other))
+  t when (= t quit-code) :quit
+  _ :other)
 ```
 
 ## Or-patterns
@@ -70,9 +70,9 @@ To dispatch against a variable's value, use `case` or a guard:
 ```lisp
 (defn parity [n]
   (match n
-    ((or 1 3 5 7 9) :odd)
-    ((or 0 2 4 6 8) :even)
-    (_              :out-of-range)))
+    (or 1 3 5 7 9) :odd
+    (or 0 2 4 6 8) :even
+    _              :out-of-range))
 
 (parity 3)                 # => :odd
 (parity 4)                 # => :even
@@ -84,11 +84,11 @@ To dispatch against a variable's value, use `case` or a guard:
 ```lisp
 (defn point-type [p]
   (match p
-    ([0 0]    :origin)
-    ([x 0]    :x-axis)
-    ([0 y]    :y-axis)
-    ([x y]    :general)
-    (_        :unknown)))
+    [0 0]    :origin
+    [x 0]    :x-axis
+    [0 y]    :y-axis
+    [x y]    :general
+    _        :unknown))
 
 (point-type [0 0])         # => :origin
 (point-type [5 0])         # => :x-axis
@@ -100,9 +100,9 @@ Struct patterns match by key, with literal values for dispatch:
 ```lisp
 (defn area [shape]
   (match shape
-    ({:type :circle :radius r}  (* 3.14159 r r))
-    ({:type :square :side s}    (* s s))
-    (_                          0)))
+    {:type :circle :radius r}  (* 3.14159 r r)
+    {:type :square :side s}    (* s s)
+    _                          0))
 
 (area {:type :circle :radius 5})   # => 78.53975
 (area {:type :square :side 7})     # => 49
@@ -115,8 +115,8 @@ Patterns compose to any depth:
 ```lisp
 (defn db-host [config]
   (match config
-    ({:db {:host h}} h)
-    (_               "unknown")))
+    {:db {:host h}} h
+    _               "unknown"))
 
 (db-host {:db {:host "pg.local"}})   # => "pg.local"
 (db-host {:nodb true})               # => "unknown"
@@ -130,9 +130,9 @@ must bind the same set of variables (or none at all).
 ```lisp
 (defn classify-suit [suit]
   (match suit
-    ((or :hearts :diamonds) :red)
-    ((or :clubs :spades)    :black)
-    (_                      :unknown)))
+    (or :hearts :diamonds) :red
+    (or :clubs :spades)    :black
+    _                      :unknown))
 
 (classify-suit :hearts)    # => :red
 (classify-suit :spades)    # => :black
@@ -144,8 +144,8 @@ the same names:
 ```lisp
 (defn first-element [coll]
   (match coll
-    ((or [x & _] (x & _))  x)
-    (_                      nil)))
+    (or [x & _] (x & _))  x
+    _                      nil))
 
 (first-element [10 20])        # => 10
 (first-element (list 30 40))   # => 30
@@ -160,9 +160,9 @@ between the pattern and the body, **not** wrapped in parentheses:
 ```lisp
 (defn classify [n]
   (match n
-    (x when (> x 0) :positive)
-    (0               :zero)
-    (x               :negative)))
+    x when (> x 0) :positive
+    0               :zero
+    x               :negative))
 
 (classify 5)               # => :positive
 (classify 0)               # => :zero
@@ -174,10 +174,10 @@ Guards can reference bindings from the pattern:
 ```lisp
 (defn describe-pair [p]
   (match p
-    ([a b] when (> a b) "descending")
-    ([a b] when (= a b) "equal")
-    ([a b]              "ascending")
-    (_                  "not a pair")))
+    [a b] when (> a b) "descending"
+    [a b] when (= a b) "equal"
+    [a b]              "ascending"
+    _                  "not a pair"))
 ```
 
 ## match vs case
@@ -191,9 +191,9 @@ Guards can reference bindings from the pattern:
 ```
 # match: literal keyword patterns
 (match event-type
-  (:quit      (handle-quit))
-  (:key-down  (handle-key ev))
-  (_          nil))
+  :quit      (handle-quit)
+  :key-down  (handle-key ev)
+  _          nil)
 
 # case: dispatch against variables holding event codes
 (case raw-event-code

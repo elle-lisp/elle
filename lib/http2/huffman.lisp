@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/http2/huffman.lisp — HPACK Huffman codec (RFC 7541 Appendix B)
 ##
 ## Loaded via: (def huffman ((import "std/http2/huffman")))
@@ -154,17 +154,14 @@
             (let* [bit (bit/and (bit/shr byte-val bit-idx) 1)
                    next (get node bit)]
               (cond
-                ((nil? next)
+                (nil? next)
                  (error {:error :h2-error :reason :compression-error
-                         :message "Huffman: invalid code"}))
-                ((integer? next)
-                 (when (= next 256)
+                         :message "Huffman: invalid code"})
+                (integer? next) (begin (when (= next 256)
                    (error {:error :h2-error :reason :compression-error
-                           :message "Huffman: EOS symbol in encoded data"}))
-                 (push out next)
-                 (assign node decode-tree))
-                (true
-                 (assign node next))))
+                           :message "Huffman: EOS symbol in encoded data"})) (push out next) (assign node decode-tree))
+                true
+                 (assign node next)))
             (assign bit-idx (- bit-idx 1))))
         (assign i (+ i 1)))
       # Verify padding: remaining bits in the tree traversal must be a

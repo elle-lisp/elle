@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 
 ## Regression test for #510: JIT must correctly handle variadic functions.
 ##

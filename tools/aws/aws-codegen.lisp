@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## tools/aws/aws-codegen.lisp — Generate Elle API module from AWS Smithy model
 ##
 ## Usage:
@@ -126,17 +126,13 @@
     (assign target-prefix (strip-ns name))
     (assign api-version (get shape "version"))
     (cond
-      ((has? traits "aws.protocols#restJson1")   (assign protocol :rest-json))
-      ((has? traits "aws.protocols#restXml")     (assign protocol :rest-xml))
-      ((has? traits "aws.protocols#awsJson1_0")
-       (assign protocol :aws-json)
-       (assign json-version "1.0"))
-      ((has? traits "aws.protocols#awsJson1_1")
-       (assign protocol :aws-json)
-       (assign json-version "1.1"))
-      ((has? traits "aws.protocols#awsQuery")    (assign protocol :aws-query))
-      ((has? traits "aws.protocols#ec2Query")    (assign protocol :aws-query))
-      (true nil))))
+      (has? traits "aws.protocols#restJson1")   (assign protocol :rest-json)
+      (has? traits "aws.protocols#restXml")     (assign protocol :rest-xml)
+      (has? traits "aws.protocols#awsJson1_0") (begin (assign protocol :aws-json) (assign json-version "1.0"))
+      (has? traits "aws.protocols#awsJson1_1") (begin (assign protocol :aws-json) (assign json-version "1.1"))
+      (has? traits "aws.protocols#awsQuery")    (assign protocol :aws-query)
+      (has? traits "aws.protocols#ec2Query")    (assign protocol :aws-query)
+      true nil)))
 
 (when (nil? protocol)
   (eprintln "error: could not detect protocol for " service)
@@ -158,17 +154,17 @@
     (when (has? traits "smithy.api#required")
       (add (get result :required) name))
     (cond
-      ((has? traits "smithy.api#httpLabel")
-       (push (get result :labels) name))
-      ((has? traits "smithy.api#httpQuery")
+      (has? traits "smithy.api#httpLabel")
+       (push (get result :labels) name)
+      (has? traits "smithy.api#httpQuery")
        (push (get result :queries)
-             {:name name :query-key (get traits "smithy.api#httpQuery")}))
-      ((has? traits "smithy.api#httpHeader")
+             {:name name :query-key (get traits "smithy.api#httpQuery")})
+      (has? traits "smithy.api#httpHeader")
        (push (get result :headers)
-             {:name name :header-name (get traits "smithy.api#httpHeader")}))
-      ((has? traits "smithy.api#httpPayload")
-       (put result :payload name))
-      (true nil)))
+             {:name name :header-name (get traits "smithy.api#httpHeader")})
+      (has? traits "smithy.api#httpPayload")
+       (put result :payload name)
+      true nil))
   result)
 
 (defn collect-input-members [input-shape-name]
@@ -340,12 +336,10 @@
 (def @emitted-names @[])
 (each [name shape] in ops
   (cond
-    ((or (= protocol :rest-xml) (= protocol :rest-json))
-     (def traits (or (get shape "traits") {}))
-     (when (has? traits "smithy.api#http")
+    (or (= protocol :rest-xml) (= protocol :rest-json)) (begin (def traits (or (get shape "traits") {})) (when (has? traits "smithy.api#http")
        (push emitted-names (camel->kebab (strip-ns name)))))
-    (true
-     (push emitted-names (camel->kebab (strip-ns name))))))
+    true
+     (push emitted-names (camel->kebab (strip-ns name)))))
 
 (eprintln service ": " (length emitted-names) " operations (" (string protocol) ")")
 
@@ -359,15 +353,13 @@
 
 (each [name shape] in ops
   (cond
-    ((or (= protocol :rest-xml) (= protocol :rest-json))
-     (def traits (or (get shape "traits") {}))
-     (when (has? traits "smithy.api#http")
+    (or (= protocol :rest-xml) (= protocol :rest-json)) (begin (def traits (or (get shape "traits") {})) (when (has? traits "smithy.api#http")
        (emit-rest-function name shape)))
-    ((= protocol :aws-json)
-     (emit-json-function name shape))
-    ((= protocol :aws-query)
-     (emit-query-function name shape))
-    (true nil)))
+    (= protocol :aws-json)
+     (emit-json-function name shape)
+    (= protocol :aws-query)
+     (emit-query-function name shape)
+    true nil))
 
 (emit-line)
 (emit-line "  # ── Module exports ─────────────────────────────────────────────")

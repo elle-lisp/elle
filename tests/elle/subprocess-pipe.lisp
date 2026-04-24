@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Isolate the subprocess stdout pipe hang
 
 (def elle (or (get (sys/env) "ELLE")

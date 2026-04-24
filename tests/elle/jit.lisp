@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Regression tests for JIT compilation behavior.
 ## Covers: side-exit through yielding primitives called from hot (JIT-compiled) functions.
 

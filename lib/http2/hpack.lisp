@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/http2/hpack.lisp — HPACK header compression (RFC 7541)
 ##
 ## Loaded via:
@@ -182,18 +182,18 @@
     "Get [name value] from the combined static+dynamic table by HPACK index.
      Index 1-61 = static, 62+ = dynamic."
     (cond
-      ((<= index 0)
+      (<= index 0)
        (error {:error :h2-error :reason :compression-error
-               :message "HPACK: invalid index 0"}))
-      ((<= index STATIC-TABLE-SIZE)
-       (get static-table index))
-      (true
+               :message "HPACK: invalid index 0"})
+      (<= index STATIC-TABLE-SIZE)
+       (get static-table index)
+      true
        (let* [dyn-idx (- index STATIC-TABLE-SIZE 1)
               entries dt:entries]
          (when (>= dyn-idx (length entries))
            (error {:error :h2-error :reason :compression-error
                    :message (concat "HPACK: dynamic table index out of range: " (string index))}))
-         (get entries dyn-idx)))))
+         (get entries dyn-idx))))
 
   ## ── Variable-length integer codec (RFC 7541 Section 5.1) ──────────────
 
@@ -281,25 +281,21 @@
                lookup (dt-lookup dt name value)]
           (cond
             # Exact match — indexed header field (Section 6.1)
-            ((and lookup lookup:exact?)
+            (and lookup lookup:exact?)
              (let* [idx-ints (encode-int lookup:index 7)
                     first-byte (bit/or 0x80 (get idx-ints 0))]
-               (push parts (apply bytes first-byte (rest idx-ints)))))
+               (push parts (apply bytes first-byte (rest idx-ints))))
 
             # Name match — literal with incremental indexing (Section 6.2.1)
-            ((and lookup (not lookup:exact?))
+            (and lookup (not lookup:exact?))
              (let* [idx-ints (encode-int lookup:index 6)
                     first-byte (bit/or 0x40 (get idx-ints 0))]
                (push parts (apply bytes first-byte (rest idx-ints)))
                (push parts (encode-string value use-huff))
-               (dt-add dt name value)))
+               (dt-add dt name value))
 
             # No match — literal with incremental indexing, new name
-            (true
-             (push parts (bytes 0x40))
-             (push parts (encode-string name use-huff))
-             (push parts (encode-string value use-huff))
-             (dt-add dt name value)))))
+            true (begin (push parts (bytes 0x40)) (push parts (encode-string name use-huff)) (push parts (encode-string value use-huff)) (dt-add dt name value)))))
       (apply concat (freeze parts))))
 
   ## ── Decoder ────────────────────────────────────────────────────────────
@@ -318,14 +314,14 @@
         (let [b (get buf offset)]
           (cond
             # 1xxxxxxx: Indexed header field (Section 6.1)
-            ((not (= 0 (bit/and b 0x80)))
+            (not (= 0 (bit/and b 0x80)))
              (let [int-res (decode-int buf offset 7)]
                (let [[name value] (dt-get dt int-res:value)]
                  (push result [name value])
-                 (assign offset int-res:offset))))
+                 (assign offset int-res:offset)))
 
             # 01xxxxxx: Literal with incremental indexing (Section 6.2.1)
-            ((not (= 0 (bit/and b 0x40)))
+            (not (= 0 (bit/and b 0x40)))
              (let [int-res (decode-int buf offset 6)]
                (if (= int-res:value 0)
                  # New name
@@ -339,16 +335,16 @@
                         value-res (decode-string buf int-res:offset)]
                    (push result [name value-res:value])
                    (dt-add dt name value-res:value)
-                   (assign offset value-res:offset)))))
+                   (assign offset value-res:offset))))
 
             # 001xxxxx: Dynamic table size update (Section 6.3)
-            ((not (= 0 (bit/and b 0x20)))
+            (not (= 0 (bit/and b 0x20)))
              (let [int-res (decode-int buf offset 5)]
                (dt-set-max-size dt int-res:value)
-               (assign offset int-res:offset)))
+               (assign offset int-res:offset))
 
             # 0001xxxx: Literal never indexed (Section 6.2.3)
-            ((not (= 0 (bit/and b 0x10)))
+            (not (= 0 (bit/and b 0x10)))
              (let [int-res (decode-int buf offset 4)]
                (if (= int-res:value 0)
                  (let* [name-res (decode-string buf int-res:offset)
@@ -358,10 +354,10 @@
                  (let* [[name _] (dt-get dt int-res:value)
                         value-res (decode-string buf int-res:offset)]
                    (push result [name value-res:value])
-                   (assign offset value-res:offset)))))
+                   (assign offset value-res:offset))))
 
             # 0000xxxx: Literal without indexing (Section 6.2.2)
-            (true
+            true
              (let [int-res (decode-int buf offset 4)]
                (if (= int-res:value 0)
                  (let* [name-res (decode-string buf int-res:offset)
@@ -371,7 +367,7 @@
                  (let* [[name _] (dt-get dt int-res:value)
                         value-res (decode-string buf int-res:offset)]
                    (push result [name value-res:value])
-                   (assign offset value-res:offset))))))))
+                   (assign offset value-res:offset)))))))
       (freeze result)))
 
   ## ── Tests ──────────────────────────────────────────────────────────────

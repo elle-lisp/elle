@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 # Mandelbrot Explorer — GTK4 + Cairo, GPU-accelerated with CPU fallback
 #
@@ -220,15 +220,11 @@
       (def buf (map (fn [_] 0) (range WIDTH)))
       (forever
         (match (recv-blocking wrx)
-          ([paddr y-min dy x-min dx max-iter y-start y-end]
-            (def pbuf (ptr/from-int paddr))
-            (def @py y-start)
-            (while (< py y-end)
+          [paddr y-min dy x-min dx max-iter y-start y-end] (begin (def pbuf (ptr/from-int paddr)) (def @py y-start) (while (< py y-end)
               (compute-row buf (+ y-min (* (float py) dy)) x-min dx max-iter)
               (ffi/write (ptr/add pbuf (* py STRIDE)) row-type buf)
-              (assign py (inc py)))
-            (chan/send dtx :done))
-          (_ (chan/send dtx :skip))))))))
+              (assign py (inc py))) (chan/send dtx :done))
+          _ (chan/send dtx :skip)))))))
 
 (defn compute-mandelbrot-cpu []
   (def vp (viewport))
@@ -281,7 +277,7 @@
          ny     (/ y (float actual-h))
          cx     (+ (- (view :cx) (/ scale 2.0)) (* nx scale))
          cy     (+ (- (view :cy) (/ (* scale aspect) 2.0)) (* ny (* scale aspect)))
-         factor (cond ((= btn 1) 0.5) ((= btn 3) 2.0) (true nil))]
+         factor (cond (= btn 1) 0.5 (= btn 3) 2.0 true nil)]
     (when factor
       (put view :cx cx)
       (put view :cy cy)
@@ -296,24 +292,16 @@
 (defn on-key [keyval keycode state]
   (let [step (/ (view :scale) 4.0)]
     (cond
-      ((or (= keyval 0xff1b) (= keyval 0x71))           # ESC / Q
-        (gtk:close handle)
-        (assign quit? true) 1)
-      ((= keyval 0x72)                                    # R
-        (put view :cx -0.5) (put view :cy 0.0)
-        (put view :scale 3.5) (put view :iter 32)
-        (refresh) 1)
-      ((= keyval 0xff51) (put view :cx (- (view :cx) step)) (refresh) 1)
-      ((= keyval 0xff53) (put view :cx (+ (view :cx) step)) (refresh) 1)
-      ((= keyval 0xff52) (put view :cy (- (view :cy) step)) (refresh) 1)
-      ((= keyval 0xff54) (put view :cy (+ (view :cy) step)) (refresh) 1)
-      ((or (= keyval 0x2b) (= keyval 0x3d) (= keyval 0xffab))
-        (put view :iter (* (view :iter) 2)) (refresh) 1)
-      ((or (= keyval 0x2d) (= keyval 0xffad))
-        (when (> (view :iter) 16)
-          (put view :iter (/ (view :iter) 2)))
-        (refresh) 1)
-      (true 0))))
+      (or (= keyval 0xff1b) (= keyval 0x71)) (begin (gtk:close handle) (assign quit? true) 1)
+      (= keyval 0x72) (begin (put view :cx -0.5) (put view :cy 0.0) (put view :scale 3.5) (put view :iter 32) (refresh) 1)
+      (= keyval 0xff51) (begin (put view :cx (- (view :cx) step)) (refresh) 1)
+      (= keyval 0xff53) (begin (put view :cx (+ (view :cx) step)) (refresh) 1)
+      (= keyval 0xff52) (begin (put view :cy (- (view :cy) step)) (refresh) 1)
+      (= keyval 0xff54) (begin (put view :cy (+ (view :cy) step)) (refresh) 1)
+      (or (= keyval 0x2b) (= keyval 0x3d) (= keyval 0xffab)) (begin (put view :iter (* (view :iter) 2)) (refresh) 1)
+      (or (= keyval 0x2d) (= keyval 0xffad)) (begin (when (> (view :iter) 16)
+          (put view :iter (/ (view :iter) 2))) (refresh) 1)
+      true 0)))
 
 # ── Main ─────────────────────────────────────────────────────────
 

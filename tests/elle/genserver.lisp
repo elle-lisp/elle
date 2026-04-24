@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## tests/elle/genserver.lisp — Tests for GenServer, Agent, and Supervisor
 ##
 ## Run: ./target/debug/elle tests/elle/genserver.lisp
@@ -24,9 +24,9 @@
                {:init        (fn [arg] arg)
                 :handle-call (fn [request _from state]
                   (match request
-                    (:get     [:reply state state])
-                    ([:set v] [:reply :ok v])
-                    (_        [:reply :unknown state])))}
+                    :get     [:reply state state]
+                    [:set v] [:reply :ok v]
+                    _        [:reply :unknown state]))}
                42)]
     (assert (= 42 (process:gen-server-call pid :get)) "call: get initial state")
     (process:gen-server-call pid [:set 99])
@@ -62,8 +62,8 @@
          :get [:reply (freeze state) state]))
      :handle-cast (fn [request state]
        (match request
-         ([:push val] (push state val) [:noreply state])
-         (_           [:noreply state])))}
+         [:push val] (begin (push state val) [:noreply state])
+         _           [:noreply state]))}
     nil :name :log)
 
   (process:gen-server-cast :log [:push :a])
@@ -92,10 +92,11 @@
     (process:gen-server-stop :stoppable :reason :shutdown)
     (let [msg (process:recv)]
       (match msg
-        ([:terminated reason state]
-          (assert (= reason :shutdown) "stop: reason is :shutdown")
-          (assert (= state :running) "stop: state passed to terminate"))
-        (_ (assert false "stop: expected terminated message")))))))
+        [:terminated reason state]
+          (begin
+            (assert (= reason :shutdown) "stop: reason is :shutdown")
+            (assert (= state :running) "stop: state passed to terminate"))
+        _ (assert false "stop: expected terminated message"))))))
 (println "  4. stop + terminate: ok")
 
 
@@ -169,8 +170,8 @@
     (let [reply (process:gen-server-call pid :die)]
       (assert (= reply :goodbye) "stop-from-call: got goodbye"))
     (match (process:recv)
-      ([:EXIT _ _] (assert true "stop-from-call: got EXIT"))
-      (_ (assert false "stop-from-call: expected EXIT"))))))
+      [:EXIT _ _] (assert true "stop-from-call: got EXIT")
+      _ (assert false "stop-from-call: expected EXIT")))))
 (println "  8. stop from handle-call: ok")
 
 
@@ -185,8 +186,8 @@
                nil)]
     (process:gen-server-cast pid :bye)
     (match (process:recv)
-      ([:EXIT _ _] (assert true "stop-from-cast: got EXIT"))
-      (_ (assert false "stop-from-cast: expected EXIT"))))))
+      [:EXIT _ _] (assert true "stop-from-cast: got EXIT")
+      _ (assert false "stop-from-cast: expected EXIT")))))
 (println "  9. stop from handle-cast: ok")
 
 
@@ -249,8 +250,8 @@
       :name :sup)
 
     (def @started @||)
-    (match (process:recv) ([:started id] (put started id)) (_ nil))
-    (match (process:recv) ([:started id] (put started id)) (_ nil))
+    (match (process:recv) [:started id] (put started id) _ nil)
+    (match (process:recv) [:started id] (put started id) _ nil)
     (assert (has? started :a) "supervisor: worker-a started")
     (assert (has? started :b) "supervisor: worker-b started"))))
 (println "  13. supervisor starts children: ok")
@@ -267,29 +268,31 @@
           (process:send me [:started (process:self)])
           (forever
             (match (process:recv)
-              (:crash (error {:error :boom :message "crash"}))
-              (:ping  (process:send me :pong))
-              (_ nil))))}]
+              :crash (error {:error :boom :message "crash"})
+              :ping  (process:send me :pong)
+              _ nil)))}]
       :name :sup3)
 
     # Wait for first start
     (match (process:recv)
-      ([:started child-pid]
-        # Verify child is alive
-        (process:send child-pid :ping)
-        (assert (= :pong (process:recv)) "restart: child responds")
+      [:started child-pid]
+        (begin
+          # Verify child is alive
+          (process:send child-pid :ping)
+          (assert (= :pong (process:recv)) "restart: child responds")
 
-        # Crash it
-        (process:send child-pid :crash)
+          # Crash it
+          (process:send child-pid :crash)
 
-        # Supervisor should restart — wait for new start
-        (match (process:recv)
-          ([:started new-pid]
-            (assert (not (= new-pid child-pid)) "restart: new pid differs")
-            (process:send new-pid :ping)
-            (assert (= :pong (process:recv)) "restart: restarted child responds"))
-          (_ (assert false "restart: expected [:started new-pid]"))))
-      (_ (assert false "restart: expected [:started child-pid]"))))))
+          # Supervisor should restart — wait for new start
+          (match (process:recv)
+            [:started new-pid]
+              (begin
+                (assert (not (= new-pid child-pid)) "restart: new pid differs")
+                (process:send new-pid :ping)
+                (assert (= :pong (process:recv)) "restart: restarted child responds"))
+            _ (assert false "restart: expected [:started new-pid]")))
+      _ (assert false "restart: expected [:started child-pid]")))))
 (println "  14. supervisor restart permanent: ok")
 
 
@@ -305,21 +308,22 @@
       :name :sup4)
 
     (match (process:recv)
-      ([:started child-pid]
-        # Kill the temporary child
-        (process:exit child-pid :kill)
+      [:started child-pid]
+        (begin
+          # Kill the temporary child
+          (process:exit child-pid :kill)
 
-        # Give supervisor a tick to process the DOWN
-        (process:send me :sync)
-        (process:recv)
-        (process:send me :sync)
-        (process:recv)
+          # Give supervisor a tick to process the DOWN
+          (process:send me :sync)
+          (process:recv)
+          (process:send me :sync)
+          (process:recv)
 
-        # No restart expected — send ourselves proof
-        (process:send me :no-restart)
-        (let [msg (process:recv)]
-          (assert (= msg :no-restart) "temporary: not restarted")))
-      (_ (assert false "temporary: expected [:started pid]"))))))
+          # No restart expected — send ourselves proof
+          (process:send me :no-restart)
+          (let [msg (process:recv)]
+            (assert (= msg :no-restart) "temporary: not restarted")))
+      _ (assert false "temporary: expected [:started pid]")))))
 (println "  15. supervisor temporary child: ok")
 
 
@@ -337,19 +341,20 @@
       :name :sup5)
 
     (match (process:recv)
-      ([:started child-pid]
-        (process:send child-pid :go)
+      [:started child-pid]
+        (begin
+          (process:send child-pid :go)
 
-        # Give supervisor time to process
-        (process:send me :sync)
-        (process:recv)
-        (process:send me :sync)
-        (process:recv)
+          # Give supervisor time to process
+          (process:send me :sync)
+          (process:recv)
+          (process:send me :sync)
+          (process:recv)
 
-        (process:send me :no-restart)
-        (let [msg (process:recv)]
-          (assert (= msg :no-restart) "transient-normal: not restarted")))
-      (_ (assert false "transient: expected [:started pid]"))))))
+          (process:send me :no-restart)
+          (let [msg (process:recv)]
+            (assert (= msg :no-restart) "transient-normal: not restarted")))
+      _ (assert false "transient: expected [:started pid]")))))
 (println "  16. supervisor transient normal exit: ok")
 
 
@@ -367,15 +372,16 @@
           (forever
             (let [msg (process:recv)]
               (match msg
-                ([:$call caller ref request]
+                [:$call caller ref request]
                   (match request
-                    ([:get key]
-                      (process:send caller [:$reply ref (get state key nil)]))
-                    ([:put key val]
-                      (put state key val)
-                      (process:send caller [:$reply ref :ok]))
-                    (_ nil)))
-                (_ nil)))))}])
+                    [:get key]
+                      (process:send caller [:$reply ref (get state key nil)])
+                    [:put key val]
+                      (begin
+                        (put state key val)
+                        (process:send caller [:$reply ref :ok]))
+                    _ nil)
+                _ nil))))}])
 
     (process:recv)  # :kv-ready
 
@@ -423,16 +429,16 @@
       [{:id :a :restart :permanent
         :start (fn []
           (process:send me [:started :a (process:self)])
-          (forever (match (process:recv) (:crash (error {:error :boom :message "a"})) (_ nil))))}
+          (forever (match (process:recv) :crash (error {:error :boom :message "a"}) _ nil)))}
        {:id :b :restart :permanent
         :start (fn []
           (process:send me [:started :b (process:self)])
-          (forever (match (process:recv) (_ nil))))}]
+          (forever (match (process:recv) _ nil)))}]
       :name :ofa-sup :strategy :one-for-all)
 
     # Wait for both to start
-    (match (process:recv) ([:started id pid] (push starts [id pid])) (_ nil))
-    (match (process:recv) ([:started id pid] (push starts [id pid])) (_ nil))
+    (match (process:recv) [:started id pid] (push starts [id pid]) _ nil)
+    (match (process:recv) [:started id pid] (push starts [id pid]) _ nil)
     (assert (= (length starts) 2) "one-for-all: both started")
 
     # Crash child :a — both should restart
@@ -444,8 +450,8 @@
 
     # Wait for both restarts
     (def @restarts @[])
-    (match (process:recv) ([:started id pid] (push restarts id)) (_ nil))
-    (match (process:recv) ([:started id pid] (push restarts id)) (_ nil))
+    (match (process:recv) [:started id pid] (push restarts id) _ nil)
+    (match (process:recv) [:started id pid] (push restarts id) _ nil)
     (assert (= (length restarts) 2) "one-for-all: both restarted"))))
 (println "  20. one-for-all strategy: ok")
 
@@ -458,23 +464,23 @@
       [{:id :x :restart :permanent
         :start (fn []
           (process:send me [:started :x (process:self)])
-          (forever (match (process:recv) (:crash (error {:error :b :message "x"})) (_ nil))))}
+          (forever (match (process:recv) :crash (error {:error :b :message "x"}) _ nil)))}
        {:id :y :restart :permanent
         :start (fn []
           (process:send me [:started :y (process:self)])
-          (forever (match (process:recv) (_ nil))))}
+          (forever (match (process:recv) _ nil)))}
        {:id :z :restart :permanent
         :start (fn []
           (process:send me [:started :z (process:self)])
-          (forever (match (process:recv) (_ nil))))}]
+          (forever (match (process:recv) _ nil)))}]
       :name :rfo-sup :strategy :rest-for-one)
 
     # Wait for all 3 to start
     (def @pids @{})
     (repeat 3
       (match (process:recv)
-        ([:started id pid] (put pids id pid))
-        (_ nil)))
+        [:started id pid] (put pids id pid)
+        _ nil))
 
     # Crash :x — :x, :y, :z should all restart (x is first, rest-for-one restarts everything after)
     (process:send (get pids :x) :crash)
@@ -483,8 +489,8 @@
     (def @restarts @||)
     (repeat 3
       (match (process:recv)
-        ([:started id _pid] (put restarts id))
-        (_ nil)))
+        [:started id _pid] (put restarts id)
+        _ nil))
     (assert (has? restarts :x) "rest-for-one: x restarted")
     (assert (has? restarts :y) "rest-for-one: y restarted")
     (assert (has? restarts :z) "rest-for-one: z restarted"))))
@@ -510,10 +516,10 @@
                  {:id :dyn-worker :restart :temporary
                   :start (fn []
                     (process:send me [:started (process:self)])
-                    (forever (match (process:recv) (_ nil))))})]
+                    (forever (match (process:recv) _ nil)))})]
       (match (process:recv)
-        ([:started _pid] nil)
-        (_ nil))
+        [:started _pid] nil
+        _ nil)
 
       (let [kids (process:supervisor-which-children :dyn-sup)]
         (assert (= (length kids) 1) "dynamic: one child"))
@@ -581,8 +587,8 @@
     (process:event-manager-sync-notify :multi-events :ping)
 
     (def @got @||)
-    (match (process:recv) ([tag _event] (put got tag)) (_ nil))
-    (match (process:recv) ([tag _event] (put got tag)) (_ nil))
+    (match (process:recv) [tag _event] (put got tag) _ nil)
+    (match (process:recv) [tag _event] (put got tag) _ nil)
     (assert (has? got :h1) "multi-event: h1 received")
     (assert (has? got :h2) "multi-event: h2 received"))))
 (println "  24. multiple event handlers: ok")

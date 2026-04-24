@@ -26,9 +26,9 @@ Traits do not affect structural equality, ordering, or hashing:
 ```lisp
 (defn describe [val]
   (match (traits val)
-    ({:type :point}  "a point")
-    ({:type :color}  "a color")
-    (_               "unknown")))
+    {:type :point}  "a point"
+    {:type :color}  "a color"
+    _               "unknown"))
 
 (describe (with-traits [255 0 0] {:type :color}))  # => "a color"
 (describe (with-traits [1 2] {:type :point}))      # => "a point"

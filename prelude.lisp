@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Elle standard prelude
 ##
 ## Loaded automatically by the Expander before user code expansion.
@@ -218,38 +218,40 @@
          body (if has-in (rest forms) forms)]
     `(let [seq ,iter]
        (match (type-of seq)
-         (:list
-          (unless (empty? seq)
-            (var cur seq)
-            (while (pair? cur)
-              (let [,var (first cur)] ,;body)
-              (assign cur (rest cur)))))
-         ((or :array :@array :string :@string :bytes :@bytes)
-          (var idx 0)
-          (var len (length seq))
-          (while (< idx len)
-            (let [,var (get seq idx)] ,;body)
-            (assign idx (+ idx 1))))
-         ((or :set :@set)
-          (let [items (set->array seq)]
-            (var idx 0)
-            (var len (length items))
-            (while (< idx len)
-              (let [,var (get items idx)] ,;body)
-              (assign idx (+ idx 1)))))
-         ((or :struct :@struct)
-          (let [pairs (pairs seq)]
-            (var idx 0)
-            (var len (length pairs))
-            (while (< idx len)
-              (let [,var (get pairs idx)] ,;body)
-              (assign idx (+ idx 1)))))
-         (:fiber
-          (var v (coro/resume seq))
-          (while v
-            (let [,var v] ,;body)
-            (assign v (coro/resume seq))))
-         (_ (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))))
+         :list
+           (unless (empty? seq)
+             (def @cur seq)
+             (while (pair? cur)
+               (let [,var (first cur)] ,;body)
+               (assign cur (rest cur))))
+         (or :array :@array :string :@string :bytes :@bytes)
+           (begin
+             (def @idx 0)
+             (def @len (length seq))
+             (while (< idx len)
+               (let [,var (get seq idx)] ,;body)
+               (assign idx (+ idx 1))))
+         (or :set :@set)
+           (let [items (set->array seq)]
+             (def @idx 0)
+             (def @len (length items))
+             (while (< idx len)
+               (let [,var (get items idx)] ,;body)
+               (assign idx (+ idx 1))))
+         (or :struct :@struct)
+           (let [pairs (pairs seq)]
+             (def @idx 0)
+             (def @len (length pairs))
+             (while (< idx len)
+               (let [,var (get pairs idx)] ,;body)
+               (assign idx (+ idx 1))))
+         :fiber
+           (begin
+             (def @v (coro/resume seq))
+             (while v
+               (let [,var v] ,;body)
+               (assign v (coro/resume seq))))
+         _ (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Bytes and @bytes Type Tests
 ##
 ## Tests for the immutable bytes and mutable @bytes types.

@@ -9,8 +9,8 @@ use crate::syntax::{Span, Syntax, SyntaxKind};
 use std::collections::HashMap;
 
 use super::rules::{
-    collapsed_renames, flatten_rules_in_range, removals_in_range, replace_rules_in_range,
-    unwrap_rules_in_range,
+    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range, removals_in_range,
+    replace_rules_in_range, unwrap_rules_in_range,
 };
 
 /// Migrate syntax forms from `from_epoch` to `to_epoch`.
@@ -23,19 +23,29 @@ pub fn migrate(forms: &mut [Syntax], from_epoch: u64, to_epoch: u64) -> Result<u
     let replaces = replace_rules_in_range(from_epoch, to_epoch);
     let unwraps = unwrap_rules_in_range(from_epoch, to_epoch);
     let flattens = flatten_rules_in_range(from_epoch, to_epoch);
+    let flatten_clauses = flatten_clause_rules_in_range(from_epoch, to_epoch);
 
     if renames.is_empty()
         && removals.is_empty()
         && replaces.is_empty()
         && unwraps.is_empty()
         && flattens.is_empty()
+        && flatten_clauses.is_empty()
     {
         return Ok(0);
     }
 
     let mut count = 0;
     for form in forms.iter_mut() {
-        count += rewrite_node(form, &renames, &removals, &replaces, &unwraps, &flattens)?;
+        count += rewrite_node(
+            form,
+            &renames,
+            &removals,
+            &replaces,
+            &unwraps,
+            &flattens,
+            &flatten_clauses,
+        )?;
     }
     Ok(count)
 }
@@ -48,8 +58,94 @@ fn rewrite_node(
     replaces: &[(&str, usize, &str)],
     unwraps: &HashMap<&str, &str>,
     flattens: &[&str],
+    flatten_clauses: &[(&str, usize)],
 ) -> Result<usize, String> {
     let mut count = 0;
+
+    // Check for FlattenClauses match: (cond (test body) ...) → (cond test body ...)
+    // and (match val (pat body) ...) → (match val pat body ...)
+    if !flatten_clauses.is_empty() {
+        if let SyntaxKind::List(items) = &mut syntax.kind {
+            if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()).map(String::from) {
+                if let Some(&(_, skip)) = flatten_clauses
+                    .iter()
+                    .find(|(s, _)| *s == head_sym.as_str())
+                {
+                    let clause_start = 1 + skip; // skip head symbol + skip args
+                    if items.len() > clause_start {
+                        let mut new_items: Vec<Syntax> = items[..clause_start].to_vec();
+                        let mut changed = false;
+                        for clause in &items[clause_start..] {
+                            if let Some(parts) = clause.as_list_or_tuple() {
+                                if parts.is_empty() {
+                                    continue;
+                                }
+                                // (else body) in cond → just the body as trailing default
+                                if parts[0].as_symbol() == Some("else") {
+                                    if parts.len() == 2 {
+                                        new_items.push(parts[1].clone());
+                                    } else if parts.len() > 2 {
+                                        let span = clause.span.clone();
+                                        let mut begin_items = vec![Syntax::new(
+                                            SyntaxKind::Symbol("begin".to_string()),
+                                            span,
+                                        )];
+                                        begin_items.extend(parts[1..].to_vec());
+                                        new_items.push(Syntax::new(
+                                            SyntaxKind::List(begin_items),
+                                            clause.span.clone(),
+                                        ));
+                                    }
+                                    changed = true;
+                                    continue;
+                                }
+                                // 2-element clause: (test body) → test body
+                                if parts.len() == 2 {
+                                    new_items.push(parts[0].clone());
+                                    new_items.push(parts[1].clone());
+                                    changed = true;
+                                } else if parts.len() > 2 {
+                                    // Multi-element: (pat body1 body2) → pat (begin body1 body2)
+                                    // But check for 'when' guard in match:
+                                    // (pat when guard body) → pat when guard body
+                                    new_items.push(parts[0].clone());
+                                    if parts.len() >= 3 && parts[1].as_symbol() == Some("when") {
+                                        // Guard: splice all remaining elements
+                                        for part in &parts[1..] {
+                                            new_items.push(part.clone());
+                                        }
+                                    } else {
+                                        // Multi-body: wrap in begin
+                                        let span = clause.span.clone();
+                                        let mut begin_items = vec![Syntax::new(
+                                            SyntaxKind::Symbol("begin".to_string()),
+                                            span,
+                                        )];
+                                        begin_items.extend(parts[1..].to_vec());
+                                        new_items.push(Syntax::new(
+                                            SyntaxKind::List(begin_items),
+                                            clause.span.clone(),
+                                        ));
+                                    }
+                                    changed = true;
+                                } else {
+                                    // Single-element clause — shouldn't happen, pass through
+                                    new_items.push(clause.clone());
+                                }
+                            } else {
+                                // Not a parenthesized clause — already flat, pass through
+                                new_items.push(clause.clone());
+                            }
+                        }
+                        if changed {
+                            *items = new_items;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Check for FlattenBindings match: (let|letrec [[p1 v1] [p2 v2] ...] body...)
     // Detect nested-pair format and flatten to (let|letrec [p1 v1 p2 v2 ...] body...)
@@ -115,7 +211,13 @@ fn rewrite_node(
                             }
                             count += 1;
                             count += rewrite_node(
-                                syntax, renames, removals, replaces, unwraps, flattens,
+                                syntax,
+                                renames,
+                                removals,
+                                replaces,
+                                unwraps,
+                                flattens,
+                                flatten_clauses,
                             )?;
                             return Ok(count);
                         }
@@ -144,7 +246,15 @@ fn rewrite_node(
                     count += 1;
                     // Recurse into the replacement so renames and nested
                     // replacements still apply.
-                    count += rewrite_node(syntax, renames, removals, replaces, unwraps, flattens)?;
+                    count += rewrite_node(
+                        syntax,
+                        renames,
+                        removals,
+                        replaces,
+                        unwraps,
+                        flattens,
+                        flatten_clauses,
+                    )?;
                     return Ok(count);
                 }
             }
@@ -175,7 +285,15 @@ fn rewrite_node(
         | SyntaxKind::Bytes(items)
         | SyntaxKind::BytesMut(items) => {
             for item in items.iter_mut() {
-                count += rewrite_node(item, renames, removals, replaces, unwraps, flattens)?;
+                count += rewrite_node(
+                    item,
+                    renames,
+                    removals,
+                    replaces,
+                    unwraps,
+                    flattens,
+                    flatten_clauses,
+                )?;
             }
         }
 
@@ -188,7 +306,15 @@ fn rewrite_node(
         | SyntaxKind::Unquote(inner)
         | SyntaxKind::UnquoteSplicing(inner)
         | SyntaxKind::Splice(inner) => {
-            count += rewrite_node(inner, renames, removals, replaces, unwraps, flattens)?;
+            count += rewrite_node(
+                inner,
+                renames,
+                removals,
+                replaces,
+                unwraps,
+                flattens,
+                flatten_clauses,
+            )?;
         }
 
         // Atoms — nothing to rewrite.
@@ -281,6 +407,7 @@ mod tests {
             &replaces,
             &HashMap::new(),
             &[],
+            &[],
         )
         .unwrap();
 
@@ -301,6 +428,7 @@ mod tests {
             &removals,
             &replaces,
             &HashMap::new(),
+            &[],
             &[],
         )
         .unwrap();
@@ -328,6 +456,7 @@ mod tests {
             &replaces,
             &HashMap::new(),
             &[],
+            &[],
         )
         .unwrap();
 
@@ -354,6 +483,7 @@ mod tests {
             &replaces,
             &HashMap::new(),
             &[],
+            &[],
         )
         .unwrap();
 
@@ -378,6 +508,7 @@ mod tests {
             &replaces,
             &HashMap::new(),
             &[],
+            &[],
         );
 
         assert!(result.is_err());
@@ -397,6 +528,7 @@ mod tests {
             &removals,
             &replaces,
             &HashMap::new(),
+            &[],
             &[],
         )
         .unwrap();
@@ -432,6 +564,7 @@ mod tests {
             &removals,
             &replaces,
             &HashMap::new(),
+            &[],
             &[],
         )
         .unwrap();
@@ -470,6 +603,7 @@ mod tests {
             &replaces,
             &HashMap::new(),
             &[],
+            &[],
         )
         .unwrap();
 
@@ -507,6 +641,7 @@ mod tests {
             &replaces,
             &HashMap::new(),
             &[],
+            &[],
         )
         .unwrap();
 
@@ -533,6 +668,7 @@ mod tests {
             &removals,
             &replaces,
             &HashMap::new(),
+            &[],
             &[],
         )
         .unwrap();

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Test tiered WASM compilation.
 # Run with: ELLE_WASM_TIER=1 elle tests/elle/wasm-tier.lisp
 

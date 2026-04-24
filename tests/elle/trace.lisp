@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Trace output tests
 #
 # Tests vm/config-set :trace behavior from Elle code.

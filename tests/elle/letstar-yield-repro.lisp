@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 # Regression test: let* + yield + calls that store heap objects externally.
 #

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 # Closure cell_locals_mask optimization
 #
 # The VM avoids wrapping locally-defined variables in LocalCell when

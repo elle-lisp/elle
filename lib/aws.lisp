@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/aws.lisp — Elle-native AWS client
 
 (def @sigv4-mod nil)
@@ -23,13 +23,13 @@
     nil
     (let [ct (or (get headers :content-type) "")]
       (cond
-        ((or (string-contains? ct "json")
+        (or (string-contains? ct "json")
              (string-contains? ct "x-amz-json"))
-         (json/parse (string body)))
-        ((or (string-contains? ct "text/")
+         (json/parse (string body))
+        (or (string-contains? ct "text/")
              (string-contains? ct "xml"))
-         (string body))
-        (true body)))))
+         (string body)
+        true body))))
 
 ## ── Response reading (split out to keep function bodies small) ───────
 
@@ -54,7 +54,7 @@
            cl (get resp-headers :content-length)
            resp-body
             (cond
-              ((and te (string-contains? (string/lowercase te) "chunked"))
+              (and te (string-contains? (string/lowercase te) "chunked"))
                (block :chunked
                  (def chunks @[])
                  (forever
@@ -68,10 +68,10 @@
                            (apply concat chunks))))
                      (let [chunk (tls:read conn sz)]
                        (push chunks chunk)
-                       (tls:read-line conn))))))
-              ((not (nil? cl))
-               (tls:read conn (parse-int cl)))
-              (true nil))
+                       (tls:read-line conn)))))
+              (not (nil? cl))
+               (tls:read conn (parse-int cl))
+              true nil)
            decoded (if raw resp-body (decode-body resp-body resp-headers))]
       {:status status :headers resp-headers :body decoded})))
 

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/http.lisp — Pure Elle HTTP/1.1 client and server
 ##
 ## Plain HTTP only:
@@ -24,11 +24,11 @@
 
   (def compress-mod
     (cond
-      ((nil? compress)       nil)
-      ((= compress true)     ((import "std/compress")))
-      ((struct? compress)    compress)
-      (true (error {:error :http-error :reason :bad-compress :value compress
-                    :message ":compress must be nil, true, or a compress module struct"}))))
+      (nil? compress)       nil
+      (= compress true)     ((import "std/compress"))
+      (struct? compress)    compress
+      true (error {:error :http-error :reason :bad-compress :value compress
+                    :message ":compress must be nil, true, or a compress module struct"})))
 
   (defn require-compress []
     "Return the configured compress module, or signal a clear error if
@@ -57,9 +57,9 @@
   (defn pick-scheme [url]
     "Return [scheme info] for url, or nil if no supported prefix matches."
     (cond
-      ((string/starts-with? url "https://") ["https" (get url-schemes "https")])
-      ((string/starts-with? url "http://")  ["http"  (get url-schemes "http")])
-      (true nil)))
+      (string/starts-with? url "https://") ["https" (get url-schemes "https")]
+      (string/starts-with? url "http://")  ["http"  (get url-schemes "http")]
+      true nil))
 
   (defn parse-url [url]
     "Parse an HTTP or HTTPS URL string into {:scheme :host :port :path :query}.
@@ -93,22 +93,22 @@
     "Render a scalar value into its query-string form. Booleans go to
      'true'/'false'; everything else goes through (string v)."
     (cond
-      ((boolean? v) (if v "true" "false"))
-      (true         (string v))))
+      (boolean? v) (if v "true" "false")
+      true         (string v)))
 
   (defn query-encode-pair [ekey v parts]
     "Push 'key=value' into parts (uri-encoded). Skip nil, recurse into
      arrays/lists to produce repeated 'key=v1&key=v2' pairs."
     (cond
-      ((nil? v) nil)
-      ((or (array? v) (list? v))
+      (nil? v) nil
+      (or (array? v) (list? v))
        (each elt in v
          (unless (nil? elt)
            (push parts
-             (string/format "{}={}" ekey (uri-encode (query-scalar->string elt)))))))
-      (true
+             (string/format "{}={}" ekey (uri-encode (query-scalar->string elt))))))
+      true
        (push parts
-         (string/format "{}={}" ekey (uri-encode (query-scalar->string v)))))))
+         (string/format "{}={}" ekey (uri-encode (query-scalar->string v))))))
 
   (defn query-encode [params]
     "Encode a struct/map of query parameters as an
@@ -126,12 +126,12 @@
      extra is nil, a string (used as-is), or a struct (query-encoded).
      Returns the merged query string, or nil if both are absent."
     (let [encoded (cond
-                     ((nil? extra)    nil)
-                     ((string? extra) extra)
-                     (true            (query-encode extra)))]
+                     (nil? extra)    nil
+                     (string? extra) extra
+                     true            (query-encode extra))]
       (cond
-        ((and url-query encoded) (string url-query "&" encoded))
-        (true                    (or url-query encoded)))))
+        (and url-query encoded) (string url-query "&" encoded)
+        true                    (or url-query encoded))))
 
   ## ── Header parsing and serialization ─────────────────────────────────
 
@@ -206,14 +206,12 @@
      Signals :http-error :tls-not-configured if an https URL is used
      without a tls plugin."
     (cond
-      ((= url-parsed:scheme "https")
-       (when (nil? tls)
+      (= url-parsed:scheme "https") (begin (when (nil? tls)
          (error {:error :http-error :reason :tls-not-configured
                  :url url-parsed
-                 :message "https URL requires the tls plugin; pass :tls to (import \"std/http\")"}))
-       (tls-transport (tls:connect url-parsed:host url-parsed:port)))
-      (true
-       (tcp-transport (tcp/connect url-parsed:host url-parsed:port)))))
+                 :message "https URL requires the tls plugin; pass :tls to (import \"std/http\")"})) (tls-transport (tls:connect url-parsed:host url-parsed:port)))
+      true
+       (tcp-transport (tcp/connect url-parsed:host url-parsed:port))))
 
   (defn t-read       [t n]    ((get t :read) n))
   (defn t-read-line  [t]      ((get t :read-line)))
@@ -357,9 +355,9 @@
      Otherwise falls back to Content-Length. Returns body string, or nil
      if neither framing header is present."
     (cond
-      ((chunked? headers) (read-chunked-body t))
-      (headers:content-length (read-fixed-body t (parse-int headers:content-length)))
-      (true nil)))
+      (chunked? headers) (read-chunked-body t)
+      headers:content-length (read-fixed-body t (parse-int headers:content-length))
+      true nil))
 
   (defn write-chunk [t data]
     "Write a single chunk to transport in HTTP/1.1 chunked encoding.
@@ -422,28 +420,28 @@
      and absolute paths ('/foo'). Other forms are treated as absolute
      paths rooted at '/'."
     (cond
-      ((or (string/starts-with? location "http://")
+      (or (string/starts-with? location "http://")
            (string/starts-with? location "https://"))
-       location)
-      ((string/starts-with? location "//")
-       (string base:scheme ":" location))
-      (true
+       location
+      (string/starts-with? location "//")
+       (string base:scheme ":" location)
+      true
        (let [path (if (string/starts-with? location "/")
                        location
                        (string "/" location))]
-         (string base:scheme "://" base:host ":" base:port path)))))
+         (string base:scheme "://" base:host ":" base:port path))))
 
   (defn redirect-limit [follow]
     "Normalize the :follow-redirects option: nil/false → 0, true →
      default, integer → itself."
     (cond
-      ((nil? follow)           0)
-      ((= follow false)        0)
-      ((= follow true)         (default-redirect-limit))
-      ((integer? follow)       follow)
-      (true (error {:error :http-error :reason :bad-follow-redirects
+      (nil? follow)           0
+      (= follow false)        0
+      (= follow true)         (default-redirect-limit)
+      (integer? follow)       follow
+      true (error {:error :http-error :reason :bad-follow-redirects
                     :value follow
-                    :message ":follow-redirects must be nil, true, or a non-negative integer"}))))
+                    :message ":follow-redirects must be nil, true, or a non-negative integer"})))
 
   ## ── Client API ───────────────────────────────────────────────────────
 
@@ -575,16 +573,16 @@
     "Parse one SSE field line per the HTML spec. Returns {:field :value},
      or nil for comments and unparseable input."
     (cond
-      ((empty? line) nil)
-      ((string/starts-with? line ":") nil)  # comment
-      (true
+      (empty? line) nil
+      (string/starts-with? line ":") nil  # comment
+      true
        (let [colon (string/find line ":")]
          (cond
-           ((nil? colon)
-            {:field line :value ""})
-           (true
+           (nil? colon)
+            {:field line :value ""}
+           true
             {:field (slice line 0 colon)
-             :value (sse-strip-leading-space (slice line (inc colon)))}))))))
+             :value (sse-strip-leading-space (slice line (inc colon)))}))))
 
   (defn sse-for-each-body-line [t headers on-line]
     "Call (on-line line) for every body line. Handles both
@@ -723,21 +721,19 @@
                       (let [conn (sse-open url headers current-id)]
                         (defer (protect (t-close conn:transport))
                           (cond
-                            ((= conn:status 204) :done)
-                            ((and (>= conn:status 200) (< conn:status 300))
-                             (sse-for-each-event conn:transport conn:headers
+                            (= conn:status 204) :done
+                            (and (>= conn:status 200) (< conn:status 300)) (begin (sse-for-each-event conn:transport conn:headers
                                (fn [evt]
                                  (when evt:id    (assign current-id evt:id))
                                  (when evt:retry (assign retry-ms evt:retry))
-                                 (yield evt)))
-                             :eof)
-                            (true
+                                 (yield evt))) :eof)
+                            true
                              (error {:error :http-error :reason :sse-bad-status
                                      :status conn:status
-                                     :message "SSE: non-2xx response"}))))))]
+                                     :message "SSE: non-2xx response"})))))]
               (cond
-                ((and ok? (= result :done)) (break :session))
-                ((not reconnect)            (break :session)))
+                (and ok? (= result :done)) (break :session)
+                (not reconnect)            (break :session))
               (ev/sleep (/ retry-ms 1000.0))))))))
 
   (defn sse-post [url body &named headers]
@@ -769,14 +765,14 @@
             (let* [status-line  (read-status-line t)
                    resp-headers (read-headers t)]
               (cond
-                ((and (>= status-line:status 200) (< status-line:status 300))
+                (and (>= status-line:status 200) (< status-line:status 300))
                  (sse-for-each-event t resp-headers
-                   (fn [evt] (yield evt))))
-                (true
+                   (fn [evt] (yield evt)))
+                true
                  (error {:error :http-error :reason :sse-bad-status
                          :status status-line:status
                          :body   (read-body t resp-headers)
-                         :message "SSE POST: non-2xx response"})))))))))
+                         :message "SSE POST: non-2xx response"}))))))))
 
   (defn sse-format-field [field value]
     "Serialize one field of an SSE event. Data values with embedded
@@ -846,15 +842,15 @@
     (write-headers t response:headers)
     (t-write t "\r\n")
     (cond
-      ((chunked? response:headers)
+      (chunked? response:headers)
        (let [body response:body]
          (cond
-           ((nil? body)  nil)
-           ((fn? body)   (body (fn [data] (write-chunk t data))))
-           (true         (write-chunk t body)))
-         (write-last-chunk t)))
-      ((not (nil? response:body))
-       (t-write t response:body)))
+           (nil? body)  nil
+           (fn? body)   (body (fn [data] (write-chunk t data)))
+           true         (write-chunk t body))
+         (write-last-chunk t))
+      (not (nil? response:body))
+       (t-write t response:body))
     (t-flush t))
 
   (defn connection-loop [t handler on-error]

@@ -5,8 +5,8 @@ use super::engine::collect_edits;
 use super::rule::{RenameSymbol, RewriteRule};
 use crate::epoch::detect_epoch_in_source;
 use crate::epoch::rules::{
-    collapsed_renames, flatten_rules_in_range, removals_in_range, replace_rules_in_range,
-    unwrap_rules_in_range, CURRENT_EPOCH,
+    collapsed_renames, flatten_clause_rules_in_range, flatten_rules_in_range, removals_in_range,
+    replace_rules_in_range, unwrap_rules_in_range, CURRENT_EPOCH,
 };
 use crate::reader::{Lexer, Token};
 use std::collections::HashMap;
@@ -67,6 +67,14 @@ pub fn run(args: &[String]) -> i32 {
                 println!(
                     "  flatten: {} (nested-pair → flat bindings)",
                     flattens.join(", ")
+                );
+            }
+            let flatten_clauses = flatten_clause_rules_in_range(0, CURRENT_EPOCH);
+            if !flatten_clauses.is_empty() {
+                let names: Vec<&str> = flatten_clauses.iter().map(|(s, _)| *s).collect();
+                println!(
+                    "  flatten-clauses: {} (parenthesized → flat pairs)",
+                    names.join(", ")
                 );
             }
         }
@@ -167,6 +175,18 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         Vec::new()
     };
 
+    // Collect flatten-clause edits: (cond (test body) ...) → (cond test body ...)
+    let flatten_clause_edits = if let Some(epoch) = file_epoch {
+        let flatten_clauses = flatten_clause_rules_in_range(epoch, CURRENT_EPOCH);
+        if flatten_clauses.is_empty() {
+            Vec::new()
+        } else {
+            collect_flatten_clause_edits(source, &flatten_clauses)?
+        }
+    } else {
+        Vec::new()
+    };
+
     // Normalize paren-delimited binding vectors to brackets:
     // (let (name val) ...) → (let [name val] ...)
     let binding_forms = &["let", "letrec", "let*", "if-let", "when-let", "when-ok"];
@@ -207,6 +227,7 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         .into_iter()
         .chain(unwrap_edits)
         .chain(flatten_edits)
+        .chain(flatten_clause_edits)
         .chain(bracket_edits)
         .collect();
     if !structural_edits.is_empty() {
@@ -750,6 +771,208 @@ fn collect_bracket_edits(source: &str, binding_forms: &[&str]) -> Result<Vec<Edi
         i += 1;
     }
     Ok(edits)
+}
+
+/// Lex source and collect edits that flatten parenthesized cond/match clauses.
+/// Matches `(cond (test body) ...)` or `(match val (pat body) ...)` and
+/// removes the inner clause delimiters, wrapping multi-body arms in `(begin ...)`.
+fn collect_flatten_clause_edits(
+    source: &str,
+    flatten_clauses: &[(&str, usize)],
+) -> Result<Vec<Edit>, String> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
+    loop {
+        match lexer.next_token_with_loc() {
+            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    let mut edits = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        // Look for `(` symbol where symbol is in flatten_clauses
+        if matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
+            if let Some((Token::Symbol(s), _, _)) = tokens.get(i + 1) {
+                if let Some(&(_, skip)) = flatten_clauses.iter().find(|(sym, _)| sym == s) {
+                    if let Some(new_edits) = try_match_flatten_clauses(source, &tokens, i, skip) {
+                        edits.extend(new_edits);
+                        // Don't skip the whole form — advance past head symbol
+                        // so nested forms in the body are still visited.
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    Ok(edits)
+}
+
+/// Try to flatten the clauses of a cond/match form at token `i`.
+/// `skip` is 0 for cond (no args before clauses) or 1 for match (skip value expr).
+fn try_match_flatten_clauses(
+    source: &str,
+    tokens: &[(Token<'_>, usize, usize)],
+    i: usize,
+    skip: usize,
+) -> Option<Vec<Edit>> {
+    // tokens[i] = `(`, tokens[i+1] = cond/match
+    // Skip past head symbol + `skip` argument forms
+    let mut pos = i + 2; // after `(` and symbol
+    for _ in 0..skip {
+        if pos >= tokens.len() {
+            return None;
+        }
+        pos = skip_one_form(tokens, pos);
+    }
+
+    // Find the closing paren of the outer form
+    let outer_close = skip_balanced_form(tokens, i);
+    if outer_close == 0 {
+        return None;
+    }
+    let outer_close_idx = outer_close - 1;
+
+    // Walk remaining children — each should be a parenthesized clause
+    let mut edits = Vec::new();
+    let mut any_clause = false;
+    while pos < outer_close_idx {
+        match &tokens[pos].0 {
+            Token::LeftParen | Token::LeftBracket => {
+                let clause_open = pos;
+                let clause_close_next = skip_balanced_form(tokens, pos);
+                if clause_close_next == 0 {
+                    return None;
+                }
+                let clause_close = clause_close_next - 1;
+
+                // Count children and find their positions
+                let mut children: Vec<(usize, usize)> = Vec::new(); // (start_byte, end_byte)
+                let mut child_pos = clause_open + 1;
+                while child_pos < clause_close {
+                    let child_start = tokens[child_pos].1;
+                    let child_end_pos = skip_one_form(tokens, child_pos);
+                    let last = child_end_pos - 1;
+                    let child_end = tokens[last].1 + tokens[last].2;
+                    children.push((child_start, child_end));
+                    child_pos = child_end_pos;
+                }
+
+                if children.is_empty() {
+                    pos = clause_close_next;
+                    continue;
+                }
+
+                // Check for (else body) in cond — replace with just body
+                let first_text = &source[children[0].0..children[0].1];
+                if first_text == "else" && children.len() >= 2 {
+                    // Replace entire clause with just the body part(s)
+                    let clause_start = tokens[clause_open].1;
+                    let clause_end = tokens[clause_close].1 + tokens[clause_close].2;
+                    if children.len() == 2 {
+                        let body_text = &source[children[1].0..children[1].1];
+                        edits.push(Edit {
+                            byte_offset: clause_start,
+                            byte_len: clause_end - clause_start,
+                            replacement: body_text.to_string(),
+                        });
+                    } else {
+                        // Multi-body else: wrap in (begin ...)
+                        let body_parts: Vec<&str> =
+                            children[1..].iter().map(|(s, e)| &source[*s..*e]).collect();
+                        edits.push(Edit {
+                            byte_offset: clause_start,
+                            byte_len: clause_end - clause_start,
+                            replacement: format!("(begin {})", body_parts.join(" ")),
+                        });
+                    }
+                    any_clause = true;
+                    pos = clause_close_next;
+                    continue;
+                }
+
+                // Normal clause: delete delimiters
+                if children.len() == 2 {
+                    // Simple 2-element clause: just remove the outer parens
+                    let open_byte = tokens[clause_open].1;
+                    let next_byte = children[0].0;
+                    edits.push(Edit {
+                        byte_offset: open_byte,
+                        byte_len: next_byte - open_byte,
+                        replacement: String::new(),
+                    });
+                    let close_byte = tokens[clause_close].1;
+                    let close_len = tokens[clause_close].2;
+                    let prev_end = children[children.len() - 1].1;
+                    edits.push(Edit {
+                        byte_offset: prev_end,
+                        byte_len: close_byte + close_len - prev_end,
+                        replacement: String::new(),
+                    });
+                    any_clause = true;
+                } else if children.len() >= 3 {
+                    // Check for guard pattern: (pat when guard body...)
+                    let second_text = &source[children[1].0..children[1].1];
+                    if second_text == "when" && children.len() >= 4 {
+                        // Guard: just remove outer parens (all elements stay flat)
+                        let open_byte = tokens[clause_open].1;
+                        let next_byte = children[0].0;
+                        edits.push(Edit {
+                            byte_offset: open_byte,
+                            byte_len: next_byte - open_byte,
+                            replacement: String::new(),
+                        });
+                        let close_byte = tokens[clause_close].1;
+                        let close_len = tokens[clause_close].2;
+                        let prev_end = children[children.len() - 1].1;
+                        edits.push(Edit {
+                            byte_offset: prev_end,
+                            byte_len: close_byte + close_len - prev_end,
+                            replacement: String::new(),
+                        });
+                    } else {
+                        // Multi-body: pattern + (begin body...)
+                        let clause_start = tokens[clause_open].1;
+                        let clause_end = tokens[clause_close].1 + tokens[clause_close].2;
+                        let pattern_text = &source[children[0].0..children[0].1];
+                        let body_parts: Vec<&str> =
+                            children[1..].iter().map(|(s, e)| &source[*s..*e]).collect();
+                        edits.push(Edit {
+                            byte_offset: clause_start,
+                            byte_len: clause_end - clause_start,
+                            replacement: format!(
+                                "{} (begin {})",
+                                pattern_text,
+                                body_parts.join(" ")
+                            ),
+                        });
+                    }
+                    any_clause = true;
+                } else {
+                    // Single-element clause — pass through
+                    pos = clause_close_next;
+                    continue;
+                }
+
+                pos = clause_close_next;
+            }
+            _ => {
+                // Not a parenthesized clause — already flat or atom
+                // Don't treat this as needing flattening
+                return None;
+            }
+        }
+    }
+
+    if any_clause {
+        Some(edits)
+    } else {
+        None
+    }
 }
 
 fn print_help() {

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/http2.lisp — HTTP/2 client and server for Elle
 ##
 ## Plain h2c (cleartext):
@@ -208,16 +208,16 @@
     (let [entries (frame:parse-settings settings-payload)]
       (each entry in entries
         (cond
-          ((= entry:id C:settings-initial-window-size)
-           (put session:remote-settings :initial-window-size entry:value))
-          ((= entry:id C:settings-max-frame-size)
-           (put session:remote-settings :max-frame-size entry:value))
-          ((= entry:id C:settings-header-table-size)
-           (put session:remote-settings :header-table-size entry:value))
-          ((= entry:id C:settings-max-concurrent-streams)
-           (put session:remote-settings :max-concurrent-streams entry:value))
-          ((= entry:id C:settings-enable-push)
-           (put session:remote-settings :enable-push entry:value))))))
+          (= entry:id C:settings-initial-window-size)
+           (put session:remote-settings :initial-window-size entry:value)
+          (= entry:id C:settings-max-frame-size)
+           (put session:remote-settings :max-frame-size entry:value)
+          (= entry:id C:settings-header-table-size)
+           (put session:remote-settings :header-table-size entry:value)
+          (= entry:id C:settings-max-concurrent-streams)
+           (put session:remote-settings :max-concurrent-streams entry:value)
+          (= entry:id C:settings-enable-push)
+           (put session:remote-settings :enable-push entry:value)))))
 
   ## ── Get or create stream ───────────────────────────────────────────────
 
@@ -254,28 +254,26 @@
                 payload f:payload]
             (cond
               ## ── SETTINGS ──
-              ((= ftype C:type-settings)
+              (= ftype C:type-settings)
                (if (has-flag? flags C:flag-ack)
                  nil  # Settings ACK — nothing to do
                  (begin
                    (apply-remote-settings session payload)
-                   (send-settings-ack session))))
+                   (send-settings-ack session)))
 
               ## ── PING ──
-              ((= ftype C:type-ping)
+              (= ftype C:type-ping)
                (unless (has-flag? flags C:flag-ack)
                  (let [[ftype flags sid payload]
                        (frame:make-ping-frame payload :ack? true)]
-                   (send-frame session ftype flags sid payload))))
+                   (send-frame session ftype flags sid payload)))
 
               ## ── GOAWAY ──
-              ((= ftype C:type-goaway)
-               (put session :goaway-recvd? true)
-               (put session :last-stream-id
+              (= ftype C:type-goaway) (begin (put session :goaway-recvd? true) (put session :last-stream-id
                     (bit/and (frame:read-u32 payload 0) 0x7fffffff)))
 
               ## ── WINDOW_UPDATE ──
-              ((= ftype C:type-window-update)
+              (= ftype C:type-window-update)
                (let [increment (bit/and (frame:read-u32 payload 0) 0x7fffffff)]
                  (if (= sid 0)
                    (stream:apply-window-update session:conn-flow increment)
@@ -283,20 +281,20 @@
                      (when s
                        (stream:apply-window-update
                          (stream:make-flow-control s:send-window)
-                         increment))))))
+                         increment)))))
 
               ## ── RST_STREAM ──
-              ((= ftype C:type-rst-stream)
+              (= ftype C:type-rst-stream)
                (let [s (get session:streams sid)]
                  (when s
                    (stream:transition s :recv-rst)
                    (let [err-code (frame:read-u32 payload 0)]
                      (put s :error-code err-code)
                      (s:data-queue:put {:type :rst :code err-code}))
-                   (del session:streams sid))))
+                   (del session:streams sid)))
 
               ## ── HEADERS ──
-              ((= ftype C:type-headers)
+              (= ftype C:type-headers)
                (let [s (get-stream session sid)]
                  (when (= s:state :idle)
                    (stream:transition s :recv-headers))
@@ -307,10 +305,10 @@
                    (s:data-queue:put {:type :headers
                                       :headers headers
                                       :end-stream end?})
-                   (when end? (del session:streams sid)))))
+                   (when end? (del session:streams sid))))
 
               ## ── DATA ──
-              ((= ftype C:type-data)
+              (= ftype C:type-data)
                (let [s (get session:streams sid)]
                  (when s
                    (let [end? (has-flag? flags C:flag-end-stream)]
@@ -322,14 +320,14 @@
                        (when (> len 0)
                          (send-window-update session 0 len)
                          (send-window-update session sid len)))
-                     (when end? (del session:streams sid))))))
+                     (when end? (del session:streams sid)))))
 
               ## ── PUSH_PROMISE — reject ──
-              ((= ftype C:type-push-promise)
-               (send-rst-stream session sid C:err-refused-stream))
+              (= ftype C:type-push-promise)
+               (send-rst-stream session sid C:err-refused-stream)
 
               ## ── Unknown — ignore ──
-              (true nil)))))))
+              true nil))))))
 
   ## ── Client: connection preface + handshake ─────────────────────────────
 
@@ -424,17 +422,13 @@
         (while (not done)
           (let [msg (s:data-queue:take)]
             (cond
-              ((= msg:type :headers)
-               (assign resp-headers msg:headers)
-               (when msg:end-stream (assign done true)))
-              ((= msg:type :data)
-               (push resp-body msg:data)
-               (when msg:end-stream (assign done true)))
-              ((= msg:type :rst)
+              (= msg:type :headers) (begin (assign resp-headers msg:headers) (when msg:end-stream (assign done true)))
+              (= msg:type :data) (begin (push resp-body msg:data) (when msg:end-stream (assign done true)))
+              (= msg:type :rst)
                (error {:error :h2-error :reason :stream-error
                        :stream-id sid :code msg:code
-                       :message (concat "stream reset: " (string msg:code))}))
-              (true (assign done true)))))
+                       :message (concat "stream reset: " (string msg:code))})
+              true (assign done true))))
         # Build response
         (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status")) resp-headers))
                status (if status-pair (parse-int (get status-pair 1)) 0)
@@ -582,28 +576,26 @@
                 sid   f:stream-id
                 payload f:payload]
             (cond
-              ((= ftype C:type-settings)
+              (= ftype C:type-settings)
                (if (has-flag? flags C:flag-ack)
                  nil
                  (begin
                    (apply-remote-settings session payload)
-                   (send-settings-ack session))))
+                   (send-settings-ack session)))
 
-              ((= ftype C:type-ping)
+              (= ftype C:type-ping)
                (unless (has-flag? flags C:flag-ack)
                  (let [[ft fl si pl] (frame:make-ping-frame payload :ack? true)]
-                   (send-frame session ft fl si pl))))
+                   (send-frame session ft fl si pl)))
 
-              ((= ftype C:type-window-update)
+              (= ftype C:type-window-update)
                (let [increment (bit/and (frame:read-u32 payload 0) 0x7fffffff)]
                  (when (= sid 0)
-                   (stream:apply-window-update session:conn-flow increment))))
+                   (stream:apply-window-update session:conn-flow increment)))
 
-              ((= ftype C:type-goaway)
-               (session:write-queue:put :shutdown)
-               (break nil))
+              (= ftype C:type-goaway) (begin (session:write-queue:put :shutdown) (break nil))
 
-              ((= ftype C:type-headers)
+              (= ftype C:type-headers)
                (let [s (get-stream session sid)]
                  (when (= s:state :idle)
                    (stream:transition s :recv-headers))
@@ -620,10 +612,8 @@
                          (forever
                            (let [msg (s:data-queue:take)]
                              (cond
-                               ((= msg:type :data)
-                                (push body-parts msg:data)
-                                (when msg:end-stream (break nil)))
-                               (true (break nil))))))
+                               (= msg:type :data) (begin (push body-parts msg:data) (when msg:end-stream (break nil)))
+                               true (break nil)))))
                        # Build request struct
                        (let* [method-pair (first (filter (fn [h] (= (get h 0) ":method")) hdrs))
                               path-pair (first (filter (fn [h] (= (get h 0) ":path")) hdrs))
@@ -670,9 +660,9 @@
                                   (frame:make-headers-frame sid h-block true true)]
                              (stream:transition s :send-headers)
                              (send-frame session ft fl si pl)
-                             (stream:transition s :send-end-stream)))))))))
+                             (stream:transition s :send-end-stream))))))))
 
-              ((= ftype C:type-data)
+              (= ftype C:type-data)
                (let [s (get session:streams sid)]
                  (when s
                    (let [end? (has-flag? flags C:flag-end-stream)]
@@ -683,16 +673,16 @@
                        (when (> len 0)
                          (send-window-update session 0 len)
                          (send-window-update session sid len)))
-                     (when end? (del session:streams sid))))))
+                     (when end? (del session:streams sid)))))
 
-              ((= ftype C:type-rst-stream)
+              (= ftype C:type-rst-stream)
                (let [s (get session:streams sid)]
                  (when s
                    (stream:transition s :recv-rst)
                    (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)})
-                   (del session:streams sid))))
+                   (del session:streams sid)))
 
-              (true nil)))))))
+              true nil))))))
 
   (defn h2-serve [listener handler &named tls-config on-error]
     "Serve HTTP/2 connections. Runs forever.
@@ -754,10 +744,10 @@
                    (let [[ok? f] (protect (frame:read-frame t 16384))]
                      (when (or (not ok?) (nil? f)) (break nil))
                      (cond
-                       ((= f:type C:type-settings) nil)
-                       ((= f:type C:type-window-update) nil)
-                       ((= f:type C:type-goaway) (break nil))
-                       ((= f:type C:type-headers)
+                       (= f:type C:type-settings) nil
+                       (= f:type C:type-window-update) nil
+                       (= f:type C:type-goaway) (break nil)
+                       (= f:type C:type-headers)
                         (let* [dec (hpack:make-decoder)
                                hdrs (hpack:decode dec f:payload)
                                path-h (first (filter (fn [h] (= (get h 0) ":path")) hdrs))
@@ -771,8 +761,8 @@
                                 (frame:make-data-frame f:stream-id
                                   (bytes (concat "hello " path)) true)]
                             (frame:write-frame t ft fl si pl))
-                          (t:flush)))
-                       (true nil))))
+                          (t:flush))
+                       true nil)))
                  (protect (t:close)))))]
       # Client connects using the h2 module API
       (let* [url (concat "http://127.0.0.1:" (string listen-port))

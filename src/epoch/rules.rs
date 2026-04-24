@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 8;
+pub const CURRENT_EPOCH: u64 = 9;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -56,6 +56,15 @@ pub enum MigrationRule {
     /// bindings container has children that are all 2-element lists/arrays,
     /// and splices each child's contents into the parent container.
     FlattenBindings { symbols: &'static [&'static str] },
+    /// Flatten parenthesized clauses into flat pairs.
+    /// Matches `(symbol <skip args> (test body) (test body) ...)` and
+    /// splices each clause's contents flat. Multi-body arms get `(begin ...)`.
+    /// `(else body)` in cond becomes just the body as a trailing default.
+    FlattenClauses {
+        symbols: &'static [&'static str],
+        /// Number of leading args to skip (0 for cond, 1 for match — the value expr)
+        skip: usize,
+    },
 }
 
 /// All registered migrations, ordered by epoch.
@@ -213,6 +222,20 @@ static MIGRATIONS: &[Migration] = &[
             template: "(def @$1 $2)",
         }],
     },
+    Migration {
+        epoch: 9,
+        summary: "flat cond/match clauses",
+        rules: &[
+            MigrationRule::FlattenClauses {
+                symbols: &["cond"],
+                skip: 0,
+            },
+            MigrationRule::FlattenClauses {
+                symbols: &["match"],
+                skip: 1,
+            },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -287,6 +310,23 @@ pub fn flatten_rules_in_range(from: u64, to: u64) -> Vec<&'static str> {
                 for sym in *symbols {
                     if !result.contains(sym) {
                         result.push(sym);
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Collect all flatten-clauses rules in a range as (symbol, skip) pairs.
+pub fn flatten_clause_rules_in_range(from: u64, to: u64) -> Vec<(&'static str, usize)> {
+    let mut result = Vec::new();
+    for migration in migrations_in_range(from, to) {
+        for rule in migration.rules {
+            if let MigrationRule::FlattenClauses { symbols, skip } = rule {
+                for sym in *symbols {
+                    if !result.iter().any(|(s, _)| s == sym) {
+                        result.push((*sym, *skip));
                     }
                 }
             }

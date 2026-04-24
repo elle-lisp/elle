@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## jit-medium-instructions — verify JIT support for 7 medium instructions
 
 ## Helper: scan rejection list for instruction name
@@ -25,8 +25,8 @@
 ## Array length check in a match pattern emits ArrayMutLen.
 (defn array-len-2? (arr)
   (match arr
-    ([a b] true)
-    (_ false)))
+    [a b] true
+    _ false))
 
 (repeat1 15 array-len-2? [1 2])
 
@@ -40,8 +40,8 @@
 ## in the non-strict destructuring path.
 (defn second-arg (x & rest)
   (match rest
-    ((a & _) a)
-    (_ nil)))
+    (a & _) a
+    _ nil))
 
 (repeat1 15 (fn (x) (second-arg x 99)) 1)
 
@@ -54,8 +54,8 @@
 ## Array index matching with optional elements uses ArrayMutRefOrNil.
 (defn arr-second (arr)
   (match arr
-    ([_ b] b)
-    (_ nil)))
+    [_ b] b
+    _ nil))
 
 (repeat1 15 arr-second [10 20])
 

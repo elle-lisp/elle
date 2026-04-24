@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/git.lisp — Git repository access via FFI to libgit2
 ##
 ## Usage:
@@ -193,11 +193,11 @@
 
   (defn state [repo]
     (match (c-repo-state repo)
-      [0  :clean] [1  :merge] [2  :revert] [3  :revert-sequence]
-      [4  :cherry-pick] [5  :cherry-pick-sequence] [6  :bisect]
-      [7  :rebase] [8  :rebase-interactive] [9  :rebase-merge]
-      [10 :apply-mailbox] [11 :apply-mailbox-or-rebase]
-      [_  :unknown]))
+      0  :clean 1  :merge 2  :revert 3  :revert-sequence
+      4  :cherry-pick 5  :cherry-pick-sequence 6  :bisect
+      7  :rebase 8  :rebase-interactive 9  :rebase-merge
+      10 :apply-mailbox 11 :apply-mailbox-or-rebase
+      _  :unknown))
 
   (defn head [repo]
     (let* [ref-ptr (with-pp (fn [pp] (check (c-repo-head pp repo) "git/head")))
@@ -381,9 +381,9 @@
   (defn branches [repo & opts]
     (let* [filter (if (> (length opts) 0)
                      (match (first opts)
-                       [:local GIT_BRANCH_LOCAL]
-                       [:remote GIT_BRANCH_REMOTE]
-                       [_ GIT_BRANCH_ALL])
+                       :local GIT_BRANCH_LOCAL
+                       :remote GIT_BRANCH_REMOTE
+                       _ GIT_BRANCH_ALL)
                      GIT_BRANCH_ALL)
            iter (with-pp (fn [pp] (check (c-branch-iterator-new pp repo filter) "git/branches")))
            results @[]

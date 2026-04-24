@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## SQLite module tests (FFI to libsqlite3)
 
 (def [ok? _] (protect ((fn [] (ffi/native "libsqlite3.so")))))

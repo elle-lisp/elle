@@ -23,11 +23,11 @@ docstring as the first body form.
 (defn letter-grade [score]
   "Convert a numeric score to a letter grade."
   (cond
-    ((>= score 90) "A")
-    ((>= score 80) "B")
-    ((>= score 70) "C")
-    ((>= score 60) "D")
-    (true          "F")))
+    (>= score 90) "A"
+    (>= score 80) "B"
+    (>= score 70) "C"
+    (>= score 60) "D"
+    "F"))
 
 (letter-grade 95)          # => "A"
 (letter-grade 55)          # => "F"

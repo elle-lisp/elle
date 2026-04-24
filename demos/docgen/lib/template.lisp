@@ -1,9 +1,8 @@
-(elle/epoch 7)
+(elle/epoch 9)
 ## Page template generation
 
 ## Generate navigation HTML using fold
-(var generate-nav
-  (fn (nav-items current-slug)
+(def @generate-nav (fn (nav-items current-slug)
     (fold
       (fn (acc item)
         (let [slug (get item "slug")
@@ -14,8 +13,7 @@
       nav-items)))
 
 ## Generate the full HTML page
-(var generate-page
-  (fn (site page nav css body)
+(def @generate-page (fn (site page nav css body)
     (let [site-title (get site "title")
           page-title (get page "title")
           page-desc (get page "description")
@@ -47,4 +45,4 @@
         (append "</html>\n")))))
 
 ## Module exports
-(fn [] {:generate-nav generate-nav :generate-page generate-page}))
+(fn [] {:generate-nav generate-nav :generate-page generate-page})

@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 8)
+(elle/epoch 9)
 
 # Demo HTTP server
 #
@@ -39,30 +39,30 @@
   (let [path   req:path
         method req:method]
     (cond
-      ((= path "/")
-       (http:respond 200 "welcome to the elle demo server"))
+      (= path "/")
+       (http:respond 200 "welcome to the elle demo server")
 
-      ((= path "/health")
-       (json-response 200 {:status "ok"}))
+      (= path "/health")
+       (json-response 200 {:status "ok"})
 
-      ((and (= method "POST") (= path "/echo"))
-       (http:respond 200 (or req:body "")))
+      (and (= method "POST") (= path "/echo"))
+       (http:respond 200 (or req:body ""))
 
-      ((string/starts-with? path "/delay/")
+      (string/starts-with? path "/delay/")
        (let* [parts (string/split path "/")
               ms    (parse-int (get parts 2))]
          (ev/sleep (/ ms 1000.0))
-         (http:respond 200 (string/format "delayed {}ms" ms))))
+         (http:respond 200 (string/format "delayed {}ms" ms)))
 
-      ((= path "/counter")
-       (http:respond 200 (string request-count)))
+      (= path "/counter")
+       (http:respond 200 (string request-count))
 
-      ((= path "/stats")
+      (= path "/stats")
        (let [uptime (- (clock/monotonic) start-time)]
-         (json-response 200 {:uptime-s uptime :requests request-count})))
+         (json-response 200 {:uptime-s uptime :requests request-count}))
 
-      (true
-       (http:respond 404 "not found")))))
+      true
+       (http:respond 404 "not found"))))
 
 # ── Main ─────────────────────────────────────────────────────────────
 

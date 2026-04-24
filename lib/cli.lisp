@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/cli.lisp — CLI argument parsing (pure Elle)
 ##
 ## Declarative argument parsing from a spec struct + argv list.
@@ -76,21 +76,21 @@
   (defn apply-action [result name action value]
     (let [k (keyword name)]
       (match action
-        [:set    (put result k value)]
-        [:flag   (put result k true)]
-        [:count  (put result k (inc (result k)))]
-        [:append (push (result k) value) result]
-        [_       result])))
+        :set    (put result k value)
+        :flag   (put result k true)
+        :count  (put result k (inc (result k)))
+        :append (begin (push (result k) value) result)
+        _       result)))
 
   (defn init-result [specs]
     (let [r @{}]
       (each s in specs
         (let [k (keyword s:name)]
           (match s:action
-            [:flag   (put r k false)]
-            [:count  (put r k 0)]
-            [:append (put r k @[])]
-            [_       (put r k s:default)])))
+            :flag   (put r k false)
+            :count  (put r k 0)
+            :append (put r k @[])
+            _       (put r k s:default))))
       r))
 
   (defn parse-argv [specs argv]
@@ -105,32 +105,30 @@
         (let [arg (args i)]
           (cond
             ## --long=value
-            ((and (string/starts-with? arg "--") (string/contains? arg "="))
+            (and (string/starts-with? arg "--") (string/contains? arg "="))
              (let* [eq    (string/find arg "=")
                     name  (slice arg 2 eq)
                     value (slice arg (inc eq) (length arg))
                     spec  (find-by-long specs name)]
                (unless spec
                  (error {:error :cli-error :reason :unknown-option :option (string "--" name) :message (string "unknown option --" name)}))
-               (apply-action result spec:name spec:action value)))
+               (apply-action result spec:name spec:action value))
             ## --long
-            ((string/starts-with? arg "--")
+            (string/starts-with? arg "--")
              (let* [name (slice arg 2 (length arg))
                     spec (find-by-long specs name)]
                (unless spec
                  (error {:error :cli-error :reason :unknown-option :option (string "--" name) :message (string "unknown option --" name)}))
                (match spec:action
-                 [:flag  (apply-action result spec:name :flag nil)]
-                 [:count (apply-action result spec:name :count nil)]
-                 [_      (assign i (inc i))
-                         (when (>= i argc)
+                 :flag  (apply-action result spec:name :flag nil)
+                 :count (apply-action result spec:name :count nil)
+                 _ (begin (assign i (inc i)) (when (>= i argc)
                            (error {:error :cli-error
                                    :reason :missing-value
                                    :option (string "--" name)
-                                   :message (string "--" name " requires a value")}))
-                         (apply-action result spec:name spec:action (args i))])))
+                                   :message (string "--" name " requires a value")})) (apply-action result spec:name spec:action (args i)))))
             ## -x (short) — handles stacked flags like -vvv
-            ((and (string/starts-with? arg "-") (> (length arg) 1))
+            (and (string/starts-with? arg "-") (> (length arg) 1))
              (let [chars (slice arg 1 (length arg))]
                (def @ci 0)
                (while (< ci (length chars))
@@ -139,9 +137,9 @@
                    (unless spec
                      (error {:error :cli-error :reason :unknown-option :option (string "-" ch) :message (string "unknown option -" ch)}))
                    (match spec:action
-                     [:flag  (apply-action result spec:name :flag nil)]
-                     [:count (apply-action result spec:name :count nil)]
-                     [_ (if (< (inc ci) (length chars))
+                     :flag  (apply-action result spec:name :flag nil)
+                     :count (apply-action result spec:name :count nil)
+                     _ (if (< (inc ci) (length chars))
                           (begin
                             (apply-action result spec:name spec:action
                                           (slice chars (inc ci) (length chars)))
@@ -153,10 +151,10 @@
                                       :reason :missing-value
                                       :option (string "-" ch)
                                       :message (string "-" ch " requires a value")}))
-                            (apply-action result spec:name spec:action (args i))))]))
-                 (assign ci (inc ci)))))
+                            (apply-action result spec:name spec:action (args i))))))
+                 (assign ci (inc ci))))
             ## Positional
-            (true
+            true
              (if (< pi (length pos-specs))
                (begin
                  (put result (keyword ((pos-specs pi) :name)) arg)
@@ -164,7 +162,7 @@
                (error {:error :cli-error
                        :reason :unexpected-argument
                        :argument arg
-                       :message (string "unexpected argument \"" arg "\"")})))))
+                       :message (string "unexpected argument \"" arg "\"")}))))
         (assign i (inc i)))
       ## Check required args
       (each s in specs

@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -22,29 +22,29 @@
 (defn map [f coll]
   "Apply f to each element of coll, returning a new collection of the same type. Type-preserving: lists return lists, arrays return arrays, sets return sets."
   (cond
-    ((or (array? coll) (string? coll) (bytes? coll))
+    (or (array? coll) (string? coll) (bytes? coll))
      (let* [len (length coll)
             acc @[]]
        (def @i 0)
        (while (< i len)
          (push acc (f (get coll i)))
          (assign i (+ i 1)))
-       (if (mutable? coll) acc (freeze acc))))
-    ((set? coll)
+       (if (mutable? coll) acc (freeze acc)))
+    (set? coll)
      (let* [items (set->array coll)
             acc @||]
        (each item in items
          (add acc (f item)))
-       (if (mutable? coll) acc (freeze acc))))
-    ((or (pair? coll) (empty? coll))
+       (if (mutable? coll) acc (freeze acc)))
+    (or (pair? coll) (empty? coll))
      (if (empty? coll) ()
-       (cons (f (first coll)) (map f (rest coll)))))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (cons (f (first coll)) (map f (rest coll))))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn filter [p coll]
   "Return elements of coll for which (p element) is truthy. Type-preserving."
   (cond
-    ((or (array? coll) (string? coll) (bytes? coll))
+    (or (array? coll) (string? coll) (bytes? coll))
      (let* [len (length coll)
             acc @[]]
        (def @i 0)
@@ -52,19 +52,19 @@
          (let [item (get coll i)]
            (when (p item) (push acc item)))
          (assign i (+ i 1)))
-       (if (mutable? coll) acc (freeze acc))))
-    ((set? coll)
+       (if (mutable? coll) acc (freeze acc)))
+    (set? coll)
      (let* [items (set->array coll)
             acc (if (mutable? coll) (@set) (set))]
        (each item in items
          (when (p item) (add acc item)))
-       acc))
-    ((or (pair? coll) (empty? coll))
+       acc)
+    (or (pair? coll) (empty? coll))
      (if (empty? coll) ()
        (if (p (first coll))
          (cons (first coll) (filter p (rest coll)))
-         (filter p (rest coll)))))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+         (filter p (rest coll))))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn fold [f init lst]
   "Reduce lst by applying (f accumulator element) left to right, starting from init. Alias: reduce."
@@ -104,89 +104,89 @@
 
 (defn all? [pred coll]
   (cond
-    ((or (pair? coll) (empty? coll))
+    (or (pair? coll) (empty? coll))
      (if (empty? coll)
        true
        (if (pred (first coll))
          (all? pred (rest coll))
-         false)))
-    ((or (array? coll) (array? coll))
+         false))
+    (or (array? coll) (array? coll))
      (letrec [loop (fn (i)
                       (if (>= i (length coll))
                         true
                         (if (pred (get coll i))
                           (loop (+ i 1))
                           false)))]
-       (loop 0)))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (loop 0))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn any? [pred coll]
   (cond
-    ((or (pair? coll) (empty? coll))
+    (or (pair? coll) (empty? coll))
      (if (empty? coll)
        false
        (if (pred (first coll))
          true
-         (any? pred (rest coll)))))
-    ((or (array? coll) (array? coll))
+         (any? pred (rest coll))))
+    (or (array? coll) (array? coll))
      (letrec [loop (fn (i)
                       (if (>= i (length coll))
                         false
                         (if (pred (get coll i))
                           true
                           (loop (+ i 1)))))]
-       (loop 0)))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (loop 0))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn find [pred coll]
   (cond
-    ((or (pair? coll) (empty? coll))
+    (or (pair? coll) (empty? coll))
      (if (empty? coll)
        nil
        (if (pred (first coll))
          (first coll)
-         (find pred (rest coll)))))
-    ((or (array? coll) (array? coll))
+         (find pred (rest coll))))
+    (or (array? coll) (array? coll))
      (letrec [loop (fn (i)
                       (if (>= i (length coll))
                         nil
                         (if (pred (get coll i))
                           (get coll i)
                           (loop (+ i 1)))))]
-       (loop 0)))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (loop 0))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn find-index [pred coll]
   (cond
-    ((or (pair? coll) (empty? coll))
+    (or (pair? coll) (empty? coll))
      (letrec [go (fn (i l)
                     (if (empty? l)
                       nil
                       (if (pred (first l))
                         i
                         (go (+ i 1) (rest l)))))]
-       (go 0 coll)))
-    ((or (array? coll) (array? coll))
+       (go 0 coll))
+    (or (array? coll) (array? coll))
      (letrec [loop (fn (i)
                       (if (>= i (length coll))
                         nil
                         (if (pred (get coll i))
                           i
                           (loop (+ i 1)))))]
-       (loop 0)))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (loop 0))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn count [pred coll]
   (cond
-    ((or (pair? coll) (empty? coll))
-     (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll))
-    ((or (array? coll) (array? coll))
+    (or (pair? coll) (empty? coll))
+     (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll)
+    (or (array? coll) (array? coll))
      (letrec [loop (fn (i n)
                       (if (>= i (length coll))
                         n
                         (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))]
-       (loop 0 0)))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (loop 0 0))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn nth [n coll]
   (get coll n))
@@ -198,22 +198,22 @@
   (letrec
     [to-list (fn (c)
        (cond
-         ((or (pair? c) (empty? c)) c)
-         ((or (array? c) (array? c))
+         (or (pair? c) (empty? c)) c
+         (or (array? c) (array? c))
           (letrec [loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))]
-            (loop 0 ())))
-         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+            (loop 0 ()))
+         true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
      from-list (fn (lst orig)
        (cond
-         ((or (pair? orig) (empty? orig)) lst)
-         ((array? orig)
+         (or (pair? orig) (empty? orig)) lst
+         (array? orig)
           (let [arr @[]]
             (each x in lst (push arr x))
-            arr))
-         ((array? orig) (apply array lst))))
+            arr)
+         (array? orig) (apply array lst)))
      zip-lists (fn (lists)
        (if (any? empty? lists)
          ()
@@ -238,21 +238,21 @@
          ()
          (let [x (first lst)]
            (cond
-             ((pair? x)
-              (append (flat x) (flat (rest lst))))
-             ((or (array? x) (array? x))
-              (append (flat (to-list x)) (flat (rest lst))))
-             (true
-              (cons x (flat (rest lst))))))))]
+             (pair? x)
+              (append (flat x) (flat (rest lst)))
+             (or (array? x) (array? x))
+              (append (flat (to-list x)) (flat (rest lst)))
+             true
+              (cons x (flat (rest lst)))))))]
     (cond
-      ((or (pair? coll) (empty? coll)) (flat coll))
-      ((array? coll)
+      (or (pair? coll) (empty? coll)) (flat coll)
+      (array? coll)
        (let [result @[]]
          (each x in (flat (to-list coll)) (push result x))
-         result))
-      ((array? coll)
-       (apply array (flat (to-list coll))))
-      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+         result)
+      (array? coll)
+       (apply array (flat (to-list coll)))
+      true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn take-while [pred coll]
   (letrec
@@ -263,8 +263,8 @@
            (cons (first lst) (tw-list (rest lst)))
            ())))]
     (cond
-      ((or (pair? coll) (empty? coll)) (tw-list coll))
-      ((array? coll)
+      (or (pair? coll) (empty? coll)) (tw-list coll)
+      (array? coll)
        (let [result @[]]
          (letrec [loop (fn (i)
                           (when (< i (length coll))
@@ -273,15 +273,15 @@
                                 (push result x)
                                 (loop (+ i 1))))))]
            (loop 0))
-         result))
-      ((array? coll)
+         result)
+      (array? coll)
        (let [lst (tw-list (letrec [loop (fn (i acc)
                                             (if (>= i (length coll))
                                               (reverse acc)
                                               (loop (+ i 1) (cons (get coll i) acc))))]
                              (loop 0 ())))]
-         (apply array lst)))
-      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+         (apply array lst))
+      true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn drop-while [pred coll]
   (letrec
@@ -292,8 +292,8 @@
            (dw-list (rest lst))
            lst)))]
     (cond
-      ((or (pair? coll) (empty? coll)) (dw-list coll))
-      ((array? coll)
+      (or (pair? coll) (empty? coll)) (dw-list coll)
+      (array? coll)
        (letrec [find-start (fn (i)
                               (if (>= i (length coll))
                                 (length coll)
@@ -307,15 +307,15 @@
                               (push result (get coll i))
                               (loop (+ i 1))))]
              (loop start))
-           result)))
-      ((array? coll)
+           result))
+      (array? coll)
        (let [lst (dw-list (letrec [loop (fn (i acc)
                                             (if (>= i (length coll))
                                               (reverse acc)
                                               (loop (+ i 1) (cons (get coll i) acc))))]
                              (loop 0 ())))]
-         (apply array lst)))
-      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+         (apply array lst))
+      true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn distinct [coll]
   (let [seen @{}]
@@ -328,22 +328,22 @@
              (begin (put seen (first lst) true)
                     (cons (first lst) (dist-list (rest lst)))))))]
       (cond
-        ((or (pair? coll) (empty? coll)) (dist-list coll))
-        ((array? coll)
+        (or (pair? coll) (empty? coll)) (dist-list coll)
+        (array? coll)
          (let [result @[]]
            (each x in coll
              (unless (has? seen x)
                (put seen x true)
                (push result x)))
-           result))
-        ((array? coll)
+           result)
+        (array? coll)
          (let [lst (dist-list (letrec [loop (fn (i acc)
                                                (if (>= i (length coll))
                                                  (reverse acc)
                                                  (loop (+ i 1) (cons (get coll i) acc))))]
                                 (loop 0 ())))]
-           (apply array lst)))
-        (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))))
+           (apply array lst))
+        true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn frequencies [coll]
   (let [counts @{}]
@@ -353,21 +353,21 @@
 
 (defn mapcat [f coll]
   (cond
-    ((or (pair? coll) (empty? coll))
-     (fold (fn (acc x) (append acc (f x))) () coll))
-    ((array? coll)
+    (or (pair? coll) (empty? coll))
+     (fold (fn (acc x) (append acc (f x))) () coll)
+    (array? coll)
      (let [result @[]]
        (each x in coll
          (each y in (f x) (push result y)))
-       result))
-    ((array? coll)
+       result)
+    (array? coll)
      (apply array (fold (fn (acc x) (append acc (f x))) ()
                         (letrec [loop (fn (i acc)
                                          (if (>= i (length coll))
                                            (reverse acc)
                                            (loop (+ i 1) (cons (get coll i) acc))))]
-                          (loop 0 ())))))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+                          (loop 0 ()))))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn group-by [f coll]
   (let [groups @{}]
@@ -380,37 +380,37 @@
 
 (defn map-indexed [f coll]
   (cond
-    ((or (pair? coll) (empty? coll))
+    (or (pair? coll) (empty? coll))
      (letrec [go (fn (i l)
                     (if (empty? l)
                       ()
                       (cons (f i (first l)) (go (+ i 1) (rest l)))))]
-       (go 0 coll)))
-    ((array? coll)
+       (go 0 coll))
+    (array? coll)
      (let [result @[]]
        (letrec [loop (fn (i)
                         (when (< i (length coll))
                           (push result (f i (get coll i)))
                           (loop (+ i 1))))]
          (loop 0))
-       result))
-    ((array? coll)
+       result)
+    (array? coll)
      (apply array
        (letrec [go (fn (i)
                       (if (>= i (length coll))
                         ()
                         (cons (f i (get coll i)) (go (+ i 1)))))]
-         (go 0))))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+         (go 0)))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn partition [n coll]
   (cond
-    ((or (pair? coll) (empty? coll))
+    (or (pair? coll) (empty? coll))
      (if (or (<= n 0) (empty? coll))
        ()
        (cons (take n coll)
-             (partition n (drop n coll)))))
-    ((array? coll)
+             (partition n (drop n coll))))
+    (array? coll)
      (let [result @[]]
        (letrec [loop (fn (i)
                         (when (< i (length coll))
@@ -423,8 +423,8 @@
                             (push result chunk)
                             (loop (+ i n)))))]
          (loop 0))
-       result))
-    ((array? coll)
+       result)
+    (array? coll)
      (letrec [to-list (fn (c)
                           (letrec [loop (fn (i acc)
                                           (if (>= i (length c))
@@ -436,8 +436,8 @@
                         ()
                         (cons (apply array (take n lst))
                               (part (drop n lst)))))]
-       (apply array (part (to-list coll)))))
-    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+       (apply array (part (to-list coll))))
+    true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
 
 (defn interpose [sep coll]
   (letrec
@@ -447,8 +447,8 @@
          (cons (first lst)
                (cons sep (ip-list (rest lst))))))]
     (cond
-      ((or (pair? coll) (empty? coll)) (ip-list coll))
-      ((array? coll)
+      (or (pair? coll) (empty? coll)) (ip-list coll)
+      (array? coll)
        (if (< (length coll) 2)
          coll
          (let [result @[(get coll 0)]]
@@ -458,15 +458,15 @@
                               (push result (get coll i))
                               (loop (+ i 1))))]
              (loop 1))
-           result)))
-      ((array? coll)
+           result))
+      (array? coll)
        (let [lst (ip-list (letrec [loop (fn (i acc)
                                            (if (>= i (length coll))
                                              (reverse acc)
                                              (loop (+ i 1) (cons (get coll i) acc))))]
                              (loop 0 ())))]
-         (apply array lst)))
-      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+         (apply array lst))
+      true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn min-key [f & args]
   (fold (fn (best x) (if (< (f x) (f best)) x best))
@@ -492,30 +492,30 @@
   (letrec
     [to-list (fn (c)
        (cond
-         ((or (pair? c) (empty? c)) c)
-         ((or (array? c) (array? c))
+         (or (pair? c) (empty? c)) c
+         (or (array? c) (array? c))
           (letrec [loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))]
-            (loop 0 ())))
-         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+            (loop 0 ()))
+         true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
      from-list (fn (lst orig)
        (cond
-         ((or (pair? orig) (empty? orig)) lst)
-         ((array? orig)
+         (or (pair? orig) (empty? orig)) lst
+         (array? orig)
           (let [arr @[]]
             (each x in lst (push arr x))
-            arr))
-         ((array? orig) (apply array lst))))
+            arr)
+         (array? orig) (apply array lst)))
      merge (fn (a b)
        (cond
-         ((empty? a) b)
-         ((empty? b) a)
-         ((<= (first (first a)) (first (first b)))
-          (cons (first a) (merge (rest a) b)))
-         (true
-          (cons (first b) (merge a (rest b))))))
+         (empty? a) b
+         (empty? b) a
+         (<= (first (first a)) (first (first b)))
+          (cons (first a) (merge (rest a) b))
+         true
+          (cons (first b) (merge a (rest b)))))
      halve (fn (lst)
        (let [mid (/ (length lst) 2)]
          [(take mid lst) (drop mid lst)]))
@@ -535,30 +535,30 @@
   (letrec
     [to-list (fn (c)
        (cond
-         ((or (pair? c) (empty? c)) c)
-         ((array? c)
+         (or (pair? c) (empty? c)) c
+         (array? c)
           (letrec [loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))]
-            (loop 0 ())))
-         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
+            (loop 0 ()))
+         true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))
      from-list (fn (lst orig)
        (cond
-         ((or (pair? orig) (empty? orig)) lst)
-         ((mutable? orig)
+         (or (pair? orig) (empty? orig)) lst
+         (mutable? orig)
           (let [arr @[]]
             (each x in lst (push arr x))
-            arr))
-         ((array? orig) (apply array lst))))
+            arr)
+         (array? orig) (apply array lst)))
      merge-lists (fn (a b)
        (cond
-         ((empty? a) b)
-         ((empty? b) a)
-         ((<= (cmp (first a) (first b)) 0)
-          (cons (first a) (merge-lists (rest a) b)))
-         (true
-          (cons (first b) (merge-lists a (rest b))))))
+         (empty? a) b
+         (empty? b) a
+         (<= (cmp (first a) (first b)) 0)
+          (cons (first a) (merge-lists (rest a) b))
+         true
+          (cons (first b) (merge-lists a (rest b)))))
      halve (fn (lst)
        (let [mid (/ (length lst) 2)]
          [(take mid lst) (drop mid lst)]))
@@ -617,9 +617,9 @@
     (when (nil? cfg)
       (error {:error :type-error :reason :no-lir :message "target has no LIR"}))
     (cond
-      ((= fmt :mermaid) (fn/cfg-mermaid cfg))
-      ((= fmt :dot)     (fn/cfg-dot cfg))
-      (true (error {:error :type-error :reason :unknown-format :format fmt :expected |:mermaid :dot| :message (string "unknown format: " fmt)})))))
+      (= fmt :mermaid) (fn/cfg-mermaid cfg)
+      (= fmt :dot)     (fn/cfg-dot cfg)
+      true (error {:error :type-error :reason :unknown-format :format fmt :expected |:mermaid :dot| :message (string "unknown format: " fmt)}))))
 
 (defn fn/cfg-label (cfg)
   "Build the label string from a CFG struct's metadata."
@@ -655,10 +655,10 @@
                term-kind (get block :term-kind)
                edges (get block :edges)
                color (cond
-                        ((= term-kind :return) "#4444cc")
-                        ((= term-kind :branch) "#cc8800")
-                        ((= term-kind :yield)  "#008844")
-                        (true                  "#444444"))]
+                        (= term-kind :return) "#4444cc"
+                        (= term-kind :branch) "#cc8800"
+                        (= term-kind :yield)  "#008844"
+                        true                  "#444444")]
           (assign result (-> result
                         (append "  block")
                         (append lbl)
@@ -714,15 +714,15 @@
                # Choose node shape based on terminator kind
                # All labels are quoted to avoid parser issues with special chars
                open-delim (cond
-                             ((= term-kind :branch) "{\"")
-                             ((= term-kind :return) "([\"")
-                             ((= term-kind :yield)  "{{\"")
-                             (true                  "[\""))
+                             (= term-kind :branch) "{\""
+                             (= term-kind :return) "([\""
+                             (= term-kind :yield)  "{{\""
+                             true                  "[\"")
                close-delim (cond
-                              ((= term-kind :branch) "\"}")
-                              ((= term-kind :return) "\"])")
-                              ((= term-kind :yield)  "\"}}")
-                              (true                  "\"]"))
+                              (= term-kind :branch) "\"}"
+                              (= term-kind :return) "\"])"
+                              (= term-kind :yield)  "\"}}"
+                              true                  "\"]")
                # Build node content with compact instructions
                @content (-> (append "block" lbl)
                           (append "<br/>"))]
@@ -745,11 +745,11 @@
                         (append "\n")))
           # Apply style class
           (let [cls (cond
-                       ((= lbl (string (get cfg :entry))) "entry")
-                       ((= term-kind :return)  "ret")
-                       ((= term-kind :branch)  "branch")
-                       ((= term-kind :yield)   "yield_block")
-                       (true                   "normal"))]
+                       (= lbl (string (get cfg :entry))) "entry"
+                       (= term-kind :return)  "ret"
+                       (= term-kind :branch)  "branch"
+                       (= term-kind :yield)   "yield_block"
+                       true                   "normal")]
             (assign result (-> result
                           (append "  class block")
                           (append lbl)
@@ -1170,9 +1170,9 @@
         :error  (complete-fiber fiber :error)
         :paused (let [bits (fiber/bits fiber)]
                   (cond
-                    ((not (= 0 (bit/and bits 1)))       # SIG_ERROR
-                     (complete-fiber fiber :error))
-                    ((not (= 0 (bit/and bits 512)))     # SIG_IO
+                    (not (= 0 (bit/and bits 1)))       # SIG_ERROR
+                     (complete-fiber fiber :error)
+                    (not (= 0 (bit/and bits 512)))     # SIG_IO
                      (let [[ok? result] (protect (io/submit backend (fiber/value fiber)))]
                        (if ok?
                          (begin
@@ -1180,11 +1180,11 @@
                            (put fiber-io fiber result))
                          (begin
                            (fiber/abort fiber result)
-                           (handle-fiber-after-resume fiber)))))
-                    ((not (= 0 (bit/and bits 16384)))   # SIG_WAIT (bit 14)
-                     (handle-wait fiber (fiber/value fiber)))
-                    (true
-                     (push runnable fiber))))))
+                           (handle-fiber-after-resume fiber))))
+                    (not (= 0 (bit/and bits 16384)))   # SIG_WAIT (bit 14)
+                     (handle-wait fiber (fiber/value fiber))
+                    true
+                     (push runnable fiber)))))
 
     (defn drain-runnable []
       "Run all runnable fibers. Guard against externally-killed fibers."
@@ -1192,10 +1192,10 @@
         (let [fiber (pop runnable)]
           (let [status (fiber/status fiber)]
             (cond
-              ((= status :dead)  (complete-fiber fiber :ok))
-              ((= status :error) (complete-fiber fiber :error))
-              (true (begin (fiber/resume fiber)
-                           (handle-fiber-after-resume fiber))))))))
+              (= status :dead)  (complete-fiber fiber :ok)
+              (= status :error) (complete-fiber fiber :error)
+              true (begin (fiber/resume fiber)
+                           (handle-fiber-after-resume fiber)))))))
 
     (defn process-completions [timeout-ms]
       "Wait for I/O completions and route fibers."

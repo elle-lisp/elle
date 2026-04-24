@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 9)
 ## lib/compress.lisp — Gzip, zlib, deflate, and zstd via FFI
 ##
 ## Usage:
@@ -130,8 +130,8 @@
             (let [produced (- space (ffi/read (ptr/add stream 32) :u32))]
               (assign total-out (+ total-out produced)))
             (match rc
-              [1 (assign done true)]   # Z_STREAM_END
-              [0 (when (zero? (ffi/read (ptr/add stream 32) :u32))
+              1 (assign done true)   # Z_STREAM_END
+              0 (when (zero? (ffi/read (ptr/add stream 32) :u32))
                    ## Output buffer full, grow
                    (let* [new-size (* buf-size 2)
                           new-buf (ffi/malloc new-size)]
@@ -140,11 +140,8 @@
                                   (ffi/read (ptr/add out-buf i) :u8)))
                      (ffi/free out-buf)
                      (assign out-buf new-buf)
-                     (assign buf-size new-size)))]
-              [_ (z-inflateEnd stream)
-                 (ffi/free stream)
-                 (ffi/free out-buf)
-                 (error {:error :compress-error :message (string "inflate failed: " rc)})]))))
+                     (assign buf-size new-size)))
+              _ (begin (z-inflateEnd stream) (ffi/free stream) (ffi/free out-buf) (error {:error :compress-error :message (string "inflate failed: " rc)}))))))
       (let [result (ptr->bytes out-buf total-out)]
         (z-inflateEnd stream)
         (ffi/free stream)

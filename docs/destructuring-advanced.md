@@ -57,9 +57,9 @@ Destructuring in `match` enables structural dispatch:
 ```lisp
 (defn area [shape]
   (match shape
-    ({:type :circle :radius r}  (* r r))
-    ({:type :square :side s}    (* s s))
-    (_                          0)))
+    {:type :circle :radius r}  (* r r)
+    {:type :square :side s}    (* s s)
+    _                          0))
 
 (area {:type :circle :radius 5})   # => 25
 (area {:type :square :side 3})     # => 9
