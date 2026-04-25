@@ -173,6 +173,88 @@ pub(super) fn format_annotated(
     Doc::concat(parts)
 }
 
+/// Format a node with leading trivia + syntax, but WITHOUT trailing trivia.
+///
+/// Used for header elements (like params) whose trailing trivia (comments,
+/// blank lines before the body) would poison `measure_flat` inside a Group,
+/// forcing the header to break unnecessarily.
+pub(super) fn format_without_trailing(
+    node: &AnnotatedSyntax,
+    source: &str,
+    config: &FormatterConfig,
+) -> Doc {
+    let mut parts = Vec::new();
+
+    // Leading trivia (same as format_annotated)
+    if !node.leading.is_empty() {
+        for t in &node.leading {
+            match t {
+                Trivia::Comment { text, .. } => {
+                    parts.push(Doc::hardbreak());
+                    parts.push(Doc::text(text));
+                }
+                Trivia::BlankLines { count, .. } => {
+                    for _ in 0..(*count).min(2) {
+                        parts.push(Doc::hardbreak());
+                    }
+                }
+            }
+        }
+        parts.push(Doc::hardbreak());
+    }
+
+    // The node itself — no trailing trivia
+    parts.push(format_syntax(node, source, config));
+    Doc::concat(parts)
+}
+
+/// Format only the trailing trivia of a node.
+///
+/// Companion to `format_without_trailing`. Emit this after the header
+/// group so trivia appears between header and body without affecting
+/// the header's flat-width measurement.
+pub(super) fn format_trailing_trivia(node: &AnnotatedSyntax) -> Doc {
+    if node.trailing.is_empty() {
+        return Doc::empty();
+    }
+
+    let mut parts = Vec::new();
+    let has_trailing_comments = node
+        .trailing
+        .iter()
+        .any(|t| matches!(t, Trivia::Comment { .. }));
+    let mut seen_break = false;
+    let mut inline_done = false;
+    for t in &node.trailing {
+        match t {
+            Trivia::Comment { text, .. } => {
+                if !seen_break && !inline_done {
+                    parts.push(Doc::text("  "));
+                    parts.push(Doc::text(text));
+                    inline_done = true;
+                } else {
+                    parts.push(Doc::hardbreak());
+                    parts.push(Doc::text(text));
+                }
+            }
+            Trivia::BlankLines { count, .. } => {
+                seen_break = true;
+                if has_trailing_comments {
+                    for _ in 0..(*count).min(2) {
+                        parts.push(Doc::hardbreak());
+                    }
+                }
+            }
+        }
+    }
+
+    if has_trailing_comments {
+        parts.push(Doc::comment_break());
+    }
+
+    Doc::concat(parts)
+}
+
 /// Format a single Syntax node (no trivia).
 ///
 /// Dispatches on SyntaxKind. For lists, checks the head symbol for

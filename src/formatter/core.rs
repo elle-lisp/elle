@@ -67,6 +67,18 @@ pub fn format_code(source: &str, config: &FormatterConfig) -> Result<String, Str
         output.push_str(shebang);
     }
     output.push_str(rendered);
+
+    // 9. Strip trailing whitespace from every line. The renderer emits
+    //    indent spaces before HardBreaks (blank separator lines), producing
+    //    lines with only whitespace. Strip these so editors and linters
+    //    don't complain.
+    let output: String = output
+        .lines()
+        .map(|line| line.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut output = output;
     if !output.ends_with('\n') {
         output.push('\n');
     }
@@ -543,5 +555,94 @@ nil
     #[test]
     fn test_idempotent_generic_call_short_head() {
         assert_idempotent("(f arg1 arg2 arg3)");
+    }
+
+    // ── Trailing trivia on params must not split header ──────────
+
+    #[test]
+    fn test_fn_header_not_split_by_trailing_comment() {
+        let config = FormatterConfig::default();
+        let input = "(fn [x y]\n\n  ## doc comment\n  (+ x y))";
+        let formatted = format_code(input, &config).unwrap();
+        assert!(
+            formatted.starts_with("(fn [x y]"),
+            "fn header should stay on one line, got:\n{}",
+            formatted
+        );
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "must be idempotent");
+    }
+
+    #[test]
+    fn test_defn_header_not_split_by_trailing_comment() {
+        let config = FormatterConfig::default();
+        let input = "(defn foo [x y]\n\n  ## doc comment\n  (+ x y))";
+        let formatted = format_code(input, &config).unwrap();
+        assert!(
+            formatted.starts_with("(defn foo [x y]"),
+            "defn header should stay on one line, got:\n{}",
+            formatted
+        );
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "must be idempotent");
+    }
+
+    #[test]
+    fn test_no_trailing_whitespace() {
+        let config = FormatterConfig::default();
+        let input = "(fn [x]\n\n  ## comment\n  (+ x 1))";
+        let formatted = format_code(input, &config).unwrap();
+        for (i, line) in formatted.lines().enumerate() {
+            assert!(
+                line == line.trim_end(),
+                "line {} has trailing whitespace: {:?}",
+                i + 1,
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_if_branches_align_in_let_binding() {
+        let config = FormatterConfig::default();
+        // When (if ...) is a value in a let binding and breaks, branches
+        // must align relative to the (if column, not the ambient nest.
+        let input = "(let [port (if (nil? colon) info:default-port (parse-int (slice auth (inc colon))))] port)";
+        let formatted = format_code(input, &config).unwrap();
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "must be idempotent");
+        // The branches should be indented relative to the ( of (if,
+        // not at some unrelated nest level.
+        let lines: Vec<&str> = formatted.lines().collect();
+        // Find the line with (if
+        let if_line_idx = lines.iter().position(|l| l.contains("(if")).unwrap();
+        let if_col = lines[if_line_idx].find("(if").unwrap();
+        // Branch lines should be at if_col + 2 (standard body indent from "(")
+        if if_line_idx + 1 < lines.len() {
+            let branch_line = lines[if_line_idx + 1];
+            let branch_col = branch_line.len() - branch_line.trim_start().len();
+            assert_eq!(
+                branch_col,
+                if_col + 2,
+                "branch should indent +2 from (if at col {}, got col {}\nformatted:\n{}",
+                if_col,
+                branch_col,
+                formatted
+            );
+        }
+    }
+
+    #[test]
+    fn test_fn_named_args_header_not_split() {
+        let config = FormatterConfig::default();
+        let input = "(fn [&named tls compress]\n\n  ## comment block\n  (def x 1)\n  (def y 2))";
+        let formatted = format_code(input, &config).unwrap();
+        assert!(
+            formatted.starts_with("(fn [&named tls compress]"),
+            "fn &named header should stay on one line, got:\n{}",
+            formatted
+        );
+        let second = format_code(&formatted, &config).unwrap();
+        assert_eq!(formatted, second, "must be idempotent");
     }
 }

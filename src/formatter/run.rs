@@ -4,6 +4,38 @@ use crate::formatter::{format_code, FormatterConfig};
 use crate::rewrite::run::rewrite_file;
 use std::io::IsTerminal;
 
+/// Options for fragment formatting.
+struct FmtOpts {
+    no_epoch: bool,
+    preserve_margin: bool,
+}
+
+/// Top-level format dispatch: handles --no-epoch and --plm.
+fn do_format(
+    source: &str,
+    file_path: &str,
+    config: &FormatterConfig,
+    opts: &FmtOpts,
+) -> Result<String, String> {
+    let (input, margin) = if opts.preserve_margin {
+        strip_left_margin(source)
+    } else {
+        (source.to_string(), String::new())
+    };
+
+    let formatted = if opts.no_epoch {
+        format_only(&input, config)?
+    } else {
+        rewrite_and_format(&input, file_path, config)?
+    };
+
+    Ok(if opts.preserve_margin {
+        apply_left_margin(&formatted, &margin)
+    } else {
+        formatted
+    })
+}
+
 /// Run epoch rewrite on source, then format.
 /// Returns the formatted string with epoch migrations applied.
 fn rewrite_and_format(
@@ -18,6 +50,67 @@ fn rewrite_and_format(
     format_code(&rewritten, config)
 }
 
+/// Format-only (no epoch rewrite). Used by --no-epoch.
+fn format_only(source: &str, config: &FormatterConfig) -> Result<String, String> {
+    format_code(source, config)
+}
+
+/// Detect and strip a common left margin from every non-blank line.
+/// Returns (stripped_source, margin_string).
+fn strip_left_margin(source: &str) -> (String, String) {
+    let min_indent = source
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+
+    if min_indent == 0 {
+        return (source.to_string(), String::new());
+    }
+
+    let margin: String = " ".repeat(min_indent);
+    let stripped: String = source
+        .lines()
+        .map(|l| {
+            if l.trim().is_empty() {
+                ""
+            } else {
+                &l[min_indent..]
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Preserve trailing newline
+    let stripped = if source.ends_with('\n') && !stripped.ends_with('\n') {
+        stripped + "\n"
+    } else {
+        stripped
+    };
+
+    (stripped, margin)
+}
+
+/// Re-apply a left margin to every non-blank line.
+fn apply_left_margin(source: &str, margin: &str) -> String {
+    if margin.is_empty() {
+        return source.to_string();
+    }
+    source
+        .lines()
+        .map(|l| {
+            if l.trim().is_empty() {
+                l.to_string()
+            } else {
+                format!("{}{}", margin, l)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if source.ends_with('\n') { "\n" } else { "" }
+}
+
 /// Run the formatter tool. Returns exit code.
 ///
 /// Exit codes:
@@ -25,6 +118,8 @@ fn rewrite_and_format(
 /// - 1 = error, or changes needed in --check mode
 pub fn run(args: &[String]) -> i32 {
     let mut check = false;
+    let mut no_epoch = false;
+    let mut preserve_margin = false;
     let mut line_length: Option<usize> = None;
     let mut indent_width: Option<usize> = None;
     let mut files = Vec::new();
@@ -33,6 +128,8 @@ pub fn run(args: &[String]) -> i32 {
     while i < args.len() {
         match args[i].as_str() {
             "--check" => check = true,
+            "--no-epoch" => no_epoch = true,
+            "--plm" | "--preserve-left-margin" => preserve_margin = true,
             "--help" | "-h" => {
                 print_help();
                 return 0;
@@ -75,6 +172,11 @@ pub fn run(args: &[String]) -> i32 {
         .maybe_with_line_length(line_length)
         .maybe_with_indent_width(indent_width);
 
+    let opts = FmtOpts {
+        no_epoch,
+        preserve_margin,
+    };
+
     // No files given: if stdin is piped, format it; otherwise show help.
     if files.is_empty() {
         if std::io::stdin().is_terminal() {
@@ -82,7 +184,7 @@ pub fn run(args: &[String]) -> i32 {
             print_help();
             return 1;
         }
-        return run_stdin(check, &config);
+        return run_stdin(check, &config, &opts);
     }
 
     let mut any_changed = false;
@@ -98,7 +200,7 @@ pub fn run(args: &[String]) -> i32 {
             }
         };
 
-        match rewrite_and_format(&source, file_path, &config) {
+        match do_format(&source, file_path, &config, &opts) {
             Ok(formatted) => {
                 if check {
                     if let Some(exit) = check_columns(file_path, &formatted) {
@@ -134,14 +236,14 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 /// Format stdin, write to stdout.
-fn run_stdin(check: bool, config: &FormatterConfig) -> i32 {
+fn run_stdin(check: bool, config: &FormatterConfig, opts: &FmtOpts) -> i32 {
     let mut source = String::new();
     if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut source) {
         eprintln!("Error reading stdin: {}", e);
         return 1;
     }
 
-    let formatted = match rewrite_and_format(&source, "<stdin>", config) {
+    let formatted = match do_format(&source, "<stdin>", config, opts) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Error formatting stdin: {}", e);
@@ -211,6 +313,8 @@ fn print_help() {
     println!();
     println!("Options:");
     println!("  --check                   Check if files need formatting (exit 1 if yes)");
+    println!("  --no-epoch                Skip epoch tag injection/upgrade (for fragments)");
+    println!("  --plm                     Preserve left margin (auto-detect + re-apply indent)");
     println!("  --line-length=N           Target line length (default: 80)");
     println!("  --indent-width=N          Spaces per indent level (default: 2)");
     println!("  --help                    Show this help message");
@@ -219,6 +323,7 @@ fn print_help() {
     println!("  elle fmt src/*.lisp");
     println!("  elle fmt --check lib/*.lisp");
     println!("  elle fmt --line-length=120 src/*.lisp");
+    println!("  elle fmt --no-epoch --plm fragment.lisp");
     println!("  cat file.lisp | elle fmt");
 }
 
@@ -271,5 +376,78 @@ mod tests {
         let first = rewrite_and_format(input, "<test>", &config).unwrap();
         let second = rewrite_and_format(&first, "<test>", &config).unwrap();
         assert_eq!(first, second, "rewrite+format must be idempotent");
+    }
+
+    #[test]
+    fn test_no_epoch_skips_injection() {
+        let config = FormatterConfig::default();
+        let opts = FmtOpts {
+            no_epoch: true,
+            preserve_margin: false,
+        };
+        let input = "(defn foo [x]\n  (+ x 1))\n";
+        let result = do_format(input, "<test>", &config, &opts).unwrap();
+        assert!(
+            !result.contains("elle/epoch"),
+            "--no-epoch should not inject epoch, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_preserve_left_margin() {
+        let config = FormatterConfig::default();
+        let opts = FmtOpts {
+            no_epoch: true,
+            preserve_margin: true,
+        };
+        let input = "    (defn foo [x]\n      (+ x 1))\n";
+        let result = do_format(input, "<test>", &config, &opts).unwrap();
+        assert!(
+            result.starts_with("    (defn foo [x]"),
+            "should preserve 4-space margin, got: {:?}",
+            result
+        );
+        // Body should be margin + 2 indent = 6 spaces
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(
+            lines[1].starts_with("      "),
+            "body should be at margin+2, got: {:?}",
+            lines[1]
+        );
+    }
+
+    #[test]
+    fn test_preserve_left_margin_idempotent() {
+        let config = FormatterConfig::default();
+        let opts = FmtOpts {
+            no_epoch: true,
+            preserve_margin: true,
+        };
+        let input = "        (defn foo [x]\n          (+ x 1))\n";
+        let first = do_format(input, "<test>", &config, &opts).unwrap();
+        let second = do_format(&first, "<test>", &config, &opts).unwrap();
+        assert_eq!(first, second, "plm must be idempotent");
+    }
+
+    #[test]
+    fn test_strip_left_margin_basic() {
+        let (stripped, margin) = strip_left_margin("    (foo)\n      (bar)\n");
+        assert_eq!(margin, "    ");
+        assert_eq!(stripped, "(foo)\n  (bar)\n");
+    }
+
+    #[test]
+    fn test_strip_left_margin_zero() {
+        let (stripped, margin) = strip_left_margin("(foo)\n  (bar)\n");
+        assert_eq!(margin, "");
+        assert_eq!(stripped, "(foo)\n  (bar)\n");
+    }
+
+    #[test]
+    fn test_strip_left_margin_blank_lines() {
+        let (stripped, margin) = strip_left_margin("    (foo)\n\n    (bar)\n");
+        assert_eq!(margin, "    ");
+        assert!(stripped.contains("\n\n"), "blank lines should be preserved");
     }
 }

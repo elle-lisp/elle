@@ -12,7 +12,7 @@
 
 use super::config::FormatterConfig;
 use super::doc::Doc;
-use super::format::format_annotated;
+use super::format::{format_annotated, format_trailing_trivia, format_without_trailing};
 use super::render::measure_flat;
 use super::trivia::AnnotatedSyntax;
 use crate::syntax::SyntaxKind;
@@ -38,17 +38,23 @@ fn is_collection(node: &AnnotatedSyntax) -> bool {
     )
 }
 
-/// Body-form head symbols that introduce nesting/control flow.
-const BODY_FORMS: &[&str] = &[
-    "def", "defn", "defmacro", "fn", "let", "let*", "letrec", "if", "when", "unless", "while",
-    "each", "begin", "cond", "match", "case", "try", "protect", "->", "->>", "some->", "some->>",
-];
-
-/// A node is "trivial" if it is structurally simple — no nested body forms.
-/// Trivial nodes get columnar alignment; compound nodes get +2 body indent.
+/// A node is "trivial" if it is structurally shallow — at most 2 levels
+/// of nested lists. Trivial nodes stay on the same line in cond/match
+/// pairs and get columnar alignment in if/when; deeply nested nodes break.
+///
+/// Depth budget: each compound node (list, collection) costs 1 level.
+/// Atoms are free. Budget of 3 allows e.g. `(if (nil? x) a b)` (2 levels)
+/// but rejects `(each x in xs (unless (nil? x) (push ...)))` (3+ levels).
 fn is_trivial(node: &AnnotatedSyntax) -> bool {
+    is_trivial_depth(node, 3)
+}
+
+fn is_trivial_depth(node: &AnnotatedSyntax, budget: usize) -> bool {
+    if budget == 0 {
+        return false;
+    }
     match &node.syntax.kind {
-        // Atoms are always trivial
+        // Atoms are always trivial (no depth cost)
         SyntaxKind::Nil
         | SyntaxKind::Bool(_)
         | SyntaxKind::Int(_)
@@ -57,18 +63,13 @@ fn is_trivial(node: &AnnotatedSyntax) -> bool {
         | SyntaxKind::Keyword(_)
         | SyntaxKind::String(_) => true,
 
-        // A list is trivial if its head is NOT a body form
-        // and all children are trivial
-        SyntaxKind::List(_) => {
-            if let Some(sym) = node.children.first().and_then(|c| c.syntax.as_symbol()) {
-                if BODY_FORMS.contains(&sym) {
-                    return false;
-                }
-            }
-            node.children.iter().all(is_trivial)
-        }
+        // A list costs 1 depth level
+        SyntaxKind::List(_) => node
+            .children
+            .iter()
+            .all(|c| is_trivial_depth(c, budget - 1)),
 
-        // Collections are trivial if all elements are trivial
+        // Collections cost 1 depth level
         SyntaxKind::Array(_)
         | SyntaxKind::ArrayMut(_)
         | SyntaxKind::Struct(_)
@@ -76,14 +77,20 @@ fn is_trivial(node: &AnnotatedSyntax) -> bool {
         | SyntaxKind::Set(_)
         | SyntaxKind::SetMut(_)
         | SyntaxKind::Bytes(_)
-        | SyntaxKind::BytesMut(_) => node.children.iter().all(is_trivial),
+        | SyntaxKind::BytesMut(_) => node
+            .children
+            .iter()
+            .all(|c| is_trivial_depth(c, budget - 1)),
 
-        // Reader macros: trivial if inner is trivial
+        // Reader macros cost 1 depth level
         SyntaxKind::Quote(_)
         | SyntaxKind::Quasiquote(_)
         | SyntaxKind::Unquote(_)
         | SyntaxKind::UnquoteSplicing(_)
-        | SyntaxKind::Splice(_) => node.children.first().is_none_or(is_trivial),
+        | SyntaxKind::Splice(_) => node
+            .children
+            .first()
+            .is_none_or(|c| is_trivial_depth(c, budget - 1)),
 
         SyntaxKind::SyntaxLiteral(_) => true,
     }
@@ -158,7 +165,10 @@ fn format_defn(children: &[AnnotatedSyntax], source: &str, config: &FormatterCon
 
     let head = format_annotated(&children[0], source, config);
     let name = format_annotated(&children[1], source, config);
-    let params = format_annotated(&children[2], source, config);
+    // Format params without trailing trivia so comments/blank-lines between
+    // params and body don't poison the header group's measure_flat.
+    let params = format_without_trailing(&children[2], source, config);
+    let params_trivia = format_trailing_trivia(&children[2]);
 
     // Header: (defn name [params])
     let header = Doc::concat([head, Doc::Break, name, Doc::Break, params]);
@@ -185,7 +195,7 @@ fn format_defn(children: &[AnnotatedSyntax], source: &str, config: &FormatterCon
 
     Doc::concat([
         Doc::text("("),
-        Doc::concat([header.group(), Doc::HardBreak, body]).nest(1),
+        Doc::concat([header.group(), params_trivia, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
     ])
 }
@@ -214,7 +224,10 @@ pub(super) fn format_fn(
     }
 
     let head = format_annotated(&children[0], source, config);
-    let params = format_annotated(&children[params_idx], source, config);
+    // Format params without trailing trivia so comments/blank-lines between
+    // params and body don't poison the header group's measure_flat.
+    let params = format_without_trailing(&children[params_idx], source, config);
+    let params_trivia = format_trailing_trivia(&children[params_idx]);
 
     // Header: (fn name? [params])
     let mut header_parts = vec![head];
@@ -238,6 +251,7 @@ pub(super) fn format_fn(
         Doc::align(Doc::concat([
             Doc::text("("),
             header.group(),
+            params_trivia,
             Doc::concat([Doc::Break, body_doc]).nest(1).group(),
             Doc::text(")"),
         ]))
@@ -247,7 +261,7 @@ pub(super) fn format_fn(
         let body = format_body(body_children, source, config);
         Doc::align(Doc::concat([
             Doc::text("("),
-            Doc::concat([header.group(), Doc::HardBreak, body]).nest(1),
+            Doc::concat([header.group(), params_trivia, Doc::HardBreak, body]).nest(1),
             Doc::text(")"),
         ]))
     }
@@ -272,12 +286,7 @@ pub(super) fn format_let(
     }
 
     let head = format_annotated(&children[0], source, config);
-
-    // Column of first binding name relative to the "(": "(let* [" = 1 + 4 + 1 + 1 = 7
-    let head_width = measure_flat(&head).unwrap_or(0);
-    let binding_col = 1 + head_width + 1 + 1; // "(head ["
-
-    let bindings_doc = format_bindings(&children[1], source, config, binding_col);
+    let bindings_doc = format_bindings(&children[1], source, config);
 
     // Header: (let [...])
     let header = Doc::concat([head, Doc::text(" "), bindings_doc]);
@@ -285,34 +294,23 @@ pub(super) fn format_let(
     // Body: +2 indent
     let body = format_body(&children[2..], source, config);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([header, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 /// Format binding vector: one pair per line, always.
 ///
-/// Uses HardBreak between pairs with exact column alignment via
-/// Nest + padding. `binding_col` is the column of the first binding
-/// name relative to the enclosing `(`.
-fn format_bindings(
-    bindings_node: &AnnotatedSyntax,
-    source: &str,
-    config: &FormatterConfig,
-    binding_col: usize,
-) -> Doc {
+/// Uses Align after `[` so that subsequent binding names line up with
+/// the first binding name regardless of nesting depth.
+fn format_bindings(bindings_node: &AnnotatedSyntax, source: &str, config: &FormatterConfig) -> Doc {
     let items = &bindings_node.children;
 
     if items.is_empty() {
         return Doc::text("[]");
     }
-
-    // Nest handles the bulk of alignment; padding covers the remainder
-    // (e.g. let* needs 7 spaces = nest(3)*2 + 1 pad)
-    let binding_nest = binding_col / config.indent_width;
-    let padding = binding_col % config.indent_width;
 
     let mut pair_parts = Vec::new();
     let mut i = 0;
@@ -320,9 +318,6 @@ fn format_bindings(
     while i < items.len() {
         if !first {
             pair_parts.push(Doc::HardBreak);
-            if padding > 0 {
-                pair_parts.push(Doc::text(" ".repeat(padding)));
-            }
         }
         first = false;
 
@@ -340,7 +335,7 @@ fn format_bindings(
 
     Doc::concat([
         Doc::text("["),
-        Doc::concat(pair_parts).nest(binding_nest),
+        Doc::align(Doc::concat(pair_parts)),
         Doc::text("]"),
     ])
 }
@@ -372,11 +367,11 @@ pub(super) fn format_if(
         // (if test then) — same as when
         if trivial {
             let header = Doc::concat([head, Doc::text(" "), test]);
-            Doc::concat([
+            Doc::align(Doc::concat([
                 Doc::text("("),
                 Doc::concat([header, Doc::Break, then]).nest(1).group(),
                 Doc::text(")"),
-            ])
+            ]))
         } else {
             Doc::align(Doc::concat([
                 Doc::text("("),
@@ -393,13 +388,13 @@ pub(super) fn format_if(
         if trivial {
             // Trivial branches: test stays with head, branches break to +2
             let header = Doc::concat([head, Doc::text(" "), test]);
-            Doc::concat([
+            Doc::align(Doc::concat([
                 Doc::text("("),
                 Doc::concat([header, Doc::Break, then, Doc::Break, else_])
                     .nest(1)
                     .group(),
                 Doc::text(")"),
-            ])
+            ]))
         } else {
             // Compound branches: always break, +2 indent relative to (if.
             // head+test inside Nest so CommentBreak absorption uses correct indent.
@@ -440,11 +435,11 @@ pub(super) fn format_cond(
     let pairs = format_flat_pairs(&children[1..], source, config);
     let clauses = Doc::join_hardbreak(pairs);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([head, Doc::HardBreak, clauses]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 // ── match ──────────────────────────────────────────────────────
@@ -464,11 +459,11 @@ pub(super) fn format_match(
     let pairs = format_flat_pairs(&children[2..], source, config);
     let clauses = Doc::join_hardbreak(pairs);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([head, Doc::text(" "), expr, Doc::HardBreak, clauses]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 // ── while ──────────────────────────────────────────────────────
@@ -487,28 +482,25 @@ pub(super) fn format_while(
     let test = format_annotated(&children[1], source, config);
     let body_children = &children[2..];
 
+    let body = format_body(body_children, source, config);
+
     if body_children.len() == 1 {
-        // Single body: try inline
-        let body = format_annotated(&body_children[0], source, config);
-        let cp = Doc::text(")");
-        Doc::concat([
+        // Single body: try inline, break before body if needed.
+        // Test always stays with head.
+        let header = Doc::concat([head, Doc::text(" "), test]);
+        Doc::align(Doc::concat([
             Doc::text("("),
-            Doc::intersperse([head, test, body]).nest(1).group(),
-            cp,
-        ])
-    } else {
-        // Multiple body expressions: always break
-        let body = format_body(body_children, source, config);
-        Doc::concat([
-            Doc::text("("),
-            Doc::concat([
-                Doc::concat([head, Doc::Break, test]).group(),
-                Doc::HardBreak,
-                body,
-            ])
-            .nest(1),
+            Doc::concat([header, Doc::Break, body]).nest(1).group(),
             Doc::text(")"),
-        ])
+        ]))
+    } else {
+        // Multiple body expressions: always break.
+        // Test always stays with head.
+        Doc::align(Doc::concat([
+            Doc::text("("),
+            Doc::concat([head, Doc::text(" "), test, Doc::HardBreak, body]).nest(1),
+            Doc::text(")"),
+        ]))
     }
 }
 
@@ -538,11 +530,11 @@ pub(super) fn format_begin(
     let head = format_annotated(&children[0], source, config);
     let body = format_body(&children[1..], source, config);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([head, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 // ── forever ────────────────────────────────────────────────────
@@ -562,18 +554,18 @@ pub(super) fn format_forever(
 
     if body_children.len() == 1 {
         let body = format_annotated(&body_children[0], source, config);
-        Doc::concat([
+        Doc::align(Doc::concat([
             Doc::text("("),
             Doc::concat([head, Doc::Break, body]).nest(1).group(),
             Doc::text(")"),
-        ])
+        ]))
     } else {
         let body = format_body(body_children, source, config);
-        Doc::concat([
+        Doc::align(Doc::concat([
             Doc::text("("),
             Doc::concat([head, Doc::HardBreak, body]).nest(1),
             Doc::text(")"),
-        ])
+        ]))
     }
 }
 
@@ -593,11 +585,11 @@ pub(super) fn format_block(
     let name = format_annotated(&children[1], source, config);
     let body = format_body(&children[2..], source, config);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([head, Doc::text(" "), name, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 // ── parameterize ──────────────────────────────────────────────
@@ -636,11 +628,11 @@ pub(super) fn format_parameterize(
 
     let body = format_body(&children[2..], source, config);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([head, Doc::text(" "), bindings, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 // ── Threading macros ─────────────────────────────────────────
@@ -699,19 +691,19 @@ pub(super) fn format_when(
     let trivial = body_children.len() == 1 && is_trivial(&body_children[0]);
 
     if trivial {
-        Doc::concat([
+        Doc::align(Doc::concat([
             Doc::text("("),
             Doc::concat([head, Doc::text(" "), test, Doc::Break, body])
                 .nest(1)
                 .group(),
             Doc::text(")"),
-        ])
+        ]))
     } else {
-        Doc::concat([
+        Doc::align(Doc::concat([
             Doc::text("("),
             Doc::concat([head, Doc::text(" "), test, Doc::HardBreak, body]).nest(1),
             Doc::text(")"),
-        ])
+        ]))
     }
 }
 
@@ -758,11 +750,11 @@ pub(super) fn format_each(
         Doc::concat([head, Doc::text(" "), item, Doc::text(" "), coll])
     };
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([header, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 // ── case ───────────────────────────────────────────────────────
@@ -782,7 +774,7 @@ pub(super) fn format_case(
     let pairs = format_flat_pairs(&children[2..], source, config);
     let clauses = Doc::join_hardbreak(pairs);
 
-    Doc::concat([
+    Doc::align(Doc::concat([
         Doc::text("("),
         Doc::concat([
             Doc::concat([head, Doc::Break, expr]).group(),
@@ -791,7 +783,7 @@ pub(super) fn format_case(
         ])
         .nest(1),
         Doc::text(")"),
-    ])
+    ]))
 }
 
 /// Format flat alternating test/body pairs.
@@ -846,19 +838,19 @@ pub(super) fn format_try(
     if body_children.len() == 1 {
         // Single body: try inline
         let body = format_annotated(&body_children[0], source, config);
-        Doc::concat([
+        Doc::align(Doc::concat([
             Doc::text("("),
             Doc::intersperse([head, body]).nest(1).group(),
             Doc::text(")"),
-        ])
+        ]))
     } else {
         // Multiple sub-forms (e.g. body + catch/finally): break
         let body = format_body(body_children, source, config);
-        Doc::concat([
+        Doc::align(Doc::concat([
             Doc::text("("),
             Doc::concat([head, Doc::HardBreak, body]).nest(1),
             Doc::text(")"),
-        ])
+        ]))
     }
 }
 
@@ -891,13 +883,14 @@ pub(super) fn format_assign(
 /// Generic function call: try inline; break with args aligned to first arg.
 ///
 /// Head and first arg stay on the same line. When breaking, subsequent
-/// args align to the first arg's column (approximated via Nest levels).
+/// args align to the first arg's column. Keyword-value pairs (`:key val`)
+/// are kept together as units so they break as one.
 ///
 /// ```lisp
 /// (f a b c)          # fits on one line
 /// (f a               # doesn't fit — first arg stays with head
-///   b                #   remaining args align to first arg
-///   c)
+///    b               #   remaining args align to first arg
+///    c)
 /// ```
 pub(super) fn format_generic_call(
     children: &[AnnotatedSyntax],
@@ -908,24 +901,19 @@ pub(super) fn format_generic_call(
         return Doc::text("()");
     }
 
-    let elems: Vec<Doc> = children
-        .iter()
-        .map(|c| format_annotated(c, source, config))
-        .collect();
-
-    if elems.len() == 1 {
+    if children.len() == 1 {
         // Head only
         return Doc::concat([
             Doc::text("("),
-            elems.into_iter().next().unwrap(),
+            format_annotated(&children[0], source, config),
             Doc::text(")"),
         ]);
     }
 
-    if elems.len() == 2 {
+    if children.len() == 2 {
         // Head + one arg: Align so arg indents to first-arg column
-        let head = elems[0].clone();
-        let arg = elems[1].clone();
+        let head = format_annotated(&children[0], source, config);
+        let arg = format_annotated(&children[1], source, config);
         return Doc::concat([
             Doc::text("("),
             head,
@@ -935,9 +923,11 @@ pub(super) fn format_generic_call(
         ]);
     }
 
-    // Head + first arg stay together; remaining args align to first arg column
-    let head = elems[0].clone();
-    let rest_args: Vec<Doc> = elems[2..].to_vec();
+    let head = format_annotated(&children[0], source, config);
+
+    // Build arg units: keyword-value pairs are joined with a space,
+    // positional args stand alone.
+    let arg_units = build_arg_units(&children[1..], source, config);
 
     // First arg column relative to the "(": 1 + head_width + 1
     let head_width = measure_flat(&head).unwrap_or(0);
@@ -947,21 +937,18 @@ pub(super) fn format_generic_call(
     if first_arg_col <= config.line_length / 4 {
         // Columnar: Align captures the first arg's column; Break inside
         // aligns subsequent args to that column.
-        let all_args: Vec<Doc> = elems[1..].to_vec();
         Doc::concat([
             Doc::text("("),
             head,
             Doc::text(" "),
-            Doc::align(Doc::intersperse(all_args)).group(),
+            Doc::align(Doc::intersperse(arg_units)).group(),
             Doc::text(")"),
         ])
     } else {
         // Fallback: +2 indent for long heads
-        let first_arg = elems[1].clone();
-        let header = Doc::concat([head, Doc::text(" "), first_arg]);
         let mut all_parts: Vec<Doc> = Vec::new();
-        all_parts.push(header);
-        for arg in &rest_args {
+        all_parts.push(Doc::concat([head, Doc::text(" "), arg_units[0].clone()]));
+        for arg in &arg_units[1..] {
             all_parts.push(Doc::Break);
             all_parts.push(arg.clone());
         }
@@ -972,4 +959,28 @@ pub(super) fn format_generic_call(
             Doc::text(")"),
         ])
     }
+}
+
+/// Build argument units for generic calls, grouping `:keyword value` pairs.
+///
+/// A keyword followed by a non-keyword argument forms a single doc unit
+/// joined by a space. Consecutive keywords or trailing keywords stand alone.
+fn build_arg_units(args: &[AnnotatedSyntax], source: &str, config: &FormatterConfig) -> Vec<Doc> {
+    let mut units = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let doc = format_annotated(&args[i], source, config);
+        if matches!(args[i].syntax.kind, SyntaxKind::Keyword(_)) {
+            // Keyword — pair with next arg if it's not also a keyword
+            if i + 1 < args.len() && !matches!(args[i + 1].syntax.kind, SyntaxKind::Keyword(_)) {
+                let val = format_annotated(&args[i + 1], source, config);
+                units.push(Doc::concat([doc, Doc::text(" "), val]));
+                i += 2;
+                continue;
+            }
+        }
+        units.push(doc);
+        i += 1;
+    }
+    units
 }
