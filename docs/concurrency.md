@@ -69,7 +69,7 @@ others are aborted.
 # (ev/abort fiber)            — graceful cancel (defer blocks run)
 # (ev/select fibers)          — wait for first: [done remaining]
 # (ev/race fibers)            — first wins, abort rest, return value
-# (ev/timeout secs thunk)     — deadline: value or {:error :timeout}
+# (ev/timeout secs thunk)     — deadline: value or nil on timeout
 # (ev/scope (fn [spawn] ...)) — nursery: children can't outlive scope
 # (ev/map f items)            — parallel map, results in order
 # (ev/map-limited f items n)  — bounded parallel map
