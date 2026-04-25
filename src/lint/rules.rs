@@ -146,8 +146,8 @@ pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
         "array-ref" => Some(2),
         "array-set!" => Some(3),
         // Variadic or special forms - return None
-        "list" | "array" | "var" | "def" | "quote" | "begin" | "let" | "let*" | "fn" | "match"
-        | "if" | "while" | "forever" | "each" => None,
+        "list" | "array" | "var" | "def" | "quote" | "begin" | "do" | "let" | "let*" | "fn"
+        | "match" | "if" | "while" | "forever" | "each" => None,
         _ => None,
     }
 }

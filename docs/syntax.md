@@ -38,6 +38,7 @@ Both convert to the same string:
 `()` is the empty list — it is truthy. `nil` is the absence of a value
 and is falsy. Lists terminate with `()`, not `nil`. Use `empty?` to
 test for end-of-list; `nil?` will not work.
+See [empty-list.md](empty-list.md) for the full rationale.
 
 ```lisp
 (empty? (list))              # => true

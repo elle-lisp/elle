@@ -30,7 +30,9 @@ user:role                  # => :admin
 
 ## Immutable updates
 
-Operations on immutable structs return new structs.
+Operations on immutable structs return new structs. The original is unchanged.
+Both `put` and `del` return the resulting struct (new for immutable, same
+reference for mutable).
 
 ```lisp
 (def user {:name "Alice" :age 30})
@@ -47,7 +49,18 @@ Operations on immutable structs return new structs.
 ```lisp
 (keys {:a 1 :b 2})         # => (:a :b)   (sorted order)
 (values {:a 1 :b 2})       # => (1 2)     (matching key order)
+(pairs {:a 1 :b 2})        # => ([a 1] [b 2])  (list of [key value] arrays)
 (from-pairs [[:a 1] [:b 2]])  # => {:a 1 :b 2}
+```
+
+`pairs` returns a list of `[key value]` arrays in sorted key order.
+Combined with `from-pairs`, structs can be round-tripped through list
+operations:
+
+```lisp
+(def s {:x 1 :y 2 :z 3})
+(from-pairs (filter (fn [p] (> (at p 1) 1)) (pairs s)))
+# => {:y 2 :z 3}
 ```
 
 ## Nested access and update
@@ -62,14 +75,15 @@ Operations on immutable structs return new structs.
 
 ## Mutable @structs
 
-`put` and `del` on `@struct` mutate in place.
+`put` and `del` on `@struct` mutate in place and return the same struct.
 
 ```lisp
 (def tbl @{:count 0})
-(put tbl :count 1)         # mutates tbl
-(put tbl :name "Bob")      # adds key
+(put tbl :count 1)         # mutates tbl, returns tbl
+(put tbl :name "Bob")      # adds key, returns tbl
 tbl:count                  # => 1
 tbl:name                   # => "Bob"
+(del tbl :name)            # removes key, returns tbl
 ```
 
 ## Destructuring

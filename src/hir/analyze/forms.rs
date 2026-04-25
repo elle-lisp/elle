@@ -234,7 +234,7 @@ impl<'a> Analyzer<'a> {
 
             // Splice outside of call/constructor position is an error
             SyntaxKind::Splice(_) => Err(format!(
-                "{}: splice can only be used in function call arguments and data constructors",
+                "{}: `;` is the splice operator, not a comment character. Use `#` for comments.",
                 span
             )),
 
@@ -317,7 +317,7 @@ impl<'a> Analyzer<'a> {
                         "let" => return self.analyze_let(items, span),
                         "letrec" => return self.analyze_letrec(items, span),
                         "fn" => return self.analyze_lambda(items, span),
-                        "begin" => return self.analyze_begin(&items[1..], span),
+                        "begin" | "do" => return self.analyze_begin(&items[1..], span),
                         "block" => return self.analyze_block(&items[1..], span),
                         "break" => return self.analyze_break(&items[1..], span),
                         "var" => return self.analyze_define(items, span),
@@ -413,7 +413,7 @@ impl<'a> Analyzer<'a> {
                         }
                         "splice" => {
                             return Err(format!(
-                                "{}: splice can only be used in function call arguments and data constructors",
+                                "{}: `;` is the splice operator, not a comment character. Use `#` for comments.",
                                 span
                             ));
                         }

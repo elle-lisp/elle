@@ -8,6 +8,7 @@ Read these first — they cause the most bugs.
 
 - **`nil` ≠ `()`** — `nil` is falsy; `()` is the empty list and is
   truthy. Use `empty?` to check end-of-list, not `nil?`.
+  See [docs/empty-list.md](docs/empty-list.md) for why.
 - **`#` is comment, `;` is splice** — `;[1 2 3]` spreads into the
   surrounding form.
 - **`assign` mutates; `set` creates a set** — `(assign x 10)` changes
