@@ -79,6 +79,9 @@ The bytecode VM is the primary backend. Key milestones include the
 trampoline-based TCO, fiber-based execution model, and the transition
 from scope-stack to direct-global access.
 
+- #775: Widen jump offsets from i16 to i32; fix silent truncation in large functions
+- #773: Fix call_stack leak in JIT dispatch path (900 MB RSS reduction on nqueens)
+- #771: REPL forward references and mutual recursion via deferred compilation
 - #707: REPL rework with form-by-form evaluation and def persistence
 - #593: Fiber fuel system for cooperative preemption via instruction budget
 - #490: Kill ScopeStack; direct global access
@@ -96,6 +99,7 @@ multi-function compilation, yield side-exit, polymorphic dispatch, and
 cross-thread LIR transfer. Current state: all instruction types supported,
 adaptive tiering, direct self-calls and intra-group calls.
 
+- #773: Fix call_stack leak — JIT path never popped CallFrame (900 MB RSS fix)
 - #753: Off-thread JIT compilation via background worker thread; eliminates event-loop stalls
 - #750: Gate Cranelift behind `jit` feature flag (default on) for Android builds
 - #737: JIT tail-call trampoline; squelch enforcement in compile/run-on
@@ -148,6 +152,7 @@ MLIR backend lowers LIR to arith/func/cf dialects and JIT-compiles via
 ExecutionEngine. Vulkan compute dispatches async via io_uring fence fds.
 SPIR-V is generated at runtime from Elle code (no GLSL).
 
+- #784: Fix MLIR capture lowering: separate env_vals from regs map to prevent register collision
 - #737: MLIR/SPIR-V float support, differential testing harness (`compile/run-on` across 4 tiers), `LirInstr::Convert`, `ValueConst`
 - #727: Vulkan compute (async dispatch, buffer pooling), SPIR-V emitter (runtime bytecode gen), MLIR backend (melior 0.27), GPU eligibility analysis, SignalBits widened to u64
 
@@ -160,6 +165,8 @@ They evolved from a Pure/Yields enum through interprocedural inference to
 a full compile-time tracking and runtime enforcement system with
 capabilities, squelch (blacklist), and emit as a special form.
 
+- #761: User-defined signal space widened to bits 32-63 (32 slots, up from 16)
+- #759: Sound signal inference for unknown callees; attune (whitelist dual of squelch); SIG_GPU; CAP_MASK structural redefine
 - #749: Signal projection (cross-file keyword→signal mapping) and compile-time squelch narrowing
 - #723: Capability enforcement (fiber/new :deny), emit special form replaces yield IR, defmacro &opt
 - #704: Encapsulate SignalBits (private inner field, named methods) for u32-to-u64 migration
@@ -184,6 +191,11 @@ scheduler. Structured concurrency (ev/scope, ev/join, ev/select, ev/race),
 fibers with signal masks, process scheduler with fuel-based preemption,
 channels, and sendable closures for cross-thread transfer.
 
+- #783: Embedding step-based scheduler (ev/step), cdylib C-ABI, Rust + C host demos
+- #781: Fix h2 stream leak; add gRPC server-streaming
+- #769: Fix h2 writer shutdown race; list_to_array plugin ABI for gRPC
+- #763: WebSocket (RFC 6455) and gRPC over HTTP/2, pure Elle
+- #761: Full HTTP/2 client and server (RFC 9113 + HPACK), pure Elle
 - #741: Fix plugin dispatch in JIT/WASM backends for MCP server
 - #710: Fix stdin reads starved when ev/spawn fiber is active
 - #709: Cycle detection for mutable containers; SyncBackend removal (1980 lines deleted)
@@ -216,6 +228,8 @@ Core language features: destructuring, match, parameters, macros, epochs,
 binding forms. The language settled on `def`/`var`/`defn`/`fn` with bracket
 syntax for bindings, `true`/`false` literals, and `#` for comments.
 
+- #785: Epoch 9: flat cond/match; immutable push on arrays/strings/bytes
+- #767: Make let sequential (Clojure-style); each binding sees previous ones
 - #737: Epoch 8: immutable-by-default bindings with `@` prefix for opt-in mutability; `integer`/`float` coercion split from `parse-int`/`parse-float`
 - #742: Epoch 7: flat let bindings (Clojure-style `[a 1 b 2]` replaces `[[a 1] [b 2]]`)
 - #648: Epoch-based migration system for breaking language changes
@@ -284,6 +298,8 @@ Each consumes `LirModule`. The WASM backend compiles per-closure with
 disk caching. The MLIR backend branches to LLVM JIT (CPU) or SPIR-V
 (GPU).
 
+- #775: Widen jump offsets from i16 to i32 to fix silent truncation in large functions
+- #768: Call-scoped arena reclamation via fixpoint return-safe analysis (nqueens RSS: 1 GB → 172 MB)
 - #755: Fix def-shadow: deferred binding registration order in fileletrec; reject duplicate letrec names
 - #749: Signal projection caching for cross-file module imports; compile-time squelch narrowing
 - #732: Python surface syntax reader (indentation-aware, Pratt parser)
@@ -341,6 +357,8 @@ Pure Elle libraries for HTTP, DNS, Redis, IRC, TLS, process management,
 telemetry, contracts, synchronization, AWS, and more. Libraries use the
 closure-as-module pattern and are imported via `(import "std/<name>")`.
 
+- #766: Raylib FFI module (1029 lines: window, drawing, input, audio, collision)
+- #762: GTK4 overhaul: 35-test suite, Cairo module, stdlib polish (color, dns, cli)
 - #745: Fix TLS read silently dropping final plaintext segment on TCP close
 - #735: HTTP: chunked transfer, HTTPS/TLS, query params, redirects, compression, SSE
 - #724: IRC module with IRCv3, CAP negotiation, SASL, auto-PONG
@@ -370,6 +388,8 @@ are NaN-boxed (later tagged-union) with ref-counted prevent
 use-after-free. `ffi/native nil` loads the current process for libc
 access on all Unix platforms.
 
+- #772: Import recognizes .dylib/.dll; falls back to plugin loading on UTF-8 failure
+- #765: Fix FFI struct/array marshalling to accept immutable arrays
 - #757: Gate libffi behind `ffi` feature flag (default on) for minimal builds
 - #756: Link libgcc on Android for `__clear_cache` resolution
 - #343: Rebuild FFI on libffi: type descriptors, marshaller, callbacks, ffi/defbind
@@ -388,6 +408,8 @@ independently. 24 Rust plugins peaked, then 9 were replaced with pure
 Elle modules using FFI. Plugins now live in a separate repo
 (`elle-lisp/plugins`) as a git submodule.
 
+- #770: Adopt plugin/ prefix convention for all plugin imports
+- #769: list_to_array plugin ABI for list-to-array coercion at boundary
 - #378: Plugin system: dlopen + elle_plugin_init; HeapObject::External; regex plugin
 - #383: Plugin init returns Value; mermaid, sqlite, crypto, random plugins
 - #396: Selkie SVG rendering plugin
@@ -434,6 +456,8 @@ CLI uses subcommands (lint, lsp, rewrite) with all configuration via flags
 parsed into a global Config struct. No more ELLE_* environment variables.
 The binary includes lint and LSP server.
 
+- #790: Formatter: Align model, depth-limited trivial, --no-epoch, --plm for editor integration
+- #787: Formatter: cleanup, cross-Nest fix, epoch rewrite integration, flat cond/match
 - #752: Android compilation support (inotify cfg gates, NDK cross-check CI)
 - #750: Gate Cranelift behind `jit` feature flag; `--no-default-features` builds
 - #757: Gate libffi behind `ffi` feature flag; `smoke-noffi` Makefile target

@@ -96,6 +96,283 @@ end-devlog-instructions -->
 Per-PR entries capturing significant development work, generated from
 git history by reading actual diffs. Most recent first.
 
+## [#790](https://github.com/elle-lisp/elle/pull/790) — Formatter alignment overhaul, editor integration flags
+[`28be82bc`](https://github.com/elle-lisp/elle/commit/28be82bc) · 2026-04-25 · `formatter` `ux`
+
+**Alignment model.** All breaking forms (cond, match, case, begin, while, each, when/unless, try/protect, forever, block, parameterize, let) now use Align so nested forms indent relative to their column rather than the ambient nest depth. Align is capped at half the line width to prevent cascading rightward drift in deeply nested code. Let* binding alignment replaces the old Nest+arithmetic approach with Align after `[`.
+
+**Trivial detection.** `is_trivial` now uses a depth-limited budget of 3, so shallow body forms like `(if v "true" "false")` stay inline in cond pairs while deeply nested forms break properly. Fn/defn header splits were broken because trailing trivia on params poisoned `measure_flat` inside the header group; the fix splits formatting into `format_without_trailing` + `format_trailing_trivia`.
+
+**Editor integration.** Two new flags: `--no-epoch` skips epoch injection so editor fragment formatting works without modifying the epoch tag, and `--plm`/`--preserve-left-margin` auto-detects and re-applies leading indent for formatting code embedded in larger contexts. All output lines now have trailing whitespace stripped. Generic calls group `:keyword value` pairs so they break as a unit.
+
+---
+
+## [#789](https://github.com/elle-lisp/elle/pull/789) — Smooth out three runtime rough edges
+[`1a6a74ec`](https://github.com/elle-lisp/elle/commit/1a6a74ec) · 2026-04-24 · `runtime` `bugfix`
+
+Three small fixes: empty lists now serialize as `[]` in JSON (previously fell through to the cons-cell path and failed), `subprocess/kill` returns success instead of erroring when the target process has already exited (ESRCH), and `ev/timeout` returns `nil` on timeout instead of raising an error struct. The timeout change simplifies callers -- they can use a simple nil check instead of wrapping in `protect`.
+
+---
+
+## [#788](https://github.com/elle-lisp/elle/pull/788) — Pin submodules, remove transient examples
+[`8091aae0`](https://github.com/elle-lisp/elle/commit/8091aae0) · 2026-04-24 · `housekeeping`
+
+Advance mcp and plugins submodule pins. Remove `examples/flatcond.lisp` and `examples/push.lisp` -- these were added in #785 as demonstrations of the new epoch 9 syntax and immutable push, but the tests already cover both features.
+
+---
+
+## [#787](https://github.com/elle-lisp/elle/pull/787) — Formatter: cleanup, cross-Nest fix, epoch rewrite, flat cond/match
+[`3f3a23ce`](https://github.com/elle-lisp/elle/commit/3f3a23ce) · 2026-04-24 · `formatter` `epoch`
+
+**Dead code removal.** Three Doc variants (SoftBreak, ColumnIndent, BreakTo) and six unused constructors were removed. `measure_flat` was deduplicated into a single `pub(super)` definition. Trivial delegations like `format_and_or` and `format_emit` were inlined -- dispatch calls `format_generic_call` directly. `format_defmacro` now delegates to `format_defn`.
+
+**Cross-Nest CommentBreak fix.** In defn, fn, let, while, block, parameterize, case, and try, boundary elements were outside the Nest node, so CommentBreak and HardBreak did not share indent context with the body. Moving them inside Nest fixes indentation after inline comments in these forms.
+
+**Epoch integration.** `elle fmt` now runs epoch rewrite before formatting, implicitly upgrading files to the current epoch. The formatter adapts to epoch 9 flat-pair syntax: `format_clause` is removed and replaced by `format_flat_pairs`, shared by cond, match, and case. The formatter module was also restructured into separate files (comments.rs, doc.rs, format.rs, forms.rs, render.rs, run.rs, trivia.rs) adding ~4200 lines of new code.
+
+---
+
+## [#785](https://github.com/elle-lisp/elle/pull/785) — Epoch 9: flat cond/match; immutable push
+[`a0fbbd6f`](https://github.com/elle-lisp/elle/commit/a0fbbd6f) · 2026-04-24 · `language` `epoch` `primitives`
+
+**Flat cond/match (epoch 9).** `cond` and `match` now use flat pair syntax, matching the pattern `case` already used: `(cond test1 body1 test2 body2 default)` and `(match val pat1 body1 pat2 when guard body2 _ default)`. Multi-expression bodies require explicit `(begin ...)`. The epoch migration system handles the mechanical conversion -- `flatten_clause_rules_in_range` unwraps clause lists, converts `(else body)` to trailing defaults, and wraps multi-body clauses in `begin`. All 329 .lisp files were migrated, along with Rust test strings and documentation.
+
+**Immutable push.** `push` now works on immutable arrays, strings, and bytes by returning a new collection with the element appended, matching the dual-mode pattern already established by `put`. Mutable collections continue to mutate in place. This eliminates a common pain point where building up an immutable collection required workarounds.
+
+---
+
+## [#784](https://github.com/elle-lisp/elle/pull/784) — Fix MLIR capture lowering: register collision
+[`b7a3b81f`](https://github.com/elle-lisp/elle/commit/b7a3b81f) · 2026-04-22 · `mlir` `bugfix`
+
+The MLIR lowerer stored block arguments (captures + params) and LIR destination register values in the same `regs` HashMap. When `LoadCaptureRaw` wrote to a destination register whose index collided with an earlier argument index, the capture value was silently clobbered. In `(fn (y) (+ x y))` where `x` is captured, register 0 would be overwritten before register 1 could read it, producing wrong results.
+
+The fix introduces a separate `env_vals` map for initial argument values that is never written by destination register stores. `LoadCapture` and `LoadCaptureRaw` lookups now use `env_vals` exclusively. This un-skips `lexical-scope.lisp` (a 287-line closure and capture test suite) from the MLIR skip list and removes stale skip entries for `core.lisp` and `concurrency.lisp`. A regression test constructs the exact LIR pattern that triggered the collision.
+
+---
+
+## [#783](https://github.com/elle-lisp/elle/pull/783) — Embedding: step-based scheduler, cdylib, Rust + C host demos
+[`c5540e44`](https://github.com/elle-lisp/elle/commit/c5540e44) · 2026-04-22 · `embedding` `runtime` `ffi`
+
+**Step-based scheduler.** The async scheduler gains a `:step` entry that executes one tick of the event loop and returns `:done` or `:pending`, giving host programs fine-grained control over execution. The existing `:pump` is rewritten in terms of `:step`. A public `ev/step` function exposes this to Elle code. `process-completions` is refactored to accept a `timeout-ms` parameter so step can use a zero-timeout poll while pump continues to block.
+
+**C-ABI embedding surface.** A new cdylib crate at `demos/embedding/` provides an opaque `ElleCtx` with exported C functions: `elle_init`, `elle_eval`, `elle_destroy`, `elle_result_int`, and `elle_register_prim`. The Rust host demo shows custom primitive registration, compile-and-execute, and result extraction. The C host demo (`host.c`) and header (`include/elle.h`) demonstrate the same workflow from plain C. Plugin API types (`PrimResult`, `PluginPrimFn`, `PLUGIN_SENTINEL`, `register_plugin_fn`) are promoted from `pub(crate)` to `pub` to support the embedding crate.
+
+**Tests.** Four Rust integration tests cover custom primitives, scheduled I/O, value round-trips, and step-based execution. Four Elle-side tests exercise `ev/step` directly.
+
+---
+
+## [#782](https://github.com/elle-lisp/elle/pull/782) — egui: fix ev/sleep units (seconds, not milliseconds)
+[`1ba0cf48`](https://github.com/elle-lisp/elle/commit/1ba0cf48) · 2026-04-22 · `egui` `bugfix`
+
+The macOS fallback path in `wait-event` was passing `16` to `ev/sleep`, but `ev/sleep` takes seconds, not milliseconds. This meant a 16-second poll interval instead of 16ms. Changed to `0.016`.
+
+---
+
+## [#781](https://github.com/elle-lisp/elle/pull/781) — h2: fix stream leak; add gRPC server-streaming
+[`813273a3`](https://github.com/elle-lisp/elle/commit/813273a3) · 2026-04-21 · `http2` `grpc` `bugfix`
+
+**Stream leak fix.** Completed streams were never removed from `session:streams` in the HTTP/2 reader loop. Every unary gRPC call leaked its stream object, and the bounded data-queue (capacity 64) could eventually block the reader-loop fiber on `put`, deadlocking the connection. The fix adds `(del session:streams sid)` after delivering end-stream DATA, end-stream HEADERS, or RST_STREAM frames in both client and server reader loops. Consumers hold a direct reference to the stream object, so enqueued messages remain readable.
+
+**Server-streaming RPC.** Adds `grpc:call-stream` which returns a reader closure. Each call to the reader blocks until a complete gRPC length-prefixed frame is available, buffering across h2 DATA boundaries. Returns `nil` at end-of-stream.
+
+**Regression test.** The loopback test now asserts that `session:streams` is empty after a completed response, preventing future leaks.
+
+---
+
+## [#780](https://github.com/elle-lisp/elle/pull/780) — CI: remove another unnecessary rebuild
+[`3f4884a7`](https://github.com/elle-lisp/elle/commit/3f4884a7) · 2026-04-21 · `ci` `makefile`
+
+Removes the `elle` prerequisite from `smoke-diff` (it was already built earlier in the pipeline), drops the standalone `test-git` target, and reorders `smoke` to run `smoke-vm` and `smoke-jit` before `doctest` so the fast tests fail first.
+
+---
+
+## [#779](https://github.com/elle-lisp/elle/pull/779) — CI: more WASM tuning, doctest separation
+[`5ccdf9db`](https://github.com/elle-lisp/elle/commit/5ccdf9db) · 2026-04-21 · `ci` `makefile`
+
+Splits `make doctest` into its own CI step on both Linux and macOS, running it before `make smoke` to avoid a full rebuild. The `doctest` Makefile target drops its `elle` prerequisite since the binary is now built in a prior step. Also fixes README typos: "LBox" to "Box" and removes a stray "bytes" from the `(length "cafe")` example.
+
+---
+
+## [#778](https://github.com/elle-lisp/elle/pull/778) — CI: cross-platform completeness overhaul
+[`7d6a68cf`](https://github.com/elle-lisp/elle/commit/7d6a68cf) · 2026-04-21 · `ci` `makefile`
+
+**CI workflow restructuring.** Breaks the monolithic `make smoke` step into individual `make smoke-vm`, `smoke-jit`, `smoke-diff` steps so failures pinpoint the exact tier. Adds a dedicated WASM job (previously bundled into `smoke`) and wires it into the `all-checks` gate. AArch64 and macOS jobs now also run Rust integration and property tests, not just Elle smoke tests. Property test case count bumped from 8 to 16 for the main Rust test job.
+
+**Makefile overhaul.** Introduces explicit build targets (`elle-wasm`, `elle-mlir`, `elle-noffi`) so CI can build once and run multiple test passes without rebuilding. JIT flags switch from numeric (`--jit=0`, `--jit=1`) to named (`--jit=off`, `--jit=eager`). Adds `smoke-mlir` target with its own skip list for tests that fail under MLIR concurrency. The `smoke` target now covers only VM + JIT + doctest + diff (not WASM/MLIR), since those have dedicated CI jobs.
+
+---
+
+## [#777](https://github.com/elle-lisp/elle/pull/777) — egui: fix resize widget loss; support macOS
+[`75e9bcb1`](https://github.com/elle-lisp/elle/commit/75e9bcb1) · 2026-04-21 · `egui` `macos` `bugfix`
+
+On window resize, the GL framebuffer stayed at its original dimensions and widgets rendered outside the visible area simply vanished. The fix resizes the GL surface each frame to match current window dimensions. Additionally, macOS (AppKit) has no pollable display file descriptor, so `wait-event` now checks whether `plugin:display-fd` returns `nil` and falls back to `ev/sleep`-based polling at ~60fps instead of crashing on a nil fd.
+
+---
+
+## [#775](https://github.com/elle-lisp/elle/pull/775) — Widen jump offsets from i16 to i32 to fix silent truncation in large functions
+[`cc4d5a4b`](https://github.com/elle-lisp/elle/commit/cc4d5a4b) · 2026-04-21 · `compiler` `vm` `bytecode`
+
+The bytecode emitter cast jump offsets with `as i16`, silently truncating any offset exceeding 32KB. Large compiled functions -- for example, `each` over a ~100-line body with nested match arms -- could produce exit jumps that wrapped to negative offsets, landing on invalid bytecode. The symptoms were baffling: spurious upvalue panics, stack corruption, crashes that only appeared at scale.
+
+**Bytecode encoding** changes from 2-byte to 4-byte big-endian for all three jump instructions (`Jump`, `JumpIfFalse`, `JumpIfTrue`). The emitter now writes `emit_i32` placeholders and `patch_jump` stores a full `i32`. The VM's `read_i32` consumes 4 bytes, and the fuel-check peek in the dispatch loop reads `i32::from_be_bytes` over 4 bytes. The disassembler was updated in lockstep to decode the wider offsets.
+
+---
+
+## [#774](https://github.com/elle-lisp/elle/pull/774) — Fix 9 documentation errors in README
+[`a931f4ac`](https://github.com/elle-lisp/elle/commit/a931f4ac) · 2026-04-21 · `docs`
+
+Corrects nine factual errors in the README: signal inference examples used wrong labels (Silent where it should be Yields, etc.), the swap macro example used `let` (immutable) instead of `def @` (mutable) so the `assign` could never work, struct key ordering was claimed as "sorted" rather than "deterministic," nonexistent functions `string->bytes` / `string->@bytes` were replaced with `bytes` / `thaw`, `empty?` on `nil` was shown returning false when it actually throws, `ev/scope` used invalid nested `let` syntax, and the lint examples were aspirational rather than real.
+
+---
+
+## [#773](https://github.com/elle-lisp/elle/pull/773) — Fix call_stack leak in JIT dispatch path
+[`90fd05af`](https://github.com/elle-lisp/elle/commit/90fd05af) · 2026-04-21 · `vm` `jit` `memory`
+
+A one-line fix for a catastrophic memory leak. The interpreter's `handle_call` pushes a `CallFrame` onto `call_stack` for stack traces. The WASM and MLIR dispatch paths both pop it on return, but the JIT path only decremented `call_depth` -- it never popped the frame. Every JIT-dispatched closure call leaked one ~64-byte `CallFrame`. On nqueens N=12 with ~14M JIT calls, this accumulated ~900 MB of leaked frames, explaining why JIT RSS was 1 GB versus 172 MB for the interpreter. Adding `call_stack.pop()` drops JIT RSS from 1055 MB to 176 MB.
+
+---
+
+## [#772](https://github.com/elle-lisp/elle/pull/772) — Import: recognize .dylib/.dll and fall back to plugin loading on UTF-8 failure
+[`4a1f5ab7`](https://github.com/elle-lisp/elle/commit/4a1f5ab7) · 2026-04-21 · `import` `plugins` `portability`
+
+Plugin resolution previously hardcoded `.so` as the shared library extension and only attempted plugin loading for files whose path literally ended in `.so`. This broke on macOS (`.dylib`) and Windows (`.dll`), and also meant that a native library with an unrecognized extension would fail with a confusing UTF-8 error when the importer tried to read it as Elle source.
+
+**Extension recognition** now checks `.so`, `.dylib`, and `.dll` via `is_native_library()`. **Probe paths** use `std::env::consts::DLL_EXTENSION` instead of hardcoded `.so`. **Fallback**: when `read_to_string` fails with `InvalidData` (not valid UTF-8), the importer now tries `load_plugin` before giving up, with a combined error message if both attempts fail.
+
+---
+
+## [#771](https://github.com/elle-lisp/elle/pull/771) — REPL: support forward references and mutual recursion
+[`83c6b0eb`](https://github.com/elle-lisp/elle/commit/83c6b0eb) · 2026-04-21 · `repl`
+
+The REPL previously required definitions to appear in dependency order -- defining `foo` that calls `bar` before `bar` existed was a hard error. This made interactive development painful for anyone accustomed to file-level compilation, where top-level forms are under implicit `letrec` and order does not matter.
+
+**Deferred compilation**: when a `def`/`defn` form fails due to undefined variables, the REPL now saves it as a `DeferredForm` and retries after subsequent definitions arrive. **Two-phase resolution**: phase 1 retries each deferred form individually in a fixpoint loop (handles simple forward references); phase 2 batch-compiles all remaining deferred forms as a single `letrec` unit (handles mutual recursion, since `letrec` pre-binds all names). Six integration tests cover forward references across lines, same-line, chained three-deep, and three-way mutual recursion.
+
+---
+
+## [#770](https://github.com/elle-lisp/elle/pull/770) — Use plugin/ prefix for all plugin imports
+[`16d8e242`](https://github.com/elle-lisp/elle/commit/16d8e242) · 2026-04-21 · `conventions` `imports`
+
+Adopts the `(import "plugin/foo")` convention instead of bare `(import "foo")` for all plugin imports -- egui, oxigraph, syn, and glob -- across demos, tools, and the MCP submodule. Six files changed, one line each. This makes the distinction between Elle source modules and native cdylib plugins explicit at every call site.
+
+---
+
+## [#769](https://github.com/elle-lisp/elle/pull/769) — Fix h2 writer shutdown race and add list-to-array plugin ABI
+[`6c474a1c`](https://github.com/elle-lisp/elle/commit/6c474a1c) · 2026-04-21 · `runtime` `http2` `plugin-abi`
+
+**h2 writer-loop shutdown race.** The writer loop in `lib/http2.lisp` had a nested `forever`/`while` structure where a `:shutdown` message arriving during the inner batch-drain `while` loop would only `break` the inner loop. The outer `forever` loop then called `q:take` again and blocked indefinitely. The fix introduces a `@shutting-down` flag that the inner loop sets on `:shutdown`, checked after `protect` to break the outer loop too.
+
+**list_to_array plugin ABI.** Plugins that expected arrays would reject cons chains (lists), which caused gRPC hangs when the protobuf plugin tried to encode repeated fields built with `->list`. A new `list_to_array` function in the plugin ABI (`elle-plugin/src/lib.rs`, `src/plugin_api.rs`) converts proper lists to immutable arrays at the boundary, letting plugins accept either representation transparently.
+
+---
+
+## [#768](https://github.com/elle-lisp/elle/pull/768) — Call-scoped arena reclamation for backtracking patterns
+[`63ec8cf6`](https://github.com/elle-lisp/elle/commit/63ec8cf6) · 2026-04-20 · `compiler` `escape-analysis` `memory`
+
+The nqueens demo allocates ~13.7M cons cells via `(cons col queens)` in a self-tail-call argument, but the compiler could not prove the callee (`search`) was return-safe because the letrec binding failed `call_result_is_safe`. Without that proof, the caller (`try-col`) was not rotation-safe and never got call-scoped reclamation.
+
+**Fixpoint return-safe analysis.** A new `precompute_return_safe()` pass iterates to fixpoint over `result_is_safe_extended()`, which trusts previously-computed `callee_return_safe` entries for non-tail Call arms. The existing `result_is_safe` was refactored to `result_is_safe_impl(trust_return_safe)` so the extended mode threads through all recursive positions (If, Cond, Begin, Match, etc.).
+
+**Extended tail-arg safety.** `tail_arg_is_safe_extended()` recurses into control flow nodes checking both `callee_result_immediate` and `callee_return_safe` for Call nodes at any depth, enabling rotation-safety for patterns like try-col. The result: N=12 nqueens RSS drops from ~1 GB to 172 MB with JIT off, with 856K `RegionExitCall` instructions executing per run.
+
+---
+
+## [#767](https://github.com/elle-lisp/elle/pull/767) — Make let sequential (Clojure-style), retire parallel let
+[`0efd4bd0`](https://github.com/elle-lisp/elle/commit/0efd4bd0) · 2026-04-20 · `language` `analyzer`
+
+`let` now binds sequentially: each binding sees all previous ones, matching Clojure semantics. Previously, all bindings were analyzed in the outer scope (parallel), which meant `(let [a 1 b (+ a 1)] b)` would fail because `b`'s initializer could not see `a`. The implementation desugars multi-binding lets into nested single-binding lets in the analyzer (`src/hir/analyze/binding.rs`), replacing the two-phase bulk approach with a clean recursive structure. `let*` is kept as a prelude macro alias for backward compatibility. Documentation across `QUICKSTART.md`, `docs/bindings.md`, and agent files updated to reflect the new semantics.
+
+---
+
+## [#766](https://github.com/elle-lisp/elle/pull/766) — Add raylib FFI module
+[`68160e0a`](https://github.com/elle-lisp/elle/commit/68160e0a) · 2026-04-20 · `lib` `ffi` `raylib`
+
+Pure FFI bindings to libraylib v5.5 in `lib/raylib.lisp` (1029 lines), covering window management, 2D/3D shape drawing, text, textures, images, keyboard/mouse/gamepad/touch input, audio, collision detection, and color manipulation. Includes a bouncing-ball demo at `demos/raylib/hello.lisp` and smoke tests at `tests/elle/lib/raylib.lisp` that exercise the struct and function bindings without requiring a display.
+
+---
+
+## [#765](https://github.com/elle-lisp/elle/pull/765) — Fix FFI struct/array marshalling to accept immutable arrays
+[`251783c9`](https://github.com/elle-lisp/elle/commit/251783c9) · 2026-04-20 · `ffi` `bugfix`
+
+`marshal_struct` and `marshal_array` in `src/ffi/to_c.rs` only checked `as_array_mut()`, rejecting immutable arrays with the confusing error "expected array, got array". The deeper `write_value_to_buffer` already handled both mutable and immutable array types correctly. The fix extracts field-writing into a closure and tries both `as_array_mut()` and `as_array()`, aligning the top-level marshalling with the buffer writer's existing capability. This was a prerequisite for the raylib bindings, which pass immutable array literals as struct fields.
+
+---
+
+## [#764](https://github.com/elle-lisp/elle/pull/764) — Document plugin build workflow and module search path
+[`78aeede4`](https://github.com/elle-lisp/elle/commit/78aeede4) · 2026-04-20 · `docs` `build`
+
+Plugin `.so` files only end up where elle's resolver looks (`target/release/`) when built with `--target-dir target`, but this was undocumented. Users who ran plain `cargo build` inside the `plugins/` submodule got "module not found" errors. This adds `make plugins` and `make plugins-all` targets to the top-level Makefile, documents the full search path in `docs/plugins.md` and `docs/modules.md`, and updates the plugins submodule README with both submodule and standalone build instructions. Submodule pointers for `mcp` and `plugins` also updated.
+
+---
+
+## [#763](https://github.com/elle-lisp/elle/pull/763) — WebSocket and gRPC: two more protocols go pure-Elle
+[`cdc7e667`](https://github.com/elle-lisp/elle/commit/cdc7e667) · 2026-04-20 · `lib` `networking` `runtime`
+
+**WebSocket (RFC 6455).** `lib/websocket.lisp` implements the full client and server lifecycle — upgrade handshake, frame codec (text, binary, ping/pong, close), masking, fragmentation. Parameterized with `&named tls hash random` following the established convention for plugin dependencies.
+
+**gRPC over HTTP/2.** `lib/grpc.lisp` implements gRPC's length-prefixed framing on top of `lib/http2.lisp`, parameterized with `&named http2 protobuf`. The HTTP/2 layer gained several enhancements to support gRPC workloads: 1MB initial window, 256KB max frame size, connection-level WINDOW_UPDATE in the client handshake, Unix socket transport, and `h2-send-raw` for caller-collected responses.
+
+**Runtime additions.** `src/port.rs` gains `Encoding::Binary` for Unix stream sockets. `src/primitives/math.rs` adds `math/f32-bits` and `math/f32-from-bits` for IEEE 754 bitcasting, needed by binary protocol implementations.
+
+**Plugin import anti-pattern fixed.** `lib/gpu.lisp` was importing `plugin/vulkan` directly instead of accepting it as a `&named` parameter. All GPU demos updated to pass the vulkan plugin at initialization.
+
+---
+
+## [#762](https://github.com/elle-lisp/elle/pull/762) — GTK4 overhaul: test suite, bug fixes, Cairo module
+[`2a2f8211`](https://github.com/elle-lisp/elle/commit/2a2f8211) · 2026-04-20 · `lib` `gtk4` `stdlib` `testing`
+
+**GTK4 test suite.** 35 tests (pure + integration) covering widget creation, property setting, event handling, and layout. Discovered and fixed two bugs in the process: `when-let` struct destructuring crashed on nil (affecting all widget access functions), and `apply-common-props` was clobbering width/height by calling `set-size-request` twice instead of once.
+
+**New modules.** `lib/cairo.lisp` provides standalone Cairo 2D graphics bindings (28 functions). `lib/gtk4/app.lisp` wraps `GtkApplication` lifecycle with a window handle. The mandelbrot demo was refactored to use `std/gtk4` + `std/cairo`, eliminating 20 local bindings.
+
+**Stdlib polish.** `lib/color.lisp` replaces ~30 `(get c :field)` calls with `c:field` accessor syntax and adds `clamp01`/`normalize-hue` helpers. `lib/dns.lisp` replaces mutable `format-ipv6` and `parse-resolv-conf` with functional `map`/`filter`. `lib/cli.lisp` gains a 14-case test suite.
+
+---
+
+## [#761](https://github.com/elle-lisp/elle/pull/761) — HTTP/2 client and server, pure Elle
+[`6f3c79e2`](https://github.com/elle-lisp/elle/commit/6f3c79e2) · 2026-04-20 · `lib` `networking` `signals`
+
+**Full HTTP/2 implementation.** RFC 9113 framing and RFC 7541 HPACK header compression, written entirely in Elle across five modules: Huffman codec, HPACK encoder/decoder with static and dynamic tables, frame codec for all 10 frame types, stream state machine with flow control, and a top-level client/server API. The server uses fiber-per-stream multiplexing with a writer fiber and bounded queue. Both h2 (over TLS with ALPN) and h2c (cleartext upgrade) are supported.
+
+**tcp-transport bug fix.** The write buffer was a mutable string that converted binary data via `(string data)`, corrupting null bytes and non-UTF-8 sequences. Switched to buffering bytes chunks with concat at flush time — a correctness fix that only surfaced because HTTP/2 is a binary protocol.
+
+**Signal bitmask widened to 64 bits.** `SignalBits` was already `u64` but only used 32 bits. User-defined signals now occupy bits 32-63 (up from 16-31), doubling the user signal space from 16 to 32 slots. The registry, overflow tests, `CAP_MASK`, JIT, and VM were all updated to match the new partition: bits 0-15 compiler-known, 16-31 runtime-reserved, 32-63 user-defined.
+
+---
+
+## [#759](https://github.com/elle-lisp/elle/pull/759) — Sound signal inference for unknown callees
+[`24763876`](https://github.com/elle-lisp/elle/commit/24763876) · 2026-04-19 · `signals` `compiler` `soundness`
+
+**The problem.** When the analyzer encountered a call to an unknown value (a parameter, a dynamic binding, an arbitrary expression), it fell back to `Signal::yields()` — an arbitrary choice that was neither sound nor conservative. This meant the compiler could silently under-approximate the signals a function might emit, leading to missed signal propagation.
+
+**The fix.** Two new inference paths replace the single fallback. Parameter calls get `Signal::yields_errors()`, which triggers the polymorphic resolution path and includes `SIG_ERROR` (since calling an unknown value can always fail). Opaque bindings and expressions get `Signal::unknown()`, defined as `CAP_MASK` — the set of all signals user code can produce. This is maximally conservative but sound: the compiler will never under-count signals from an unknown callee.
+
+**CAP_MASK redefined structurally.** Previously it was a manual enumeration of user-facing signal bits, which missed `SIG_GPU` (bit 15) and all user-defined signals (bits 16-31). Now it is computed as the complement of `VM_INTERNAL` bits, so new signal bits are automatically included in capability enforcement.
+
+**attune: the dual of squelch.** `squelch` blocks specific signals (blacklist); `attune` permits only specified signals (whitelist). `(attune |:yield| f)` is equivalent to squelching everything except `:yield`. `attune!` is a compile-time preamble that sets a function's signal ceiling, generalizing `(silence)` to arbitrary signal sets. The `!` convention (`silent!`, `numeric!`, `immutable!`) replaces the old `assert-` prefix for compile-time assertions that unlock optimizations.
+
+**SIG_GPU wired up.** Bit 15 is registered as `:gpu` in the signal registry. The `git` primitive declares `SIG_GPU`, and the VM call path checks GPU capability before dispatching GIT'd closures. `(fiber/new body mask :deny |:gpu|)` now properly sandboxes GPU access.
+
+---
+
+## [#758](https://github.com/elle-lisp/elle/pull/758) — Documentation sweep: DEVLOG, CHANGELOG, README, stale references
+[`cd80159b`](https://github.com/elle-lisp/elle/commit/cd80159b) · 2026-04-19 · `docs`
+
+Catch-up documentation pass covering PRs #748-#757. Added DEVLOG entries written from actual diffs, CHANGELOG entries under the JIT/Signals/Compiler/FFI/CLI/MCP/Demos arcs, and fixed stale references throughout: README now lists gpu/spirv/wayland libraries and vulkan/plotters/wayland/image plugins, corrects the MCP tool count from 15 to 21, and notes the separate repos for plugins and MCP. Removed the top-level `plan.md` (751 lines), superseded by maintained docs at `docs/impl/gpu.md`, `docs/impl/mlir.md`, and `docs/impl/spirv.md`.
+
+---
+
+## [#753](https://github.com/elle-lisp/elle/pull/753) — HTTP server demo, load generator, and background JIT
+[`7ffed20f`](https://github.com/elle-lisp/elle/commit/7ffed20f) · 2026-04-19 · `demos` `jit` `performance` `runtime`
+
+**HTTP server demo.** `demos/webserver/` adds three scripts: a multi-endpoint server (health, echo, delay, counter, stats), a concurrent load generator with fresh-connection and keepalive modes, and a benchmarking harness that sweeps concurrency levels and renders SVG charts via `plugin/plotters`. Profiling against this workload revealed two runtime bottlenecks.
+
+**TCP_NODELAY and write buffering.** All TCP streams (connect and accept paths) now set `TCP_NODELAY` in `io/completion.rs`. The HTTP transport layer buffers per-header `port/write` calls into a single flush, reducing scheduler yield count. These changes were discovered through the load generator's latency measurements.
+
+**Background JIT compilation.** The headline fix: Cranelift compilation moved to a dedicated background thread (`src/jit/worker.rs`). Previously, JIT compilation stalled the event loop — the interpreter blocked while Cranelift generated native code, adding 40ms of latency to the first call of each hot function. Now the interpreter continues running the bytecode version while `JitWorker` compiles in the background; the next call picks up native code from cache. This required `Rc<JitCode>` to become `Arc<JitCode>` across the JIT cache, entry, run_on, and suspend paths. The worker thread maintains a persistent `FiberHeap` for constant allocations that outlive individual compilations. Peak throughput reached 3450 req/s at concurrency 5 with p50 latency of 0.3ms at concurrency 1.
+
+---
+
 ## [#757](https://github.com/elle-lisp/elle/pull/757) — Gate libffi behind `ffi` feature flag (default on)
 [`63d7d564`](https://github.com/elle-lisp/elle/commit/63d7d564) · 2026-04-19 · `ffi` `build`
 
