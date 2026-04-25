@@ -97,9 +97,8 @@
 
 # === 12. ev/timeout — fires ===
 
-(let [[ok? val] (protect (ev/timeout 0.01 (fn [] (ev/sleep 100))))]
-  (assert (not ok?) "12a: timeout fires when work is slow")
-  (assert (= :timeout (get val :error)) "12b: timeout error has :timeout key"))
+(let [val (ev/timeout 0.01 (fn [] (ev/sleep 100)))]
+  (assert (nil? val) "12: timeout returns nil when work is slow"))
 
 # === 13. ev/scope — joins all children ===
 

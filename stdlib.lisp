@@ -1433,14 +1433,14 @@
     (ev/join done)))
 
 (defn ev/timeout [seconds thunk]
-  "Run thunk with a time limit. Returns result or signals {:error :timeout}."
+  "Run thunk with a time limit. Returns result on success, nil on timeout."
   (let [work  (ev/spawn thunk)
         timer (ev/spawn (fn [] (ev/sleep seconds)))]
     (let [[done remaining] (ev/select [work timer])]
       (each f in remaining (ev/abort f))
       (if (= done work)
         (ev/join work)
-        (error {:error :timeout :reason :deadline-exceeded :message "operation timed out"})))))
+        nil))))
 
 (defn ev/scope [body-fn]
   "Structured concurrency nursery. body-fn receives a spawn function.

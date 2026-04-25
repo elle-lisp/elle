@@ -623,13 +623,16 @@ fn prim_subprocess_kill(args: &[Value]) -> (SignalBits, Value) {
     };
     let ret = unsafe { libc::kill(handle.pid() as i32, signal) };
     if ret < 0 {
-        (
-            SIG_ERROR,
-            error_val(
-                "exec-error",
-                format!("subprocess/kill: {}", std::io::Error::last_os_error()),
-            ),
-        )
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            // Process already exited — treat as success
+            (SIG_OK, Value::NIL)
+        } else {
+            (
+                SIG_ERROR,
+                error_val("exec-error", format!("subprocess/kill: {}", err)),
+            )
+        }
     } else {
         (SIG_OK, Value::NIL)
     }
