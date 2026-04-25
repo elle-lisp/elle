@@ -212,9 +212,11 @@ pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
 
     let resume_value = args.get(1).copied().unwrap_or(Value::NIL);
 
-    // Validate status and store resume value
+    // Validate status and store resume value.
+    // Error'd fibers are resumable — this is the restarts system.
+    // Only Dead fibers are terminal.
     let status_err = handle.with_mut(|fiber| match fiber.status {
-        FiberStatus::New | FiberStatus::Paused => {
+        FiberStatus::New | FiberStatus::Paused | FiberStatus::Error => {
             fiber.signal = Some((SIG_OK, resume_value));
             None
         }
@@ -225,10 +227,6 @@ pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
         FiberStatus::Dead => Some(error_val(
             "state-error",
             "coro/resume: cannot resume completed coroutine",
-        )),
-        FiberStatus::Error => Some(error_val(
-            "state-error",
-            "coro/resume: cannot resume errored coroutine",
         )),
     });
 

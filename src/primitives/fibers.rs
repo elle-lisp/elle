@@ -285,9 +285,11 @@ pub(crate) fn prim_fiber_resume(args: &[Value]) -> (SignalBits, Value) {
 
     let resume_value = args.get(1).copied().unwrap_or(Value::NIL);
 
-    // Validate fiber status and store resume value
+    // Validate fiber status and store resume value.
+    // Error'd fibers are resumable — this is the restarts system.
+    // Only Dead fibers are terminal.
     let status_err = handle.with_mut(|fiber| match fiber.status {
-        FiberStatus::New | FiberStatus::Paused => {
+        FiberStatus::New | FiberStatus::Paused | FiberStatus::Error => {
             fiber.signal = Some((SIG_OK, resume_value));
             None
         }
@@ -298,10 +300,6 @@ pub(crate) fn prim_fiber_resume(args: &[Value]) -> (SignalBits, Value) {
         FiberStatus::Dead => Some(error_val(
             "state-error",
             "fiber/resume: cannot resume completed fiber",
-        )),
-        FiberStatus::Error => Some(error_val(
-            "state-error",
-            "fiber/resume: cannot resume errored fiber",
         )),
     });
 
@@ -732,6 +730,21 @@ mod tests {
             .with_mut(|f| f.status = FiberStatus::Dead);
         let (sig, _) = prim_fiber_resume(&[fiber_val]);
         assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_resume_errored_fiber_is_allowed() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        fiber_val
+            .as_fiber()
+            .unwrap()
+            .with_mut(|f| f.status = FiberStatus::Error);
+        let (sig, _) = prim_fiber_resume(&[fiber_val]);
+        assert_eq!(
+            sig, SIG_RESUME,
+            "errored fibers must be resumable (restarts)"
+        );
     }
 
     #[test]
