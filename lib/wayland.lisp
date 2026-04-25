@@ -47,14 +47,14 @@
     (plugin:poll-events conn))
 
   (defn wayland/event-loop [conn handler]
-    "Run an event loop: poll fd, dispatch, drain events, call handler.
+    "Run an event loop: flush, poll fd, dispatch, drain events, call handler.
      Handler receives each event struct. Loop until handler returns :stop."
-    (let [[fd (wayland/fd conn)]]
+    (let [fd (wayland/fd conn)]
       (forever
-        (ev/poll-fd fd 1)  ## POLLIN
-        (wayland/dispatch conn)
         (wayland/flush conn)
-        (for-each [ev (wayland/poll-events conn)]
+        (ev/poll-fd fd :read 0.033)
+        (wayland/dispatch conn)
+        (each ev in (wayland/poll-events conn)
           (when (= (handler ev) :stop)
             (break nil))))))
 
@@ -70,9 +70,21 @@
 
   ## ── Layer shell ─────────────────────────────────────────────────────
 
-  (defn wayland/layer-surface [conn &named width height anchor layer namespace]
-    "Create a layer-shell surface."
-    (plugin:layer-surface conn))
+  (defn wayland/layer-surface [conn &named @width @height @anchor @layer @namespace @exclusive-zone]
+    "Create a layer-shell surface.
+     :layer      — :background, :bottom, :top, :overlay (default :overlay)
+     :anchor     — array of :top, :bottom, :left, :right (default [:top :left :right])
+     :width      — int (default 0 = compositor decides from anchors)
+     :height     — int (default 50)
+     :exclusive-zone — int (default 0)
+     :namespace  — string (default \"elle\")"
+    (default layer :overlay)
+    (default anchor [:top :left :right])
+    (default height 50)
+    (default exclusive-zone 0)
+    (default namespace "elle")
+    (plugin:layer-surface conn {:layer layer :anchor anchor :width width :height height
+                                :exclusive-zone exclusive-zone :namespace namespace}))
 
   (defn wayland/layer-configure [conn surface-id]
     "Acknowledge a layer surface configure."
@@ -109,6 +121,18 @@
   (defn wayland/buffer-fill [conn buffer-id color]
     "Fill an SHM buffer with an ARGB color."
     (plugin:buffer-fill conn buffer-id color))
+
+  (defn wayland/buffer-fill-rect [conn buffer-id x y width height color]
+    "Fill a rectangular region of an SHM buffer with an ARGB color."
+    (plugin:buffer-fill-rect conn buffer-id x y width height color))
+
+  (defn wayland/buffer-fill-circle [conn buffer-id cx cy r color]
+    "Fill a circle region of an SHM buffer with an ARGB color."
+    (plugin:buffer-fill-circle conn buffer-id cx cy r color))
+
+  (defn wayland/buffer-fill-triangle [conn buffer-id x1 y1 x2 y2 x3 y3 color]
+    "Fill a triangle region of an SHM buffer with an ARGB color."
+    (plugin:buffer-fill-triangle conn buffer-id x1 y1 x2 y2 x3 y3 color))
 
   (defn wayland/buffer-destroy [conn buffer-id]
     "Destroy an SHM buffer."
@@ -162,6 +186,9 @@
    :shm-buffer wayland/shm-buffer
    :buffer-write wayland/buffer-write
    :buffer-fill wayland/buffer-fill
+   :buffer-fill-rect wayland/buffer-fill-rect
+   :buffer-fill-circle wayland/buffer-fill-circle
+   :buffer-fill-triangle wayland/buffer-fill-triangle
    :buffer-destroy wayland/buffer-destroy
    :screencopy wayland/screencopy
    :screencopy-destroy wayland/screencopy-destroy
