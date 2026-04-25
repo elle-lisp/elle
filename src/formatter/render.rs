@@ -116,7 +116,18 @@ impl LayoutCtx {
                 }
             }
 
-            Doc::Align(inner) => self.layout(inner, col, col, broken, last_cb, out),
+            Doc::Align(inner) => {
+                // Cap alignment: if we're past half the line width, don't
+                // create a new alignment point — keep the enclosing indent.
+                // This prevents cascading Aligns from pushing deeply nested
+                // code off the right edge.
+                let new_indent = if col <= self.line_width / 2 {
+                    col
+                } else {
+                    indent
+                };
+                self.layout(inner, col, new_indent, broken, last_cb, out)
+            }
         }
     }
 
