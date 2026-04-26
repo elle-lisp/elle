@@ -4,9 +4,9 @@
 ## Pure Elle. Receives crypto and jiff functions as arguments.
 ##
 ## Usage:
-##   (def crypto (import-file "target/debug/libelle_crypto.so"))
-##   (def jiff   (import-file "target/debug/libelle_jiff.so"))
-##   (def sigv4 ((import-file "lib/aws/sigv4.lisp") crypto jiff))
+##   (def crypto (import "plugin/crypto"))
+##   (def jiff   (import "plugin/jiff"))
+##   (def sigv4 ((import "std/aws/sigv4") crypto jiff))
 ##   (sigv4:sign "GET" "/" nil nil "s3.us-east-1.amazonaws.com" creds "us-east-1" "s3")
 
 (fn [crypto jiff]

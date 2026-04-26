@@ -11,7 +11,7 @@
     (println "zmq tests skipped: libzmq.so not found")
     (sys/exit 0)))
 
-(def zmq (import-file "lib/zmq.lisp"))
+(def zmq ((import-file "lib/zmq.lisp")))
 
 ## ── Context creation ─────────────────────────────────────────────
 

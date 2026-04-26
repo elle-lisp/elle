@@ -2,7 +2,7 @@
 ## lib/contract.lisp — Compositional validation system for function boundaries.
 ##
 ## Loaded via:
-##   (def cv ((import-file "lib/contract.lisp")))
+##   (def cv ((import "std/contract")))
 ##   (def compile-validator (get cv :compile-validator))
 ##   ...
 ##

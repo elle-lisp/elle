@@ -1,7 +1,7 @@
 (elle/epoch 9)
 ## lib/redis.lisp — Pure Elle Redis client (RESP2)
 ##
-## Loaded via: (def redis ((import-file "lib/redis.lisp")))
+## Loaded via: (def redis ((import "std/redis")))
 ## Usage:      (redis:set "key" "value")
 ##             (redis:get "key")
 ##
