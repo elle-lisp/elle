@@ -19,6 +19,7 @@ head  # => 1
 tail  # => (2 3)
 
 # all consumed: rest is empty list (not nil!)
+# see empty-list.md for why
 (def (p q & rest) (list 10 20))
 (empty? rest)    # => true
 (nil? rest)      # => false

@@ -22,7 +22,8 @@ Elle control flow forms are expressions — they return values. Only `nil` and
 ## cond
 
 Multi-branch conditional. Evaluates tests in order, returns the body of the
-first truthy one.
+first truthy one. For structural dispatch on data shape, see
+[match.md](match.md).
 
 ```lisp
 (defn classify [x]
@@ -37,6 +38,10 @@ first truthy one.
 (classify 0)               # => :zero
 (classify -5)              # => :negative
 ```
+
+`cond` evaluates arbitrary test expressions. When you need to dispatch on
+the *structure* or *literal value* of a single expression, `match` is more
+concise and guarantees exhaustiveness.
 
 ## case
 
@@ -169,7 +174,7 @@ count                      # => 5
 ## each
 
 Iteration macro. `in` is optional sugar. Works on lists, arrays,
-strings, bytes, sets, structs, and coroutines.
+strings, bytes, sets, structs, fibers, and coroutines.
 
 ```lisp
 (var total 0)
@@ -184,7 +189,11 @@ total                      # => 60
       (break :found x)))
   nil)                     # => 16
 
-# coroutines: drives coro/resume until a nil yield terminates the loop
+# fibers: iterate over yielded values until the fiber completes
+(def fib (fiber/new (fn [] (yield 1) (yield 2) (yield 3)) |:yield|))
+(each n in fib (println n))  # prints 1 2 3
+
+# coroutines: same pattern via coro/>iterator
 (def co (coro/new (fn [] (yield 1) (yield 2) (yield 3))))
 (each n in co (println n))   # prints 1 2 3
 ```

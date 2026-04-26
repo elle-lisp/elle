@@ -180,13 +180,14 @@ Guards can reference bindings from the pattern:
     _                  "not a pair"))
 ```
 
-## match vs case
+## match vs case vs cond
 
-| | `match` | `case` |
-|---|---------|--------|
-| **Patterns** | structural (literals, destructuring, guards) | equality (`=`) against evaluated expressions |
-| **Variables** | bare symbols **bind** | keys are **evaluated** and compared |
-| **Use when** | dispatching on shape, type, or literal values | dispatching against runtime values (constants, computed keys) |
+| | `match` | `case` | `cond` |
+|---|---------|--------|--------|
+| **Dispatch** | structural patterns | equality (`=`) against evaluated expressions | arbitrary test expressions |
+| **Variables** | bare symbols **bind** | keys are **evaluated** and compared | full expressions |
+| **Exhaustiveness** | compiler-enforced | no | no |
+| **Use when** | dispatching on shape, type, or literal values | dispatching against runtime values | multi-branch boolean logic |
 
 ```
 # match: literal keyword patterns
@@ -200,7 +201,18 @@ Guards can reference bindings from the pattern:
   event-quit      (handle-quit)
   event-key-down  (handle-key ev)
   (handle-unknown))
+
+# cond: arbitrary boolean conditions
+(cond
+  (> x 10) :large
+  (> x 0)  :small
+  (= x 0)  :zero
+  :negative)
 ```
+
+When `cond` branches are all testing the same expression against literal
+values, `match` is more concise and catches incomplete coverage at compile
+time. See [control.md](control.md) for `cond` and `case`.
 
 ---
 

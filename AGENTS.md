@@ -229,7 +229,8 @@ The 4 most critical (agents get these wrong):
 
 - **`nil` vs `()` are distinct.** `nil` is falsy; `()` is truthy (empty
   list). Use `empty?` not `nil?` for end-of-list. **Getting this wrong
-  causes infinite recursion.**
+  causes infinite recursion.** See [docs/empty-list.md](docs/empty-list.md)
+  for the rationale.
 - **`#` is comment, `;` is splice.** Not the other way around.
 - **`assign` not `set` for mutation.** `(set x val)` creates a set.
 - **`squelch` takes exactly 2 arguments.** `(squelch closure :keyword)` or

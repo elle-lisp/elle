@@ -56,6 +56,7 @@ Use `closure?` or `native-fn?` to distinguish.
 ### List predicates and nil
 
 `nil` and `()` are distinct. This table is authoritative:
+See [empty-list.md](empty-list.md) for the rationale.
 
 ```text
 Expression       Result    Notes

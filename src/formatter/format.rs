@@ -327,7 +327,7 @@ fn format_list(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig) -
             "match" => return super::forms::format_match(children, source, config),
             "while" => return super::forms::format_while(children, source, config),
             "defmacro" => return super::forms::format_defmacro(children, source, config),
-            "begin" => return super::forms::format_begin(children, source, config),
+            "begin" | "do" => return super::forms::format_begin(children, source, config),
             "forever" => return super::forms::format_forever(children, source, config),
             "block" => return super::forms::format_block(children, source, config),
             "parameterize" => return super::forms::format_parameterize(children, source, config),

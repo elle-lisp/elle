@@ -41,9 +41,12 @@ Sets are unordered collections of unique values. `|...|` is immutable;
 
 ```lisp
 (def ms @|1 2 3|)
-(add ms 4)           # mutates; ms is now @|1 2 3 4|
-(del ms 1)           # mutates; ms is now @|2 3 4|
+(add ms 4)           # mutates in place, returns ms; ms is now @|1 2 3 4|
+(del ms 1)           # mutates in place, returns ms; ms is now @|2 3 4|
 ```
+
+`add` and `del` on mutable sets mutate in place and return the set.
+On immutable sets they return a new set.
 
 ## As signal masks
 

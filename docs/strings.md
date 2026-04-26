@@ -37,11 +37,18 @@ Grapheme count and byte count differ for multi-byte characters:
 ## Search and test
 
 ```lisp
-(string/find "hello" "ll")        # => 2 (index, or nil)
+(string/find "hello" "ll")        # => 2 (grapheme index, or nil if not found)
+(string/find "hello" "xx")        # => nil
+(string/find "hello" "lo" 3)      # => 3 (with optional start offset)
+(string/index-of "hello" "ll")    # => 2 (alias for string/find)
 (string/contains? "hello" "ell")   # => true
 (string/starts-with? "hello" "he") # => true
 (string/ends-with? "hello" "lo")   # => true
 ```
+
+`string/find` returns the grapheme index of the first occurrence, or `nil`
+if the substring is not found. An optional third argument sets the start
+offset. `string/index-of` is an alias.
 
 ## Transformation
 
@@ -57,18 +64,24 @@ Grapheme count and byte count differ for multi-byte characters:
 
 ```lisp
 (string/split "a,b,c" ",")        # => ["a" "b" "c"] (returns array)
+(string/split "one two three" " ") # => ["one" "two" "three"]
+(string/split "a,,b" ",")         # => ["a" "" "b"] (empty strings between consecutive delimiters)
 ```
+
+`string/split` returns an array of substrings. Consecutive delimiters
+produce empty strings in the result. The delimiter cannot be empty.
 
 ## Mutable @strings
 
 `@"..."` creates a mutable string. `get`, `put`, `length`, `push`, and
-`pop` are all grapheme-indexed.
+`pop` are all grapheme-indexed. `put` mutates in place and returns the
+@string.
 
 ```lisp
 (def s @"hello")
 (get s 0)                          # => "h"
-(put s 0 "H")                     # mutates; s is now @"Hello"
-(push s "!")                       # mutates; s is now @"Hello!"
+(put s 0 "H")                     # mutates and returns s; s is now @"Hello"
+(push s "!")                       # mutates and returns s; s is now @"Hello!"
 (pop s)                            # => "!" (removes and returns last)
 ```
 

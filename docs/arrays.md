@@ -40,13 +40,14 @@ arr                        # => [10 20 30] (unchanged)
 
 ## Mutable @array operations
 
-`put`, `push`, and `pop` mutate in place.
+`put`, `push`, and `pop` mutate in place. `put` and `push` return the
+mutated array; `pop` returns the removed element.
 
 ```lisp
 (def buf @[1 2 3])
-(push buf 4)               # appends; buf is now @[1 2 3 4]
+(push buf 4)               # appends, returns buf; buf is now @[1 2 3 4]
 (pop buf)                  # => 4; buf is now @[1 2 3]
-(put buf 0 99)             # buf is now @[99 2 3]
+(put buf 0 99)             # mutates and returns buf; buf is now @[99 2 3]
 (length buf)               # => 3
 ```
 
