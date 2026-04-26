@@ -8,17 +8,17 @@
 a real value, like `0` is a real integer or `""` is a real string.
 
 ```lisp
-(pop '(x))                  # => () — take x out of (x), you get ()
-(not= '() nil)               # => true — () is not "absence of value"
+(defn find-all [pred coll]
+  (filter pred coll))
+
+(if (find-all odd? [2 4 6])    # => () — truthy, meaning: "ran, found nothing"
+  :got-results
+  :no-results)                 # => :got-results — correct!
 ```
 
-`nil` is the absence of a value. It means "nothing here", "not found", "no
-result". It is falsy.
-
-```lisp
-(get {:a 1} :b)              # => nil — key not present
-(get {:a 1} :b :missing)     # => :missing — nil means "fall through to default"
-```
+`(find-all odd? nil)` signals an error — nil isn't a collection, so passing it
+where a collection is expected fails loudly rather than silently returning
+something ambiguous.
 
 ## Why this matters: truthiness
 
@@ -35,16 +35,14 @@ This lets you distinguish "the function returned an empty result" from "the
 function returned nothing":
 
 ```lisp
-(defn find-all [pred coll]
-  (filter pred coll))
-
 (if (find-all odd? [2 4 6])    # => () — truthy, meaning: "ran, found nothing"
   :got-results
   :no-results)                 # => :got-results — correct!
-
-(if (find-all odd? nil)         # => error — nil isn't a collection
-  ...)
 ```
+
+`(find-all odd? nil)` signals an error — nil isn't a collection, so passing it
+where a collection is expected fails loudly rather than silently returning
+something ambiguous.
 
 ## Why this matters: pattern matching
 

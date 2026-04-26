@@ -59,7 +59,7 @@ operations:
 
 ```lisp
 (def s {:x 1 :y 2 :z 3})
-(from-pairs (filter (fn [p] (> (at p 1) 1)) (pairs s)))
+(from-pairs (filter (fn [p] (> (get p 1) 1)) (pairs s)))
 # => {:y 2 :z 3}
 ```
 
