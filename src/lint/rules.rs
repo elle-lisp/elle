@@ -1,7 +1,9 @@
 //! Linting rules for Elle code
 
 use super::diagnostics::{Diagnostic, Severity};
+use crate::primitives::registration::ALL_TABLES;
 use crate::reader::SourceLoc;
+use crate::value::types::Arity;
 use crate::value::SymbolId;
 
 /// Check naming conventions for a symbol
@@ -55,23 +57,19 @@ pub(crate) fn check_call_arity(
     symbol_table: &crate::SymbolTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Try to get the function name
     if let Some(func_name) = symbol_table.name(func_sym) {
-        if let Some(expected_arity) = builtin_arity(func_name) {
-            // For now, just warn on obvious mismatches
-            // In a full implementation, we'd track user-defined function arities
-            if arg_count != expected_arity {
+        if let Some(arity) = builtin_arity(func_name) {
+            if !arity.matches(arg_count) {
                 let diag = Diagnostic::new(
                     Severity::Warning,
                     "W002",
                     "arity-mismatch",
                     format!(
                         "function '{}' expects {} argument(s) but got {}",
-                        func_name, expected_arity, arg_count
+                        func_name, arity, arg_count
                     ),
                     location.clone(),
                 );
-
                 diagnostics.push(diag);
             }
         }
@@ -111,45 +109,16 @@ fn to_kebab_case(s: &str) -> String {
     result
 }
 
-/// Get arity of built-in functions
-pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
-    match name {
-        // Arithmetic - these are actually variadic but min 2
-        "+" | "-" | "*" | "/" | "mod" | "rem" => Some(2),
-        // Comparison
-        "=" | "<" | ">" | "<=" | ">=" => Some(2),
-        // List operations
-        "cons" => Some(2),
-        "first" | "rest" => Some(1),
-        "length" => Some(1),
-        "append" => Some(2),
-        "reverse" => Some(1),
-        "concat" => Some(2),
-        "last" => Some(1),
-        "take" | "drop" => Some(2),
-        // Math functions
-        "abs" | "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "floor" | "ceil" | "round" => {
-            Some(1)
+/// Get arity of a built-in function by looking up `PrimitiveDef::PRIMITIVES` tables.
+pub(crate) fn builtin_arity(name: &str) -> Option<Arity> {
+    for table in ALL_TABLES {
+        for def in *table {
+            if def.name == name || def.aliases.contains(&name) {
+                return Some(def.arity);
+            }
         }
-        "pow" => Some(2),
-        "min" | "max" => Some(2),
-        // String operations
-        "string-upcase" | "string-downcase" => Some(1),
-        "string/append" => Some(2),
-        "substring" => Some(3),
-        "string-index" => Some(2),
-        // Type operations
-        "type-of" => Some(1),
-        // Logic
-        "not" => Some(1),
-        // Array operations
-        "array-ref" => Some(2),
-        "array-set!" => Some(3),
-        // Variadic or special forms - return None
-        "list" | "array" | "var" | "def" | "quote" | "begin" | "do" | "let" | "let*" | "fn"
-        | "match" | "if" | "while" | "forever" | "each" => None,
-        _ => None,
     }
+    None
 }
 
 #[cfg(test)]
@@ -183,9 +152,50 @@ mod tests {
 
     #[test]
     fn test_builtin_arity() {
-        assert_eq!(builtin_arity("+"), Some(2));
-        assert_eq!(builtin_arity("cons"), Some(2));
-        assert_eq!(builtin_arity("list"), None);
+        use crate::value::Arity;
+        assert_eq!(builtin_arity("+"), Some(Arity::AtLeast(0)));
+        assert_eq!(builtin_arity("cons"), Some(Arity::Exact(2)));
+        assert_eq!(builtin_arity("list"), Some(Arity::AtLeast(0)));
         assert_eq!(builtin_arity("undefined"), None);
+    }
+
+    #[test]
+    fn test_variadic_builtins_no_false_w002() {
+        // (+ 1 2 3), (* 1 2 3 4), (- 10 2 2 2 2) must not produce W002
+        let mut symbols = crate::SymbolTable::new();
+        let mut diagnostics = Vec::new();
+
+        let plus = symbols.intern("+");
+        check_call_arity(plus, 3, &None, &symbols, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "W002 false positive for (+ 1 2 3)");
+
+        let star = symbols.intern("*");
+        check_call_arity(star, 4, &None, &symbols, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "W002 false positive for (* 1 2 3 4)"
+        );
+
+        let minus = symbols.intern("-");
+        check_call_arity(minus, 5, &None, &symbols, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "W002 false positive for (- 10 2 2 2 2)"
+        );
+    }
+
+    #[test]
+    fn test_exact_arity_still_warns() {
+        // cons expects exactly 2 args
+        let mut symbols = crate::SymbolTable::new();
+        let mut diagnostics = Vec::new();
+
+        let cons = symbols.intern("cons");
+        check_call_arity(cons, 1, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (cons 1)");
+
+        diagnostics.clear();
+        check_call_arity(cons, 3, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (cons 1 2 3)");
     }
 }
