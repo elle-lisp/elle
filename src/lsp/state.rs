@@ -7,10 +7,30 @@ use crate::context::set_symbol_table;
 use crate::hir::{extract_symbols_from_hir, HirLinter};
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::primitives::def::Doc;
+use crate::reader::SourceLoc;
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
 use crate::{analyze_file, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
+
+/// Extract a `SourceLoc` from a reader/analyzer error string.
+///
+/// Reader and analyzer errors are formatted as `<file>:line:col: message`.
+/// This parses the prefix to recover the structured location.
+fn extract_location_from_error(msg: &str) -> Option<SourceLoc> {
+    // Format: "<file>:line:col: message"
+    let rest = msg.strip_prefix('<')?;
+    let bracket_end = rest.find('>')?;
+    let file = &rest[..bracket_end];
+    // After "<file>" comes ":line:col: message"
+    let tail = &rest[bracket_end + 1..]; // ":line:col: message"
+    let tail = tail.strip_prefix(':')?; // "line:col: message"
+    let (line_str, col_and_rest) = tail.split_once(':')?;
+    let (col_str, _) = col_and_rest.split_once(": ")?;
+    let line = line_str.parse::<usize>().ok()?;
+    let col = col_str.parse::<usize>().ok()?;
+    Some(SourceLoc::new(format!("<{}>", file), line, col))
+}
 
 /// Document state: source + diagnostics + symbol index
 pub(crate) struct DocumentState {
@@ -97,12 +117,13 @@ impl CompilerState {
             Ok(result) => result,
             Err(e) => {
                 // Analysis error - add as diagnostic
+                let location = extract_location_from_error(&e);
                 doc.diagnostics.push(Diagnostic::new(
                     Severity::Error,
                     "E0001",
                     "syntax-error",
                     e,
-                    None,
+                    location,
                 ));
                 return false;
             }
@@ -183,5 +204,48 @@ mod tests {
         state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
         let result = state.compile_document("file:///test.l");
         assert!(result);
+    }
+
+    #[test]
+    fn test_extract_location_from_error() {
+        // Standard reader error format
+        let loc = extract_location_from_error("<lsp>:1:4: unterminated list");
+        assert!(loc.is_some());
+        let loc = loc.unwrap();
+        assert_eq!(loc.file, "<lsp>");
+        assert_eq!(loc.line, 1);
+        assert_eq!(loc.col, 4);
+
+        // Multi-digit line/col
+        let loc = extract_location_from_error("<lsp>:12:34: some error");
+        assert!(loc.is_some());
+        let loc = loc.unwrap();
+        assert_eq!(loc.line, 12);
+        assert_eq!(loc.col, 34);
+    }
+
+    #[test]
+    fn test_extract_location_from_error_invalid() {
+        // No angle brackets
+        assert!(extract_location_from_error("something went wrong").is_none());
+        // Missing colon-separated parts
+        assert!(extract_location_from_error("<lsp>: message").is_none());
+    }
+
+    #[test]
+    fn test_compile_syntax_error_has_location() {
+        let mut state = CompilerState::new();
+        state.on_document_open("file:///test.l".to_string(), "((((".to_string());
+        state.compile_document("file:///test.l");
+        let doc = state.get_document("file:///test.l").unwrap();
+        assert!(!doc.diagnostics.is_empty());
+        let diag = &doc.diagnostics[0];
+        assert!(
+            diag.location.is_some(),
+            "parse error diagnostic should have a location"
+        );
+        let loc = diag.location.as_ref().unwrap();
+        assert_eq!(loc.line, 1);
+        assert_eq!(loc.col, 4);
     }
 }
