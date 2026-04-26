@@ -603,30 +603,32 @@ impl FiberHeap {
         }
 
         let base_allocs = base.heap_mark.root_allocs_len();
-        let base_dtors = base.heap_mark.dtor_len();
+        let _base_dtors = base.heap_mark.dtor_len();
         let base_count = base.heap_mark.position();
 
         // 1. Teardown the swap pool (iteration N-2's allocations are dead).
+        //    Only dealloc slots — dtors are NOT in the swap pool (see step 2).
         if let Some(old) = self.swap_pool.take() {
-            for i in (0..old.dtors.len()).rev() {
-                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
-            }
             for &ptr in old.root_allocs.iter().rev() {
                 unsafe { self.pool.dealloc_slot(ptr) };
             }
             self.rotation_freed += old.root_allocs.len();
         }
 
-        // 2. Move current iteration's objects (after base_mark) to swap.
+        // 2. Move current iteration's non-dtor objects to swap.
+        //    Dtor-bearing objects (Closures, Fibers, etc.) stay in the main
+        //    pool because they may be reachable via Rc references held in
+        //    arrays/maps that survive rotation. Dropping them would free the
+        //    Rc inner data (Fiber, ClosureTemplate) while still referenced.
+        //    They are cleaned up only on pool teardown (fiber exit).
         let iter_allocs = self.pool.allocs.split_off(base_allocs);
-        let iter_dtors = self.pool.dtors.split_off(base_dtors);
 
         self.swap_pool = if iter_allocs.is_empty() {
             None
         } else {
             Some(SwapPool {
                 root_allocs: iter_allocs,
-                dtors: iter_dtors,
+                dtors: Vec::new(),
             })
         };
 
@@ -679,9 +681,6 @@ impl FiberHeap {
         // `rotate_pools` — those slab slots were held "live for one
         // iteration" but the function is exiting, so they're dead now.
         if let Some(old) = self.swap_pool.take() {
-            for i in (0..old.dtors.len()).rev() {
-                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
-            }
             for &ptr in old.root_allocs.iter().rev() {
                 unsafe { self.pool.dealloc_slot(ptr) };
             }

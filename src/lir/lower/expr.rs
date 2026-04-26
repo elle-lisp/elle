@@ -285,6 +285,7 @@ impl<'a> Lowerer<'a> {
             result_slot: block_result_slot,
             exit_label,
             region_depth_at_entry: depth_before,
+            flip_depth_at_entry: self.flip_depth,
         });
 
         // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
@@ -335,6 +336,7 @@ impl<'a> Lowerer<'a> {
         let target_result_slot = target.result_slot;
         let target_exit_label = target.exit_label;
         let target_region_depth = target.region_depth_at_entry;
+        let target_flip_depth = target.flip_depth_at_entry;
 
         // Lower the value expression
         let value_reg = self.lower_expr(value)?;
@@ -344,6 +346,13 @@ impl<'a> Lowerer<'a> {
             slot: target_result_slot,
             src: value_reg,
         });
+
+        // Emit compensating FlipExit for each while-loop flip frame
+        // entered since the target block was opened.
+        let compensating_flips = self.flip_depth - target_flip_depth;
+        for _ in 0..compensating_flips {
+            self.emit(LirInstr::FlipExit);
+        }
 
         // Emit compensating RegionExit for each region entered since the
         // target block was opened. This ensures scope marks are popped
@@ -370,10 +379,14 @@ impl<'a> Lowerer<'a> {
 
     fn lower_while(&mut self, cond: &Hir, body: &Hir) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
+        let flip_eligible = self.can_flip_while_loop(body);
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
         let done_label = self.fresh_label();
+
+        // The entry block is the current block before we jump to cond.
+        let entry_label = self.current_block.label;
 
         // Jump to condition check
         self.terminate(Terminator::Jump(cond_label));
@@ -389,11 +402,27 @@ impl<'a> Lowerer<'a> {
         });
         self.finish_block();
 
-        // Body block
+        // Body block — track flip_depth so breaks can compensate
+        if flip_eligible {
+            self.flip_depth += 1;
+        }
         self.current_block = BasicBlock::new(body_label);
         let _body_reg = self.lower_expr(body)?;
+        // The back-edge block is whatever block we're in after lowering
+        // the body (body lowering may have created intermediate blocks).
+        let back_edge_label = self.current_block.label;
         self.terminate(Terminator::Jump(cond_label));
         self.finish_block();
+        if flip_eligible {
+            self.flip_depth -= 1;
+        }
+
+        // Record the loop triple for inject_flip to use later.
+        if flip_eligible {
+            self.current_func
+                .while_loops
+                .push((entry_label, back_edge_label, done_label));
+        }
 
         // Done block — emit nil result here so it's tracked in this block
         self.current_block = BasicBlock::new(done_label);

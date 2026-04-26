@@ -1406,4 +1406,25 @@ impl<'a> Lowerer<'a> {
             _ => false,
         }
     }
+
+    /// Determine whether a while loop's body is safe for FlipSwap injection.
+    ///
+    /// Two conditions must hold:
+    /// 1. No dangerous outward set — body doesn't write heap values to
+    ///    bindings defined outside the loop.
+    /// 2. All break values are safe immediates — breaks don't carry heap
+    ///    pointers past FlipExit.
+    ///
+    /// Suspension is NOT a rejection condition. The runtime's
+    /// `rotate_pools` returns early when `shared_alloc` is non-null,
+    /// so FlipSwap on shared-alloc fibers is a safe no-op.
+    pub(super) fn can_flip_while_loop(&self, body: &Hir) -> bool {
+        if self.body_contains_dangerous_outward_set(body, &[]) {
+            return false;
+        }
+        if !self.all_breaks_have_safe_values(body) {
+            return false;
+        }
+        true
+    }
 }

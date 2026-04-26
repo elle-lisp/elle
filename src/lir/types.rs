@@ -124,6 +124,10 @@ pub struct LirFunction {
     pub has_outward_heap_set: bool,
     /// True when the function body is safe for tail-call pool rotation.
     pub rotation_safe: bool,
+    /// While-loop triples `(entry, back_edge, done)` that passed escape
+    /// analysis during lowering. `inject_flip` uses these to insert
+    /// FlipEnter/FlipSwap/FlipExit without CFG heuristics.
+    pub while_loops: Vec<(Label, Label, Label)>,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.
@@ -195,6 +199,7 @@ impl LirFunction {
             result_is_immediate: false,
             has_outward_heap_set: false,
             rotation_safe: false,
+            while_loops: Vec::new(),
         }
     }
 
