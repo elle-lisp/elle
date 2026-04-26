@@ -347,6 +347,7 @@ impl<'a> Analyzer<'a> {
                         "match" => return self.analyze_match(items, span),
                         "cond" => return self.analyze_cond(items, span),
                         "eval" => return self.analyze_eval(items, span),
+                        "environment" => return self.analyze_environment(items, span),
                         "parameterize" => return self.analyze_parameterize(items, span),
 
                         "silence" => return self.analyze_silence(items, span),
@@ -732,6 +733,80 @@ impl<'a> Analyzer<'a> {
             },
             span,
             signal,
+        ))
+    }
+
+    /// `(environment)` — reify the current lexical scope as a struct.
+    ///
+    /// Desugars into `(struct 'x x 'y y ...)` for all lexical bindings
+    /// in scope. Primitives are excluded (eval binds those itself).
+    pub(crate) fn analyze_environment(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        if items.len() != 1 {
+            return Err(format!("{}: environment takes no arguments", span));
+        }
+
+        // Collect all lexical (non-primitive) bindings from all scopes.
+        // Inner scopes shadow outer: track seen names.
+        let mut seen = std::collections::HashSet::new();
+        let mut pairs: Vec<(String, Binding)> = Vec::new();
+
+        for scope in self.scopes.iter().rev() {
+            for (name, candidates) in &scope.bindings {
+                if seen.contains(name) {
+                    continue;
+                }
+                // Skip gensym'd internal bindings (e.g. __file_expr_0)
+                if name.starts_with("__") {
+                    seen.insert(name.clone());
+                    continue;
+                }
+                // Use the last candidate (most recent binding) with empty scope filter
+                if let Some(winner) = candidates.last() {
+                    let binding = winner.binding;
+                    // Skip primitives
+                    if self.primitive_values.contains_key(&binding) {
+                        seen.insert(name.clone());
+                        continue;
+                    }
+                    pairs.push((name.clone(), binding));
+                    seen.insert(name.clone());
+                }
+            }
+        }
+
+        // Build: (struct 'sym1 sym1 'sym2 sym2 ...)
+        let struct_binding = self.resolve_primitive("struct");
+        let func = Hir::new(HirKind::Var(struct_binding), span.clone(), Signal::silent());
+
+        let mut args = Vec::new();
+        for (name, binding) in &pairs {
+            let sym_id = self.symbols.intern(name);
+            // quoted symbol key
+            let key = Hir::silent(HirKind::Quote(Value::symbol(sym_id.0)), span.clone());
+            args.push(crate::hir::expr::CallArg {
+                expr: key,
+                spliced: false,
+            });
+            // variable reference
+            let var = Hir::silent(HirKind::Var(*binding), span.clone());
+            args.push(crate::hir::expr::CallArg {
+                expr: var,
+                spliced: false,
+            });
+        }
+
+        Ok(Hir::new(
+            HirKind::Call {
+                func: Box::new(func),
+                args,
+                is_tail: false,
+            },
+            span,
+            Signal::silent(),
         ))
     }
 

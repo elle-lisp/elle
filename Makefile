@@ -67,7 +67,7 @@ ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.
 
 # WASM backend skip list: tests requiring features not yet in WASM backend
 # (eval = dynamic compilation)
-WASM_SKIP := -e eval.lisp
+WASM_SKIP := -e eval.lisp -e eval-env.lisp
 
 smoke-vm: elle
 	@echo "=== elle scripts (VM, no JIT) ==="
