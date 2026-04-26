@@ -92,6 +92,38 @@ fn inject_flip(func: &mut LirFunction) {
                 .push(SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
         }
     }
+
+    // While-loop flip frames: detect back-edges from the CFG and inject
+    // FlipEnter/FlipSwap/FlipExit around each loop so per-iteration
+    // allocations are reclaimed.
+    //
+    // Pattern: entry→Jump(cond), cond→Branch{body,done}, back_edge→Jump(cond).
+    // Detect Branch blocks with exactly two Jump predecessors (forward entry +
+    // backward back-edge), distinguished by block order.
+    inject_flip_while_loops(func);
+}
+
+/// Inject per-loop FlipEnter/FlipSwap/FlipExit using the
+/// `while_loops` metadata recorded during lowering. Each triple
+/// `(entry, back_edge, done)` has already passed escape analysis.
+fn inject_flip_while_loops(func: &mut LirFunction) {
+    for &(entry_label, back_edge_label, done_label) in &func.while_loops.clone() {
+        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == entry_label) {
+            block
+                .instructions
+                .push(SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
+        }
+        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == back_edge_label) {
+            block
+                .instructions
+                .push(SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
+        }
+        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == done_label) {
+            block
+                .instructions
+                .insert(0, SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
+        }
+    }
 }
 
 /// Compile-time scope allocation statistics.
@@ -199,6 +231,10 @@ struct BlockLowerContext {
     /// `break` emits `(current_region_depth - region_depth_at_entry)`
     /// compensating `RegionExit` instructions before jumping to the exit.
     region_depth_at_entry: u32,
+    /// The `flip_depth` at the time this block was entered.
+    /// `break` emits compensating `FlipExit` instructions for each
+    /// flip frame entered since the block was opened.
+    flip_depth_at_entry: u32,
 }
 
 /// Lowers HIR to LIR
@@ -269,6 +305,11 @@ pub struct Lowerer<'a> {
     /// Incremented on `RegionEnter`, decremented on `RegionExit`.
     /// Used by `lower_break` to emit compensating `RegionExit`s.
     region_depth: u32,
+    /// Current nesting depth of while-loop flip frames.
+    /// Incremented when entering a flip-eligible while loop,
+    /// decremented when leaving. Used by `lower_break` to emit
+    /// compensating `FlipExit` instructions.
+    flip_depth: u32,
     pending_region_exits: u32,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
@@ -315,6 +356,7 @@ impl<'a> Lowerer<'a> {
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
+            flip_depth: 0,
             pending_region_exits: 0,
             scope_stats: ScopeStats::default(),
             discard_slot: None,
