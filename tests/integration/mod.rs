@@ -115,6 +115,9 @@ mod embedding {
 mod projection {
     include!("projection.rs");
 }
+mod lsp {
+    include!("lsp.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

@@ -12,6 +12,7 @@ pub fn run() -> i32 {
     let stdin = std::io::stdin();
     let mut reader = BufReader::new(stdin.lock());
     let mut stdout = std::io::stdout();
+    let mut shutdown_received = false;
 
     loop {
         // Read headers until Content-Length
@@ -47,6 +48,7 @@ pub fn run() -> i32 {
 
         let message = String::from_utf8_lossy(&buf);
         if let Ok(request) = serde_json::from_str::<Value>(&message) {
+            let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
             let (response, notifications) = handle_request(&request, &mut compiler_state);
 
             // Only send response for requests (not notifications)
@@ -62,10 +64,57 @@ pub fn run() -> i32 {
                 let _ = write!(stdout, "Content-Length: {}\r\n\r\n{}", body.len(), body);
                 let _ = stdout.flush();
             }
+
+            // LSP spec: exit notification causes the server to exit.
+            // Must check AFTER sending any pending response/notifications.
+            if method == "exit" {
+                return if shutdown_received { 0 } else { 1 };
+            }
+
+            if method == "shutdown" {
+                shutdown_received = true;
+            }
         }
     }
 
     0
+}
+
+/// Convert a `Diagnostic` to an LSP diagnostic JSON value.
+fn diagnostic_to_json(d: &crate::lint::diagnostics::Diagnostic) -> Value {
+    let (line, col) = match &d.location {
+        Some(loc) => (loc.line as u32, loc.col as u32),
+        None => (1, 1), // Default to (1,1) so subtracting 1 stays non-zero
+    };
+    json!({
+        "range": {
+            "start": { "line": line.saturating_sub(1), "character": col.saturating_sub(1) },
+            "end": { "line": line.saturating_sub(1), "character": col }
+        },
+        "severity": match d.severity {
+            crate::lint::diagnostics::Severity::Error => 1,
+            crate::lint::diagnostics::Severity::Warning => 2,
+            crate::lint::diagnostics::Severity::Info => 3,
+        },
+        "code": d.code,
+        "source": "elle-lint",
+        "message": d.message
+    })
+}
+
+/// Collect diagnostics from a compiled document and return a
+/// `textDocument/publishDiagnostics` notification.
+fn diagnostics_notification(uri: &str, compiler_state: &CompilerState) -> Option<Value> {
+    let doc = compiler_state.get_document(uri)?;
+    let diags: Vec<Value> = doc.diagnostics.iter().map(diagnostic_to_json).collect();
+    Some(json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/publishDiagnostics",
+        "params": {
+            "uri": uri,
+            "diagnostics": diags
+        }
+    }))
 }
 
 /// Extract the word/prefix at the given position
@@ -174,40 +223,8 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                         compiler_state.on_document_open(uri.to_string(), text.to_string());
                         compiler_state.compile_document(uri);
 
-                        if let Some(doc) = compiler_state.get_document(uri) {
-                            let diags: Vec<_> = doc
-                                .diagnostics
-                                .iter()
-                                .map(|d| {
-                                    let (line, col) = match &d.location {
-                                        Some(loc) => (loc.line as u32, loc.col as u32),
-                                        None => (0, 0),
-                                    };
-                                    json!({
-                                        "range": {
-                                            "start": { "line": line - 1, "character": col - 1 },
-                                            "end": { "line": line - 1, "character": col }
-                                        },
-                                        "severity": match d.severity {
-                                            crate::lint::diagnostics::Severity::Error => 1,
-                                            crate::lint::diagnostics::Severity::Warning => 2,
-                                            crate::lint::diagnostics::Severity::Info => 3,
-                                        },
-                                        "code": d.code,
-                                        "source": "elle-lint",
-                                        "message": d.message
-                                    })
-                                })
-                                .collect();
-
-                            notifications.push(json!({
-                                "jsonrpc": "2.0",
-                                "method": "textDocument/publishDiagnostics",
-                                "params": {
-                                    "uri": uri,
-                                    "diagnostics": diags
-                                }
-                            }));
+                        if let Some(notification) = diagnostics_notification(uri, compiler_state) {
+                            notifications.push(notification);
                         }
                     }
                 }
@@ -234,40 +251,10 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                             compiler_state.on_document_change(uri, text.to_string());
                             compiler_state.compile_document(uri);
 
-                            if let Some(doc) = compiler_state.get_document(uri) {
-                                let diags: Vec<_> = doc
-                                    .diagnostics
-                                    .iter()
-                                    .map(|d| {
-                                        let (line, col) = match &d.location {
-                                            Some(loc) => (loc.line as u32, loc.col as u32),
-                                            None => (0, 0),
-                                        };
-                                        json!({
-                                            "range": {
-                                                "start": { "line": line - 1, "character": col - 1 },
-                                                "end": { "line": line - 1, "character": col }
-                                            },
-                                        "severity": match d.severity {
-                                            crate::lint::diagnostics::Severity::Error => 1,
-                                            crate::lint::diagnostics::Severity::Warning => 2,
-                                            crate::lint::diagnostics::Severity::Info => 3,
-                                        },
-                                            "code": d.code,
-                                            "source": "elle-lint",
-                                            "message": d.message
-                                        })
-                                    })
-                                    .collect();
-
-                                notifications.push(json!({
-                                    "jsonrpc": "2.0",
-                                    "method": "textDocument/publishDiagnostics",
-                                    "params": {
-                                        "uri": uri,
-                                        "diagnostics": diags
-                                    }
-                                }));
+                            if let Some(notification) =
+                                diagnostics_notification(uri, compiler_state)
+                            {
+                                notifications.push(notification);
                             }
                         }
                     }
