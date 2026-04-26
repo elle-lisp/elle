@@ -1094,15 +1094,14 @@ fn test_eval_list_construction() {
 }
 
 #[test]
-fn test_eval_with_env_ignored() {
-    // env argument is accepted syntactically but ignored at runtime —
-    // eval compiles in an empty environment (just primitives + prelude).
-    // Passing an env with bindings does NOT inject them.
+fn test_eval_with_env_keyword_keys_skipped() {
+    // Keyword-keyed struct entries are silently skipped — only symbol
+    // keys ('x) become bindings. {:x 10} has keyword keys, so eval
+    // sees no env bindings and the expression uses primitives only.
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval("(eval '(+ 1 2) {:x 10})", &mut symbols, &mut vm, "<test>");
     clear_symbol_table();
-    // The env is ignored; the expression compiles with primitives only
     assert_eq!(result.unwrap(), Value::int(3));
 }
 
@@ -1251,14 +1250,13 @@ fn test_eval_nested() {
 }
 
 #[test]
-fn test_eval_env_arg_ignored() {
-    // env argument is consumed but ignored — any type is accepted
-    // (no validation since the value is discarded)
+fn test_eval_env_arg_rejects_non_struct() {
+    // env argument must be a struct or nil — other types are rejected
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval("(eval '42 \"anything\")", &mut symbols, &mut vm, "<test>");
     clear_symbol_table();
-    assert_eq!(result.unwrap(), Value::int(42));
+    assert!(result.is_err());
 }
 
 #[test]

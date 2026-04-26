@@ -33,6 +33,7 @@ const RESERVED_WORDS: &[&str] = &[
     "call/cc",
     "splice",
     "eval",
+    "environment",
     "load",
     "require",
     "module",

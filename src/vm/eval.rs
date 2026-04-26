@@ -1,9 +1,9 @@
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
-//! The expression is compiled in an empty environment (just primitives
-//! and prelude). The optional env argument on the stack is consumed
-//! but ignored.
+//! The expression is compiled in an environment seeded from primitives
+//! and prelude. When the optional env argument is a non-nil struct,
+//! its symbol-keyed entries become additional immutable bindings.
 
 use crate::error::{LError, LResult};
 use crate::hir::tailcall::mark_tail_calls;
@@ -12,7 +12,9 @@ use crate::lir::{Emitter, Lowerer};
 use crate::primitives::cached_primitive_meta;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax};
+use crate::value::heap::TableKey;
 use crate::value::{error_val, Value, SIG_ERROR, SIG_OK};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::core::VM;
@@ -29,9 +31,8 @@ pub(crate) fn handle_eval_instruction(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on eval (expr)");
     // Pop the env argument from the stack (bytecode always pushes two
-    // operands for Eval). The env is ignored — eval compiles in an
-    // empty environment.
-    let _env_value = vm
+    // operands for Eval).
+    let env_value = vm
         .fiber
         .stack
         .pop()
@@ -52,7 +53,7 @@ pub(crate) fn handle_eval_instruction(vm: &mut VM) {
     };
     let symbols = unsafe { &mut *symbols_ptr };
 
-    match eval_inner(vm, expr_value, symbols) {
+    match eval_inner(vm, expr_value, env_value, symbols) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
@@ -63,7 +64,12 @@ pub(crate) fn handle_eval_instruction(vm: &mut VM) {
     }
 }
 
-fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LResult<Value> {
+fn eval_inner(
+    vm: &mut VM,
+    expr_value: Value,
+    env_value: Value,
+    symbols: &mut SymbolTable,
+) -> LResult<Value> {
     // Convert value to Syntax
     let span = Span::synthetic();
     let syntax = Syntax::from_value(&expr_value, symbols, span)?;
@@ -106,6 +112,13 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
     // Put Expander back
     vm.eval_expander = Some(expander);
 
+    // Extract env bindings before creating the analyzer (avoids borrow conflict)
+    let env_map = if !env_value.is_nil() {
+        Some(extract_env_bindings(env_value, symbols)?)
+    } else {
+        None
+    };
+
     // Analyze
     let meta = cached_primitive_meta(symbols);
     let mut arena = BindingArena::new();
@@ -116,6 +129,10 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if let Some(ref env_map) = env_map {
+        analyzer.bind_compile_time_env(env_map);
+    }
+
     let mut analysis = analyzer
         .analyze(&expanded)
         .map_err(|e| LError::generic(format!("eval: analysis failed: {}", e)))?;
@@ -171,4 +188,41 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
             bits
         ))),
     }
+}
+
+/// Extract symbol-keyed entries from a struct value into a name→value map
+/// suitable for `bind_compile_time_env`.
+fn extract_env_bindings(
+    env_value: Value,
+    symbols: &SymbolTable,
+) -> LResult<HashMap<String, Value>> {
+    // Try immutable struct first, then mutable struct
+    if let Some(entries) = env_value.as_struct() {
+        let mut map = HashMap::new();
+        for (key, value) in entries {
+            if let TableKey::Symbol(sym_id) = key {
+                if let Some(name) = symbols.name(*sym_id) {
+                    map.insert(name.to_string(), *value);
+                }
+            }
+            // Non-symbol keys (keywords, ints, etc.) are silently skipped
+        }
+        return Ok(map);
+    }
+    if let Some(cell) = env_value.as_struct_mut() {
+        let borrowed = cell.borrow();
+        let mut map = HashMap::new();
+        for (key, value) in borrowed.iter() {
+            if let TableKey::Symbol(sym_id) = key {
+                if let Some(name) = symbols.name(*sym_id) {
+                    map.insert(name.to_string(), *value);
+                }
+            }
+        }
+        return Ok(map);
+    }
+    Err(LError::generic(format!(
+        "eval: env argument must be a struct or nil, got {}",
+        env_value.type_name()
+    )))
 }
