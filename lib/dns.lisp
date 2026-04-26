@@ -1,7 +1,7 @@
 (elle/epoch 9)
 ## lib/dns.lisp — Pure Elle DNS client (RFC 1035)
 ##
-## Loaded via: (def dns ((import-file "lib/dns.lisp")))
+## Loaded via: (def dns ((import "std/dns")))
 ## Usage:      (dns:resolve "example.com")
 ##
 ## Async/uring-first: all I/O goes through udp/send-to and udp/recv-from,

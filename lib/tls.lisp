@@ -5,7 +5,7 @@
 ## All socket I/O is async via native TCP ports and the fiber scheduler.
 ##
 ## Dependencies:
-##   - elle-tls plugin loaded via (import-file "path/to/libelle_tls.so")
+##   - elle-tls plugin loaded via (import "plugin/tls")
 ##   - tcp/connect, tcp/accept from net primitives
 ##   - port/read, port/write from stream primitives  (port/read returns
 ##     bytes for TCP ports — TCP streams use binary encoding in this runtime)
@@ -14,8 +14,8 @@
 ##   - subprocess/system for hostname resolution (getent fallback)
 ##
 ## Usage:
-##   (def tls-plugin (import-file "target/release/libelle_tls.so"))
-##   (def tls ((import-file "lib/tls.lisp") tls-plugin))
+##   (def tls-plugin (import "plugin/tls"))
+##   (def tls ((import "std/tls") tls-plugin))
 ##   (let [[conn (tls:connect "example.com" 443)]]
 ##     (defer (tls:close conn) ...))
 ##
@@ -24,7 +24,7 @@
 ## functions can call plugin primitives without naming them globally.
 ##
 ## API change from spec: the entry point takes the plugin struct as argument.
-## Load with: (def tls ((import-file "lib/tls.lisp") tls-plugin))
+## Load with: (def tls ((import "std/tls") tls-plugin))
 ##
 ## tls-conn shape:
 ##   {:tcp port :tls tls-state}
@@ -58,7 +58,7 @@
 ##
 ## The file's last expression is a function that accepts the plugin struct
 ## and returns the public API. Call it like:
-##   (def tls ((import-file "lib/tls.lisp") tls-plugin))
+##   (def tls ((import "std/tls") tls-plugin))
 
 (fn [plugin]
   ## Extract plugin primitives from the struct so they can be called

@@ -6,11 +6,11 @@
 ## the plugin is a thin wrapper with zero async knowledge.
 ##
 ## Dependencies:
-##   - elle-egui plugin loaded via (import "target/release/libelle_egui.so")
+##   - elle-egui plugin loaded via (import "plugin/egui")
 ##   - ev/poll-fd from stdlib (fiber scheduler)
 ##
 ## Usage:
-##   (def egui-plugin (import "target/release/libelle_egui.so"))
+##   (def egui-plugin (import "plugin/egui"))
 ##   (def ui ((import "std/egui") egui-plugin))
 ##
 ##   (var count 0)

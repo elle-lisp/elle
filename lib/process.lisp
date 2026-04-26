@@ -1,7 +1,7 @@
 (elle/epoch 9)
 ## lib/process.lisp — Erlang-inspired process module
 ##
-## Loaded via: (def process ((import-file "lib/process.lisp")))
+## Loaded via: (def process ((import "std/process")))
 ## Usage:      (process:start (fn () (send (self) :hello) (recv)))
 ##
 ## Processes are fibers driven by a cooperative scheduler with fuel-based

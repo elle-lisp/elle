@@ -5,12 +5,12 @@
 ## and files using the elle-hash plugin's incremental API.
 ##
 ## Dependencies:
-##   - elle-hash plugin loaded via (import-file "path/to/libelle_hash.so")
+##   - elle-hash plugin loaded via (import "plugin/hash")
 ##   - port/chunks, stream/fold from stdlib
 ##
 ## Usage:
-##   (def hash-plugin (import-file "target/release/libelle_hash.so"))
-##   (def h ((import-file "lib/hash.lisp") hash-plugin))
+##   (def hash-plugin (import "plugin/hash"))
+##   (def h ((import "std/hash") hash-plugin))
 ##
 ##   (bytes->hex (h:file :sha256 "bigfile.bin"))
 ##   (bytes->hex (h:digest :blake3 port))

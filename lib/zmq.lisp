@@ -8,7 +8,7 @@
 ##   - ffi primitives (ffi/native, ffi/defbind, ffi/malloc, etc.)
 ##
 ## Usage:
-##   (def zmq (import-file "lib/zmq.lisp"))
+##   (def zmq ((import "std/zmq")))
 ##   (def ctx (zmq:context))
 ##   (def sock (zmq:socket ctx :req))
 ##   (zmq:connect sock "tcp://localhost:5555")
@@ -227,6 +227,7 @@
 
 # ── Export ─────────────────────────────────────────────────────────────
 
+(fn []
 {:context        zmq/context
  :term           zmq/term
  :socket         zmq/socket
@@ -244,4 +245,4 @@
  :get-option     zmq/get-option
  :has-more?      zmq/has-more?
  :send-multipart zmq/send-multipart
- :recv-multipart zmq/recv-multipart}
+ :recv-multipart zmq/recv-multipart})

@@ -1,5 +1,13 @@
 (elle/epoch 9)
 ## lib/aws.lisp — Elle-native AWS client
+##
+## Usage:
+##   (def crypto (import "plugin/crypto"))
+##   (def jiff   (import "plugin/jiff"))
+##   (def tls-plug (import "plugin/tls"))
+##   (def tls ((import "std/tls") tls-plug))
+##   (def aws ((import "std/aws") :crypto crypto :jiff jiff :tls tls))
+##   (aws:request "s3" "GET" "/" :region "us-east-1")
 
 (def @sigv4-mod nil)
 
@@ -106,9 +114,8 @@
 
 ## ── Entry point ──────────────────────────────────────────────────────
 
-(fn [crypto jiff tls-module]
-  (def tls tls-module)
-  (assign sigv4-mod ((import-file "lib/aws/sigv4.lisp") crypto jiff))
+(fn [&named crypto jiff tls]
+  (assign sigv4-mod ((import "std/aws/sigv4") crypto jiff))
 
   {:request (fn [service method path & args]
     (aws-request-impl tls service method path (or (get args 0) {})))})

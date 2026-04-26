@@ -1,7 +1,7 @@
 (elle/epoch 9)
 ## lib/sync.lisp — Concurrency primitives built on futex (park/notify)
 ##
-## Loaded via: (def sync ((import-file "lib/sync.lisp")))
+## Loaded via: (def sync ((import "std/sync")))
 ## Usage:      (def lock (sync:make-lock))
 ##             (lock:acquire)
 ##             (lock:release)

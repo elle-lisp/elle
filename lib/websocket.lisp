@@ -7,7 +7,7 @@
 ##   (def ws   ((import "std/websocket") :hash hash :random rand))
 ##
 ## With TLS (for wss://):
-##   (def tls-plug ((import "plugin/tls")))
+##   (def tls-plug (import "plugin/tls"))
 ##   (def tls ((import "std/tls") tls-plug))
 ##   (def ws  ((import "std/websocket") :hash hash :random rand :tls tls))
 ##

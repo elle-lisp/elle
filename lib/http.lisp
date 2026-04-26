@@ -5,7 +5,7 @@
 ##   (def http ((import "std/http")))
 ##
 ## HTTPS client support requires a TLS plugin passed as :tls:
-##   (def tls-plug ((import "plugin/tls")))
+##   (def tls-plug (import "plugin/tls"))
 ##   (def http ((import "std/http") :tls tls-plug))
 ##
 ## Usage: (http:get "http://example.com/")   (http:get "https://...")

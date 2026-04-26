@@ -5,7 +5,7 @@
 ##   (def http2 ((import "std/http2")))
 ##
 ## h2 over TLS (requires TLS plugin):
-##   (def tls-plug ((import "plugin/tls")))
+##   (def tls-plug (import "plugin/tls"))
 ##   (def tls ((import "std/tls") tls-plug))
 ##   (def http2 ((import "std/http2") :tls tls))
 ##

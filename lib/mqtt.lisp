@@ -5,12 +5,12 @@
 ## All TCP I/O is async via native TCP ports and the fiber scheduler.
 ##
 ## Dependencies:
-##   - elle-mqtt plugin loaded via (import-file "path/to/libelle_mqtt.so")
+##   - elle-mqtt plugin loaded via (import "plugin/mqtt")
 ##   - tcp/connect, port/read, port/write, port/close
 ##
 ## Usage:
-##   (def mqtt-plugin (import-file "target/release/libelle_mqtt.so"))
-##   (def mqtt ((import-file "lib/mqtt.lisp") mqtt-plugin))
+##   (def mqtt-plugin (import "plugin/mqtt"))
+##   (def mqtt ((import "std/mqtt") mqtt-plugin))
 ##   (let* [[conn (mqtt:connect "broker.example.com" 1883
 ##                              :client-id "elle-client")]
 ##          [_ (mqtt:subscribe conn [["test/#" 0]])]
