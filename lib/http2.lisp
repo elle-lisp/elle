@@ -241,15 +241,14 @@
     "Push an error message into every live stream's data-queue so blocked
      consumers wake up instead of hanging forever."
     (each sid in (keys session:streams)
-      (let [s (get session:streams sid)]
-        (when s
-          ## put can fail if the queue is full or the consumer fiber has
-          ## already exited — swallow so we still notify remaining streams
-          (protect
-            (s:data-queue:put {:type :error
-                               :error {:error :h2-error
-                                       :reason reason
-                                       :message "session closed"}})))))
+      ## put can fail if the queue is full or the consumer fiber has
+      ## already exited — swallow so we still notify remaining streams
+      (when-let [s (get session:streams sid)]
+        (protect
+          (s:data-queue:put {:type :error
+                             :error {:error :h2-error
+                                     :reason reason
+                                     :message "session closed"}}))))
     (put session :streams @{}))
 
   (defn reader-loop [session]
@@ -297,19 +296,17 @@
                (let [increment (bit/and (frame:read-u32 payload 0) 0x7fffffff)]
                  (if (= sid 0)
                    (stream:apply-window-update session:conn-flow increment)
-                   (let [s (get session:streams sid)]
-                     (when s
-                       (put s :send-window (+ s:send-window increment))))))
+                   (when-let [s (get session:streams sid)]
+                     (put s :send-window (+ s:send-window increment)))))
 
               ## ── RST_STREAM ──
               (= ftype C:type-rst-stream)
-               (let [s (get session:streams sid)]
-                 (when s
-                   (stream:transition s :recv-rst)
-                   (let [err-code (frame:read-u32 payload 0)]
-                     (put s :error-code err-code)
-                     (s:data-queue:put {:type :rst :code err-code}))
-                   (del session:streams sid)))
+               (when-let [s (get session:streams sid)]
+                 (stream:transition s :recv-rst)
+                 (let [err-code (frame:read-u32 payload 0)]
+                   (put s :error-code err-code)
+                   (s:data-queue:put {:type :rst :code err-code}))
+                 (del session:streams sid))
 
               ## ── HEADERS ──
               (= ftype C:type-headers)
@@ -334,17 +331,16 @@
                  (let [len (length payload)]
                    (when (> len 0)
                      (send-window-update session 0 len)))
-                 (let [s (get session:streams sid)]
-                   (when s
-                     (let [end? (has-flag? flags C:flag-end-stream)]
-                       (s:data-queue:put {:type :data :data payload
-                                          :end-stream end?})
-                       (when end? (stream:transition s :recv-end-stream))
-                       # Stream-level WINDOW_UPDATE
-                       (let [len (length payload)]
-                         (when (> len 0)
-                           (send-window-update session sid len)))
-                       (when end? (del session:streams sid))))))
+                 (when-let [s (get session:streams sid)]
+                   (let [end? (has-flag? flags C:flag-end-stream)]
+                     (s:data-queue:put {:type :data :data payload
+                                        :end-stream end?})
+                     (when end? (stream:transition s :recv-end-stream))
+                     # Stream-level WINDOW_UPDATE
+                     (let [len (length payload)]
+                       (when (> len 0)
+                         (send-window-update session sid len)))
+                     (when end? (del session:streams sid)))))
 
               ## ── PUSH_PROMISE — reject ──
               (= ftype C:type-push-promise)
@@ -697,23 +693,21 @@
                  (let [len (length payload)]
                    (when (> len 0)
                      (send-window-update session 0 len)))
-                 (let [s (get session:streams sid)]
-                   (when s
-                     (let [end? (has-flag? flags C:flag-end-stream)]
-                       (s:data-queue:put {:type :data :data payload
-                                          :end-stream end?})
-                       (when end? (stream:transition s :recv-end-stream))
-                       (let [len (length payload)]
-                         (when (> len 0)
-                           (send-window-update session sid len)))
-                       (when end? (del session:streams sid))))))
+                 (when-let [s (get session:streams sid)]
+                   (let [end? (has-flag? flags C:flag-end-stream)]
+                     (s:data-queue:put {:type :data :data payload
+                                        :end-stream end?})
+                     (when end? (stream:transition s :recv-end-stream))
+                     (let [len (length payload)]
+                       (when (> len 0)
+                         (send-window-update session sid len)))
+                     (when end? (del session:streams sid)))))
 
               (= ftype C:type-rst-stream)
-               (let [s (get session:streams sid)]
-                 (when s
-                   (stream:transition s :recv-rst)
-                   (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)})
-                   (del session:streams sid)))
+               (when-let [s (get session:streams sid)]
+                 (stream:transition s :recv-rst)
+                 (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)})
+                 (del session:streams sid))
 
               true nil))))))
 
