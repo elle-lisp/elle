@@ -1568,15 +1568,15 @@ fn nested_let_tail_call_emits_multiple_exits() {
 
 #[test]
 fn nested_let_with_heap_inits_outer_only() {
-    // Nested lets with heap-allocating inits: only the INNER let
-    // scope-allocates. The outer let is rejected by C4 (outward set)
-    // because the inner let's init contains a non-immediate argument
-    // (string constant) to a non-immediate-returning callee (concat).
+    // Nested lets with heap-allocating inits: both lets scope-allocate.
+    // concat is a non-mutating primitive — it consumes args and produces
+    // return values without storing args externally, so escape analysis
+    // accepts it.
     let source = "(defn loop (n) (let [a (concat \"a\" (number->string n))] (let [b (concat \"b\" (number->string n))] (loop (- n 1)))))";
     let enters = count_in_closure_bytecode(source, "RegionEnter");
     let exits = count_in_closure_bytecode(source, "RegionExit");
-    assert_eq!(enters, 1, "only inner let scope-allocates");
-    assert_eq!(exits, 1, "RegionExit matches RegionEnter");
+    assert_eq!(enters, 2, "both lets scope-allocate (concat is safe primitive)");
+    assert_eq!(exits, 2, "RegionExit matches RegionEnter");
 }
 
 #[test]
