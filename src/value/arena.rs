@@ -12,6 +12,7 @@
 
 use std::rc::Rc;
 
+use super::fiberheap::bump::BumpMark;
 use super::heap::HeapObject;
 use super::Value;
 
@@ -41,6 +42,9 @@ pub struct ArenaMark {
     /// Length of `FiberHeap.root_allocs` at mark time.
     /// Used by `release()` to dealloc root-slab slots allocated after the mark.
     root_allocs_len: usize,
+    /// Bump arena position at mark time. Used by `release()` to reset the
+    /// bump pointer and free pages allocated after the mark.
+    bump_mark: Option<BumpMark>,
 }
 
 impl ArenaMark {
@@ -50,6 +54,7 @@ impl ArenaMark {
         custom_ptrs_len: usize,
         root_allocs_len: usize,
         shared_alloc_count: usize,
+        bump_mark: Option<BumpMark>,
     ) -> Self {
         ArenaMark {
             position,
@@ -57,6 +62,7 @@ impl ArenaMark {
             shared_alloc_count,
             custom_ptrs_len,
             root_allocs_len,
+            bump_mark,
         }
     }
 
@@ -78,6 +84,10 @@ impl ArenaMark {
 
     pub(crate) fn root_allocs_len(&self) -> usize {
         self.root_allocs_len
+    }
+
+    pub(crate) fn bump_mark(&self) -> Option<BumpMark> {
+        self.bump_mark
     }
 }
 

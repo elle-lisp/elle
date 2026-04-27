@@ -241,6 +241,7 @@ pub(crate) fn prim_arena_reset(args: &[Value]) -> (SignalBits, Value) {
             mark.custom_ptrs_len(),
             mark.root_allocs_len(),
             mark.shared_alloc_count(),
+            mark.bump_mark(),
         );
         unsafe { (*heap_ptr).release(m) };
     }
