@@ -61,6 +61,34 @@
   (assert (bounded? d100 d10k 10)
     (string "t0 string: d100=" d100 " d10k=" d10k)))
 
+# ── Tier 0b: bytes-bounded while loops ────────────────────────────
+# Per-iteration RegionEnter/RegionExit releases bump arena pages,
+# so allocated-bytes stays bounded even at scale.
+
+(defn t0b-bytes-struct [n]
+  (def b (get (arena/stats) :allocated-bytes))
+  (def @i 0)
+  (while (< i n)
+    {:x i :y (+ i 1)}
+    (assign i (+ i 1)))
+  (- (get (arena/stats) :allocated-bytes) b))
+
+(let [d (t0b-bytes-struct 100000)]
+  (assert (< d 131072)
+    (string "t0b bytes-struct: " d " bytes (expected <128KB)")))
+
+(defn t0b-bytes-string [n]
+  (def b (get (arena/stats) :allocated-bytes))
+  (def @i 0)
+  (while (< i n)
+    (string "iter-" i)
+    (assign i (+ i 1)))
+  (- (get (arena/stats) :allocated-bytes) b))
+
+(let [d (t0b-bytes-string 100000)]
+  (assert (< d 131072)
+    (string "t0b bytes-string: " d " bytes (expected <128KB)")))
+
 # ── Tier 1: nested while loops ───────────────────────────────────
 # Inner and outer loops both allocate; scoping must handle both.
 
@@ -192,16 +220,13 @@
   (assert (bounded? d100 d10k 30)
     (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
 
-# ── Known leaks (while loops only) ────────────────────────────────
-# Tail calls reclaim everything via trampoline rotation. While loops
-# leak patterns that are either dtor-bearing (closures, fibers) or
-# fail escape analysis (concat, outward-escaping struct, protect).
-#
-# These assertions document the current linear growth. When fixed,
-# they will fail — update them to assert bounded.
+# ── Tier 0c: while loops with closures, fibers, concat, protect ──
+# These patterns now pass escape analysis: closures are collected
+# for rotation-safety analysis across lambda boundaries, and
+# primitives no longer trigger false rejections for heap-returning args.
 
-# Dtor-bearing: closures (Rc<ClosureTemplate> kept in main pool)
-(defn leak-closure-while [n]
+# Closure: let-bound lambda called inside while body
+(defn t0c-closure-while [n]
   (def before (arena/count))
   (def @i 0)
   (while (< i n)
@@ -209,12 +234,12 @@
     (assign i (+ i 1)))
   (- (arena/count) before))
 
-(let [d (leak-closure-while 1000)]
-  (assert (>= d 1000)
-    (string "closure-while: expected linear leak, got " d)))
+(let [d100 (t0c-closure-while 100) d10k (t0c-closure-while 10000)]
+  (assert (bounded? d100 d10k 10)
+    (string "t0c closure-while: d100=" d100 " d10k=" d10k)))
 
-# Dtor-bearing: fiber/new (closure + fiber handle)
-(defn leak-fiber-while [n]
+# fiber/new + fiber/resume: primitives with heap-returning args
+(defn t0c-fiber-while [n]
   (def before (arena/count))
   (def @i 0)
   (while (< i n)
@@ -222,12 +247,12 @@
     (assign i (+ i 1)))
   (- (arena/count) before))
 
-(let [d (leak-fiber-while 1000)]
-  (assert (>= d 1000)
-    (string "fiber-while: expected linear leak, got " d)))
+(let [d100 (t0c-fiber-while 100) d10k (t0c-fiber-while 10000)]
+  (assert (bounded? d100 d10k 10)
+    (string "t0c fiber-while: d100=" d100 " d10k=" d10k)))
 
-# Escape-analysis rejected: concat (multi-step primitive, locals escape)
-(defn leak-concat-while [n]
+# concat with number->string: chain of primitives returning heap values
+(defn t0c-concat-while [n]
   (def before (arena/count))
   (def @i 0)
   (while (< i n)
@@ -235,26 +260,12 @@
     (assign i (+ i 1)))
   (- (arena/count) before))
 
-(let [d (leak-concat-while 1000)]
-  (assert (>= d 1000)
-    (string "concat-while: expected linear leak, got " d)))
+(let [d100 (t0c-concat-while 100) d10k (t0c-concat-while 10000)]
+  (assert (bounded? d100 d10k 10)
+    (string "t0c concat-while: d100=" d100 " d10k=" d10k)))
 
-# Escape-analysis rejected: struct assigned to outer mutable
-(defn leak-struct-outer [n]
-  (def before (arena/count))
-  (def @last nil)
-  (def @i 0)
-  (while (< i n)
-    (assign last {:x i})
-    (assign i (+ i 1)))
-  (- (arena/count) before))
-
-(let [d (leak-struct-outer 1000)]
-  (assert (>= d 1000)
-    (string "struct-outer: expected linear leak, got " d)))
-
-# Escape-analysis rejected: protect (internally creates closure + fiber)
-(defn leak-protect-while [n]
+# protect: primitives creating closure + fiber internally
+(defn t0c-protect-while [n]
   (def before (arena/count))
   (def @i 0)
   (while (< i n)
@@ -262,12 +273,12 @@
     (assign i (+ i 1)))
   (- (arena/count) before))
 
-(let [d (leak-protect-while 1000)]
-  (assert (>= d 1000)
-    (string "protect-while: expected linear leak, got " d)))
+(let [d100 (t0c-protect-while 100) d10k (t0c-protect-while 10000)]
+  (assert (bounded? d100 d10k 10)
+    (string "t0c protect-while: d100=" d100 " d10k=" d10k)))
 
-# Same patterns in yielding while — same leaks
-(defn leak-closure-yield [n]
+# Same patterns in yielding while — also bounded now
+(defn t0c-closure-yield [n]
   (drain-fiber
     (fiber/new
       (fn []
@@ -280,11 +291,11 @@
         (- (arena/count) before))
       |:yield|)))
 
-(let [d (leak-closure-yield 1000)]
-  (assert (>= d 1000)
-    (string "closure-yield: expected linear leak, got " d)))
+(let [d100 (t0c-closure-yield 100) d10k (t0c-closure-yield 10000)]
+  (assert (bounded? d100 d10k 10)
+    (string "t0c closure-yield: d100=" d100 " d10k=" d10k)))
 
-(defn leak-concat-yield [n]
+(defn t0c-concat-yield [n]
   (drain-fiber
     (fiber/new
       (fn []
@@ -297,9 +308,44 @@
         (- (arena/count) before))
       |:yield|)))
 
-(let [d (leak-concat-yield 1000)]
-  (assert (>= d 1000)
-    (string "concat-yield: expected linear leak, got " d)))
+(let [d100 (t0c-concat-yield 100) d10k (t0c-concat-yield 10000)]
+  (assert (bounded? d100 d10k 10)
+    (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
+
+# Closure bytes: now bounded too
+(defn t0c-bytes-closure [n]
+  (def b (get (arena/stats) :allocated-bytes))
+  (def @i 0)
+  (while (< i n)
+    (let [f (fn [] i)] (f))
+    (assign i (+ i 1)))
+  (- (get (arena/stats) :allocated-bytes) b))
+
+(let [d (t0c-bytes-closure 10000)]
+  (assert (< d 131072)
+    (string "t0c bytes-closure: " d " bytes (expected <128KB)")))
+
+# ── Known leak: struct assigned to outer mutable binding ─────────
+# heap-allocated assign to an outer mutable binding is genuinely
+# dangerous (the scope would free it while the outer binding still
+# holds a reference). This remains linear.
+
+(defn linear? [d100 d1000]
+  "True if growth is roughly linear (d1000 ≥ 5x d100)."
+  (and (>= d100 50) (>= d1000 (* d100 5))))
+
+(defn leak-struct-outer [n]
+  (def before (arena/count))
+  (def @last nil)
+  (def @i 0)
+  (while (< i n)
+    (assign last {:x i})
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-struct-outer 100) d1k (leak-struct-outer 1000)]
+  (assert (linear? d100 d1k)
+    (string "struct-outer: d100=" d100 " d1k=" d1k " — expected linear leak")))
 
 # ── Tier 4: correctness under rotation ───────────────────────────
 # Rotation must not corrupt live values. Returned heap values and
@@ -335,3 +381,21 @@
 
 (assert (= (t4-accum 10000 0) 50005000)
   (string "t4 accumulator: " (t4-accum 10000 0)))
+
+# Yielded heap values survive per-iteration scope release at scale.
+(let* [fiber (fiber/new
+               (fn []
+                 (def @i 0)
+                 (while (< i 1000)
+                   (yield (string "val-" i))
+                   (assign i (+ i 1))))
+               |:yield|)
+       vals (do
+              (def @acc [])
+              (while (not= (fiber/status fiber) :dead)
+                (assign acc (append acc [(fiber/resume fiber)])))
+              acc)]
+  (assert (= (get vals 0) "val-0")
+    (string "t4 yield-at-scale first: " (get vals 0)))
+  (assert (= (get vals 999) "val-999")
+    (string "t4 yield-at-scale last: " (get vals 999))))

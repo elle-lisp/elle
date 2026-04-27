@@ -555,32 +555,21 @@ impl<'a> Lowerer<'a> {
                 // which is caught by condition 3 (result_is_safe).
                 if !*is_tail {
                     let callee_is_safe = self.call_result_is_safe(func, args);
-                    if !callee_is_safe {
-                        // Check 1: any non-safe callee receiving a heap-allocated
-                        // scope-local argument may store it externally (e.g. push
-                        // into an outer @array).
-                        if args
-                            .iter()
-                            .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
-                        {
-                            return true;
-                        }
-                        // Check 2: user-defined functions (non-primitives) may
-                        // internally allocate heap objects and store them in
-                        // external mutable structures (e.g. via put to an outer
-                        // @struct). Built-in primitives are safe — they only
-                        // produce return values and/or mutate their arguments
-                        // (caught by check 1).
+                    if !callee_is_safe
+                        && !self.callee_is_primitive(func)
+                        && !self.callee_is_rotation_safe(func)
+                    {
+                        // The callee is an unknown user-defined function that
+                        // is not proven rotation-safe. It could store its args
+                        // externally or internally allocate heap values and
+                        // escape them. Reject unconditionally.
                         //
-                        // Safe if the callee is a built-in primitive (only
-                        // produces return values / mutates args, caught by
-                        // check 1) OR rotation-safe (proven not to escape
-                        // heap values to external structures). Rotation-safety
-                        // transitively checks for internal allocations stored
-                        // externally via mutating primitives.
-                        if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
-                            return true;
-                        }
+                        // Primitives are safe: they only produce return values
+                        // and/or mutate their arguments (caught by
+                        // MUTATING_PRIMITIVES). Rotation-safe callees are
+                        // proven not to escape heap values to external
+                        // structures.
+                        return true;
                     }
                 }
                 self.walk_for_outward_set(func, scope_bindings)
