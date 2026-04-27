@@ -136,7 +136,10 @@
                         :initial-window-size 65535
                         :max-frame-size 16384
                         :max-concurrent-streams 100}
-      :conn-flow      (stream:make-flow-control INITIAL-WINDOW)
+      ## Connection send window starts at 65535 per RFC 9113 Section 6.9.2.
+      ## Only WINDOW_UPDATE frames change the connection window; SETTINGS
+      ## INITIAL_WINDOW_SIZE only affects per-stream windows.
+      :conn-flow      (stream:make-flow-control 65535)
       :write-queue    (sync:make-queue 256)
       :reader-fiber   nil
       :writer-fiber   nil
@@ -234,6 +237,20 @@
   ## ── Reader fiber ───────────────────────────────────────────────────────
   ## Reads frames, dispatches to per-stream queues, handles control frames.
 
+  (defn notify-all-streams [session reason]
+    "Push an error message into every live stream's data-queue so blocked
+     consumers wake up instead of hanging forever."
+    (each sid in (keys session:streams)
+      ## put can fail if the queue is full or the consumer fiber has
+      ## already exited — swallow so we still notify remaining streams
+      (when-let [s (get session:streams sid)]
+        (protect
+          (s:data-queue:put {:type :error
+                             :error {:error :h2-error
+                                     :reason reason
+                                     :message "session closed"}}))))
+    (put session :streams @{}))
+
   (defn reader-loop [session]
     "Read frames from transport and dispatch."
     (let [t session:transport
@@ -243,10 +260,12 @@
           (when (not ok?)
             (put session :closed? true)
             (session:write-queue:put :shutdown)
+            (notify-all-streams session :transport-error)
             (break nil))
           (when (nil? f)
             (put session :closed? true)
             (session:write-queue:put :shutdown)
+            (notify-all-streams session :eof)
             (break nil))
           (let [ftype f:type
                 flags f:flags
@@ -277,21 +296,17 @@
                (let [increment (bit/and (frame:read-u32 payload 0) 0x7fffffff)]
                  (if (= sid 0)
                    (stream:apply-window-update session:conn-flow increment)
-                   (let [s (get session:streams sid)]
-                     (when s
-                       (stream:apply-window-update
-                         (stream:make-flow-control s:send-window)
-                         increment)))))
+                   (when-let [s (get session:streams sid)]
+                     (put s :send-window (+ s:send-window increment)))))
 
               ## ── RST_STREAM ──
               (= ftype C:type-rst-stream)
-               (let [s (get session:streams sid)]
-                 (when s
-                   (stream:transition s :recv-rst)
-                   (let [err-code (frame:read-u32 payload 0)]
-                     (put s :error-code err-code)
-                     (s:data-queue:put {:type :rst :code err-code}))
-                   (del session:streams sid)))
+               (when-let [s (get session:streams sid)]
+                 (stream:transition s :recv-rst)
+                 (let [err-code (frame:read-u32 payload 0)]
+                   (put s :error-code err-code)
+                   (s:data-queue:put {:type :rst :code err-code}))
+                 (del session:streams sid))
 
               ## ── HEADERS ──
               (= ftype C:type-headers)
@@ -309,16 +324,21 @@
 
               ## ── DATA ──
               (= ftype C:type-data)
-               (let [s (get session:streams sid)]
-                 (when s
+               (begin
+                 # Always send connection-level WINDOW_UPDATE for received
+                 # DATA, even if the stream is unknown (already closed).
+                 # Skipping this leaks the connection receive window.
+                 (let [len (length payload)]
+                   (when (> len 0)
+                     (send-window-update session 0 len)))
+                 (when-let [s (get session:streams sid)]
                    (let [end? (has-flag? flags C:flag-end-stream)]
                      (s:data-queue:put {:type :data :data payload
                                         :end-stream end?})
                      (when end? (stream:transition s :recv-end-stream))
-                     # Auto WINDOW_UPDATE for connection + stream
+                     # Stream-level WINDOW_UPDATE
                      (let [len (length payload)]
                        (when (> len 0)
-                         (send-window-update session 0 len)
                          (send-window-update session sid len)))
                      (when end? (del session:streams sid)))))
 
@@ -399,7 +419,7 @@
             (frame:make-headers-frame sid header-block (not has-body) true)]
         (stream:transition s :send-headers)
         (send-frame session ftype flags sid2 payload))
-      # Send DATA if body present
+      # Send DATA if body present, respecting connection flow control
       (when has-body
         (let* [body-bytes (if (string? body) (bytes body) body)
                max-frame (get session:remote-settings :max-frame-size)
@@ -407,13 +427,15 @@
                total (length body-bytes)]
           (while (< offset total)
             (let* [remaining (- total offset)
-                   chunk-size (min remaining max-frame)
-                   chunk (slice body-bytes offset (+ offset chunk-size))
-                   end? (= (+ offset chunk-size) total)
+                   # Respect connection send window — blocks until space available
+                   allowed (stream:consume-send-window session:conn-flow
+                             (min remaining max-frame))
+                   chunk (slice body-bytes offset (+ offset allowed))
+                   end? (= (+ offset allowed) total)
                    [ftype flags sid2 payload]
                    (frame:make-data-frame sid chunk end?)]
               (send-frame session ftype flags sid2 payload)
-              (assign offset (+ offset chunk-size))))
+              (assign offset (+ offset allowed))))
           (stream:transition s :send-end-stream)))
       # Wait for response
       (let [@resp-headers nil
@@ -421,14 +443,16 @@
             @done false]
         (while (not done)
           (let [msg (s:data-queue:take)]
-            (cond
-              (= msg:type :headers) (begin (assign resp-headers msg:headers) (when msg:end-stream (assign done true)))
-              (= msg:type :data) (begin (push resp-body msg:data) (when msg:end-stream (assign done true)))
-              (= msg:type :rst)
-               (error {:error :h2-error :reason :stream-error
-                       :stream-id sid :code msg:code
-                       :message (concat "stream reset: " (string msg:code))})
-              true (assign done true))))
+            (match msg:type
+              :headers (begin (assign resp-headers msg:headers)
+                              (when msg:end-stream (assign done true)))
+              :data    (begin (push resp-body msg:data)
+                              (when msg:end-stream (assign done true)))
+              :rst     (error {:error :h2-error :reason :stream-error
+                               :stream-id sid :code msg:code
+                               :message (concat "stream reset: " (string msg:code))})
+              :error   (error msg:error)
+              _        (assign done true))))
         # Build response
         (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status")) resp-headers))
                status (if status-pair (parse-int (get status-pair 1)) 0)
@@ -468,7 +492,7 @@
             (frame:make-headers-frame sid header-block (not has-body) true)]
         (stream:transition s :send-headers)
         (send-frame session ftype flags sid2 payload))
-      # Send DATA if body present
+      # Send DATA if body present, respecting connection flow control
       (when has-body
         (let* [body-bytes (if (string? body) (bytes body) body)
                max-frame (get session:remote-settings :max-frame-size)
@@ -476,13 +500,14 @@
                total (length body-bytes)]
           (while (< offset total)
             (let* [remaining (- total offset)
-                   chunk-size (min remaining max-frame)
-                   chunk (slice body-bytes offset (+ offset chunk-size))
-                   end? (= (+ offset chunk-size) total)
+                   allowed (stream:consume-send-window session:conn-flow
+                             (min remaining max-frame))
+                   chunk (slice body-bytes offset (+ offset allowed))
+                   end? (= (+ offset allowed) total)
                    [ftype flags sid2 payload]
                    (frame:make-data-frame sid chunk end?)]
               (send-frame session ftype flags sid2 payload)
-              (assign offset (+ offset chunk-size))))
+              (assign offset (+ offset allowed))))
           (stream:transition s :send-end-stream)))
       s))
 
@@ -663,24 +688,26 @@
                              (stream:transition s :send-end-stream))))))))
 
               (= ftype C:type-data)
-               (let [s (get session:streams sid)]
-                 (when s
+               (begin
+                 # Always send connection WINDOW_UPDATE for received DATA
+                 (let [len (length payload)]
+                   (when (> len 0)
+                     (send-window-update session 0 len)))
+                 (when-let [s (get session:streams sid)]
                    (let [end? (has-flag? flags C:flag-end-stream)]
                      (s:data-queue:put {:type :data :data payload
                                         :end-stream end?})
                      (when end? (stream:transition s :recv-end-stream))
                      (let [len (length payload)]
                        (when (> len 0)
-                         (send-window-update session 0 len)
                          (send-window-update session sid len)))
                      (when end? (del session:streams sid)))))
 
               (= ftype C:type-rst-stream)
-               (let [s (get session:streams sid)]
-                 (when s
-                   (stream:transition s :recv-rst)
-                   (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)})
-                   (del session:streams sid)))
+               (when-let [s (get session:streams sid)]
+                 (stream:transition s :recv-rst)
+                 (s:data-queue:put {:type :rst :code (frame:read-u32 payload 0)})
+                 (del session:streams sid))
 
               true nil))))))
 
