@@ -192,6 +192,48 @@
   (assert (bounded? d100 d10k 30)
     (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
 
+# ── Tier 3d: closure leak in while loops (known defect) ──────────
+# Closures are dtor-bearing objects (Rc<ClosureTemplate>). rotate_pools
+# keeps them in the main pool to avoid freeing Rc inners while still
+# referenced, and escape analysis rejects while loops containing
+# closure allocations. This causes linear accumulation.
+#
+# These assertions document the current leak. When the defect is
+# fixed, they will fail — update them to assert bounded.
+
+(defn t3-closure-while [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (let [f (fn [] i)] (f))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (t3-closure-while 100) d10k (t3-closure-while 10000)]
+  (assert (= d100 100)
+    (string "t3d closure-while: expected linear leak, d100=" d100))
+  (assert (= d10k 10000)
+    (string "t3d closure-while: expected linear leak, d10k=" d10k)))
+
+(defn t3-closure-yield [n]
+  (drain-fiber
+    (fiber/new
+      (fn []
+        (def before (arena/count))
+        (def @i 0)
+        (while (< i n)
+          (let [f (fn [] i)] (f))
+          (yield i)
+          (assign i (+ i 1)))
+        (- (arena/count) before))
+      |:yield|)))
+
+(let [d100 (t3-closure-yield 100) d10k (t3-closure-yield 1000)]
+  (assert (= d100 100)
+    (string "t3d closure-yield: expected linear leak, d100=" d100))
+  (assert (= d10k 1000)
+    (string "t3d closure-yield: expected linear leak, d10k=" d10k)))
+
 # ── Tier 4: correctness under rotation ───────────────────────────
 # Rotation must not corrupt live values. Returned heap values and
 # yielded heap values must survive.
