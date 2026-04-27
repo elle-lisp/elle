@@ -446,15 +446,16 @@
             @done false]
         (while (not done)
           (let [msg (s:data-queue:take)]
-            (cond
-              (= msg:type :headers) (begin (assign resp-headers msg:headers) (when msg:end-stream (assign done true)))
-              (= msg:type :data) (begin (push resp-body msg:data) (when msg:end-stream (assign done true)))
-              (= msg:type :rst)
-               (error {:error :h2-error :reason :stream-error
-                       :stream-id sid :code msg:code
-                       :message (concat "stream reset: " (string msg:code))})
-              (= msg:type :error) (error msg:error)
-              true (assign done true))))
+            (match msg:type
+              :headers (begin (assign resp-headers msg:headers)
+                              (when msg:end-stream (assign done true)))
+              :data    (begin (push resp-body msg:data)
+                              (when msg:end-stream (assign done true)))
+              :rst     (error {:error :h2-error :reason :stream-error
+                               :stream-id sid :code msg:code
+                               :message (concat "stream reset: " (string msg:code))})
+              :error   (error msg:error)
+              _        (assign done true))))
         # Build response
         (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status")) resp-headers))
                status (if status-pair (parse-int (get status-pair 1)) 0)

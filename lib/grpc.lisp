@@ -59,22 +59,24 @@
           @done false]
       (while (not done)
         (let [msg (s:data-queue:take)]
-          (cond
-            (= msg:type :headers) (begin (if (nil? resp-headers)
-               (assign resp-headers msg:headers)
-               ## Trailers — check grpc-status
-               (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
-                 (when (and status-pair (not (= (get status-pair 1) "0")))
-                   (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
-                     (error {:error :grpc-error
-                             :code (parse-int (get status-pair 1))
-                             :message (if msg-pair (get msg-pair 1) "unknown error")}))))) (when msg:end-stream (assign done true)))
-            (= msg:type :data) (begin (push resp-data msg:data) (when msg:end-stream (assign done true)))
-            (= msg:type :rst)
-             (error {:error :grpc-error :reason :stream-reset
-                     :code msg:code})
-            (= msg:type :error) (error msg:error)
-            true (assign done true))))
+          (match msg:type
+            :headers (begin
+                       (if (nil? resp-headers)
+                         (assign resp-headers msg:headers)
+                         ## Trailers — check grpc-status
+                         (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
+                           (when (and status-pair (not (= (get status-pair 1) "0")))
+                             (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
+                               (error {:error :grpc-error
+                                       :code (parse-int (get status-pair 1))
+                                       :message (if msg-pair (get msg-pair 1) "unknown error")})))))
+                       (when msg:end-stream (assign done true)))
+            :data    (begin (push resp-data msg:data)
+                            (when msg:end-stream (assign done true)))
+            :rst     (error {:error :grpc-error :reason :stream-reset
+                             :code msg:code})
+            :error   (error msg:error)
+            _        (assign done true))))
       (let [all-data (if (empty? resp-data)
                        (bytes)
                        (apply concat (freeze resp-data)))]
@@ -133,28 +135,32 @@
       ## If nothing in buffer, read h2 frames until we get a complete message
       (while (and (nil? result) (not done))
         (let [msg (s:data-queue:take)]
-          (cond
-            (= msg:type :headers) (begin (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
-               (when (and status-pair (not (= (get status-pair 1) "0")))
-                 (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
-                   (error {:error :grpc-error
-                           :code (parse-int (get status-pair 1))
-                           :message (if msg-pair (get msg-pair 1) "unknown error")})))) (when msg:end-stream (assign done true)))
-            (= msg:type :data) (begin (assign buf (concat buf msg:data)) (when msg:end-stream (assign done true)) (when (and (nil? result) (>= (length buf) 5))
-               (let [len (bit/or (bit/shl (get buf 1) 24)
-                                 (bit/shl (get buf 2) 16)
-                                 (bit/shl (get buf 3) 8)
-                                 (get buf 4))
-                     frame-end (+ 5 len)]
-                 (when (>= (length buf) frame-end)
-                   (let [payload (slice buf 5 frame-end)]
-                     (assign buf (slice buf frame-end))
-                     (assign result (protobuf:decode schema response-type payload)))))))
-            (= msg:type :rst)
-             (error {:error :grpc-error :reason :stream-reset
-                     :code msg:code})
-            (= msg:type :error) (error msg:error)
-            true (assign done true))))
+          (match msg:type
+            :headers (begin
+                       (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
+                         (when (and status-pair (not (= (get status-pair 1) "0")))
+                           (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
+                             (error {:error :grpc-error
+                                     :code (parse-int (get status-pair 1))
+                                     :message (if msg-pair (get msg-pair 1) "unknown error")}))))
+                       (when msg:end-stream (assign done true)))
+            :data    (begin
+                       (assign buf (concat buf msg:data))
+                       (when msg:end-stream (assign done true))
+                       (when (and (nil? result) (>= (length buf) 5))
+                         (let [len (bit/or (bit/shl (get buf 1) 24)
+                                           (bit/shl (get buf 2) 16)
+                                           (bit/shl (get buf 3) 8)
+                                           (get buf 4))
+                               frame-end (+ 5 len)]
+                           (when (>= (length buf) frame-end)
+                             (let [payload (slice buf 5 frame-end)]
+                               (assign buf (slice buf frame-end))
+                               (assign result (protobuf:decode schema response-type payload)))))))
+            :rst     (error {:error :grpc-error :reason :stream-reset
+                             :code msg:code})
+            :error   (error msg:error)
+            _        (assign done true))))
       result))
 
   ## ── Close ──────────────────────────────────────────────────────────
