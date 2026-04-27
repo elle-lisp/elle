@@ -402,23 +402,12 @@ impl<'a> Lowerer<'a> {
         });
         self.finish_block();
 
-        // Body block — track flip_depth and region_depth so breaks can compensate
+        // Body block — track flip_depth so breaks can compensate
         if flip_eligible {
             self.flip_depth += 1;
         }
-        let scope_eligible = flip_eligible; // same escape-analysis gate
         self.current_block = BasicBlock::new(body_label);
-
-        if scope_eligible {
-            self.emit_region_enter(); // per-iteration scope mark
-        }
-
         let _body_reg = self.lower_expr(body)?;
-
-        if scope_eligible {
-            self.emit_region_exit(); // release iteration allocs
-        }
-
         // The back-edge block is whatever block we're in after lowering
         // the body (body lowering may have created intermediate blocks).
         let back_edge_label = self.current_block.label;

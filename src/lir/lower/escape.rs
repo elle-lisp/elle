@@ -555,21 +555,29 @@ impl<'a> Lowerer<'a> {
                 // which is caught by condition 3 (result_is_safe).
                 if !*is_tail {
                     let callee_is_safe = self.call_result_is_safe(func, args);
-                    if !callee_is_safe
-                        && !self.callee_is_primitive(func)
-                        && !self.callee_is_rotation_safe(func)
-                    {
-                        // The callee is an unknown user-defined function that
-                        // is not proven rotation-safe. It could store its args
-                        // externally or internally allocate heap values and
-                        // escape them. Reject unconditionally.
-                        //
-                        // Primitives are safe: they only produce return values
-                        // and/or mutate their arguments (caught by
-                        // MUTATING_PRIMITIVES). Rotation-safe callees are
-                        // proven not to escape heap values to external
-                        // structures.
-                        return true;
+                    if !callee_is_safe {
+                        if self.callee_is_mutating_primitive(func) {
+                            // Mutating primitives (push, put, del, pop, etc.)
+                            // store args into external structures. If any arg
+                            // is heap-allocated, the scope would free it while
+                            // the structure still holds a reference.
+                            if args
+                                .iter()
+                                .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                            {
+                                return true;
+                            }
+                        } else if !self.callee_is_primitive(func)
+                            && !self.callee_is_rotation_safe(func)
+                        {
+                            // Unknown user-defined function: could store args
+                            // externally or internally allocate heap values and
+                            // escape them. Reject unconditionally.
+                            return true;
+                        }
+                        // Non-mutating primitives and rotation-safe callees
+                        // are safe: they only produce return values, they don't
+                        // store args in external mutable structures.
                     }
                 }
                 self.walk_for_outward_set(func, scope_bindings)

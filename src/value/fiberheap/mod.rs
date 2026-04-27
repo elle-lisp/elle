@@ -66,7 +66,7 @@ pub struct RotationBase {
     shared_alloc_count: usize,
 }
 
-pub(crate) mod bump;
+mod bump;
 mod slab;
 #[allow(unused_imports)]
 pub(crate) use slab::RootSlab;
@@ -345,7 +345,6 @@ impl FiberHeap {
             custom_ptrs_len,
             self.pool.allocs.len(),
             self.shared_alloc_count,
-            Some(self.pool.mark().arena_mark),
         )
     }
 
@@ -379,11 +378,6 @@ impl FiberHeap {
 
         self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();
-
-        // Reset the bump arena pointer to free pages allocated after the mark.
-        if let Some(bump_mark) = mark.bump_mark() {
-            self.pool.release_bump(bump_mark);
-        }
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
