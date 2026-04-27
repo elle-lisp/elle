@@ -51,7 +51,7 @@ pub fn global_scope_stats() -> ScopeStats {
 
 /// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
 /// before every tail call. Used by Phase 4b auto-insertion
-/// (gated by `config.flip_instructions`).
+/// (gated by `config::flip_enabled()`).
 ///
 /// The resulting LIR is semantically equivalent under the runtime's
 /// existing rotation mechanism — `FlipSwap` tears down the previous
@@ -455,7 +455,7 @@ impl<'a> Lowerer<'a> {
         // pass is a no-op unless `--flip=on` or the vm/config equivalent
         // is set. It runs after lowering so it doesn't perturb any
         // scope/rotation analysis upstream.
-        if crate::config::get().flip_instructions {
+        if crate::config::flip_enabled() {
             inject_flip(&mut entry);
             for f in &mut closures {
                 inject_flip(f);

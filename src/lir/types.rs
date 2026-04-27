@@ -768,7 +768,11 @@ fn is_gpu_instruction(i: &LirInstr) -> bool {
         | LirInstr::LoadLocal { .. }
         | LirInstr::StoreLocal { .. }
         | LirInstr::LoadCapture { .. }
-        | LirInstr::LoadCaptureRaw { .. } => true,
+        | LirInstr::LoadCaptureRaw { .. }
+        // Flip instructions are arena-rotation no-ops on GPU (no heap).
+        | LirInstr::FlipEnter
+        | LirInstr::FlipSwap
+        | LirInstr::FlipExit => true,
         // ValueConst of numeric/bool/nil types is GPU-safe — these are
         // immutable binding constants inlined by the lowerer.
         LirInstr::ValueConst { value, .. } => {

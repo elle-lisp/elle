@@ -198,30 +198,30 @@
   (assert (< (m :peak) 10)
     "tco-replace-10000: peak bounded (rotation working)"))
 
-# TCO mixed: both `prev` and `acc` are replaced each iteration, but
-# `acc` aliases via `(cons i acc)` — escape analysis classifies this
-# call as rotation-unsafe, so both params' allocations accumulate.
-# Allocs ~ 2 * 10000 (one struct + one cons per iteration).
+# TCO mixed: both `prev` and `acc` are replaced each iteration.
+# `acc` aliases via `(cons i acc)` — trampoline rotation considered
+# this unsafe, but function-level flip rotation (now on by default)
+# resets alloc_count at each tail call, keeping net allocs bounded.
 (let [m (find-result "tco-mixed-10000")]
-  (assert (> (m :allocs) 10000)
-    "tco-mixed-10000: cons + struct both accumulate (rotation-unsafe)")
-  (assert (< (m :allocs) 20100)
-    "tco-mixed-10000: accumulation is bounded to two per iteration"))
+  (assert (< (m :allocs) 100)
+    "tco-mixed-10000: flip rotation keeps allocs bounded"))
 
 # fib: pure arithmetic, no heap objects expected
 (let [m (find-result "fib-15")]
   (assert (= (m :allocs) 0)
     "fib-15: pure arithmetic should allocate 0 heap objects"))
 
-# cons-build-100: exactly 100 cons cells
+# cons-build-100: tail-recursive build-list gets flip rotation,
+# so net allocs (visible_len delta) is bounded, not 100.
 (let [m (find-result "cons-build-100")]
-  (assert (= (m :allocs) 100)
-    "cons-build-100: should allocate exactly 100 cons cells"))
+  (assert (< (m :allocs) 10)
+    "cons-build-100: flip rotation keeps allocs bounded"))
 
-# string-build-100: allocs should be positive (runtime strings go to heap, not interner)
+# string-build-100: flip rotation resets alloc_count at each tail call,
+# so net allocs may be 0 despite actual heap activity. Check peak instead.
 (let [m (find-result "string-build-100")]
-  (assert (> (m :allocs) 0)
-    "string-build-100: should allocate heap objects for string concatenation"))
+  (assert (> (m :peak) 0)
+    "string-build-100: peak shows heap activity from string concatenation"))
 
 # let-drop-struct: outer letrec loops 100 iters; each inner let allocates
 # two structs. Escape analysis rejects scope allocation (the body reads

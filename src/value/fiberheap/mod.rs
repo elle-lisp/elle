@@ -621,6 +621,13 @@ impl FiberHeap {
         //    arrays/maps that survive rotation. Dropping them would free the
         //    Rc inner data (Fiber, ClosureTemplate) while still referenced.
         //    They are cleaned up only on pool teardown (fiber exit).
+        //
+        //    Guard: reentrant calls (e.g. arena/allocs) may shrink the allocs
+        //    vector below the base mark via scope release. In that case there
+        //    is nothing to rotate — skip.
+        if base_allocs > self.pool.allocs.len() {
+            return;
+        }
         let iter_allocs = self.pool.allocs.split_off(base_allocs);
 
         self.swap_pool = if iter_allocs.is_empty() {
