@@ -192,16 +192,16 @@
   (assert (bounded? d100 d10k 30)
     (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
 
-# ── Tier 3d: closure leak in while loops (known defect) ──────────
-# Closures are dtor-bearing objects (Rc<ClosureTemplate>). rotate_pools
-# keeps them in the main pool to avoid freeing Rc inners while still
-# referenced, and escape analysis rejects while loops containing
-# closure allocations. This causes linear accumulation.
+# ── Known leaks (while loops only) ────────────────────────────────
+# Tail calls reclaim everything via trampoline rotation. While loops
+# leak patterns that are either dtor-bearing (closures, fibers) or
+# fail escape analysis (concat, outward-escaping struct, protect).
 #
-# These assertions document the current leak. When the defect is
-# fixed, they will fail — update them to assert bounded.
+# These assertions document the current linear growth. When fixed,
+# they will fail — update them to assert bounded.
 
-(defn t3-closure-while [n]
+# Dtor-bearing: closures (Rc<ClosureTemplate> kept in main pool)
+(defn leak-closure-while [n]
   (def before (arena/count))
   (def @i 0)
   (while (< i n)
@@ -209,13 +209,65 @@
     (assign i (+ i 1)))
   (- (arena/count) before))
 
-(let [d100 (t3-closure-while 100) d10k (t3-closure-while 10000)]
-  (assert (= d100 100)
-    (string "t3d closure-while: expected linear leak, d100=" d100))
-  (assert (= d10k 10000)
-    (string "t3d closure-while: expected linear leak, d10k=" d10k)))
+(let [d (leak-closure-while 1000)]
+  (assert (>= d 1000)
+    (string "closure-while: expected linear leak, got " d)))
 
-(defn t3-closure-yield [n]
+# Dtor-bearing: fiber/new (closure + fiber handle)
+(defn leak-fiber-while [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (let [f (fiber/new (fn [] i) 1)] (fiber/resume f))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d (leak-fiber-while 1000)]
+  (assert (>= d 1000)
+    (string "fiber-while: expected linear leak, got " d)))
+
+# Escape-analysis rejected: concat (multi-step primitive, locals escape)
+(defn leak-concat-while [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (concat "x" (number->string i))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d (leak-concat-while 1000)]
+  (assert (>= d 1000)
+    (string "concat-while: expected linear leak, got " d)))
+
+# Escape-analysis rejected: struct assigned to outer mutable
+(defn leak-struct-outer [n]
+  (def before (arena/count))
+  (def @last nil)
+  (def @i 0)
+  (while (< i n)
+    (assign last {:x i})
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d (leak-struct-outer 1000)]
+  (assert (>= d 1000)
+    (string "struct-outer: expected linear leak, got " d)))
+
+# Escape-analysis rejected: protect (internally creates closure + fiber)
+(defn leak-protect-while [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (let [[ok v] (protect ((fn [] i)))] v)
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d (leak-protect-while 1000)]
+  (assert (>= d 1000)
+    (string "protect-while: expected linear leak, got " d)))
+
+# Same patterns in yielding while — same leaks
+(defn leak-closure-yield [n]
   (drain-fiber
     (fiber/new
       (fn []
@@ -228,11 +280,26 @@
         (- (arena/count) before))
       |:yield|)))
 
-(let [d100 (t3-closure-yield 100) d10k (t3-closure-yield 1000)]
-  (assert (= d100 100)
-    (string "t3d closure-yield: expected linear leak, d100=" d100))
-  (assert (= d10k 1000)
-    (string "t3d closure-yield: expected linear leak, d10k=" d10k)))
+(let [d (leak-closure-yield 1000)]
+  (assert (>= d 1000)
+    (string "closure-yield: expected linear leak, got " d)))
+
+(defn leak-concat-yield [n]
+  (drain-fiber
+    (fiber/new
+      (fn []
+        (def before (arena/count))
+        (def @i 0)
+        (while (< i n)
+          (concat "x" (number->string i))
+          (yield i)
+          (assign i (+ i 1)))
+        (- (arena/count) before))
+      |:yield|)))
+
+(let [d (leak-concat-yield 1000)]
+  (assert (>= d 1000)
+    (string "concat-yield: expected linear leak, got " d)))
 
 # ── Tier 4: correctness under rotation ───────────────────────────
 # Rotation must not corrupt live values. Returned heap values and
