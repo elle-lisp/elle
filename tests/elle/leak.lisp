@@ -284,15 +284,16 @@
   (assert (bounded? d100 d10k 10)
     (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
 
-# ── Known leak: struct assigned to outer mutable binding ─────────
-# heap-allocated assign to an outer mutable binding is genuinely
-# dangerous (the scope would free it while the outer binding still
-# holds a reference). This remains linear.
+# ── Known leaks: inherent ────────────────────────────────────────
+# These genuinely escape heap values to outer bindings or collections.
+# The scope cannot free them because the outer reference survives.
+# Fixing requires drop-on-overwrite or reference counting.
 
 (defn linear? [d100 d1000]
   "True if growth is roughly linear (d1000 ≥ 5x d100)."
   (and (>= d100 50) (>= d1000 (* d100 5))))
 
+# Heap struct assigned to outer mutable binding
 (defn leak-struct-outer [n]
   (def before (arena/count))
   (def @last nil)
@@ -304,7 +305,123 @@
 
 (let [d100 (leak-struct-outer 100) d1k (leak-struct-outer 1000)]
   (assert (linear? d100 d1k)
-    (string "struct-outer: d100=" d100 " d1k=" d1k " — expected linear leak")))
+    (string "struct-outer: d100=" d100 " d1k=" d1k)))
+
+# Heap string assigned to outer mutable binding (concat accumulation)
+(defn leak-string-outer [n]
+  (def before (arena/count))
+  (def @s "")
+  (def @i 0)
+  (while (< i n)
+    (assign s (concat s "x"))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-string-outer 100) d1k (leak-string-outer 1000)]
+  (assert (linear? d100 d1k)
+    (string "string-outer: d100=" d100 " d1k=" d1k)))
+
+# Heap array assigned to outer mutable binding (append accumulation)
+(defn leak-append-outer [n]
+  (def before (arena/count))
+  (def @acc [])
+  (def @i 0)
+  (while (< i n)
+    (assign acc (append acc [i]))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-append-outer 100) d1k (leak-append-outer 1000)]
+  (assert (linear? d100 d1k)
+    (string "append-outer: d100=" d100 " d1k=" d1k)))
+
+# push stores heap struct into outer mutable array
+(defn leak-push-outer [n]
+  (def before (arena/count))
+  (def @acc [])
+  (def @i 0)
+  (while (< i n)
+    (push acc {:x i})
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-push-outer 100) d1k (leak-push-outer 1000)]
+  (assert (linear? d100 d1k)
+    (string "push-outer: d100=" d100 " d1k=" d1k)))
+
+# put stores heap string into outer mutable struct
+(defn leak-put-outer [n]
+  (def before (arena/count))
+  (def @s {:x 0})
+  (def @i 0)
+  (while (< i n)
+    (put s :x (string "v" i))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-put-outer 100) d1k (leak-put-outer 1000)]
+  (assert (linear? d100 d1k)
+    (string "put-outer: d100=" d100 " d1k=" d1k)))
+
+# ── Known leaks: fixable (escape analysis limitations) ──────────
+# These don't genuinely escape heap values but are rejected by
+# escape analysis conservatism. When fixed, flip to bounded?.
+
+# each over lists: (assign cur (rest cur)) assigns heap list to
+# outer @cur. rest returns an existing cons cell (no allocation)
+# but escape analysis can't distinguish accessor from allocator.
+(defn leak-each-list [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (each x in (list 1 2 3) {:val x})
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-each-list 100) d1k (leak-each-list 1000)]
+  (assert (linear? d100 d1k)
+    (string "each-list: d100=" d100 " d1k=" d1k)))
+
+# map in while: map is a stdlib HOF, not a primitive. Escape
+# analysis rejects calls to unknown user-defined functions.
+(defn leak-map-while [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (map (fn [x] (+ x 1)) [1 2 3])
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-map-while 100) d1k (leak-map-while 1000)]
+  (assert (linear? d100 d1k)
+    (string "map-while: d100=" d100 " d1k=" d1k)))
+
+# filter in while: same as map — stdlib HOF not recognized.
+(defn leak-filter-while [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (filter (fn [x] (> x 1)) [1 2 3])
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-filter-while 100) d1k (leak-filter-while 1000)]
+  (assert (linear? d100 d1k)
+    (string "filter-while: d100=" d100 " d1k=" d1k)))
+
+# nested closure: (fn [] (fn [] i)) — inner lambda is anonymous
+# (no binding), so not collected for rotation-safety analysis.
+(defn leak-nested-closure [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    (let [f (fn [] (fn [] i))] ((f)))
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(let [d100 (leak-nested-closure 100) d1k (leak-nested-closure 1000)]
+  (assert (linear? d100 d1k)
+    (string "nested-closure: d100=" d100 " d1k=" d1k)))
 
 # ── Tier 4: correctness under rotation ───────────────────────────
 # Rotation must not corrupt live values. Returned heap values and
