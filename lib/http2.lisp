@@ -243,12 +243,13 @@
     (each sid in (keys session:streams)
       (let [s (get session:streams sid)]
         (when s
-          (let [[ok? _] (protect
-                          (s:data-queue:put {:type :error
-                                            :error {:error :h2-error
-                                                    :reason reason
-                                                    :message "session closed"}}))]
-            nil))))
+          ## put can fail if the queue is full or the consumer fiber has
+          ## already exited — swallow so we still notify remaining streams
+          (protect
+            (s:data-queue:put {:type :error
+                               :error {:error :h2-error
+                                       :reason reason
+                                       :message "session closed"}})))))
     (put session :streams @{}))
 
   (defn reader-loop [session]
