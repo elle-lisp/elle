@@ -195,6 +195,26 @@ pub(crate) fn build_immediate_primitives(symbols: &SymbolTable) -> FxHashSet<Sym
     set
 }
 
+/// Primitives that store an argument into a collection, causing the arg
+/// value to escape the current scope. Used by `walk_for_outward_set` to
+/// reject while loops where a heap-allocated value would be pushed into
+/// an outer collection that outlives the per-iteration scope.
+///
+/// Unlike MUTATING_PRIMITIVES (which includes fiber/resume, del, pop, etc.),
+/// these specifically INSERT a value into a live collection.
+const ARG_ESCAPING_PRIMITIVES: &[&str] = &["push", "put"];
+
+/// Build the set of primitive SymbolIds that insert args into collections.
+pub(crate) fn build_arg_escaping_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
+    let mut set = FxHashSet::default();
+    for &name in ARG_ESCAPING_PRIMITIVES {
+        if let Some(id) = symbols.get(name) {
+            set.insert(id);
+        }
+    }
+    set
+}
+
 /// Build the set of primitive SymbolIds that store heap values externally.
 #[allow(dead_code)]
 pub(crate) fn build_mutating_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {

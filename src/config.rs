@@ -4,9 +4,24 @@
 //! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
+
+/// Separate atomic for runtime-togglable flip; initialized from Config default,
+/// updated by `set_flip`, read by `flip_enabled`.
+static FLIP_OVERRIDE: AtomicBool = AtomicBool::new(true);
+
+/// Check whether flip instructions are enabled (runtime-togglable).
+pub fn flip_enabled() -> bool {
+    FLIP_OVERRIDE.load(Ordering::Relaxed)
+}
+
+/// Toggle flip instructions at runtime (from vm/config-set :flip).
+pub fn set_flip(on: bool) {
+    FLIP_OVERRIDE.store(on, Ordering::Relaxed);
+}
 
 /// Default cache directory.
 ///
@@ -33,6 +48,7 @@ pub fn get() -> &'static Config {
 /// Initialize the global config. Must be called before `get` for
 /// CLI-parsed values to take effect. No-op if already initialized.
 pub fn init(config: Config) {
+    FLIP_OVERRIDE.store(config.flip_instructions, Ordering::Relaxed);
     let _ = CONFIG.set(config);
 }
 
@@ -304,6 +320,8 @@ pub struct RuntimeConfig {
     pub dump_bits: u32,
     /// Print compilation stats on exit.
     pub stats: bool,
+    /// Whether flip instructions are enabled.
+    pub flip: bool,
 }
 
 impl RuntimeConfig {
@@ -378,6 +396,7 @@ impl RuntimeConfig {
             dump: config.dump.clone(),
             dump_bits: dump_bits_u,
             stats: config.stats,
+            flip: config.flip_instructions,
         }
     }
 
@@ -416,6 +435,7 @@ impl Default for RuntimeConfig {
             dump: HashSet::new(),
             dump_bits: 0,
             stats: false,
+            flip: true,
         }
     }
 }
@@ -511,9 +531,9 @@ pub struct Config {
     pub wasm_chunk: bool,
 
     /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
-    /// lowered functions (Phase 4b). Off by default — the existing
-    /// trampoline-driven rotation remains authoritative. Enable via
-    /// `--flip=on` to exercise the Flip instruction path.
+    /// lowered functions (Phase 4b). On by default — escape-analysis
+    /// gates injection so only safe loops get flip. Disable via
+    /// `--flip=off` to fall back to trampoline-only rotation.
     pub flip_instructions: bool,
 
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
@@ -549,7 +569,7 @@ impl Default for Config {
             wasm_dump: false,
             wasm_lir: false,
             wasm_chunk: false,
-            flip_instructions: false,
+            flip_instructions: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
         }

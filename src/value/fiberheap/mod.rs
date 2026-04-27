@@ -66,7 +66,7 @@ pub struct RotationBase {
     shared_alloc_count: usize,
 }
 
-mod bump;
+pub(crate) mod bump;
 mod slab;
 #[allow(unused_imports)]
 pub(crate) use slab::RootSlab;
@@ -345,6 +345,7 @@ impl FiberHeap {
             custom_ptrs_len,
             self.pool.allocs.len(),
             self.shared_alloc_count,
+            Some(self.pool.mark().arena_mark),
         )
     }
 
@@ -378,6 +379,15 @@ impl FiberHeap {
 
         self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();
+
+        // NOTE: Bump arena release is disabled for scope marks (RegionEnter/
+        // RegionExit). The bump arena doesn't track which values are still
+        // referenced; releasing pages can free strings/arrays that are still
+        // live in outer bindings. Bump pages are only freed on full arena
+        // reset (clear/teardown).
+        // if let Some(bump_mark) = mark.bump_mark() {
+        //     self.pool.release_bump(bump_mark);
+        // }
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
@@ -621,6 +631,13 @@ impl FiberHeap {
         //    arrays/maps that survive rotation. Dropping them would free the
         //    Rc inner data (Fiber, ClosureTemplate) while still referenced.
         //    They are cleaned up only on pool teardown (fiber exit).
+        //
+        //    Guard: reentrant calls (e.g. arena/allocs) may shrink the allocs
+        //    vector below the base mark via scope release. In that case there
+        //    is nothing to rotate — skip.
+        if base_allocs > self.pool.allocs.len() {
+            return;
+        }
         let iter_allocs = self.pool.allocs.split_off(base_allocs);
 
         self.swap_pool = if iter_allocs.is_empty() {

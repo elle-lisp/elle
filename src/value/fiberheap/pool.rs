@@ -102,6 +102,13 @@ impl SlabPool {
         self.alloc_count = mark.alloc_count;
     }
 
+    /// Reset the bump arena pointer to a saved mark. Called by
+    /// `FiberHeap::release()` after dtors and tracking vecs are handled.
+    #[allow(dead_code)]
+    pub fn release_bump(&mut self, mark: BumpMark) {
+        self.arena.release_to(mark);
+    }
+
     /// Run all destructors and reset the arena.
     pub fn teardown(&mut self) {
         self.run_dtors(0);

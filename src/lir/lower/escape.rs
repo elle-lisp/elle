@@ -556,31 +556,29 @@ impl<'a> Lowerer<'a> {
                 if !*is_tail {
                     let callee_is_safe = self.call_result_is_safe(func, args);
                     if !callee_is_safe {
-                        // Check 1: any non-safe callee receiving a heap-allocated
-                        // scope-local argument may store it externally (e.g. push
-                        // into an outer @array).
-                        if args
-                            .iter()
-                            .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                        if self.callee_is_arg_escaping_primitive(func) {
+                            // Arg-escaping primitives (push, put) insert a
+                            // value into a collection. If any arg is
+                            // heap-allocated and scope-local, the scope would
+                            // free it while the collection still references it.
+                            if args
+                                .iter()
+                                .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                            {
+                                return true;
+                            }
+                        } else if !self.callee_is_primitive(func)
+                            && !self.callee_is_rotation_safe(func)
                         {
+                            // Unknown user-defined function: could store args
+                            // externally or internally allocate heap values and
+                            // escape them. Reject unconditionally.
                             return true;
                         }
-                        // Check 2: user-defined functions (non-primitives) may
-                        // internally allocate heap objects and store them in
-                        // external mutable structures (e.g. via put to an outer
-                        // @struct). Built-in primitives are safe — they only
-                        // produce return values and/or mutate their arguments
-                        // (caught by check 1).
-                        //
-                        // Safe if the callee is a built-in primitive (only
-                        // produces return values / mutates args, caught by
-                        // check 1) OR rotation-safe (proven not to escape
-                        // heap values to external structures). Rotation-safety
-                        // transitively checks for internal allocations stored
-                        // externally via mutating primitives.
-                        if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
-                            return true;
-                        }
+                        // Non-escaping primitives (concat, fiber/resume, etc.)
+                        // and rotation-safe callees are safe: they consume
+                        // args and produce return values, they don't store
+                        // args in external mutable structures.
                     }
                 }
                 self.walk_for_outward_set(func, scope_bindings)
@@ -1383,6 +1381,17 @@ impl<'a> Lowerer<'a> {
         };
         let bi = self.arena.get(*binding);
         self.mutating_primitives.contains(&bi.name)
+    }
+
+    /// Check if the callee is a primitive that stores an argument into a
+    /// collection (push, put). These can cause a heap value to escape the
+    /// current scope by inserting it into an outer collection.
+    fn callee_is_arg_escaping_primitive(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        let bi = self.arena.get(*binding);
+        self.arg_escaping_primitives.contains(&bi.name)
     }
 
     /// Check if an expression is statically proven to produce an immediate

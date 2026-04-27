@@ -32,15 +32,29 @@ fn run(args: &[&str], source: &str) -> (String, String, std::process::ExitStatus
 }
 
 #[test]
-fn flip_off_by_default_in_lir() {
+fn flip_on_by_default_in_lir() {
     let (out, _, status) = run(
         &["--dump=lir"],
         "(defn loop [n] (if (= n 0) :done (loop (- n 1))))",
     );
     assert!(status.success());
     assert!(
+        out.contains("flip-enter"),
+        "expected flip-enter by default:\n{}",
+        out
+    );
+}
+
+#[test]
+fn flip_off_suppresses_instructions() {
+    let (out, _, status) = run(
+        &["--flip=off", "--dump=lir"],
+        "(defn loop [n] (if (= n 0) :done (loop (- n 1))))",
+    );
+    assert!(status.success());
+    assert!(
         !out.contains("flip-enter"),
-        "unexpected flip-enter without --flip=on:\n{}",
+        "unexpected flip-enter with --flip=off:\n{}",
         out
     );
     assert!(!out.contains("flip-swap"), "unexpected flip-swap:\n{}", out);

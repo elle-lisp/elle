@@ -51,7 +51,7 @@ pub fn global_scope_stats() -> ScopeStats {
 
 /// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
 /// before every tail call. Used by Phase 4b auto-insertion
-/// (gated by `config.flip_instructions`).
+/// (gated by `config::flip_enabled()`).
 ///
 /// The resulting LIR is semantically equivalent under the runtime's
 /// existing rotation mechanism — `FlipSwap` tears down the previous
@@ -270,6 +270,8 @@ pub struct Lowerer<'a> {
     /// these primitives in scope-allocated let bodies.
     immediate_primitives: FxHashSet<SymbolId>,
     mutating_primitives: FxHashSet<SymbolId>,
+    /// Primitives that insert args into collections (push, put).
+    arg_escaping_primitives: FxHashSet<SymbolId>,
     /// Binding → rotation_safe for lowered lambdas. Populated during
     /// lowering so that `body_escapes_heap_values` can check callees
     /// transitively: a call to a rotation-safe function doesn't escape.
@@ -348,6 +350,7 @@ impl<'a> Lowerer<'a> {
             intrinsics: FxHashMap::default(),
             immediate_primitives: FxHashSet::default(),
             mutating_primitives: FxHashSet::default(),
+            arg_escaping_primitives: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
             callee_return_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
@@ -381,6 +384,11 @@ impl<'a> Lowerer<'a> {
 
     pub fn with_mutating_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
         self.mutating_primitives = set;
+        self
+    }
+
+    pub fn with_arg_escaping_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
+        self.arg_escaping_primitives = set;
         self
     }
 
@@ -455,7 +463,7 @@ impl<'a> Lowerer<'a> {
         // pass is a no-op unless `--flip=on` or the vm/config equivalent
         // is set. It runs after lowering so it doesn't perturb any
         // scope/rotation analysis upstream.
-        if crate::config::get().flip_instructions {
+        if crate::config::flip_enabled() {
             inject_flip(&mut entry);
             for f in &mut closures {
                 inject_flip(f);
@@ -961,8 +969,76 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_rest_indices(body, out);
             }
-            HirKind::Lambda { .. } => {}
-            _ => {}
+            HirKind::Lambda { body, .. } => {
+                Self::collect_rest_indices(body, out);
+            }
+            // Recurse into all structural nodes to find nested lambda defs
+            HirKind::While { cond, body } => {
+                Self::collect_rest_indices(cond, out);
+                Self::collect_rest_indices(body, out);
+            }
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_rest_indices(cond, out);
+                Self::collect_rest_indices(then_branch, out);
+                Self::collect_rest_indices(else_branch, out);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    Self::collect_rest_indices(c, out);
+                    Self::collect_rest_indices(b, out);
+                }
+                if let Some(e) = else_branch {
+                    Self::collect_rest_indices(e, out);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    Self::collect_rest_indices(e, out);
+                }
+            }
+            HirKind::Break { value, .. } => Self::collect_rest_indices(value, out),
+            HirKind::Match { value, arms } => {
+                Self::collect_rest_indices(value, out);
+                for (_, guard, body) in arms {
+                    if let Some(g) = guard {
+                        Self::collect_rest_indices(g, out);
+                    }
+                    Self::collect_rest_indices(body, out);
+                }
+            }
+            HirKind::Call { func, args, .. } => {
+                Self::collect_rest_indices(func, out);
+                for a in args {
+                    Self::collect_rest_indices(&a.expr, out);
+                }
+            }
+            HirKind::Assign { value, .. } => Self::collect_rest_indices(value, out),
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    Self::collect_rest_indices(e, out);
+                }
+            }
+            HirKind::Emit { value, .. } => Self::collect_rest_indices(value, out),
+            HirKind::Destructure { value, .. } => Self::collect_rest_indices(value, out),
+            HirKind::Eval { expr, env } => {
+                Self::collect_rest_indices(expr, out);
+                Self::collect_rest_indices(env, out);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (k, v) in bindings {
+                    Self::collect_rest_indices(k, out);
+                    Self::collect_rest_indices(v, out);
+                }
+                Self::collect_rest_indices(body, out);
+            }
+            _ => {} // Leaves: Var, literals, Quote, Error
         }
     }
 
@@ -1165,8 +1241,79 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_lambda_defs_with_params(body, out);
             }
-            HirKind::Lambda { .. } => {}
-            _ => {}
+            // Recurse into lambda bodies to find nested defs (e.g. closures
+            // inside function bodies). Don't push the Lambda itself — that's
+            // handled by Define/Let when the Lambda is bound to a name.
+            HirKind::Lambda { body, .. } => {
+                Self::collect_lambda_defs_with_params(body, out);
+            }
+            // Recurse into all structural nodes to find nested lambda defs
+            HirKind::While { cond, body } => {
+                Self::collect_lambda_defs_with_params(cond, out);
+                Self::collect_lambda_defs_with_params(body, out);
+            }
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_lambda_defs_with_params(cond, out);
+                Self::collect_lambda_defs_with_params(then_branch, out);
+                Self::collect_lambda_defs_with_params(else_branch, out);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    Self::collect_lambda_defs_with_params(c, out);
+                    Self::collect_lambda_defs_with_params(b, out);
+                }
+                if let Some(e) = else_branch {
+                    Self::collect_lambda_defs_with_params(e, out);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    Self::collect_lambda_defs_with_params(e, out);
+                }
+            }
+            HirKind::Break { value, .. } => Self::collect_lambda_defs_with_params(value, out),
+            HirKind::Match { value, arms } => {
+                Self::collect_lambda_defs_with_params(value, out);
+                for (_, guard, body) in arms {
+                    if let Some(g) = guard {
+                        Self::collect_lambda_defs_with_params(g, out);
+                    }
+                    Self::collect_lambda_defs_with_params(body, out);
+                }
+            }
+            HirKind::Call { func, args, .. } => {
+                Self::collect_lambda_defs_with_params(func, out);
+                for a in args {
+                    Self::collect_lambda_defs_with_params(&a.expr, out);
+                }
+            }
+            HirKind::Assign { value, .. } => Self::collect_lambda_defs_with_params(value, out),
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    Self::collect_lambda_defs_with_params(e, out);
+                }
+            }
+            HirKind::Emit { value, .. } => Self::collect_lambda_defs_with_params(value, out),
+            HirKind::Destructure { value, .. } => Self::collect_lambda_defs_with_params(value, out),
+            HirKind::Eval { expr, env } => {
+                Self::collect_lambda_defs_with_params(expr, out);
+                Self::collect_lambda_defs_with_params(env, out);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (k, v) in bindings {
+                    Self::collect_lambda_defs_with_params(k, out);
+                    Self::collect_lambda_defs_with_params(v, out);
+                }
+                Self::collect_lambda_defs_with_params(body, out);
+            }
+            _ => {} // Leaves: Var, literals, Quote, Error
         }
     }
 
@@ -1309,10 +1456,76 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_lambda_defs(body, out);
             }
-            // Don't recurse into nested lambdas — they have their own
-            // lowering context and precompute call.
-            HirKind::Lambda { .. } => {}
-            _ => {}
+            HirKind::Lambda { body, .. } => {
+                Self::collect_lambda_defs(body, out);
+            }
+            // Recurse into all structural nodes to find nested lambda defs
+            HirKind::While { cond, body } => {
+                Self::collect_lambda_defs(cond, out);
+                Self::collect_lambda_defs(body, out);
+            }
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_lambda_defs(cond, out);
+                Self::collect_lambda_defs(then_branch, out);
+                Self::collect_lambda_defs(else_branch, out);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    Self::collect_lambda_defs(c, out);
+                    Self::collect_lambda_defs(b, out);
+                }
+                if let Some(e) = else_branch {
+                    Self::collect_lambda_defs(e, out);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    Self::collect_lambda_defs(e, out);
+                }
+            }
+            HirKind::Break { value, .. } => Self::collect_lambda_defs(value, out),
+            HirKind::Match { value, arms } => {
+                Self::collect_lambda_defs(value, out);
+                for (_, guard, body) in arms {
+                    if let Some(g) = guard {
+                        Self::collect_lambda_defs(g, out);
+                    }
+                    Self::collect_lambda_defs(body, out);
+                }
+            }
+            HirKind::Call { func, args, .. } => {
+                Self::collect_lambda_defs(func, out);
+                for a in args {
+                    Self::collect_lambda_defs(&a.expr, out);
+                }
+            }
+            HirKind::Assign { value, .. } => Self::collect_lambda_defs(value, out),
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    Self::collect_lambda_defs(e, out);
+                }
+            }
+            HirKind::Emit { value, .. } => Self::collect_lambda_defs(value, out),
+            HirKind::Destructure { value, .. } => Self::collect_lambda_defs(value, out),
+            HirKind::Eval { expr, env } => {
+                Self::collect_lambda_defs(expr, out);
+                Self::collect_lambda_defs(env, out);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (k, v) in bindings {
+                    Self::collect_lambda_defs(k, out);
+                    Self::collect_lambda_defs(v, out);
+                }
+                Self::collect_lambda_defs(body, out);
+            }
+            _ => {} // Leaves: Var, literals, Quote, Error
         }
     }
 

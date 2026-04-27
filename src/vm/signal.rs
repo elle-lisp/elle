@@ -905,6 +905,10 @@ impl VM {
                 TableKey::from_value(&Value::keyword("debug-bytecode")).unwrap(),
                 Value::bool(rc.debug_bytecode),
             );
+            map.insert(
+                TableKey::from_value(&Value::keyword("flip")).unwrap(),
+                Value::bool(rc.flip),
+            );
             (SIG_OK, Value::struct_from(map))
         } else if let Some(kw) = arg.as_keyword_name() {
             match kw.as_str() {
@@ -917,6 +921,7 @@ impl VM {
                     (SIG_OK, Value::set(trace_set.into_iter().collect()))
                 }
                 "stats" => (SIG_OK, Value::bool(rc.stats)),
+                "flip" => (SIG_OK, Value::bool(rc.flip)),
                 _ => (
                     SIG_ERROR,
                     error_val(
@@ -1069,6 +1074,33 @@ impl VM {
             }
             "stats" => {
                 self.runtime_config.stats = val.is_truthy();
+                Value::NIL
+            }
+            "flip" => {
+                let on = if let Some(b) = val.as_bool() {
+                    b
+                } else if let Some(kw) = val.as_keyword_name() {
+                    match kw.as_str() {
+                        "on" => true,
+                        "off" => false,
+                        _ => {
+                            return error_val(
+                                "argument-error",
+                                format!("vm/config-set :flip: expected :on/:off, got :{}", kw),
+                            )
+                        }
+                    }
+                } else {
+                    return error_val(
+                        "type-error",
+                        format!(
+                            "vm/config-set :flip: expected bool or keyword, got {}",
+                            val.type_name()
+                        ),
+                    );
+                };
+                self.runtime_config.flip = on;
+                crate::config::set_flip(on);
                 Value::NIL
             }
             _ => error_val(
