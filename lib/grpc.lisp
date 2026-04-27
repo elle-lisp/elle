@@ -73,6 +73,7 @@
             (= msg:type :rst)
              (error {:error :grpc-error :reason :stream-reset
                      :code msg:code})
+            (= msg:type :error) (error msg:error)
             true (assign done true))))
       (let [all-data (if (empty? resp-data)
                        (bytes)
@@ -152,6 +153,7 @@
             (= msg:type :rst)
              (error {:error :grpc-error :reason :stream-reset
                      :code msg:code})
+            (= msg:type :error) (error msg:error)
             true (assign done true))))
       result))
 
