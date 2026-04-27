@@ -61,34 +61,6 @@
   (assert (bounded? d100 d10k 10)
     (string "t0 string: d100=" d100 " d10k=" d10k)))
 
-# ── Tier 0b: bytes-bounded while loops ────────────────────────────
-# Per-iteration RegionEnter/RegionExit releases bump arena pages,
-# so allocated-bytes stays bounded even at scale.
-
-(defn t0b-bytes-struct [n]
-  (def b (get (arena/stats) :allocated-bytes))
-  (def @i 0)
-  (while (< i n)
-    {:x i :y (+ i 1)}
-    (assign i (+ i 1)))
-  (- (get (arena/stats) :allocated-bytes) b))
-
-(let [d (t0b-bytes-struct 100000)]
-  (assert (< d 131072)
-    (string "t0b bytes-struct: " d " bytes (expected <128KB)")))
-
-(defn t0b-bytes-string [n]
-  (def b (get (arena/stats) :allocated-bytes))
-  (def @i 0)
-  (while (< i n)
-    (string "iter-" i)
-    (assign i (+ i 1)))
-  (- (get (arena/stats) :allocated-bytes) b))
-
-(let [d (t0b-bytes-string 100000)]
-  (assert (< d 131072)
-    (string "t0b bytes-string: " d " bytes (expected <128KB)")))
-
 # ── Tier 1: nested while loops ───────────────────────────────────
 # Inner and outer loops both allocate; scoping must handle both.
 
@@ -311,19 +283,6 @@
 (let [d100 (t0c-concat-yield 100) d10k (t0c-concat-yield 10000)]
   (assert (bounded? d100 d10k 10)
     (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
-
-# Closure bytes: now bounded too
-(defn t0c-bytes-closure [n]
-  (def b (get (arena/stats) :allocated-bytes))
-  (def @i 0)
-  (while (< i n)
-    (let [f (fn [] i)] (f))
-    (assign i (+ i 1)))
-  (- (get (arena/stats) :allocated-bytes) b))
-
-(let [d (t0c-bytes-closure 10000)]
-  (assert (< d 131072)
-    (string "t0c bytes-closure: " d " bytes (expected <128KB)")))
 
 # ── Known leak: struct assigned to outer mutable binding ─────────
 # heap-allocated assign to an outer mutable binding is genuinely

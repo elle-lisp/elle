@@ -270,6 +270,8 @@ pub struct Lowerer<'a> {
     /// these primitives in scope-allocated let bodies.
     immediate_primitives: FxHashSet<SymbolId>,
     mutating_primitives: FxHashSet<SymbolId>,
+    /// Primitives that insert args into collections (push, put).
+    arg_escaping_primitives: FxHashSet<SymbolId>,
     /// Binding → rotation_safe for lowered lambdas. Populated during
     /// lowering so that `body_escapes_heap_values` can check callees
     /// transitively: a call to a rotation-safe function doesn't escape.
@@ -348,6 +350,7 @@ impl<'a> Lowerer<'a> {
             intrinsics: FxHashMap::default(),
             immediate_primitives: FxHashSet::default(),
             mutating_primitives: FxHashSet::default(),
+            arg_escaping_primitives: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
             callee_return_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
@@ -381,6 +384,11 @@ impl<'a> Lowerer<'a> {
 
     pub fn with_mutating_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
         self.mutating_primitives = set;
+        self
+    }
+
+    pub fn with_arg_escaping_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
+        self.arg_escaping_primitives = set;
         self
     }
 

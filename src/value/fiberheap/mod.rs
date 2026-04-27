@@ -66,7 +66,7 @@ pub struct RotationBase {
     shared_alloc_count: usize,
 }
 
-mod bump;
+pub(crate) mod bump;
 mod slab;
 #[allow(unused_imports)]
 pub(crate) use slab::RootSlab;
@@ -345,6 +345,7 @@ impl FiberHeap {
             custom_ptrs_len,
             self.pool.allocs.len(),
             self.shared_alloc_count,
+            Some(self.pool.mark().arena_mark),
         )
     }
 
@@ -378,6 +379,15 @@ impl FiberHeap {
 
         self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();
+
+        // NOTE: Bump arena release is disabled for scope marks (RegionEnter/
+        // RegionExit). The bump arena doesn't track which values are still
+        // referenced; releasing pages can free strings/arrays that are still
+        // live in outer bindings. Bump pages are only freed on full arena
+        // reset (clear/teardown).
+        // if let Some(bump_mark) = mark.bump_mark() {
+        //     self.pool.release_bump(bump_mark);
+        // }
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).

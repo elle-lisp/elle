@@ -556,11 +556,11 @@ impl<'a> Lowerer<'a> {
                 if !*is_tail {
                     let callee_is_safe = self.call_result_is_safe(func, args);
                     if !callee_is_safe {
-                        if self.callee_is_mutating_primitive(func) {
-                            // Mutating primitives (push, put, del, pop, etc.)
-                            // store args into external structures. If any arg
-                            // is heap-allocated, the scope would free it while
-                            // the structure still holds a reference.
+                        if self.callee_is_arg_escaping_primitive(func) {
+                            // Arg-escaping primitives (push, put) insert a
+                            // value into a collection. If any arg is
+                            // heap-allocated and scope-local, the scope would
+                            // free it while the collection still references it.
                             if args
                                 .iter()
                                 .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
@@ -575,9 +575,10 @@ impl<'a> Lowerer<'a> {
                             // escape them. Reject unconditionally.
                             return true;
                         }
-                        // Non-mutating primitives and rotation-safe callees
-                        // are safe: they only produce return values, they don't
-                        // store args in external mutable structures.
+                        // Non-escaping primitives (concat, fiber/resume, etc.)
+                        // and rotation-safe callees are safe: they consume
+                        // args and produce return values, they don't store
+                        // args in external mutable structures.
                     }
                 }
                 self.walk_for_outward_set(func, scope_bindings)
@@ -1380,6 +1381,17 @@ impl<'a> Lowerer<'a> {
         };
         let bi = self.arena.get(*binding);
         self.mutating_primitives.contains(&bi.name)
+    }
+
+    /// Check if the callee is a primitive that stores an argument into a
+    /// collection (push, put). These can cause a heap value to escape the
+    /// current scope by inserting it into an outer collection.
+    fn callee_is_arg_escaping_primitive(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        let bi = self.arena.get(*binding);
+        self.arg_escaping_primitives.contains(&bi.name)
     }
 
     /// Check if an expression is statically proven to produce an immediate
