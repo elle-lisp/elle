@@ -47,12 +47,16 @@ pub fn eval_syntax(
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
     let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
+    let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
+    let nes_prims = crate::lir::intrinsics::build_non_escaping_stdlib(symbols);
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_intrinsics(intrinsics)
         .with_immediate_primitives(imm_prims)
         .with_mutating_primitives(mut_prims)
         .with_arg_escaping_primitives(esc_prims)
+        .with_non_allocating_accessors(acc_prims.clone())
+        .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
     let lir_module = lowerer.lower(&analysis.hir)?;
@@ -101,12 +105,16 @@ pub fn eval(
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
     let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
+    let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
+    let nes_prims = crate::lir::intrinsics::build_non_escaping_stdlib(symbols);
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_intrinsics(intrinsics)
         .with_immediate_primitives(imm_prims)
         .with_mutating_primitives(mut_prims)
         .with_arg_escaping_primitives(esc_prims)
+        .with_non_allocating_accessors(acc_prims.clone())
+        .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
     let lir_module = lowerer.lower(&analysis.hir)?;

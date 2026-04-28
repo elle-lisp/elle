@@ -272,6 +272,10 @@ pub struct Lowerer<'a> {
     mutating_primitives: FxHashSet<SymbolId>,
     /// Primitives that insert args into collections (push, put).
     arg_escaping_primitives: FxHashSet<SymbolId>,
+    /// Primitives that return pre-existing values without allocating.
+    non_allocating_accessors: FxHashSet<SymbolId>,
+    /// Stdlib functions known to not escape heap values.
+    non_escaping_stdlib: FxHashSet<SymbolId>,
     /// Binding → rotation_safe for lowered lambdas. Populated during
     /// lowering so that `body_escapes_heap_values` can check callees
     /// transitively: a call to a rotation-safe function doesn't escape.
@@ -351,6 +355,8 @@ impl<'a> Lowerer<'a> {
             immediate_primitives: FxHashSet::default(),
             mutating_primitives: FxHashSet::default(),
             arg_escaping_primitives: FxHashSet::default(),
+            non_allocating_accessors: FxHashSet::default(),
+            non_escaping_stdlib: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
             callee_return_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
@@ -389,6 +395,16 @@ impl<'a> Lowerer<'a> {
 
     pub fn with_arg_escaping_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
         self.arg_escaping_primitives = set;
+        self
+    }
+
+    pub fn with_non_allocating_accessors(mut self, set: FxHashSet<SymbolId>) -> Self {
+        self.non_allocating_accessors = set;
+        self
+    }
+
+    pub fn with_non_escaping_stdlib(mut self, set: FxHashSet<SymbolId>) -> Self {
+        self.non_escaping_stdlib = set;
         self
     }
 
