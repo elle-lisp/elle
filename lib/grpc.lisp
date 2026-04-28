@@ -52,14 +52,19 @@
 
   ## ── Collect gRPC response from stream ──────────────────────────────
 
+  (defn find-header [headers name]
+    (let [matches (filter (fn [h] (= (h 0) name)) headers)]
+      (when (not (empty? matches)) (first matches))))
+
   (defn check-grpc-status [headers]
     "Check grpc-status in headers/trailers. Raises on non-zero status."
-    (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) headers))]
-      (when (and status-pair (not (= (get status-pair 1) "0")))
-        (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) headers))]
+    (if-let [pair (find-header headers "grpc-status")]
+      (when (not= (pair 1) "0")
+        (let [msg (find-header headers "grpc-message")]
           (error {:error :grpc-error
-                  :code (parse-int (get status-pair 1))
-                  :message (if msg-pair (get msg-pair 1) "unknown error")})))))
+                  :code (parse-int (pair 1))
+                  :message (if msg (msg 1) "unknown error")})))
+      nil))
 
   (defn collect-grpc-response [s]
     "Read data + trailers from an h2 stream. Returns raw gRPC frame bytes.
