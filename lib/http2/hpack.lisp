@@ -497,6 +497,13 @@
 
     true)
 
+  ## ── Table size update ─────────────────────────────────────────────────
+
+  (defn set-encoder-table-size [encoder new-max]
+    "Update the encoder's dynamic table max size and evict as needed.
+     Called when peer sends SETTINGS_HEADER_TABLE_SIZE."
+    (dt-set-max-size encoder:table new-max))
+
   ## ── Exports ────────────────────────────────────────────────────────────
 
   {:make-encoder make-encoder
@@ -505,5 +512,6 @@
    :decode       hpack-decode
    :encode-int   encode-int
    :decode-int   decode-int
+   :set-encoder-table-size set-encoder-table-size
    :static-table static-table
    :test         run-tests})

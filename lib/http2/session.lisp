@@ -229,7 +229,9 @@
                        :message "MAX_FRAME_SIZE outside valid range 16384..16777215"}))
              (put session:remote-settings :max-frame-size entry:value))
           (= entry:id C:settings-header-table-size)
-           (put session:remote-settings :header-table-size entry:value)
+           (begin
+             (put session:remote-settings :header-table-size entry:value)
+             (hpack:set-encoder-table-size session:hpack-encoder entry:value))
           (= entry:id C:settings-max-concurrent-streams)
            (put session:remote-settings :max-concurrent-streams entry:value)
           (= entry:id C:settings-enable-push)
@@ -436,6 +438,17 @@
                           (frame:u32->bytes 2147483648))]
       (let [[ok? _] (protect (apply-remote-settings sess payload))]
         (assert (not ok?) "settings: INITIAL_WINDOW_SIZE > 2^31-1 rejected")))
+
+    # ── SETTINGS_HEADER_TABLE_SIZE updates encoder ──
+    (let [mock-transport {:read nil :write nil :flush nil :close nil}
+          sess (make-session mock-transport "test" false)
+          payload (concat (frame:u16->bytes C:settings-header-table-size)
+                          (frame:u32->bytes 2048))]
+      (assert (= sess:hpack-encoder:table:max-size 4096)
+              "settings: encoder table starts at 4096")
+      (apply-remote-settings sess payload)
+      (assert (= sess:hpack-encoder:table:max-size 2048)
+              "settings: encoder table resized to 2048"))
 
     # ── strip-padding ──
     (let [padded (bytes 3 0x41 0x42 0x43 0x00 0x00 0x00)
