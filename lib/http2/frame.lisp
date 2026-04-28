@@ -205,6 +205,11 @@
      opaque-data must be exactly 8 bytes."
     [TYPE-PING (if ack? FLAG-ACK 0) 0 opaque-data])
 
+  (defn make-continuation-frame [stream-id header-block end-headers?]
+    "Build a CONTINUATION frame. Returns [type flags stream-id payload]."
+    [TYPE-CONTINUATION (if end-headers? FLAG-END-HEADERS 0)
+     stream-id header-block])
+
   ## ── Settings parser ───────────────────────────────────────────────────
 
   (defn parse-settings [payload]
@@ -387,6 +392,20 @@
         (assert (= hdr:length 2) "roundtrip: payload length")
         (assert (= payload (bytes 0x82 0x86)) "roundtrip: payload")))
 
+    # ── CONTINUATION frame ──
+    (let [[ftype flags sid payload]
+          (make-continuation-frame 1 (bytes 0x82 0x86) false)]
+      (assert (= ftype TYPE-CONTINUATION) "continuation: type")
+      (assert (= flags 0) "continuation: no end-headers")
+      (assert (= sid 1) "continuation: stream-id")
+      (assert (= payload (bytes 0x82 0x86)) "continuation: payload"))
+
+    (let [[ftype flags sid payload]
+          (make-continuation-frame 3 (bytes 0x84) true)]
+      (assert (= ftype TYPE-CONTINUATION) "continuation end: type")
+      (assert (has-flag? flags FLAG-END-HEADERS) "continuation end: end-headers flag")
+      (assert (= sid 3) "continuation end: stream-id"))
+
     true)
 
   ## ── Exports ────────────────────────────────────────────────────────────
@@ -404,6 +423,7 @@
    :make-rst-stream-frame    make-rst-stream-frame
    :make-goaway-frame        make-goaway-frame
    :make-ping-frame          make-ping-frame
+   :make-continuation-frame  make-continuation-frame
    :parse-settings  parse-settings
    :has-flag?       has-flag?
    :u16->bytes      u16->bytes
