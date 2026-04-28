@@ -6,6 +6,24 @@ use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::Value;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Unique identifier for a HIR node. Used as a key for analysis side
+/// tables (region assignments, type annotations, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HirId(pub u32);
+
+/// Global monotonic counter for HirId assignment.
+static NEXT_HIR_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Reset the HirId counter (call between compilation units).
+pub fn reset_hir_ids() {
+    NEXT_HIR_ID.store(0, Ordering::Relaxed);
+}
+
+fn fresh_hir_id() -> HirId {
+    HirId(NEXT_HIR_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 /// A declared signal bound on a function parameter.
 #[derive(Debug, Clone)]
@@ -14,26 +32,33 @@ pub struct ParamBound {
     pub signal: Signal,
 }
 
-/// HIR expression with source location and signal
+/// HIR expression with source location, signal, and unique ID.
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub kind: HirKind,
     pub span: Span,
     pub signal: Signal,
+    pub id: HirId,
 }
 
 impl Hir {
-    /// Create a new HIR node
+    /// Create a new HIR node with an auto-assigned unique ID.
     pub fn new(kind: HirKind, span: Span, signal: Signal) -> Self {
-        Hir { kind, span, signal }
+        Hir {
+            kind,
+            span,
+            signal,
+            id: fresh_hir_id(),
+        }
     }
 
-    /// Create a silent HIR node (no signals)
+    /// Create a silent HIR node (no signals) with an auto-assigned ID.
     pub fn silent(kind: HirKind, span: Span) -> Self {
         Hir {
             kind,
             span,
             signal: Signal::silent(),
+            id: fresh_hir_id(),
         }
     }
 }
