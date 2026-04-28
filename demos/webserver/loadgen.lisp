@@ -19,31 +19,29 @@
 
 # ── Parameters ───────────────────────────────────────────────────────
 
-(def args      (sys/args))
-(def target    (or (get args 0) "http://127.0.0.1:8080/"))
-(def total     (parse-int (or (get args 1) "1000")))
-(def parallel  (parse-int (or (get args 2) "50")))
+(def args (sys/args))
+(def target (or (get args 0) "http://127.0.0.1:8080/"))
+(def total (parse-int (or (get args 1) "1000")))
+(def parallel (parse-int (or (get args 2) "50")))
 (def keepalive (= (get args 3) "keepalive"))
 
 (def parsed (http:parse-url target))
-(def path   (or parsed:path "/"))
+(def path (or parsed:path "/"))
 
 # ── Single request (fresh connection) ────────────────────────────────
 
 (defn fresh-request [_]
-  (let* [t0         (clock/monotonic)
+  (let* [t0 (clock/monotonic)
          [ok? resp] (protect (http:get target))
-         t1         (clock/monotonic)]
-    {:ok?        ok?
-     :status     (if ok? resp:status 0)
-     :latency-ms (* (- t1 t0) 1000.0)}))
+         t1 (clock/monotonic)]
+    {:ok? ok? :status (if ok? resp:status 0) :latency-ms (* (- t1 t0) 1000.0)}))
 
 # ── Keep-alive worker (one connection, N requests) ───────────────────
 
 (defn distribute [total n]
   "Split total into n roughly-equal chunks."
-  (let* [base   (/ total n)
-         extra  (% total n)
+  (let* [base (/ total n)
+         extra (% total n)
          result @[]]
     (def @i 0)
     (while (< i n)
@@ -55,37 +53,39 @@
   (let* [session (http:connect target)
          results @[]]
     (defer (protect (http:close session))
-      (def @i 0)
-      (while (< i request-count)
-        (let* [t0         (clock/monotonic)
-               [ok? resp] (protect (http:send session "GET" path))
-               t1         (clock/monotonic)]
-          (push results {:ok?        ok?
-                         :status     (if ok? resp:status 0)
-                         :latency-ms (* (- t1 t0) 1000.0)}))
-        (assign i (+ i 1))))
+           (def @i 0)
+           (while (< i request-count)
+             (let* [t0 (clock/monotonic)
+                    [ok? resp] (protect (http:send session "GET" path))
+                    t1 (clock/monotonic)]
+               (push results
+                     {:ok? ok?
+                      :status (if ok? resp:status 0)
+                      :latency-ms (* (- t1 t0) 1000.0)}))
+             (assign i (+ i 1))))
     (->list results)))
 
 # ── Percentile helper ────────────────────────────────────────────────
 
 (defn percentile [sorted-arr p]
-  (let* [n   (length sorted-arr)
+  (let* [n (length sorted-arr)
          idx (min (- n 1) (floor (* (/ p 100.0) n)))]
     (get sorted-arr idx)))
 
 # ── Stats printer ────────────────────────────────────────────────────
 
 (defn print-stats [results elapsed]
-  (let* [n           (length results)
-         rps         (/ n elapsed)
-         latencies   (sort (map (fn [r] r:latency-ms) results))
-         lat-arr     (->array latencies)
-         ok-count    (length (filter (fn [r] r:ok?) results))
-         err-count   (- n ok-count)
+  (let* [n (length results)
+         rps (/ n elapsed)
+         latencies (sort (map (fn [r] r:latency-ms) results))
+         lat-arr (->array latencies)
+         ok-count (length (filter (fn [r] r:ok?) results))
+         err-count (- n ok-count)
          status-dist (fold (fn [acc r]
                              (let [k (string r:status)]
                                (put acc k (+ (or (get acc k) 0) 1))))
-                           {} results)]
+                           {}
+                           results)]
     (println "")
     (println "── results ────────────────────────────────────────")
     (println (string/format "total requests:  {}" n))
@@ -98,7 +98,8 @@
     (println (string/format "  p50:  {:.2f}" (percentile lat-arr 50)))
     (println (string/format "  p95:  {:.2f}" (percentile lat-arr 95)))
     (println (string/format "  p99:  {:.2f}" (percentile lat-arr 99)))
-    (println (string/format "  max:  {:.2f}" (get lat-arr (- (length lat-arr) 1))))
+    (println (string/format "  max:  {:.2f}"
+                            (get lat-arr (- (length lat-arr) 1))))
     (println "")
     (println "── status codes ──────────────────────────────────")
     (each k in (keys status-dist)
@@ -107,12 +108,17 @@
 # ── Main ─────────────────────────────────────────────────────────────
 
 (def mode (if keepalive "keepalive" "fresh"))
-(println (string/format "load test: {} requests, {} concurrent, {} connections → {}"
-                        total parallel mode target))
+(println (string/format (string "load test: {} requests, "
+                                "{} concurrent, "
+                                "{} connections → {}")
+                        total
+                        parallel
+                        mode
+                        target))
 
-(let* [t0      (clock/monotonic)
+(let* [t0 (clock/monotonic)
        results (if keepalive
-                 (let* [chunks  (distribute total parallel)
+                 (let* [chunks (distribute total parallel)
                         batches (ev/map-limited keepalive-worker chunks parallel)]
                    (->array (fold concat () batches)))
                  (ev/map-limited fresh-request (range total) parallel))

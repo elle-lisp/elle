@@ -60,7 +60,8 @@
 
 # Setting trace keywords
 (vm/config-set :trace |:call|)
-(assert (contains? (vm/config :trace) :call) "trace set contains :call after set")
+(assert (contains? (vm/config :trace) :call)
+        "trace set contains :call after set")
 
 # Multiple trace keywords
 (vm/config-set :trace |:call :signal :fiber|)
@@ -89,11 +90,10 @@
 # ── Custom JIT policy via closure ─────────────────────────────────────
 
 # Set a custom JIT policy closure
-(vm/config-set :jit
-  (fn [info]
-    (if (and (get info :silent) (> (get info :calls) 5))
-      :jit
-      :skip)))
+(vm/config-set :jit (fn [info]
+                      (if (and (get info :silent) (> (get info :calls) 5))
+                        :jit
+                        :skip)))
 
 # Custom policy should report as :custom
 (assert (= (vm/config :jit) :custom) "custom JIT policy reports as :custom")
@@ -113,5 +113,4 @@
 # ── Boolean config fields ────────────────────────────────────────────
 
 (let [cfg (vm/config)]
-  # stats defaults to false
   (assert (= (get cfg :stats) false) "stats defaults to false"))

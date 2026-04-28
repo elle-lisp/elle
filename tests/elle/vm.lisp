@@ -2,7 +2,8 @@
 
 ## === vm/list-primitives returns symbols ===
 
-(assert (= (type-of (first (vm/list-primitives))) :symbol) "list-primitives elements are symbols")
+(assert (= (type-of (first (vm/list-primitives))) :symbol)
+        "list-primitives elements are symbols")
 
 ## === vm/primitive-meta accepts symbols ===
 
@@ -18,4 +19,5 @@
 
 ## === vm/primitive-meta type error on wrong type ===
 
-(let [[ok? _] (protect ((fn () (vm/primitive-meta 42))))] (assert (not ok?) "primitive-meta rejects integer"))
+(let [[ok? _] (protect ((fn () (vm/primitive-meta 42))))]
+  (assert (not ok?) "primitive-meta rejects integer"))

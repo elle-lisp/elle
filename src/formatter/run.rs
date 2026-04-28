@@ -203,7 +203,7 @@ pub fn run(args: &[String]) -> i32 {
         match do_format(&source, file_path, &config, &opts) {
             Ok(formatted) => {
                 if check {
-                    if let Some(exit) = check_columns(file_path, &formatted) {
+                    if let Some(exit) = check_columns(file_path, &formatted, config.line_length) {
                         had_errors = exit != 0;
                     }
                 }
@@ -264,28 +264,31 @@ fn run_stdin(check: bool, config: &FormatterConfig, opts: &FmtOpts) -> i32 {
 
 /// Check for lines with opening delimiters past column thresholds.
 /// Returns Some(exit_code) if violations found, None if clean.
-fn check_columns(file_path: &str, formatted: &str) -> Option<i32> {
+fn check_columns(file_path: &str, formatted: &str, line_length: usize) -> Option<i32> {
     let mut has_warning = false;
     let mut has_error = false;
     let openers = ['(', '[', '{'];
+    let warn_col = line_length * 3 / 4; // 75% of line length (60 for default 80)
 
     for (line_num, line) in formatted.lines().enumerate() {
         for (col, ch) in line.chars().enumerate() {
             if openers.contains(&ch) {
-                if col >= 80 {
+                if col >= line_length {
                     eprintln!(
-                        "error: {}:{}:{}: opening delimiter past column 80",
+                        "error: {}:{}:{}: opening delimiter past column {}",
                         file_path,
                         line_num + 1,
-                        col + 1
+                        col + 1,
+                        line_length,
                     );
                     has_error = true;
-                } else if col >= 60 {
+                } else if col >= warn_col {
                     eprintln!(
-                        "warning: {}:{}:{}: opening delimiter past column 60, consider refactoring",
+                        "warning: {}:{}:{}: opening delimiter past column {}, consider refactoring",
                         file_path,
                         line_num + 1,
-                        col + 1
+                        col + 1,
+                        warn_col,
                     );
                     has_warning = true;
                 }

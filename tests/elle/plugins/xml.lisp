@@ -7,10 +7,10 @@
   (print "SKIP: xml plugin not built\n")
   (exit 0))
 
-(def parse-fn        (get plugin :parse))
-(def emit-fn         (get plugin :emit))
-(def reader-new-fn   (get plugin :reader-new))
-(def next-event-fn   (get plugin :next-event))
+(def parse-fn (get plugin :parse))
+(def emit-fn (get plugin :emit))
+(def reader-new-fn (get plugin :reader-new))
+(def next-event-fn (get plugin :next-event))
 (def reader-close-fn (get plugin :reader-close))
 
 # ── xml/parse ──────────────────────────────────────────────────────
@@ -18,11 +18,13 @@
 ## Parse simple self-closing element
 (let [doc (parse-fn "<root/>")]
   (assert (= (get doc :tag) "root") "parse: simple element tag")
-  (assert (= (length (get doc :children)) 0) "parse: simple element has no children"))
+  (assert (= (length (get doc :children)) 0)
+          "parse: simple element has no children"))
 
 ## Parse element with attributes
 (let [doc (parse-fn "<a href=\"http://example.com\" id=\"1\"/>")]
-  (assert (= (get (get doc :attrs) :href) "http://example.com") "parse: attribute href")
+  (assert (= (get (get doc :attrs) :href) "http://example.com")
+          "parse: attribute href")
   (assert (= (get (get doc :attrs) :id) "1") "parse: attribute id"))
 
 ## Parse nested elements
@@ -56,40 +58,57 @@
        emitted (emit-fn doc1)
        doc2 (parse-fn emitted)]
   (assert (= (get doc2 :tag) (get doc1 :tag)) "roundtrip: tag matches")
-  (assert (= (get (get (get doc2 :children) 0) :tag) (get (get (get doc1 :children) 0) :tag)) "roundtrip: child tag matches"))
+  (assert (= (get (get (get doc2 :children) 0) :tag)
+             (get (get (get doc1 :children) 0) :tag))
+          "roundtrip: child tag matches"))
 
 ## Error: malformed XML
-(let [[ok? err] (protect ((fn () (parse-fn "<unclosed>"))))] (assert (not ok?) "parse: malformed XML returns xml-error") (assert (= (get err :error) :xml-error) "parse: malformed XML returns xml-error"))
+(let [[ok? err] (protect ((fn () (parse-fn "<unclosed>"))))]
+  (assert (not ok?) "parse: malformed XML returns xml-error")
+  (assert (= (get err :error) :xml-error)
+          "parse: malformed XML returns xml-error"))
 
 ## Error: non-string argument
-(let [[ok? err] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "parse: non-string returns type-error") (assert (= (get err :error) :type-error) "parse: non-string returns type-error"))
+(let [[ok? err] (protect ((fn () (parse-fn 42))))]
+  (assert (not ok?) "parse: non-string returns type-error")
+  (assert (= (get err :error) :type-error)
+          "parse: non-string returns type-error"))
 
 # ── xml/emit ───────────────────────────────────────────────────────
 
 ## Emit simple element produces self-closing tag
-(assert (= (emit-fn {:tag "root" :attrs {} :children []}) "<root/>") "emit: simple self-closing element")
+(assert (= (emit-fn {:tag "root" :attrs {} :children []}) "<root/>")
+        "emit: simple self-closing element")
 
 ## Emit element with children produces valid XML
-(let [result (emit-fn {:tag "root" :attrs {} :children
-                        [{:tag "child" :attrs {} :children ["text"]}]})]
+(let [result (emit-fn {:tag "root"
+                       :attrs {}
+                       :children [{:tag "child" :attrs {} :children ["text"]}]})]
   (assert (not (nil? (parse-fn result))) "emit: output is valid XML"))
 
 ## Emit escapes special characters in text; re-parse recovers original
 (let [result (emit-fn {:tag "root" :attrs {} :children ["<hello> & \"world\""]})]
   (assert (not (= result nil)) "emit: escapes special chars")
   (let [doc (parse-fn result)]
-    (assert (= (get (get doc :children) 0) "<hello> & \"world\"") "emit: round-trip escaping")))
+    (assert (= (get (get doc :children) 0) "<hello> & \"world\"")
+            "emit: round-trip escaping")))
 
 ## Emit with attributes roundtrips cleanly
 (let [result (emit-fn {:tag "a" :attrs {:href "http://x.com"} :children []})]
   (let [doc (parse-fn result)]
-    (assert (= (get (get doc :attrs) :href) "http://x.com") "emit: attribute roundtrip")))
+    (assert (= (get (get doc :attrs) :href) "http://x.com")
+            "emit: attribute roundtrip")))
 
 ## Error: non-struct argument produces xml-error
-(let [[ok? err] (protect ((fn () (emit-fn "not-a-struct"))))] (assert (not ok?) "emit: non-struct returns xml-error") (assert (= (get err :error) :xml-error) "emit: non-struct returns xml-error"))
+(let [[ok? err] (protect ((fn () (emit-fn "not-a-struct"))))]
+  (assert (not ok?) "emit: non-struct returns xml-error")
+  (assert (= (get err :error) :xml-error) "emit: non-struct returns xml-error"))
 
 ## Error: missing :tag field
-(let [[ok? err] (protect ((fn () (emit-fn {:attrs {} :children []}))))] (assert (not ok?) "emit: missing :tag field returns xml-error") (assert (= (get err :error) :xml-error) "emit: missing :tag field returns xml-error"))
+(let [[ok? err] (protect ((fn () (emit-fn {:attrs {} :children []}))))]
+  (assert (not ok?) "emit: missing :tag field returns xml-error")
+  (assert (= (get err :error) :xml-error)
+          "emit: missing :tag field returns xml-error"))
 
 # ── Streaming API ──────────────────────────────────────────────────
 
@@ -124,18 +143,21 @@
     (assert (= (get e1 :tag) "root") "stream: first meaningful event is root")))
 
 ## Error: non-reader to xml/next-event
-(let [[ok? err] (protect ((fn () (next-event-fn "not-a-reader"))))] (assert (not ok?) "stream: non-reader to next-event returns type-error") (assert (= (get err :error) :type-error) "stream: non-reader to next-event returns type-error"))
+(let [[ok? err] (protect ((fn () (next-event-fn "not-a-reader"))))]
+  (assert (not ok?) "stream: non-reader to next-event returns type-error")
+  (assert (= (get err :error) :type-error)
+          "stream: non-reader to next-event returns type-error"))
 
 ## Error: non-reader to xml/reader-close
-(let [[ok? err] (protect ((fn () (reader-close-fn "not-a-reader"))))] (assert (not ok?) "stream: non-reader to reader-close returns type-error") (assert (= (get err :error) :type-error) "stream: non-reader to reader-close returns type-error"))
+(let [[ok? err] (protect ((fn () (reader-close-fn "not-a-reader"))))]
+  (assert (not ok?) "stream: non-reader to reader-close returns type-error")
+  (assert (= (get err :error) :type-error)
+          "stream: non-reader to reader-close returns type-error"))
 
 ## Error: malformed XML during streaming (unclosed tag inside root)
 (let [reader (reader-new-fn "<root><unclosed></root>")]
-  ## Advance past root start
-  (next-event-fn reader)
-  ## unclosed start event for <unclosed>
-  (next-event-fn reader)
-  ## The </root> closes the wrong tag — quick-xml may error or return end
+  (next-event-fn reader)  ## unclosed start event for <unclosed>
+  (next-event-fn reader)  ## The </root> closes the wrong tag — quick-xml may error or return end
   ## Either an error or an :end event is acceptable; just confirm no crash
   (let [e (protect (fn () (next-event-fn reader)))]
     (assert (not (nil? e)) "stream: malformed XML does not crash")))

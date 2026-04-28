@@ -22,13 +22,14 @@
 
 (def tmp-path "/tmp/elle-print-test-redirect.txt")
 (def out (port/open tmp-path :write))
-    (parameterize ((*stdout* out))
-      (println "captured line"))
-    (port/close out)
+(parameterize ((*stdout* out))
+  (println "captured line"))
+(port/close out)
 
 (def in (port/open tmp-path :read))
-    (def contents (port/read-all in))
-    (port/close in)
-    (assert (= (string contents) "captured line\n") "println respects *stdout* rebinding")
+(def contents (port/read-all in))
+(port/close in)
+(assert (= (string contents) "captured line\n")
+        "println respects *stdout* rebinding")
 
 (println "all print tests passed")

@@ -15,7 +15,11 @@
   "Assert that (thunk) signals an error containing substring"
   (let [[ok? result] (protect (thunk))]
     (assert (not ok?) (append msg " — expected error"))
-    (assert (string/contains? (string result) substring) (-> msg (append " — expected '") (append substring) (append "' in error")))))
+    (assert (string/contains? (string result) substring)
+            (-> msg
+                (append " — expected '")
+                (append substring)
+                (append "' in error")))))
 
 # ============================================================
 # Basic eval
@@ -58,30 +62,52 @@
 (assert (= (eval '(unless false 99)) 99) "eval with unless macro")
 
 # test_eval_with_defn_macro
-(assert (= (eval '(begin (defn f (x) (* x x)) (f 5))) 25) "eval with defn macro")
+(assert (= (eval '(begin
+                    (defn f (x)
+                      (* x x))
+                    (f 5)))
+           25)
+        "eval with defn macro")
 
 # test_eval_with_let_star_macro
-(assert (= (eval '(let* [x 1 y (+ x 1)] (+ x y))) 3) "eval with let* macro")
+(assert (= (eval '(let* [x 1
+                         y (+ x 1)]
+                    (+ x y)))
+           3)
+        "eval with let* macro")
 
 # test_eval_with_thread_first
-(assert (= (eval '(-> 5 (+ 3) (* 2))) 16) "eval with thread-first")
+(assert (= (eval '(-> 5
+                      (+ 3)
+                      (* 2)))
+           16)
+        "eval with thread-first")
 
 # ============================================================
 # Closures and scoping in eval'd code
 # ============================================================
 
 # test_eval_with_closure
-(assert (= (eval '(let [x 1] ((fn () x)))) 1) "eval with closure")
+(assert (= (eval '(let [x 1]
+                    ((fn () x))))
+           1)
+        "eval with closure")
 
 # test_eval_with_higher_order_function
-(assert (= (eval '(let [f (fn (x) (+ x 1))] (f 41))) 42) "eval with higher-order function")
+(assert (= (eval '(let [f (fn (x) (+ x 1))]
+                    (f 41)))
+           42)
+        "eval with higher-order function")
 
 # ============================================================
 # Eval in various contexts
 # ============================================================
 
 # test_eval_inside_let
-(assert (= (let [x 10] (eval '(+ 1 2))) 3) "eval inside let")
+(assert (= (let [x 10]
+             (eval '(+ 1 2)))
+           3)
+        "eval inside let")
 
 # test_eval_inside_lambda
 (assert (= ((fn () (eval '42))) 42) "eval inside lambda")
@@ -90,7 +116,10 @@
 (assert (= (+ 1 (eval '2)) 3) "eval result in computation")
 
 # test_eval_result_in_let_binding
-(assert (= (let [x (eval '42)] (+ x 1)) 43) "eval result in let binding")
+(assert (= (let [x (eval '42)]
+             (+ x 1))
+           43)
+        "eval result in let binding")
 
 # test_eval_in_conditional
 (assert (= (if (eval 'true) 1 2) 1) "eval in conditional")
@@ -107,34 +136,49 @@
 # ============================================================
 
 # test_eval_compilation_error
-(let [[ok? _] (protect ((fn () (eval '(if)))))] (assert (not ok?) "eval compilation error (if with no args)"))
+(let [[ok? _] (protect ((fn () (eval '(if)))))]
+  (assert (not ok?) "eval compilation error (if with no args)"))
 
 # test_eval_runtime_error_in_evald_code
-(let [[ok? _] (protect ((fn () (eval '(/ 1 0)))))] (assert (not ok?) "eval runtime error (division by zero)"))
+(let [[ok? _] (protect ((fn () (eval '(/ 1 0)))))]
+  (assert (not ok?) "eval runtime error (division by zero)"))
 
 # test_eval_undefined_variable
-(let [[ok? _] (protect ((fn () (eval 'undefined_var))))] (assert (not ok?) "eval undefined variable"))
+(let [[ok? _] (protect ((fn () (eval 'undefined_var))))]
+  (assert (not ok?) "eval undefined variable"))
 
 # ============================================================
 # Sequential evals (expander caching)
 # ============================================================
 
 # test_eval_sequential
-(assert (= (begin (eval '(+ 1 2)) (eval '(* 3 4))) 12) "sequential evals")
+(assert (= (begin
+             (eval '(+ 1 2))
+             (eval '(* 3 4)))
+           12)
+        "sequential evals")
 
 # ============================================================
 # Eval with begin/block
 # ============================================================
 
 # test_eval_begin_sequence
-(assert (= (eval '(begin 1 2 3)) 3) "eval begin sequence")
+(assert (= (eval '(begin
+                    1
+                    2
+                    3))
+           3)
+        "eval begin sequence")
 
 # ============================================================
 # Eval with match
 # ============================================================
 
 # test_eval_with_match — bind match result to var first (known bug workaround)
-(def @match-result (eval '(match 42 42 "found" _ "not found")))
+(def @match-result
+  (eval '(match 42
+           42 "found"
+           _ "not found")))
 (assert (= match-result "found") "eval with match")
 
 # ============================================================
@@ -163,21 +207,37 @@
 # ============================================================
 
 # test_eval_with_cond
-(assert (= (eval '(cond (= 1 2) "no" true "yes")) "yes") "eval with cond")
+(assert (= (eval '(cond
+                    (= 1 2) "no"
+                    true "yes"))
+           "yes")
+        "eval with cond")
 
 # ============================================================
 # Eval with while loop
 # ============================================================
 
 # test_eval_with_while
-(assert (= (eval '(begin (def @i 0) (while (< i 3) (assign i (+ i 1))) i)) 3) "eval with while loop")
+(assert (= (eval '(begin
+                    (def @i 0)
+                    (while (< i 3) (assign i (+ i 1)))
+                    i))
+           3)
+        "eval with while loop")
 
 # ============================================================
 # Eval with recursion
 # ============================================================
 
 # test_eval_with_recursion
-(assert (= (eval '(begin (defn fact (n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5))) 120) "eval with recursion (factorial)")
+(assert (= (eval '(begin
+                    (defn fact (n)
+                      (if (= n 0)
+                        1
+                        (* n (fact (- n 1)))))
+                    (fact 5)))
+           120)
+        "eval with recursion (factorial)")
 
 # ============================================================
 # Eval with array operations
@@ -215,7 +275,11 @@
 # ============================================================
 
 # test_eval_with_try_catch
-(assert (= (eval '(try (/ 1 0) (catch e 42))) 42) "eval with try/catch")
+(assert (= (eval '(try
+                    (/ 1 0)
+                    (catch e 42)))
+           42)
+        "eval with try/catch")
 
 # ============================================================
 # import (prelude function)
@@ -224,13 +288,15 @@
 # test_import_returns_last_value
 # Write a temp file, import it, check the returned struct
 (def @import-test-path "/tmp/elle-test-import.lisp")
-(spit import-test-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
+(spit import-test-path
+      "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (def @import-result (import-file import-test-path))
 (assert (= (get import-result :answer) 42) "import returns last value (:answer)")
 (assert (= (get import-result :double) 84) "import returns last value (:double)")
 
 # test_import_destructuring
 (def @import-destr-path "/tmp/elle-test-import-destr.lisp")
-(spit import-destr-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
+(spit import-destr-path
+      "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (let [{:answer a} (import-file import-destr-path)]
   (assert (= a 42) "import destructuring"))

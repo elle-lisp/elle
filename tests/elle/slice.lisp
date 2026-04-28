@@ -62,12 +62,14 @@
 # Note: @string equality via = is reference-based, so we compare via freeze
 # ============================================================================
 
-(assert (= (freeze (slice @"hello" 1 4)) "ell") "@string slice middle")
-(assert (= (freeze (slice @"hello" 0 5)) "hello") "@string slice full")
-(assert (= (freeze (slice @"hello" 0 0)) "") "@string slice empty start=end=0")
-(assert (= (freeze (slice @"hello" 3 3)) "") "@string slice empty start=end")
-(assert (= (freeze (slice @"hello" 4 2)) "") "@string slice start > end")
-(assert (string? (slice @"hello" 0 3)) "@string slice returns @string")
+(assert (= (freeze (slice (thaw "hello") 1 4)) "ell") "@string slice middle")
+(assert (= (freeze (slice (thaw "hello") 0 5)) "hello") "@string slice full")
+(assert (= (freeze (slice (thaw "hello") 0 0)) "")
+        "@string slice empty start=end=0")
+(assert (= (freeze (slice (thaw "hello") 3 3)) "")
+        "@string slice empty start=end")
+(assert (= (freeze (slice (thaw "hello") 4 2)) "") "@string slice start > end")
+(assert (string? (slice (thaw "hello") 0 3)) "@string slice returns @string")
 
 # ============================================================================
 # Bytes slicing (existing behavior preserved)
@@ -82,14 +84,16 @@
 # ============================================================================
 
 (assert (= (slice (@bytes 1 2 3 4 5) 1 3) (@bytes 2 3)) "@bytes slice middle")
-(assert (= (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3)) "@bytes slice end clamped")
+(assert (= (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3))
+        "@bytes slice end clamped")
 (assert (bytes? (slice (@bytes 1 2 3) 0 2)) "@bytes slice returns @bytes")
 
 # ============================================================================
 # Error cases
 # ============================================================================
 
-(let [[ok? _] (protect ((fn () (slice 42 0 1))))] (assert (not ok?) "slice on non-sequence errors"))
+(let [[ok? _] (protect ((fn () (slice 42 0 1))))]
+  (assert (not ok?) "slice on non-sequence errors"))
 (assert (= (slice [1 2 3] -1 3) [3]) "slice negative start resolves")
 (assert (= (slice [1 2 3] 0 -1) [1 2]) "slice negative end resolves")
 (assert (= (slice [1 2 3] -2 -1) [2]) "slice both negative")

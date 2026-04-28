@@ -4,7 +4,8 @@
 # Tests raw function call overhead: ~2.7M calls
 
 (defn fib [n]
-  (if (< n 2) n
+  (if (< n 2)
+    n
     (+ (fib (- n 1)) (fib (- n 2)))))
 
 (let* [t0 (clock/monotonic)

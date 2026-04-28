@@ -2,14 +2,20 @@
 ## jit-type-predicates — verify IsArray, IsStruct, IsSet compile via JIT
 
 ## Functions using type predicates — should JIT-compile without rejection
-(defn check-array (x) (array? x))
-(defn check-struct (x) (struct? x))
-(defn check-set (x) (set? x))
+(defn check-array (x)
+  (array? x))
+(defn check-struct (x)
+  (struct? x))
+(defn check-set (x)
+  (set? x))
 
 ## Call 15 times each to exceed JIT threshold
 (defn repeat (n f x)
-  (if (<= n 0) true
-    (begin (f x) (repeat (- n 1) f x))))
+  (if (<= n 0)
+    true
+    (begin
+      (f x)
+      (repeat (- n 1) f x))))
 
 (repeat 15 check-array [1 2 3])
 (repeat 15 check-struct {:a 1})

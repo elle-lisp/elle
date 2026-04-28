@@ -53,7 +53,8 @@
 (assert (< (- 1e10 10000000000.0) 1.0) "scientific notation 1e10 no dot")
 (assert (< (abs (- 2.3e-5 0.000023)) 1e-15) "scientific notation 2.3e-5")
 (assert (< (abs (- 1.5E10 1.5e10)) 1.0) "scientific notation uppercase E")
-(assert (< (abs (- 1e+10 1e10)) 1.0) "scientific notation explicit positive exponent")
+(assert (< (abs (- 1e+10 1e10)) 1.0)
+        "scientific notation explicit positive exponent")
 
 # ============================================================================
 # Underscores in float literals

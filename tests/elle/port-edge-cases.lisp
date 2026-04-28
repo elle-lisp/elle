@@ -8,15 +8,16 @@
 (def listener (tcp/listen "127.0.0.1" 0))
 (def port-num (parse-int (get (string/split (port/path listener) ":") 1)))
 
-(def server-fiber (ev/spawn (fn []
-  (forever
-    (let [[ok? conn] (protect (tcp/accept listener))]
-      (unless ok? (break nil))
-      (ev/spawn (fn []
-        (defer (protect (port/close conn))
-          (port/write conn "hello world")
-          (port/flush conn)
-          (ev/sleep 5)))))))))
+(def server-fiber
+  (ev/spawn (fn []
+              (forever
+                (let [[ok? conn] (protect (tcp/accept listener))]
+                  (unless ok? (break nil))
+                  (ev/spawn (fn []
+                              (defer (protect (port/close conn))
+                                     (port/write conn "hello world")
+                                     (port/flush conn)
+                                     (ev/sleep 5)))))))))
 
 (defn fresh-conn []
   (tcp/connect "127.0.0.1" port-num))
@@ -28,8 +29,7 @@
 (let [conn (fresh-conn)]
   (let [result (port/read conn 0)]
     (assert (= (length result) 0) "port/read 0 returns empty")
-    (assert (bytes? result) "port/read 0 returns bytes"))
-  # Connection still usable
+    (assert (bytes? result) "port/read 0 returns bytes"))  # Connection still usable
   (let [data (port/read conn 5)]
     (assert (= (string data) "hello") "port still usable after 0-read"))
   (port/close conn))

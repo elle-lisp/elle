@@ -6,7 +6,8 @@
 
 ## A function containing eval gets rejected when hot.
 (defn has-eval (n)
-  (if (<= n 0) 0
+  (if (<= n 0)
+    0
     (+ (eval '1) (has-eval (- n 1)))))
 
 (has-eval 20)
@@ -15,7 +16,7 @@
 
 ## At least one new rejection recorded
 (assert (> (length rejections) initial-count)
-  "expected new rejection from has-eval")
+        "expected new rejection from has-eval")
 
 ## Each rejection is a struct with :name, :reason, :calls
 (def @r (first rejections))
@@ -31,4 +32,4 @@
 
 ## Rejections should not have grown beyond has-eval
 (assert (= (length (jit/rejections)) (length rejections))
-  "pure hot function does not add to rejections")
+        "pure hot function does not add to rejections")

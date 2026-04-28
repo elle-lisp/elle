@@ -26,18 +26,19 @@
 (def elle-bin
   (cond
     (file/exists? "./target/release/elle") "./target/release/elle"
-    (file/exists? "./target/debug/elle")   "./target/debug/elle"
+    (file/exists? "./target/debug/elle") "./target/debug/elle"
     true (error {:error :test-skip
-                  :message "cannot find elle binary in ./target/"})))
+                 :message "cannot find elle binary in ./target/"})))
 
 (def result
   (subprocess/system "sh"
-    ["-c" (string "printf 'alpha\\nbeta\\ngamma\\n' | '"
-                   elle-bin "' /tmp/elle-stdin-evspawn-inner.lisp")]))
+                     ["-c"
+                      (string "printf 'alpha\\nbeta\\ngamma\\n' | '"
+                              elle-bin
+                              "' /tmp/elle-stdin-evspawn-inner.lisp")]))
 
 (assert (= result:exit 0)
-  (string "subprocess exited " result:exit ": " result:stderr))
+        (string "subprocess exited " result:exit ": " result:stderr))
 (def output (string/trim result:stdout))
-(assert (= output "3")
-  (string "expected '3', got '" output "'"))
+(assert (= output "3") (string "expected '3', got '" output "'"))
 (println "stdin-evspawn: PASS")

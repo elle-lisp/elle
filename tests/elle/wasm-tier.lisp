@@ -5,7 +5,8 @@
 # ── fib: recursive closure, should be WASM-compiled after threshold ──
 
 (defn fib [n]
-  (if (< n 2) n
+  (if (< n 2)
+    n
     (+ (fib (- n 1)) (fib (- n 2)))))
 
 (let [result (fib 20)]
@@ -16,7 +17,8 @@
 # ── higher-order: map uses a lambda, should stay on bytecode VM ──
 
 (defn my-sum [xs]
-  (if (empty? xs) 0
+  (if (empty? xs)
+    0
     (+ (first xs) (my-sum (rest xs)))))
 
 (let [result (my-sum (list 1 2 3 4 5))]

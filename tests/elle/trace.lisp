@@ -38,15 +38,30 @@
 # that the config state is correct and doesn't crash.
 
 (vm/config-set :trace |:call|)
-(defn traced-fn [x] (+ x 1))
+(defn traced-fn [x]
+  (+ x 1))
 (assert (= (traced-fn 5) 6) "traced function works correctly")
 (vm/config-set :trace ||)
 
 # ── All known keywords ────────────────────────────────────────────────
 
-(vm/config-set :trace |:call :signal :compile :fiber :hir :lir :emit :jit
-                        :io :gc :import :macro :wasm :capture :arena :escape
-                        :bytecode|)
+(vm/config-set :trace |:call
+                       :signal
+                       :compile
+                       :fiber
+                       :hir
+                       :lir
+                       :emit
+                       :jit
+                       :io
+                       :gc
+                       :import
+                       :macro
+                       :wasm
+                       :capture
+                       :arena
+                       :escape
+                       :bytecode|)
 (let [t (vm/config :trace)]
   (assert (>= (length t) 17) "all 17 known keywords accepted"))
 (vm/config-set :trace ||)

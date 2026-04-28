@@ -23,7 +23,6 @@
 (let* [s {:z 26 :a 1 :m 13}
        ks (keys s)
        vs (values s)]
-  # Keys should be in sorted order (keyword ordering)
   (assert (= (length ks) 3) "keys length")
   (assert (= (length vs) 3) "values length"))
 
@@ -53,8 +52,7 @@
 # ── pairs ──────────────────────────────────────────────────────────────────
 
 (let [ps (pairs {:x 10 :y 20})]
-  (assert (= (length ps) 2) "pairs length")
-  # Each pair is [key value]
+  (assert (= (length ps) 2) "pairs length")  # Each pair is [key value]
   (assert (= (length (first ps)) 2) "first pair is 2-element array"))
 
 # ── freeze / thaw ─────────────────────────────────────────────────────────
@@ -80,7 +78,8 @@
 
 # ── equality ───────────────────────────────────────────────────────────────
 
-(assert (= {:a 1 :b 2} {:b 2 :a 1}) "struct equality independent of insertion order")
+(assert (= {:a 1 :b 2} {:b 2 :a 1})
+        "struct equality independent of insertion order")
 (assert (= {:a 1} {:a 1}) "identical structs equal")
 (assert (not (= {:a 1} {:a 2})) "different values not equal")
 (assert (not (= {:a 1} {:a 1 :b 2})) "different sizes not equal")

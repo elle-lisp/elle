@@ -9,7 +9,7 @@
   (exit 0))
 
 ## Extract plugin functions from the returned struct
-(def parse-fn  (get plugin :parse))
+(def parse-fn (get plugin :parse))
 (def encode-fn (get plugin :encode))
 
 ## ── toml/parse: simple nested table ────────────────────────────
@@ -53,12 +53,17 @@
 
 ## ── error: parse invalid TOML ───────────────────────────────────
 
-(let [[ok? err] (protect ((fn () (parse-fn "not [valid toml"))))] (assert (not ok?) "toml/parse invalid") (assert (= (get err :error) :toml-error) "toml/parse invalid"))
+(let [[ok? err] (protect ((fn () (parse-fn "not [valid toml"))))]
+  (assert (not ok?) "toml/parse invalid")
+  (assert (= (get err :error) :toml-error) "toml/parse invalid"))
 
 ## ── error: encode nil value ─────────────────────────────────────
 
-(let [[ok? err] (protect ((fn () (encode-fn {:key nil}))))] (assert (not ok?) "toml/encode nil value") (assert (= (get err :error) :toml-error) "toml/encode nil value"))
+(let [[ok? err] (protect ((fn () (encode-fn {:key nil}))))]
+  (assert (not ok?) "toml/encode nil value")
+  (assert (= (get err :error) :toml-error) "toml/encode nil value"))
 
 ## ── error: wrong type to parse ──────────────────────────────────
 
-(let [[ok? _] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "toml/parse wrong type"))
+(let [[ok? _] (protect ((fn () (parse-fn 42))))]
+  (assert (not ok?) "toml/parse wrong type"))

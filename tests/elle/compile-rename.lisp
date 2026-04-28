@@ -42,7 +42,8 @@
 
 # ── Rename with multiple references ──────────────────────────────────
 
-(def multi-src "
+(def multi-src
+  "
 (defn double [n] (* n 2))
 (defn triple [n] (* n 3))
 (defn use-both [x] (+ (double x) (triple x)))
@@ -53,11 +54,13 @@
 
 # Verify the rename happened
 (def a6 (compile/analyze new5))
-(def twice-sym (first (filter (fn [s] (= (get s :name) "twice")) (compile/symbols a6))))
+(def twice-sym
+  (first (filter (fn [s] (= (get s :name) "twice")) (compile/symbols a6))))
 (assert (not (nil? twice-sym)) "twice exists after rename")
 
 # triple should still be there
-(def triple-sym (first (filter (fn [s] (= (get s :name) "triple")) (compile/symbols a6))))
+(def triple-sym
+  (first (filter (fn [s] (= (get s :name) "triple")) (compile/symbols a6))))
 (assert (not (nil? triple-sym)) "triple is untouched")
 
 (println "all compile/rename tests passed")

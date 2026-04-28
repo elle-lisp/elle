@@ -18,4 +18,5 @@
   (push jit-lines (string/join ["line " (string i)] ""))
   (ewrite (string/join ["line " (string i) "\n"] ""))
   (assign i (+ i 1)))
-(assert (= (length jit-lines) 10) "jit: port/write in hot defn completes all 10 iterations")
+(assert (= (length jit-lines) 10)
+        "jit: port/write in hot defn completes all 10 iterations")

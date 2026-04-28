@@ -22,18 +22,20 @@
 
 (let [p (port/open "/tmp/elle-test-read-after-readline" :read)]
   (defer (port/close p)
-    (let [line1 (port/read-line p)]
-      (println (string/join ["  line1: " (string line1)] ""))
-      (assert (= line1 "+OK") "line 1 content"))
-    (let [line2 (port/read-line p)]
-      (println (string/join ["  line2: " (string line2)] ""))
-      (assert (= line2 "$5") "line 2 content"))
-    (println "  about to port/read 7...")
-    (let [body (port/read p 7)]
-      (assert (not (nil? body)) "read returned data")
-      (assert (= (string/size-of body) 7)
-        (string/join ["expected 7 bytes, got " (string (string/size-of body))] ""))
-      (assert (= (string body) "hello\r\n") "read body content"))))
+         (let [line1 (port/read-line p)]
+           (println (string/join ["  line1: " (string line1)] ""))
+           (assert (= line1 "+OK") "line 1 content"))
+         (let [line2 (port/read-line p)]
+           (println (string/join ["  line2: " (string line2)] ""))
+           (assert (= line2 "$5") "line 2 content"))
+         (println "  about to port/read 7...")
+         (let [body (port/read p 7)]
+           (assert (not (nil? body)) "read returned data")
+           (assert (= (string/size-of body) 7)
+                   (string/join ["expected 7 bytes, got "
+                                 (string (string/size-of body))]
+                                ""))
+           (assert (= (string body) "hello\r\n") "read body content"))))
 
 (println "  single read-after-readline: ok")
 
@@ -45,11 +47,13 @@
 
 (defn make-bulk-sequence [n]
   "Build a string of n concatenated RESP bulk strings: $1\\r\\n0\\r\\n$1\\r\\n1\\r\\n..."
-  (def buf @"")
+  (def buf (thaw ""))
   (def @i 0)
   (while (< i n)
     (let [val (string i)]
-      (push buf (string/join ["$" (string (string/size-of val)) "\r\n" val "\r\n"] "")))
+      (push buf
+            (string/join ["$" (string (string/size-of val)) "\r\n" val "\r\n"]
+                         "")))
     (assign i (+ i 1)))
   (freeze buf))
 
@@ -57,17 +61,23 @@
 
 (let [p (port/open "/tmp/elle-test-read-after-readline-multi" :read)]
   (defer (port/close p)
-    (def @i 0)
-    (while (< i 20)
-      (let [header (port/read-line p)]
-        (assert (not (nil? header))
-          (string/join ["round " (string i) ": header is nil"] ""))
-        (let [expected-len (parse-int (slice header 1))]
-          (let [body (port/read p (+ expected-len 2))]
-            (let [val (slice (string body) 0 expected-len)]
-              (assert (= val (string i))
-                (string/join ["round " (string i) ": expected " (string i) " got " val] ""))))))
-      (assign i (+ i 1)))))
+         (def @i 0)
+         (while (< i 20)
+           (let [header (port/read-line p)]
+             (assert (not (nil? header))
+                     (string/join ["round " (string i) ": header is nil"] ""))
+             (let [expected-len (parse-int (slice header 1))]
+               (let [body (port/read p (+ expected-len 2))]
+                 (let [val (slice (string body) 0 expected-len)]
+                   (assert (= val (string i))
+                           (string/join ["round "
+                                        (string i)
+                                        ": expected "
+                                        (string i)
+                                        " got "
+                                        val]
+                                        ""))))))
+           (assign i (+ i 1)))))
 
 (println "  20 sequential bulk reads: ok")
 

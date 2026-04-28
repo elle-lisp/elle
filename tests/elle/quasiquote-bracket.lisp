@@ -9,19 +9,20 @@
 # ── 1. Bracket let in macro output ──────────────────────────────────
 
 (defmacro bind1 (name val & body)
-  `(let [,name ,val] ,;body))
+  `(let [,name ,val]
+     ,;body))
 
-(bind1 x 42
-  (assert (= x 42) "1: bracket let"))
+(bind1 x 42 (assert (= x 42) "1: bracket let"))
 (println "1: bracket let ok")
 
 # ── 2. Bracket let* in macro output ─────────────────────────────────
 
 (defmacro bind2 (n1 v1 n2 v2 & body)
-  `(let* [,n1 ,v1 ,n2 ,v2] ,;body))
+  `(let* [,n1 ,v1
+          ,n2 ,v2]
+     ,;body))
 
-(bind2 a 1 b 2
-  (assert (= (+ a b) 3) "2: bracket let*"))
+(bind2 a 1 b 2 (assert (= (+ a b) 3) "2: bracket let*"))
 (println "2: bracket let* ok")
 
 # ── 3. Array data in quasiquote still works ─────────────────────────
@@ -50,8 +51,7 @@
 # ── 6. when-ok failure ──────────────────────────────────────────────
 
 (def @ran false)
-(when-ok [v (error {:error :test :message "boom"})]
-  (assign ran true))
+(when-ok [v (error {:error :test :message "boom"})] (assign ran true))
 (assert (not ran) "6: when-ok skip on error")
 (println "6: when-ok error skip ok")
 

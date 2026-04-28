@@ -5,7 +5,7 @@
 
 # Build a string that exceeds 4096 bytes by repeated concatenation
 (defn make-long-string [n]
-  (def buf @"")
+  (def buf (thaw ""))
   (def @i 0)
   (while (< i n)
     (push buf "x")
@@ -21,33 +21,35 @@
 # Read it back with port/read-line
 (let [p (port/open "/tmp/elle-readline-long-test" :read)]
   (defer (port/close p)
-    (let [line (port/read-line p)]
-      (assert (= (string/size-of line) 8192)
-        (string/join ["expected 8192 bytes, got " (string (string/size-of line))] ""))
-      (assert (= line long-line) "read-line content mismatch"))))
+         (let [line (port/read-line p)]
+           (assert (= (string/size-of line) 8192)
+                   (string/join ["expected 8192 bytes, got "
+                                 (string (string/size-of line))]
+                                ""))
+           (assert (= line long-line) "read-line content mismatch"))))
 
 # Also test a line well under the limit still works
 (spit "/tmp/elle-readline-short-test" "hello\nworld\n")
 (let [p (port/open "/tmp/elle-readline-short-test" :read)]
   (defer (port/close p)
-    (let [line1 (port/read-line p)
-          line2 (port/read-line p)
-          line3 (port/read-line p)]
-      (assert (= line1 "hello") "short line 1")
-      (assert (= line2 "world") "short line 2")
-      (assert (nil? line3) "EOF after last line"))))
+         (let [line1 (port/read-line p)
+               line2 (port/read-line p)
+               line3 (port/read-line p)]
+           (assert (= line1 "hello") "short line 1")
+           (assert (= line2 "world") "short line 2")
+           (assert (nil? line3) "EOF after last line"))))
 
 # Test multiple long lines in sequence
 (def medium-line (make-long-string 5000))
 (spit "/tmp/elle-readline-multi-test"
-  (string/join [long-line "\n" medium-line "\n" "short\n"] ""))
+      (string/join [long-line "\n" medium-line "\n" "short\n"] ""))
 (let [p (port/open "/tmp/elle-readline-multi-test" :read)]
   (defer (port/close p)
-    (let [l1 (port/read-line p)
-          l2 (port/read-line p)
-          l3 (port/read-line p)]
-      (assert (= (string/size-of l1) 8192) "multi: line 1 length")
-      (assert (= (string/size-of l2) 5000) "multi: line 2 length")
-      (assert (= l3 "short") "multi: line 3 content"))))
+         (let [l1 (port/read-line p)
+               l2 (port/read-line p)
+               l3 (port/read-line p)]
+           (assert (= (string/size-of l1) 8192) "multi: line 1 length")
+           (assert (= (string/size-of l2) 5000) "multi: line 2 length")
+           (assert (= l3 "short") "multi: line 3 content"))))
 
 (println "readline-long: all tests passed")

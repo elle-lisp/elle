@@ -9,11 +9,13 @@
 # safe. This is fixed structurally by the bump-arena Phase 4 redesign.
 # See contracts.lisp for the full reproduction.
 
-(def f (fn [x]
-         (letrec [loop (fn [i]
-                   (if (>= i 3) {:fail x}
-                     (if (= x i) nil (loop (+ i 1)))))]
-           (loop 0))))
+(def f
+  (fn [x]
+    (letrec [loop (fn [i]
+                    (if (>= i 3)
+                      {:fail x}
+                      (if (= x i) nil (loop (+ i 1)))))]
+      (loop 0))))
 
 # Direct calls work (no cross-function rotation)
 (assert (nil? (f 1)) "direct call 1")

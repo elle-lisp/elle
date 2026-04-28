@@ -56,13 +56,19 @@
 # ============================================================================
 
 # Yield a string, return int
-(let [f (fiber/new (fn [] (yield "yielded") 99) |:yield|)]
+(let [f (fiber/new (fn []
+                     (yield "yielded")
+                     99)
+                   |:yield|)]
   (let [y (fiber/resume f)]
     (assert (= y "yielded") "fiber yield string")
     (assert (= (fiber/resume f) 99) "fiber return after yield")))
 
 # Yield an array
-(let [f (fiber/new (fn [] (yield [1 2 3]) :done) |:yield|)]
+(let [f (fiber/new (fn []
+                     (yield [1 2 3])
+                     :done)
+                   |:yield|)]
   (let [y (fiber/resume f)]
     (assert (= (length y) 3) "fiber yield array length")
     (assert (= (get y 0) 1) "fiber yield array element")))
@@ -73,13 +79,19 @@
 
 # Captured mutable variable set to heap value inside fiber
 (def @box nil)
-(let [f (fiber/new (fn [] (assign box "escaped") 42) |:yield|)]
+(let [f (fiber/new (fn []
+                     (assign box "escaped")
+                     42)
+                   |:yield|)]
   (fiber/resume f)
   (assert (= box "escaped") "fiber outward mutation string"))
 
 # Captured mutable variable set to array inside fiber
 (def @holder nil)
-(let [f (fiber/new (fn [] (assign holder [1 2 3]) :ok) |:yield|)]
+(let [f (fiber/new (fn []
+                     (assign holder [1 2 3])
+                     :ok)
+                   |:yield|)]
   (fiber/resume f)
   (assert (= (length holder) 3) "fiber outward mutation array length")
   (assert (= (get holder 1) 2) "fiber outward mutation array element"))
@@ -89,7 +101,8 @@
 # ============================================================================
 
 # defn at top-level, passed as variable
-(defn make-string [] "from-defn")
+(defn make-string []
+  "from-defn")
 
 (let [f (fiber/new make-string |:yield|)]
   (let [result (fiber/resume f)]
@@ -125,10 +138,10 @@
 # ============================================================================
 
 (let [f (fiber/new (fn []
-                      (yield "first")
-                      (yield "second")
-                      "third")
-                    |:yield|)]
+                     (yield "first")
+                     (yield "second")
+                     "third")
+                   |:yield|)]
   (assert (= (fiber/resume f) "first") "multi-yield first")
   (assert (= (fiber/resume f) "second") "multi-yield second")
   (assert (= (fiber/resume f) "third") "multi-yield final"))

@@ -25,24 +25,26 @@
 
 (println "tier 1 — primitive whitelist (length)")
 
-(def @tier1-scoped (run (fn []
-    (var before (arena/count))
-    (var i 0)
-    (while (< i 10000)
-      (let [data @[1 2 3 4 5]]
-        (length data))
-      (assign i (+ i 1)))
-    (- (arena/count) before))))
+(def @tier1-scoped
+  (run (fn []
+         (var before (arena/count))
+         (var i 0)
+         (while (< i 10000)
+           (let [data @[1 2 3 4 5]]
+             (length data))
+           (assign i (+ i 1)))
+         (- (arena/count) before))))
 
-(def @tier1-unscoped (run (fn []
-    (var before (arena/count))
-    (var i 0)
-    (var last nil)
-    (while (< i 10000)
-      (let [data @[1 2 3 4 5]]
-        (assign last data))
-      (assign i (+ i 1)))
-    (- (arena/count) before))))
+(def @tier1-unscoped
+  (run (fn []
+         (var before (arena/count))
+         (var i 0)
+         (var last nil)
+         (while (< i 10000)
+           (let [data @[1 2 3 4 5]]
+             (assign last data))
+           (assign i (+ i 1)))
+         (- (arena/count) before))))
 
 (println "  scoped:   " tier1-scoped " live objects after 10k iters")
 (println "  unscoped: " tier1-unscoped " live objects after 10k iters")
@@ -57,15 +59,16 @@
 
 (println "tier 3 — returning outer binding")
 
-(def @tier3-stats (run (fn []
-    (var i 0)
-    (var outer-val 0)
-    (while (< i 10000)
-      (let [temp @[1 2 3]]
-        (assign outer-val (+ outer-val (length temp)))
-        outer-val)
-      (assign i (+ i 1)))
-    (arena/stats))))
+(def @tier3-stats
+  (run (fn []
+         (var i 0)
+         (var outer-val 0)
+         (while (< i 10000)
+           (let [temp @[1 2 3]]
+             (assign outer-val (+ outer-val (length temp)))
+             outer-val)
+           (assign i (+ i 1)))
+         (arena/stats))))
 
 (println "  enters:    " tier3-stats:enters)
 (println "  dtors-run: " tier3-stats:dtors-run)
@@ -79,15 +82,16 @@
 
 (println "tier 4 — nested lets reducing to arithmetic")
 
-(def @tier4-scoped (run (fn []
-    (var before (arena/count))
-    (var i 0)
-    (while (< i 10000)
-      (let [xs @[10 20 30]]
-        (let [n (length xs)]
-          (+ n 1)))
-      (assign i (+ i 1)))
-    (- (arena/count) before))))
+(def @tier4-scoped
+  (run (fn []
+         (var before (arena/count))
+         (var i 0)
+         (while (< i 10000)
+           (let [xs @[10 20 30]]
+             (let [n (length xs)]
+               (+ n 1)))
+           (assign i (+ i 1)))
+         (- (arena/count) before))))
 
 (println "  scoped net: " tier4-scoped " live objects after 10k iters")
 (println)
@@ -99,17 +103,18 @@
 
 (println "tier 5 — match arms returning keywords")
 
-(def @tier5-scoped (run (fn []
-    (var before (arena/count))
-    (var i 0)
-    (while (< i 10000)
-      (let [tag (mod i 3)]
-        (match tag
-          0 :zero
-          1 :one
-          _ :other))
-      (assign i (+ i 1)))
-    (- (arena/count) before))))
+(def @tier5-scoped
+  (run (fn []
+         (var before (arena/count))
+         (var i 0)
+         (while (< i 10000)
+           (let [tag (mod i 3)]
+             (match tag
+               0 :zero
+               1 :one
+               _ :other))
+           (assign i (+ i 1)))
+         (- (arena/count) before))))
 
 (println "  scoped net: " tier5-scoped " live objects after 10k iters")
 (println)
@@ -123,16 +128,20 @@
 
 (println "tier 8 — immediate outward set in while")
 
-(def @tier8-stats (run (fn []
-    (var counter 0)
-    (while (< counter 10000)
-      (let [tmp @[1 2 3]]
-        (length tmp))
-      (assign counter (+ counter 1)))
-    (arena/stats))))
+(def @tier8-stats
+  (run (fn []
+         (var counter 0)
+         (while (< counter 10000)
+           (let [tmp @[1 2 3]]
+             (length tmp))
+           (assign counter (+ counter 1)))
+         (arena/stats))))
 
-(println "  enters:    " tier8-stats:enters
-  " (10000 inner let + 1 while block = " tier8-stats:enters ")")
+(println "  enters:    "
+         tier8-stats:enters
+         " (10000 inner let + 1 while block = "
+         tier8-stats:enters
+         ")")
 (println "  dtors-run: " tier8-stats:dtors-run)
 (println)
 
@@ -143,28 +152,25 @@
 
 (println "combined — all tiers in one fiber")
 
-(def @combined (run (fn []
-    (var before (arena/count))
-    (var total 0)
-    (var i 0)
-    (while (< i 5000)
-      # Tier 1: whitelist (length)
-      (let [xs @[1 2 3 4 5]]
-        (assign total (+ total (length xs))))
-      # Tier 3: return outer binding
-      (let [tmp @[10 20]]
-        total)
-      # Tier 4: nested let → arithmetic
-      (let [a @[1 2]]
-        (let [n (length a)]
-          (+ n i)))
-      # Tier 5: match → keyword
-      (let [tag (mod i 2)]
-        (match tag 0 :even _ :odd))
-      (assign i (+ i 1)))
-    {:net (- (arena/count) before)
-     :total total
-     :stats (arena/stats)})))
+(def @combined
+  (run (fn []
+         (var before (arena/count))
+         (var total 0)
+         (var i 0)
+         (while (< i 5000)  # Tier 1: whitelist (length)
+           (let [xs @[1 2 3 4 5]]
+             (assign total (+ total (length xs))))  # Tier 3: return outer binding
+           (let [tmp @[10 20]]
+             total)  # Tier 4: nested let → arithmetic
+           (let [a @[1 2]]
+             (let [n (length a)]
+               (+ n i)))  # Tier 5: match → keyword
+           (let [tag (mod i 2)]
+             (match tag
+               0 :even
+               _ :odd))
+           (assign i (+ i 1)))
+         {:net (- (arena/count) before) :total total :stats (arena/stats)})))
 
 (println "  net objects: " combined:net)
 (println "  total sum:   " combined:total)

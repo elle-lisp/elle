@@ -24,8 +24,7 @@
     "Fold a coroutine source through a hasher and return the digest.
      algorithm: keyword (:sha256, :blake3, :md5, etc.).
      source: coroutine that yields string, bytes, or @bytes chunks."
-    (plugin:finalize
-      (stream/fold plugin:update (plugin:new algorithm) source)))
+    (plugin:finalize (stream/fold plugin:update (plugin:new algorithm) source)))
 
   ## ── Convenience ─────────────────────────────────────────────────────
 
@@ -34,16 +33,12 @@
      Does not close the port."
     (default chunk-size 8192)
     (hash/stream algorithm (port/chunks port chunk-size)))
-
   (defn hash/file [algorithm path &named @chunk-size]
     "Hash a file by path. Opens, hashes, and closes the file.
      Returns the digest bytes (or integer for crc32/xxh32/xxh64)."
     (default chunk-size 8192)
     (let [p (port/open path :read)]
-      (defer (port/close p)
-        (hash/digest algorithm p :chunk-size chunk-size))))
+      (defer (port/close p) (hash/digest algorithm p :chunk-size chunk-size))))
 
   ## ── Export struct ───────────────────────────────────────────────────
-  {:stream hash/stream
-   :digest hash/digest
-   :file   hash/file})
+  {:stream hash/stream :digest hash/digest :file hash/file})

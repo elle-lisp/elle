@@ -9,12 +9,10 @@
 
 ## ── MD5 ──────────────────────────────────────────────────────────
 
-(assert (= (bytes->hex (hash:md5 ""))
-           "d41d8cd98f00b204e9800998ecf8427e")
+(assert (= (bytes->hex (hash:md5 "")) "d41d8cd98f00b204e9800998ecf8427e")
         "md5 empty")
 
-(assert (= (bytes->hex (hash:md5 "hello"))
-           "5d41402abc4b2a76b9719d911017c592")
+(assert (= (bytes->hex (hash:md5 "hello")) "5d41402abc4b2a76b9719d911017c592")
         "md5 hello")
 
 ## ── SHA-1 ────────────────────────────────────────────────────────
@@ -90,15 +88,21 @@
 
 ## ── bytes input ──────────────────────────────────────────────────
 
-(assert (= (hash:sha256 (bytes 104 101 108 108 111))
-           (hash:sha256 "hello"))
+(assert (= (hash:sha256 (bytes 104 101 108 108 111)) (hash:sha256 "hello"))
         "bytes input matches string input")
 
 ## ── Streaming API ────────────────────────────────────────────────
 
 ## new/update/finalize matches one-shot for all algorithms
-(each algo in [:md5 :sha1 :sha256 :sha512 :sha3-256 :blake2b-512 :blake3
-               :crc32 :xxh128]
+(each algo in [:md5
+               :sha1
+               :sha256
+               :sha512
+               :sha3-256
+               :blake2b-512
+               :blake3
+               :crc32
+               :xxh128]
   (let* [ctx (hash:new algo)]
     (hash:update ctx "hel")
     (hash:update ctx "lo")
@@ -120,8 +124,8 @@
 
 ## stream/fold integration
 (let* [chunks (coro/new (fn []
-                 (yield "hel")
-                 (yield "lo")))
+                          (yield "hel")
+                          (yield "lo")))
        ctx (stream/fold hash:update (hash:new :sha256) chunks)]
   (assert (= (hash:finalize ctx) (hash:sha256 "hello"))
           "stream/fold with hash/update"))
@@ -132,8 +136,7 @@
            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
         "hex sha256 hello")
 
-(assert (= (hash:hex :md5 "")
-           "d41d8cd98f00b204e9800998ecf8427e")
+(assert (= (hash:hex :md5 "") "d41d8cd98f00b204e9800998ecf8427e")
         "hex md5 empty")
 
 ## crc32 hex is an integer formatted as hex

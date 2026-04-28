@@ -17,19 +17,27 @@
 
 # let binding inside lambda preserves value
 (begin
-  (def f (fn (x) (let [y x] y)))
+  (def f
+    (fn (x)
+      (let [y x]
+        y)))
   (assert (= (f 42) 42) "let binding preserves positive value")
   (assert (= (f -7) -7) "let binding preserves negative value"))
 
 # let binding with arithmetic
 (begin
-  (def f (fn (a b) (let [x a y b] (+ x y))))
+  (def f
+    (fn (a b)
+      (let [x a
+            y b]
+        (+ x y))))
   (assert (= (f 10 -3) 7) "let binding with arithmetic"))
 
 # recursive function with let inside
 (begin
-  (def f (fn (x)
-    (if (= x 0)
+  (def f
+    (fn (x)
+      (if (= x 0)
         (list)
         (let [y x]
           (cons y (f (- x 1)))))))
@@ -37,8 +45,9 @@
 
 # append inside let inside lambda
 (begin
-  (def f (fn (x)
-    (if (= x 0)
+  (def f
+    (fn (x)
+      (if (= x 0)
         (list)
         (let [y x]
           (append (list y) (f (- x 1)))))))
@@ -46,24 +55,30 @@
 
 # multiple let bindings
 (begin
-  (def f (fn (a b c)
-    (let [x a y b z c]
-      (+ x (+ y z)))))
+  (def f
+    (fn (a b c)
+      (let [x a
+            y b
+            z c]
+        (+ x (+ y z)))))
   (assert (= (f 1 2 3) 6) "multiple let bindings"))
 
 # nested let bindings
 (begin
-  (def f (fn (a b)
-    (let [x a]
-      (let [y b]
-        (+ x y)))))
+  (def f
+    (fn (a b)
+      (let [x a]
+        (let [y b]
+          (+ x y)))))
   (assert (= (f 10 20) 30) "nested let bindings"))
 
 # let with computation
 (begin
-  (def f (fn (x)
-    (let [y (* x 2) z (+ x 1)]
-      (+ y z))))
+  (def f
+    (fn (x)
+      (let [y (* x 2)
+            z (+ x 1)]
+        (+ y z))))
   (assert (= (f 5) 16) "let with computation (y=10, z=6, result=16)"))
 
 # ============================================================================
@@ -72,20 +87,22 @@
 
 # defn ≡ def+fn
 (begin
-  (defn f (x) (+ x 1))
+  (defn f (x)
+    (+ x 1))
   (assert (= (f 41) 42) "defn shorthand"))
 
 # defn multi-param
 (begin
-  (defn add (a b) (+ a b))
+  (defn add (a b)
+    (+ a b))
   (assert (= (add 10 -3) 7) "defn multi-param"))
 
 # defn recursive (factorial)
 (begin
   (defn fact (n)
     (if (= n 0)
-        1
-        (* n (fact (- n 1)))))
+      1
+      (* n (fact (- n 1)))))
   (assert (= (fact 10) 3628800) "defn recursive factorial"))
 
 # defn with let body
@@ -102,7 +119,8 @@
 # list display no dot terminator
 (begin
   (def @list-str (string (list 1 2 3)))
-  (assert (not (string/contains? list-str ". ()")) "list display no dot terminator"))
+  (assert (not (string/contains? list-str ". ()"))
+          "list display no dot terminator"))
 
 # cons chain display
 (begin
@@ -130,19 +148,20 @@
 
 # or expression in recursive predicate
 (begin
-  (def @check (fn (x remaining)
+  (def @check
+    (fn (x remaining)
       (if (empty? remaining)
-          true
-          (if (or (= x 1) (= x 2))
-              false
-              (check x (rest remaining))))))
-  (def @foo (fn (n seen)
+        true
+        (if (or (= x 1) (= x 2)) false (check x (rest remaining))))))
+  (def @foo
+    (fn (n seen)
       (if (= n 0)
-          (list)
-          (if (check n seen)
-              (append (list n) (foo (- n 1) (cons n seen)))
-              (foo (- n 1) seen)))))
-  (assert (= (length (foo 5 (list 0))) 3) "or in recursive predicate (n=5,4,3 safe)"))
+        (list)
+        (if (check n seen)
+          (append (list n) (foo (- n 1) (cons n seen)))
+          (foo (- n 1) seen)))))
+  (assert (= (length (foo 5 (list 0))) 3)
+          "or in recursive predicate (n=5,4,3 safe)"))
 
 # ============================================================================
 # Combined: shorthand + let + list display
@@ -152,9 +171,9 @@
 (begin
   (defn make-list (x)
     (if (= x 0)
-        (list)
-        (let [y x]
-          (cons y (make-list (- x 1))))))
+      (list)
+      (let [y x]
+        (cons y (make-list (- x 1))))))
   (def @result-str (string (make-list 5)))
   (assert (not (string/contains? result-str ". ()")) "defn + let + list display"))
 
@@ -162,9 +181,9 @@
 (begin
   (defn build (n)
     (if (= n 0)
-        (list)
-        (let [rest-list (build (- n 1))]
-          (cons n rest-list))))
+      (list)
+      (let [rest-list (build (- n 1))]
+        (cons n rest-list))))
   (assert (= (length (build 10)) 10) "defn + recursive + list display"))
 
 # ============================================================================
@@ -181,10 +200,10 @@
 (begin
   (defn do-write (port msg)
     (port/write port msg))
-
   (let [p (port/open "/tmp/elle_bugfix5_test" :write)]
     (do-write p "hello")
-    (assert (= (type p) :port) "fiber locals not corrupted after yield through nested tail-call-to-native")
+    (assert (= (type p) :port)
+            "fiber locals not corrupted after yield through nested tail-call-to-native")
     (port/close p)))
 
 # ============================================================================
@@ -202,19 +221,31 @@
 # fiber-swap path), then passes the sub-fiber's return value to the outer frame.
 # ============================================================================
 
-(begin
-  # Minimal reproduction: deep call chain with many locals, fiber inside defer
+(begin  # Minimal reproduction: deep call chain with many locals, fiber inside defer
   # doing I/O (port/write to a real port). Caused LoadLocal panic before fix.
   (defn inner-with-many-locals (port msg)
-    (let [a 1 b 2 c 3 d 4 e 5 f 6 g 7 h 8
-          i 9 j 10 k 11 l 12 m 13 n 14 o 15 p 16]
+    (let [a 1
+          b 2
+          c 3
+          d 4
+          e 5
+          f 6
+          g 7
+          h 8
+          i 9
+          j 10
+          k 11
+          l 12
+          m 13
+          n 14
+          o 15
+          p 16]
       (port/write port msg)
       (+ a b c d e f g h i j k l m n o p)))
-
   (let [port (port/open "/tmp/elle_bugfix6_test" :write)]
-    (let [result (defer (port/close port)
-                    (inner-with-many-locals port "hello"))]
-      (assert (= result 136) "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)"))))
+    (let [result (defer (port/close port) (inner-with-many-locals port "hello"))]
+      (assert (= result 136)
+              "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)"))))
 
 # ============================================================================
 # Bug 7: defer + I/O inside ev/spawn uses FiberResume chain correctly
@@ -231,31 +262,29 @@
   (let [listener (tcp/listen "127.0.0.1" 0)]
     (let [addr (port/path listener)]
       (let [port-num (parse-int (get (string/split addr ":") 1))]
-        (let [server-got @[nil] client-got @[nil]]
-          (let [server-fiber
-                  (ev/spawn (fn ()  # server: accept, read, write, close via defer
-                    (let [conn (tcp/accept listener)]
-                      (defer (port/close conn)
-                        (let [data (port/read conn 4)]
-                          (put server-got 0 data)
-                          (port/write conn "pong"))))))
-                client-fiber
-                  (ev/spawn (fn ()  # client: connect, write, read
-                    (let [c (tcp/connect "127.0.0.1" port-num)]
-                      (port/write c "ping")
-                      (port/flush c)
-                      (let [resp (port/read c 4)]
-                        (put client-got 0 resp)
-                        (port/close c)))))]
+        (let [server-got @[nil]
+              client-got @[nil]]
+          (let [server-fiber (ev/spawn (fn ()  # server: accept, read, write, close via defer
+                                       (let [conn (tcp/accept listener)]
+                                         (defer (port/close conn)
+                                         (let [data (port/read conn 4)]
+                                           (put server-got 0 data)
+                                           (port/write conn "pong"))))))
+                client-fiber (ev/spawn (fn ()  # client: connect, write, read
+                                       (let [c (tcp/connect "127.0.0.1" port-num)]
+                                         (port/write c "ping")
+                                         (port/flush c)
+                                         (let [resp (port/read c 4)]
+                                           (put client-got 0 resp)
+                                           (port/close c)))))]
             (ev/join server-fiber)
             (ev/join client-fiber))
-          (port/close listener)
-          # TCP ports use binary encoding; port/read returns bytes.
+          (port/close listener)  # TCP ports use binary encoding; port/read returns bytes.
           # Convert to string for assertion.
           (assert (= (string (get server-got 0)) "ping")
-            "server received data from client (Bug 7)")
+                  "server received data from client (Bug 7)")
           (assert (= (string (get client-got 0)) "pong")
-            "client received response from server (Bug 7)"))))) )
+                  "client received response from server (Bug 7)"))))))
 
 # ============================================================================
 # Bug 612: cond/match corrupt previously-evaluated arguments in variadic calls
@@ -275,25 +304,65 @@
 # ============================================================================
 
 # cond as non-first arg to native variadic call
-(assert (= (path/join "a" (cond true "b")) "a/b") "cond as second arg to path/join")
+(assert (= (path/join "a"
+                      (cond
+                        true "b"))
+           "a/b")
+        "cond as second arg to path/join")
 
 # match as non-first arg to native variadic call
-(assert (= (path/join "a" (match 1 1 "b" _ "c")) "a/b") "match as second arg to path/join")
+(assert (= (path/join "a"
+                      (match 1
+                        1 "b"
+                        _ "c"))
+           "a/b")
+        "match as second arg to path/join")
 
 # cond in second position of three-arg list
-(assert (= (list 1 (cond true 2) 3) (list 1 2 3)) "cond as second arg in list")
+(assert (= (list 1
+                 (cond
+                   true 2)
+                 3)
+           (list 1 2 3))
+        "cond as second arg in list")
 
 # cond in third position of three-arg list
-(assert (= (list 1 2 (cond true 3)) (list 1 2 3)) "cond as third arg in list")
+(assert (= (list 1
+                 2
+                 (cond
+                   true 3))
+           (list 1 2 3))
+        "cond as third arg in list")
 
 # match in second position of three-arg list
-(assert (= (list 1 (match 1 1 2 _ 0) 3) (list 1 2 3)) "match as second arg in list")
+(assert (= (list 1
+                 (match 1
+                   1 2
+                   _ 0)
+                 3)
+           (list 1 2 3))
+        "match as second arg in list")
 
 # match in third position (wildcard arm)
-(assert (= (list 1 2 (match 5 1 "nope" _ 3)) (list 1 2 3)) "match wildcard as third arg in list")
+(assert (= (list 1
+                 2
+                 (match 5
+                   1 "nope"
+                   _ 3))
+           (list 1 2 3))
+        "match wildcard as third arg in list")
 
 # cond with multiple clauses, non-first arg
-(assert (= (path/join "a" (cond false "x" true "b")) "a/b") "cond with two clauses as second arg to path/join")
+(assert (= (path/join "a"
+                      (cond
+                        false "x"
+                        true "b"))
+           "a/b")
+        "cond with two clauses as second arg to path/join")
 
 # cond as first arg still works (was never broken)
-(assert (= (path/join (cond true "a") "b") "a/b") "cond as first arg to path/join (regression guard)")
+(assert (= (path/join (cond
+                        true "a")
+                      "b")
+           "a/b")
+        "cond as first arg to path/join (regression guard)")

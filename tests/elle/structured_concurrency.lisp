@@ -6,8 +6,7 @@
 
 # === 1. ev/join — basic spawn + join ===
 
-(assert (= 42 (ev/join (ev/spawn (fn [] 42))))
-        "1a: spawn + join returns value")
+(assert (= 42 (ev/join (ev/spawn (fn [] 42)))) "1a: spawn + join returns value")
 
 # === 2. ev/join — propagates error ===
 
@@ -17,9 +16,7 @@
 
 # === 3. ev/join — sequence collects ordered results ===
 
-(let [fibers [(ev/spawn (fn [] :a))
-               (ev/spawn (fn [] :b))
-               (ev/spawn (fn [] :c))]]
+(let [fibers [(ev/spawn (fn [] :a)) (ev/spawn (fn [] :b)) (ev/spawn (fn [] :c))]]
   (assert (= [:a :b :c] (ev/join fibers))
           "3a: join sequence collects results in order"))
 
@@ -76,7 +73,9 @@
 # === 9. ev/select — returns [completed remaining] ===
 
 (let [fast (ev/spawn (fn [] :fast))
-      slow (ev/spawn (fn [] (ev/sleep 10) :slow))]
+      slow (ev/spawn (fn []
+                       (ev/sleep 10)
+                       :slow))]
   (let [[done remaining] (ev/select [fast slow])]
     (assert (= done fast) "9a: select returns fast fiber")
     (assert (= 1 (length remaining)) "9b: one fiber remaining")
@@ -85,7 +84,9 @@
 # === 10. ev/race — aborts losers ===
 
 (let [fast (ev/spawn (fn [] :fast))
-      slow (ev/spawn (fn [] (ev/sleep 10) :slow))]
+      slow (ev/spawn (fn []
+                       (ev/sleep 10)
+                       :slow))]
   (let [result (ev/race [fast slow])]
     (assert (= :fast result) "10a: race returns winner's value")
     (assert (= :error (fiber/status slow)) "10b: loser is aborted")))
@@ -103,24 +104,23 @@
 # === 13. ev/scope — joins all children ===
 
 (let [result (ev/scope (fn [spawn]
-                (let [a (spawn (fn [] 1))
-                      b (spawn (fn [] 2))]
-                  (+ (ev/join a) (ev/join b)))))]
+                         (let [a (spawn (fn [] 1))
+                               b (spawn (fn [] 2))]
+                           (+ (ev/join a) (ev/join b)))))]
   (assert (= 3 result) "13a: scope joins all children and returns body result"))
 
 # === 14. ev/scope — aborts siblings on error ===
 
 (let [[ok? val] (protect (ev/scope (fn [spawn]
-    (spawn (fn [] (ev/sleep 100)))
-    (spawn (fn [] (error "child-error")))
-    (ev/sleep 100))))]
+                                     (spawn (fn [] (ev/sleep 100)))
+                                     (spawn (fn [] (error "child-error")))
+                                     (ev/sleep 100))))]
   (assert (not ok?) "14a: scope propagates first error"))
 
 # === 15. ev/map — returns results in input order ===
 
 (let [results (ev/map (fn [x] (* x x)) [1 2 3 4 5])]
-  (assert (= [1 4 9 16 25] results)
-          "15a: ev/map returns ordered results"))
+  (assert (= [1 4 9 16 25] results) "15a: ev/map returns ordered results"))
 
 # === 16. ev/join — already-dead fiber returns immediately ===
 
@@ -131,8 +131,8 @@
 # === 17. ev/join-protected — sequence ===
 
 (let [fibers [(ev/spawn (fn [] 1))
-               (ev/spawn (fn [] (error "oops")))
-               (ev/spawn (fn [] 3))]]
+              (ev/spawn (fn [] (error "oops")))
+              (ev/spawn (fn [] 3))]]
   (let [results (ev/join-protected fibers)]
     (assert (= [true 1] (get results 0)) "17a: first succeeds")
     (assert (= false (get (get results 1) 0)) "17b: second fails")

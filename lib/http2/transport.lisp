@@ -7,11 +7,10 @@
 ## Exports: {:tcp :tls}
 
 (fn [&named tls]
-
   (defn tcp-transport [port]
     "Wrap a TCP port as a transport with buffered binary writes."
     (def @wbuf-parts @[])
-    {:read  (fn [n] (port/read port n))
+    {:read (fn [n] (port/read port n))
      :write (fn [data]
               (let [d (if (bytes? data) data (bytes data))]
                 (push wbuf-parts d)))
@@ -21,13 +20,10 @@
                   (port/write port combined)
                   (assign wbuf-parts @[]))))
      :close (fn [] (port/close port))})
-
   (defn tls-transport [conn]
     "Wrap a TLS connection as a transport."
-    {:read  (fn [n] (tls:read conn n))
+    {:read (fn [n] (tls:read conn n))
      :write (fn [data] (tls:write conn data))
      :flush (fn [] nil)
      :close (fn [] (tls:close conn))})
-
-  {:tcp tcp-transport
-   :tls tls-transport})
+  {:tcp tcp-transport :tls tls-transport})

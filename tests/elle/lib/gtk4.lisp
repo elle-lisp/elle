@@ -45,9 +45,10 @@
   (assert (= text "OK") "parse-spec: full → text"))
 
 # tag + props + children
-(let [[tag props specs text] (gtk:parse-spec [:v-box {:spacing 8}
-                                               [:label "a"]
-                                               [:label "b"]])]
+(let [[tag props specs text] (gtk:parse-spec [:v-box
+      {:spacing 8}
+      [:label "a"]
+      [:label "b"]])]
   (assert (= tag :v-box) "parse-spec: container → tag")
   (assert (= props:spacing 8) "parse-spec: container → spacing")
   (assert (= (length specs) 2) "parse-spec: container → 2 children")
@@ -61,8 +62,10 @@
   (assert (nil? text) "parse-spec: no-props container → no text"))
 
 # mixed text and child specs
-(let [[tag props specs text] (gtk:parse-spec [:expander {} "Details"
-                                               [:label "body"]])]
+(let [[tag props specs text] (gtk:parse-spec [:expander
+      {}
+      "Details"
+      [:label "body"]])]
   (assert (= tag :expander) "parse-spec: mixed → tag")
   (assert (= text "Details") "parse-spec: mixed → text")
   (assert (= (length specs) 1) "parse-spec: mixed → 1 child spec"))
@@ -73,33 +76,29 @@
 
 (println "gtk4: testing json-escape")
 
-(assert (= (gtk:json-escape "hello") "\"hello\"")
-  "json-escape: plain string")
+(assert (= (gtk:json-escape "hello") "\"hello\"") "json-escape: plain string")
 
-(assert (= (gtk:json-escape "") "\"\"")
-  "json-escape: empty string")
+(assert (= (gtk:json-escape "") "\"\"") "json-escape: empty string")
 
 (assert (= (gtk:json-escape "he\"llo") "\"he\\\"llo\"")
-  "json-escape: embedded quotes")
+        "json-escape: embedded quotes")
 
-(assert (= (gtk:json-escape "a\\b") "\"a\\\\b\"")
-  "json-escape: backslash")
+(assert (= (gtk:json-escape "a\\b") "\"a\\\\b\"") "json-escape: backslash")
 
 (assert (= (gtk:json-escape "line1\nline2") "\"line1\\nline2\"")
-  "json-escape: newline")
+        "json-escape: newline")
 
-(assert (= (gtk:json-escape "a\rb") "\"a\\rb\"")
-  "json-escape: carriage return")
+(assert (= (gtk:json-escape "a\rb") "\"a\\rb\"") "json-escape: carriage return")
 
 (assert (= (gtk:json-escape "a\"b\\c\nd") "\"a\\\"b\\\\c\\nd\"")
-  "json-escape: multiple escapes")
+        "json-escape: multiple escapes")
 
 (println "gtk4: json-escape OK")
 
 # ── Integration tests (require display) ──────────────────────────
 
-(def [live-ok win] (protect (gtk:open {:title "Elle GTK4 Test"
-                                        :width 200 :height 200})))
+(def [live-ok win]
+  (protect (gtk:open {:title "Elle GTK4 Test" :width 200 :height 200})))
 (unless live-ok
   (println "gtk4: pure tests passed (no display for integration)")
   (exit 0))
@@ -112,21 +111,22 @@
 (println "gtk4: testing build")
 
 (gtk:build win
-  [:v-box {:id :root :spacing 4}
-    [:label {:id :lbl} "Hello"]
-    [:heading {:id :hdg} "Title"]
-    [:button {:id :btn} "Click"]
-    [:checkbox {:id :chk} "Check me"]
-    [:switch {:id :sw}]
-    [:toggle-button {:id :tgl} "Toggle"]
-    [:slider {:id :sld :min 0.0 :max 100.0 :value 50.0}]
-    [:spin-button {:id :spin :min 0.0 :max 100.0 :value 25.0}]
-    [:text-input {:id :inp :value "initial"}]
-    [:text-edit {:id :edit}]
-    [:progress-bar {:id :prog :value 0.5}]
-    [:separator {}]
-    [:spacer {}]
-    [:spinner {:id :spnr}]])
+           [:v-box
+            {:id :root :spacing 4}
+            [:label {:id :lbl} "Hello"]
+            [:heading {:id :hdg} "Title"]
+            [:button {:id :btn} "Click"]
+            [:checkbox {:id :chk} "Check me"]
+            [:switch {:id :sw}]
+            [:toggle-button {:id :tgl} "Toggle"]
+            [:slider {:id :sld :min 0.0 :max 100.0 :value 50.0}]
+            [:spin-button {:id :spin :min 0.0 :max 100.0 :value 25.0}]
+            [:text-input {:id :inp :value "initial"}]
+            [:text-edit {:id :edit}]
+            [:progress-bar {:id :prog :value 0.5}]
+            [:separator {}]
+            [:spacer {}]
+            [:spinner {:id :spnr}]])
 
 # ── set/get roundtrip ────────────────────────────────────────────
 
@@ -241,78 +241,89 @@
 
 (println "gtk4: testing nested containers")
 
-(gtk:add win :root
-  [:h-box {:id :nested :spacing 4}
-    [:label {:id :n1} "Left"]
-    [:label {:id :n2} "Right"]])
+(gtk:add win
+         :root [:h-box
+                {:id :nested :spacing 4}
+                [:label {:id :n1} "Left"]
+                [:label {:id :n2} "Right"]])
 (assert (= (gtk:get win :n1) "Left") "nested child 1")
 (assert (= (gtk:get win :n2) "Right") "nested child 2")
 
 # ── scroll-area ──────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:scroll-area {:id :scr :height 100}
-    [:label {:id :scr-child} "Scrollable"]])
+(gtk:add win
+         :root [:scroll-area
+                {:id :scr :height 100}
+                [:label {:id :scr-child} "Scrollable"]])
 (assert (= (gtk:get win :scr-child) "Scrollable") "scroll-area child")
 
 # ── frame ────────────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:frame {:id :frm} "Frame Title"
-    [:label {:id :frm-child} "Framed"]])
+(gtk:add win
+         :root [:frame
+                {:id :frm}
+                "Frame Title"
+                [:label {:id :frm-child} "Framed"]])
 (assert (= (gtk:get win :frm-child) "Framed") "frame child")
 
 # ── expander ─────────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:expander {:id :exp :expanded true} "Expand"
-    [:label {:id :exp-child} "Hidden"]])
+(gtk:add win
+         :root [:expander
+                {:id :exp :expanded true}
+                "Expand"
+                [:label {:id :exp-child} "Hidden"]])
 (assert (= (gtk:get win :exp-child) "Hidden") "expander child")
 
 # ── revealer ─────────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:revealer {:id :rev :revealed true}
-    [:label {:id :rev-child} "Revealed"]])
+(gtk:add win
+         :root [:revealer
+                {:id :rev :revealed true}
+                [:label {:id :rev-child} "Revealed"]])
 (assert (= (gtk:get win :rev-child) "Revealed") "revealer child")
 
 # ── grid ─────────────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:grid {:id :grd :columns 2 :row-spacing 4 :col-spacing 4}
-    [:label {:id :g1} "A"]
-    [:label {:id :g2} "B"]
-    [:label {:id :g3} "C"]
-    [:label {:id :g4} "D"]])
+(gtk:add win
+         :root [:grid
+                {:id :grd :columns 2 :row-spacing 4 :col-spacing 4}
+                [:label {:id :g1} "A"]
+                [:label {:id :g2} "B"]
+                [:label {:id :g3} "C"]
+                [:label {:id :g4} "D"]])
 (assert (= (gtk:get win :g1) "A") "grid child 1")
 (assert (= (gtk:get win :g4) "D") "grid child 4")
 
 # ── paned ────────────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:paned {:id :pnd}
-    [:label {:id :pnd-start} "Start"]
-    [:label {:id :pnd-end} "End"]])
+(gtk:add win
+         :root [:paned
+                {:id :pnd}
+                [:label {:id :pnd-start} "Start"]
+                [:label {:id :pnd-end} "End"]])
 (assert (= (gtk:get win :pnd-start) "Start") "paned start")
 (assert (= (gtk:get win :pnd-end) "End") "paned end")
 
 # ── center-box ───────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:center-box {:id :cb}
-    [:label {:id :cb-s} "S"]
-    [:label {:id :cb-c} "C"]
-    [:label {:id :cb-e} "E"]])
+(gtk:add win
+         :root [:center-box
+                {:id :cb}
+                [:label {:id :cb-s} "S"]
+                [:label {:id :cb-c} "C"]
+                [:label {:id :cb-e} "E"]])
 (assert (= (gtk:get win :cb-s) "S") "center-box start")
 (assert (= (gtk:get win :cb-c) "C") "center-box center")
 (assert (= (gtk:get win :cb-e) "E") "center-box end")
 
 # ── overlay ──────────────────────────────────────────────────────
 
-(gtk:add win :root
-  [:overlay {:id :ovl}
-    [:label {:id :ovl-main} "Main"]
-    [:label {:id :ovl-over} "Over"]])
+(gtk:add win
+         :root [:overlay
+                {:id :ovl}
+                [:label {:id :ovl-main} "Main"]
+                [:label {:id :ovl-over} "Over"]])
 (assert (= (gtk:get win :ovl-main) "Main") "overlay main child")
 (assert (= (gtk:get win :ovl-over) "Over") "overlay overlay child")
 

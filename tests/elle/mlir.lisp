@@ -11,9 +11,12 @@
 
 # ── Arithmetic ───────────────────────────────────────────────────────
 
-(defn ml-add [a b] (+ a b))
-(defn ml-mul [a b] (* a b))
-(defn ml-sub [a b] (- a b))
+(defn ml-add [a b]
+  (+ a b))
+(defn ml-mul [a b]
+  (* a b))
+(defn ml-sub [a b]
+  (- a b))
 
 # Call past hotness threshold (default 10)
 (repeat 15 (ml-add 1 2))
@@ -37,14 +40,16 @@
 
 # ── Control flow ─────────────────────────────────────────────────────
 
-(defn ml-abs [x] (if (> x 0) x (- 0 x)))
+(defn ml-abs [x]
+  (if (> x 0) x (- 0 x)))
 
 (repeat 15 (ml-abs 1))
 (assert (= (ml-abs 42) 42) "MLIR abs positive")
 (assert (= (ml-abs -7) 7) "MLIR abs negative")
 (assert (= (ml-abs 0) 0) "MLIR abs zero")
 
-(defn ml-max [a b] (if (> a b) a b))
+(defn ml-max [a b]
+  (if (> a b) a b))
 
 (repeat 15 (ml-max 1 2))
 (assert (= (ml-max 3 7) 7) "MLIR max")
@@ -55,7 +60,8 @@
 # These use I/O or captures, so they go through Cranelift or bytecode.
 
 (def outer 100)
-(defn ml-with-capture [x] (+ x outer))
+(defn ml-with-capture [x]
+  (+ x outer))
 (repeat 15 (ml-with-capture 1))
 (assert (= (ml-with-capture 5) 105) "captured var works (not MLIR)")
 
@@ -63,7 +69,8 @@
 
 (assert (fn/gpu-eligible? ml-add) "ml-add is GPU-eligible")
 (assert (fn/gpu-eligible? ml-abs) "ml-abs is GPU-eligible")
-(assert (fn/gpu-eligible? ml-with-capture) "immutable capture is constant-propagated")
+(assert (fn/gpu-eligible? ml-with-capture)
+        "immutable capture is constant-propagated")
 
 # ── Branching with even values ────────────────────────────────────────
 # Before the cmpi-ne fix in MLIR, trunci took the LSB: comparison result

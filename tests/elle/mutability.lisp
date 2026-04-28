@@ -17,7 +17,9 @@
 ## ── letrec @ ───────────────────────────────────────────────────────────
 
 (letrec [@count 0
-         tick (fn [] (assign count (inc count)) count)]
+         tick (fn []
+                (assign count (inc count))
+                count)]
   (tick)
   (tick)
   (assert (= count 2) "letrec @ allows assign"))

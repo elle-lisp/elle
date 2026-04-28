@@ -18,9 +18,9 @@
 (println "  ev/spawn error propagation: ok")
 
 # Test 3: unhandled ev/spawn error propagates through ev/join
-(let [[ok? val] (protect
-                   (let [f (ev/spawn (fn [] (error {:error :unhandled :message "crash"})))]
-                     (ev/join f)))]
+(let [[ok? val] (protect (let [f (ev/spawn (fn []
+                                 (error {:error :unhandled :message "crash"})))]
+                           (ev/join f)))]
   (assert (not ok?) "ev/join should propagate unhandled error")
   (assert (= (get val :error) :unhandled) "unhandled error kind preserved"))
 (println "  ev/join error propagation: ok")

@@ -9,7 +9,6 @@
 ## Exports: {:serve :test}
 
 (fn [&named sync hpack frame stream session tls transport]
-
   (def C frame:constants)
 
   ## ── Server request handler ─────────────────────────────────────────────
@@ -22,8 +21,9 @@
         (let [msg (s:data-queue:take)]
           (cond
             (= msg:type :data)
-             (begin (push body-parts msg:data)
-                    (when msg:end-stream (break nil)))
+              (begin
+                (push body-parts msg:data)
+                (when msg:end-stream (break nil)))
             (= msg:type :error) (error msg:error)
             true (break nil)))))
     (let* [method-pair (first (filter (fn [h] (= (get h 0) ":method")) hdrs))
@@ -36,10 +36,10 @@
            body-val (if (empty? body-parts)
                       nil
                       (apply concat (freeze body-parts)))
-           request {:method  (if method-pair (get method-pair 1) "GET")
-                    :path    (if path-pair (get path-pair 1) "/")
+           request {:method (if method-pair (get method-pair 1) "GET")
+                    :path (if path-pair (get path-pair 1) "/")
                     :headers (freeze req-headers)
-                    :body    body-val}
+                    :body body-val}
            [ok? response] (protect (handler request))]
       (if ok?
         (let* [status (string (or response:status 200))
@@ -56,9 +56,15 @@
                has-body (> (length resp-body) 0)
                has-trailers (and trailers (not (empty? trailers)))
                end-on-headers (and (not has-body) (not has-trailers))]
-          (session:encode-and-send-headers sess sid (freeze h-pairs) end-on-headers)
+          (session:encode-and-send-headers sess
+            sid
+            (freeze h-pairs)
+            end-on-headers)
           (when has-body
-            (session:send-data-with-flow-control sess sid s:flow resp-body
+            (session:send-data-with-flow-control sess
+              sid
+              s:flow
+              resp-body
               :end-stream (not has-trailers)))
           (when has-trailers
             (session:encode-and-send-headers sess sid trailers true))
@@ -76,40 +82,43 @@
     "Create the on-headers callback for server reader loop."
     (fn [sess s sid hdrs end?]
       (put s :headers hdrs)
-      (when end? (stream:transition s :recv-end-stream))
-      # Check max-concurrent-streams
+      (when end? (stream:transition s :recv-end-stream))  # Check max-concurrent-streams
       (let [max-streams (get sess:local-settings :max-concurrent-streams)
             active (length (keys sess:streams))]
         (if (> active max-streams)
           (begin
             (del sess:streams sid)
             (session:send-rst-stream sess sid C:err-refused-stream))
-          (ev/spawn
-            (fn []
-              (defer (del sess:streams sid)
-                (let [[ok? err] (protect
-                  (handle-server-request sess s sid hdrs end? handler))]
-                  (unless ok?
-                    (protect
-                      (session:send-rst-stream sess sid C:err-internal-error))
-                    (when on-error (on-error err)))))))))))
+          (ev/spawn (fn []
+                      (defer (del sess:streams sid)
+                             (let [[ok? err] (protect (handle-server-request sess
+                                     s
+                                     sid
+                                     hdrs
+                                     end?
+                                     handler))]
+                               (unless ok?
+                                 (protect (session:send-rst-stream sess
+                                   sid
+                                   C:err-internal-error))
+                                 (when on-error (on-error err)))))))))))
 
   ## ── Server connection ──────────────────────────────────────────────────
 
   (defn server-connection [transport handler sess &named on-error]
-    "Handle one HTTP/2 server connection."
-    # Read client preface
+    "Handle one HTTP/2 server connection."  # Read client preface
     (let [preface (frame:read-exact transport 24)]
       (when (or (nil? preface) (not (= preface C:client-preface)))
-        (error {:error :h2-error :reason :protocol-error
-                :message "invalid client connection preface"})))
-    # Read client SETTINGS
-    (let [f (frame:read-frame transport (get sess:local-settings :max-frame-size))]
+        (error {:error :h2-error
+                :reason :protocol-error
+                :message "invalid client connection preface"})))  # Read client SETTINGS
+    (let [f (frame:read-frame transport
+                              (get sess:local-settings :max-frame-size))]
       (when (or (nil? f) (not (= f:type C:type-settings)))
-        (error {:error :h2-error :reason :protocol-error
+        (error {:error :h2-error
+                :reason :protocol-error
                 :message "expected SETTINGS as first client frame"}))
-      (session:apply-remote-settings sess f:payload))
-    # Send our SETTINGS + ACK + connection WINDOW_UPDATE
+      (session:apply-remote-settings sess f:payload))  # Send our SETTINGS + ACK + connection WINDOW_UPDATE
     (let [[ftype flags sid payload] (frame:make-settings-frame session:default-settings)]
       (frame:write-frame transport ftype flags sid payload))
     (let [[ftype flags sid payload] (frame:make-settings-ack)]
@@ -118,15 +127,13 @@
       (when (> delta 0)
         (let [[ftype flags sid payload] (frame:make-window-update-frame 0 delta)]
           (frame:write-frame transport ftype flags sid payload))))
-    (transport:flush)
-    # Start writer fiber
-    (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))
-    # Shared reader loop with server callbacks
+    (transport:flush)  # Start writer fiber
+    (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))  # Shared reader loop with server callbacks
     (session:read-loop sess
-      :on-headers (make-on-headers handler on-error)
-      :on-goaway (fn [sess payload]
-                   (sess:write-queue:put :shutdown)
-                   true)))
+                       :on-headers (make-on-headers handler on-error)
+                       :on-goaway (fn [sess payload]
+                                    (sess:write-queue:put :shutdown)
+                                    true)))
 
   ## ── h2-serve ───────────────────────────────────────────────────────────
 
@@ -137,18 +144,19 @@
              t (if tls-config
                  (begin
                    (when (nil? tls)
-                     (error {:error :h2-error :reason :tls-not-configured
+                     (error {:error :h2-error
+                             :reason :tls-not-configured
                              :message "TLS serving requires :tls plugin"}))
                    (transport:tls (tls:accept listener tls-config)))
                  (transport:tcp tcp-port))
              sess (session:make-session t "" true)]
-        (ev/spawn
-          (fn []
-            (let [[ok? err] (protect
-              (server-connection t handler sess :on-error on-error))]
-              (unless ok?
-                (when on-error (on-error err)))
-              (protect (t:close))))))))
+        (ev/spawn (fn []
+                    (let [[ok? err] (protect (server-connection t
+                          handler
+                          sess
+                          :on-error on-error))]
+                      (unless ok? (when on-error (on-error err)))
+                      (protect (t:close))))))))
 
   ## ── Tests ──────────────────────────────────────────────────────────────
 
@@ -157,5 +165,4 @@
 
   ## ── Exports ────────────────────────────────────────────────────────────
 
-  {:serve h2-serve
-   :test  run-tests})
+  {:serve h2-serve :test run-tests})

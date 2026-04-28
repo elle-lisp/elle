@@ -1,0 +1,11 @@
+#!/bin/sh
+# Auto-format staged .lisp files with elle fmt
+
+ELLE="${ELLE:-./target/debug/elle}"
+
+staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.lisp')
+[ -z "$staged" ] && exit 0
+
+for f in $staged; do
+  "$ELLE" fmt "$f" && git add "$f"
+done

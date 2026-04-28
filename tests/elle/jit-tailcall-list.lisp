@@ -7,8 +7,7 @@
 # list's cons cells, (first lst) in the next iteration reads freed memory.
 
 (defn count-list [lst acc]
-  (if (empty? lst) acc
-    (count-list (rest lst) (+ acc 1))))
+  (if (empty? lst) acc (count-list (rest lst) (+ acc 1))))
 
 # Build a list long enough to trigger JIT compilation (threshold ~10 calls)
 (def big-list (range 200))

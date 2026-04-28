@@ -285,6 +285,13 @@ pub(super) fn format_let(
         return format_generic_call(children, source, config);
     }
 
+    // Only apply let-specific formatting when the bindings position is
+    // actually a bracket form.  Inside quasiquotes the "bindings" slot
+    // can be an unquote (`,more`) which must not be wrapped in brackets.
+    if !matches!(children[1].syntax.kind, SyntaxKind::Array(_)) {
+        return format_generic_call(children, source, config);
+    }
+
     let head = format_annotated(&children[0], source, config);
     let bindings_doc = format_bindings(&children[1], source, config);
 

@@ -1,7 +1,8 @@
 (elle/epoch 9)
 ## CSS stylesheet generation
 
-(def @generate-css (fn ()
+(def @generate-css
+  (fn ()
     "/* Elle Documentation Site Stylesheet */
 
 :root {
@@ -262,7 +263,7 @@ tbody tr:nth-child(even) {
   body {
     flex-direction: column;
   }
-  
+
   .sidebar {
     width: 100%;
     height: auto;
@@ -271,24 +272,24 @@ tbody tr:nth-child(even) {
     border-bottom: 1px solid var(--border);
     padding: 1rem;
   }
-  
+
   .site-title {
     margin-bottom: 1rem;
   }
-  
+
   .content {
     margin-left: 0;
     padding: 1.5rem;
   }
-  
+
   h1 {
     font-size: 1.75rem;
   }
-  
+
   h2 {
     font-size: 1.5rem;
   }
-  
+
   h3 {
     font-size: 1.25rem;
   }
@@ -380,8 +381,7 @@ tbody tr:nth-child(even) {
   padding-top: 1rem;
   border-top: 2px solid var(--border);
 }
-"
-))
+"))
 
 ## Module exports
 (fn [] {:generate-css generate-css})

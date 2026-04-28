@@ -18,7 +18,11 @@
 # ============================================================================
 
 # test_let_determinism
-(assert (= (let [x 42 y -17] (+ x y)) 25) "let: (let ((x 42) (y -17)) (+ x y)) == 25")
+(assert (= (let [x 42
+                 y -17]
+             (+ x y))
+           25)
+        "let: (let ((x 42) (y -17)) (+ x y)) == 25")
 
 # ============================================================================
 # Lambda
@@ -32,14 +36,22 @@
 # ============================================================================
 
 # test_multi_form_determinism
-(assert (= (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) 5) "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
+(assert (= (begin
+             (def det-x 13)
+             (def det-y -8)
+             (+ det-x det-y))
+           5)
+        "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
 
 # ============================================================================
 # Closure
 # ============================================================================
 
 # test_closure_determinism
-(assert (= (let [captured 10] ((fn (x) (+ x captured)) 32)) 42) "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
+(assert (= (let [captured 10]
+             ((fn (x) (+ x captured)) 32))
+           42)
+        "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
 
 # ============================================================================
 # Conditional
@@ -56,8 +68,8 @@
 (defn factorial [n]
   "Compute factorial of n"
   (if (<= n 1)
-      1
-      (* n (factorial (- n 1)))))
+    1
+    (* n (factorial (- n 1)))))
 
 (assert (= (factorial 7) 5040) "recursive: factorial of 7 == 5040")
 

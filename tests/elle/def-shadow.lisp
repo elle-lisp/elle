@@ -20,8 +20,14 @@
 (assert (= a 11) "file-scope: (+ a 1) should see previous a=10")
 
 # ── 2. explicit letrec: duplicate names rejected ──
-(let [[ok? _] (protect ((fn [] (eval '(letrec [x 1 x 2] x)))))]
+(let [[ok? _] (protect ((fn []
+                          (eval '(letrec [x 1
+                                   x 2]
+                                   x)))))]
   (assert (not ok?) "letrec: duplicate x should be a compile error"))
 
-(let [[ok? _] (protect ((fn [] (eval '(letrec [@x @[1 2 3] x (freeze x)] x)))))]
+(let [[ok? _] (protect ((fn []
+                          (eval '(letrec [@x @[1 2 3]
+                                   x (freeze x)]
+                                   x)))))]
   (assert (not ok?) "letrec: @x then x should be a compile error"))

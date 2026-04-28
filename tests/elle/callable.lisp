@@ -84,7 +84,7 @@
 (assert (= ("food" -1) "d") "string negative index wraps")
 
 # ── @String as function ───────────────────────────────────────────
-(let [s @"hello"]
+(let [s (thaw "hello")]
   (assert (= (s 0) "h") "@string index 0")
   (assert (= (s 4) "o") "@string index 4")
   (assert (= (s 99) nil) "@string out-of-bounds returns nil"))
@@ -104,14 +104,18 @@
 
 # ── callable? for strings and bytes ───────────────────────────────
 (assert (= (callable? "hello") true) "callable?: string")
-(assert (= (callable? @"hello") true) "callable?: @string")
+(assert (= (callable? (thaw "hello")) true) "callable?: @string")
 (assert (= (callable? (bytes 1 2)) true) "callable?: bytes")
 (assert (= (callable? (@bytes 1 2)) true) "callable?: @bytes")
 
 # ── Error cases ───────────────────────────────────────────────────────
-(assert (protect (({:a 1})) :error)
+(assert (protect
+          (({:a 1}))
+          :error)
         "struct call with 0 args is arity error")
-(assert (protect (([1 2] "x")) :error)
+(assert (protect
+          (([1 2] "x"))
+          :error)
         "array call with string index is type error")
 
 # ── Tail position ─────────────────────────────────────────────────────

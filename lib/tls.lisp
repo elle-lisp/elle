@@ -60,17 +60,16 @@
 ## and returns the public API. Call it like:
 ##   (def tls ((import "std/tls") tls-plugin))
 
-(fn [plugin]
-  ## Extract plugin primitives from the struct so they can be called
+(fn [plugin]  ## Extract plugin primitives from the struct so they can be called
   ## as local bindings. Plugin primitives are not resolvable by name
   ## at compile time — they must be accessed through the struct.
-  (def process-fn             (get plugin :process))
-  (def get-outgoing-fn        (get plugin :get-outgoing))
+  (def process-fn (get plugin :process))
+  (def get-outgoing-fn (get plugin :get-outgoing))
   (def handshake-complete?-fn (get plugin :handshake-complete?))
-  (def client-state-fn        (get plugin :client-state))
-  (def server-state-fn        (get plugin :server-state))
-  (def server-config-fn       (get plugin :server-config))
-  (def alpn-protocol-fn       (get plugin :alpn-protocol))
+  (def client-state-fn (get plugin :client-state))
+  (def server-state-fn (get plugin :server-state))
+  (def server-config-fn (get plugin :server-config))
+  (def alpn-protocol-fn (get plugin :alpn-protocol))
 
   ## ── Private: handshake driver ───────────────────────────────────────────
 
@@ -83,28 +82,25 @@
        - After every tls/process call, drain and send outgoing bytes.
          TLS 1.3 may produce post-handshake messages at any time.
        - Check handshake-complete? AFTER sending outgoing — the server
-         needs to receive our Finished before it considers us ready."
-    # Pump the state machine with empty bytes to generate the initial
+         needs to receive our Finished before it considers us ready."  # Pump the state machine with empty bytes to generate the initial
     # ClientHello (client side) or enter the wait state (server side).
     (process-fn tls (bytes))
-    (forever
-      # INVARIANT: Send any queued ciphertext before doing anything else.
+    (forever  # INVARIANT: Send any queued ciphertext before doing anything else.
       # This must happen on the first iteration for ClientHello (client side)
       # and after every subsequent process call.
       (let [out (get-outgoing-fn tls)]
-        (when (> (length out) 0)
-          (port/write port out)))          # async — yields SIG_IO
+        (when (> (length out) 0) (port/write port out)))  # async — yields SIG_IO
 
       # If handshake is complete, we're done.
-      (when (handshake-complete?-fn tls)
-        (break nil))
+      (when (handshake-complete?-fn tls) (break nil))
 
       # Read more ciphertext from the network.
       # Note: TCP ports use binary encoding; port/read returns bytes.
-      (let [data (port/read port 16384)]  # async — yields SIG_IO
+      (let [data (port/read port 16384)]
         (when (nil? data)
           (error {:error :tls-error
-                  :reason :connection-closed :phase :handshake
+                  :reason :connection-closed
+                  :phase :handshake
                   :message "connection closed during handshake"}))
 
         # Feed into state machine. Outgoing data from this call
@@ -126,28 +122,25 @@
        :ca-file    string — path to PEM CA bundle
        :client-cert string — path to PEM client certificate chain
        :client-key  string — path to PEM client private key"
-    (let* [opts (or (get args 0) {})
-           # Resolve hostname to IP. The io_uring TCP backend requires an IP
+    (let* [opts (or (get args 0) {})  # Resolve hostname to IP. The io_uring TCP backend requires an IP
            # address; hostnames must be resolved before calling tcp/connect.
            # SNI and cert verification still use the original hostname.
            ip (resolve-host hostname)
-           tcp-port (tcp/connect ip port-num)       # async
-           tls (client-state-fn hostname opts)]     # sync — state machine only
+           tcp-port (tcp/connect ip port-num)  # async
+           tls (client-state-fn hostname opts)]
       (let [[ok? result] (protect (tls-handshake tcp-port tls))]
-        (unless ok?
-          # Handshake failed. Close TCP port before re-raising.
+        (unless ok?  # Handshake failed. Close TCP port before re-raising.
           # Do not attempt to send close_notify — the connection is broken.
           (port/close tcp-port)
           (error result))
         {:tcp tcp-port :tls tls})))
-
   (defn tls/accept [listener config]
     "Accept a TLS connection on a TCP listener. Returns a tls-conn struct.
      listener: a TcpListener port from (tcp/listen host port).
      config:   a tls-server-config from (tls/server-config cert key).
      Must be called inside a scheduler context."
-    (let* [tcp-port (tcp/accept listener)       # async
-           tls (server-state-fn config)]        # sync
+    (let* [tcp-port (tcp/accept listener)  # async
+           tls (server-state-fn config)]
       (let [[ok? result] (protect (tls-handshake tcp-port tls))]
         (unless ok?
           (port/close tcp-port)
@@ -157,11 +150,11 @@
   ## ── Private: additional plugin primitives ──────────────────────────────
   ## Extracted here so data-transfer functions close over them without
   ## reaching into `plugin` at each call site.
-  (def read-plaintext-fn    (get plugin :read-plaintext))
-  (def get-plaintext-fn     (get plugin :get-plaintext))
-  (def write-plaintext-fn   (get plugin :write-plaintext))
+  (def read-plaintext-fn (get plugin :read-plaintext))
+  (def get-plaintext-fn (get plugin :get-plaintext))
+  (def write-plaintext-fn (get plugin :write-plaintext))
   (def plaintext-indexof-fn (get plugin :plaintext-indexof))
-  (def close-notify-fn      (get plugin :close-notify))
+  (def close-notify-fn (get plugin :close-notify))
 
   ## ── Public: data transfer ─────────────────────────────────────────────────
 
@@ -171,29 +164,20 @@
      Must be called inside a scheduler context."
     (let [tls conn:tls
           port conn:tcp]
-      # Single loop: break immediately if plaintext is already buffered,
-      # otherwise read from the network until we get data or EOF.
-      (forever
-        # Check buffered plaintext first — avoid a network round-trip if data is ready.
+      (forever  # Check buffered plaintext first — avoid a network round-trip if data is ready.
         (let [buffered (read-plaintext-fn tls n)]
-          (when (> (length buffered) 0)
-            (break buffered)))
-        # Plaintext buffer empty — read from network.
+          (when (> (length buffered) 0) (break buffered)))  # Plaintext buffer empty — read from network.
         # Use 16384 to match TLS max record size.
-        (let [data (port/read port 16384)]  # async
-          (when (nil? data)
-            # TCP closed. process-fn may have buffered plaintext from
+        (let [data (port/read port 16384)]
+          (when (nil? data)  # TCP closed. process-fn may have buffered plaintext from
             # a segment that also contained close_notify. One final drain.
             (let [final (read-plaintext-fn tls n)]
               (break (if (> (length final) 0) final nil))))
-          (process-fn tls data)
-          # INVARIANT: Send outgoing after every tls/process.
+          (process-fn tls data)  # INVARIANT: Send outgoing after every tls/process.
           # TLS 1.3 post-handshake messages (NewSessionTicket, KeyUpdate) must
           # be sent or the connection stalls.
           (let [out (get-outgoing-fn tls)]
-            (when (> (length out) 0)
-              (port/write port out)))))))
-
+            (when (> (length out) 0) (port/write port out)))))))
   (defn tls/read-line [conn]
     "Read a line (through \\n, byte 10) from a TLS connection.
      Returns a string including the newline, or nil on EOF.
@@ -202,33 +186,23 @@
      Must be called inside a scheduler context."
     (let [tls conn:tls
           port conn:tcp
-          chunks @[]]     # accumulated string fragments before the newline
-      (forever
-        # Scan for newline in the buffered plaintext — do NOT drain yet.
-        (let [idx (plaintext-indexof-fn tls 10)]   # 10 = \n
-          (when (not (nil? idx))
-            # Found a newline at position idx.
+          chunks @[]]
+      (forever  # Scan for newline in the buffered plaintext — do NOT drain yet.
+        (let [idx (plaintext-indexof-fn tls 10)]
+          (when (not (nil? idx))  # Found a newline at position idx.
             # Drain exactly (idx + 1) bytes — up to and including the newline.
             (let [line-bytes (read-plaintext-fn tls (+ idx 1))]
-              (push chunks (string line-bytes))
-              # Remainder (bytes after the newline) stays in the plaintext buffer
+              (push chunks (string line-bytes))  # Remainder (bytes after the newline) stays in the plaintext buffer
               # for the next tls/read-line call.
-              (break (apply concat chunks)))))
-        # No newline in buffer yet — read more from network.
+              (break (apply concat chunks)))))  # No newline in buffer yet — read more from network.
         (let [data (port/read port 16384)]
-          (when (nil? data)
-            # EOF. Return whatever we have accumulated, or nil if nothing.
+          (when (nil? data)  # EOF. Return whatever we have accumulated, or nil if nothing.
             (let [remaining (get-plaintext-fn tls)]
-              (when (> (length remaining) 0)
-                (push chunks (string remaining)))
-              (break (if (> (length chunks) 0)
-                       (apply concat chunks)
-                       nil))))
-          (process-fn tls data)
-          # INVARIANT: Send outgoing after every tls/process.
+              (when (> (length remaining) 0) (push chunks (string remaining)))
+              (break (if (> (length chunks) 0) (apply concat chunks) nil))))
+          (process-fn tls data)  # INVARIANT: Send outgoing after every tls/process.
           (let [out (get-outgoing-fn tls)]
-            (when (> (length out) 0)
-              (port/write port out)))))))   # async
+            (when (> (length out) 0) (port/write port out)))))))  # async
 
   (defn tls/read-all [conn]
     "Read all remaining decrypted bytes until EOF. Returns bytes.
@@ -239,24 +213,18 @@
           chunks @[]]
       (forever
         (let [data (port/read port 16384)]
-          (when (nil? data)
-            # EOF. Drain any remaining plaintext and return accumulated data.
+          (when (nil? data)  # EOF. Drain any remaining plaintext and return accumulated data.
             (let [remaining (get-plaintext-fn tls)]
-              (when (> (length remaining) 0)
-                (push chunks remaining)))
+              (when (> (length remaining) 0) (push chunks remaining)))
             (break (if (> (length chunks) 0)
                      (apply concat (freeze chunks))
                      (bytes))))
-          (process-fn tls data)
-          # INVARIANT: Send outgoing after every tls/process.
+          (process-fn tls data)  # INVARIANT: Send outgoing after every tls/process.
           (let [out (get-outgoing-fn tls)]
-            (when (> (length out) 0)
-              (port/write port out)))         # async
+            (when (> (length out) 0) (port/write port out)))  # async
           # Accumulate any newly decrypted plaintext.
           (let [pt (get-plaintext-fn tls)]
-            (when (> (length pt) 0)
-              (push chunks pt)))))))
-
+            (when (> (length pt) 0) (push chunks pt)))))))
   (defn tls/write [conn data]
     "Encrypt data and send over TLS. data may be bytes or string.
      Returns the number of plaintext bytes written.
@@ -268,18 +236,15 @@
       (when (= result:status :error)
         (error {:error :tls-error :reason :write-failed :message result:message}))
       (let [out result:outgoing]
-        (when (> (length out) 0)
-          (port/write port out)))             # async
+        (when (> (length out) 0) (port/write port out)))  # async
       (length plaintext)))
-
   (defn tls/close [conn]
     "Close a TLS connection. Sends a TLS close_notify alert then closes the TCP port.
      Complies with RFC 8446 §6.1: each party must send close_notify before
      closing its write side. Returns nil."
     (let* [notify-result (close-notify-fn conn:tls)
            outgoing notify-result:outgoing]
-      (when (> (length outgoing) 0)
-        (port/write conn:tcp outgoing))
+      (when (> (length outgoing) 0) (port/write conn:tcp outgoing))
       (port/close conn:tcp))
     nil)
 
@@ -296,33 +261,37 @@
      Compose with stream/map, stream/filter, stream/take, stream/collect, etc.
      Must be called inside a scheduler context."
     (coro/new (fn []
-      (forever
-        (let [line (tls/read-line conn)]
-          (if (nil? line)
-            (begin (tls/close conn) (break))
-            (yield line)))))))
-
+                (forever
+                  (let [line (tls/read-line conn)]
+                    (if (nil? line)
+                      (begin
+                        (tls/close conn)
+                        (break))
+                      (yield line)))))))
   (defn tls/chunks [conn size]
     "Return a coroutine that yields byte chunks of `size` from a TLS connection.
      Final chunk may be smaller. Closes the connection when exhausted.
      Must be called inside a scheduler context."
     (coro/new (fn []
-      (forever
-        (let [chunk (tls/read conn size)]
-          (if (nil? chunk)
-            (begin (tls/close conn) (break))
-            (yield chunk)))))))
-
+                (forever
+                  (let [chunk (tls/read conn size)]
+                    (if (nil? chunk)
+                      (begin
+                        (tls/close conn)
+                        (break))
+                      (yield chunk)))))))
   (defn tls/writer [conn]
     "Return a write-stream coroutine. Resume with bytes/string to write.
      Resume with nil to close the connection.
      Must be called inside a scheduler context."
     (coro/new (fn []
-      (forever
-        (let [val (yield nil)]
-          (if (nil? val)
-            (begin (tls/close conn) (break))
-            (tls/write conn val)))))))
+                (forever
+                  (let [val (yield nil)]
+                    (if (nil? val)
+                      (begin
+                        (tls/close conn)
+                        (break))
+                      (tls/write conn val)))))))
 
   ## ── Public: ALPN protocol query ──────────────────────────────────────
 
@@ -331,15 +300,15 @@
     (alpn-protocol-fn conn:tls))
 
   ## ── Export struct ──────────────────────────────────────────────────────
-  {:connect        tls/connect
-   :accept         tls/accept
-   :server-config  server-config-fn
-   :read           tls/read
-   :read-line      tls/read-line
-   :read-all       tls/read-all
-   :write          tls/write
-   :close          tls/close
-   :lines          tls/lines
-   :chunks         tls/chunks
-   :writer         tls/writer
-   :alpn-protocol  tls/alpn-protocol})
+  {:connect tls/connect
+   :accept tls/accept
+   :server-config server-config-fn
+   :read tls/read
+   :read-line tls/read-line
+   :read-all tls/read-all
+   :write tls/write
+   :close tls/close
+   :lines tls/lines
+   :chunks tls/chunks
+   :writer tls/writer
+   :alpn-protocol tls/alpn-protocol})

@@ -108,6 +108,23 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 See [`docs/plugins.md`](docs/plugins.md) for the full list and
 [`docs/cookbook/plugins.md`](docs/cookbook/plugins.md) for the recipe.
 
+## Formatting
+
+All `.lisp` files are formatted with `elle fmt`. This is enforced by CI
+and by a pre-commit hook.
+
+| Command | What it does |
+|---------|-------------|
+| `make fmt` | Format all Elle source in-place |
+| `make fmt-check` | Verify formatting (used in CI, exits 1 on diff) |
+
+A pre-commit hook in `.githooks/` auto-formats staged `.lisp` files on
+commit. After cloning, enable it with:
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ## Conventions
 
 - Files and directories: lowercase, single-word when possible.

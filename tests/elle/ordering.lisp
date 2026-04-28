@@ -32,9 +32,9 @@
 # @string equality (was broken — Buffer arm was missing from PartialEq)
 # ============================================================================
 
-(assert (= @"hello" @"hello") "@string structural eq")
-(assert (not (= @"hello" @"world")) "@string structural neq")
-(assert (= @"" @"") "empty @string eq")
+(assert (= (thaw "hello") (thaw "hello")) "@string structural eq")
+(assert (not (= (thaw "hello") (thaw "world"))) "@string structural neq")
+(assert (= (thaw "") (thaw "")) "empty @string eq")
 
 # ============================================================================
 # Cross-type inequality

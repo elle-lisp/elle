@@ -16,13 +16,15 @@
   (assert (not (nil? (get cfg :entry))) "fn/flow has entry")
   (assert (not (nil? (get cfg :blocks))) "fn/flow has blocks"))
 
-(assert (string? (get (fn/flow (fn (x y) (+ x y))) :arity)) "fn/flow arity is string")
+(assert (string? (get (fn/flow (fn (x y) (+ x y))) :arity))
+        "fn/flow arity is string")
 
 (assert (= (get (fn/flow (fn (x y) (+ x y))) :arity) "2") "fn/flow arity value")
 
 (assert (array? (get (fn/flow (fn (x) x)) :blocks)) "fn/flow blocks is array")
 
-(assert (> (length (get (fn/flow (fn (x) x)) :blocks)) 0) "fn/flow blocks nonempty")
+(assert (> (length (get (fn/flow (fn (x) x)) :blocks)) 0)
+        "fn/flow blocks nonempty")
 
 (let [block (get (get (fn/flow (fn (x) x)) :blocks) 0)]
   (assert (not (nil? (get block :label))) "fn/flow block has label")
@@ -39,15 +41,21 @@
 (let [term (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :term)]
   (assert (string? term) "fn/flow term is string"))
 
-(let [[ok? _] (protect ((fn () (fn/flow 42))))] (assert (not ok?) "fn/flow non-closure errors"))
+(let [[ok? _] (protect ((fn () (fn/flow 42))))]
+  (assert (not ok?) "fn/flow non-closure errors"))
 
-(defn my-add (x y) (+ x y))
+(defn my-add (x y)
+  (+ x y))
 (assert (nil? (get (fn/flow my-add) :name)) "fn/flow named function")
 
-(assert (nil? (get (fn/flow (fn (x) x)) :name)) "fn/flow anonymous function name is nil")
+(assert (nil? (get (fn/flow (fn (x) x)) :name))
+        "fn/flow anonymous function name is nil")
 
-(defn my-add (x y) "Add two numbers." (+ x y))
-(assert (= (get (fn/flow my-add) :doc) "Add two numbers.") "fn/flow doc with docstring")
+(defn my-add (x y)
+  "Add two numbers."
+  (+ x y))
+(assert (= (get (fn/flow my-add) :doc) "Add two numbers.")
+        "fn/flow doc with docstring")
 
 (assert (nil? (get (fn/flow (fn (x) x)) :doc)) "fn/flow doc without docstring")
 
@@ -72,24 +80,32 @@
 (def r5 (fn/cfg (fn (d) d) :dot))
 (assert (string/contains? r5 "shape=record") "fn/cfg dot contains shape record")
 
-(defn my-fn-1 (x) (+ x 1))
+(defn my-fn-1 (x)
+  (+ x 1))
 (def r6 (fn/cfg my-fn-1 :dot))
-(assert (string/contains? r6 "anonymous") "fn/cfg dot unnamed defn shows anonymous")
+(assert (string/contains? r6 "anonymous")
+        "fn/cfg dot unnamed defn shows anonymous")
 
 (def r7 (fn/cfg (fn (e) (if e 1 2)) :dot))
 (assert (string/contains? r7 "->") "fn/cfg dot branching has edges")
 
-(defn my-fn-2 (x) "Does stuff." (+ x 1))
+(defn my-fn-2 (x)
+  "Does stuff."
+  (+ x 1))
 (def r8 (fn/cfg my-fn-2 :dot))
-(assert (string/contains? r8 "Does stuff.") "fn/cfg dot shows docstring in label")
+(assert (string/contains? r8 "Does stuff.")
+        "fn/cfg dot shows docstring in label")
 
 ## ── fn/cfg: Error handling ──────────────────────────────────────────────────
 
-(let [[ok? _] (protect ((fn () (fn/cfg (fn (k) k) :png))))] (assert (not ok?) "fn/cfg invalid format errors"))
+(let [[ok? _] (protect ((fn () (fn/cfg (fn (k) k) :png))))]
+  (assert (not ok?) "fn/cfg invalid format errors"))
 
-(let [[ok? _] (protect ((fn () (fn/cfg (fn (l) l) :dot :extra))))] (assert (not ok?) "fn/cfg too many args errors"))
+(let [[ok? _] (protect ((fn () (fn/cfg (fn (l) l) :dot :extra))))]
+  (assert (not ok?) "fn/cfg too many args errors"))
 
-(let [[ok? _] (protect ((fn () (fn/cfg 42))))] (assert (not ok?) "fn/cfg non-closure errors"))
+(let [[ok? _] (protect ((fn () (fn/cfg 42))))]
+  (assert (not ok?) "fn/cfg non-closure errors"))
 
 ## ── fn/cfg: Fiber support ───────────────────────────────────────────────────
 
@@ -147,7 +163,8 @@
 
 (def flow7 (fn/flow (fn (u) u)))
 (def block7 (get (get flow7 :blocks) 0))
-(assert (string/starts-with? (get block7 :term-display) "return") "fn/flow term-display compact")
+(assert (string/starts-with? (get block7 :term-display) "return")
+        "fn/flow term-display compact")
 
 ## ── fn/cfg: Mermaid visual feature tests ────────────────────────────────────
 
@@ -161,4 +178,5 @@
 (assert (string/contains? r18 "([") "fn/cfg mermaid return uses stadium")
 
 (def r19 (fn/cfg (fn (aa) aa) :mermaid))
-(assert (not (string/contains? r19 "Reg(")) "fn/cfg mermaid compact instructions")
+(assert (not (string/contains? r19 "Reg("))
+        "fn/cfg mermaid compact instructions")

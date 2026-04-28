@@ -91,9 +91,12 @@
 (def a2 (compile/analyze src2))
 
 # Both have SIG_ERROR (from * and +) but don't suspend
-(assert (not (get (compile/signal a2 :pure-fn) :silent)) "pure-fn has SIG_ERROR from *")
-(assert (not (get (compile/signal a2 :caller) :silent)) "caller has SIG_ERROR from + and pure-fn")
-(assert (get (compile/signal a2 :pure-fn) :jit-eligible) "pure-fn is jit-eligible")
+(assert (not (get (compile/signal a2 :pure-fn) :silent))
+        "pure-fn has SIG_ERROR from *")
+(assert (not (get (compile/signal a2 :caller) :silent))
+        "caller has SIG_ERROR from + and pure-fn")
+(assert (get (compile/signal a2 :pure-fn) :jit-eligible)
+        "pure-fn is jit-eligible")
 (assert (get (compile/signal a2 :caller) :jit-eligible) "caller is jit-eligible")
 
 # caller calls pure-fn
@@ -110,7 +113,8 @@
 
 # ── Closure with captures ──────────────────────────────────────────────
 
-(def src3 "
+(def src3
+  "
 (defn make-counter [start]
   (var n start)
   (defn next [] (assign n (+ n 1)) n)

@@ -22,10 +22,10 @@
 
   (defn snapshot []
     "Capture all resource counters at a point in time."
-    {:objects  (arena/count)
-     :bytes    (arena/bytes)
-     :interns  (debug/intern-count)
-     :symbols  (debug/symbol-count)
+    {:objects (arena/count)
+     :bytes (arena/bytes)
+     :interns (debug/intern-count)
+     :symbols (debug/symbol-count)
      :keywords (debug/keyword-count)})
 
   ## ── Measure ─────────────────────────────────────────────────────────
@@ -36,31 +36,29 @@
   # reported peak reflects only the thunk.
   (def calibration-base (arena/count))
   (arena/reset-peak)
-  (arena/allocs (fn [] nil))
-  # Subtract 1: the calibration allocates its own noop closure which
+  (arena/allocs (fn [] nil))  # Subtract 1: the calibration allocates its own noop closure which
   # the real measure doesn't (the thunk is passed in, not created).
   (def peak-overhead (- (arena/peak) calibration-base 1))
-
   (defn measure [thunk]
     "Run thunk, return struct of resource consumption deltas.
 
      Uses arena/allocs internally for precise heap object counting.
      Peak is adjusted to subtract measurement overhead.
      Before-snapshot uses raw scalars (no struct) to avoid tainting peak."
-    (let* [b-objects  (arena/count)
-           b-bytes    (arena/bytes)
-           b-interns  (debug/intern-count)
-           b-symbols  (debug/symbol-count)
+    (let* [b-objects (arena/count)
+           b-bytes (arena/bytes)
+           b-interns (debug/intern-count)
+           b-symbols (debug/symbol-count)
            b-keywords (debug/keyword-count)
-           _          (arena/reset-peak)
-           pair       (arena/allocs thunk)
-           peak       (- (arena/peak) b-objects peak-overhead)]
-      {:result   (first pair)
-       :allocs   (rest pair)
-       :peak     peak
-       :bytes    (- (arena/bytes) b-bytes)
-       :interns  (- (debug/intern-count) b-interns)
-       :symbols  (- (debug/symbol-count) b-symbols)
+           _ (arena/reset-peak)
+           pair (arena/allocs thunk)
+           peak (- (arena/peak) b-objects peak-overhead)]
+      {:result (first pair)
+       :allocs (rest pair)
+       :peak peak
+       :bytes (- (arena/bytes) b-bytes)
+       :interns (- (debug/intern-count) b-interns)
+       :symbols (- (debug/symbol-count) b-symbols)
        :keywords (- (debug/keyword-count) b-keywords)}))
 
   ## ── Report ──────────────────────────────────────────────────────────
@@ -70,22 +68,22 @@
     (let [n (length s)]
       (if (>= n width)
         s
-        (let [buf @""]
+        (let [buf (thaw "")]
           (append buf s)
           (each _ in (range (- width n))
             (append buf " "))
           (freeze buf)))))
-
   (defn report [name m]
     "Format a measurement as a tab-separated key=value line."
-    (string/format "{}\tallocs={}\tpeak={}\tbytes={}\tinterns={}\tsymbols={}\tkeywords={}"
-      (pad-right name 24)
-      (m :allocs)
-      (m :peak)
-      (m :bytes)
-      (m :interns)
-      (m :symbols)
-      (m :keywords)))
+    (string/format (string "{}\tallocs={}\tpeak={}\tbytes={}"
+                           "\tinterns={}\tsymbols={}\tkeywords={}")
+                   (pad-right name 24)
+                   (m :allocs)
+                   (m :peak)
+                   (m :bytes)
+                   (m :interns)
+                   (m :symbols)
+                   (m :keywords)))
 
   ## ── Suite ───────────────────────────────────────────────────────────
 
@@ -95,14 +93,10 @@
      Returns array of [name measurement] results for programmatic use."
     (let [results @[]]
       (each entry in scenarios
-        (let* [name  (entry 0)
+        (let* [name (entry 0)
                thunk (entry 1)
-               m     (measure thunk)]
+               m (measure thunk)]
           (println (report name m))
           (push results [name m])))
       (freeze results)))
-
-  {:snapshot snapshot
-   :measure  measure
-   :report   report
-   :suite    suite})
+  {:snapshot snapshot :measure measure :report report :suite suite})

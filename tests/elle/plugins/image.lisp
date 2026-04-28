@@ -12,7 +12,7 @@
 
 ## 2x2 red RGBA8 image
 (def red-pixel [255 0 0 255])
-(def red-bytes b[255 0 0 255  255 0 0 255  255 0 0 255  255 0 0 255])
+(def red-bytes b[255 0 0 255 255 0 0 255 255 0 0 255 255 0 0 255])
 (def red-img (img:from-pixels 2 2 :rgba8 red-bytes))
 
 (assert (= (img:width red-img) 2) "width")
@@ -42,7 +42,8 @@
 (assert (= (img:get-pixel thawed 0 0) [0 255 0 255]) "thaw then mutate")
 
 ## Original unchanged
-(assert (= (img:get-pixel red-img 0 0) [255 0 0 255]) "original unchanged after thaw")
+(assert (= (img:get-pixel red-img 0 0) [255 0 0 255])
+        "original unchanged after thaw")
 
 (def frozen (img:freeze thawed))
 (assert (= (img:get-pixel frozen 0 0) [0 255 0 255]) "freeze snapshot")
@@ -64,7 +65,8 @@
 # ── Adjustments ──────────────────────────────────────────────────────
 
 (def gray (img:grayscale red-img))
-(assert (or (= (img:color-type gray) :luma8) (= (img:color-type gray) :lumaa8)) "grayscale → luma")
+(assert (or (= (img:color-type gray) :luma8) (= (img:color-type gray) :lumaa8))
+        "grayscale → luma")
 
 (def inv (img:invert red-img))
 (assert (not (nil? inv)) "invert runs")

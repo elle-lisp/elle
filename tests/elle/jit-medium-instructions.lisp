@@ -6,20 +6,24 @@
   (defn scan (rs)
     (if (= rs ())
       false
-      (if (string/contains? (get (first rs) :reason) name)
-        true
-        (scan (rest rs)))))
+      (if (string/contains? (get (first rs) :reason) name) true (scan (rest rs)))))
   (scan (jit/rejections)))
 
 ## Helper: call f n times with no args
 (defn repeat0 (n f)
-  (if (<= n 0) true
-    (begin (f) (repeat0 (- n 1) f))))
+  (if (<= n 0)
+    true
+    (begin
+      (f)
+      (repeat0 (- n 1) f))))
 
 ## Helper: call f n times with one arg
 (defn repeat1 (n f x)
-  (if (<= n 0) true
-    (begin (f x) (repeat1 (- n 1) f x))))
+  (if (<= n 0)
+    true
+    (begin
+      (f x)
+      (repeat1 (- n 1) f x))))
 
 ## ===== ArrayMutLen =====
 ## Array length check in a match pattern emits ArrayMutLen.
@@ -61,7 +65,8 @@
 
 (assert (= (arr-second [10 20]) 20) "arr-second returns element at index 1")
 (assert (= (arr-second [10]) nil) "arr-second nil on short array")
-(assert (not (has-rejection? "ArrayMutRefOrNil")) "ArrayMutRefOrNil not rejected")
+(assert (not (has-rejection? "ArrayMutRefOrNil"))
+        "ArrayMutRefOrNil not rejected")
 
 ## ===== ArrayMutPush / ArrayMutExtend =====
 ## The splice operator ; emits ArrayMutPush (scalar) and ArrayMutExtend (array).

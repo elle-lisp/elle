@@ -264,8 +264,19 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
         // ── Atoms ────────────────────────────────────────────
         SyntaxKind::Nil => Doc::text("nil"),
         SyntaxKind::Bool(b) => Doc::text(if *b { "true" } else { "false" }),
-        SyntaxKind::Int(n) => Doc::text(n.to_string()),
-        SyntaxKind::Float(f) => Doc::text(f.to_string()),
+        SyntaxKind::Int(_) | SyntaxKind::Float(_) => {
+            // Preserve original source representation (e.g. 1.7e308, 0xff)
+            let span = &node.syntax.span;
+            if span.start < source.len() && span.end <= source.len() {
+                Doc::text(&source[span.start..span.end])
+            } else {
+                match &node.syntax.kind {
+                    SyntaxKind::Int(n) => Doc::text(n.to_string()),
+                    SyntaxKind::Float(f) => Doc::text(format!("{:e}", f)),
+                    _ => unreachable!(),
+                }
+            }
+        }
         SyntaxKind::Symbol(s) => Doc::text(s.clone()),
         SyntaxKind::Keyword(s) => Doc::text(format!(":{}", s)),
         SyntaxKind::String(_) => {
