@@ -110,7 +110,7 @@
             (cond
               (= ftype C:type-settings)
                (if (has-flag? flags C:flag-ack)
-                 nil
+                 (session:ack-settings-received sess)
                  (begin
                    (session:apply-remote-settings sess payload)
                    (session:send-settings-ack sess)))
@@ -131,32 +131,37 @@
                (begin (sess:write-queue:put :shutdown) (break nil))
 
               (= ftype C:type-headers)
-               (let [s (session:get-stream sess sid)]
-                 (when (= s:state :idle)
-                   (stream:transition s :recv-headers))
-                 # Buffer CONTINUATION fragments if END_HEADERS not set
-                 (if (has-flag? flags C:flag-end-headers)
-                   (let [hdrs (hpack:decode sess:hpack-decoder payload)
-                         end? (has-flag? flags C:flag-end-stream)]
-                     (put s :headers hdrs)
-                     (when end? (stream:transition s :recv-end-stream))
-                     # Spawn handler fiber wrapped in protect+defer (defect 6+7)
-                     (ev/spawn
-                       (fn []
-                         (defer (del sess:streams sid)
-                           (let [[ok? err] (protect
-                             (handle-server-request sess s sid hdrs end? handler))]
-                             (unless ok?
-                               (protect
-                                 (session:send-rst-stream sess sid C:err-internal-error))
-                               (when on-error (on-error err))))))))
-                   # No END_HEADERS — buffer payload + remember END_STREAM flag
-                   (begin
-                     (when (has-flag? flags C:flag-end-stream)
-                       (stream:transition s :recv-end-stream))
-                     (put s :pending-headers
-                          @{:data payload
-                            :end-stream (has-flag? flags C:flag-end-stream)}))))
+               (let [max-streams (get sess:local-settings :max-concurrent-streams)
+                     active (length (keys sess:streams))
+                     existing (get sess:streams sid)]
+                 (if (and (nil? existing) (>= active max-streams))
+                   # Refuse stream: max-concurrent-streams exceeded
+                   (session:send-rst-stream sess sid C:err-refused-stream)
+                   # Accept and process the HEADERS
+                   (let [s (session:get-stream sess sid)]
+                     (when (= s:state :idle)
+                       (stream:transition s :recv-headers))
+                     (if (has-flag? flags C:flag-end-headers)
+                       (let [hdrs (hpack:decode sess:hpack-decoder payload)
+                             end? (has-flag? flags C:flag-end-stream)]
+                         (put s :headers hdrs)
+                         (when end? (stream:transition s :recv-end-stream))
+                         (ev/spawn
+                           (fn []
+                             (defer (del sess:streams sid)
+                               (let [[ok? err] (protect
+                                 (handle-server-request sess s sid hdrs end? handler))]
+                                 (unless ok?
+                                   (protect
+                                     (session:send-rst-stream sess sid C:err-internal-error))
+                                   (when on-error (on-error err))))))))
+                       # No END_HEADERS — buffer for CONTINUATION
+                       (begin
+                         (when (has-flag? flags C:flag-end-stream)
+                           (stream:transition s :recv-end-stream))
+                         (put s :pending-headers
+                              @{:data payload
+                                :end-stream (has-flag? flags C:flag-end-stream)}))))))
 
               (= ftype C:type-continuation)
                (when-let [s (get sess:streams sid)]

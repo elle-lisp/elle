@@ -130,7 +130,7 @@
               ## ── SETTINGS ──
               (= ftype C:type-settings)
                (if (has-flag? flags C:flag-ack)
-                 nil
+                 (session:ack-settings-received sess)
                  (begin
                    (session:apply-remote-settings sess payload)
                    (session:send-settings-ack sess)))
@@ -274,6 +274,10 @@
     (when sess:closed?
       (error {:error :h2-error :reason :connection-closed
               :message "session is closed"}))
+    (when sess:goaway-recvd?
+      (error {:error :h2-error :reason :goaway-received
+              :last-stream-id sess:last-stream-id
+              :message "peer sent GOAWAY, refusing new streams"}))
     (let* [sid sess:next-stream-id
            _ (put sess :next-stream-id (+ sid 2))
            s (session:get-stream sess sid)

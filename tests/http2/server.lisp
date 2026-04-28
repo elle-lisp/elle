@@ -212,6 +212,21 @@
         (assert (= resp:status 200) "status 200")
         true))))
 
+## ── Group 7: LOW defects ──────────────────────────────────────────────────
+
+(defn test-goaway-refuses-new-streams []
+  # After server closes, client should refuse new streams
+  (with-server
+    (fn [req] {:status 200 :body "ok"})
+    (fn [session]
+      (let [resp (http2:send session "GET" "/first")]
+        (assert (= resp:status 200) "first request ok"))
+      # Close session — marks goaway-recvd after GOAWAY exchange
+      (http2:close session)
+      (let [[ok? err] (protect (http2:send session "GET" "/second"))]
+        (assert (not ok?) "should refuse after close")
+        true))))
+
 ## ── Run ──────────────────────────────────────────────────────────────────
 
 (println "h2 server tests:")
@@ -228,6 +243,7 @@
 (run-test "large response headers" test-large-response-headers)
 (run-test "stream cleanup no leak" test-stream-cleanup-no-leak)
 (run-test "SETTINGS window adjustment" test-settings-window-adjustment)
+(run-test "GOAWAY refuses new streams" test-goaway-refuses-new-streams)
 (println)
 (println "results: " pass-count "/" test-count " passed, " fail-count " failed")
 (when (> fail-count 0)

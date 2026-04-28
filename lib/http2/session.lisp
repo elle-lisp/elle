@@ -53,7 +53,8 @@
       :writer-fiber   nil
       :closed?        false
       :goaway-recvd?  false
-      :last-stream-id 0})
+      :last-stream-id 0
+      :settings-ack-latch nil})
 
   ## ── Writer fiber ───────────────────────────────────────────────────────
 
@@ -85,12 +86,30 @@
     (session:write-queue:put [ftype flags sid payload]))
 
   (defn send-settings [session settings]
+    "Send SETTINGS and start a 30s timeout for the ACK."
     (let [[ftype flags sid payload] (frame:make-settings-frame settings)]
-      (send-frame session ftype flags sid payload)))
+      (send-frame session ftype flags sid payload))
+    # Start SETTINGS timeout: if no ACK within 30s, send GOAWAY
+    (let [latch (sync:make-latch)]
+      (put session :settings-ack-latch latch)
+      (ev/spawn
+        (fn []
+          (let [result (ev/timeout 30 (fn [] (latch:wait) :acked))]
+            (when (nil? result)
+              # Timeout: no ACK received
+              (when (not session:closed?)
+                (send-goaway session 0 C:err-settings-timeout)
+                (session:write-queue:put :shutdown))))))))
 
   (defn send-settings-ack [session]
     (let [[ftype flags sid payload] (frame:make-settings-ack)]
       (send-frame session ftype flags sid payload)))
+
+  (defn ack-settings-received [session]
+    "Called when SETTINGS ACK is received. Opens the latch if pending."
+    (when session:settings-ack-latch
+      (session:settings-ack-latch:open)
+      (put session :settings-ack-latch nil)))
 
   (defn send-window-update [session stream-id increment]
     (let [[ftype flags sid payload] (frame:make-window-update-frame stream-id increment)]
@@ -259,6 +278,7 @@
    :send-frame        send-frame
    :send-settings     send-settings
    :send-settings-ack send-settings-ack
+   :ack-settings-received ack-settings-received
    :send-window-update send-window-update
    :send-goaway       send-goaway
    :send-rst-stream   send-rst-stream
