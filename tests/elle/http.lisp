@@ -92,7 +92,7 @@
 # Custom headers override defaults
 (let [r (http:respond 200 "data" :headers {:content-type "application/json"})]
   (assert (= (get r:headers :content-type) "application/json")
-          "respond: custom content-type overrides default"))
+    "respond: custom content-type overrides default"))
 
 # ============================================================================
 # Client API — error paths
@@ -110,7 +110,7 @@
 (let [[ok? err] (protect (http:get "https://example.com/"))]
   (assert (not ok?) "https without :tls signals error")
   (assert (= err:reason :tls-not-configured)
-          "https without :tls reports :tls-not-configured"))
+    "https without :tls reports :tls-not-configured"))
 
 # With :tls, the module uses the supplied plugin. We use a fake plugin that
 # records calls so we can verify the wiring without pulling in real TLS.
@@ -143,11 +143,11 @@
   (assert (not ok?) "https-http:get exits via TLS path"))
 
 (assert (= (first (first tls-log)) :connect)
-        "tls:connect was called via https URL")
+  "tls:connect was called via https URL")
 (assert (= (get (first tls-log) 1) "example.com")
-        "tls:connect received the https host")
+  "tls:connect received the https host")
 (assert (= (get (first tls-log) 2) 443)
-        "tls:connect received the default https port 443")
+  "tls:connect received the default https port 443")
 
 # Parity: tls-transport's read-line must strip trailing newlines so the
 # wire-format helpers behave identically whether the underlying pipe is
@@ -156,9 +156,7 @@
 # does), and verify the parser doesn't choke.
 
 (def canned-response
-  ["HTTP/1.1 200 OK\r\n"
-   "Content-Type: text/plain\r\n"
-   "Content-Length: 5\r\n"
+  ["HTTP/1.1 200 OK\r\n" "Content-Type: text/plain\r\n" "Content-Length: 5\r\n"
    "\r\n"])
 (def canned-cursor @[0])
 
@@ -189,7 +187,7 @@
 (def line-strip-http ((import "std/http") :tls line-strip-tls))
 (let [resp (line-strip-http:get "https://example.com/")]
   (assert (= resp:status 200)
-          "tls-transport: read-line stripping yields parseable status")
+    "tls-transport: read-line stripping yields parseable status")
   (assert (= resp:body "hello") "tls-transport: full https response round-trips"))
 
 # ============================================================================
@@ -200,7 +198,7 @@
 (let [[ok? err] (protect (http:gzip "hello"))]
   (assert (not ok?) "no :compress ⇒ http:gzip errors")
   (assert (= err:reason :compress-not-configured)
-          "no :compress ⇒ :compress-not-configured reason"))
+    "no :compress ⇒ :compress-not-configured reason"))
 
 # Fake compress plugin: just record calls and return a tagged value so
 # we don't depend on libz being present in the test environment.
@@ -234,11 +232,11 @@
 (def http-z ((import "std/http") :compress fake-compress))
 
 (assert (= (string (http-z:gzip "hi")) "GZ:hi")
-        ":compress struct ⇒ http:gzip dispatches to the plugin")
+  ":compress struct ⇒ http:gzip dispatches to the plugin")
 (assert (= (string (http-z:gunzip (bytes "anything"))) "ungz")
-        ":compress struct ⇒ http:gunzip dispatches to the plugin")
+  ":compress struct ⇒ http:gunzip dispatches to the plugin")
 (assert (= (string (http-z:zstd "hi" 5)) "ZD:hi")
-        ":compress struct ⇒ http:zstd forwards level argument")
+  ":compress struct ⇒ http:zstd forwards level argument")
 (let [gzip-call (first compress-log)]
   (assert (= (first gzip-call) :gzip) "compress-log recorded :gzip call")
   (assert (= (get gzip-call 1) "hi") "compress-log recorded the data"))
@@ -255,7 +253,7 @@
              [ok? err] (protect (http-auto:gunzip data))]
         (when (not ok?)
           (assert (not (= err:reason :compress-not-configured))
-                  ":compress true ⇒ module imported, not reporting compress-not-configured"))))
+            ":compress true ⇒ module imported, not reporting compress-not-configured"))))
     (println "SKIP: :compress true test — libz/libzstd not available")))
 
 # Invalid :compress value → clear error at module init
@@ -288,29 +286,29 @@
 
 # Test 2: POST request with body
 (let [resp (http:post (string "http://127.0.0.1:" server-port "/submit")
-                      "payload")]
+        "payload")]
   (assert (= resp:status 200) "loopback POST: status 200")
   (assert (= resp:body "POST /submit") "loopback POST: body echoes method+path"))
 
 # Test 3: Custom headers round-trip
 (let [resp (http:get (string "http://127.0.0.1:" server-port "/")
-                     :headers {:x-test "custom-value"})]
+        :headers {:x-test "custom-value"})]
   (assert (= resp:status 200) "loopback custom header: status 200"))
 
 # Test 4: :query encodes a struct into the request path. Elle struct
 # iteration is key-sorted, so we assert on the sorted order the server
 # will actually receive.
 (let [resp (http:get (string "http://127.0.0.1:" server-port "/search")
-                     :query {:q "hello world" :page 2})]
+        :query {:q "hello world" :page 2})]
   (assert (= resp:status 200) "query struct: status 200")
   (assert (string/contains? resp:body "/search?page=2&q=hello%20world")
-          "query struct: encoded path echoed in body"))
+    "query struct: encoded path echoed in body"))
 
 # Test 5: :query merges with existing URL query (URL first, struct after)
 (let [resp (http:get (string "http://127.0.0.1:" server-port "/feed?fmt=json")
-                     :query {:limit 10})]
+        :query {:limit 10})]
   (assert (string/contains? resp:body "/feed?fmt=json&limit=10")
-          "query merge: url query retained, struct appended"))
+    "query merge: url query retained, struct appended"))
 
 # Shut down: closing the listener cancels the pending accept, server exits
 (port/close listener)
@@ -348,7 +346,7 @@
   (assert (= resp:status 200) "chunked single: status 200")
   (assert (= resp:body "single-chunk body") "chunked single: body reassembled")
   (assert (= (string/lowercase (get resp:headers :transfer-encoding)) "chunked")
-          "chunked single: server sent Transfer-Encoding: chunked"))
+    "chunked single: server sent Transfer-Encoding: chunked"))
 
 # Streamed multi-chunk body
 (let [resp (http:get (string "http://127.0.0.1:" chunk-port "/stream"))]
@@ -411,36 +409,35 @@
 # :follow-redirects true: follows all hops to 200
 (put redir-count 0 0)
 (let [resp (http:get (string "http://127.0.0.1:" redir-port "/hop1")
-                     :follow-redirects true)]
+        :follow-redirects true)]
   (assert (= resp:status 200) "redirect: :follow-redirects true reaches 200")
   (assert (= resp:body "GET /end") "redirect: method is GET after rewrite")
   (assert (= (get redir-count 0) 4)
-          "redirect: server saw 4 requests (hop1, hop2, hop3, end)"))
+    "redirect: server saw 4 requests (hop1, hop2, hop3, end)"))
 
 # :follow-redirects integer: limits hops
 (let [resp (http:get (string "http://127.0.0.1:" redir-port "/hop1")
-                     :follow-redirects 1)]
+        :follow-redirects 1)]
   (assert (= resp:status 301)
-          "redirect: hop limit 1 stops at the second redirect response"))
+    "redirect: hop limit 1 stops at the second redirect response"))
 
 # 307 preserves method on POST
-(let [resp (http:post (string "http://127.0.0.1:" redir-port "/hop3")
-                      "payload"
-                      :follow-redirects true)]
+(let [resp (http:post (string "http://127.0.0.1:" redir-port "/hop3") "payload"
+        :follow-redirects true)]
   (assert (= resp:status 200) "redirect: 307 POST reaches end")
   (assert (= resp:body "POST /end") "redirect: 307 preserves POST method"))
 
 # Loop detection: we bound hops, so a redirect loop terminates with
 # the last redirect response rather than hanging.
 (let [resp (http:get (string "http://127.0.0.1:" redir-port "/loop")
-                     :follow-redirects 3)]
+        :follow-redirects 3)]
   (assert (= resp:status 302) "redirect: loops stop at hop limit")
   (assert (= (get resp:headers :location) "/loop")
-          "redirect: loop final response has the Location header"))
+    "redirect: loop final response has the Location header"))
 
 # Absolute Location URL works
 (let [resp (http:get (string "http://127.0.0.1:" redir-port "/abs")
-                     :follow-redirects true)]
+        :follow-redirects true)]
   (assert (= resp:status 200) "redirect: absolute Location URL followed")
   (assert (= resp:body "GET /end") "redirect: absolute Location produced GET"))
 
@@ -476,7 +473,7 @@
         (http:sse-response (fn [send]
                              (send {:event "meta"
                                     :data (string "ct="
-                                    (or (get req:headers :content-type) "none"))})
+                                      (or (get req:headers :content-type) "none"))})
                              (send {:event "delta"
                                     :data (string "body=" (or req:body ""))})
                              (send {:event "delta" :data "token-1"})
@@ -494,7 +491,7 @@
 # Basic stream: connect, consume all events, stop when stream ends.
 (let [events @[]
       source (http:sse-get (string "http://127.0.0.1:" sse-server-port "/stream")
-                           :reconnect false)]
+        :reconnect false)]
   (each evt in source
     (push events evt))
   (assert (= (length events) 4) "sse: received all four events")
@@ -505,7 +502,7 @@
     (assert (= e1:id "a") "sse: id captured")
     (assert (= e2:id "b") "sse: id advances")
     (assert (= e3:data "multi\nline")
-            "sse: multi-line data preserved as single payload")))
+      "sse: multi-line data preserved as single payload")))
 
 # ============================================================================
 # sse-post: POST with body, consume streamed SSE response
@@ -513,45 +510,38 @@
 
 # Happy path: POST a JSON body, expect events echoing the body.
 (let [events @[]
-      source (http:sse-post (string "http://127.0.0.1:"
-                                    sse-server-port
-                                    "/echo-post")
-                            "{\"prompt\":\"hi\"}")]
+      source (http:sse-post (string "http://127.0.0.1:" sse-server-port
+          "/echo-post") "{\"prompt\":\"hi\"}")]
   (each evt in source
     (push events evt))
   (assert (= (length events) 5) "sse-post: received all five events")
   (let [[meta body t1 t2 done] events]
     (assert (= meta:event "meta") "sse-post: first event name")
     (assert (string/contains? meta:data "json")
-            "sse-post: server saw Content-Type application/json by default")
+      "sse-post: server saw Content-Type application/json by default")
     (assert (= body:event "delta") "sse-post: body echo event")
     (assert (= body:data "body={\"prompt\":\"hi\"}")
-            "sse-post: request body delivered to server intact")
+      "sse-post: request body delivered to server intact")
     (assert (= t1:data "token-1") "sse-post: token-1")
     (assert (= t2:data "token-2") "sse-post: token-2")
     (assert (= done:event "done") "sse-post: terminal event")
     (assert (= done:data "[DONE]")
-            "sse-post: caller can detect OpenAI-style [DONE] sentinel")))
+      "sse-post: caller can detect OpenAI-style [DONE] sentinel")))
 
 # Custom headers on sse-post are merged into the request.
 (let [events @[]
-      source (http:sse-post (string "http://127.0.0.1:"
-                                    sse-server-port
-                                    "/echo-post")
-                            "raw bytes"
-                            :headers {:content-type "text/plain"})]
+      source (http:sse-post (string "http://127.0.0.1:" sse-server-port
+          "/echo-post") "raw bytes" :headers {:content-type "text/plain"})]
   (each evt in source
     (push events evt))
   (let [meta (first events)]
     (assert (string/contains? meta:data "text/plain")
-            "sse-post: :headers override the default Content-Type")))
+      "sse-post: :headers override the default Content-Type")))
 
 # Error path: non-2xx response signals :sse-bad-status (coroutine body
 # errors during draining; the error surfaces to the each-loop driver).
 (let [[ok? err] (protect (let [source (http:sse-post (string "http://127.0.0.1:"
-                               sse-server-port
-                               "/bad-post")
-                               "ignored")]
+                                   sse-server-port "/bad-post") "ignored")]
                            (each _ in source
                              nil)))]
   (assert (not ok?) "sse-post: non-2xx signals error")

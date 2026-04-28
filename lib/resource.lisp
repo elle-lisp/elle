@@ -76,14 +76,8 @@
   (defn report [name m]
     "Format a measurement as a tab-separated key=value line."
     (string/format (string "{}\tallocs={}\tpeak={}\tbytes={}"
-                           "\tinterns={}\tsymbols={}\tkeywords={}")
-                   (pad-right name 24)
-                   (m :allocs)
-                   (m :peak)
-                   (m :bytes)
-                   (m :interns)
-                   (m :symbols)
-                   (m :keywords)))
+        "\tinterns={}\tsymbols={}\tkeywords={}") (pad-right name 24) (m :allocs)
+      (m :peak) (m :bytes) (m :interns) (m :symbols) (m :keywords)))
 
   ## ── Suite ───────────────────────────────────────────────────────────
 

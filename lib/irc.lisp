@@ -46,16 +46,8 @@
   (def DEFAULT-PORT-TLS 6697)
   (def SOH (string (bytes 1)))
   (def DESIRED-CAPS
-    ["multi-prefix"
-     "server-time"
-     "echo-message"
-     "account-notify"
-     "away-notify"
-     "extended-join"
-     "chghost"
-     "userhost-in-names"
-     "message-tags"
-     "batch"
+    ["multi-prefix" "server-time" "echo-message" "account-notify" "away-notify"
+     "extended-join" "chghost" "userhost-in-names" "message-tags" "batch"
      "labeled-response"])
 
   ## ── Tag escaping ──────────────────────────────────────────────────
@@ -78,13 +70,13 @@
       (if (and (= (get s i) "\\") (< (inc i) (length s)))
         (let [next (get s (inc i))]
           (append result
-                  (match next
-                    ":" ";"
-                    "s" " "
-                    "\\" "\\"
-                    "r" "\r"
-                    "n" "\n"
-                    _ next))
+            (match next
+              ":" ";"
+              "s" " "
+              "\\" "\\"
+              "r" "\r"
+              "n" "\n"
+              _ next))
           (assign i (+ i 2)))
         (begin
           (append result (get s i))
@@ -101,9 +93,8 @@
       (when (> (length part) 0)
         (let [eq (string/find part "=")]
           (if eq
-            (put result
-                 (keyword (slice part 0 eq))
-                 (unescape-tag-value (slice part (inc eq))))
+            (put result (keyword (slice part 0 eq))
+              (unescape-tag-value (slice part (inc eq))))
             (put result (keyword part) true)))))
     (freeze result))
   (defn parse-source [raw]
@@ -194,8 +185,7 @@
       (let* [n (length params)
              last-param (get params (dec n))
              needs-colon (or (string/contains? last-param " ")
-                             (string/starts-with? last-param ":")
-                             (= last-param ""))]
+               (string/starts-with? last-param ":") (= last-param ""))]
         (def @parts @[command])
         (each i in (range (dec n))
           (push parts (get params i)))
@@ -206,9 +196,9 @@
     (def parts @[])
     (each [k v] in (pairs tags)
       (push parts
-            (if (= v true)
-              (string k)
-              (string k "=" (escape-tag-value (string v))))))
+        (if (= v true)
+          (string k)
+          (string k "=" (escape-tag-value (string v))))))
     (string/join (freeze parts) ";"))
   (defn format-source [source]
     "Format a source struct to nick!user@host or servername string."
@@ -230,8 +220,7 @@
       (let* [n (length msg:params)
              last-param (get msg:params (dec n))
              needs-colon (or (string/contains? last-param " ")
-                             (string/starts-with? last-param ":")
-                             (= last-param ""))]
+               (string/starts-with? last-param ":") (= last-param ""))]
         (each i in (range (dec n))
           (push parts (get msg:params i)))
         (push parts (if needs-colon (string ":" last-param) last-param))))
@@ -242,9 +231,8 @@
   (defn parse-ctcp [text]
     "Parse CTCP from message text. Returns {:command :text} or nil.
      CTCP messages are delimited by SOH (0x01) characters."
-    (when (and (string/starts-with? text SOH)
-               (string/ends-with? text SOH)
-               (> (length text) 1))
+    (when (and (string/starts-with? text SOH) (string/ends-with? text SOH)
+        (> (length text) 1))
       (let* [inner (slice text 1 (dec (length text)))
              sp (string/find inner " ")]
         (if sp
@@ -271,9 +259,8 @@
     (each token in tokens
       (let [eq (string/find token "=")]
         (when eq
-          (put result
-               (keyword (string/downcase (slice token 0 eq)))
-               (slice token (inc eq))))))
+          (put result (keyword (string/downcase (slice token 0 eq)))
+            (slice token (inc eq))))))
     (freeze result))
 
   ## ── Transport ─────────────────────────────────────────────────────
@@ -281,9 +268,8 @@
   (defn strip-crlf [s]
     "Strip trailing CRLF, LF, or CR from a line.
      CRLF is a single grapheme in Elle, so all cases strip one grapheme."
-    (if (or (string/ends-with? s "\r\n")
-            (string/ends-with? s "\n")
-            (string/ends-with? s "\r"))
+    (if (or (string/ends-with? s "\r\n") (string/ends-with? s "\n")
+        (string/ends-with? s "\r"))
       (slice s 0 (dec (length s)))
       s))
   (defn make-transport [host port-num]
@@ -362,7 +348,7 @@
       (when (and sasl-in-progress (= (get msg:params 0) "+"))
         (let [[authcid password] sasl]
           (send (build-line "AUTHENTICATE"
-                            [(sasl-plain-payload authcid password)])))))
+                  [(sasl-plain-payload authcid password)])))))
     (defn handle-nick-collision []
       (when (zero? nick-retries)
         (error {:error :irc-error
@@ -429,11 +415,8 @@
     (default username nick)
     (default realname nick)
     (let [transport (make-transport host port)]
-      (let [[ok? result] (protect (register transport
-                                  nick
-                                  username
-                                  realname
-                                  :sasl sasl))]
+      (let [[ok? result] (protect (register transport nick username realname
+                                    :sasl sasl))]
         (unless ok?
           (protect ((get transport :close)))
           (error result))
@@ -447,7 +430,7 @@
                                         (let [msg (parse-message line)]
                                           (if (= msg:command "PING")
                                             (write-fn (build-line "PONG"
-                                            [(or (get msg:params 0) "")]))
+                                              [(or (get msg:params 0) "")]))
                                             (yield msg)))))))]
           {:messages messages
            :send (fn [command & params]
@@ -473,15 +456,14 @@
     (assert (= (escape-tag-value "a\\b") "a\\\\b") "escape: backslash")
     (assert (= (escape-tag-value "plain") "plain") "escape: no special chars")
     (assert (= (unescape-tag-value "hello\\sworld") "hello world")
-            "unescape: space")
+      "unescape: space")
     (assert (= (unescape-tag-value "a\\:b") "a;b") "unescape: semicolon")
     (assert (= (unescape-tag-value "a\\\\b") "a\\b") "unescape: backslash")
     (assert (= (unescape-tag-value "plain") "plain") "unescape: no escapes")
 
     # Roundtrip
     (assert (= (unescape-tag-value (escape-tag-value "a;b c\\d\r\n"))
-               "a;b c\\d\r\n")
-            "tag escape roundtrip")
+        "a;b c\\d\r\n") "tag escape roundtrip")
 
     ## ── Tag parsing ──
 
@@ -548,11 +530,10 @@
 
     (assert (= (build-line "JOIN" ["#test"]) "JOIN #test") "format JOIN")
     (assert (= (build-line "PRIVMSG" ["#ch" "Hello world"])
-               "PRIVMSG #ch :Hello world")
-            "format PRIVMSG with trailing")
+        "PRIVMSG #ch :Hello world") "format PRIVMSG with trailing")
     (assert (= (build-line "NICK" ["bot"]) "NICK bot") "format NICK")
     (assert (= (build-line "QUIT" ["Bye bye"]) "QUIT :Bye bye")
-            "format QUIT with spaces")
+      "format QUIT with spaces")
     (assert (= (build-line "PING" ["token"]) "PING token") "format PING")
 
     # Format/parse structural roundtrip
@@ -562,9 +543,9 @@
            reparsed (parse-message formatted)]
       (assert (= reparsed:command parsed:command) "roundtrip: command")
       (assert (= (get reparsed:params 0) (get parsed:params 0))
-              "roundtrip: target")
+        "roundtrip: target")
       (assert (= (get reparsed:params 1) (get parsed:params 1))
-              "roundtrip: text")
+        "roundtrip: text")
       (assert (= reparsed:source:nick parsed:source:nick) "roundtrip: nick"))
 
     ## ── CTCP ──
@@ -594,8 +575,7 @@
 
     ## ── ISUPPORT ──
 
-    (let [params (parse-isupport ["CHANTYPES=#&"
-                                  "PREFIX=(ov)@+"
+    (let [params (parse-isupport ["CHANTYPES=#&" "PREFIX=(ov)@+"
                                   "NETWORK=Libera"])]
       (assert (= params:chantypes "#&") "isupport: CHANTYPES")
       (assert (= params:prefix "(ov)@+") "isupport: PREFIX")

@@ -52,9 +52,7 @@
 (assert (= (freeze (begin
                      (def @s (thaw "hello"))
                      (put s -1 "X")
-                     s))
-           "hellX")
-        "put @string -1")
+                     s)) "hellX") "put @string -1")
 
 # ── callable form with negative index ────────────────────────────────
 
@@ -78,18 +76,14 @@
 (assert (= (begin
              (def @a @[1 2 3])
              (insert a -1 99)
-             a)
-           @[1 2 99 3])
-        "insert @array -1")
+             a) @[1 2 99 3]) "insert @array -1")
 
 # ── remove with negative index ───────────────────────────────────────
 
 (assert (= (begin
              (def @a @[1 2 3])
              (remove a -1)
-             a)
-           @[1 2])
-        "remove @array -1")
+             a) @[1 2]) "remove @array -1")
 
 # ── first on all sequence types ──────────────────────────────────────
 

@@ -30,7 +30,7 @@
 (let [d100 (t0-let-struct 100)
       d10k (t0-let-struct 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0 let-struct: d100=" d100 " d10k=" d10k)))
+    (string "t0 let-struct: d100=" d100 " d10k=" d10k)))
 
 # Discarded struct (no let binding) — scope still reclaims.
 
@@ -45,7 +45,7 @@
 (let [d100 (t0-discard-struct 100)
       d10k (t0-discard-struct 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0 discard-struct: d100=" d100 " d10k=" d10k)))
+    (string "t0 discard-struct: d100=" d100 " d10k=" d10k)))
 
 # String allocation in while loop — scope reclaims.
 
@@ -162,13 +162,12 @@
                               {:x i :y (+ i 1)}
                               (yield i)
                               (assign i (+ i 1)))
-                            (- (arena/count) before))
-                          |:yield|)))
+                            (- (arena/count) before)) |:yield|)))
 
 (let [d100 (t3-yield-struct 100)
       d10k (t3-yield-struct 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t3 yield-struct: d100=" d100 " d10k=" d10k)))
+    (string "t3 yield-struct: d100=" d100 " d10k=" d10k)))
 
 # 3b: string per iteration
 
@@ -180,13 +179,12 @@
                               (string "iter-" i)
                               (yield i)
                               (assign i (+ i 1)))
-                            (- (arena/count) before))
-                          |:yield|)))
+                            (- (arena/count) before)) |:yield|)))
 
 (let [d100 (t3-yield-string 100)
       d10k (t3-yield-string 10000)]
   (assert (bounded? d100 d10k 20)
-          (string "t3 yield-string: d100=" d100 " d10k=" d10k)))
+    (string "t3 yield-string: d100=" d100 " d10k=" d10k)))
 
 # 3c: multiple allocations per iteration
 
@@ -200,13 +198,12 @@
                               (number->string i)
                               (yield i)
                               (assign i (+ i 1)))
-                            (- (arena/count) before))
-                          |:yield|)))
+                            (- (arena/count) before)) |:yield|)))
 
 (let [d100 (t3-yield-multi 100)
       d10k (t3-yield-multi 10000)]
   (assert (bounded? d100 d10k 30)
-          (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
+    (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
 
 # ── Tier 0c: while loops with closures, fibers, concat, protect ──
 # These patterns now pass escape analysis: closures are collected
@@ -226,7 +223,7 @@
 (let [d100 (t0c-closure-while 100)
       d10k (t0c-closure-while 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0c closure-while: d100=" d100 " d10k=" d10k)))
+    (string "t0c closure-while: d100=" d100 " d10k=" d10k)))
 
 # fiber/new + fiber/resume: primitives with heap-returning args
 (defn t0c-fiber-while [n]
@@ -241,7 +238,7 @@
 (let [d100 (t0c-fiber-while 100)
       d10k (t0c-fiber-while 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0c fiber-while: d100=" d100 " d10k=" d10k)))
+    (string "t0c fiber-while: d100=" d100 " d10k=" d10k)))
 
 # concat with number->string: chain of primitives returning heap values
 (defn t0c-concat-while [n]
@@ -255,7 +252,7 @@
 (let [d100 (t0c-concat-while 100)
       d10k (t0c-concat-while 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0c concat-while: d100=" d100 " d10k=" d10k)))
+    (string "t0c concat-while: d100=" d100 " d10k=" d10k)))
 
 # protect: primitives creating closure + fiber internally
 (defn t0c-protect-while [n]
@@ -270,7 +267,7 @@
 (let [d100 (t0c-protect-while 100)
       d10k (t0c-protect-while 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0c protect-while: d100=" d100 " d10k=" d10k)))
+    (string "t0c protect-while: d100=" d100 " d10k=" d10k)))
 
 # Same patterns in yielding while — also bounded now
 (defn t0c-closure-yield [n]
@@ -282,13 +279,12 @@
                                 (f))
                               (yield i)
                               (assign i (+ i 1)))
-                            (- (arena/count) before))
-                          |:yield|)))
+                            (- (arena/count) before)) |:yield|)))
 
 (let [d100 (t0c-closure-yield 100)
       d10k (t0c-closure-yield 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0c closure-yield: d100=" d100 " d10k=" d10k)))
+    (string "t0c closure-yield: d100=" d100 " d10k=" d10k)))
 
 (defn t0c-concat-yield [n]
   (drain-fiber (fiber/new (fn []
@@ -298,13 +294,12 @@
                               (concat "x" (number->string i))
                               (yield i)
                               (assign i (+ i 1)))
-                            (- (arena/count) before))
-                          |:yield|)))
+                            (- (arena/count) before)) |:yield|)))
 
 (let [d100 (t0c-concat-yield 100)
       d10k (t0c-concat-yield 10000)]
   (assert (bounded? d100 d10k 10)
-          (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
+    (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
 
 # ── Known leaks: inherent ────────────────────────────────────────
 # These genuinely escape heap values to outer bindings or collections.
@@ -389,9 +384,10 @@
 # These don't genuinely escape heap values but are rejected by
 # escape analysis conservatism. When fixed, flip to bounded?.
 
-# each over lists: (assign cur (rest cur)) assigns heap list to
-# outer @cur. rest returns an existing cons cell (no allocation)
-# but escape analysis can't distinguish accessor from allocator.
+# each over lists: the each macro desugars to coroutines. QW2
+# recognizes internal stdlib calls as non-escaping, enabling FlipSwap
+# on the outer while loop. The coroutine is fully drained within
+# each iteration, so FlipSwap at the back-edge is safe.
 (defn leak-each-list [n]
   (def before (arena/count))
   (def @i 0)
@@ -403,10 +399,10 @@
 
 (let [d100 (leak-each-list 100)
       d1k (leak-each-list 1000)]
-  (assert (linear? d100 d1k) (string "each-list: d100=" d100 " d1k=" d1k)))
+  (assert (bounded? d100 d1k 10) (string "each-list: d100=" d100 " d1k=" d1k)))
 
-# map in while: map is a stdlib HOF, not a primitive. Escape
-# analysis rejects calls to unknown user-defined functions.
+# map in while: map is a stdlib HOF — QW2 recognizes non-escaping
+# stdlib functions, so FlipSwap is now eligible.
 (defn leak-map-while [n]
   (def before (arena/count))
   (def @i 0)
@@ -417,9 +413,9 @@
 
 (let [d100 (leak-map-while 100)
       d1k (leak-map-while 1000)]
-  (assert (linear? d100 d1k) (string "map-while: d100=" d100 " d1k=" d1k)))
+  (assert (bounded? d100 d1k 10) (string "map-while: d100=" d100 " d1k=" d1k)))
 
-# filter in while: same as map — stdlib HOF not recognized.
+# filter in while: same as map — QW2 recognizes filter.
 (defn leak-filter-while [n]
   (def before (arena/count))
   (def @i 0)
@@ -430,10 +426,10 @@
 
 (let [d100 (leak-filter-while 100)
       d1k (leak-filter-while 1000)]
-  (assert (linear? d100 d1k) (string "filter-while: d100=" d100 " d1k=" d1k)))
+  (assert (bounded? d100 d1k 10) (string "filter-while: d100=" d100 " d1k=" d1k)))
 
-# nested closure: (fn [] (fn [] i)) — inner lambda is anonymous
-# (no binding), so not collected for rotation-safety analysis.
+# nested closure: (fn [] (fn [] i)) — QW3 traces through calls to
+# rotation-safe let-bound lambdas to prove the outer call is safe.
 (defn leak-nested-closure [n]
   (def before (arena/count))
   (def @i 0)
@@ -445,7 +441,8 @@
 
 (let [d100 (leak-nested-closure 100)
       d1k (leak-nested-closure 1000)]
-  (assert (linear? d100 d1k) (string "nested-closure: d100=" d100 " d1k=" d1k)))
+  (assert (bounded? d100 d1k 10)
+    (string "nested-closure: d100=" d100 " d1k=" d1k)))
 
 # ── Tier 4: correctness under rotation ───────────────────────────
 # Rotation must not corrupt live values. Returned heap values and
@@ -460,15 +457,14 @@
       (t4-return (- n 1)))))
 
 (assert (= (t4-return 10000) "result-0")
-        (string "t4 return: " (t4-return 10000)))
+  (string "t4 return: " (t4-return 10000)))
 
 # Yielded heap values survive across resume boundaries.
 (let* [fiber (fiber/new (fn []
                           (def @i 0)
                           (while (< i 100)
                             (yield (string "val-" i))
-                            (assign i (+ i 1))))
-                        |:yield|)
+                            (assign i (+ i 1)))) |:yield|)
        first-val (fiber/resume fiber)
        second-val (fiber/resume fiber)]
   (assert (= first-val "val-0") (string "t4 yield survives: " first-val))
@@ -479,21 +475,20 @@
   (if (= n 0) acc (t4-accum (- n 1) (+ acc n))))
 
 (assert (= (t4-accum 10000 0) 50005000)
-        (string "t4 accumulator: " (t4-accum 10000 0)))
+  (string "t4 accumulator: " (t4-accum 10000 0)))
 
 # Yielded heap values survive per-iteration scope release at scale.
 (let* [fiber (fiber/new (fn []
                           (def @i 0)
                           (while (< i 1000)
                             (yield (string "val-" i))
-                            (assign i (+ i 1))))
-                        |:yield|)
+                            (assign i (+ i 1)))) |:yield|)
        vals (do
               (def @acc [])
               (while (not= (fiber/status fiber) :dead)
                 (assign acc (append acc [(fiber/resume fiber)])))
               acc)]
   (assert (= (get vals 0) "val-0")
-          (string "t4 yield-at-scale first: " (get vals 0)))
+    (string "t4 yield-at-scale first: " (get vals 0)))
   (assert (= (get vals 999) "val-999")
-          (string "t4 yield-at-scale last: " (get vals 999))))
+    (string "t4 yield-at-scale last: " (get vals 999))))

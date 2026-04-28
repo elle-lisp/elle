@@ -15,67 +15,23 @@
 
   (def static-table
     [nil  # index 0: unused
-     [":authority" ""]
-     [":method" "GET"]
-     [":method" "POST"]
-     [":path" "/"]
-     [":path" "/index.html"]
-     [":scheme" "http"]
-     [":scheme" "https"]
-     [":status" "200"]
-     [":status" "204"]
-     [":status" "206"]
-     [":status" "304"]
-     [":status" "400"]
-     [":status" "404"]
-     [":status" "500"]
-     ["accept-charset" ""]
-     ["accept-encoding" "gzip, deflate"]
-     ["accept-language" ""]
-     ["accept-ranges" ""]
-     ["accept" ""]
-     ["access-control-allow-origin" ""]
-     ["age" ""]
-     ["allow" ""]
-     ["authorization" ""]
-     ["cache-control" ""]
-     ["content-disposition" ""]
-     ["content-encoding" ""]
-     ["content-language" ""]
-     ["content-length" ""]
-     ["content-location" ""]
-     ["content-range" ""]
-     ["content-type" ""]
-     ["cookie" ""]
-     ["date" ""]
-     ["etag" ""]
-     ["expect" ""]
-     ["expires" ""]
-     ["from" ""]
-     ["host" ""]
-     ["if-match" ""]
-     ["if-modified-since" ""]
-     ["if-none-match" ""]
-     ["if-range" ""]
-     ["if-unmodified-since" ""]
-     ["last-modified" ""]
-     ["link" ""]
-     ["location" ""]
-     ["max-forwards" ""]
-     ["proxy-authenticate" ""]
-     ["proxy-authorization" ""]
-     ["range" ""]
-     ["referer" ""]
-     ["refresh" ""]
-     ["retry-after" ""]
-     ["server" ""]
-     ["set-cookie" ""]
-     ["strict-transport-security" ""]
-     ["transfer-encoding" ""]
-     ["user-agent" ""]
-     ["vary" ""]
-     ["via" ""]
-     ["www-authenticate" ""]])
+      [":authority" ""] [":method" "GET"] [":method" "POST"] [":path" "/"]
+     [":path" "/index.html"] [":scheme" "http"] [":scheme" "https"]
+     [":status" "200"] [":status" "204"] [":status" "206"] [":status" "304"]
+     [":status" "400"] [":status" "404"] [":status" "500"] ["accept-charset" ""]
+     ["accept-encoding" "gzip, deflate"] ["accept-language" ""]
+     ["accept-ranges" ""] ["accept" ""] ["access-control-allow-origin" ""]
+     ["age" ""] ["allow" ""] ["authorization" ""] ["cache-control" ""]
+     ["content-disposition" ""] ["content-encoding" ""] ["content-language" ""]
+     ["content-length" ""] ["content-location" ""] ["content-range" ""]
+     ["content-type" ""] ["cookie" ""] ["date" ""] ["etag" ""] ["expect" ""]
+     ["expires" ""] ["from" ""] ["host" ""] ["if-match" ""]
+     ["if-modified-since" ""] ["if-none-match" ""] ["if-range" ""]
+     ["if-unmodified-since" ""] ["last-modified" ""] ["link" ""] ["location" ""]
+     ["max-forwards" ""] ["proxy-authenticate" ""] ["proxy-authorization" ""]
+     ["range" ""] ["referer" ""] ["refresh" ""] ["retry-after" ""] ["server" ""]
+     ["set-cookie" ""] ["strict-transport-security" ""] ["transfer-encoding" ""]
+     ["user-agent" ""] ["vary" ""] ["via" ""] ["www-authenticate" ""]])
   (def STATIC-TABLE-SIZE 61)
 
   ## ── Static table reverse lookup ────────────────────────────────────────
@@ -172,7 +128,7 @@
             (error {:error :h2-error
                     :reason :compression-error
                     :message (concat "HPACK: dynamic table index out of range: "
-                                     (string index))}))
+                      (string index))}))
           (get entries dyn-idx))))
 
   ## ── Variable-length integer codec (RFC 7541 Section 5.1) ──────────────
@@ -353,27 +309,20 @@
     (assert (= (encode-int 10 5) [10]) "encode-int: 10 in 5-bit prefix")
     (assert (= (encode-int 31 5) [31 0]) "encode-int: 31 in 5-bit prefix")
     (assert (= (encode-int 1337 5) [31 154 10])
-            "encode-int: 1337 in 5-bit prefix")
+      "encode-int: 1337 in 5-bit prefix")
 
     # Roundtrip
-    (each [val prefix] in [[0 5]
-                           [10 5]
-                           [30 5]
-                           [31 5]
-                           [127 7]
-                           [128 7]
-                           [255 8]
-                           [1337 5]
-                           [65535 4]]
+    (each [val prefix] in [[0 5] [10 5] [30 5] [31 5] [127 7] [128 7] [255 8]
+                           [1337 5] [65535 4]]
       (let* [encoded (encode-int val prefix)
              buf (apply bytes encoded)
              decoded (decode-int buf 0 prefix)]
         (assert (= decoded:value val)
-                (concat "int roundtrip: " (string val) "/" (string prefix)))))
+          (concat "int roundtrip: " (string val) "/" (string prefix)))))
 
     # ── Static table ──
     (assert (= (get (get static-table 1) 0) ":authority")
-            "static table: index 1")
+      "static table: index 1")
     (assert (= (get (get static-table 2) 0) ":method") "static table: index 2")
     (assert (= (get (get static-table 2) 1) "GET") "static table: index 2 value")
 
@@ -432,21 +381,19 @@
     # ── Encode/decode roundtrip with multiple headers ──
     (let* [encoder (make-encoder :use-huffman false)
            decoder (make-decoder)
-           headers [["custom-key" "custom-value"]
-                    [":method" "GET"]
-                    [":path" "/"]
-                    [":scheme" "https"]
+           headers [["custom-key" "custom-value"] [":method" "GET"]
+                    [":path" "/"] [":scheme" "https"]
                     [":authority" "example.com"]]
            encoded (hpack-encode encoder headers)
            decoded (hpack-decode decoder encoded)]
       (assert (= (length decoded) (length headers))
-              "multi-header roundtrip: count")
+        "multi-header roundtrip: count")
       (def @k 0)
       (while (< k (length headers))
         (assert (= (get (get decoded k) 0) (get (get headers k) 0))
-                (concat "multi-header roundtrip: name " (string k)))
+          (concat "multi-header roundtrip: name " (string k)))
         (assert (= (get (get decoded k) 1) (get (get headers k) 1))
-                (concat "multi-header roundtrip: value " (string k)))
+          (concat "multi-header roundtrip: value " (string k)))
         (assign k (+ k 1))))
 
     # ── Dynamic table shared state across requests ──
@@ -460,7 +407,7 @@
       (assert (= (length dec1) 1) "shared state: first decode")  ## Second encoding should be shorter via indexing
       (assert (= (length dec2) 1) "shared state: second decode")
       (assert (< (length enc2) (length enc1))
-              "shared state: second encoding shorter"))
+        "shared state: second encoding shorter"))
 
     # ── RFC 7541 C.2.4: Indexed Header Field ──
     # :method GET is static index 2

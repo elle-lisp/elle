@@ -5,7 +5,7 @@
 (import-file "target/release/libelle_git.so")
 
 (let [tmp (string/concat "/tmp/elle-git-test-"
-                         (number->string (integer (clock/realtime))))]
+        (number->string (integer (clock/realtime))))]
   (let [repo (git/init tmp)]
     (assert (string? (git/path repo)) "git/path returns string")
     (assert (string? (git/workdir repo)) "git/workdir returns string")
@@ -17,7 +17,7 @@
     (git/config-set repo "user.email" "test@example.com")
     (assert (= "Test User" (git/config-get repo "user.name")) "config roundtrip")
     (assert (nil? (git/config-get repo "no.such.key"))
-            "config-get nil for missing")
+      "config-get nil for missing")
 
     # HEAD on empty repo should signal
     (let [r (protect (git/head repo))]
@@ -157,7 +157,7 @@
       # -------------------------------------------------------------------------
       (git/config-set repo "core.autocrlf" "false")
       (assert (= "false" (git/config-get repo "core.autocrlf"))
-              "config-set/get roundtrip")
+        "config-set/get roundtrip")
 
       # -------------------------------------------------------------------------
       # Chunk 9: Remotes (basic, no network)

@@ -125,27 +125,26 @@
 (defn setsockopt-bytes [sock opt-int buf name]
   (let* [ptr (ffi/pin buf)]
     (defer (ffi/free ptr)
-           (check (zmq-setsockopt sock opt-int ptr (length buf)) name))
+      (check (zmq-setsockopt sock opt-int ptr (length buf)) name))
     nil))
 
 (defn setsockopt-int [sock opt-int value name]
   (ffi/with-stack [[ptr :int value]]
-                  (check (zmq-setsockopt sock opt-int ptr (ffi/size :int)) name)
-                  nil))
+    (check (zmq-setsockopt sock opt-int ptr (ffi/size :int)) name) nil))
 
 (defn getsockopt-bytes [sock opt-int name]
   (ffi/with-stack [[szptr :size 256] [buf 256]]
-                  (let* [rc (zmq-getsockopt sock opt-int buf szptr)
-                         result (ptr->bytes buf (ffi/read szptr :size))]
-                    (check rc name)
-                    result)))
+    (let* [rc (zmq-getsockopt sock opt-int buf szptr)
+           result (ptr->bytes buf (ffi/read szptr :size))]
+      (check rc name)
+      result)))
 
 (defn getsockopt-int [sock opt-int name]
   (ffi/with-stack [[buf :int 0] [szptr :size (ffi/size :int)]]
-                  (let* [rc (zmq-getsockopt sock opt-int buf szptr)
-                         result (ffi/read buf :int)]
-                    (check rc name)
-                    result)))
+    (let* [rc (zmq-getsockopt sock opt-int buf szptr)
+           result (ffi/read buf :int)]
+      (check rc name)
+      result)))
 
 (defn resolve-option [opt-kw name]
   (let [opt-int (get option-map opt-kw)]
@@ -199,22 +198,20 @@
          flags (+ (if dontwait ZMQ_DONTWAIT 0) (if sndmore ZMQ_SNDMORE 0))
          ptr (ffi/pin buf)]
     (defer (ffi/free ptr)
-           (check (zmq-send sock ptr (length buf) flags) "zmq/send"))
+      (check (zmq-send sock ptr (length buf) flags) "zmq/send"))
     nil))
 
 (defn zmq/recv [sock &named dontwait]
   "Receive bytes. :dontwait true for non-blocking."
   (let [flags (if dontwait ZMQ_DONTWAIT 0)]
-    (ffi/with-stack [[msg (ffi/size msg-type)]]
-                    (zmq-msg-init msg)
-                    (let [rc (zmq-msg-recv msg sock flags)]
-                      (when (< rc 0)
-                        (zmq-msg-close msg)
-                        (zmq-error "zmq/recv"))
-                      (let [result (ptr->bytes (zmq-msg-data msg)
-                            (zmq-msg-size msg))]
-                        (zmq-msg-close msg)
-                        result)))))
+    (ffi/with-stack [[msg (ffi/size msg-type)]] (zmq-msg-init msg)
+      (let [rc (zmq-msg-recv msg sock flags)]
+        (when (< rc 0)
+          (zmq-msg-close msg)
+          (zmq-error "zmq/recv"))
+        (let [result (ptr->bytes (zmq-msg-data msg) (zmq-msg-size msg))]
+          (zmq-msg-close msg)
+          result)))))
 
 (defn zmq/recv-string [sock &named dontwait]
   "Receive as UTF-8 string. :dontwait true for non-blocking."

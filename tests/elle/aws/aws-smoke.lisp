@@ -17,11 +17,8 @@
   (begin
     (println "  imported, initializing...")
     (def s3 (result aws))
-    (println "  ok ("
-             (length (keys s3))
-             " exports, api-version "
-             s3:api-version
-             ")"))
+    (println "  ok (" (length (keys s3)) " exports, api-version " s3:api-version
+      ")"))
   (println "  ERROR: " result))
 
 (println "done")

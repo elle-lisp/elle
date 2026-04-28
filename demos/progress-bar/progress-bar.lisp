@@ -25,12 +25,8 @@
 (def fd (wl:fd conn))
 
 (def surf-id
-  (wl:layer-surface conn
-                    :layer
-                    :overlay
-                    :anchor [:top :bottom :left :right]
-                    :height 0
-                    :exclusive-zone 0))
+  (wl:layer-surface conn :layer :overlay :anchor [:top :bottom :left :right]
+    :height 0 :exclusive-zone 0))
 
 ## ── Wait for the initial configure event ────────────────────────────────
 
@@ -70,49 +66,23 @@
   (wl:buffer-fill conn buf-id 0x00000000)
   (def r (int (/ bar-height 2)))  # bar track — transparent black pill
   (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r track-color)
-  (wl:buffer-fill-circle conn
-    buf-id
-    (+ bar-x bar-w (- r))
-    (+ bar-y r)
-    r
+  (wl:buffer-fill-circle conn buf-id (+ bar-x bar-w (- r)) (+ bar-y r) r
     track-color)
-  (wl:buffer-fill-rect conn
-    buf-id
-    (+ bar-x r)
-    bar-y
-    (- bar-w (* 2 r))
-    bar-height
-    track-color)  # progress fill — light blue pill (clipped to fill width)
+  (wl:buffer-fill-rect conn buf-id (+ bar-x r) bar-y (- bar-w (* 2 r))
+    bar-height track-color)  # progress fill — light blue pill (clipped to fill width)
   (def fill-w (int (* bar-w (/ (max 0 (min 100 pct)) 100.0))))
   (when (> fill-w 0)
     (cond  # fill is smaller than one diameter — just a circle
-      (<= fill-w (* 2 r)) (wl:buffer-fill-circle conn
-        buf-id
-        (+ bar-x r)
-        (+ bar-y r)
-        r
-        fill-color)  # fill spans past one diameter — left cap + rect + right cap
+      (<= fill-w (* 2 r)) (wl:buffer-fill-circle conn buf-id (+ bar-x r)
+        (+ bar-y r) r fill-color)  # fill spans past one diameter — left cap + rect + right cap
       true
         (begin
-          (wl:buffer-fill-circle conn
-            buf-id
-            (+ bar-x r)
-            (+ bar-y r)
-            r
+          (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r
             fill-color)
-          (wl:buffer-fill-rect conn
-            buf-id
-            (+ bar-x r)
-            bar-y
-            (- fill-w (* 2 r))
-            bar-height
-            fill-color)
-          (wl:buffer-fill-circle conn
-            buf-id
-            (+ bar-x fill-w (- r))
-            (+ bar-y r)
-            r
-            fill-color))))
+          (wl:buffer-fill-rect conn buf-id (+ bar-x r) bar-y (- fill-w (* 2 r))
+            bar-height fill-color)
+          (wl:buffer-fill-circle conn buf-id (+ bar-x fill-w (- r)) (+ bar-y r)
+            r fill-color))))
   (wl:attach conn surf-id buf-id)
   (wl:damage conn surf-id 0 0 screen-w screen-h)
   (wl:commit conn surf-id))

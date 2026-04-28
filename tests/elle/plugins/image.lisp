@@ -43,7 +43,7 @@
 
 ## Original unchanged
 (assert (= (img:get-pixel red-img 0 0) [255 0 0 255])
-        "original unchanged after thaw")
+  "original unchanged after thaw")
 
 (def frozen (img:freeze thawed))
 (assert (= (img:get-pixel frozen 0 0) [0 255 0 255]) "freeze snapshot")
@@ -66,7 +66,7 @@
 
 (def gray (img:grayscale red-img))
 (assert (or (= (img:color-type gray) :luma8) (= (img:color-type gray) :lumaa8))
-        "grayscale → luma")
+  "grayscale → luma")
 
 (def inv (img:invert red-img))
 (assert (not (nil? inv)) "invert runs")

@@ -13,7 +13,6 @@
 use super::config::FormatterConfig;
 use super::doc::Doc;
 use super::format::{format_annotated, format_trailing_trivia, format_without_trailing};
-use super::render::measure_flat;
 use super::trivia::AnnotatedSyntax;
 use crate::syntax::SyntaxKind;
 
@@ -936,35 +935,21 @@ pub(super) fn format_generic_call(
     // positional args stand alone.
     let arg_units = build_arg_units(&children[1..], source, config);
 
-    // First arg column relative to the "(": 1 + head_width + 1
-    let head_width = measure_flat(&head).unwrap_or(0);
-    let first_arg_col = 1 + head_width + 1;
+    // Head + first arg always share the opening line.
+    // Remaining args fill-wrap with +2 body indent.
+    let first = arg_units[0].clone();
+    let rest = &arg_units[1..];
 
-    // Columnar alignment if head is short enough, otherwise fall back to +2 indent
-    if first_arg_col <= config.line_length / 4 {
-        // Columnar: Align captures the first arg's column; Break inside
-        // aligns subsequent args to that column.
-        Doc::concat([
-            Doc::text("("),
-            head,
-            Doc::text(" "),
-            Doc::align(Doc::intersperse(arg_units)).group(),
-            Doc::text(")"),
-        ])
+    let opening = Doc::concat([head, Doc::text(" "), first]);
+
+    if rest.is_empty() {
+        Doc::concat([Doc::text("("), opening, Doc::text(")")])
     } else {
-        // Fallback: +2 indent for long heads
-        let mut all_parts: Vec<Doc> = Vec::new();
-        all_parts.push(Doc::concat([head, Doc::text(" "), arg_units[0].clone()]));
-        for arg in &arg_units[1..] {
-            all_parts.push(Doc::Break);
-            all_parts.push(arg.clone());
-        }
+        let mut parts: Vec<Doc> = Vec::new();
+        parts.push(opening);
+        parts.extend(rest.iter().cloned());
 
-        Doc::concat([
-            Doc::text("("),
-            Doc::concat(all_parts).nest(1).group(),
-            Doc::text(")"),
-        ])
+        Doc::concat([Doc::text("("), Doc::fill(parts).nest(1), Doc::text(")")])
     }
 }
 

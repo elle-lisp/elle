@@ -19,10 +19,8 @@
 # ── Gap 6: multiple errors accumulated ────────────────────────────────
 
 (def multi-src
-  (string "(defn one [x] (prntln x))\n"
-          "(defn two [x] (pirntln x))\n"
-          "(defn three [x] (println x))\n"
-          "(three 5)"))
+  (string "(defn one [x] (prntln x))\n" "(defn two [x] (pirntln x))\n"
+    "(defn three [x] (println x))\n" "(three 5)"))
 (def multi-result (compile/analyze multi-src {:file "multi.lisp"}))
 (def multi-diags (compile/diagnostics multi-result))
 
@@ -47,8 +45,7 @@
 (def immut-fiber
   (fiber/new (fn []
                (compile/analyze immut-src {:file "immut.lisp"})
-               :no-error)
-             |:error|))
+               :no-error) |:error|))
 (def immut-result (fiber/resume immut-fiber))
 
 # Should have caught an error (fiber yields the error struct)

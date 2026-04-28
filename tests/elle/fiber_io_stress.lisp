@@ -17,9 +17,9 @@
   (assert (= (port/read-line p) nil) "readline eof: nil after EOF"))
 
 (let [lines (stream/collect (port/lines (port/open "/tmp/elle-test-io-stress-eof"
-                                        :read)))]
+                                          :read)))]
   (assert (= lines (list "alpha" "beta" "gamma"))
-          "port/lines: includes unterminated last line"))
+    "port/lines: includes unterminated last line"))
 
 # ============================================================================
 # port/lines + stream/collect basic
@@ -28,9 +28,9 @@
 (spit "/tmp/elle-test-io-stress-1" "line1\nline2\nline3\n")
 
 (let [lines (stream/collect (port/lines (port/open "/tmp/elle-test-io-stress-1"
-                                        :read)))]
+                                          :read)))]
   (assert (= lines (list "line1" "line2" "line3"))
-          "port/lines: basic multi-line"))
+    "port/lines: basic multi-line"))
 
 # ============================================================================
 # Sustained sequential stream reads (15 files)
@@ -44,10 +44,9 @@
 (let [@i 0]
   (while (< i 15)
     (let [lines (stream/collect (port/lines (port/open (string "/tmp/elle-test-io-stress-seq-"
-                                i)
-                                :read)))]
+                                    i) :read)))]
       (assert (= lines (list (string "content-" i)))
-              (string "sustained sequential read: file " i)))
+        (string "sustained sequential read: file " i)))
     (assign i (+ i 1))))
 
 # ============================================================================
@@ -63,9 +62,9 @@
   (port/close p))
 
 (let [lines (stream/collect (port/lines (port/open "/tmp/elle-test-io-stress-write"
-                                        :read)))]
+                                          :read)))]
   (assert (= (length lines) 20)
-          (string "sustained write: got " (length lines) " lines"))
+    (string "sustained write: got " (length lines) " lines"))
   (assert (= (first lines) "line 0") "sustained write: first line")
   (assert (= (get lines 19) "line 19") "sustained write: last line"))
 
@@ -76,9 +75,9 @@
 (let [@i 0]
   (while (< i 15)
     (let [lines (stream/collect (port/lines (port/open "/tmp/elle-test-io-stress-1"
-                                :read)))]
+                                  :read)))]
       (assert (= (length lines) 3)
-              (string "repeated read " i ": got " (length lines) " lines")))
+        (string "repeated read " i ": got " (length lines) " lines")))
     (assign i (+ i 1))))
 
 # ============================================================================
@@ -88,8 +87,8 @@
 (let [@i 0]
   (while (< i 15)
     (let [[ok? val] (protect (let [lines (stream/collect (port/lines (port/open "/tmp/elle-test-io-stress-1"
-                                   :read)))]
+                                     :read)))]
                                (assert (= (length lines) 3)
-                                       (string "protect+read " i))))]
+                                 (string "protect+read " i))))]
       (assert ok? (string "protect around read " i ": should succeed")))
     (assign i (+ i 1))))

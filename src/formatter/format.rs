@@ -386,7 +386,7 @@ fn format_collection(
 
     Doc::concat([
         Doc::text(open),
-        Doc::align(Doc::intersperse(elems).group()),
+        Doc::align(Doc::fill(elems)),
         Doc::text(close),
     ])
 }

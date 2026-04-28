@@ -225,9 +225,8 @@
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
-  (let* [has-in (and (not (empty? forms))
-                     (not (empty? (rest forms)))
-                     (= (syntax->datum iter-or-in) 'in))
+  (let* [has-in (and (not (empty? forms)) (not (empty? (rest forms)))
+           (= (syntax->datum iter-or-in) 'in))
          iter (if has-in (first forms) iter-or-in)
          body (if has-in (rest forms) forms)]
     `(let [seq ,iter]
@@ -312,9 +311,8 @@
 ## Sugar for (if-let bindings (begin body...) nil)
 (defmacro when-let (bindings & body)
   `(if-let ,bindings
-           (begin
-             ,;body)
-           nil))
+    (begin
+      ,;body) nil))
 
 ## when-ok - protect + destructure in one step
 ## (when-ok [val (expr)] body...) => runs body with val if expr succeeds

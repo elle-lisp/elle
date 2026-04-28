@@ -17,7 +17,7 @@
 (defn make-matrix [rows cols initial-value]
   "Create an m×n matrix (@array of arrays, row-major)."
   (@array ;(map (fn [_] (@array ;(map (fn [_] initial-value) (range cols))))
-                (range rows))))
+            (range rows))))
 
 (defn matrix-ref [m i j]
   "Get element at (i, j)."
@@ -27,8 +27,7 @@
   "Return a new matrix with element at (i, j) set to val."
   (let* [row (m i)
          new-row (@array ;(map (fn [k v] (if (= k j) val v))
-                               (range (length row))
-                               row))
+                           (range (length row)) row))
          rows (map (fn [k r] (if (= k i) new-row r)) (range (length m)) m)]
     (@array ;rows)))
 
@@ -65,28 +64,15 @@
                     (@array ;(map (fn [j]
                                     (let* [cell (matrix-ref m i j)
                                       up (get-neighbor m (- i 1) j rows cols 0.0)
-                                      down (get-neighbor m
-                                      (+ i 1)
-                                      j
-                                      rows
-                                      cols
-                                      0.0)
-                                      left (get-neighbor m
-                                      i
-                                      (- j 1)
-                                      rows
-                                      cols
-                                      0.0)
-                                      right (get-neighbor m
-                                      i
-                                      (+ j 1)
-                                      rows
-                                      cols
-                                      0.0)
+                                      down (get-neighbor m (+ i 1) j rows cols
+                                        0.0)
+                                      left (get-neighbor m i (- j 1) rows cols
+                                        0.0)
+                                      right (get-neighbor m i (+ j 1) rows cols
+                                        0.0)
                                       neighbors (+ up down left right)]
                                       (+ (* cell coeff) (* alpha neighbors))))
-                                  (range cols))))
-                  (range rows)))))
+                              (range cols)))) (range rows)))))
 
 # ── Visualization ────────────────────────────────────────────────────
 
@@ -121,9 +107,7 @@
                     (@array ;(map (fn [j]
                                     (if (and (= i center-i) (= j center-j))
                                       1.0
-                                      0.0))
-                                  (range cols))))
-                  (range rows)))))
+                                      0.0)) (range cols)))) (range rows)))))
 
 (defn simulate [grid steps alpha]
   "Run the diffusion simulation for a given number of steps."

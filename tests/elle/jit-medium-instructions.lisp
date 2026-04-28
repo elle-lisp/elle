@@ -66,7 +66,7 @@
 (assert (= (arr-second [10 20]) 20) "arr-second returns element at index 1")
 (assert (= (arr-second [10]) nil) "arr-second nil on short array")
 (assert (not (has-rejection? "ArrayMutRefOrNil"))
-        "ArrayMutRefOrNil not rejected")
+  "ArrayMutRefOrNil not rejected")
 
 ## ===== ArrayMutPush / ArrayMutExtend =====
 ## The splice operator ; emits ArrayMutPush (scalar) and ArrayMutExtend (array).

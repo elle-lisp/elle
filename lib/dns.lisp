@@ -53,8 +53,8 @@
 (defn read-u32 [buf offset]
   "Read a 32-bit big-endian integer from buf at offset."
   (bit/or (bit/or (bit/shl (get buf offset) 24)
-                  (bit/shl (get buf (+ offset 1)) 16))
-          (bit/or (bit/shl (get buf (+ offset 2)) 8) (get buf (+ offset 3)))))
+      (bit/shl (get buf (+ offset 1)) 16))
+    (bit/or (bit/shl (get buf (+ offset 2)) 8) (get buf (+ offset 3)))))
 
 ## ── Domain name encoding / decoding ───────────────────────────────────
 
@@ -71,9 +71,8 @@
                         :length (length label-bytes)
                         :limit 63
                         :message (concat "label too long: " label)}))
-              (concat acc (bytes (length label-bytes)) label-bytes)))
-          (bytes)
-          (concat labels [""]))))
+              (concat acc (bytes (length label-bytes)) label-bytes))) (bytes)
+      (concat labels [""]))))
 
 (defn decode-name [buf offset]
   "Decode a DNS wire-format name starting at offset.
@@ -123,14 +122,13 @@
    name: domain name string
    qtype: query type (TYPE-A, TYPE-AAAA, etc.)"
   (let [header (concat (u16->bytes id)  # ID
-                       (u16->bytes FLAG-RD)  # Flags: RD=1
-                       (u16->bytes 1)  # QDCOUNT=1
-                       (u16->bytes 0)  # ANCOUNT=0
-                       (u16->bytes 0)  # NSCOUNT=0
-                       (u16->bytes 0))  # ARCOUNT=0
-        question (concat (encode-name name)
-                         (u16->bytes qtype)
-                         (u16->bytes CLASS-IN))]
+          (u16->bytes FLAG-RD)  # Flags: RD=1
+          (u16->bytes 1)  # QDCOUNT=1
+          (u16->bytes 0)  # ANCOUNT=0
+          (u16->bytes 0)  # NSCOUNT=0
+           (u16->bytes 0))  # ARCOUNT=0
+        question (concat (encode-name name) (u16->bytes qtype)
+          (u16->bytes CLASS-IN))]
     (concat header question)))
 
 ## ── Response parsing ──────────────────────────────────────────────────
@@ -170,18 +168,14 @@
 
 (defn format-ipv4 [buf offset]
   "Format 4 bytes at offset as dotted-decimal IPv4 address."
-  (string/join (list (string (get buf offset))
-                     (string (get buf (+ offset 1)))
-                     (string (get buf (+ offset 2)))
-                     (string (get buf (+ offset 3))))
-               "."))
+  (string/join (list (string (get buf offset)) (string (get buf (+ offset 1)))
+      (string (get buf (+ offset 2))) (string (get buf (+ offset 3)))) "."))
 
 (defn format-ipv6 [buf offset]
   "Format 16 bytes at offset as colon-separated IPv6 address (full form)."
   (string/join (map (fn [i]
                       (number->string (read-u16 buf (+ offset (* i 2))) 16))
-                    (range 8))
-               ":"))
+      (range 8)) ":"))
 
 (defn parse-records [buf offset count]
   "Parse 'count' resource records starting at offset.
@@ -260,7 +254,7 @@
          addrs (map (fn [l]
                       (let [parts (string/split l " ")]
                         (when (>= (length parts) 2) (string/trim (parts 1)))))
-                    ns-lines)]
+           ns-lines)]
     (freeze (filter (fn [a] (and a (not (empty? a)))) addrs))))
 
 (defn read-nameservers []
@@ -291,40 +285,38 @@
          packet (build-query txid name qtype)
          sock (udp/bind "0.0.0.0" 0)]
     (defer (port/close sock)
-           (udp/send-to sock packet server 53 :timeout timeout)
-           (let* [[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]
-             (unless ok?
-               (error {:error :dns-timeout
-                       :reason :query-timeout
-                       :server server
-                       :name name
-                       :message (concat "timeout querying " server " for " name)}))
-             (let* [resp-buf result:data
-                    resp (parse-response resp-buf)]
-               (unless (= resp:header:id txid)
-                 (error {:error :dns-error
-                         :reason :txid-mismatch
-                         :expected txid
-                         :actual resp:header:id
-                         :message "transaction ID mismatch"}))  # Check truncation
-               (when resp:header:tc
-                 (error {:error :dns-error
-                         :reason :truncated
-                         :message "response truncated (TC bit set)"}))  # Check RCODE
-               (unless (= resp:header:rcode RCODE-OK)
-                 (let [rcode-name (or (get rcode-names resp:header:rcode)
-                                      (string resp:header:rcode))]
-                   (error {:error :dns-error
-                           :reason :server-error
-                           :rcode resp:header:rcode
-                           :rcode-name rcode-name
-                           :name name
-                           :server server
-                           :message (concat "server returned "
-                           rcode-name
-                           " for "
-                           name)})))
-               resp)))))
+      (udp/send-to sock packet server 53 :timeout timeout)
+      (let* [[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]
+        (unless ok?
+          (error {:error :dns-timeout
+                  :reason :query-timeout
+                  :server server
+                  :name name
+                  :message (concat "timeout querying " server " for " name)}))
+        (let* [resp-buf result:data
+               resp (parse-response resp-buf)]
+          (unless (= resp:header:id txid)
+            (error {:error :dns-error
+                    :reason :txid-mismatch
+                    :expected txid
+                    :actual resp:header:id
+                    :message "transaction ID mismatch"}))  # Check truncation
+          (when resp:header:tc
+            (error {:error :dns-error
+                    :reason :truncated
+                    :message "response truncated (TC bit set)"}))  # Check RCODE
+          (unless (= resp:header:rcode RCODE-OK)
+            (let [rcode-name (or (get rcode-names resp:header:rcode)
+                    (string resp:header:rcode))]
+              (error {:error :dns-error
+                      :reason :server-error
+                      :rcode resp:header:rcode
+                      :rcode-name rcode-name
+                      :name name
+                      :server server
+                      :message (concat "server returned " rcode-name " for "
+                        name)})))
+          resp)))))
 
 (defn query-with-retries [server name qtype timeout retries]
   "Query with retries. Returns parsed response or signals error."
@@ -363,11 +355,10 @@
            answers resp:answers  # Collect direct answers of the requested type
            direct (filter (fn [r]
                             (= r:type
-                               (case qtype
-                                 TYPE-A :a
-                                 TYPE-AAAA :aaaa
-                                 nil)))
-                          answers)  # Check for CNAME redirects
+                              (case qtype
+                                TYPE-A :a
+                                TYPE-AAAA :aaaa
+                                nil))) answers)  # Check for CNAME redirects
            cnames (filter (fn [r] (= r:type :cname)) answers)]
       (if (not (empty? direct))  # Found direct answers — done
         (begin
@@ -393,17 +384,11 @@
   (let* [srv (or server (first (read-nameservers)))
          tmo (or timeout DEFAULT-TIMEOUT)
          ret (or retries DEFAULT-RETRIES)
-         a-records (let [[ok? result] (protect (resolve-type name
-                         TYPE-A
-                         srv
-                         tmo
-                         ret))]
+         a-records (let [[ok? result] (protect (resolve-type name TYPE-A srv tmo
+                           ret))]
                      (if ok? result ()))
-         aaaa-records (let [[ok? result] (protect (resolve-type name
-                            TYPE-AAAA
-                            srv
-                            tmo
-                            ret))]
+         aaaa-records (let [[ok? result] (protect (resolve-type name TYPE-AAAA
+                              srv tmo ret))]
                         (if ok? result ()))]
     (concat a-records aaaa-records)))
 
@@ -480,11 +465,11 @@
   # Construct a minimal response header: QR=1, RD=1, RA=1, RCODE=0
   (let* [flags (bit/or FLAG-QR (bit/or FLAG-RD 128))  # QR + RD + RA
          header (concat (u16->bytes 0xabcd)  # ID
-                        (u16->bytes flags)  # Flags
-                        (u16->bytes 1)  # QDCOUNT
-                        (u16->bytes 2)  # ANCOUNT
-                        (u16->bytes 0)  # NSCOUNT
-                        (u16->bytes 0))  # ARCOUNT
+           (u16->bytes flags)  # Flags
+           (u16->bytes 1)  # QDCOUNT
+           (u16->bytes 2)  # ANCOUNT
+           (u16->bytes 0)  # NSCOUNT
+            (u16->bytes 0))  # ARCOUNT
          parsed (parse-header header)]
     (assert (= parsed:id 0xabcd) "parse-header: id")
     (assert parsed:qr "parse-header: qr")
@@ -498,43 +483,39 @@
 
   # ── IPv4 formatting ──
   (assert (= (format-ipv4 (bytes 93 184 216 34) 0) "93.184.216.34")
-          "format-ipv4")
+    "format-ipv4")
   (assert (= (format-ipv4 (bytes 127 0 0 1) 0) "127.0.0.1")
-          "format-ipv4 loopback")
+    "format-ipv4 loopback")
 
   # ── IPv6 formatting ──
   (assert (= (format-ipv6 (bytes 0x20 0x01 0x0d 0xb8 0 0 0 0 0 0 0 0 0 0 0 1) 0)
-             "2001:db8:0:0:0:0:0:1")
-          "format-ipv6")
+      "2001:db8:0:0:0:0:0:1") "format-ipv6")
 
   # ── resolv.conf parsing ──
   (assert (= (parse-resolv-conf "nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
-             ["8.8.8.8" "8.8.4.4"])
-          "parse-resolv-conf: two servers")
+      ["8.8.8.8" "8.8.4.4"]) "parse-resolv-conf: two servers")
   (assert (= (parse-resolv-conf "# comment\nnameserver 1.1.1.1\nsearch example.com\n")
-             ["1.1.1.1"])
-          "parse-resolv-conf: with comment and search")
+      ["1.1.1.1"]) "parse-resolv-conf: with comment and search")
   (assert (empty? (parse-resolv-conf "")) "parse-resolv-conf: empty")
 
   # ── Full response parsing (synthetic A record) ──
   # Build a complete DNS response for "example.com" → 93.184.216.34
   (let* [txid 0x1234
          flags (bit/or FLAG-QR (bit/or FLAG-RD 128))
-         header (concat (u16->bytes txid)
-                        (u16->bytes flags)
-                        (u16->bytes 1)  # QDCOUNT
-                        (u16->bytes 1)  # ANCOUNT
-                        (u16->bytes 0)  # NSCOUNT
-                        (u16->bytes 0))  # ARCOUNT
+         header (concat (u16->bytes txid) (u16->bytes flags)
+           (u16->bytes 1)  # QDCOUNT
+           (u16->bytes 1)  # ANCOUNT
+           (u16->bytes 0)  # NSCOUNT
+            (u16->bytes 0))  # ARCOUNT
          qname (encode-name "example.com")  # Answer: compression pointer to offset 12
          # (qname in question)
          question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))
          answer (concat (bytes 0xc0 12)  # Name pointer
-                        (u16->bytes TYPE-A)  # TYPE
-                        (u16->bytes CLASS-IN)  # CLASS
-                        (bytes 0 0 0xe 0x10)  # TTL = 3600
-                        (u16->bytes 4)  # RDLENGTH
-                        (bytes 93 184 216 34))  # RDATA
+           (u16->bytes TYPE-A)  # TYPE
+           (u16->bytes CLASS-IN)  # CLASS
+           (bytes 0 0 0xe 0x10)  # TTL = 3600
+           (u16->bytes 4)  # RDLENGTH
+            (bytes 93 184 216 34))  # RDATA
          packet (concat header question answer)
          resp (parse-response packet)]
     (assert (= resp:header:id txid) "full parse: txid")
@@ -549,35 +530,19 @@
   # ── Full response parsing (synthetic AAAA record) ──
   (let* [txid 0x5678
          flags (bit/or FLAG-QR (bit/or FLAG-RD 128))
-         header (concat (u16->bytes txid)
-                        (u16->bytes flags)
-                        (u16->bytes 1)  # QDCOUNT
-                        (u16->bytes 1)  # ANCOUNT
-                        (u16->bytes 0)
-                        (u16->bytes 0))
+         header (concat (u16->bytes txid) (u16->bytes flags)
+           (u16->bytes 1)  # QDCOUNT
+           (u16->bytes 1)  # ANCOUNT
+            (u16->bytes 0) (u16->bytes 0))
          qname (encode-name "example.com")
          question (concat qname (u16->bytes TYPE-AAAA) (u16->bytes CLASS-IN))
          answer (concat (bytes 0xc0 12)  # Name pointer
-                        (u16->bytes TYPE-AAAA)  # TYPE
-                        (u16->bytes CLASS-IN)  # CLASS
-                        (bytes 0 0 0x0e 0x10)  # TTL = 3600
-                        (u16->bytes 16)  # RDLENGTH = 16
-                        (bytes 0x26
-                               0x06
-                               0x28
-                               0x00
-                               0x02
-                               0x20
-                               0x00
-                               0x01
-                               0x02
-                               0x48
-                               0x18
-                               0x93
-                               0x25
-                               0xc8
-                               0x19
-                               0x46))
+           (u16->bytes TYPE-AAAA)  # TYPE
+           (u16->bytes CLASS-IN)  # CLASS
+           (bytes 0 0 0x0e 0x10)  # TTL = 3600
+           (u16->bytes 16)  # RDLENGTH = 16
+           (bytes 0x26 0x06 0x28 0x00 0x02 0x20 0x00 0x01 0x02 0x48 0x18 0x93
+             0x25 0xc8 0x19 0x46))
          packet (concat header question answer)
          resp (parse-response packet)]
     (assert (= (length resp:answers) 1) "aaaa parse: 1 answer")
@@ -588,27 +553,21 @@
   # ── CNAME + A response ──
   (let* [txid 0x9999
          flags (bit/or FLAG-QR (bit/or FLAG-RD 128))
-         header (concat (u16->bytes txid)
-                        (u16->bytes flags)
-                        (u16->bytes 1)  # QDCOUNT
-                        (u16->bytes 2)  # ANCOUNT (CNAME + A)
-                        (u16->bytes 0)
-                        (u16->bytes 0))
+         header (concat (u16->bytes txid) (u16->bytes flags)
+           (u16->bytes 1)  # QDCOUNT
+           (u16->bytes 2)  # ANCOUNT (CNAME + A)
+            (u16->bytes 0) (u16->bytes 0))
          qname (encode-name "www.example.com")
          question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))  # CNAME answer
          cname-target (encode-name "example.com")
          cname-answer (concat (bytes 0xc0 12)  # Name pointer
-                              (u16->bytes TYPE-CNAME)
-                              (u16->bytes CLASS-IN)
-                              (bytes 0 0 0 60)  # TTL = 60
-                              (u16->bytes (length cname-target))
-                              cname-target)  # A answer for the CNAME target
-         a-answer (concat (encode-name "example.com")
-                          (u16->bytes TYPE-A)
-                          (u16->bytes CLASS-IN)
-                          (bytes 0 0 0xe 0x10)  # TTL = 3600
-                          (u16->bytes 4)
-                          (bytes 93 184 216 34))
+            (u16->bytes TYPE-CNAME) (u16->bytes CLASS-IN)
+           (bytes 0 0 0 60)  # TTL = 60
+            (u16->bytes (length cname-target)) cname-target)  # A answer for the CNAME target
+         a-answer (concat (encode-name "example.com") (u16->bytes TYPE-A)
+           (u16->bytes CLASS-IN)
+           (bytes 0 0 0xe 0x10)  # TTL = 3600
+            (u16->bytes 4) (bytes 93 184 216 34))
          packet (concat header question cname-answer a-answer)
          resp (parse-response packet)]
     (assert (= (length resp:answers) 2) "cname+a: 2 answers")

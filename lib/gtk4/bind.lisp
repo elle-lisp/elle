@@ -24,125 +24,75 @@
   (ffi/defbind gtk-window-present libgtk "gtk_window_present" :void [:ptr])
   (ffi/defbind gtk-window-close libgtk "gtk_window_close" :void [:ptr])
   (ffi/defbind gtk-window-destroy libgtk "gtk_window_destroy" :void [:ptr])
-  (ffi/defbind gtk-window-set-title
-               libgtk
-               "gtk_window_set_title"
-               :void [:ptr :string])
-  (ffi/defbind gtk-window-set-default-size
-               libgtk
-               "gtk_window_set_default_size"
-               :void [:ptr :int :int])
+  (ffi/defbind gtk-window-set-title libgtk "gtk_window_set_title"
+    :void [:ptr :string])
+  (ffi/defbind gtk-window-set-default-size libgtk "gtk_window_set_default_size"
+    :void [:ptr :int :int])
   (ffi/defbind gtk-window-fullscreen libgtk "gtk_window_fullscreen" :void [:ptr])
-  (ffi/defbind gtk-window-set-child
-               libgtk
-               "gtk_window_set_child"
-               :void [:ptr :ptr])
+  (ffi/defbind gtk-window-set-child libgtk "gtk_window_set_child"
+    :void [:ptr :ptr])
 
   # ── GtkWidget ─────────────────────────────────────────────────────
 
   (ffi/defbind gtk-widget-show libgtk "gtk_widget_show" :void [:ptr])
   (ffi/defbind gtk-widget-hide libgtk "gtk_widget_hide" :void [:ptr])
-  (ffi/defbind gtk-widget-set-visible
-               libgtk
-               "gtk_widget_set_visible"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-sensitive
-               libgtk
-               "gtk_widget_set_sensitive"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-size-request
-               libgtk
-               "gtk_widget_set_size_request"
-               :void [:ptr :int :int])
-  (ffi/defbind gtk-widget-set-hexpand
-               libgtk
-               "gtk_widget_set_hexpand"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-vexpand
-               libgtk
-               "gtk_widget_set_vexpand"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-add-css-class
-               libgtk
-               "gtk_widget_add_css_class"
-               :void [:ptr :string])
-  (ffi/defbind gtk-widget-set-margin-start
-               libgtk
-               "gtk_widget_set_margin_start"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-margin-end
-               libgtk
-               "gtk_widget_set_margin_end"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-margin-top
-               libgtk
-               "gtk_widget_set_margin_top"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-margin-bottom
-               libgtk
-               "gtk_widget_set_margin_bottom"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-halign
-               libgtk
-               "gtk_widget_set_halign"
-               :void [:ptr :int])
-  (ffi/defbind gtk-widget-set-valign
-               libgtk
-               "gtk_widget_set_valign"
-               :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-visible libgtk "gtk_widget_set_visible"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-sensitive libgtk "gtk_widget_set_sensitive"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-size-request libgtk "gtk_widget_set_size_request"
+    :void [:ptr :int :int])
+  (ffi/defbind gtk-widget-set-hexpand libgtk "gtk_widget_set_hexpand"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-vexpand libgtk "gtk_widget_set_vexpand"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-add-css-class libgtk "gtk_widget_add_css_class"
+    :void [:ptr :string])
+  (ffi/defbind gtk-widget-set-margin-start libgtk "gtk_widget_set_margin_start"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-margin-end libgtk "gtk_widget_set_margin_end"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-margin-top libgtk "gtk_widget_set_margin_top"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-margin-bottom libgtk
+    "gtk_widget_set_margin_bottom" :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-halign libgtk "gtk_widget_set_halign"
+    :void [:ptr :int])
+  (ffi/defbind gtk-widget-set-valign libgtk "gtk_widget_set_valign"
+    :void [:ptr :int])
   (ffi/defbind gtk-widget-unparent libgtk "gtk_widget_unparent" :void [:ptr])
   (ffi/defbind gtk-widget-queue-draw libgtk "gtk_widget_queue_draw" :void [:ptr])
-  (ffi/defbind gtk-widget-add-controller
-               libgtk
-               "gtk_widget_add_controller"
-               :void [:ptr :ptr])
+  (ffi/defbind gtk-widget-add-controller libgtk "gtk_widget_add_controller"
+    :void [:ptr :ptr])
 
   # ── GtkDrawingArea ──────────────────────────────────────────────
 
   (ffi/defbind gtk-drawing-area-new libgtk "gtk_drawing_area_new" :ptr [])
-  (ffi/defbind gtk-drawing-area-set-content-width
-               libgtk
-               "gtk_drawing_area_set_content_width"
-               :void [:ptr :int])
-  (ffi/defbind gtk-drawing-area-set-content-height
-               libgtk
-               "gtk_drawing_area_set_content_height"
-               :void [:ptr :int])
-  (ffi/defbind gtk-drawing-area-set-draw-func
-               libgtk
-               "gtk_drawing_area_set_draw_func"
-               :void [:ptr :ptr :ptr :ptr])
+  (ffi/defbind gtk-drawing-area-set-content-width libgtk
+    "gtk_drawing_area_set_content_width" :void [:ptr :int])
+  (ffi/defbind gtk-drawing-area-set-content-height libgtk
+    "gtk_drawing_area_set_content_height" :void [:ptr :int])
+  (ffi/defbind gtk-drawing-area-set-draw-func libgtk
+    "gtk_drawing_area_set_draw_func" :void [:ptr :ptr :ptr :ptr])
 
   # ── GtkApplication ──────────────────────────────────────────────
 
-  (ffi/defbind gtk-application-new
-               libgtk
-               "gtk_application_new"
-               :ptr [:string :u32])
-  (ffi/defbind gtk-application-window-new
-               libgtk
-               "gtk_application_window_new"
-               :ptr [:ptr])
+  (ffi/defbind gtk-application-new libgtk "gtk_application_new"
+    :ptr [:string :u32])
+  (ffi/defbind gtk-application-window-new libgtk "gtk_application_window_new"
+    :ptr [:ptr])
 
   # ── Event controllers ───────────────────────────────────────────
 
   (ffi/defbind gtk-gesture-click-new libgtk "gtk_gesture_click_new" :ptr [])
-  (ffi/defbind gtk-gesture-single-set-button
-               libgtk
-               "gtk_gesture_single_set_button"
-               :void [:ptr :u32])
-  (ffi/defbind gtk-gesture-single-get-current-button
-               libgtk
-               "gtk_gesture_single_get_current_button"
-               :u32 [:ptr])
-  (ffi/defbind gtk-event-controller-scroll-new
-               libgtk
-               "gtk_event_controller_scroll_new"
-               :ptr [:u32])
-  (ffi/defbind gtk-event-controller-key-new
-               libgtk
-               "gtk_event_controller_key_new"
-               :ptr [])
+  (ffi/defbind gtk-gesture-single-set-button libgtk
+    "gtk_gesture_single_set_button" :void [:ptr :u32])
+  (ffi/defbind gtk-gesture-single-get-current-button libgtk
+    "gtk_gesture_single_get_current_button" :u32 [:ptr])
+  (ffi/defbind gtk-event-controller-scroll-new libgtk
+    "gtk_event_controller_scroll_new" :ptr [:u32])
+  (ffi/defbind gtk-event-controller-key-new libgtk
+    "gtk_event_controller_key_new" :ptr [])
 
   # ── GtkBox ────────────────────────────────────────────────────────
 
@@ -153,153 +103,99 @@
   # ── GtkLabel ──────────────────────────────────────────────────────
 
   (ffi/defbind gtk-label-new libgtk "gtk_label_new" :ptr [:string])
-  (ffi/defbind gtk-label-set-text
-               libgtk
-               "gtk_label_set_text"
-               :void [:ptr :string])
+  (ffi/defbind gtk-label-set-text libgtk "gtk_label_set_text"
+    :void [:ptr :string])
   (ffi/defbind gtk-label-get-text libgtk "gtk_label_get_text" :ptr [:ptr])
-  (ffi/defbind gtk-label-set-xalign
-               libgtk
-               "gtk_label_set_xalign"
-               :void [:ptr :float])
+  (ffi/defbind gtk-label-set-xalign libgtk "gtk_label_set_xalign"
+    :void [:ptr :float])
   (ffi/defbind gtk-label-set-wrap libgtk "gtk_label_set_wrap" :void [:ptr :int])
 
   # ── GtkButton ─────────────────────────────────────────────────────
 
-  (ffi/defbind gtk-button-new-with-label
-               libgtk
-               "gtk_button_new_with_label"
-               :ptr [:string])
-  (ffi/defbind gtk-button-set-label
-               libgtk
-               "gtk_button_set_label"
-               :void [:ptr :string])
+  (ffi/defbind gtk-button-new-with-label libgtk "gtk_button_new_with_label"
+    :ptr [:string])
+  (ffi/defbind gtk-button-set-label libgtk "gtk_button_set_label"
+    :void [:ptr :string])
   (ffi/defbind gtk-button-get-label libgtk "gtk_button_get_label" :ptr [:ptr])
 
   # ── GtkToggleButton ──────────────────────────────────────────────
 
   (ffi/defbind gtk-toggle-button-new libgtk "gtk_toggle_button_new" :ptr [])
-  (ffi/defbind gtk-toggle-button-new-with-label
-               libgtk
-               "gtk_toggle_button_new_with_label"
-               :ptr [:string])
-  (ffi/defbind gtk-toggle-button-set-active
-               libgtk
-               "gtk_toggle_button_set_active"
-               :void [:ptr :int])
-  (ffi/defbind gtk-toggle-button-get-active
-               libgtk
-               "gtk_toggle_button_get_active"
-               :int [:ptr])
+  (ffi/defbind gtk-toggle-button-new-with-label libgtk
+    "gtk_toggle_button_new_with_label" :ptr [:string])
+  (ffi/defbind gtk-toggle-button-set-active libgtk
+    "gtk_toggle_button_set_active" :void [:ptr :int])
+  (ffi/defbind gtk-toggle-button-get-active libgtk
+    "gtk_toggle_button_get_active" :int [:ptr])
 
   # ── GtkEntry (text-input) ────────────────────────────────────────
 
   (ffi/defbind gtk-entry-new libgtk "gtk_entry_new" :ptr [])
-  (ffi/defbind gtk-entry-set-placeholder-text
-               libgtk
-               "gtk_entry_set_placeholder_text"
-               :void [:ptr :string])
+  (ffi/defbind gtk-entry-set-placeholder-text libgtk
+    "gtk_entry_set_placeholder_text" :void [:ptr :string])
   (ffi/defbind gtk-editable-get-text libgtk "gtk_editable_get_text" :ptr [:ptr])
-  (ffi/defbind gtk-editable-set-text
-               libgtk
-               "gtk_editable_set_text"
-               :void [:ptr :string])
+  (ffi/defbind gtk-editable-set-text libgtk "gtk_editable_set_text"
+    :void [:ptr :string])
 
   # ── GtkTextView (text-edit) ──────────────────────────────────────
 
   (ffi/defbind gtk-text-view-new libgtk "gtk_text_view_new" :ptr [])
-  (ffi/defbind gtk-text-view-get-buffer
-               libgtk
-               "gtk_text_view_get_buffer"
-               :ptr [:ptr])
-  (ffi/defbind gtk-text-view-set-wrap-mode
-               libgtk
-               "gtk_text_view_set_wrap_mode"
-               :void [:ptr :int])
-  (ffi/defbind gtk-text-view-set-editable
-               libgtk
-               "gtk_text_view_set_editable"
-               :void [:ptr :int])
-  (ffi/defbind gtk-text-buffer-set-text
-               libgtk
-               "gtk_text_buffer_set_text"
-               :void [:ptr :string :int])
-  (ffi/defbind gtk-text-buffer-get-start-iter
-               libgtk
-               "gtk_text_buffer_get_start_iter"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-text-buffer-get-end-iter
-               libgtk
-               "gtk_text_buffer_get_end_iter"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-text-buffer-get-text
-               libgtk
-               "gtk_text_buffer_get_text"
-               :ptr [:ptr :ptr :ptr :int])
+  (ffi/defbind gtk-text-view-get-buffer libgtk "gtk_text_view_get_buffer"
+    :ptr [:ptr])
+  (ffi/defbind gtk-text-view-set-wrap-mode libgtk "gtk_text_view_set_wrap_mode"
+    :void [:ptr :int])
+  (ffi/defbind gtk-text-view-set-editable libgtk "gtk_text_view_set_editable"
+    :void [:ptr :int])
+  (ffi/defbind gtk-text-buffer-set-text libgtk "gtk_text_buffer_set_text"
+    :void [:ptr :string :int])
+  (ffi/defbind gtk-text-buffer-get-start-iter libgtk
+    "gtk_text_buffer_get_start_iter" :void [:ptr :ptr])
+  (ffi/defbind gtk-text-buffer-get-end-iter libgtk
+    "gtk_text_buffer_get_end_iter" :void [:ptr :ptr])
+  (ffi/defbind gtk-text-buffer-get-text libgtk "gtk_text_buffer_get_text"
+    :ptr [:ptr :ptr :ptr :int])
 
   # ── GtkCheckButton ───────────────────────────────────────────────
 
-  (ffi/defbind gtk-check-button-new-with-label
-               libgtk
-               "gtk_check_button_new_with_label"
-               :ptr [:string])
-  (ffi/defbind gtk-check-button-set-active
-               libgtk
-               "gtk_check_button_set_active"
-               :void [:ptr :int])
-  (ffi/defbind gtk-check-button-get-active
-               libgtk
-               "gtk_check_button_get_active"
-               :int [:ptr])
+  (ffi/defbind gtk-check-button-new-with-label libgtk
+    "gtk_check_button_new_with_label" :ptr [:string])
+  (ffi/defbind gtk-check-button-set-active libgtk "gtk_check_button_set_active"
+    :void [:ptr :int])
+  (ffi/defbind gtk-check-button-get-active libgtk "gtk_check_button_get_active"
+    :int [:ptr])
 
   # ── GtkSwitch ────────────────────────────────────────────────────
 
   (ffi/defbind gtk-switch-new libgtk "gtk_switch_new" :ptr [])
-  (ffi/defbind gtk-switch-set-active
-               libgtk
-               "gtk_switch_set_active"
-               :void [:ptr :int])
+  (ffi/defbind gtk-switch-set-active libgtk "gtk_switch_set_active"
+    :void [:ptr :int])
   (ffi/defbind gtk-switch-get-active libgtk "gtk_switch_get_active" :int [:ptr])
 
   # ── GtkScale (slider) ────────────────────────────────────────────
 
-  (ffi/defbind gtk-scale-new-with-range
-               libgtk
-               "gtk_scale_new_with_range"
-               :ptr [:int :double :double :double])
+  (ffi/defbind gtk-scale-new-with-range libgtk "gtk_scale_new_with_range"
+    :ptr [:int :double :double :double])
   (ffi/defbind gtk-range-get-value libgtk "gtk_range_get_value" :double [:ptr])
-  (ffi/defbind gtk-range-set-value
-               libgtk
-               "gtk_range_set_value"
-               :void [:ptr :double])
+  (ffi/defbind gtk-range-set-value libgtk "gtk_range_set_value"
+    :void [:ptr :double])
 
   # ── GtkSpinButton ────────────────────────────────────────────────
 
-  (ffi/defbind gtk-spin-button-new-with-range
-               libgtk
-               "gtk_spin_button_new_with_range"
-               :ptr [:double :double :double])
-  (ffi/defbind gtk-spin-button-get-value
-               libgtk
-               "gtk_spin_button_get_value"
-               :double [:ptr])
-  (ffi/defbind gtk-spin-button-set-value
-               libgtk
-               "gtk_spin_button_set_value"
-               :void [:ptr :double])
+  (ffi/defbind gtk-spin-button-new-with-range libgtk
+    "gtk_spin_button_new_with_range" :ptr [:double :double :double])
+  (ffi/defbind gtk-spin-button-get-value libgtk "gtk_spin_button_get_value"
+    :double [:ptr])
+  (ffi/defbind gtk-spin-button-set-value libgtk "gtk_spin_button_set_value"
+    :void [:ptr :double])
 
   # ── GtkDropDown (combo-box) ──────────────────────────────────────
 
   (ffi/defbind gtk-string-list-new libgtk "gtk_string_list_new" :ptr [:ptr])
   (ffi/defbind gtk-drop-down-new libgtk "gtk_drop_down_new" :ptr [:ptr :ptr])
-  (ffi/defbind gtk-drop-down-get-selected
-               libgtk
-               "gtk_drop_down_get_selected"
-               :uint [:ptr])
-  (ffi/defbind gtk-drop-down-set-selected
-               libgtk
-               "gtk_drop_down_set_selected"
-               :void [:ptr :uint])
+  (ffi/defbind gtk-drop-down-get-selected libgtk "gtk_drop_down_get_selected"
+    :uint [:ptr])
+  (ffi/defbind gtk-drop-down-set-selected libgtk "gtk_drop_down_set_selected"
+    :void [:ptr :uint])
 
   # ── GtkSearchEntry ───────────────────────────────────────────────
 
@@ -308,14 +204,10 @@
   # ── GtkProgressBar ───────────────────────────────────────────────
 
   (ffi/defbind gtk-progress-bar-new libgtk "gtk_progress_bar_new" :ptr [])
-  (ffi/defbind gtk-progress-bar-set-fraction
-               libgtk
-               "gtk_progress_bar_set_fraction"
-               :void [:ptr :double])
-  (ffi/defbind gtk-progress-bar-get-fraction
-               libgtk
-               "gtk_progress_bar_get_fraction"
-               :double [:ptr])
+  (ffi/defbind gtk-progress-bar-set-fraction libgtk
+    "gtk_progress_bar_set_fraction" :void [:ptr :double])
+  (ffi/defbind gtk-progress-bar-get-fraction libgtk
+    "gtk_progress_bar_get_fraction" :double [:ptr])
 
   # ── GtkSpinner ────────────────────────────────────────────────────
 
@@ -330,157 +222,101 @@
   # ── GtkScrolledWindow ────────────────────────────────────────────
 
   (ffi/defbind gtk-scrolled-window-new libgtk "gtk_scrolled_window_new" :ptr [])
-  (ffi/defbind gtk-scrolled-window-set-child
-               libgtk
-               "gtk_scrolled_window_set_child"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-scrolled-window-set-min-content-height
-               libgtk
-               "gtk_scrolled_window_set_min_content_height"
-               :void [:ptr :int])
-  (ffi/defbind gtk-scrolled-window-set-min-content-width
-               libgtk
-               "gtk_scrolled_window_set_min_content_width"
-               :void [:ptr :int])
+  (ffi/defbind gtk-scrolled-window-set-child libgtk
+    "gtk_scrolled_window_set_child" :void [:ptr :ptr])
+  (ffi/defbind gtk-scrolled-window-set-min-content-height libgtk
+    "gtk_scrolled_window_set_min_content_height" :void [:ptr :int])
+  (ffi/defbind gtk-scrolled-window-set-min-content-width libgtk
+    "gtk_scrolled_window_set_min_content_width" :void [:ptr :int])
 
   # ── GtkExpander ───────────────────────────────────────────────────
 
   (ffi/defbind gtk-expander-new libgtk "gtk_expander_new" :ptr [:string])
-  (ffi/defbind gtk-expander-set-child
-               libgtk
-               "gtk_expander_set_child"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-expander-set-expanded
-               libgtk
-               "gtk_expander_set_expanded"
-               :void [:ptr :int])
+  (ffi/defbind gtk-expander-set-child libgtk "gtk_expander_set_child"
+    :void [:ptr :ptr])
+  (ffi/defbind gtk-expander-set-expanded libgtk "gtk_expander_set_expanded"
+    :void [:ptr :int])
 
   # ── GtkFrame ──────────────────────────────────────────────────────
 
   (ffi/defbind gtk-frame-new libgtk "gtk_frame_new" :ptr [:string])
-  (ffi/defbind gtk-frame-set-child
-               libgtk
-               "gtk_frame_set_child"
-               :void [:ptr :ptr])
+  (ffi/defbind gtk-frame-set-child libgtk "gtk_frame_set_child"
+    :void [:ptr :ptr])
 
   # ── GtkGrid ──────────────────────────────────────────────────────
 
   (ffi/defbind gtk-grid-new libgtk "gtk_grid_new" :ptr [])
-  (ffi/defbind gtk-grid-attach
-               libgtk
-               "gtk_grid_attach"
-               :void [:ptr :ptr :int :int :int :int])
-  (ffi/defbind gtk-grid-set-row-spacing
-               libgtk
-               "gtk_grid_set_row_spacing"
-               :void [:ptr :int])
-  (ffi/defbind gtk-grid-set-column-spacing
-               libgtk
-               "gtk_grid_set_column_spacing"
-               :void [:ptr :int])
+  (ffi/defbind gtk-grid-attach libgtk "gtk_grid_attach"
+    :void [:ptr :ptr :int :int :int :int])
+  (ffi/defbind gtk-grid-set-row-spacing libgtk "gtk_grid_set_row_spacing"
+    :void [:ptr :int])
+  (ffi/defbind gtk-grid-set-column-spacing libgtk "gtk_grid_set_column_spacing"
+    :void [:ptr :int])
 
   # ── GtkStack / GtkStackPage ──────────────────────────────────────
 
   (ffi/defbind gtk-stack-new libgtk "gtk_stack_new" :ptr [])
-  (ffi/defbind gtk-stack-add-titled
-               libgtk
-               "gtk_stack_add_titled"
-               :ptr [:ptr :ptr :string :string])
-  (ffi/defbind gtk-stack-set-visible-child-name
-               libgtk
-               "gtk_stack_set_visible_child_name"
-               :void [:ptr :string])
-  (ffi/defbind gtk-stack-get-visible-child-name
-               libgtk
-               "gtk_stack_get_visible_child_name"
-               :ptr [:ptr])
+  (ffi/defbind gtk-stack-add-titled libgtk "gtk_stack_add_titled"
+    :ptr [:ptr :ptr :string :string])
+  (ffi/defbind gtk-stack-set-visible-child-name libgtk
+    "gtk_stack_set_visible_child_name" :void [:ptr :string])
+  (ffi/defbind gtk-stack-get-visible-child-name libgtk
+    "gtk_stack_get_visible_child_name" :ptr [:ptr])
 
   # ── GtkNotebook ──────────────────────────────────────────────────
 
   (ffi/defbind gtk-notebook-new libgtk "gtk_notebook_new" :ptr [])
-  (ffi/defbind gtk-notebook-append-page
-               libgtk
-               "gtk_notebook_append_page"
-               :int [:ptr :ptr :ptr])
-  (ffi/defbind gtk-notebook-get-current-page
-               libgtk
-               "gtk_notebook_get_current_page"
-               :int [:ptr])
-  (ffi/defbind gtk-notebook-set-current-page
-               libgtk
-               "gtk_notebook_set_current_page"
-               :void [:ptr :int])
+  (ffi/defbind gtk-notebook-append-page libgtk "gtk_notebook_append_page"
+    :int [:ptr :ptr :ptr])
+  (ffi/defbind gtk-notebook-get-current-page libgtk
+    "gtk_notebook_get_current_page" :int [:ptr])
+  (ffi/defbind gtk-notebook-set-current-page libgtk
+    "gtk_notebook_set_current_page" :void [:ptr :int])
 
   # ── GtkPaned ─────────────────────────────────────────────────────
 
   (ffi/defbind gtk-paned-new libgtk "gtk_paned_new" :ptr [:int])
-  (ffi/defbind gtk-paned-set-start-child
-               libgtk
-               "gtk_paned_set_start_child"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-paned-set-end-child
-               libgtk
-               "gtk_paned_set_end_child"
-               :void [:ptr :ptr])
+  (ffi/defbind gtk-paned-set-start-child libgtk "gtk_paned_set_start_child"
+    :void [:ptr :ptr])
+  (ffi/defbind gtk-paned-set-end-child libgtk "gtk_paned_set_end_child"
+    :void [:ptr :ptr])
 
   # ── GtkCenterBox ──────────────────────────────────────────────────
 
   (ffi/defbind gtk-center-box-new libgtk "gtk_center_box_new" :ptr [])
-  (ffi/defbind gtk-center-box-set-start-widget
-               libgtk
-               "gtk_center_box_set_start_widget"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-center-box-set-center-widget
-               libgtk
-               "gtk_center_box_set_center_widget"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-center-box-set-end-widget
-               libgtk
-               "gtk_center_box_set_end_widget"
-               :void [:ptr :ptr])
+  (ffi/defbind gtk-center-box-set-start-widget libgtk
+    "gtk_center_box_set_start_widget" :void [:ptr :ptr])
+  (ffi/defbind gtk-center-box-set-center-widget libgtk
+    "gtk_center_box_set_center_widget" :void [:ptr :ptr])
+  (ffi/defbind gtk-center-box-set-end-widget libgtk
+    "gtk_center_box_set_end_widget" :void [:ptr :ptr])
 
   # ── GtkOverlay ────────────────────────────────────────────────────
 
   (ffi/defbind gtk-overlay-new libgtk "gtk_overlay_new" :ptr [])
-  (ffi/defbind gtk-overlay-set-child
-               libgtk
-               "gtk_overlay_set_child"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-overlay-add-overlay
-               libgtk
-               "gtk_overlay_add_overlay"
-               :void [:ptr :ptr])
+  (ffi/defbind gtk-overlay-set-child libgtk "gtk_overlay_set_child"
+    :void [:ptr :ptr])
+  (ffi/defbind gtk-overlay-add-overlay libgtk "gtk_overlay_add_overlay"
+    :void [:ptr :ptr])
 
   # ── GtkRevealer ──────────────────────────────────────────────────
 
   (ffi/defbind gtk-revealer-new libgtk "gtk_revealer_new" :ptr [])
-  (ffi/defbind gtk-revealer-set-child
-               libgtk
-               "gtk_revealer_set_child"
-               :void [:ptr :ptr])
-  (ffi/defbind gtk-revealer-set-reveal-child
-               libgtk
-               "gtk_revealer_set_reveal_child"
-               :void [:ptr :int])
-  (ffi/defbind gtk-revealer-set-transition-type
-               libgtk
-               "gtk_revealer_set_transition_type"
-               :void [:ptr :int])
+  (ffi/defbind gtk-revealer-set-child libgtk "gtk_revealer_set_child"
+    :void [:ptr :ptr])
+  (ffi/defbind gtk-revealer-set-reveal-child libgtk
+    "gtk_revealer_set_reveal_child" :void [:ptr :int])
+  (ffi/defbind gtk-revealer-set-transition-type libgtk
+    "gtk_revealer_set_transition_type" :void [:ptr :int])
 
   # ── GtkImage ──────────────────────────────────────────────────────
 
-  (ffi/defbind gtk-image-new-from-file
-               libgtk
-               "gtk_image_new_from_file"
-               :ptr [:string])
-  (ffi/defbind gtk-image-new-from-icon-name
-               libgtk
-               "gtk_image_new_from_icon_name"
-               :ptr [:string])
-  (ffi/defbind gtk-image-set-pixel-size
-               libgtk
-               "gtk_image_set_pixel_size"
-               :void [:ptr :int])
+  (ffi/defbind gtk-image-new-from-file libgtk "gtk_image_new_from_file"
+    :ptr [:string])
+  (ffi/defbind gtk-image-new-from-icon-name libgtk
+    "gtk_image_new_from_icon_name" :ptr [:string])
+  (ffi/defbind gtk-image-set-pixel-size libgtk "gtk_image_set_pixel_size"
+    :void [:ptr :int])
 
   # ── GtkCalendar ──────────────────────────────────────────────────
 
@@ -489,87 +325,59 @@
   # ── CSS ───────────────────────────────────────────────────────────
 
   (ffi/defbind gtk-css-provider-new libgtk "gtk_css_provider_new" :ptr [])
-  (ffi/defbind gtk-css-provider-load-from-string
-               libgtk
-               "gtk_css_provider_load_from_string"
-               :void [:ptr :string])
-  (ffi/defbind gtk-style-context-add-provider-for-display
-               libgtk
-               "gtk_style_context_add_provider_for_display"
-               :void [:ptr :ptr :uint])
+  (ffi/defbind gtk-css-provider-load-from-string libgtk
+    "gtk_css_provider_load_from_string" :void [:ptr :string])
+  (ffi/defbind gtk-style-context-add-provider-for-display libgtk
+    "gtk_style_context_add_provider_for_display" :void [:ptr :ptr :uint])
   (ffi/defbind gdk-display-get-default libgtk "gdk_display_get_default" :ptr [])
 
   # ── GLib main loop ────────────────────────────────────────────────
 
   (ffi/defbind g-main-context-default libglib "g_main_context_default" :ptr [])
-  (ffi/defbind g-main-context-iteration
-               libglib
-               "g_main_context_iteration"
-               :int [:ptr :int])
-  (ffi/defbind g-main-context-pending
-               libglib
-               "g_main_context_pending"
-               :int [:ptr])
-  (ffi/defbind g-main-context-prepare
-               libglib
-               "g_main_context_prepare"
-               :int [:ptr :ptr])
-  (ffi/defbind g-main-context-query
-               libglib
-               "g_main_context_query"
-               :int [:ptr :int :ptr :ptr :int])
-  (ffi/defbind g-main-context-check
-               libglib
-               "g_main_context_check"
-               :int [:ptr :int :ptr :int])
-  (ffi/defbind g-main-context-dispatch
-               libglib
-               "g_main_context_dispatch"
-               :void [:ptr])
+  (ffi/defbind g-main-context-iteration libglib "g_main_context_iteration"
+    :int [:ptr :int])
+  (ffi/defbind g-main-context-pending libglib "g_main_context_pending"
+    :int [:ptr])
+  (ffi/defbind g-main-context-prepare libglib "g_main_context_prepare"
+    :int [:ptr :ptr])
+  (ffi/defbind g-main-context-query libglib "g_main_context_query"
+    :int [:ptr :int :ptr :ptr :int])
+  (ffi/defbind g-main-context-check libglib "g_main_context_check"
+    :int [:ptr :int :ptr :int])
+  (ffi/defbind g-main-context-dispatch libglib "g_main_context_dispatch"
+    :void [:ptr])
   (def MAX_POLL_FDS 64)
   (def GPOLLFD_SIZE 8)
   (defn glib-wait (ctx)
     "Yield to Elle's scheduler until GLib has events ready, then dispatch.
    Uses prepare/query/check/dispatch with ev/poll-fd on the primary fd."
-    (ffi/with-stack [[priority 4]
-                     [timeout 4]
+    (ffi/with-stack [[priority 4] [timeout 4]
                      [fds (* MAX_POLL_FDS GPOLLFD_SIZE)]]
-                    (g-main-context-prepare ctx priority)
-                    (let* [pri (ffi/read priority :int)
-                           nfds (g-main-context-query ctx
-                             pri
-                             timeout
-                             fds
-                             MAX_POLL_FDS)
-                           tms (ffi/read timeout :int)]
-                      (each i in (range nfds)
-                        (ffi/write (ptr/add fds (+ (* i GPOLLFD_SIZE) 6)) :u16 0))  # Block on the primary fd or respect the timeout
-                      (when (not (zero? tms))
-                        (if (> nfds 0)
-                          (let* [fd0 (ffi/read fds :int)
-                                 tsec (if (< tms 0) 60.0 (/ tms 1000.0))
-                                 revents (ev/poll-fd fd0 :read-write tsec)]
-                            (when (> revents 0)
-                              (ffi/write (ptr/add fds 6) :u16 revents)))
-                          (ev/sleep (if (> tms 0) (/ tms 1000.0) 0))))
-                      (when (nonzero? (g-main-context-check ctx pri fds nfds))
-                        (g-main-context-dispatch ctx)))))
+      (g-main-context-prepare ctx priority)
+      (let* [pri (ffi/read priority :int)
+             nfds (g-main-context-query ctx pri timeout fds MAX_POLL_FDS)
+             tms (ffi/read timeout :int)]
+        (each i in (range nfds)
+          (ffi/write (ptr/add fds (+ (* i GPOLLFD_SIZE) 6)) :u16 0))  # Block on the primary fd or respect the timeout
+        (when (not (zero? tms))
+          (if (> nfds 0)
+            (let* [fd0 (ffi/read fds :int)
+                   tsec (if (< tms 0) 60.0 (/ tms 1000.0))
+                   revents (ev/poll-fd fd0 :read-write tsec)]
+              (when (> revents 0) (ffi/write (ptr/add fds 6) :u16 revents)))
+            (ev/sleep (if (> tms 0) (/ tms 1000.0) 0))))
+        (when (nonzero? (g-main-context-check ctx pri fds nfds))
+          (g-main-context-dispatch ctx)))))
 
   # ── GApplication ─────────────────────────────────────────────────
 
   (def libgio (ffi/native "libgio-2.0.so.0"))
-  (ffi/defbind g-application-register
-               libgio
-               "g_application_register"
-               :int [:ptr :ptr :ptr])
-  (ffi/defbind g-application-activate
-               libgio
-               "g_application_activate"
-               :void [:ptr])
-  (ffi/defbind g-application-run
-               libgio
-               "g_application_run"
-               :int [:ptr :int :ptr])
+  (ffi/defbind g-application-register libgio "g_application_register"
+    :int [:ptr :ptr :ptr])
+  (ffi/defbind g-application-activate libgio "g_application_activate"
+    :void [:ptr])
+  (ffi/defbind g-application-run libgio "g_application_run"
+    :int [:ptr :int :ptr])
   (ffi/defbind g-application-quit libgio "g_application_quit" :void [:ptr])
   (defn run-app [app &named @quit]
     "Cooperative GTK event loop. Registers and activates the app, then
@@ -585,41 +393,29 @@
 
   # ── GObject signals ──────────────────────────────────────────────
 
-  (ffi/defbind g-signal-connect-data
-               libgobj
-               "g_signal_connect_data"
-               :ulong [:ptr :string :ptr :ptr :ptr :int])
+  (ffi/defbind g-signal-connect-data libgobj "g_signal_connect_data"
+    :ulong [:ptr :string :ptr :ptr :ptr :int])
 
   # ── GObject properties ───────────────────────────────────────────
 
-  (ffi/defbind g-object-set-property-string
-               libgobj
-               "g_object_set"
-               :void [:ptr :string :string :ptr])
+  (ffi/defbind g-object-set-property-string libgobj "g_object_set"
+    :void [:ptr :string :string :ptr])
 
   # ── WebKit ────────────────────────────────────────────────────────
 
   (ffi/defbind webkit-web-view-new libwebkit "webkit_web_view_new" :ptr [])
-  (ffi/defbind webkit-web-view-load-html
-               libwebkit
-               "webkit_web_view_load_html"
-               :void [:ptr :string :ptr])
-  (ffi/defbind webkit-web-view-load-uri
-               libwebkit
-               "webkit_web_view_load_uri"
-               :void [:ptr :string])
-  (ffi/defbind webkit-web-view-evaluate-javascript
-               libwebkit
-               "webkit_web_view_evaluate_javascript"
-               :void [:ptr :string :ssize :ptr :ptr :ptr :ptr])
-  (ffi/defbind webkit-web-view-get-user-content-manager
-               libwebkit
-               "webkit_web_view_get_user_content_manager"
-               :ptr [:ptr])
-  (ffi/defbind webkit-ucm-register-script-message-handler
-               libwebkit
-               "webkit_user_content_manager_register_script_message_handler"
-               :int [:ptr :string :string])
+  (ffi/defbind webkit-web-view-load-html libwebkit "webkit_web_view_load_html"
+    :void [:ptr :string :ptr])
+  (ffi/defbind webkit-web-view-load-uri libwebkit "webkit_web_view_load_uri"
+    :void [:ptr :string])
+  (ffi/defbind webkit-web-view-evaluate-javascript libwebkit
+    "webkit_web_view_evaluate_javascript"
+    :void [:ptr :string :ssize :ptr :ptr :ptr :ptr])
+  (ffi/defbind webkit-web-view-get-user-content-manager libwebkit
+    "webkit_web_view_get_user_content_manager" :ptr [:ptr])
+  (ffi/defbind webkit-ucm-register-script-message-handler libwebkit
+    "webkit_user_content_manager_register_script_message_handler"
+    :int [:ptr :string :string])
 
   # ── JSC ───────────────────────────────────────────────────────────
 

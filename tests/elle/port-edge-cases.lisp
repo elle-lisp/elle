@@ -15,9 +15,8 @@
                   (unless ok? (break nil))
                   (ev/spawn (fn []
                               (defer (protect (port/close conn))
-                                     (port/write conn "hello world")
-                                     (port/flush conn)
-                                     (ev/sleep 5)))))))))
+                                (port/write conn "hello world")
+                                (port/flush conn) (ev/sleep 5)))))))))
 
 (defn fresh-conn []
   (tcp/connect "127.0.0.1" port-num))

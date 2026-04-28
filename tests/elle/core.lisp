@@ -124,17 +124,13 @@
 (assert (= (begin
              1
              2
-             3)
-           3)
-        "begin returns last")
+             3) 3) "begin returns last")
 
 # test_begin_with_side_effects
 (assert (= (begin
              (def @x-begin 10)
              (def @y-begin 20)
-             (+ x-begin y-begin))
-           30)
-        "begin with side effects")
+             (+ x-begin y-begin)) 30) "begin with side effects")
 
 # ============================================================================
 # Complex expressions
@@ -177,106 +173,10 @@
 
 # test_large_list — create list with 100 elements
 (def @large-list
-  (list 0
-        1
-        2
-        3
-        4
-        5
-        6
-        7
-        8
-        9
-        10
-        11
-        12
-        13
-        14
-        15
-        16
-        17
-        18
-        19
-        20
-        21
-        22
-        23
-        24
-        25
-        26
-        27
-        28
-        29
-        30
-        31
-        32
-        33
-        34
-        35
-        36
-        37
-        38
-        39
-        40
-        41
-        42
-        43
-        44
-        45
-        46
-        47
-        48
-        49
-        50
-        51
-        52
-        53
-        54
-        55
-        56
-        57
-        58
-        59
-        60
-        61
-        62
-        63
-        64
-        65
-        66
-        67
-        68
-        69
-        70
-        71
-        72
-        73
-        74
-        75
-        76
-        77
-        78
-        79
-        80
-        81
-        82
-        83
-        84
-        85
-        86
-        87
-        88
-        89
-        90
-        91
-        92
-        93
-        94
-        95
-        96
-        97
-        98
-        99))
+  (list 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
+    27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51
+    52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76
+    77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99))
 (assert (list? large-list) "large list is list")
 (assert (= (length large-list) 100) "large list length")
 
@@ -309,7 +209,7 @@
 
 # test_append
 (assert (= (append (append (list 1 2) (list 3 4)) (list 5)) (list 1 2 3 4 5))
-        "append lists")
+  "append lists")
 
 # test_reverse
 (assert (= (reverse (list 1 2 3)) (list 3 2 1)) "reverse list")
@@ -548,11 +448,11 @@
 (def @cy 20)
 (def @cz 30)
 (assert (= ((fn [a b c] (+ a b c cx cy cz)) 1 2 3) 66)
-        "closure captures multiple")
+  "closure captures multiple")
 
 # test_closure_parameter_in_nested_expression
 (assert (= ((fn [x] (if (> x 50) (* x 2) (+ x 100))) 25) 125)
-        "closure param in nested expr")
+  "closure param in nested expr")
 
 # test_multiple_closures_independent_params
 (def f1 (fn [x] (+ x 10)))
@@ -569,7 +469,7 @@
 
 # test_closure_parameter_in_conditional
 (assert (= ((fn [n] (if (nil? n) "empty" "nonempty")) (list 1)) "nonempty")
-        "closure param in conditional")
+  "closure param in conditional")
 
 # test_closure_preserves_parameter_type
 (assert ((fn [s] (string? s)) "hello") "closure preserves param type")
@@ -580,36 +480,26 @@
 
 # test_let_simple_binding
 (assert (= (let [x 5]
-             x)
-           5)
-        "let simple binding")
+             x) 5) "let simple binding")
 
 # test_let_with_arithmetic
 (assert (= (let [x 5]
-             (+ x 3))
-           8)
-        "let with arithmetic")
+             (+ x 3)) 8) "let with arithmetic")
 
 # test_let_multiple_bindings
 (assert (= (let [x 5
                  y 3]
-             (+ x y))
-           8)
-        "let multiple bindings")
+             (+ x y)) 8) "let multiple bindings")
 
 # test_let_binding_with_expressions
 (assert (= (let [x (+ 2 3)
                  y (* 4 5)]
-             (+ x y))
-           25)
-        "let binding with expressions")
+             (+ x y)) 25) "let binding with expressions")
 
 # test_let_shadowing_global
 (def @x-let-shadow 10)
 (assert (= (let [x-let-shadow 20]
-             x-let-shadow)
-           20)
-        "let shadows global")
+             x-let-shadow) 20) "let shadows global")
 
 # test_let_does_not_modify_global
 (def @x-let-global 10)
@@ -619,20 +509,15 @@
 
 # test_let_with_lists
 (assert (= (let [lst (list 1 2 3)]
-             (first lst))
-           1)
-        "let with lists")
+             (first lst)) 1) "let with lists")
 
 # test_let_with_string_operations
 (assert (let [s "hello"]
-          (string? s))
-        "let with string ops")
+          (string? s)) "let with string ops")
 
 # test_let_with_conditional
 (assert (= (let [x 10]
-             (if (> x 5) "big" "small"))
-           "big")
-        "let with conditional")
+             (if (> x 5) "big" "small")) "big") "let with conditional")
 
 # test_let_empty_body_returns_nil
 (assert (= (let [x 5]) nil) "let empty body returns nil")
@@ -641,43 +526,31 @@
 (assert (= (let [x 5]
              (+ x 1)
              (+ x 2)
-             (+ x 3))
-           8)
-        "let multiple body returns last")
+             (+ x 3)) 8) "let multiple body returns last")
 
 # test_let_with_global_reference
 (def @y-let-ref 100)
 (assert (= (let [x 50]
-             (+ x y-let-ref))
-           150)
-        "let with global reference")
+             (+ x y-let-ref)) 150) "let with global reference")
 
 # test_let_binding_order
 (assert (= (let [x 1
                  y 2
                  z 3]
-             (+ x y z))
-           6)
-        "let binding order")
+             (+ x y z)) 6) "let binding order")
 
 # test_let_with_list_literal
 (assert (= (let [x '(1 2 3)]
-             (rest x))
-           (list 2 3))
-        "let with quoted list")
+             (rest x)) (list 2 3)) "let with quoted list")
 
 # test_let_shadowing_with_calculation
 (def @x-let-calc 10)
 (assert (= (let [x-let-calc (* 2 x-let-calc)]
-             x-let-calc)
-           20)
-        "let shadowing with calculation")
+             x-let-calc) 20) "let shadowing with calculation")
 
 # test_let_with_builtin_functions
 (assert (= (let [len (fn [x] 42)]
-             (len nil))
-           42)
-        "let with builtin function override")
+             (len nil)) 42) "let with builtin function override")
 
 # ============================================================================
 # let* (sequential bindings)
@@ -685,22 +558,16 @@
 
 # test_let_star_empty
 (assert (= (let* []
-             42)
-           42)
-        "let* empty bindings")
+             42) 42) "let* empty bindings")
 
 # test_let_star_simple_binding
 (assert (= (let* [x 5]
-             x)
-           5)
-        "let* simple binding")
+             x) 5) "let* simple binding")
 
 # test_let_star_with_multiple_bindings_no_dependencies
 (assert (= (let* [x 1
                   y 2]
-             (+ x y))
-           3)
-        "let* multiple bindings")
+             (+ x y)) 3) "let* multiple bindings")
 
 # ============================================================================
 # cond
@@ -832,72 +699,52 @@
 # test_thread_first_simple
 (assert (= (-> 5
                (+ 10)
-               (* 2))
-           30)
-        "thread-first simple")
+               (* 2)) 30) "thread-first simple")
 
 # test_thread_first_with_multiple_args
 (assert (= (-> 5
                (+ 10 2)
-               (* 3))
-           51)
-        "thread-first multiple args")
+               (* 3)) 51) "thread-first multiple args")
 
 # test_thread_last_simple
 (assert (= (->> 5
                 (+ 10)
-                (* 2))
-           30)
-        "thread-last simple")
+                (* 2)) 30) "thread-last simple")
 
 # test_thread_last_with_multiple_args
 (assert (= (->> 2
                 (+ 10)
-                (* 3))
-           36)
-        "thread-last multiple args")
+                (* 3)) 36) "thread-last multiple args")
 
 # test_thread_first_chain
 (assert (= (-> 1
                (+ 1)
                (+ 1)
-               (+ 1))
-           4)
-        "thread-first chain")
+               (+ 1)) 4) "thread-first chain")
 
 # test_thread_last_chain
 (assert (= (->> 1
                 (+ 1)
                 (+ 1)
-                (+ 1))
-           4)
-        "thread-last chain")
+                (+ 1)) 4) "thread-last chain")
 
 # test_thread_first_with_list_ops
 (assert (= (-> (list 1 2 3)
-               (length))
-           3)
-        "thread-first list ops")
+               (length)) 3) "thread-first list ops")
 
 # test_thread_last_with_list_ops
 (assert (= (->> (list 1 2 3)
-                (length))
-           3)
-        "thread-last list ops")
+                (length)) 3) "thread-last list ops")
 
 # test_thread_first_nested
 (assert (= (-> 10
                (- 3)
-               (+ 5))
-           12)
-        "thread-first nested")
+               (+ 5)) 12) "thread-first nested")
 
 # test_thread_last_nested
 (assert (= (->> 10
                 (- 3)
-                (+ 5))
-           -2)
-        "thread-last nested")
+                (+ 5)) -2) "thread-last nested")
 
 # ============================================================================
 # Threading operator variants: as->, some->, some->>
@@ -928,30 +775,22 @@
 # test_some_thread_first_simple
 (assert (= (some-> 5
                    (+ 1)
-                   (* 2))
-           12)
-        "some-> simple chain")
+                   (* 2)) 12) "some-> simple chain")
 
 # test_some_thread_first_nil_input
 (assert (= (some-> nil
-                   (+ 1))
-           nil)
-        "some-> short-circuits on nil input")
+                   (+ 1)) nil) "some-> short-circuits on nil input")
 
 # test_some_thread_first_nil_midchain
 (def some-test-fn (fn (x) nil))
 (assert (= (some-> 5
                    some-test-fn
-                   (+ 1))
-           nil)
-        "some-> short-circuits mid-chain")
+                   (+ 1)) nil) "some-> short-circuits mid-chain")
 
 # test_some_thread_first_false_passes_through
 # false is falsy but not nil; some-> must not short-circuit on false
 (assert (= (some-> false
-                   not)
-           true)
-        "some-> false is not nil, passes through")
+                   not) true) "some-> false is not nil, passes through")
 
 # test_some_thread_last_zero_forms
 (assert (= (some->> 42) 42) "some->> zero forms returns value")
@@ -959,30 +798,22 @@
 # test_some_thread_last_simple
 (assert (= (some->> 5
                     (+ 1)
-                    (* 2))
-           12)
-        "some->> simple chain")
+                    (* 2)) 12) "some->> simple chain")
 
 # test_some_thread_last_nil_input
 (assert (= (some->> nil
-                    (+ 1))
-           nil)
-        "some->> short-circuits on nil input")
+                    (+ 1)) nil) "some->> short-circuits on nil input")
 
 # test_some_thread_last_nil_midchain
 (assert (= (some->> 5
                     some-test-fn
-                    (+ 1))
-           nil)
-        "some->> short-circuits mid-chain")
+                    (+ 1)) nil) "some->> short-circuits mid-chain")
 
 # test_some_thread_last_position
 # (->> 2 (- 10) (* 3)) => (* 3 (- 10 2)) => (* 3 8) => 24
 (assert (= (some->> 2
                     (- 10)
-                    (* 3))
-           24)
-        "some->> inserts value as last argument")
+                    (* 3)) 24) "some->> inserts value as last argument")
 
 # ============================================================================
 # Closure with local define and param arithmetic
@@ -1069,14 +900,14 @@
 
 # test_min_max_float
 (assert (< (abs (- (min 1.5 2 0.5) 0.5)) 0.0000000001)
-        "min float: min(1.5,2,0.5)=0.5")
+  "min float: min(1.5,2,0.5)=0.5")
 
 # test_abs_float
 (assert (< (abs (- (abs -3.5) 3.5)) 0.0000000001) "abs float: abs(-3.5)=3.5")
 
 # test_type_conversions_float
 (assert (< (abs (- (float 5) 5.0)) 0.0000000001)
-        "float conversion: (float 5)=5.0")
+  "float conversion: (float 5)=5.0")
 
 # test_sqrt
 (assert (= (sqrt 4) 2.0) "sqrt 4 = 2.0")
@@ -1129,12 +960,10 @@
 (assert (not (nonempty? (bytes))) "nonempty? false for empty bytes")
 (assert (= :type-error (try
                          (nonempty? nil)
-                         (catch e e:error)))
-        "nonempty? errors on nil")
+                         (catch e e:error))) "nonempty? errors on nil")
 (assert (= :type-error (try
                          (nonempty? 42)
-                         (catch e e:error)))
-        "nonempty? errors on non-container")
+                         (catch e e:error))) "nonempty? errors on non-container")
 
 # test_deep_arithmetic — 50 nested additions
 (let [a (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ 1 1) 1) 1) 1) 1) 1) 1) 1) 1) 1)

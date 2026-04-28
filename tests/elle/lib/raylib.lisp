@@ -122,11 +122,8 @@
   (assert (= (get cam 3) 45.0) "camera-3d default fovy")
   (assert (= (get cam 4) 0) "camera-3d default projection"))
 
-(let [cam (rl:camera-3d [0.0 0.0 0.0]
-                        [0.0 0.0 -1.0]
-                        [0.0 1.0 0.0]
-                        :fovy 90.0
-                        :projection rl:CAMERA_ORTHOGRAPHIC)]
+(let [cam (rl:camera-3d [0.0 0.0 0.0] [0.0 0.0 -1.0] [0.0 1.0 0.0] :fovy 90.0
+        :projection rl:CAMERA_ORTHOGRAPHIC)]
   (assert (= (get cam 3) 90.0) "camera-3d custom fovy")
   (assert (= (get cam 4) 1) "camera-3d orthographic"))
 
@@ -135,11 +132,11 @@
 (assert (= (ffi/size (ffi/struct [:u8 :u8 :u8 :u8])) 4) "Color size = 4")
 (assert (= (ffi/size (ffi/struct [:float :float])) 8) "Vector2 size = 8")
 (assert (= (ffi/size (ffi/struct [:float :float :float])) 12)
-        "Vector3 size = 12")
+  "Vector3 size = 12")
 (assert (= (ffi/size (ffi/struct [:float :float :float :float])) 16)
-        "Rectangle size = 16")
+  "Rectangle size = 16")
 (assert (= (ffi/size (ffi/struct [:uint :int :int :int :int])) 20)
-        "Texture2D size = 20")
+  "Texture2D size = 20")
 
 # ── Module API surface ───────────────────────────────────────────────
 # Verify key exports exist (they should be functions or values, not nil)

@@ -295,35 +295,29 @@
                  (<= (abs (- h1p h2p)) 180.0) (/ (+ h1p h2p) 2.0)
                  (< (+ h1p h2p) 360.0) (/ (+ h1p h2p 360.0) 2.0)
                  true (/ (+ h1p h2p -360.0) 2.0))
-           T (+ 1.0
-                (* -0.17 (math/cos (* (- Hbp 30.0) RAD)))
-                (* 0.24 (math/cos (* (* 2.0 Hbp) RAD)))
-                (* 0.32 (math/cos (* (+ (* 3.0 Hbp) 6.0) RAD)))
-                (* -0.20 (math/cos (* (- (* 4.0 Hbp) 63.0) RAD))))
+           T (+ 1.0 (* -0.17 (math/cos (* (- Hbp 30.0) RAD)))
+             (* 0.24 (math/cos (* (* 2.0 Hbp) RAD)))
+             (* 0.32 (math/cos (* (+ (* 3.0 Hbp) 6.0) RAD)))
+             (* -0.20 (math/cos (* (- (* 4.0 Hbp) 63.0) RAD))))
            lbm50sq (* (- lb 50.0) (- lb 50.0))
            sl (+ 1.0 (/ (* 0.015 lbm50sq) (math/sqrt (+ 20.0 lbm50sq))))
            sc (+ 1.0 (* 0.045 cbp))
            sh (+ 1.0 (* 0.015 cbp T))
            cbp7 (math/pow cbp 7.0)
-           rt (* -2.0
-                 (math/sqrt (/ cbp7 (+ cbp7 (math/pow 25.0 7.0))))
-                 (math/sin (* 60.0
-                              (math/pow 2.718281828
-                                        (* -1.0
-                                        (* (/ (- Hbp 275.0) 25.0)
-                                        (/ (- Hbp 275.0) 25.0))))))
-                 RAD)]
-      (math/sqrt (+ (* (/ dl sl) (/ dl sl))
-                    (* (/ dcp sc) (/ dcp sc))
-                    (* (/ dHp sh) (/ dHp sh))
-                    (* rt (/ dcp sc) (/ dHp sh))))))
+           rt (* -2.0 (math/sqrt (/ cbp7 (+ cbp7 (math/pow 25.0 7.0))))
+             (math/sin (* 60.0
+                         (math/pow 2.718281828
+                           (* -1.0
+                             (* (/ (- Hbp 275.0) 25.0) (/ (- Hbp 275.0) 25.0))))))
+             RAD)]
+      (math/sqrt (+ (* (/ dl sl) (/ dl sl)) (* (/ dcp sc) (/ dcp sc))
+                   (* (/ dHp sh) (/ dHp sh)) (* rt (/ dcp sc) (/ dHp sh))))))
 
   # ── Pixel interop ──────────────────────────────────────────────────
 
   (defn to-rgba8 [c]
     (let [s (to-srgb c)]
-      [(integer (* (clamp01 s:r) 255.0))
-       (integer (* (clamp01 s:g) 255.0))
+      [(integer (* (clamp01 s:r) 255.0)) (integer (* (clamp01 s:g) 255.0))
        (integer (* (clamp01 s:b) 255.0))
        (integer (* (clamp01 (or s:a 1.0)) 255.0))]))
   (defn from-rgba8 [r g b a]

@@ -24,8 +24,7 @@
 (let [result @[]]
   (ev/spawn (fn []
               (push result
-                    (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp"
-                                   :read)))))  # Pump happens naturally; spawned fiber runs before user code returns.
+                (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read)))))  # Pump happens naturally; spawned fiber runs before user code returns.
   )
 
 # === Error propagation ===
@@ -50,14 +49,12 @@
 
 (spit "/tmp/elle-test-toplevel-io-lisp" "top level")
 (assert (= (string (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp"
-                                  :read)))
-           "top level")
-        "stream I/O works")
+                                    :read))) "top level") "stream I/O works")
 
 # === stdlib functions work with scheduler ===
 
 (assert (= (map (fn [x] (* x x)) (list 1 2 3)) (list 1 4 9))
-        "stdlib map works with scheduler")
+  "stdlib map works with scheduler")
 
 # === Async backend ===
 
@@ -89,8 +86,7 @@
   (let [[ok? _] (protect ((fn ()
                             (let* [backend (io/backend :sync)
                                    f (fiber/new (fn []
-                                     (port/read-all submit-sync-port))
-                                   512)]
+                                       (port/read-all submit-sync-port)) 512)]
                               (fiber/resume f)
                               (io/submit backend (fiber/value f))))))]
     (assert (not ok?) "io/submit on sync backend errors")))
@@ -116,7 +112,7 @@
   (let [id (io/submit backend (fiber/value f))]
     (let [completions (io/wait backend -1)]
       (assert (= id (get (get completions 0) :id))
-              "completion :id matches submission id"))))
+        "completion :id matches submission id"))))
 
 # === Completion struct has :error nil ===
 
@@ -128,7 +124,7 @@
   (let [id (io/submit backend (fiber/value f))]
     (let [completions (io/wait backend -1)]
       (assert (nil? (get (get completions 0) :error))
-              "completion :error is nil on success"))))
+        "completion :error is nil on success"))))
 
 # === make-async-scheduler ===
 
@@ -142,9 +138,8 @@
 
 (spit "/tmp/elle-test-ev-run-io-lisp" "async scheduler")
 (assert (= (string (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp"
-                                  :read)))
-           "async scheduler")
-        "I/O thunk reads file")
+                                    :read))) "async scheduler")
+  "I/O thunk reads file")
 
 # === multiple concurrent fibers ===
 
@@ -153,12 +148,12 @@
 (let [results @[]]
   (let [f1 (ev/spawn (fn []
                        (push results
-                             (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp"
-                             :read)))))
+                         (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp"
+                                          :read)))))
         f2 (ev/spawn (fn []
                        (push results
-                             (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp"
-                             :read)))))]
+                         (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp"
+                                          :read)))))]
     (ev/join f1)
     (ev/join f2))
   (assert (= (length results) 2) "concurrent fibers both complete"))
@@ -174,7 +169,7 @@
   (port/write p "async write test")
   (port/flush p))
 (assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test")
-        "async write thunk")
+  "async write thunk")
 
 # ============================================================================
 # ev/sleep tests
@@ -200,7 +195,7 @@
     (ev/join f3))
   (let [elapsed (- (clock/monotonic) t0)]
     (assert (< elapsed 0.5)
-            "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
+      "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
 
 # === ev/sleep interleaved with I/O ===
 
@@ -211,8 +206,8 @@
                        (push result :slept)))
         f2 (ev/spawn (fn []
                        (push result
-                             (string (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp"
-                                     :read))))))]
+                         (string (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp"
+                                   :read))))))]
     (ev/join f1)
     (ev/join f2))
   (assert (= (length result) 2) "ev/sleep + I/O: both fibers complete")

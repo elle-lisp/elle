@@ -52,17 +52,16 @@
 (defn keepalive-worker [request-count]
   (let* [session (http:connect target)
          results @[]]
-    (defer (protect (http:close session))
-           (def @i 0)
-           (while (< i request-count)
-             (let* [t0 (clock/monotonic)
-                    [ok? resp] (protect (http:send session "GET" path))
-                    t1 (clock/monotonic)]
-               (push results
-                     {:ok? ok?
-                      :status (if ok? resp:status 0)
-                      :latency-ms (* (- t1 t0) 1000.0)}))
-             (assign i (+ i 1))))
+    (defer (protect (http:close session)) (def @i 0)
+      (while (< i request-count)
+        (let* [t0 (clock/monotonic)
+               [ok? resp] (protect (http:send session "GET" path))
+               t1 (clock/monotonic)]
+          (push results
+            {:ok? ok?
+             :status (if ok? resp:status 0)
+             :latency-ms (* (- t1 t0) 1000.0)}))
+        (assign i (+ i 1))))
     (->list results)))
 
 # ── Percentile helper ────────────────────────────────────────────────
@@ -83,9 +82,7 @@
          err-count (- n ok-count)
          status-dist (fold (fn [acc r]
                              (let [k (string r:status)]
-                               (put acc k (+ (or (get acc k) 0) 1))))
-                           {}
-                           results)]
+                               (put acc k (+ (or (get acc k) 0) 1)))) {} results)]
     (println "")
     (println "── results ────────────────────────────────────────")
     (println (string/format "total requests:  {}" n))
@@ -99,7 +96,7 @@
     (println (string/format "  p95:  {:.2f}" (percentile lat-arr 95)))
     (println (string/format "  p99:  {:.2f}" (percentile lat-arr 99)))
     (println (string/format "  max:  {:.2f}"
-                            (get lat-arr (- (length lat-arr) 1))))
+               (get lat-arr (- (length lat-arr) 1))))
     (println "")
     (println "── status codes ──────────────────────────────────")
     (each k in (keys status-dist)
@@ -108,13 +105,8 @@
 # ── Main ─────────────────────────────────────────────────────────────
 
 (def mode (if keepalive "keepalive" "fresh"))
-(println (string/format (string "load test: {} requests, "
-                                "{} concurrent, "
-                                "{} connections → {}")
-                        total
-                        parallel
-                        mode
-                        target))
+(println (string/format (string "load test: {} requests, " "{} concurrent, "
+             "{} connections → {}") total parallel mode target))
 
 (let* [t0 (clock/monotonic)
        results (if keepalive

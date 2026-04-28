@@ -14,16 +14,12 @@
 
 # Non-captured, non-mutated let binding
 (assert (= (let [x 42]
-             x)
-           42)
-        "non-captured let binding")
+             x) 42) "non-captured let binding")
 
 # Non-captured let inside a lambda (the optimization target)
 (assert (= ((fn ()
               (let [x 10]
-                (+ x 5))))
-           15)
-        "non-captured let in lambda")
+                (+ x 5)))) 15) "non-captured let in lambda")
 
 # ============================================================================
 # Captured + mutated let — must still use LocalCell
@@ -46,9 +42,7 @@
 (assert (= ((fn ()
               (let [@y 0]
                 (assign y 10)
-                y)))
-           10)
-        "mutated non-captured let in lambda")
+                y))) 10) "mutated non-captured let in lambda")
 
 # ============================================================================
 # Mixed cell needs — both paths in the same lambda
@@ -60,9 +54,8 @@
                 (let [b 2]
                   (let [c 3]
                     (let [get-b (fn () b)]
-                      (+ a (get-b) c)))))))
-           6)
-        "mixed captured and non-captured lets")
+                      (+ a (get-b) c))))))) 6)
+  "mixed captured and non-captured lets")
 
 # ============================================================================
 # letrec with self-recursive binding
@@ -74,6 +67,4 @@
                            (if (= n 0)
                              1
                              (* n (f (- n 1)))))]
-                (f 5))))
-           120)
-        "letrec factorial")
+                (f 5)))) 120) "letrec factorial")

@@ -34,9 +34,7 @@
     (def server (ev/spawn (fn [] (http:serve listener collector-handler))))
     (def meter (telemetry:meter "t" :endpoint url :interval 9999))
     (def lat
-      (telemetry:histogram meter
-        "lat"
-        :unit "s"
+      (telemetry:histogram meter "lat" :unit "s"
         :boundaries [0.01 0.05 0.1 0.5 1.0]))
     (def req-c (telemetry:counter meter "reqs" :unit "1"))
     (def rev-c (telemetry:counter meter "rev" :unit "USD"))
@@ -45,8 +43,8 @@
       (let [attrs {"m" method "p" path "s" status}]
         (telemetry:add req-c 1 :attributes attrs)
         (telemetry:time lat
-                        (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
-                        :attributes attrs)
+          (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
+          :attributes attrs)
         (when price (telemetry:add rev-c price :attributes {"cur" "USD"}))))
 
     # 16 sim calls — exceeds JIT threshold (10).

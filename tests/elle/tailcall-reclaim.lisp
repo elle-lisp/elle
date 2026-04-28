@@ -21,10 +21,8 @@
 (let* [count-100 (tail-loop 100)
        count-10000 (tail-loop 10000)]
   (assert (< count-10000 (* count-100 10))
-          (concat "tail-call reclamation: count-100="
-                  (number->string count-100)
-                  " count-10000="
-                  (number->string count-10000))))
+    (concat "tail-call reclamation: count-100=" (number->string count-100)
+      " count-10000=" (number->string count-10000))))
 
 # ── Mutual tail recursion ─────────────────────────────────────────────
 
@@ -43,10 +41,8 @@
 (let* [c1 (even-loop 100)
        c2 (even-loop 10000)]
   (assert (< c2 (* c1 10))
-          (concat "mutual tail-call reclamation: c1="
-                  (number->string c1)
-                  " c2="
-                  (number->string c2))))
+    (concat "mutual tail-call reclamation: c1=" (number->string c1) " c2="
+      (number->string c2))))
 
 # ── No-alloc tail recursion (baseline) ────────────────────────────────
 
@@ -56,10 +52,8 @@
 (let* [c1 (count-loop 100)
        c2 (count-loop 10000)]
   (assert (< c2 (* c1 10))
-          (concat "no-alloc tail-call: c1="
-                  (number->string c1)
-                  " c2="
-                  (number->string c2))))
+    (concat "no-alloc tail-call: c1=" (number->string c1) " c2="
+      (number->string c2))))
 
 # ── Tail call returning heap value ────────────────────────────────────
 #
@@ -123,7 +117,5 @@
 (let* [c1 (nested-int-loop 100)
        c2 (nested-int-loop 10000)]
   (assert (< c2 (* c1 10))
-          (concat "nested-int-let reclamation: c1="
-                  (number->string c1)
-                  " c2="
-                  (number->string c2))))
+    (concat "nested-int-let reclamation: c1=" (number->string c1) " c2="
+      (number->string c2))))

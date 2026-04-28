@@ -73,14 +73,8 @@
            in-pin (ffi/pin input)]
       (each i in (range Z_STREAM_SIZE)
         (ffi/write (ptr/add stream i) :u8 0))  ## deflateInit2(stream, level, Z_DEFLATED=8, windowBits, memLevel=8, Z_DEFAULT_STRATEGY=0)
-      (let [rc (z-deflateInit2 stream
-                               level
-                               8
-                               window-bits
-                               8
-                               0
-                               ZLIB_VERSION
-                               Z_STREAM_SIZE)]
+      (let [rc (z-deflateInit2 stream level 8 window-bits 8 0 ZLIB_VERSION
+              Z_STREAM_SIZE)]
         (unless (= rc Z_OK)
           (ffi/free stream)
           (ffi/free out-buf)
@@ -144,7 +138,7 @@
                          new-buf (ffi/malloc new-size)]
                     (each i in (range total-out)
                       (ffi/write (ptr/add new-buf i)
-                                 :u8 (ffi/read (ptr/add out-buf i) :u8)))
+                        :u8 (ffi/read (ptr/add out-buf i) :u8)))
                     (ffi/free out-buf)
                     (assign out-buf new-buf)
                     (assign buf-size new-size)))

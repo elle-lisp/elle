@@ -129,12 +129,11 @@
         (each elt in v
           (unless (nil? elt)
             (push parts
-                  (string/format "{}={}"
-                                 ekey
-                                 (uri-encode (query-scalar->string elt))))))
+              (string/format "{}={}" ekey
+                (uri-encode (query-scalar->string elt))))))
       true
         (push parts
-              (string/format "{}={}" ekey (uri-encode (query-scalar->string v))))))
+          (string/format "{}={}" ekey (uri-encode (query-scalar->string v))))))
   (defn query-encode [params]
     "Encode a struct/map of query parameters as an
      application/x-www-form-urlencoded string: 'k1=v1&k2=v2'. Keys and
@@ -202,9 +201,8 @@
     "Strip a trailing CRLF, LF, or CR from a line. CRLF is a single
      grapheme in Elle, so all three cases drop one grapheme."
     (if (and s
-             (or (string/ends-with? s "\r\n")
-                 (string/ends-with? s "\n")
-                 (string/ends-with? s "\r")))
+        (or (string/ends-with? s "\r\n") (string/ends-with? s "\n")
+          (string/ends-with? s "\r")))
       (slice s 0 (dec (length s)))
       s))
   (defn tls-transport [conn]
@@ -390,7 +388,7 @@
     (cond
       (chunked? headers) (read-chunked-body t)
       headers:content-length (read-fixed-body t
-      (parse-int headers:content-length))
+        (parse-int headers:content-length))
       true nil))
   (defn write-chunk [t data]
     "Write a single chunk to transport in HTTP/1.1 chunked encoding.
@@ -452,7 +450,7 @@
      paths rooted at '/'."
     (cond
       (or (string/starts-with? location "http://")
-          (string/starts-with? location "https://")) location
+        (string/starts-with? location "https://")) location
       (string/starts-with? location "//") (string base:scheme ":" location)
       true
         (let [path (if (string/starts-with? location "/")
@@ -482,7 +480,7 @@
     "Build request headers. Sets Connection: keep-alive or close."
     (let [headers (merge {:host host
                           :connection (if keep-alive "keep-alive" "close")}
-                         (freeze (or extra-headers {})))]
+            (freeze (or extra-headers {})))]
       (if (nil? body)
         headers
         (merge headers {:content-length (string (string/size-of body))}))))
@@ -509,13 +507,7 @@
                           (string/format "{}?{}" url-parsed:path full-query))
            t (open-transport url-parsed)]
       (defer (protect (t-close t))
-             (send-request t
-                           method
-                           request-path
-                           url-parsed:host
-                           headers
-                           body
-                           false))))
+        (send-request t method request-path url-parsed:host headers body false))))
   (defn http-request [method url &named body headers query follow-redirects]
     "Make an HTTP/1.1 request. Opens a new transport, sends request, closes.
      Returns {:status :headers :body}. Uses TLS for https URLs if :tls was
@@ -541,11 +533,8 @@
     (def @last-response nil)
     (block :redirects
       (forever
-        (let [resp (do-request current-method
-                               current-parsed
-                               headers
-                               current-body
-                               current-query)]
+        (let [resp (do-request current-method current-parsed headers
+                current-body current-query)]
           (assign last-response resp)
           (when (or (zero? remaining) (not (redirect-statuses resp:status)))
             (break :redirects nil))
@@ -563,19 +552,12 @@
     last-response)
   (defn http-get [url &named headers query follow-redirects]
     "Make a GET request. Returns {:status :headers :body}."
-    (http-request "GET"
-                  url
-                  :headers headers
-                  :query query
-                  :follow-redirects follow-redirects))
+    (http-request "GET" url :headers headers :query query
+      :follow-redirects follow-redirects))
   (defn http-post [url body &named headers query follow-redirects]
     "Make a POST request with body. Returns {:status :headers :body}."
-    (http-request "POST"
-                  url
-                  :body body
-                  :headers headers
-                  :query query
-                  :follow-redirects follow-redirects))
+    (http-request "POST" url :body body :headers headers :query query
+      :follow-redirects follow-redirects))
   (defn http-connect [url]
     "Open a keep-alive transport to a URL's host:port.
      Returns {:transport :host} for use with http:send."
@@ -692,8 +674,7 @@
     "Parse the SSE body on transport t, calling on-event for each
      complete event. Returns when the stream closes."
     (let [state @{:event-type nil :data-lines @[] :last-id nil :retry nil}]
-      (sse-for-each-body-line t
-        headers
+      (sse-for-each-body-line t headers
         (fn [line] (sse-handle-line state line on-event)))))
   (defn sse-open [url headers last-event-id]
     "Open an SSE request. Returns {:transport :status :headers}.
@@ -708,10 +689,7 @@
            t (open-transport url-parsed)]
       (write-request-line t "GET" url-parsed:path)
       (write-headers t
-                     (build-request-headers url-parsed:host
-                       final-headers
-                       nil
-                       false))
+        (build-request-headers url-parsed:host final-headers nil false))
       (t-write t "\r\n")
       (t-flush t)
       (let* [status-line (read-status-line t)
@@ -735,27 +713,24 @@
                 (block :session
                   (forever
                     (let* [[ok? result] (protect (let [conn (sse-open url
-                             headers
-                             current-id)]
+                               headers current-id)]
                              (defer (protect (t-close conn:transport))
-                                    (cond
-                                      (= conn:status 204) :done
-                                      (and (>= conn:status 200)
-                                      (< conn:status 300))
-                                        (begin
-                                          (sse-for-each-event conn:transport
-                                          conn:headers
-                                          (fn [evt]
-                                            (when evt:id
-                                              (assign current-id evt:id))
-                                            (when evt:retry
-                                              (assign retry-ms evt:retry))
-                                            (yield evt)))
-                                          :eof)
-                                      true (error {:error :http-error
-                                      :reason :sse-bad-status
-                                      :status conn:status
-                                      :message "SSE: non-2xx response"})))))]
+                               (cond
+                                 (= conn:status 204) :done
+                                 (and (>= conn:status 200) (< conn:status 300))
+                                   (begin
+                                     (sse-for-each-event conn:transport
+                                       conn:headers
+                                       (fn [evt]
+                                         (when evt:id (assign current-id evt:id))
+                                         (when evt:retry
+                                           (assign retry-ms evt:retry))
+                                         (yield evt)))
+                                     :eof)
+                                 true (error {:error :http-error
+                                 :reason :sse-bad-status
+                                 :status conn:status
+                                 :message "SSE: non-2xx response"})))))]
                       (cond
                         (and ok? (= result :done)) (break :session)
                         (not reconnect) (break :session))
@@ -779,37 +754,31 @@
                        final-headers (merge base-headers user-headers)
                        t (open-transport url-parsed)]
                   (defer (protect (t-close t))
-                         (write-request-line t "POST" url-parsed:path)
-                         (write-headers t
-                                        (build-request-headers url-parsed:host
-                                          final-headers
-                                          body
-                                          false))
-                         (t-write t "\r\n")
-                         (unless (nil? body) (t-write t body))
-                         (t-flush t)
-                         (let* [status-line (read-status-line t)
-                                resp-headers (read-headers t)]
-                           (cond
-                             (and (>= status-line:status 200)
-                                  (< status-line:status 300))
-                               (sse-for-each-event t
-                               resp-headers
-                               (fn [evt] (yield evt)))
-                             true
-                               (error {:error :http-error
-                                       :reason :sse-bad-status
-                                       :status status-line:status
-                                       :body (read-body t resp-headers)
-                                       :message "SSE POST: non-2xx response"}))))))))
+                    (write-request-line t "POST" url-parsed:path)
+                    (write-headers t
+                      (build-request-headers url-parsed:host final-headers body
+                        false)) (t-write t "\r\n")
+                    (unless (nil? body) (t-write t body)) (t-flush t)
+                    (let* [status-line (read-status-line t)
+                           resp-headers (read-headers t)]
+                      (cond
+                        (and (>= status-line:status 200)
+                          (< status-line:status 300))
+                          (sse-for-each-event t resp-headers
+                            (fn [evt] (yield evt)))
+                        true
+                          (error {:error :http-error
+                                  :reason :sse-bad-status
+                                  :status status-line:status
+                                  :body (read-body t resp-headers)
+                                  :message "SSE POST: non-2xx response"}))))))))
   (defn sse-format-field [field value]
     "Serialize one field of an SSE event. Data values with embedded
      newlines are emitted as repeated 'field: line' entries per spec."
     (let [s (string value)]
       (if (and (= field "data") (string/contains? s "\n"))
         (string/join (map (fn [line] (string/format "data: {}\n" line))
-                          (string/split s "\n"))
-                     "")
+            (string/split s "\n")) "")
         (string/format "{}: {}\n" field s))))
   (defn format-sse-event [evt]
     "Serialize an event struct to SSE wire format. Recognizes :event,
@@ -845,13 +814,13 @@
     "Read a complete HTTP request from a transport.
      Returns {:method :path :version :headers :body}, or nil on EOF."
     (when-let [req-line (read-request-line t)]
-              (let* [headers (read-headers t)
-                     body (read-body t headers)]
-                {:method req-line:method
-                 :path req-line:path
-                 :version req-line:version
-                 :headers headers
-                 :body body})))
+      (let* [headers (read-headers t)
+             body (read-body t headers)]
+        {:method req-line:method
+         :path req-line:path
+         :version req-line:version
+         :headers headers
+         :body body})))
   (defn write-response [t response]
     "Write a complete HTTP response to a transport and flush.
      response is {:status :headers :body}.
@@ -859,9 +828,8 @@
      as chunks. A body that is a function (fn [write-chunk]) is invoked
      with a chunk writer so handlers can stream arbitrary data; otherwise
      the body is written as a single chunk."
-    (write-status-line t
-                       response:status
-                       (or (get reason-phrases response:status) "Unknown"))
+    (write-status-line t response:status
+      (or (get reason-phrases response:status) "Unknown"))
     (write-headers t response:headers)
     (t-write t "\r\n")
     (cond
@@ -880,27 +848,24 @@
      sends Connection: close. Errors in handler produce a 500 response.
      on-error is called with (request error) when the handler fails."
     (defer (protect (t-close t))
-           (forever
-             (let [[ok? req] (protect (read-request t))]
-               (unless ok? (break))
-               (when (nil? req) (break))
-               (let* [[ok? val] (protect (handler req))
-                      response (if ok?
-                                 val
-                                 (begin
-                                   (when on-error (on-error req val))
-                                   (http-respond 500 "Internal Server Error")))]
-                 (write-response t response)
-                 (when (or (wants-close? req:headers)
-                           (wants-close? response:headers))
-                   (break)))))))
+      (forever
+        (let [[ok? req] (protect (read-request t))]
+          (unless ok? (break))
+          (when (nil? req) (break))
+          (let* [[ok? val] (protect (handler req))
+                 response (if ok?
+                            val
+                            (begin
+                              (when on-error (on-error req val))
+                              (http-respond 500 "Internal Server Error")))]
+            (write-response t response)
+            (when (or (wants-close? req:headers) (wants-close? response:headers))
+              (break)))))))
   (defn default-on-error [request err]
     "Default error handler: print to stderr."
     (port/write (port/stderr)
-                (string/format "http: handler error on {} {}: {}\n"
-                               request:method
-                               request:path
-                               err)))
+      (string/format "http: handler error on {} {}: {}\n" request:method
+        request:path err)))
   (defn http-serve [listener handler &named @on-error]
     "Accept connections on listener and handle them with keep-alive.
      Each connection runs in its own fiber via ev/spawn.
@@ -927,34 +892,34 @@
 
     # header->kw
     (assert (= (header->kw "Content-Type") :content-type)
-            "header->kw Content-Type")
+      "header->kw Content-Type")
     (assert (= (header->kw "Host") :host) "header->kw Host")
     (assert (= (header->kw "X-Custom-Header") :x-custom-header)
-            "header->kw X-Custom-Header")
+      "header->kw X-Custom-Header")
     (assert (= (header->kw "content-type") :content-type) "header->kw lowercase")
 
     # kw->header
     (assert (= (kw->header :content-type) "Content-Type")
-            "kw->header content-type")
+      "kw->header content-type")
     (assert (= (kw->header :host) "Host") "kw->header host")
     (assert (= (kw->header :x-custom-header) "X-Custom-Header")
-            "kw->header x-custom-header")
+      "kw->header x-custom-header")
     (assert (= (kw->header :content-length) "Content-Length")
-            "kw->header content-length")
+      "kw->header content-length")
 
     # round-trip
     (assert (= (kw->header (header->kw "Content-Type")) "Content-Type")
-            "header round-trip Content-Type")
+      "header round-trip Content-Type")
     (assert (= (kw->header (header->kw "Host")) "Host") "header round-trip Host")
 
     # read-headers via file transport
     (spit "/tmp/elle-http-test-headers"
-          "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
+      "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
     (with-file-transport "/tmp/elle-http-test-headers"
       :read (fn [t]
               (let [h (read-headers t)]
                 (assert (= h:content-type "text/plain")
-                        "read-headers content-type")
+                  "read-headers content-type")
                 (assert (= h:host "example.com") "read-headers host")
                 (assert (= h:content-length "42") "read-headers content-length"))))
 
@@ -976,14 +941,14 @@
     (with-file-transport "/tmp/elle-http-test-write-headers"
       :write (fn [t]
                (write-headers t
-                              {:content-type "text/plain" :content-length "11"})
+                 {:content-type "text/plain" :content-length "11"})
                (t-write t "\r\n")
                (t-flush t)))
     (let [content (slurp "/tmp/elle-http-test-write-headers")]
       (assert (string/contains? content "Content-Type: text/plain")
-              "write-headers content-type")
+        "write-headers content-type")
       (assert (string/contains? content "Content-Length: 11")
-              "write-headers content-length"))
+        "write-headers content-length"))
 
     # read-request-line
     (spit "/tmp/elle-http-test-req-line" "GET /path HTTP/1.1\r\n")
@@ -1044,7 +1009,7 @@
       :read (fn [t]
               (let [body (read-chunked-body t)]
                 (assert (= body "hello world")
-                        "read-chunked-body concatenates chunks"))))
+                  "read-chunked-body concatenates chunks"))))
 
     # read-chunked-body: chunk extensions are ignored
     (spit "/tmp/elle-http-test-chunked-ext" "3;ext=foo\r\nabc\r\n0\r\n\r\n")
@@ -1055,7 +1020,7 @@
 
     # read-chunked-body: trailers are discarded
     (spit "/tmp/elle-http-test-chunked-trail"
-          "4\r\ndata\r\n0\r\nX-Trailer: value\r\n\r\n")
+      "4\r\ndata\r\n0\r\nX-Trailer: value\r\n\r\n")
     (with-file-transport "/tmp/elle-http-test-chunked-trail"
       :read (fn [t]
               (let [body (read-chunked-body t)]
@@ -1063,12 +1028,12 @@
 
     # read-chunked-body: hex sizes
     (spit "/tmp/elle-http-test-chunked-hex"
-          "1a\r\nabcdefghijklmnopqrstuvwxyz\r\n0\r\n\r\n")
+      "1a\r\nabcdefghijklmnopqrstuvwxyz\r\n0\r\n\r\n")
     (with-file-transport "/tmp/elle-http-test-chunked-hex"
       :read (fn [t]
               (let [body (read-chunked-body t)]
                 (assert (= body "abcdefghijklmnopqrstuvwxyz")
-                        "read-chunked-body hex-encoded size"))))
+                  "read-chunked-body hex-encoded size"))))
 
     # read-chunked-body: empty body (just the 0-chunk)
     (spit "/tmp/elle-http-test-chunked-empty" "0\r\n\r\n")
@@ -1082,10 +1047,9 @@
     (with-file-transport "/tmp/elle-http-test-body-chunked"
       :read (fn [t]
               (let [body (read-body t
-                                    {:transfer-encoding "chunked"
-                                     :content-length "999"})]
+                      {:transfer-encoding "chunked" :content-length "999"})]
                 (assert (= body "hello")
-                        "read-body prefers chunked over content-length"))))
+                  "read-body prefers chunked over content-length"))))
 
     # write-chunk: produces hex-size + CRLF + data + CRLF
     (with-file-transport "/tmp/elle-http-test-write-chunk"
@@ -1096,7 +1060,7 @@
                (t-flush t)))
     (let [content (slurp "/tmp/elle-http-test-write-chunk")]
       (assert (= content "2\r\nhi\r\n5\r\nthere\r\n0\r\n\r\n")
-              "write-chunk + write-last-chunk produce correct framing"))
+        "write-chunk + write-last-chunk produce correct framing"))
 
     # write-chunk: empty chunk is a no-op
     (with-file-transport "/tmp/elle-http-test-write-chunk-empty"
@@ -1122,7 +1086,7 @@
 
     # full request parse
     (spit "/tmp/elle-http-test-full-req"
-          "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
+      "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
     (let [out @[nil nil nil nil]]
       (with-file-transport "/tmp/elle-http-test-full-req"
         :read (fn [t]
@@ -1143,63 +1107,63 @@
       (let [[ok? err] (protect (http-get "https://example.com/"))]
         (assert (not ok?) "https without tls signals error")
         (assert (= err:reason :tls-not-configured)
-                "https without tls reports :tls-not-configured")))
+          "https without tls reports :tls-not-configured")))
 
     # query-encode: scalars
     (assert (= (query-encode {}) "") "query-encode empty → empty string")
     (assert (= (query-encode {:page 2}) "page=2") "query-encode integer value")
     (assert (= (query-encode {:q "hello world"}) "q=hello%20world")
-            "query-encode percent-encodes spaces")
+      "query-encode percent-encodes spaces")
     (assert (= (query-encode {:flag true}) "flag=true")
-            "query-encode boolean true")
+      "query-encode boolean true")
     (assert (= (query-encode {:flag false}) "flag=false")
-            "query-encode boolean false")
+      "query-encode boolean false")
 
     # query-encode: keyword values render as bare strings (no colon)
     (assert (= (query-encode {:sort :asc}) "sort=asc")
-            "query-encode keyword strips colon")
+      "query-encode keyword strips colon")
 
     # query-encode: nil values are dropped
     (assert (= (query-encode {:a 1 :b nil :c 3}) "a=1&c=3")
-            "query-encode omits nil values")
+      "query-encode omits nil values")
 
     # query-encode: arrays/lists produce repeated keys
     (assert (= (query-encode {:tag ["a" "b" "c"]}) "tag=a&tag=b&tag=c")
-            "query-encode repeats array values")
+      "query-encode repeats array values")
 
     # query-encode: reserved characters in keys and values are encoded
     (assert (= (query-encode {"a b" "c&d=e"}) "a%20b=c%26d%3De")
-            "query-encode encodes reserved characters in both keys and values")
+      "query-encode encodes reserved characters in both keys and values")
 
     # merge-query: struct merges with existing URL query
     (assert (= (merge-query "fmt=json" {:page 2}) "fmt=json&page=2")
-            "merge-query appends struct to url query")
+      "merge-query appends struct to url query")
     (assert (= (merge-query nil {:page 2}) "page=2")
-            "merge-query with nil url query")
+      "merge-query with nil url query")
     (assert (= (merge-query "fmt=json" nil) "fmt=json")
-            "merge-query with nil extra keeps url query")
+      "merge-query with nil extra keeps url query")
     (assert (= (merge-query "fmt=json" "page=2") "fmt=json&page=2")
-            "merge-query accepts pre-encoded string")
+      "merge-query accepts pre-encoded string")
     (assert (nil? (merge-query nil nil)) "merge-query nil+nil is nil")
 
     # strip-line-terminator: parity between tcp and tls transports.
     # port/read-line strips newlines; tls:read-line does not; tls-transport
     # reconciles them so wire-format helpers see a single semantics.
     (assert (= (strip-line-terminator "hi\r\n") "hi")
-            "strip-line-terminator CRLF")
+      "strip-line-terminator CRLF")
     (assert (= (strip-line-terminator "hi\n") "hi") "strip-line-terminator LF")
     (assert (= (strip-line-terminator "hi\r") "hi") "strip-line-terminator CR")
     (assert (= (strip-line-terminator "hi") "hi")
-            "strip-line-terminator no terminator")
+      "strip-line-terminator no terminator")
     (assert (= (strip-line-terminator "") "") "strip-line-terminator empty")
     (assert (nil? (strip-line-terminator nil))
-            "strip-line-terminator nil passthrough")
+      "strip-line-terminator nil passthrough")
 
     # redirect-limit normalization
     (assert (= (redirect-limit nil) 0) "redirect-limit nil → 0")
     (assert (= (redirect-limit false) 0) "redirect-limit false → 0")
     (assert (= (redirect-limit true) (default-redirect-limit))
-            "redirect-limit true → default")
+      "redirect-limit true → default")
     (assert (= (redirect-limit 3) 3) "redirect-limit integer passthrough")
     (let [[ok? _] (protect (redirect-limit "bogus"))]
       (assert (not ok?) "redirect-limit rejects non-integer/non-bool"))
@@ -1207,14 +1171,11 @@
     # resolve-location
     (let [base (parse-url "http://example.com/foo")]
       (assert (= (resolve-location base "https://other.com/bar")
-                 "https://other.com/bar")
-              "resolve-location absolute URL passthrough")
+          "https://other.com/bar") "resolve-location absolute URL passthrough")
       (assert (= (resolve-location base "//other.com/bar")
-                 "http://other.com/bar")
-              "resolve-location scheme-relative")
+          "http://other.com/bar") "resolve-location scheme-relative")
       (assert (= (resolve-location base "/new/path")
-                 "http://example.com:80/new/path")
-              "resolve-location absolute path"))
+          "http://example.com:80/new/path") "resolve-location absolute path"))
 
     # redirect-statuses / get-rewrite-statuses
     (each s [301 302 303 307 308]
@@ -1223,25 +1184,25 @@
     (assert (not (redirect-statuses 500)) "500 is not a redirect")
     (each s [301 302 303]
       (assert (get-rewrite-statuses s)
-              (string/format "status {} rewrites to GET" s)))
+        (string/format "status {} rewrites to GET" s)))
     (each s [307 308]
       (assert (not (get-rewrite-statuses s))
-              (string/format "status {} preserves method" s)))
+        (string/format "status {} preserves method" s)))
 
     # SSE: field parsing
     (let [f (sse-parse-field "event: update")]
       (assert (= f:field "event") "sse-parse-field event name"))
     (let [f (sse-parse-field "data: hello")]
       (assert (= f:value "hello")
-              "sse-parse-field eats one leading space on value"))
+        "sse-parse-field eats one leading space on value"))
     (let [f (sse-parse-field "data:hello")]
       (assert (= f:value "hello") "sse-parse-field no space is fine too"))
     (assert (nil? (sse-parse-field ": comment"))
-            "sse-parse-field treats : prefix as comment")
+      "sse-parse-field treats : prefix as comment")
     (assert (nil? (sse-parse-field "")) "sse-parse-field skips empty line")
     (let [f (sse-parse-field "field-no-colon")]
       (assert (= f:field "field-no-colon")
-              "sse-parse-field colonless line is field")
+        "sse-parse-field colonless line is field")
       (assert (= f:value "") "sse-parse-field colonless value is empty"))
 
     # SSE: sse-handle-line dispatches events on blank lines
@@ -1267,15 +1228,14 @@
 
     # SSE: format-sse-event round-trips basics
     (assert (= (format-sse-event {:event "message" :data "hi"}) "data: hi\n\n")
-            "format-sse-event default event skips 'event:' line")
+      "format-sse-event default event skips 'event:' line")
     (assert (= (format-sse-event {:event "tick" :data "1" :id "a"})
-               "event: tick\nid: a\ndata: 1\n\n")
-            "format-sse-event full frame")
+        "event: tick\nid: a\ndata: 1\n\n") "format-sse-event full frame")
     (assert (= (format-sse-event {:data "line1\nline2"})
-               "data: line1\ndata: line2\n\n")
-            "format-sse-event splits multi-line data")
+        "data: line1\ndata: line2\n\n")
+      "format-sse-event splits multi-line data")
     (assert (= (format-sse-event {:retry 5000}) "retry: 5000\n\n")
-            "format-sse-event retry-only event")
+      "format-sse-event retry-only event")
 
     # SSE: parse + format round-trip
     (let [events @[]
@@ -1295,11 +1255,10 @@
                                (send {:event "tick" :data "1"})))]
       (assert (= resp:status 200) "sse-response: status 200")
       (assert (= (get resp:headers :content-type) "text/event-stream")
-              "sse-response: content-type")
+        "sse-response: content-type")
       (assert (string/contains? (string/lowercase (get resp:headers
-                                :transfer-encoding))
-                                "chunked")
-              "sse-response: transfer-encoding chunked")
+            :transfer-encoding)) "chunked")
+        "sse-response: transfer-encoding chunked")
       (assert (fn? resp:body) "sse-response: body is a closure"))
     true)
 

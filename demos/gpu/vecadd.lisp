@@ -13,14 +13,12 @@
 
 ## ── Compile shader at runtime ───────────────────────────────────
 (def shader
-  (gpu:compile ctx
-               256
-               3
-               (fn [s]
-                 (let* [id (s:global-id)
-                        a (s:load 0 id)
-                        b (s:load 1 id)]
-                   (s:store 2 id (s:fadd a b))))))
+  (gpu:compile ctx 256 3
+    (fn [s]
+      (let* [id (s:global-id)
+             a (s:load 0 id)
+             b (s:load 1 id)]
+        (s:store 2 id (s:fadd a b))))))
 (println "Shader compiled (SPIR-V emitted at runtime)")
 
 ## ── Input data ──────────────────────────────────────────────────

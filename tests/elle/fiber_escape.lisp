@@ -58,8 +58,7 @@
 # Yield a string, return int
 (let [f (fiber/new (fn []
                      (yield "yielded")
-                     99)
-                   |:yield|)]
+                     99) |:yield|)]
   (let [y (fiber/resume f)]
     (assert (= y "yielded") "fiber yield string")
     (assert (= (fiber/resume f) 99) "fiber return after yield")))
@@ -67,8 +66,7 @@
 # Yield an array
 (let [f (fiber/new (fn []
                      (yield [1 2 3])
-                     :done)
-                   |:yield|)]
+                     :done) |:yield|)]
   (let [y (fiber/resume f)]
     (assert (= (length y) 3) "fiber yield array length")
     (assert (= (get y 0) 1) "fiber yield array element")))
@@ -81,8 +79,7 @@
 (def @box nil)
 (let [f (fiber/new (fn []
                      (assign box "escaped")
-                     42)
-                   |:yield|)]
+                     42) |:yield|)]
   (fiber/resume f)
   (assert (= box "escaped") "fiber outward mutation string"))
 
@@ -90,8 +87,7 @@
 (def @holder nil)
 (let [f (fiber/new (fn []
                      (assign holder [1 2 3])
-                     :ok)
-                   |:yield|)]
+                     :ok) |:yield|)]
   (fiber/resume f)
   (assert (= (length holder) 3) "fiber outward mutation array length")
   (assert (= (get holder 1) 2) "fiber outward mutation array element"))
@@ -140,8 +136,7 @@
 (let [f (fiber/new (fn []
                      (yield "first")
                      (yield "second")
-                     "third")
-                   |:yield|)]
+                     "third") |:yield|)]
   (assert (= (fiber/resume f) "first") "multi-yield first")
   (assert (= (fiber/resume f) "second") "multi-yield second")
   (assert (= (fiber/resume f) "third") "multi-yield final"))

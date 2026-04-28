@@ -59,10 +59,8 @@
                 :reason :stream-error
                 :stream-id stream:id
                 :code 0x1
-                :message (concat "invalid transition: "
-                                 (string current)
-                                 " + "
-                                 (string event))})
+                :message (concat "invalid transition: " (string current) " + "
+                  (string event))})
         (put stream :state next-state))
       next-state))
 
@@ -128,7 +126,7 @@
       (assert (= s:state :open) "stream server: idle->open")
       (stream-transition s :recv-end-stream)
       (assert (= s:state :half-closed-remote)
-              "stream server: open->half-closed-remote")
+        "stream server: open->half-closed-remote")
       (stream-transition s :send-end-stream)
       (assert (= s:state :closed) "stream server: half-closed-remote->closed"))
 

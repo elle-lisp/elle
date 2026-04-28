@@ -79,7 +79,7 @@
 # ── equality ───────────────────────────────────────────────────────────────
 
 (assert (= {:a 1 :b 2} {:b 2 :a 1})
-        "struct equality independent of insertion order")
+  "struct equality independent of insertion order")
 (assert (= {:a 1} {:a 1}) "identical structs equal")
 (assert (not (= {:a 1} {:a 2})) "different values not equal")
 (assert (not (= {:a 1} {:a 1 :b 2})) "different sizes not equal")

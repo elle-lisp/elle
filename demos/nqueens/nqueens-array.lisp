@@ -43,11 +43,8 @@
 
 (defn benchmark [n]
   (let* [solutions (solve-nqueens n)]
-    (println "Solving N-Queens for N="
-             n
-             "... Found "
-             (length solutions)
-             " solution(s)")))
+    (println "Solving N-Queens for N=" n "... Found " (length solutions)
+      " solution(s)")))
 
 (println "=== N-Queens Solver (Elle, array) ===")
 (println)

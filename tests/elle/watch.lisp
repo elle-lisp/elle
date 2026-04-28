@@ -27,7 +27,7 @@
 (assert (not (empty? events)) "got events")
 # inotify reports :create; kqueue reports :modify (NOTE_WRITE on directory)
 (assert (contains? |:create :modify| (get (first events) :kind))
-        "event is create or modify")
+  "event is create or modify")
 
 # ── Second event: create another file ──────────────────────────────────
 # Use a new file rather than overwriting — kqueue EVFILT_VNODE on a

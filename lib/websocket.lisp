@@ -207,13 +207,12 @@
                              (= plen 127)
                                (let [ext (read-exact t 8)]
                                  (bit/or (bit/shl (get ext 0) 56)
-                                 (bit/shl (get ext 1) 48)
-                                 (bit/shl (get ext 2) 40)
-                                 (bit/shl (get ext 3) 32)
-                                 (bit/shl (get ext 4) 24)
-                                 (bit/shl (get ext 5) 16)
-                                 (bit/shl (get ext 6) 8)
-                                 (get ext 7)))
+                                   (bit/shl (get ext 1) 48)
+                                   (bit/shl (get ext 2) 40)
+                                   (bit/shl (get ext 3) 32)
+                                   (bit/shl (get ext 4) 24)
+                                   (bit/shl (get ext 5) 16)
+                                   (bit/shl (get ext 6) 8) (get ext 7)))
                              true plen)
                mask-key (when masked (read-exact t 4))
                raw (if (> payload-len 0) (read-exact t payload-len) (bytes))
@@ -240,9 +239,8 @@
             (let [op frame:opcode]
               (cond
                 (= op OP-PING)
-                  (let [pong (encode-frame OP-PONG
-                        frame:payload
-                        :mask? conn:is-client?)]
+                  (let [pong (encode-frame OP-PONG frame:payload
+                          :mask? conn:is-client?)]
                     (t-write t pong)
                     (t-flush t))
                 (= op OP-PONG) nil
@@ -250,7 +248,7 @@
                   (let* [payload frame:payload
                          code (if (>= (length payload) 2)
                                 (bit/or (bit/shl (get payload 0) 8)
-                                        (get payload 1))
+                                  (get payload 1))
                                 1005)
                          reason (if (> (length payload) 2)
                                   (string (slice payload 2))
@@ -285,21 +283,12 @@
            t (open-transport parsed)
            key (generate-key)
            host-str (if (or (and (= parsed:scheme "ws") (= parsed:port 80))
-                            (and (= parsed:scheme "wss") (= parsed:port 443)))
+                        (and (= parsed:scheme "wss") (= parsed:port 443)))
                       parsed:host
                       (string parsed:host ":" parsed:port))
-           req (string "GET "
-                       parsed:path
-                       " HTTP/1.1\r\n"
-                       "Host: "
-                       host-str
-                       "\r\n"
-                       "Upgrade: websocket\r\n"
-                       "Connection: Upgrade\r\n"
-                       "Sec-WebSocket-Key: "
-                       key
-                       "\r\n"
-                       "Sec-WebSocket-Version: 13\r\n")]
+           req (string "GET " parsed:path " HTTP/1.1\r\n" "Host: " host-str
+             "\r\n" "Upgrade: websocket\r\n" "Connection: Upgrade\r\n"
+             "Sec-WebSocket-Key: " key "\r\n" "Sec-WebSocket-Version: 13\r\n")]
       (def @req-str req)
       (when headers
         (each [name value] in headers
@@ -312,7 +301,7 @@
           (error {:error :ws-error
                   :reason :handshake-failed
                   :message (string "expected 101 Switching Protocols, got: "
-                                   status-line)}))
+                    status-line)}))
         (def @accept-key nil)
         (forever
           (let [line (t-read-line t)]
@@ -353,8 +342,7 @@
     (let* [close-code (or code 1000)
            close-reason (or reason "")
            payload (concat (bytes (bit/and (bit/shr close-code 8) 0xFF)
-                                  (bit/and close-code 0xFF))
-                           (bytes close-reason))
+               (bit/and close-code 0xFF)) (bytes close-reason))
            frame (encode-frame OP-CLOSE payload :mask? conn:is-client?)]
       (t-write conn:transport frame)
       (t-flush conn:transport)
@@ -375,12 +363,8 @@
                 :message "missing Sec-WebSocket-Key header"}))
       (let* [accept (compute-accept-key key)
              response (string "HTTP/1.1 101 Switching Protocols\r\n"
-                              "Upgrade: websocket\r\n"
-                              "Connection: Upgrade\r\n"
-                              "Sec-WebSocket-Accept: "
-                              accept
-                              "\r\n"
-                              "\r\n")]
+               "Upgrade: websocket\r\n" "Connection: Upgrade\r\n"
+               "Sec-WebSocket-Accept: " accept "\r\n" "\r\n")]
         (t-write t response)
         (t-flush t)
         (make-conn t false))))
@@ -392,31 +376,30 @@
         (ev/spawn (fn []
                     (let [t (tcp-transport tcp-port)]
                       (defer (protect (t-close t))
-                             (let [req-line (t-read-line t)]
-                               (when (not (nil? req-line))
-                                 (let [parts (string/split req-line " ")]
-                                   (when (>= (length parts) 2)
-                                     (def @headers @{})
-                                     (forever
-                                       (let [line (t-read-line t)]
-                                         (when (or (nil? line)
-                                           (empty? line)
-                                           (= line "\r"))
-                                           (break nil))
-                                         (let [colon (string/find line ":")]
-                                           (when colon
-                                             (let [raw (slice line 0 colon)
-                                               name (keyword (string/lowercase (string/trim raw)))
-                                               value (string/trim (slice line
-                                               (+ colon 1)))]
-                                               (put headers name value))))))
-                                     (let* [req {:method (get parts 0)
+                        (let [req-line (t-read-line t)]
+                          (when (not (nil? req-line))
+                            (let [parts (string/split req-line " ")]
+                              (when (>= (length parts) 2)
+                                (def @headers @{})
+                                (forever
+                                  (let [line (t-read-line t)]
+                                    (when (or (nil? line) (empty? line)
+                                        (= line "\r"))
+                                      (break nil))
+                                    (let [colon (string/find line ":")]
+                                      (when colon
+                                        (let [raw (slice line 0 colon)
+                                          name (keyword (string/lowercase (string/trim raw)))
+                                          value (string/trim (slice line
+                                            (+ colon 1)))]
+                                          (put headers name value))))))
+                                (let* [req {:method (get parts 0)
                                        :path (get parts 1)
                                        :headers (freeze headers)
                                        :body nil}
                                        conn (ws-upgrade req t)]
-                                       (let [[ok? _] (protect (handler conn))]
-                                         nil)))))))))))))
+                                  (let [[ok? _] (protect (handler conn))]
+                                    nil)))))))))))))
 
   ## ── Internal tests ──────────────────────────────────────────────────
 
@@ -445,7 +428,7 @@
     (let [key "dGhlIHNhbXBsZSBub25jZQ=="
           expected "NAwr/jm285Ly94AfF1mwjRaNwgQ="]
       (assert (= (compute-accept-key key) expected)
-              "accept key: RFC 6455 test vector"))
+        "accept key: RFC 6455 test vector"))
 
     ## ── Masking ──
     (let* [data (bytes 1 2 3 4 5)
@@ -467,7 +450,7 @@
            frame (encode-frame OP-BINARY payload)
            byte1 (get frame 1)]
       (assert (= (bit/and byte1 0x7F) 126)
-              "medium frame: extended length marker")
+        "medium frame: extended length marker")
       (let [ext-len (bit/or (bit/shl (get frame 2) 8) (get frame 3))]
         (assert (= ext-len 200) "medium frame: extended length value")))
     (let* [frame (encode-frame OP-TEXT (bytes 65) :fin false)

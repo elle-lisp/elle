@@ -33,7 +33,7 @@
 (assert (= (+ (+ -10 5) -3) (+ -10 (+ 5 -3))) "add_associative: mixed signs")
 (assert (= (+ (+ 0 0) 0) (+ 0 (+ 0 0))) "add_associative: all zeros")
 (assert (= (+ (+ 100 -100) 50) (+ 100 (+ -100 50)))
-        "add_associative: cancellation")
+  "add_associative: cancellation")
 
 # ============================================================================
 # mul_associative: (* (* a b) c) == (* a (* b c))
@@ -42,7 +42,7 @@
 (assert (= (* (* 2 3) 4) (* 2 (* 3 4))) "mul_associative: positive integers")
 (assert (= (* (* -1 5) -3) (* -1 (* 5 -3))) "mul_associative: mixed signs")
 (assert (= (* (* 0 7) 9) (* 0 (* 7 9)))
-        "mul_associative: zero in first position")
+  "mul_associative: zero in first position")
 (assert (= (* (* 10 -10) 5) (* 10 (* -10 5))) "mul_associative: cancellation")
 
 # ============================================================================
@@ -88,10 +88,10 @@
 
 (assert (= (* 2 (+ 3 4)) (+ (* 2 3) (* 2 4))) "distributive: positive integers")
 (assert (= (* -1 (+ 5 -3)) (+ (* -1 5) (* -1 -3)))
-        "distributive: negative multiplier")
+  "distributive: negative multiplier")
 (assert (= (* 0 (+ 7 9)) (+ (* 0 7) (* 0 9))) "distributive: zero multiplier")
 (assert (= (* 10 (+ -5 3)) (+ (* 10 -5) (* 10 3)))
-        "distributive: mixed signs in sum")
+  "distributive: mixed signs in sum")
 
 # ============================================================================
 # div_inverse_of_mul: (/ (* a b) b) == a (b != 0)
@@ -142,7 +142,7 @@
       b 4]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: -7 vs 4 - one is true")
   (assert (not (and (< a b) (< b a)))
-          "lt_antisymmetric: -7 vs 4 - not both true"))
+    "lt_antisymmetric: -7 vs 4 - not both true"))
 
 (let [a 0
       b 1]

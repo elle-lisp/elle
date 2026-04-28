@@ -21,9 +21,8 @@
   (defn byte->hex [b]
     (string (hex-chars (bit/shr b 4)) (hex-chars (bit/and b 15))))
   (defn hex-char? [c]
-    (or (and (>= c "0") (<= c "9"))
-        (and (>= c "a") (<= c "f"))
-        (and (>= c "A") (<= c "F"))))
+    (or (and (>= c "0") (<= c "9")) (and (>= c "a") (<= c "f"))
+      (and (>= c "A") (<= c "F"))))
   (defn hex->nibble [c]
     (if (and (>= c "0") (<= c "9"))
       (- (first (bytes c)) 48)
@@ -49,15 +48,8 @@
     (let [b (thaw (random-bytes 16))]
       (put b 6 (bit/or (bit/and (b 6) 15) 64))  ## Set variant: byte 8 = 10xxxxxx
       (put b 8 (bit/or (bit/and (b 8) 63) 128))
-      (string (bytes->hex b 0 4)
-              "-"
-              (bytes->hex b 4 2)
-              "-"
-              (bytes->hex b 6 2)
-              "-"
-              (bytes->hex b 8 2)
-              "-"
-              (bytes->hex b 10 6))))
+      (string (bytes->hex b 0 4) "-" (bytes->hex b 4 2) "-" (bytes->hex b 6 2)
+        "-" (bytes->hex b 8 2) "-" (bytes->hex b 10 6))))
   (defn parse-uuid [s]
     "Parse and normalize a UUID string to lowercase hyphenated form."
     (unless (string? s)
@@ -76,7 +68,7 @@
             (unless (hex-char? c)
               (error {:error :uuid-error
                       :message (string "uuid/parse: invalid hex char at position "
-                                       i)})))))
+                        i)})))))
       lower))
   (defn uuid-nil []
     "Return the nil UUID (all zeros)."
@@ -86,7 +78,7 @@
     (unless (string? uuid-str)
       (error {:error :type-error
               :message (string "uuid/version: expected string, got "
-                               (type-of uuid-str))}))
+                (type-of uuid-str))}))
     (let [parsed (parse-uuid uuid-str)]
       (let [v (hex->nibble (parsed 14))]
         (if (zero? v) nil v))))
@@ -119,13 +111,6 @@
            b (thaw (slice digest 0 16))]
       (put b 6 (bit/or (bit/and (b 6) 15) 80))  ## Set variant: byte 8 = 10xxxxxx
       (put b 8 (bit/or (bit/and (b 8) 63) 128))
-      (string (bytes->hex b 0 4)
-              "-"
-              (bytes->hex b 4 2)
-              "-"
-              (bytes->hex b 6 2)
-              "-"
-              (bytes->hex b 8 2)
-              "-"
-              (bytes->hex b 10 6))))
+      (string (bytes->hex b 0 4) "-" (bytes->hex b 4 2) "-" (bytes->hex b 6 2)
+        "-" (bytes->hex b 8 2) "-" (bytes->hex b 10 6))))
   {:v4 v4 :v5 v5 :parse parse-uuid :nil uuid-nil :version version})

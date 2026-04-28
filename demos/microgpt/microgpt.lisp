@@ -76,8 +76,8 @@
         (put opt:m i m-new)
         (put opt:v i v-new)
         (put p
-             :data (- (ag:v-data p)
-                      (* lr-current (/ m-hat (+ (sqrt v-hat) opt:eps))))))
+          :data (- (ag:v-data p)
+            (* lr-current (/ m-hat (+ (sqrt v-hat) opt:eps))))))
       (assign i (inc i)))))
 
 # ── Training ────────────────────────────────────────────────────
@@ -101,10 +101,8 @@
         (each p in params
           (put p :grad 0.0))
         (when (= (mod step 100) 0)
-          (println (string/format "step {:>4d} / {} | loss {:.4f}"
-                                  step
-                                  num-steps
-                                  (ag:v-data loss)))))
+          (println (string/format "step {:>4d} / {} | loss {:.4f}" step
+                     num-steps (ag:v-data loss)))))
       (assign step (inc step)))))
 
 # ── Inference ───────────────────────────────────────────────────
@@ -125,23 +123,20 @@
 (defn generate [model tokenizer n-samples temperature max-len]
   "Generate n-samples names using incremental forward pass."
   (repeat n-samples
-          (let* [chars @[]
-                 [kv-keys kv-values] (helpers:make-kv-caches gpt:*n-layer*)]
-            (def @token-id tokenizer:bos)
-            (def @pos 0)
-            (block :gen
-              (while (< pos max-len)
-                (let* [logits (gpt:gpt-forward-token token-id
-                         pos
-                         kv-keys
-                         kv-values
-                         model)
-                       next-tok (sample-token logits temperature)]
-                  (when (= next-tok tokenizer:bos) (break :gen))
-                  (assign token-id next-tok)
-                  (push chars (tokenizer:id->char next-tok))
-                  (assign pos (inc pos)))))
-            (println " " (string/join chars "")))))
+    (let* [chars @[]
+           [kv-keys kv-values] (helpers:make-kv-caches gpt:*n-layer*)]
+      (def @token-id tokenizer:bos)
+      (def @pos 0)
+      (block :gen
+        (while (< pos max-len)
+          (let* [logits (gpt:gpt-forward-token token-id pos kv-keys kv-values
+                   model)
+                 next-tok (sample-token logits temperature)]
+            (when (= next-tok tokenizer:bos) (break :gen))
+            (assign token-id next-tok)
+            (push chars (tokenizer:id->char next-tok))
+            (assign pos (inc pos)))))
+      (println " " (string/join chars "")))))
 
 # ── Gradient check ──────────────────────────────────────────────
 
@@ -153,10 +148,10 @@
     (ag:backward c)  # dc/da = b + 2a = 4 + 6 = 10, dc/db = a = 3
     (when (> (abs (- (ag:v-grad a) 10.0)) 0.000001)
       (error (string/format "grad check failed: da = {} (expected 10.0)"
-                            (ag:v-grad a))))
+               (ag:v-grad a))))
     (when (> (abs (- (ag:v-grad b) 3.0)) 0.000001)
       (error (string/format "grad check failed: db = {} (expected 3.0)"
-                            (ag:v-grad b))))
+               (ag:v-grad b))))
     (println "Gradient check passed.")))
 
 # ── Main ────────────────────────────────────────────────────────
@@ -175,7 +170,7 @@
         (let [start (clock/monotonic)]
           (train model tokenizer names 1000 0.01)
           (println (string/format "Training took {:.1f}s"
-                                  (- (clock/monotonic) start))))
+                     (- (clock/monotonic) start))))
         (println "\nGenerated names:")
         (generate model tokenizer 20 0.5 16)))))
 

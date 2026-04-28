@@ -150,15 +150,15 @@
 
 (assert (= (put-in {:a {:b 1}} [:a :b] 2) {:a {:b 2}}) "put-in nested struct")
 (assert (= (put-in {:a [10 20]} [:a 1] 99) {:a [10 99]})
-        "put-in struct then array")
+  "put-in struct then array")
 (assert (= (put-in [0 [1 2]] [1 0] 9) [0 [9 2]]) "put-in nested arrays")
 
 ## ── update-in ─────────────────────────────────────────────────────────
 
 (assert (= (update-in {:a {:b 5}} [:a :b] inc) {:a {:b 6}})
-        "update-in nested struct")
+  "update-in nested struct")
 (assert (= (update-in [10 [20 30]] [1 0] inc) [10 [21 30]])
-        "update-in nested arrays")
+  "update-in nested arrays")
 
 (def [ok? err] (protect (update-in {:a {:b 1}} [:a :x] inc)))
 (assert (not ok?) "update-in missing key errors")

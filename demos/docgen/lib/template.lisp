@@ -17,9 +17,7 @@
                   (append active-class)
                   (append "\">")
                   (append title)
-                  (append "</a></li>"))))
-          ""
-          nav-items)))
+                  (append "</a></li>")))) "" nav-items)))
 
 ## Generate the full HTML page
 (def @generate-page

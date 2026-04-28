@@ -20,9 +20,7 @@
 # test_let_determinism
 (assert (= (let [x 42
                  y -17]
-             (+ x y))
-           25)
-        "let: (let ((x 42) (y -17)) (+ x y)) == 25")
+             (+ x y)) 25) "let: (let ((x 42) (y -17)) (+ x y)) == 25")
 
 # ============================================================================
 # Lambda
@@ -39,9 +37,8 @@
 (assert (= (begin
              (def det-x 13)
              (def det-y -8)
-             (+ det-x det-y))
-           5)
-        "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
+             (+ det-x det-y)) 5)
+  "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
 
 # ============================================================================
 # Closure
@@ -49,9 +46,8 @@
 
 # test_closure_determinism
 (assert (= (let [captured 10]
-             ((fn (x) (+ x captured)) 32))
-           42)
-        "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
+             ((fn (x) (+ x captured)) 32)) 42)
+  "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
 
 # ============================================================================
 # Conditional

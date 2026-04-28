@@ -37,8 +37,7 @@
     (element :svg {:xmlns "http://www.w3.org/2000/svg"
                    :width (float w)
                    :height (float h)
-                   :viewBox (string "0 0 " w " " h)}
-             children))
+                   :viewBox (string "0 0 " w " " h)} children))
 
   # ── Shape elements ─────────────────────────────────────────────────
 
@@ -46,27 +45,20 @@
     (element :rect (merge-attrs {:x (float x)
                                  :y (float y)
                                  :width (float w)
-                                 :height (float h)}
-                                (opt-attrs opts))
-             []))
+                                 :height (float h)} (opt-attrs opts)) []))
   (defn circle [cx cy r & opts]
     (element :circle (merge-attrs {:cx (float cx) :cy (float cy) :r (float r)}
-                                  (opt-attrs opts))
-             []))
+        (opt-attrs opts)) []))
   (defn ellipse [cx cy rx ry & opts]
     (element :ellipse (merge-attrs {:cx (float cx)
                                     :cy (float cy)
                                     :rx (float rx)
-                                    :ry (float ry)}
-                                   (opt-attrs opts))
-             []))
+                                    :ry (float ry)} (opt-attrs opts)) []))
   (defn line [x1 y1 x2 y2 & opts]
     (element :line (merge-attrs {:x1 (float x1)
                                  :y1 (float y1)
                                  :x2 (float x2)
-                                 :y2 (float y2)}
-                                (opt-attrs opts))
-             []))
+                                 :y2 (float y2)} (opt-attrs opts)) []))
   (defn path [d & opts]
     (element :path (merge-attrs {:d d} (opt-attrs opts)) []))
 
@@ -76,12 +68,10 @@
     (string/join (map (fn [p] (string (p 0) "," (p 1))) pts) " "))
   (defn polyline [pts & opts]
     (element :polyline (merge-attrs {:points (points->string pts)}
-                                    (opt-attrs opts))
-             []))
+        (opt-attrs opts)) []))
   (defn polygon [pts & opts]
     (element :polygon (merge-attrs {:points (points->string pts)}
-                                   (opt-attrs opts))
-             []))
+        (opt-attrs opts)) []))
 
   # ── Text ───────────────────────────────────────────────────────────
 
@@ -102,9 +92,8 @@
   # ── Grouping and transforms ───────────────────────────────────────
 
   (defn group [& args]
-    (if (and (not (empty? args))
-             (struct? (first args))
-             (nil? (get (first args) :tag)))
+    (if (and (not (empty? args)) (struct? (first args))
+        (nil? (get (first args) :tag)))
       (element :g (first args) (slice args 1))
       (element :g {} args)))
   (defn translate [dx dy & children]
@@ -127,9 +116,7 @@
     (element :radialGradient (merge {:id id} attrs) stops))
   (defn stop [offset color & opts]
     (element :stop (merge-attrs {:offset (string (* offset 100.0) "%")
-                                 :stop-color color}
-                                (opt-attrs opts))
-             []))
+                                 :stop-color color} (opt-attrs opts)) []))
   (defn clip-path [id & children]
     (element :clipPath {:id id} children))
   (defn mask [id & children]
@@ -223,8 +210,8 @@
   ## If renderer plugin provided, add rendering functions
   (if renderer
     (merge exports
-           {:render (get renderer :render)
-            :render-raw (get renderer :render-raw)
-            :render-to-file (get renderer :render-to-file)
-            :dimensions (get renderer :dimensions)})
+      {:render (get renderer :render)
+       :render-raw (get renderer :render-raw)
+       :render-to-file (get renderer :render-to-file)
+       :dimensions (get renderer :dimensions)})
     exports))

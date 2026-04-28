@@ -60,26 +60,24 @@
 
 (defn server-defer [conn n latencies]
   "Mode C: defer wrapping the loop body.  2 fiber levels."
-  (defer nil
-         (var i 0)
-         (while (< i n)
-           (let [t0 (clock/monotonic)]
-             (port/read-line conn)
-             (port/write conn "ok\n")
-             (put latencies i (* (- (clock/monotonic) t0) 1000.0)))
-           (assign i (+ i 1)))))
+  (defer nil (var i 0)
+    (while (< i n)
+      (let [t0 (clock/monotonic)]
+        (port/read-line conn)
+        (port/write conn "ok\n")
+        (put latencies i (* (- (clock/monotonic) t0) 1000.0)))
+      (assign i (+ i 1)))))
 
 (defn server-defer-protect [conn n latencies]
   "Mode D: defer + protect (connection-loop shape).  3 fiber levels."
-  (defer (protect nil)
-         (var i 0)
-         (while (< i n)
-           (let [t0 (clock/monotonic)]
-             (let [[ok? _] (protect (port/read-line conn))]
-               (unless ok? (break)))
-             (protect (port/write conn "ok\n"))
-             (put latencies i (* (- (clock/monotonic) t0) 1000.0)))
-           (assign i (+ i 1)))))
+  (defer (protect nil) (var i 0)
+    (while (< i n)
+      (let [t0 (clock/monotonic)]
+        (let [[ok? _] (protect (port/read-line conn))]
+          (unless ok? (break)))
+        (protect (port/write conn "ok\n"))
+        (put latencies i (* (- (clock/monotonic) t0) 1000.0)))
+      (assign i (+ i 1)))))
 
 # ── Test runner ──────────────────────────────────────────────────────
 
@@ -108,13 +106,10 @@
     (let [sorted (sort (->list latencies))]
       (let [sorted-arr (->array sorted)]
         (println (string/format (string "  {:<35} p50={:.3f}"
-                                        "  p95={:.3f}  p99={:.3f}"
-                                        "  max={:.3f} ms")
-                                label
-                                (percentile sorted-arr 50)
-                                (percentile sorted-arr 95)
-                                (percentile sorted-arr 99)
-                                (get sorted-arr (- (length sorted-arr) 1))))))))
+                     "  p95={:.3f}  p99={:.3f}" "  max={:.3f} ms") label
+                   (percentile sorted-arr 50) (percentile sorted-arr 95)
+                   (percentile sorted-arr 99)
+                   (get sorted-arr (- (length sorted-arr) 1))))))))
 
 # ── Main ─────────────────────────────────────────────────────────────
 

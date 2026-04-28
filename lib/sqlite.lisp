@@ -112,7 +112,7 @@
       (bind-params db stmt params)
       (let* [ncols (c-col-count stmt)
              col-names (->array (map (fn [i] (ffi/string (c-col-name stmt i)))
-                                     (->list (range ncols))))
+                                  (->list (range ncols))))
              rows @[]]
         (while (= (c-step stmt) SQLITE_ROW)
           (push rows (read-row stmt ncols col-names)))

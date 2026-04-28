@@ -11,9 +11,7 @@
 
 (assert (= (block 1
              2
-             3)
-           3)
-        "block returns last")
+             3) 3) "block returns last")
 (assert (= (block) nil) "block empty returns nil")
 (assert (= (block 42) 42) "block single value")
 
@@ -24,9 +22,7 @@
 (assert (= (block :done
              1
              2
-             3)
-           3)
-        "named block returns last")
+             3) 3) "named block returns last")
 (assert (= (block :done) nil) "named block empty body")
 
 # ============================================================================
@@ -74,9 +70,9 @@
   (assert (= result 2) "break inner continues outer"))
 
 (let [result (+ 1
-                (block :inner
-                  (break :inner 10)
-                  99))]
+        (block :inner
+          (break :inner 10)
+          99))]
   (assert (= result 11) "break inner value used by outer"))
 
 # ============================================================================
@@ -110,9 +106,7 @@
               (def @x 1)
               (block (def @x 2)
                 x)
-              x))
-           1)
-        "block creates scope")
+              x)) 1) "block creates scope")
 
 # ============================================================================
 # Multiple breaks

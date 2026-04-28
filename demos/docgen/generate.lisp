@@ -44,11 +44,8 @@
         (let [result (thaw "")]
           (each bit in (set->array bits)
             (push result
-                  (string "<span class=\"signal-badge "
-                          (signal-class bit)
-                          "\">"
-                          (string bit)
-                          "</span>")))
+              (string "<span class=\"signal-badge " (signal-class bit) "\">"
+                (string bit) "</span>")))
           (freeze result))))))
 
 # ── Navigation ─────────────────────────────────────────────────────
@@ -59,20 +56,14 @@
   (each item in nav-items
     (if (get item :section)
       (push html
-            (string "      <li class=\"nav-section\">"
-                    (html-escape (get item :section))
-                    "</li>\n"))
+        (string "      <li class=\"nav-section\">"
+          (html-escape (get item :section)) "</li>\n"))
       (let* [slug (get item :slug)
              title (get item :title)
              active (if (= slug current-slug) " active" "")]
         (push html
-              (string "      <li><a href=\""
-                      slug
-                      ".html\" class=\"nav-link"
-                      active
-                      "\">"
-                      (html-escape title)
-                      "</a></li>\n")))))
+          (string "      <li><a href=\"" slug ".html\" class=\"nav-link" active
+            "\">" (html-escape title) "</a></li>\n")))))
   (freeze html))
 
 # ── Page template ──────────────────────────────────────────────────
@@ -82,33 +73,17 @@
   [site-title page-title page-desc current-slug nav-items body]
   "Generate a complete HTML page."
   (string "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
-          "  <meta charset=\"UTF-8\">\n"
-          "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-          "  <title>"
-          (html-escape page-title)
-          " - "
-          (html-escape site-title)
-          "</title>\n"
-          "  <meta name=\"description\" content=\""
-          (html-escape page-desc)
-          "\">\n"
-          "  <link rel=\"stylesheet\" href=\"style.css\">\n"
-          "</head>\n<body>\n"
-          "  <nav class=\"sidebar\">\n"
-          "    <div class=\"site-title\">"
-          (html-escape site-title)
-          "</div>\n"
-          "    <ul>\n"
-          (render-nav nav-items current-slug)
-          "    </ul>\n"
-          "  </nav>\n"
-          "  <main class=\"content\">\n"
-          "    <h1>"
-          (html-escape page-title)
-          "</h1>\n"
-          body
-          "  </main>\n"
-          "</body>\n</html>\n"))
+    "  <meta charset=\"UTF-8\">\n"
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+    "  <title>" (html-escape page-title) " - " (html-escape site-title)
+    "</title>\n" "  <meta name=\"description\" content=\""
+    (html-escape page-desc) "\">\n"
+    "  <link rel=\"stylesheet\" href=\"style.css\">\n" "</head>\n<body>\n"
+    "  <nav class=\"sidebar\">\n" "    <div class=\"site-title\">"
+    (html-escape site-title) "</div>\n" "    <ul>\n"
+    (render-nav nav-items current-slug) "    </ul>\n" "  </nav>\n"
+    "  <main class=\"content\">\n" "    <h1>" (html-escape page-title) "</h1>\n"
+    body "  </main>\n" "</body>\n</html>\n"))
 
 # ── Link rewriting ─────────────────────────────────────────────────
 
@@ -139,8 +114,7 @@
                                   md-path
                                   (cond
                                     (string/starts-with? md-path "../") (slice md-path
-                                    3
-                                    (length md-path))
+                                      3 (length md-path))
                                     (string-contains? md-path "/") md-path
                                     true (string source-dir "/" md-path)))
                        slug (or (get slug-map resolved) resolved)]
@@ -176,25 +150,8 @@
     true cat))
 
 (def @category-order
-  [""
-   "math"
-   "string"
-   "array"
-   "struct"
-   "json"
-   "file"
-   "fn"
-   "fiber"
-   "coro"
-   "clock"
-   "time"
-   "meta"
-   "debug"
-   "bit"
-   "os"
-   "pkg"
-   "module"
-   "ffi"])
+  ["" "math" "string" "array" "struct" "json" "file" "fn" "fiber" "coro" "clock"
+   "time" "meta" "debug" "bit" "os" "pkg" "module" "ffi"])
 
 (defn generate-primitives-html []
   "Generate HTML for the primitives API page."
@@ -215,7 +172,7 @@
         (when (and (not (nil? metas)) (not (empty? metas)))
           (push html (string "<h2>" (category-display-name cat) "</h2>\n"))
           (push html
-                "<table><thead><tr><th>Function</th><th>Description</th><th>Example</th></tr></thead><tbody>\n")
+            "<table><thead><tr><th>Function</th><th>Description</th><th>Example</th></tr></thead><tbody>\n")
           (each meta in metas
             (let* [name (get meta :name)
                    params (get meta :params)
@@ -229,15 +186,9 @@
                           (string doc " (alias: " (string/join aliases ", ") ")"))
                    example (get meta :example)]
               (push html
-                    (string "<tr><td><code>"
-                            (html-escape sig-str)
-                            "</code></td>"
-                            "<td>"
-                            (html-escape desc)
-                            "</td>"
-                            "<td><code>"
-                            (html-escape (or example ""))
-                            "</code></td></tr>\n"))))
+                (string "<tr><td><code>" (html-escape sig-str) "</code></td>"
+                  "<td>" (html-escape desc) "</td>" "<td><code>"
+                  (html-escape (or example "")) "</code></td></tr>\n"))))
           (push html "</tbody></table>\n"))))
 
     # Handle any categories not in the preferred order
@@ -245,7 +196,7 @@
       (when (not (any? (fn [c] (= c cat)) category-order))
         (push html (string "<h2>" (category-display-name cat) "</h2>\n"))
         (push html
-              "<table><thead><tr><th>Function</th><th>Description</th><th>Example</th></tr></thead><tbody>\n")
+          "<table><thead><tr><th>Function</th><th>Description</th><th>Example</th></tr></thead><tbody>\n")
         (each meta in metas
           (let* [name (get meta :name)
                  params (get meta :params)
@@ -255,15 +206,9 @@
                  doc (get meta :doc)
                  example (get meta :example)]
             (push html
-                  (string "<tr><td><code>"
-                          (html-escape sig-str)
-                          "</code></td>"
-                          "<td>"
-                          (html-escape doc)
-                          "</td>"
-                          "<td><code>"
-                          (html-escape (or example ""))
-                          "</code></td></tr>\n"))))
+              (string "<tr><td><code>" (html-escape sig-str) "</code></td>"
+                "<td>" (html-escape doc) "</td>" "<td><code>"
+                (html-escape (or example "")) "</code></td></tr>\n"))))
         (push html "</tbody></table>\n")))
     (freeze html)))
 
@@ -274,9 +219,9 @@
   (let [source (slurp "prelude.lisp")]
     (def @html (thaw ""))
     (push html
-          "<p>Macros loaded automatically before user code. These expand at compile time.</p>\n")
+      "<p>Macros loaded automatically before user code. These expand at compile time.</p>\n")
     (push html
-          "<table><thead><tr><th>Macro</th><th>Description</th></tr></thead><tbody>\n")
+      "<table><thead><tr><th>Macro</th><th>Description</th></tr></thead><tbody>\n")
     (let [lines (string/split source "\n")]
       (def @comment-lines @[])
       (def @i 0)
@@ -292,19 +237,12 @@
                      name (get parts 0)
                      desc (string/join (freeze comment-lines) " ")
                      line-num (+ i 1)
-                     source-link (string github-base
-                     "/prelude.lisp#L"
-                     (string line-num))]
+                     source-link (string github-base "/prelude.lisp#L"
+                       (string line-num))]
                 (push html
-                      (string "<tr><td><code>"
-                              (html-escape name)
-                              "</code>"
-                              " <a class=\"source-link\" href=\""
-                              source-link
-                              "\">src</a></td>"
-                              "<td>"
-                              (format-inline desc)
-                              "</td></tr>\n"))
+                  (string "<tr><td><code>" (html-escape name) "</code>"
+                    " <a class=\"source-link\" href=\"" source-link
+                    "\">src</a></td>" "<td>" (format-inline desc) "</td></tr>\n"))
                 (assign comment-lines @[]))
             true
               (when (not (= (string/trim line) "")) (assign comment-lines @[]))))
@@ -367,7 +305,7 @@
           (string/starts-with? line "(def ") (assign comment-lines @[])
           true
             (when (and (not (= (string/trim line) ""))
-                       (not (string/starts-with? line "## ")))
+                (not (string/starts-with? line "## ")))
               (assign comment-lines @[]))))
       (assign i (+ i 1)))
 
@@ -378,34 +316,28 @@
           (push html (string "<h2>" (html-escape section-name) "</h2>\n"))
           (each fn-name in (freeze fns)
             (let* [sig-result (protect (compile/signal analysis
-                                       (keyword fn-name)))
+                                         (keyword fn-name)))
                    sig (when (get sig-result 0) (get sig-result 1))
                    desc (or (get fn-comments fn-name) "")
                    line-num (get fn-lines fn-name)
                    source-link (when line-num
-                                 (string github-base
-                                 "/stdlib.lisp#L"
-                                 (string line-num)))]
+                                 (string github-base "/stdlib.lisp#L"
+                                   (string line-num)))]
               (push html "<div class=\"api-entry\">")
               (push html
-                    (string "<code class=\"api-signature\">"
-                            (html-escape fn-name)
-                            "</code>"))
+                (string "<code class=\"api-signature\">" (html-escape fn-name)
+                  "</code>"))
               (when source-link
                 (push html
-                      (string " <a class=\"source-link\" href=\""
-                              source-link
-                              "\">src</a>")))
+                  (string " <a class=\"source-link\" href=\"" source-link
+                    "\">src</a>")))
               (when sig
                 (push html
-                      (string "\n<div class=\"api-signals\">"
-                              (render-signal-badges sig)
-                              "</div>")))
+                  (string "\n<div class=\"api-signals\">"
+                    (render-signal-badges sig) "</div>")))
               (when (not (= desc ""))
                 (push html
-                      (string "<p class=\"api-desc\">"
-                              (format-inline desc)
-                              "</p>")))
+                  (string "<p class=\"api-desc\">" (format-inline desc) "</p>")))
               (push html "</div>\n"))))))
     (freeze html)))
 
@@ -414,24 +346,18 @@
 (defn generate-libraries-html []
   "Generate HTML for lib/*.lisp modules."
   (let* [result (subprocess/system "find"
-                                   ["lib"
-                                    "-maxdepth"
-                                    "1"
-                                    "-name"
-                                    "*.lisp"
-                                    "-type"
-                                    "f"])
+           ["lib" "-maxdepth" "1" "-name" "*.lisp" "-type" "f"])
          files (filter (fn [f] (not (= f ""))) (string/split result:stdout "\n"))]
     (def @html (thaw ""))
     (push html
-          "<p>Reusable libraries in <code>lib/</code>. Each exports a struct of functions.</p>\n")
+      "<p>Reusable libraries in <code>lib/</code>. Each exports a struct of functions.</p>\n")
     (each file in (sort-with (fn [a b] (if (< a b) -1 (if (> a b) 1 0))) files)
       (let* [source (slurp file)
              lines (string/split source "\n")  # Extract first ## comment as description
              desc (let [@first-comment nil]
                     (each line in lines
                       (when (and (nil? first-comment)
-                                 (string/starts-with? line "## "))
+                          (string/starts-with? line "## "))
                         (assign first-comment (slice line 3 (length line)))))
                     first-comment)  # Extract module name from filename
              basename (let* [parts (string/split file "/")
@@ -439,13 +365,9 @@
                         (slice fname 0 (- (length fname) 5)))  # Try to analyze
              analysis-result (protect (compile/analyze source {:file file}))]
         (push html
-              (string "<h2>"
-                      (html-escape basename)
-                      " <a class=\"source-link\" href=\""
-                      github-base
-                      "/"
-                      file
-                      "\">source</a></h2>\n"))
+          (string "<h2>" (html-escape basename)
+            " <a class=\"source-link\" href=\"" github-base "/" file
+            "\">source</a></h2>\n"))
         (when desc
           (push html (string "<p>" (format-inline desc) "</p>\n")))
 
@@ -457,35 +379,25 @@
               (let* [syms (get syms-result 1)
                      fn-syms (filter (fn [s]
                                        (and (struct? s)
-                                       (= (get s :kind) :function)))
-                                     syms)]
+                                         (= (get s :kind) :function))) syms)]
                 (when (and (array? fn-syms) (not (empty? fn-syms)))
                   (push html
-                        "<table><thead><tr><th>Export</th><th>Signals</th></tr></thead><tbody>\n")
+                    "<table><thead><tr><th>Export</th><th>Signals</th></tr></thead><tbody>\n")
                   (each sym in fn-syms
                     (let* [name (get sym :name)
                            line-num (get sym :line)
                            sig-result (protect (compile/signal analysis
-                           (keyword name)))
+                             (keyword name)))
                            badges (if (get sig-result 0)
                                     (render-signal-badges (get sig-result 1))
                                     "")]
                       (push html
-                            (string "<tr><td><code>"
-                                    (html-escape name)
-                                    "</code>"
-                                    (if line-num
-                                      (string " <a class=\"source-link\" href=\""
-                                      github-base
-                                      "/"
-                                      file
-                                      "#L"
-                                      (string line-num)
-                                      "\">src</a>")
-                                      "")
-                                    "</td><td>"
-                                    badges
-                                    "</td></tr>\n"))))
+                        (string "<tr><td><code>" (html-escape name) "</code>"
+                          (if line-num
+                            (string " <a class=\"source-link\" href=\""
+                              github-base "/" file "#L" (string line-num)
+                              "\">src</a>")
+                            "") "</td><td>" badges "</td></tr>\n"))))
                   (push html "</tbody></table>\n"))))))))
     (freeze html)))
 
@@ -494,19 +406,13 @@
 (defn generate-plugins-html []
   "Generate HTML from plugin README.md files."
   (let* [result (subprocess/system "find"
-                                   ["plugins"
-                                    "-maxdepth"
-                                    "2"
-                                    "-name"
-                                    "README.md"
-                                    "-type"
-                                    "f"])
+           ["plugins" "-maxdepth" "2" "-name" "README.md" "-type" "f"])
          files (filter (fn [f]
                          (and (not (= f "")) (not (= f "plugins/README.md"))))
-                       (string/split result:stdout "\n"))]
+           (string/split result:stdout "\n"))]
     (def @html (thaw ""))
     (push html
-          "<p>Available plugins. Each provides primitives accessible after import.</p>\n")
+      "<p>Available plugins. Each provides primitives accessible after import.</p>\n")
     (each file in (sort-with (fn [a b] (if (< a b) -1 (if (> a b) 1 0))) files)
       (let* [source (slurp file)
              parsed (parse-markdown source)  # Extract plugin dir: plugins/name/README.md → plugins/name
@@ -514,18 +420,10 @@
                                dir-name (get parts 1)]
                           (string "plugins/" dir-name))]
         (push html
-              (string "<h2>"
-                      (html-escape parsed:title)
-                      " <a class=\"source-link\" href=\""
-                      github-base
-                      "/"
-                      plugin-dir
-                      "\">source</a>"
-                      " <a class=\"source-link\" href=\""
-                      github-base
-                      "/"
-                      file
-                      "\">README</a></h2>\n"))
+          (string "<h2>" (html-escape parsed:title)
+            " <a class=\"source-link\" href=\"" github-base "/" plugin-dir
+            "\">source</a>" " <a class=\"source-link\" href=\"" github-base "/"
+            file "\">README</a></h2>\n"))
         (push html parsed:body)
         (push html "<hr>\n")))
     (freeze html)))
@@ -556,11 +454,11 @@
        parsed (parse-markdown (slurp home-file))]
   (push nav-items {:slug "index" :title "Home"})
   (push all-pages
-        {:slug "index"
-         :title parsed:title
-         :description parsed:description
-         :body parsed:body
-         :source-dir ""})
+    {:slug "index"
+     :title parsed:title
+     :description parsed:description
+     :body parsed:body
+     :source-dir ""})
   (put slug-map "README" "index"))
 
 # Process each section
@@ -582,11 +480,11 @@
                        true page-name)]
           (push nav-items {:slug slug :title title})
           (push all-pages
-                {:slug slug
-                 :title title
-                 :description (string title " API reference")
-                 :api page-name
-                 :source-dir ""})))
+            {:slug slug
+             :title title
+             :description (string title " API reference")
+             :api page-name
+             :source-dir ""})))
 
       # Markdown section — read from docs/
       (each page-name in pages
@@ -603,11 +501,11 @@
             (let [parsed (parse-markdown (get read-result 1))]
               (push nav-items {:slug slug :title parsed:title})
               (push all-pages
-                    {:slug slug
-                     :title parsed:title
-                     :description parsed:description
-                     :body parsed:body
-                     :source-dir source-dir})  # Map relative paths to slugs for link rewriting
+                {:slug slug
+                 :title parsed:title
+                 :description parsed:description
+                 :body parsed:body
+                 :source-dir source-dir})  # Map relative paths to slugs for link rewriting
               (let [rel-path (if dir (string dir "/" page-name) page-name)]
                 (put slug-map rel-path slug)
                 (put slug-map (string rel-path ".md") slug)
@@ -633,12 +531,8 @@
           (= api-name "plugins") (generate-plugins-html)
           true "")  # Markdown content with link rewriting
         (rewrite-md-links (get page :body) source-dir frozen-slug-map)))
-    (let [full-html (generate-page site-title
-                                   title
-                                   desc
-                                   slug
-                                   frozen-nav
-                                   body-html)]
+    (let [full-html (generate-page site-title title desc slug frozen-nav
+            body-html)]
       (spit (path/join output-dir (string slug ".html")) full-html))
     (println "Generating: " slug ".html...")))
 

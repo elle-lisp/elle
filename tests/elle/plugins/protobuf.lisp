@@ -110,7 +110,7 @@ message Team {
 (assert (= (get f-tags :label) :repeated) "tags field label is repeated")
 (assert (= (get f-status :type) :enum) "status field type is enum")
 (assert (= (get f-scores :type) :message)
-        "scores field type is message (map entry)")
+  "scores field type is message (map entry)")
 
 (assert (= (get f-name :number) 1) "name field number is 1")
 (assert (= (get f-age :number) 2) "age field number is 2")
@@ -184,12 +184,12 @@ message Team {
 (assert (= (get alice-decoded :age) 30) "Person round-trip: age")
 
 (assert (= (length (get alice-decoded :tags)) 2)
-        "Person round-trip: tags length")
+  "Person round-trip: tags length")
 
 (assert (= (get (get alice-decoded :tags) 0) "dev") "Person round-trip: tags[0]")
 
 (assert (= (get (get alice-decoded :tags) 1) "lisp")
-        "Person round-trip: tags[1]")
+  "Person round-trip: tags[1]")
 
 ## ── Round-trip: Team with nested Persons ────────────────────────────
 
@@ -210,15 +210,15 @@ message Team {
 (assert (= (length members) 3) "Team round-trip: 3 members")
 
 (assert (= (get (get members 0) :name) "Alice")
-        "Team round-trip: member[0].name")
+  "Team round-trip: member[0].name")
 
 (assert (= (get (get members 1) :name) "Bob") "Team round-trip: member[1].name")
 
 (assert (= (get (get members 2) :name) "Carol")
-        "Team round-trip: member[2].name")
+  "Team round-trip: member[2].name")
 
 (assert (= (length (get (get members 2) :tags)) 2)
-        "Team round-trip: member[2].tags length")
+  "Team round-trip: member[2].tags length")
 
 ## ── Enum fields round-trip as keywords ──────────────────────────────
 
@@ -227,14 +227,14 @@ message Team {
   (decode-fn pool "Person" (encode-fn pool "Person" person-ok)))
 
 (assert (= (get person-ok-decoded :status) :OK)
-        "enum field :OK round-trips as keyword")
+  "enum field :OK round-trips as keyword")
 
 (def person-error {:name "Eve" :status :ERROR})
 (def person-error-decoded
   (decode-fn pool "Person" (encode-fn pool "Person" person-error)))
 
 (assert (= (get person-error-decoded :status) :ERROR)
-        "enum field :ERROR round-trips as keyword")
+  "enum field :ERROR round-trips as keyword")
 
 ## ── Map fields round-trip correctly ─────────────────────────────────
 
@@ -257,24 +257,24 @@ message Team {
 (let [[ok? err] (protect ((fn () (encode-fn pool "NoSuchMessage" {:x 1}))))]
   (assert (not ok?) "encode with unknown message name gives protobuf-error")
   (assert (= (get err :error) :protobuf-error)
-          "encode with unknown message name gives protobuf-error"))
+    "encode with unknown message name gives protobuf-error"))
 
 (let [[ok? err] (protect ((fn () (decode-fn pool "NoSuchMessage" (bytes 0)))))]
   (assert (not ok?) "decode with unknown message name gives protobuf-error")
   (assert (= (get err :error) :protobuf-error)
-          "decode with unknown message name gives protobuf-error"))
+    "decode with unknown message name gives protobuf-error"))
 
 (let [[ok? err] (protect ((fn () (fields-fn pool "NoSuchMessage"))))]
   (assert (not ok?) "fields with unknown message name gives protobuf-error")
   (assert (= (get err :error) :protobuf-error)
-          "fields with unknown message name gives protobuf-error"))
+    "fields with unknown message name gives protobuf-error"))
 
 ## ── Error: wrong types ───────────────────────────────────────────────
 
 (let [[ok? err] (protect ((fn () (schema-fn 42))))]
   (assert (not ok?) "protobuf/schema non-string gives type-error")
   (assert (= (get err :error) :type-error)
-          "protobuf/schema non-string gives type-error"))
+    "protobuf/schema non-string gives type-error"))
 
 (let [[ok? err] (protect ((fn () (encode-fn pool "Person" "not a struct"))))]
   (assert (not ok?) "encode non-struct gives type-error")
@@ -287,4 +287,4 @@ message Team {
 (let [[ok? err] (protect ((fn () (messages-fn 42))))]
   (assert (not ok?) "messages with non-pool gives type-error")
   (assert (= (get err :error) :type-error)
-          "messages with non-pool gives type-error"))
+    "messages with non-pool gives type-error"))

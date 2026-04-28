@@ -72,10 +72,8 @@
     (triple buf subj (pred "signal-silent") (lit (string (get sig :silent))))
     (triple buf subj (pred "signal-yields") (lit (string (get sig :yields))))
     (triple buf subj (pred "signal-io") (lit (string (get sig :io))))
-    (triple buf
-            subj
-            (pred "jit-eligible")
-            (lit (string (get sig :jit-eligible))))
+    (triple buf subj (pred "jit-eligible")
+      (lit (string (get sig :jit-eligible))))
     (each bit in (get sig :bits)
       (triple buf subj (pred "signal-bit") (lit (string bit)))))
 
@@ -140,22 +138,14 @@
         # Composition
         (def @comp (portrait-lib:composition sig caps))
         (triple buf subj (pred "stateless") (lit (string (get comp :stateless))))
-        (triple buf
-                subj
-                (pred "retry-safe")
-                (lit (string (get comp :retry-safe))))
-        (triple buf
-                subj
-                (pred "parallelizable")
-                (lit (string (get comp :parallelizable))))
-        (triple buf
-                subj
-                (pred "memoizable")
-                (lit (string (get comp :memoizable))))
-        (triple buf
-                subj
-                (pred "timeout-safe")
-                (lit (string (get comp :timeout-safe)))))))
+        (triple buf subj (pred "retry-safe")
+          (lit (string (get comp :retry-safe))))
+        (triple buf subj (pred "parallelizable")
+          (lit (string (get comp :parallelizable))))
+        (triple buf subj (pred "memoizable")
+          (lit (string (get comp :memoizable))))
+        (triple buf subj (pred "timeout-safe")
+          (lit (string (get comp :timeout-safe)))))))
 
   # ── File triples ───────────────────────────────────────────────────────
 

@@ -45,8 +45,7 @@
         (b:gtk-widget-set-margin-top ptr m)
         (b:gtk-widget-set-margin-bottom ptr m)))
     (when (or props:width props:height)
-      (b:gtk-widget-set-size-request ptr
-        (or props:width -1)
+      (b:gtk-widget-set-size-request ptr (or props:width -1)
         (or props:height -1))))
   (defn make-handle (win-ptr)
     "Create a mutable window handle with standard fields."
@@ -86,10 +85,8 @@
       (when props:value (b:gtk-progress-bar-set-fraction ptr props:value))
       (make-widget win-handle props ptr :progress-bar)))
   (defn make-separator (win-handle props)
-    (make-widget win-handle
-                 props
-                 (b:gtk-separator-new b:GTK_ORIENTATION_HORIZONTAL)
-                 :separator))
+    (make-widget win-handle props
+      (b:gtk-separator-new b:GTK_ORIENTATION_HORIZONTAL) :separator))
   (defn make-spacer (win-handle props)
     (let [ptr (b:gtk-label-new "")]
       (b:gtk-widget-set-hexpand ptr 1)
@@ -105,24 +102,20 @@
   (defn on-clicked (win-handle ptr id)
     "Wire a 'clicked' signal that emits {:type :click :id id}."
     (let [cb (ffi/callback sig-clicked
-                           (fn (widget data)
-                             (emit win-handle {:type :click :id id})))]
+            (fn (widget data) (emit win-handle {:type :click :id id})))]
       (connect win-handle ptr "clicked" cb)))
   (defn on-toggled (win-handle ptr id type getter)
     "Wire a 'toggled' signal that emits {:type type :id id :active bool}."
     (let [cb (ffi/callback sig-clicked
-                           (fn (widget data)
-                             (emit win-handle
-                                   {:type type
-                                    :id id
-                                    :active (nonzero? (getter ptr))})))]
+            (fn (widget data)
+              (emit win-handle
+                {:type type :id id :active (nonzero? (getter ptr))})))]
       (connect win-handle ptr "toggled" cb)))
   (defn on-changed (win-handle ptr id type getter signal)
     "Wire a change signal that emits {:type type :id id :value value}."
     (let [cb (ffi/callback sig-clicked
-                           (fn (widget data)
-                             (emit win-handle
-                                   {:type type :id id :value (getter ptr)})))]
+            (fn (widget data)
+              (emit win-handle {:type type :id id :value (getter ptr)})))]
       (connect win-handle ptr signal cb)))
   (defn make-button (win-handle props text)
     (let [ptr (b:gtk-button-new-with-label (or text ""))]
@@ -139,11 +132,8 @@
     (let [ptr (b:gtk-entry-new)]
       (when props:hint (b:gtk-entry-set-placeholder-text ptr props:hint))
       (when props:value (b:gtk-editable-set-text ptr props:value))
-      (on-changed win-handle
-                  ptr
-                  props:id
-                  :text (fn (p) (ffi/string (b:gtk-editable-get-text p)))
-                  "changed")
+      (on-changed win-handle ptr props:id
+        :text (fn (p) (ffi/string (b:gtk-editable-get-text p))) "changed")
       (make-widget win-handle props ptr :text-input)))
   (defn make-text-edit (win-handle props)
     (let [ptr (b:gtk-text-view-new)]
@@ -161,12 +151,9 @@
     (let* [ptr (b:gtk-switch-new)
            id props:id
            cb (ffi/callback sig-state-set
-                            (fn (widget state data)
-                              (emit win-handle
-                                    {:type :switch
-                                     :id id
-                                     :active (nonzero? state)})
-                              0))]
+             (fn (widget state data)
+               (emit win-handle {:type :switch :id id :active (nonzero? state)})
+               0))]
       (when props:active (b:gtk-switch-set-active ptr 1))
       (connect win-handle ptr "state-set" cb)
       (make-widget win-handle props ptr :switch)))
@@ -174,16 +161,11 @@
     (let* [mn (or props:min 0.0)
            mx (or props:max 100.0)
            step (or props:step 1.0)
-           ptr (b:gtk-scale-new-with-range b:GTK_ORIENTATION_HORIZONTAL
-             mn
-             mx
+           ptr (b:gtk-scale-new-with-range b:GTK_ORIENTATION_HORIZONTAL mn mx
              step)]
       (when props:value (b:gtk-range-set-value ptr props:value))
-      (on-changed win-handle
-                  ptr
-                  props:id
-                  :slider b:gtk-range-get-value
-                  "value-changed")
+      (on-changed win-handle ptr props:id :slider b:gtk-range-get-value
+        "value-changed")
       (make-widget win-handle props ptr :slider)))
   (defn make-spin-button (win-handle props)
     (let* [mn (or props:min 0.0)
@@ -191,11 +173,8 @@
            step (or props:step 1.0)
            ptr (b:gtk-spin-button-new-with-range mn mx step)]
       (when props:value (b:gtk-spin-button-set-value ptr props:value))
-      (on-changed win-handle
-                  ptr
-                  props:id
-                  :spin b:gtk-spin-button-get-value
-                  "value-changed")
+      (on-changed win-handle ptr props:id :spin b:gtk-spin-button-get-value
+        "value-changed")
       (make-widget win-handle props ptr :spin-button)))
   (defn make-combo-box (win-handle props items)
     (let* [id props:id
@@ -209,29 +188,28 @@
            ptr (b:gtk-drop-down-new model nil)]
       (ffi/free ptrs)
       (let [cb (ffi/callback sig-clicked
-                             (fn (widget data)
-                               (let [idx (b:gtk-drop-down-get-selected ptr)]
-                                 (emit win-handle
-                                       {:type :combo
-                                        :id id
-                                        :value (if (< idx count) (items idx) nil)}))))]
+              (fn (widget data)
+                (let [idx (b:gtk-drop-down-get-selected ptr)]
+                  (emit win-handle
+                    {:type :combo
+                     :id id
+                     :value (if (< idx count) (items idx) nil)}))))]
         (connect win-handle ptr "notify::selected" cb))
       (make-widget win-handle props ptr :combo-box)))
   (defn make-search-entry (win-handle props)
     (let* [ptr (b:gtk-search-entry-new)
            cb (ffi/callback sig-clicked
-                            (fn (widget data)
-                              (emit win-handle
-                                    {:type :search
-                                     :id props:id
-                                     :value (ffi/string (b:gtk-editable-get-text ptr))})))]
+             (fn (widget data)
+               (emit win-handle
+                 {:type :search
+                  :id props:id
+                  :value (ffi/string (b:gtk-editable-get-text ptr))})))]
       (connect win-handle ptr "search-changed" cb)
       (make-widget win-handle props ptr :search-entry)))
   (defn make-calendar (win-handle props)
     (let* [ptr (b:gtk-calendar-new)
            cb (ffi/callback sig-clicked
-                            (fn (widget data)
-                              (emit win-handle {:type :calendar :id props:id})))]
+             (fn (widget data) (emit win-handle {:type :calendar :id props:id})))]
       (connect win-handle ptr "day-selected" cb)
       (make-widget win-handle props ptr :calendar)))
 
@@ -264,13 +242,11 @@
           id props:id]
       (when id
         (let [cb (ffi/callback sig-clicked
-                               (fn (widget data)
-                                 (let [name (b:gtk-stack-get-visible-child-name ptr)]
-                                   (unless (null? name)
-                                     (emit win-handle
-                                     {:type :stack-changed
-                                      :id id
-                                      :value (ffi/string name)})))))]
+                (fn (widget data)
+                  (let [name (b:gtk-stack-get-visible-child-name ptr)]
+                    (unless (null? name)
+                      (emit win-handle
+                        {:type :stack-changed :id id :value (ffi/string name)})))))]
           (connect win-handle ptr "notify::visible-child-name" cb)))
       (make-widget win-handle props ptr :stack)))
   (defn make-notebook (win-handle props)
@@ -278,11 +254,11 @@
           id props:id]
       (when id
         (let [cb (ffi/callback sig-clicked
-                               (fn (widget data)
-                                 (emit win-handle
-                                       {:type :tab-changed
-                                        :id id
-                                        :value (b:gtk-notebook-get-current-page ptr)})))]
+                (fn (widget data)
+                  (emit win-handle
+                    {:type :tab-changed
+                     :id id
+                     :value (b:gtk-notebook-get-current-page ptr)})))]
           (connect win-handle ptr "switch-page" cb)))
       (make-widget win-handle props ptr :notebook)))
   (defn make-paned (win-handle props orientation)
@@ -320,7 +296,7 @@
     "Add a click controller. handler: (fn [gesture n x y])."
     (let* [click (b:gtk-gesture-click-new)
            cb (ffi/callback sig-click-pressed
-                            (fn (gesture n x y data) (handler gesture n x y)))]
+             (fn (gesture n x y data) (handler gesture n x y)))]
       (b:gtk-gesture-single-set-button click 0)
       (push win-handle:callbacks cb)
       (b:g-signal-connect-data click "pressed" cb nil nil 0)
@@ -336,8 +312,7 @@
     "Add a key controller. handler: (fn [keyval keycode state]) → int."
     (let* [keys (b:gtk-event-controller-key-new)
            cb (ffi/callback sig-key-pressed
-                            (fn (ctrl keyval keycode state data)
-                              (handler keyval keycode state)))]
+             (fn (ctrl keyval keycode state data) (handler keyval keycode state)))]
       (push win-handle:callbacks cb)
       (b:g-signal-connect-data keys "key-pressed" cb nil nil 0)
       (b:gtk-widget-add-controller ptr keys)))

@@ -25,9 +25,7 @@
                      :restart :temporary
                      :start (fn []
                               (process:send me :started)
-                              (process:recv))}]
-                     :name
-                     :log-sup
+                              (process:recv))}] :name :log-sup
                      :logger (fn [event] (process:send me [:log event])))
 
                    # Wait for child start
@@ -39,9 +37,9 @@
                        [:log event]
                          (begin
                            (assert (= (get event :event) :child-started)
-                                   "logger: got child-started event")
+                             "logger: got child-started event")
                            (assert (= (get event :id) :logged-child)
-                                   "logger: correct child id"))
+                             "logger: correct child id"))
                        _ (assert false "logger: expected log event"))))))
 (println "  1. supervisor logger: ok")
 
@@ -58,9 +56,7 @@
                               (process:send me :started)
                               (match (process:recv)
                                 :crash (error {:error :boom :message "crash"})
-                                _ nil))}]
-                     :name
-                     :log-sup2
+                                _ nil))}] :name :log-sup2
                      :logger (fn [event] (process:send me [:log event])))
 
                    # Initial start
@@ -105,9 +101,7 @@
                      :start (fn []
                               (process:send me :started)  # Crash immediately
                               (error {:error :always-crash :message "always"}))}]
-                     :name
-                     :max-sup
-                     :max-restarts 3
+                     :name :max-sup :max-restarts 3
                      :max-ticks 100  # wide window so all restarts count
                      :logger (fn [event]
                                (when (= (get event :event) :max-restarts-reached)
@@ -126,7 +120,7 @@
                        :timeout (assign done true)
                        _ nil))
                    (assert max-reached
-                           "max-restarts: intensity limit was reached")
+                     "max-restarts: intensity limit was reached")
                    (assert (<= starts 5) "max-restarts: did not spin forever"))))
 (println "  3. max-restarts limit: ok")
 
@@ -143,9 +137,7 @@
                               (process:send me [:started (process:self)])
                               (match (process:recv)
                                 :exit-normally :done  # return normally
-                                _ nil))}]
-                     :name
-                     :perm-normal-sup)
+                                _ nil))}] :name :perm-normal-sup)
 
                    # Wait for first start
                    (match (process:recv)
@@ -157,7 +149,7 @@
                          (match (process:recv)
                            [:started pid2]
                              (assert (not (= pid1 pid2))
-                                     "permanent-normal: restarted with new pid")
+                               "permanent-normal: restarted with new pid")
                            _ (assert false "permanent-normal: expected restart")))
                      _ (assert false "permanent-normal: expected initial start")))))
 (println "  4. permanent child normal exit restarts: ok")
@@ -175,9 +167,7 @@
                               (process:send me [:started (process:self)])
                               (match (process:recv)
                                 :crash (error {:error :boom :message "crash"})
-                                _ nil))}]
-                     :name
-                     :trans-crash-sup)
+                                _ nil))}] :name :trans-crash-sup)
                    (match (process:recv)
                      [:started pid1]
                        (begin
@@ -185,7 +175,7 @@
                          (match (process:recv)
                            [:started pid2]
                              (assert (not (= pid1 pid2))
-                                     "transient-crash: restarted")
+                               "transient-crash: restarted")
                            _ (assert false "transient-crash: expected restart")))
                      _ (assert false "transient-crash: expected initial start")))))
 (println "  5. transient child crash restarts: ok")
@@ -203,10 +193,7 @@
                      :start (fn []
                               (process:send me :attempt)
                               (error {:error :start-failed :message "bad config"}))}]
-                     :name
-                     :bad-start-sup
-                     :max-restarts 2
-                     :max-ticks 100
+                     :name :bad-start-sup :max-restarts 2 :max-ticks 100
                      :logger (fn [event]
                                (when (= (get event :event) :max-restarts-reached)
                                  (process:send me :max-reached))))
@@ -249,18 +236,15 @@
                                (forever
                                  (match (process:recv)
                                    :crash (error {:error :b :message "b"})
-                                   _ nil)))}]
-                     :name
-                     :dual-crash-sup
-                     :strategy
+                                   _ nil)))}] :name :dual-crash-sup :strategy
                      :one-for-all)
 
                    # Wait for both to start
                    (def @pids @{})
                    (repeat 2
-                           (match (process:recv)
-                             [:started id pid] (put pids id pid)
-                             _ nil))
+                     (match (process:recv)
+                       [:started id pid] (put pids id pid)
+                       _ nil))
 
                    # Crash both rapidly
                    (process:send (get pids :a) :crash)
@@ -296,8 +280,7 @@
                                   (assign crash-count (+ crash-count 1))
                                   (error {:error :crash :message "crash"}))
                                 (process:recv)))}]  # stay alive after 5 crashes
-                     :name
-                     :no-limit-sup)
+                      :name :no-limit-sup)
 
                    # Should restart 5 times without hitting any limit
                    (def @starts 0)
@@ -311,8 +294,8 @@
                        :timeout (assign done true)
                        _ nil))
                    (assert (= starts 6)
-                           "no-limit: all 6 starts happened (1 initial + 5 restarts)")))
-               :fuel 5000)
+                     "no-limit: all 6 starts happened (1 initial + 5 restarts)")))
+  :fuel 5000)
 (println "  8. unbounded restarts (default): ok")
 
 
@@ -335,9 +318,7 @@
                       :restart :permanent
                       :start (fn []
                                (process:send me [:starting :client])
-                               (forever (process:recv)))}]
-                     :name
-                     :ready-sup)
+                               (forever (process:recv)))}] :name :ready-sup)
 
                    # Collect events — wait for all 3 messages
                    (def @events @[])
@@ -353,16 +334,15 @@
                    # Verify ordering: bridge starts, bridge ready, THEN client starts
                    (assert (>= (length events) 3) "ready: got all 3 events")
                    (assert (= (get events 0) [:starting :bridge])
-                           "ready: bridge starts first")
+                     "ready: bridge starts first")
                    (assert (= (get events 1) [:ready :bridge])
-                           "ready: bridge becomes ready")
+                     "ready: bridge becomes ready")
                    (assert (= (get events 2) [:starting :client])
-                           "ready: client starts after bridge ready")
+                     "ready: client starts after bridge ready")
 
                    # Cleanup
                    (let [sup-pid (process:whereis :ready-sup)]
-                     (process:exit sup-pid :shutdown))))
-               :fuel 5000)
+                     (process:exit sup-pid :shutdown)))) :fuel 5000)
 (println "  9. readiness protocol: ok")
 
 
@@ -377,8 +357,7 @@
                      :ready true
                      :start (fn []  # Crash before signaling ready
                             (error {:error :init-failed :message "can't start"}))}]
-                     :name
-                     :crash-ready-sup
+                     :name :crash-ready-sup
                      :logger (fn [event] (process:send me [:log event])))
 
                    # Supervisor should not deadlock — it should detect the child death
@@ -396,7 +375,7 @@
                        _ nil)
                      (assign count (+ count 1)))
                    (assert got-exit
-                           "crash-before-ready: supervisor detected death, no deadlock"))))
+                     "crash-before-ready: supervisor detected death, no deadlock"))))
 (println "  10. crash before ready (no deadlock): ok")
 
 

@@ -55,9 +55,8 @@
 (def concurrency-levels [1 5 10 25 50 100])
 (def requests-per-level 500)
 
-(println (string/format "benchmarking {} → {} requests per level"
-                        base-url
-                        requests-per-level))
+(println (string/format "benchmarking {} → {} requests per level" base-url
+           requests-per-level))
 (println "")
 
 (def @results @[])
@@ -65,26 +64,20 @@
   (let [r (trial requests-per-level c)]
     (push results r)
     (println (string/format (string "  c={:>3}  rps={:.0f}"
-                                    "  p50={:.1f}ms  p95={:.1f}ms"
-                                    "  p99={:.1f}ms  errors={}")
-                            c
-                            r:rps
-                            r:p50
-                            r:p95
-                            r:p99
-                            r:errors))))
+                 "  p50={:.1f}ms  p95={:.1f}ms" "  p99={:.1f}ms  errors={}") c
+               r:rps r:p50 r:p95 r:p99 r:errors))))
 
 # ── Chart 1: Throughput vs concurrency (line) ────────────────────────
 
 (def rps-data (->array (map (fn [r] [(float r:concurrency) r:rps]) results)))
 (spit "demos/webserver/throughput.svg"
-      (plt:line rps-data
-                (merge svg-opts
-                       {:title "throughput vs concurrency"
-                        :x-label "concurrent connections"
-                        :y-label "requests/sec"
-                        :width 900
-                        :height 500})))
+  (plt:line rps-data
+    (merge svg-opts
+      {:title "throughput vs concurrency"
+       :x-label "concurrent connections"
+       :y-label "requests/sec"
+       :width 900
+       :height 500})))
 (println "")
 (println "wrote demos/webserver/throughput.svg")
 
@@ -95,39 +88,29 @@
 (def p99-data (->array (map (fn [r] [(float r:concurrency) r:p99]) results)))
 
 (spit "demos/webserver/latency.svg"
-      (plt:chart (merge svg-opts
-                        {:title "latency vs concurrency"
-                         :x-label "concurrent connections"
-                         :y-label "latency (ms)"
-                         :width 900
-                         :height 500
-                         :series [{:type :line
-                                   :label "p50"
-                                   :data p50-data
-                                   :color :blue}
-                                  {:type :line
-                                   :label "p95"
-                                   :data p95-data
-                                   :color :orange}
-                                  {:type :line
-                                   :label "p99"
-                                   :data p99-data
-                                   :color :red}]})))
+  (plt:chart (merge svg-opts
+               {:title "latency vs concurrency"
+                :x-label "concurrent connections"
+                :y-label "latency (ms)"
+                :width 900
+                :height 500
+                :series [{:type :line :label "p50" :data p50-data :color :blue}
+                         {:type :line :label "p95" :data p95-data :color :orange}
+                         {:type :line :label "p99" :data p99-data :color :red}]})))
 (println "wrote demos/webserver/latency.svg")
 
 # ── Chart 3: Latency histogram at peak concurrency ───────────────────
 
 (def peak (get results (- (length results) 1)))
 (spit "demos/webserver/histogram.svg"
-      (plt:histogram peak:latencies
-                     (merge svg-opts
-                            {:title (string/format "latency distribution (c={})"
-                             peak:concurrency)
-                             :x-label "latency (ms)"
-                             :y-label "count"
-                             :bins 30
-                             :width 900
-                             :height 500})))
+  (plt:histogram peak:latencies
+    (merge svg-opts
+      {:title (string/format "latency distribution (c={})" peak:concurrency)
+       :x-label "latency (ms)"
+       :y-label "count"
+       :bins 30
+       :width 900
+       :height 500})))
 (println "wrote demos/webserver/histogram.svg")
 
 (println "")

@@ -45,22 +45,8 @@
 
 # ── All known keywords ────────────────────────────────────────────────
 
-(vm/config-set :trace |:call
-                       :signal
-                       :compile
-                       :fiber
-                       :hir
-                       :lir
-                       :emit
-                       :jit
-                       :io
-                       :gc
-                       :import
-                       :macro
-                       :wasm
-                       :capture
-                       :arena
-                       :escape
+(vm/config-set :trace |:call :signal :compile :fiber :hir :lir :emit :jit :io
+                       :gc :import :macro :wasm :capture :arena :escape
                        :bytecode|)
 (let [t (vm/config :trace)]
   (assert (>= (length t) 17) "all 17 known keywords accepted"))

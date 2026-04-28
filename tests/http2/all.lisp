@@ -3,9 +3,8 @@
 
 (defn run-file [path]
   (println "=== " path " ===")
-  (let [proc (subprocess/exec "elle"
-                              ["--home=." path]
-                              {:stdout :pipe :stderr :pipe})]
+  (let [proc (subprocess/exec "elle" ["--home=." path]
+          {:stdout :pipe :stderr :pipe})]
     (let [out (string (port/read-all (get proc :stdout)))
           err (string (port/read-all (get proc :stderr)))
           code (subprocess/wait proc)]

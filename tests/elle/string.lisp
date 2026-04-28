@@ -56,9 +56,7 @@
 (assert (= (freeze (begin
                      (def @s (thaw "hello"))
                      (put s -1 "x")
-                     s))
-           "hellx")
-        "put negative index wraps")
+                     s)) "hellx") "put negative index wraps")
 (let [[ok? _] (protect ((fn () (put (thaw "") 0 "x"))))]
   (assert (not ok?) "put on empty @string errors"))
 
@@ -68,11 +66,11 @@
 
 # length counts grapheme clusters, not bytes
 (assert (= (length (thaw "café")) 4)
-        "length @\"café\" is 4 graphemes, not 5 bytes")
+  "length @\"café\" is 4 graphemes, not 5 bytes")
 (assert (= (length (thaw "🎉🎊")) 2)
-        "length of emoji @string is grapheme count")
+  "length of emoji @string is grapheme count")
 (assert (= (length (thaw "naïve")) 5)
-        "length @\"naïve\" counts combining sequence as one grapheme")
+  "length @\"naïve\" counts combining sequence as one grapheme")
 
 # put replaces grapheme cluster at the given position
 (let [s (thaw "café")]
@@ -111,9 +109,7 @@
 (assert (= (freeze (begin
                      (def @s2 (thaw "hello"))
                      (put s2 -1 "x")
-                     s2))
-           "hellx")
-        "put negative index wraps (new)")
+                     s2)) "hellx") "put negative index wraps (new)")
 (let [[ok? _] (protect ((fn () (put (thaw "") 0 "x"))))]
   (assert (not ok?) "put on empty @string errors (new)"))
 
@@ -123,14 +119,10 @@
 
 (assert (= (begin
              (def @b (thaw "hi"))
-             (pop b))
-           "i")
-        "pop returns last grapheme as string")
+             (pop b)) "i") "pop returns last grapheme as string")
 (assert (= (begin
              (def @b (thaw "café"))
-             (pop b))
-           "é")
-        "pop returns last multibyte grapheme")
+             (pop b)) "é") "pop returns last multibyte grapheme")
 (let [[ok? _] (protect ((fn ()
                           (begin
                             (def @b (thaw ""))
@@ -144,20 +136,15 @@
 (assert (string? (begin
                    (def @b (thaw "hi"))
                    (push b "!")
-                   b))
-        "push returns @string")
+                   b)) "push returns @string")
 (assert (= (freeze (begin
                      (def @b (thaw "hi"))
                      (push b "!")
-                     b))
-           "hi!")
-        "push appends string to @string")
+                     b)) "hi!") "push appends string to @string")
 (assert (= (freeze (begin
                      (def @b (thaw "café"))
                      (push b "x")
-                     b))
-           "caféx")
-        "push appends to multibyte @string")
+                     b)) "caféx") "push appends to multibyte @string")
 (let [[ok? _] (protect ((fn ()
                           (begin
                             (def @b (thaw "hi"))
@@ -171,15 +158,14 @@
 (assert (string? (begin
                    (def @b (thaw "hello"))
                    (append b (thaw " world"))
-                   b))
-        "append returns @string")
+                   b)) "append returns @string")
 
 # ============================================================================
 # @string concat
 # ============================================================================
 
 (assert (string? (concat (thaw "hello") (thaw " world")))
-        "concat returns @string")
+  "concat returns @string")
 
 # ============================================================================
 # @string roundtrip conversions
@@ -195,8 +181,7 @@
 (assert (string? (begin
                    (def @b (thaw "hllo"))
                    (insert b 1 101)
-                   b))
-        "insert returns @string")
+                   b)) "insert returns @string")
 
 # ============================================================================
 # @string remove
@@ -205,13 +190,11 @@
 (assert (string? (begin
                    (def @b (thaw "hello"))
                    (remove b 1)
-                   b))
-        "remove returns @string")
+                   b)) "remove returns @string")
 (assert (string? (begin
                    (def @b (thaw "hello"))
                    (remove b 1 2)
-                   b))
-        "remove multiple returns @string")
+                   b)) "remove multiple returns @string")
 
 # ============================================================================
 # @string popn
@@ -219,25 +202,24 @@
 
 (assert (string? (begin
                    (def @b (thaw "hello"))
-                   (popn b 2)))
-        "popn returns @string")
+                   (popn b 2))) "popn returns @string")
 
 # ============================================================================
 # String operations on @strings
 # ============================================================================
 
 (assert (string/contains? (thaw "hello world") "world")
-        "@string contains substring")
+  "@string contains substring")
 (assert (not (string/contains? (thaw "hello") "xyz"))
-        "@string doesn't contain substring")
+  "@string doesn't contain substring")
 
 (assert (string/starts-with? (thaw "hello") "he") "@string starts with prefix")
 (assert (not (string/starts-with? (thaw "hello") "lo"))
-        "@string doesn't start with suffix")
+  "@string doesn't start with suffix")
 
 (assert (string/ends-with? (thaw "hello") "lo") "@string ends with suffix")
 (assert (not (string/ends-with? (thaw "hello") "he"))
-        "@string doesn't end with prefix")
+  "@string doesn't end with prefix")
 
 (assert (= (string/index (thaw "hello") "l") 2) "@string index of substring")
 (assert (= (string/index (thaw "hello") "z") nil) "@string index not found")
@@ -245,12 +227,12 @@
 (assert (= (freeze (slice (thaw "hello") 1 4)) "ell") "slice of @string")
 
 (assert (string? (string/upcase (thaw "hello")))
-        "upcase @string returns @string")
+  "upcase @string returns @string")
 (assert (string? (string/downcase (thaw "HELLO")))
-        "downcase @string returns @string")
+  "downcase @string returns @string")
 
 (assert (string? (string/trim (thaw "  hello  ")))
-        "trim @string returns @string")
+  "trim @string returns @string")
 
 (assert (= (get (thaw "hello") 1) "e") "get on @string returns e")
 
@@ -259,14 +241,14 @@
 # ============================================================================
 
 (assert (= (length (string/split (thaw "a,b,c") ",")) 3)
-        "split @string returns 3 parts")
+  "split @string returns 3 parts")
 
 # ============================================================================
 # @string replace
 # ============================================================================
 
 (assert (string? (string/replace (thaw "hello") "l" "L"))
-        "replace on @string returns @string")
+  "replace on @string returns @string")
 
 # ============================================================================
 # Concat on lists
@@ -278,6 +260,5 @@
 # Verify original lists unchanged
 (assert (= (let [a (list 1 2)]
              (let [b (concat a (list 3 4))]
-               (list (length a) (length b))))
-           (list 2 4))
-        "concat doesn't modify original lists")
+               (list (length a) (length b)))) (list 2 4))
+  "concat doesn't modify original lists")

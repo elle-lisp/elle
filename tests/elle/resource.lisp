@@ -61,8 +61,7 @@
     (fn []
       (let [f (fiber/new (fn []
                            (each i in (range 100)
-                             (yield i)))
-                         |:yield|)]
+                             (yield i))) |:yield|)]
         (each _ in (range 100)
           (fiber/resume f))))]
    ["tco-loop-10000"
@@ -152,9 +151,9 @@
 # TCO: net allocs and peak must be small — not proportional to iteration count
 (let [m (find-result "tco-loop-10000")]
   (assert (< (m :allocs) 100)
-          "tco-loop-10000: net allocs must be bounded (swap pool rotation working)")
+    "tco-loop-10000: net allocs must be bounded (swap pool rotation working)")
   (assert (< (m :peak) 10)
-          "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
+    "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
 
 # TCO with per-iteration struct + cons: rotation keeps this bounded at
 # function-entry scope. tco-alloc replaces `prev` each iteration; the
@@ -167,7 +166,7 @@
 # Rotation frees the prev struct → allocs and peak bounded.
 (let [m (find-result "tco-replace-10000")]
   (assert (< (m :allocs) 10)
-          "tco-replace-10000: allocs bounded (rotation working)")
+    "tco-replace-10000: allocs bounded (rotation working)")
   (assert (< (m :peak) 10) "tco-replace-10000: peak bounded (rotation working)"))
 
 # TCO mixed: both `prev` and `acc` are replaced each iteration.
@@ -176,24 +175,24 @@
 # resets alloc_count at each tail call, keeping net allocs bounded.
 (let [m (find-result "tco-mixed-10000")]
   (assert (< (m :allocs) 100)
-          "tco-mixed-10000: flip rotation keeps allocs bounded"))
+    "tco-mixed-10000: flip rotation keeps allocs bounded"))
 
 # fib: pure arithmetic, no heap objects expected
 (let [m (find-result "fib-15")]
   (assert (= (m :allocs) 0)
-          "fib-15: pure arithmetic should allocate 0 heap objects"))
+    "fib-15: pure arithmetic should allocate 0 heap objects"))
 
 # cons-build-100: tail-recursive build-list gets flip rotation,
 # so net allocs (visible_len delta) is bounded, not 100.
 (let [m (find-result "cons-build-100")]
   (assert (< (m :allocs) 10)
-          "cons-build-100: flip rotation keeps allocs bounded"))
+    "cons-build-100: flip rotation keeps allocs bounded"))
 
 # string-build-100: flip rotation resets alloc_count at each tail call,
 # so net allocs may be 0 despite actual heap activity. Check peak instead.
 (let [m (find-result "string-build-100")]
   (assert (> (m :peak) 0)
-          "string-build-100: peak shows heap activity from string concatenation"))
+    "string-build-100: peak shows heap activity from string concatenation"))
 
 # let-drop-struct: outer letrec loops 100 iters; each inner let allocates
 # two structs. Escape analysis rejects scope allocation (the body reads
@@ -201,12 +200,12 @@
 # so allocs scale with iteration count (~2 per iter = 200 + overhead).
 (let [m (find-result "let-drop-struct")]
   (assert (< (m :allocs) 300)
-          "let-drop-struct: allocs bounded by 2 per iteration"))
+    "let-drop-struct: allocs bounded by 2 per iteration"))
 
 # tco-cons-replace: rotation should keep allocs at minimum
 (let [m (find-result "tco-cons-replace")]
   (assert (< (m :allocs) 10)
-          "tco-cons-replace: allocs bounded (rotation working)"))
+    "tco-cons-replace: allocs bounded (rotation working)"))
 
 # All measurements should have non-negative allocs
 (each entry in results

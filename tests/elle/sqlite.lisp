@@ -12,7 +12,7 @@
 
 ## Create, insert, query
 (db:exec conn
-         "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, score REAL)")
+  "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, score REAL)")
 (db:exec conn "INSERT INTO users VALUES (?1, ?2, ?3)" [1 "alice" 95.5])
 (db:exec conn "INSERT INTO users VALUES (?1, ?2, ?3)" [2 "bob" 87.0])
 (db:exec conn "INSERT INTO users VALUES (?1, ?2, ?3)" [3 "charlie" nil])
@@ -35,11 +35,8 @@
   (assert (= r:name "alice") "filtered name"))
 
 ## Exec returns rows affected
-(assert (= (db:exec conn
-                    "UPDATE users SET score = 100 WHERE name = ?1"
-                    ["alice"])
-           1)
-        "rows affected")
+(assert (= (db:exec conn "UPDATE users SET score = 100 WHERE name = ?1"
+      ["alice"]) 1) "rows affected")
 
 ## Boolean binding (stored as integer)
 (db:exec conn "CREATE TABLE flags (active INTEGER)")

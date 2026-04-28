@@ -35,8 +35,7 @@
     (defer (begin
              (protect (http2:close session))
              (protect (port/close listener))
-             (protect (ev/abort sf)))
-           (test-fn session))))
+             (protect (ev/abort sf))) (test-fn session))))
 
 
 ## ── Part 1: Framing tests ────────────────────────────────────────
@@ -44,7 +43,7 @@
 (defn test-encode-empty []
   (let [frame (grpc:encode (bytes))]
     (assert (= frame (bytes 0 0 0 0 0))
-            "encode empty: 5-byte header, zero length")))
+      "encode empty: 5-byte header, zero length")))
 
 (defn test-roundtrip-small []
   (let* [payload (bytes 10 20 30)
@@ -139,81 +138,64 @@
 (defn test-unary-rpc []
   "Full unary gRPC call: connect → send → receive → decode."
   (with-server grpc-handler
-               (fn [sess]
-                 (let [raw (grpc:call sess nil "/test.Svc/Fixed" "test.Req" {})]
-                   (assert (not (nil? raw)) "unary: got response bytes")
-                   (assert (= raw (bytes 4 5 6))
-                           "unary: response payload matches")))))
+    (fn [sess]
+      (let [raw (grpc:call sess nil "/test.Svc/Fixed" "test.Req" {})]
+        (assert (not (nil? raw)) "unary: got response bytes")
+        (assert (= raw (bytes 4 5 6)) "unary: response payload matches")))))
 
 (defn test-unary-decode []
   "Full unary gRPC call with decode: exercises grpc:call-decode."
   (with-server grpc-handler
-               (fn [sess]
-                 (let [result (grpc:call-decode sess
-                       nil
-                       "/test.Svc/Fixed"
-                       "test.Req"
-                       {}
-                       "test.Resp")]
-                   (assert (= result:decoded true) "decode: fake-pb decoded")
-                   (assert (= result:len 3) "decode: correct payload length")))))
+    (fn [sess]
+      (let [result (grpc:call-decode sess nil "/test.Svc/Fixed" "test.Req" {}
+              "test.Resp")]
+        (assert (= result:decoded true) "decode: fake-pb decoded")
+        (assert (= result:len 3) "decode: correct payload length")))))
 
 (defn test-grpc-error-in-trailers []
   "Server returns grpc-status != 0 in trailers: client should raise."
   (with-server grpc-handler
-               (fn [sess]
-                 (let [[ok? err] (protect (grpc:call sess
-                       nil
-                       "/test.Svc/Error"
-                       "test.Req"
-                       {}))]
-                   (assert (not ok?) "error: should raise")
-                   (assert (= err:error :grpc-error)
-                           "error: type is :grpc-error")
-                   (assert (= err:code 13) "error: code 13")
-                   (assert (= err:message "internal error")
-                           "error: message propagated")))))
+    (fn [sess]
+      (let [[ok? err] (protect (grpc:call sess nil "/test.Svc/Error" "test.Req"
+                                 {}))]
+        (assert (not ok?) "error: should raise")
+        (assert (= err:error :grpc-error) "error: type is :grpc-error")
+        (assert (= err:code 13) "error: code 13")
+        (assert (= err:message "internal error") "error: message propagated")))))
 
 (defn test-trailers-only-error []
   "Server sends trailers-only (no DATA), non-zero status."
   (with-server grpc-handler
-               (fn [sess]
-                 (let [[ok? err] (protect (grpc:call sess
-                       nil
-                       "/test.Svc/NotFound"
-                       "test.Req"
-                       {}))]
-                   (assert (not ok?) "trailers-only: should raise")
-                   (assert (= err:code 5) "trailers-only: code 5")))))
+    (fn [sess]
+      (let [[ok? err] (protect (grpc:call sess nil "/test.Svc/NotFound"
+                                 "test.Req" {}))]
+        (assert (not ok?) "trailers-only: should raise")
+        (assert (= err:code 5) "trailers-only: code 5")))))
 
 (defn test-empty-response []
   "Server sends grpc-status 0 with no data — decoded result should be nil."
   (with-server grpc-handler
-               (fn [sess]
-                 (let [raw (grpc:call sess nil "/test.Svc/Empty" "test.Req" {})]
-                   (assert (nil? raw) "empty response: nil")))))
+    (fn [sess]
+      (let [raw (grpc:call sess nil "/test.Svc/Empty" "test.Req" {})]
+        (assert (nil? raw) "empty response: nil")))))
 
 (defn test-large-payload []
   "Unary RPC with payload > 1KB."
   (let [expected (apply bytes (map (fn [i] (% i 256)) (range 2000)))]
     (with-server grpc-handler
-                 (fn [sess]
-                   (let [raw (grpc:call sess nil "/test.Svc/Large" "test.Req" {})]
-                     (assert (= (length raw) 2000) "large: correct length")
-                     (assert (= raw expected) "large: payload matches"))))))
+      (fn [sess]
+        (let [raw (grpc:call sess nil "/test.Svc/Large" "test.Req" {})]
+          (assert (= (length raw) 2000) "large: correct length")
+          (assert (= raw expected) "large: payload matches"))))))
 
 (defn test-sequential-rpcs []
   "Multiple sequential unary RPCs on the same session."
   (with-server grpc-handler
-               (fn [sess]
-                 (each i in (range 5)
-                   (let [raw (grpc:call sess
-                                        nil
-                                        (concat "/test.Svc/Seq" (string i))
-                                        "test.Req"
-                                        {})]
-                     (assert (not (nil? raw))
-                             (concat "seq " (string i) ": got response")))))))
+    (fn [sess]
+      (each i in (range 5)
+        (let [raw (grpc:call sess nil (concat "/test.Svc/Seq" (string i))
+                "test.Req" {})]
+          (assert (not (nil? raw)) (concat "seq " (string i) ": got response")))))))
 
 
 ## ── Run ──────────────────────────────────────────────────────────

@@ -91,9 +91,8 @@
       (-> path
           (slice (inc (length base)) (length path)))))
   (defn has-glob? [s]
-    (or (string/contains? s "*")
-        (string/contains? s "?")
-        (string/contains? s "[")))
+    (or (string/contains? s "*") (string/contains? s "?")
+      (string/contains? s "[")))
   (defn split-pattern [pattern]
     "Split into [fixed-prefix glob-suffix]."
     (let [parts (string/split pattern "/")

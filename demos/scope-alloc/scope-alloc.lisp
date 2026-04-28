@@ -137,11 +137,8 @@
            (assign counter (+ counter 1)))
          (arena/stats))))
 
-(println "  enters:    "
-         tier8-stats:enters
-         " (10000 inner let + 1 while block = "
-         tier8-stats:enters
-         ")")
+(println "  enters:    " tier8-stats:enters
+  " (10000 inner let + 1 while block = " tier8-stats:enters ")")
 (println "  dtors-run: " tier8-stats:dtors-run)
 (println)
 

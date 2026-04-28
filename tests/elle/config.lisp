@@ -61,7 +61,7 @@
 # Setting trace keywords
 (vm/config-set :trace |:call|)
 (assert (contains? (vm/config :trace) :call)
-        "trace set contains :call after set")
+  "trace set contains :call after set")
 
 # Multiple trace keywords
 (vm/config-set :trace |:call :signal :fiber|)

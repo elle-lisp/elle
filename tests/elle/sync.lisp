@@ -56,8 +56,8 @@
   (defn critical [id n]
     (lock:acquire)
     (repeat n
-            (let [v (counter 0)]
-              (put counter 0 (inc v))))
+      (let [v (counter 0)]
+        (put counter 0 (inc v))))
     (push log id)
     (lock:release))
   (let [a (ev/spawn (fn [] (critical :a 100)))
@@ -165,7 +165,7 @@
           r1-out (find-index (fn [x] (= x :r1-out)) log)
           r2-out (find-index (fn [x] (= x :r2-out)) log)]
       (assert (and (not (nil? r1-in)) (not (nil? r2-in)))
-              "5a: both readers entered"))))
+        "5a: both readers entered"))))
 
 # Writer excludes readers
 (let [rw (sync:make-rwlock)
@@ -248,7 +248,7 @@
   (let [fibers (map (fn [_] (ev/spawn (fn [] (once:get)))) [1 2 3 4 5])]
     (let [results (ev/join fibers)]
       (assert (= 1 (call-count 0))
-              "8d: thunk called once even with concurrent getters")
+        "8d: thunk called once even with concurrent getters")
       (each r in results
         (assert (= :initialized r) "8e: all getters received same value")))))
 
@@ -280,7 +280,7 @@
         consumer (ev/spawn (fn [] (repeat 5 (push results (q:take)))))]
     (ev/join [producer consumer])
     (assert (= [1 2 3 4 5] (freeze results))
-            "9f: producer-consumer with bounded queue")))
+      "9f: producer-consumer with bounded queue")))
 
 # Multiple producers, single consumer
 (let [q (sync:make-queue 2)
@@ -294,7 +294,7 @@
         consumer (ev/spawn (fn [] (repeat 6 (push results (q:take)))))]
     (ev/join [p1 p2 consumer])
     (assert (= 6 (length results))
-            "9g: all items consumed from multi-producer queue")))
+      "9g: all items consumed from multi-producer queue")))
 
 # ============================================================================
 # 10. Monitor
@@ -311,9 +311,9 @@
   (let [fibers (map (fn [_]
                       (ev/spawn (fn []
                                   (repeat 50
-                                  (mon:with (fn []
-                                    (put counter 0 (inc (counter 0)))))))))
-                    [1 2 3 4])]
+                                    (mon:with (fn []
+                                      (put counter 0 (inc (counter 0)))))))))
+          [1 2 3 4])]
     (ev/join fibers)
     (assert (= 200 (counter 0)) "10b: monitor ensures mutual exclusion")))
 

@@ -40,9 +40,8 @@
 
     # ── 2. http:post with JSON body ───────────────────────────────────
 
-    (let [r (http:post url
-                       (json-serialize {"test" true})
-                       :headers {:content-type "application/json"})]
+    (let [r (http:post url (json-serialize {"test" true})
+            :headers {:content-type "application/json"})]
       (assert (= r:status 200) "JSON http:post works")
       (assert (= (length received) 2) "collector received JSON post"))
     (println "  2. http:post with JSON body: ok")
@@ -99,9 +98,7 @@
 
     (while (not (empty? received)) (pop received))
     (def latency
-      (telemetry:histogram meter
-        "latency"
-        :unit "s"
+      (telemetry:histogram meter "latency" :unit "s"
         :boundaries [0.01 0.05 0.1 0.5 1.0]))
     (telemetry:time latency (fn [] (ev/sleep 0.001)) :attributes {"op" "test"})
     (telemetry:flush meter)
@@ -115,9 +112,8 @@
     (while (not (empty? received)) (pop received))
     (def @i 0)
     (while (< i 8)
-      (telemetry:time latency
-                      (fn [] (ev/sleep 0.001))
-                      :attributes {"op" (string "req-" i)})
+      (telemetry:time latency (fn [] (ev/sleep 0.001))
+        :attributes {"op" (string "req-" i)})
       (assign i (+ i 1)))
     (telemetry:flush meter)
     (ev/sleep 0.05)
@@ -135,12 +131,11 @@
       (let [attrs {"http.method" method "http.route" path "http.status" status}]
         (telemetry:add http-requests 1 :attributes attrs)
         (telemetry:time latency
-                        (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
-                        :attributes attrs)
+          (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
+          :attributes attrs)
         (when price
-          (telemetry:add order-revenue
-                         price
-                         :attributes {"currency" "USD" "region" "us-east"}))))
+          (telemetry:add order-revenue price
+            :attributes {"currency" "USD" "region" "us-east"}))))
     (simulate-request "GET" "/api/orders" 200 nil)
     (simulate-request "POST" "/api/orders" 201 49.99)
     (simulate-request "GET" "/api/orders/123" 200 nil)

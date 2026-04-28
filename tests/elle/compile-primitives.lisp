@@ -29,7 +29,7 @@
 
 # apply is a macro (prelude.lisp), not a Rust primitive
 (assert (nil? (find-prim "apply"))
-        "apply is not a Rust primitive (it's a macro)")
+  "apply is not a Rust primitive (it's a macro)")
 
 # cons is a core Rust primitive
 (def cons-prim (find-prim "cons"))
@@ -60,6 +60,6 @@
 (assert (not (nil? self-prim)) "compile/primitives is in its own output")
 (assert (get (get self-prim :signal) :silent) "compile/primitives is silent")
 (assert (= (get self-prim :category) "compile")
-        "compile/primitives is in compile category")
+  "compile/primitives is in compile category")
 
 (println "compile-primitives: all tests passed")

@@ -12,7 +12,7 @@
 
 # import-file tests
 (assert (fn () (import-file "tests/modules/test.lisp"))
-        "import-file with valid file succeeds")
+  "import-file with valid file succeeds")
 (let [[ok? _] (protect ((fn () (import-file "./lib/nonexistent.lisp"))))]
   (assert (not ok?) "import-file with non-existent relative path fails"))
 (let [[ok? _] (protect ((fn () (import-file "/absolute/nonexistent.lisp"))))]
@@ -25,7 +25,7 @@
 # debug-print tests
 (assert (= (debug-print 42) 42) "debug-print returns the value (int)")
 (assert (= (debug-print "hello") "hello")
-        "debug-print returns the value (string)")
+  "debug-print returns the value (string)")
 (assert (= (debug-print (+ 1 2)) 3) "debug-print works with expressions")
 
 # trace tests
@@ -36,15 +36,15 @@
 (assert (fn ()
           (let [result (memory-usage)]
             (or (list? result) (nil? result))))
-        "memory-usage returns a list or nil")
+  "memory-usage returns a list or nil")
 
 # concurrency with arithmetic
 (assert (int? (+ (current-thread-id) 1))
-        "current-thread-id can be used in arithmetic")
+  "current-thread-id can be used in arithmetic")
 
 # debug-print with list operations
 (assert (= (debug-print (list 1 2 3)) (list 1 2 3))
-        "debug-print works with list operations")
+  "debug-print works with list operations")
 
 # trace with arithmetic chain
 (assert (= (trace "step1" (+ 1 2)) 3) "trace with first arithmetic")
@@ -54,9 +54,7 @@
 (assert (= (begin
              (debug-print 1)
              (debug-print 2)
-             (debug-print 3))
-           3)
-        "multiple debug-prints return last value")
+             (debug-print 3)) 3) "multiple debug-prints return last value")
 
 # module and arithmetic combination
 (assert (= (+ 1 2) 3) "arithmetic before import-file")
@@ -65,11 +63,11 @@
 
 # thread id consistency
 (assert (= (current-thread-id) (current-thread-id))
-        "multiple calls to current-thread-id return same value")
+  "multiple calls to current-thread-id return same value")
 
 # debug-print with nested structures
 (assert (fn () (debug-print (list (list 1 2) (list 3 4))))
-        "debug-print with nested lists")
+  "debug-print with nested lists")
 (assert (fn () (debug-print (@array 1 2 3))) "debug-print with arrays")
 
 # phase 5 feature availability
@@ -136,7 +134,7 @@
 
 # current-thread-id no arguments
 (assert (fn () (current-thread-id))
-        "current-thread-id with no arguments succeeds")
+  "current-thread-id with no arguments succeeds")
 
 # debug-print wrong argument count
 (let [[ok? _] (protect ((fn () (eval '(debug-print)))))]
@@ -169,18 +167,15 @@
 (assert (fn ()
           (match 5
             5 "five"
-            _ nil))
-        "match syntax is properly parsed")
+            _ nil)) "match syntax is properly parsed")
 
 # match wildcard catches any
 (assert (fn ()
           (match 42
-            _ "matched"))
-        "wildcard matches int")
+            _ "matched")) "wildcard matches int")
 (assert (fn ()
           (match "test"
-            _ true))
-        "wildcard matches string")
+            _ true)) "wildcard matches string")
 
 # match returns result expression
 (assert (fn ()
@@ -188,96 +183,72 @@
                     5 42
                     10 0
                     _ nil)]
-            (and (int? v) (> v 0))))
-        "match returns positive number")
+            (and (int? v) (> v 0)))) "match returns positive number")
 
 # match clause ordering
 (assert (fn ()
           (match 5
             5 true
             5 false
-            _ nil))
-        "first matching clause is used")
+            _ nil)) "first matching clause is used")
 
 # match default wildcard
 (assert (fn ()
           (match 99
             1 "one"
             2 "two"
-            _ "other"))
-        "wildcard matches when no literals match")
+            _ "other")) "wildcard matches when no literals match")
 
 # match nil pattern parsing
 (assert (fn ()
           (match nil
             nil "empty"
-            _ nil))
-        "nil pattern parses and works")
+            _ nil)) "nil pattern parses and works")
 
 # match wildcard pattern
 (assert (= (match 42
-             _ "any")
-           "any")
-        "match wildcard with int")
+             _ "any") "any") "match wildcard with int")
 (assert (= (match "hello"
-             _ "matched")
-           "matched")
-        "match wildcard with string")
+             _ "matched") "matched") "match wildcard with string")
 
 # match nil pattern
 (assert (= (match nil
              nil "empty"
-             _ nil)
-           "empty")
-        "match nil pattern matches nil")
+             _ nil) "empty") "match nil pattern matches nil")
 (assert (= (match (list)
              nil "empty"
-             _ "not-nil")
-           "not-nil")
-        "nil pattern does not match empty list")
+             _ "not-nil") "not-nil") "nil pattern does not match empty list")
 
 # match default case
 (assert (= (match 99
              1 "one"
              2 "two"
-             _ "other")
-           "other")
-        "default pattern catches unmatched values")
+             _ "other") "other") "default pattern catches unmatched values")
 
 # match multiple clauses ordering
 (assert (= (match 2
              1 "one"
              2 "two"
              3 "three"
-             _ nil)
-           "two")
-        "match clause ordering: 2 matches second clause")
+             _ nil) "two") "match clause ordering: 2 matches second clause")
 (assert (= (match 1
              1 "one"
              2 "two"
              3 "three"
-             _ nil)
-           "one")
-        "match clause ordering: 1 matches first clause")
+             _ nil) "one") "match clause ordering: 1 matches first clause")
 
 # match with static expressions
 (assert (= (match 10
              10 (* 2 3)
-             _ nil)
-           6)
-        "match evaluates result expression (multiply)")
+             _ nil) 6) "match evaluates result expression (multiply)")
 (assert (= (match 5
              5 (+ 1 1)
-             _ nil)
-           2)
-        "match evaluates result expression (add)")
+             _ nil) 2) "match evaluates result expression (add)")
 
 # match string literals
 (assert (= (match "hello"
              "hello" "matched"
-             _ "no")
-           "matched")
-        "match string literals")
+             _ "no") "matched") "match string literals")
 
 # ============================================================================
 # Integration scenarios
@@ -289,7 +260,7 @@
 
 # debug and trace chain
 (assert (fn () (trace "a" (debug-print (+ 1 2))))
-        "debug-print and trace can be chained")
+  "debug-print and trace can be chained")
 
 # sleep in arithmetic context
 (let [[ok? _] (protect ((fn () (+ 1 (time/sleep 0)))))]
@@ -298,31 +269,30 @@
 # import-file returns last value
 (assert (fn ()
           (let [result (import-file "tests/modules/test.lisp")]
-            (list? result)))
-        "import-file returns list")
+            (list? result))) "import-file returns list")
 
 # import-file with variable definitions
 (assert (fn () (import-file "tests/modules/test.lisp"))
-        "import-file with variable definitions")
+  "import-file with variable definitions")
 
 # import multiple files sequentially
 (assert (fn () (import-file "tests/modules/test.lisp"))
-        "first import-file succeeds")
+  "first import-file succeeds")
 (assert (fn () (import-file "tests/modules/test.lisp"))
-        "second import-file succeeds")
+  "second import-file succeeds")
 
 # import same file twice idempotent
 (assert (fn ()
           (let [r1 (import-file "tests/modules/test.lisp")
                 r2 (import-file "tests/modules/test.lisp")]
             (and (list? r1) (= r2 true))))
-        "import-file idempotent: first returns list, second returns true")
+  "import-file idempotent: first returns list, second returns true")
 
 # import-file with relative paths
 (assert (fn () (import-file "./tests/modules/test.lisp"))
-        "import-file with ./ relative path")
+  "import-file with ./ relative path")
 (assert (fn () (import-file "tests/modules/test.lisp"))
-        "import-file with relative path")
+  "import-file with relative path")
 
 # ============================================================================
 # Array pattern matching tests
@@ -331,52 +301,38 @@
 # match array literal
 (assert (= (match [1 2 3]
              [1 2 3] "exact"
-             _ "no")
-           "exact")
-        "match exact array literal")
+             _ "no") "exact") "match exact array literal")
 
 # match array binding
 (assert (= (match [10 20]
              [a b] (+ a b)
-             _ 0)
-           30)
-        "match array with binding")
+             _ 0) 30) "match array with binding")
 
 # match array wrong length
 (assert (= (match [1 2]
              [a b c] "three"
              [a b] "two"
-             _ nil)
-           "two")
-        "match array wrong length falls through")
+             _ nil) "two") "match array wrong length falls through")
 
 # match array not array
 (assert (= (match 42
              [a b] "array"
-             _ "other")
-           "other")
-        "match non-array falls through")
+             _ "other") "other") "match non-array falls through")
 
 # match array empty
 (assert (= (match []
              [] "empty"
-             _ "other")
-           "empty")
-        "match empty array")
+             _ "other") "empty") "match empty array")
 
 # match array rest
 (assert (= (match [1 2 3 4]
              [a & rest] (length rest)
-             _ 0)
-           3)
-        "match array with rest captures remaining")
+             _ 0) 3) "match array with rest captures remaining")
 
 # match array nested
 (assert (= (match [1 [2 3]]
              [a [b c]] (+ a (+ b c))
-             _ 0)
-           6)
-        "match nested arrays")
+             _ 0) 6) "match nested arrays")
 
 # ============================================================================
 # Guard (when) tests
@@ -386,24 +342,18 @@
 (assert (= (match 5
              x when
              (> x 3) "big"
-             x "small")
-           "big")
-        "guard passes when condition true")
+             x "small") "big") "guard passes when condition true")
 (assert (= (match 2
              x when
              (> x 3) "big"
-             x "small")
-           "small")
-        "guard falls through when condition false")
+             x "small") "small") "guard falls through when condition false")
 
 # match guard with literal
 (assert (= (match 10
              10 when
              false "nope"
              10 "yes"
-             _ nil)
-           "yes")
-        "guard with literal falls through on false")
+             _ nil) "yes") "guard with literal falls through on false")
 
 # ============================================================================
 # Cons pattern tests
@@ -412,16 +362,12 @@
 # match cons pattern
 (assert (= (match (cons 1 2)
              (h . t) (+ h t)
-             _ 0)
-           3)
-        "match cons pattern")
+             _ 0) 3) "match cons pattern")
 
 # match cons not pair
 (assert (= (match 42
              (h . t) "pair"
-             _ "nope")
-           "nope")
-        "match non-pair falls through")
+             _ "nope") "nope") "match non-pair falls through")
 
 # ============================================================================
 # List rest pattern tests
@@ -430,17 +376,13 @@
 # match list rest
 (assert (= (match (list 1 2 3)
              (a & rest) a
-             _ nil)
-           1)
-        "match list rest captures first")
+             _ nil) 1) "match list rest captures first")
 
 # match list exact length
 (assert (= (match (list 1 2 3)
              (1 2) "two"
              (1 2 3) "three"
-             _ nil)
-           "three")
-        "match list exact length")
+             _ nil) "three") "match list exact length")
 
 # ============================================================================
 # Keyword pattern test
@@ -449,14 +391,11 @@
 # match keyword literal
 (assert (= (match :foo
              :foo "matched"
-             _ "no")
-           "matched")
-        "match keyword literal matches")
+             _ "no") "matched") "match keyword literal matches")
 (assert (= (match :bar
              :foo "matched"
-             _ "no")
-           "no")
-        "match keyword literal doesn't match different keyword")
+             _ "no") "no")
+  "match keyword literal doesn't match different keyword")
 
 # ============================================================================
 # Variable binding test
@@ -464,9 +403,7 @@
 
 # match variable binding
 (assert (= (match 42
-             x (+ x 1))
-           43)
-        "match variable binding")
+             x (+ x 1)) 43) "match variable binding")
 
 # ============================================================================
 # Non-exhaustive match is a compile-time error
@@ -487,25 +424,19 @@
 (assert (= (begin
              (defmacro my-list (& items)
                `(list ,;items))
-             (my-list 1 2 3))
-           (list 1 2 3))
-        "variadic macro basic")
+             (my-list 1 2 3)) (list 1 2 3)) "variadic macro basic")
 
 # variadic macro fixed and rest
 (assert (= (begin
              (defmacro my-add (first & rest)
                `(+ ,first ,;rest))
-             (my-add 1 2 3))
-           6)
-        "variadic macro with fixed and rest")
+             (my-add 1 2 3)) 6) "variadic macro with fixed and rest")
 
 # variadic macro empty rest
 (assert (= (begin
              (defmacro my-list (& items)
                `(list ,;items))
-             (my-list))
-           (list))
-        "variadic macro with empty rest")
+             (my-list)) (list)) "variadic macro with empty rest")
 
 # variadic macro arity error
 (let [[ok? _] (protect ((fn ()
@@ -522,9 +453,7 @@
                   (begin
                     ,;body)
                   nil))
-             (my-when true 1 2 3))
-           3)
-        "variadic macro with when and multi body")
+             (my-when true 1 2 3)) 3) "variadic macro with when and multi body")
 
 # ============================================================================
 # Match: improper list patterns (a b . c)
@@ -533,30 +462,23 @@
 # match improper list pattern
 (assert (= (match (cons 1 (cons 2 3))
              (a b . c) (list a b c)
-             _ :no)
-           (list 1 2 3))
-        "match improper list pattern")
+             _ :no) (list 1 2 3)) "match improper list pattern")
 
 # match improper list pattern longer
 (assert (= (match (list 1 2 3 4 5)
              (a b c . d) (list a b c d)
-             _ :no)
-           (list 1 2 3 (list 4 5)))
-        "match improper list pattern longer")
+             _ :no) (list 1 2 3 (list 4 5)))
+  "match improper list pattern longer")
 
 # match improper list pattern exact
 (assert (= (match (cons 1 2)
              (a . b) (list a b)
-             _ :no)
-           (list 1 2))
-        "match improper list pattern exact")
+             _ :no) (list 1 2)) "match improper list pattern exact")
 
 # match improper list pattern too short
 (assert (= (match (list 1)
              (a b . c) :matched
-             _ :no)
-           :no)
-        "match improper list pattern too short")
+             _ :no) :no) "match improper list pattern too short")
 
 # ============================================================================
 # Match: or-patterns (or 1 2 3)
@@ -565,37 +487,27 @@
 # or pattern basic
 (assert (= (match 2
              (or 1 2 3) :small
-             _ :big)
-           :small)
-        "or pattern basic match")
+             _ :big) :small) "or pattern basic match")
 
 # or pattern no match
 (assert (= (match 5
              (or 1 2 3) :small
-             _ :big)
-           :big)
-        "or pattern no match")
+             _ :big) :big) "or pattern no match")
 
 # or pattern keywords
 (assert (= (match :b
              (or :a :b :c) :found
-             _ :not)
-           :found)
-        "or pattern with keywords")
+             _ :not) :found) "or pattern with keywords")
 
 # or pattern with binding
 (assert (= (match (cons 1 2)
              (or (x . _) (_ . x)) x
-             _ 0)
-           1)
-        "or pattern with binding")
+             _ 0) 1) "or pattern with binding")
 
 # or pattern with binding second
 (assert (= (match 99
              (or (x . _) x) x
-             _ 0)
-           99)
-        "or pattern with binding second alternative")
+             _ 0) 99) "or pattern with binding second alternative")
 
 # or pattern different bindings error
 (let [[ok? _] (protect ((fn ()
@@ -608,37 +520,27 @@
 (assert (= (match 2
              (or 1 2 3) when
              true :yes
-             _ :no)
-           :yes)
-        "or pattern with guard")
+             _ :no) :yes) "or pattern with guard")
 
 # or pattern nested in cons
 (assert (= (match (cons 2 :x)
              ((or 1 2) . t) t
-             _ :fail)
-           :x)
-        "or pattern nested in cons")
+             _ :fail) :x) "or pattern nested in cons")
 
 # or pattern two alternatives
 (assert (= (match :y
              (or :x :y) :found
-             _ :not)
-           :found)
-        "or pattern two alternatives")
+             _ :not) :found) "or pattern two alternatives")
 
 # or pattern with nil
 (assert (= (match nil
              (or nil 0) :empty
-             _ :other)
-           :empty)
-        "or pattern with nil")
+             _ :other) :empty) "or pattern with nil")
 
 # or pattern in tuple
 (assert (= (match [2 :x]
              [(or 1 2) y] y
-             _ :fail)
-           :x)
-        "or pattern in tuple")
+             _ :fail) :x) "or pattern in tuple")
 
 # ============================================================================
 # Guard test coverage
@@ -648,71 +550,53 @@
 (assert (= (match 10
              x when
              (> x 5) :big
-             x :small)
-           :big)
-        "guard references pattern var: big")
+             x :small) :big) "guard references pattern var: big")
 (assert (= (match 3
              x when
              (> x 5) :big
-             x :small)
-           :small)
-        "guard references pattern var: small")
+             x :small) :small) "guard references pattern var: small")
 
 # guard fallthrough
 (assert (= (match 5
              x when
              false :never
-             x :always)
-           :always)
-        "guard fallthrough")
+             x :always) :always) "guard fallthrough")
 
 # guard with cons
 (assert (= (match (cons 1 2)
              (h . t) when
              (> h 0) (+ h t)
-             _ 0)
-           3)
-        "guard with cons")
+             _ 0) 3) "guard with cons")
 
 # guard with list
 (assert (= (match (list 1 2 3)
              (a b c) when
              (> (+ a b c) 5) :big
-             _ :small)
-           :big)
-        "guard with list")
+             _ :small) :big) "guard with list")
 
 # guard with tuple
 (assert (= (match [1 2]
              [a b] when
              (< a b) :ordered
-             _ :no)
-           :ordered)
-        "guard with tuple")
+             _ :no) :ordered) "guard with tuple")
 
 # guard with struct
 (assert (= (match {:x 10 :y 20}
              {:x x :y y} when
              (> y x) :valid
-             _ :no)
-           :valid)
-        "guard with struct")
+             _ :no) :valid) "guard with struct")
 
 # guard with rest
 (assert (= (match (list 1 2 3)
              (a & rest) when
              (> a 0) rest
-             _ :fail)
-           (list 2 3))
-        "guard with rest")
+             _ :fail) (list 2 3)) "guard with rest")
 
 # guard fallthrough to wildcard
 (assert (= (match 5
              x when
              false :a
-             _ :fallback)
-           :fallback)
-        "guard fallthrough to wildcard")
+             _ :fallback) :fallback) "guard fallthrough to wildcard")
 
 # guard complex body
 (assert (= (match 10
@@ -720,17 +604,13 @@
              (> x 5)
                (let [y (* x 2)]
                  y)
-             x x)
-           20)
-        "guard complex body")
+             x x) 20) "guard complex body")
 
 # guard no binding leak
 (assert (= (match 5
              x when
              false x
-             y (+ y 1))
-           6)
-        "guard no binding leak")
+             y (+ y 1)) 6) "guard no binding leak")
 
 # guard middle arm matches
 (assert (= (match 5
@@ -738,34 +618,26 @@
              (> x 10) :big
              x when
              (> x 3) :medium
-             x :small)
-           :medium)
-        "guard middle arm matches")
+             x :small) :medium) "guard middle arm matches")
 
 # or pattern guard outer var
 (assert (= (let [threshold 3]
              (match 2
                (or 1 2 3) when
                (< threshold 5) :yes
-               _ :no))
-           :yes)
-        "or pattern guard outer var")
+               _ :no)) :yes) "or pattern guard outer var")
 
 # or pattern binding guard
 (assert (= (match (cons 6 :x)
              (or (a . _) (_ . a)) when
              (> a 5) :big
-             _ :small)
-           :big)
-        "or pattern binding guard")
+             _ :small) :big) "or pattern binding guard")
 
 # or pattern guard fallthrough
 (assert (= (match 2
              (or 1 2 3) when
              false :never
-             _ :fallback)
-           :fallback)
-        "or pattern guard fallthrough")
+             _ :fallback) :fallback) "or pattern guard fallthrough")
 
 # ============================================================================
 # Exhaustiveness tests
@@ -774,16 +646,12 @@
 # exhaustive match with wildcard
 (assert (= (match 42
              1 :one
-             _ :other)
-           :other)
-        "exhaustive match with wildcard")
+             _ :other) :other) "exhaustive match with wildcard")
 
 # exhaustive match with variable
 (assert (= (match 42
              1 :one
-             x x)
-           42)
-        "exhaustive match with variable")
+             x x) 42) "exhaustive match with variable")
 
 # non-exhaustive match error
 (let [[ok? _] (protect ((fn ()
@@ -795,15 +663,11 @@
 # exhaustive match booleans
 (assert (= (match true
              true :t
-             false :f)
-           :t)
-        "exhaustive match booleans")
+             false :f) :t) "exhaustive match booleans")
 
 # exhaustive or pattern booleans
 (assert (= (match true
-             (or true false) :both)
-           :both)
-        "exhaustive or pattern booleans")
+             (or true false) :both) :both) "exhaustive or pattern booleans")
 
 # non-exhaustive guard on last arm
 (let [[ok? _] (protect ((fn ()
@@ -820,25 +684,19 @@
 (assert (= (match (list 1 2 3)
              (1 2 3) :exact
              (1 2 _) :prefix
-             _ :other)
-           :exact)
-        "decision tree shared prefix exact")
+             _ :other) :exact) "decision tree shared prefix exact")
 
 # decision tree shared prefix second arm
 (assert (= (match (list 1 2 4)
              (1 2 3) :exact
              (1 2 _) :prefix
-             _ :other)
-           :prefix)
-        "decision tree shared prefix second arm")
+             _ :other) :prefix) "decision tree shared prefix second arm")
 
 # decision tree multiple constructors
 (assert (= (match (list 1 2)
              nil :nil
              (h . t) :pair
-             _ :other)
-           :pair)
-        "decision tree multiple constructors")
+             _ :other) :pair) "decision tree multiple constructors")
 
 # decision tree literal discrimination
 (assert (= (match :c
@@ -846,60 +704,47 @@
              :b 2
              :c 3
              :d 4
-             _ 0)
-           3)
-        "decision tree literal discrimination")
+             _ 0) 3) "decision tree literal discrimination")
 
 # decision tree nested tuple match
 (assert (= (match [1 [2 3]]
              [1 [2 3]] :exact
              [1 [2 _]] :partial
              [_ _] :any-pair
-             _ :other)
-           :exact)
-        "decision tree nested tuple match")
+             _ :other) :exact) "decision tree nested tuple match")
 
 # decision tree guard fallthrough to next constructor
 (assert (= (match 5
              5 when
              false :guarded
              5 :unguarded
-             _ :default)
-           :unguarded)
-        "decision tree guard fallthrough to next constructor")
+             _ :default) :unguarded)
+  "decision tree guard fallthrough to next constructor")
 
 # decision tree or pattern with shared body
 (assert (= (match :b
              (or :a :b :c) :first-group
              (or :d :e :f) :second-group
-             _ :other)
-           :first-group)
-        "decision tree or pattern with shared body")
+             _ :other) :first-group) "decision tree or pattern with shared body")
 
 # decision tree struct key discrimination
 (assert (= (match {:type :circle :radius 5}
              {:type :circle :radius r} r
              {:type :square :side s} s
-             _ 0)
-           5)
-        "decision tree struct key discrimination")
+             _ 0) 5) "decision tree struct key discrimination")
 
 # decision tree struct key discrimination second
 (assert (= (match {:type :square :side 7}
              {:type :circle :radius r} r
              {:type :square :side s} s
-             _ 0)
-           7)
-        "decision tree struct key discrimination second")
+             _ 0) 7) "decision tree struct key discrimination second")
 
 # decision tree deeply nested
 (assert (= (match (list 1 (list 2 (list 3)))
              (1 (2 (3))) :deep
              (1 (2 _)) :medium
              (1 _) :shallow
-             _ :none)
-           :deep)
-        "decision tree deeply nested")
+             _ :none) :deep) "decision tree deeply nested")
 
 # decision tree match in loop
 (def @test-result (list))
@@ -910,45 +755,34 @@
             1 :one
             2 :two
             3 :three
-            _ :other)
-          test-result)))
+            _ :other) test-result)))
 (assert (= (reverse test-result) (list :one :two :three))
-        "decision tree match in loop")
+  "decision tree match in loop")
 
 # decision tree boolean exhaustive
 (assert (= (match false
              true :yes
-             false :no)
-           :no)
-        "decision tree boolean exhaustive")
+             false :no) :no) "decision tree boolean exhaustive")
 
 # decision tree or boolean exhaustive
 (assert (= (match true
-             (or true false) :bool)
-           :bool)
-        "decision tree or boolean exhaustive")
+             (or true false) :bool) :bool) "decision tree or boolean exhaustive")
 
 # or pattern decision tree shared
 (assert (= (match (cons 1 :x)
              (1 . t) t
              (2 . t) t
              ((or 3 4) . t) t
-             _ :fail)
-           :x)
-        "or pattern decision tree shared")
+             _ :fail) :x) "or pattern decision tree shared")
 
 # or pattern nested decision tree
 (assert (= (match [3 :y]
              [(or 1 2 3) v] v
-             _ :fail)
-           :y)
-        "or pattern nested decision tree")
+             _ :fail) :y) "or pattern nested decision tree")
 
 # or pattern guard decision tree
 (assert (= (match 5
              (or 1 2 3) when
              true :small
              (or 4 5 6) :medium
-             _ :big)
-           :medium)
-        "or pattern guard decision tree")
+             _ :big) :medium) "or pattern guard decision tree")

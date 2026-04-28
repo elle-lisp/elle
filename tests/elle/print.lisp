@@ -30,6 +30,6 @@
 (def contents (port/read-all in))
 (port/close in)
 (assert (= (string contents) "captured line\n")
-        "println respects *stdout* rebinding")
+  "println respects *stdout* rebinding")
 
 (println "all print tests passed")

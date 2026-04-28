@@ -60,11 +60,8 @@
    workgroups: [x y z] dispatch dimensions.
    buffers: array of specs from gpu-input, gpu-output, gpu-inout.
    Fiber suspends on GPU fence fd — no thread pool thread consumed."
-    (let* [handle (plugin:dispatch shader
-                                   (workgroups 0)
-                                   (workgroups 1)
-                                   (workgroups 2)
-                                   buffers)
+    (let* [handle (plugin:dispatch shader (workgroups 0) (workgroups 1)
+             (workgroups 2) buffers)
            _ (plugin:wait handle)]
       (plugin:decode (plugin:collect handle) :f32)))
 
@@ -113,18 +110,18 @@
            dtype (or (get opts :dtype) :i64)
            wg-size (or (get opts :wg-size) 256)]
       (assert (= (length inputs) (fn/arity f))
-              "gpu:map: number of input arrays must match function arity")
+        "gpu:map: number of input arrays must match function arity")
       (let* [n (length (inputs 0))
              _ (each inp in inputs
                  (assert (= (length inp) n)
-                         "gpu:map: all input arrays must have the same length"))
+                   "gpu:map: all input arrays must have the same length"))
              num-bufs (+ (length inputs) 1)
              spirv (if (fn/git? f) (disgit f) (mlir/compile-spirv f wg-size))
              shader (plugin:shader ctx spirv num-bufs)
              wg-count (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))
              elem-size (if (= dtype :i64) 8 4)
              in-bufs (map (fn [data] {:data data :usage :input :dtype dtype})
-                          inputs)
+               inputs)
              out-buf {:size (* n elem-size) :usage :output}
              bufs (push (concat in-bufs) out-buf)
              handle (plugin:dispatch shader wg-count 1 1 bufs)

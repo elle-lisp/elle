@@ -31,24 +31,18 @@
                     :wpe (init-weight *block-size* *n-embd* scale)
                     :lm-head (init-weight vocab-size *n-embd* scale)}]
         (each layer in (range *n-layer*)
-          (put model
-               (layer-key layer "attn-wq")
-               (init-weight *n-embd* *n-embd* scale))
-          (put model
-               (layer-key layer "attn-wk")
-               (init-weight *n-embd* *n-embd* scale))
-          (put model
-               (layer-key layer "attn-wv")
-               (init-weight *n-embd* *n-embd* scale))
-          (put model
-               (layer-key layer "attn-wo")
-               (init-weight *n-embd* *n-embd* scale))
-          (put model
-               (layer-key layer "mlp-fc1")
-               (init-weight *mlp-hidden* *n-embd* scale))
-          (put model
-               (layer-key layer "mlp-fc2")
-               (init-weight *n-embd* *mlp-hidden* scale)))
+          (put model (layer-key layer "attn-wq")
+            (init-weight *n-embd* *n-embd* scale))
+          (put model (layer-key layer "attn-wk")
+            (init-weight *n-embd* *n-embd* scale))
+          (put model (layer-key layer "attn-wv")
+            (init-weight *n-embd* *n-embd* scale))
+          (put model (layer-key layer "attn-wo")
+            (init-weight *n-embd* *n-embd* scale))
+          (put model (layer-key layer "mlp-fc1")
+            (init-weight *mlp-hidden* *n-embd* scale))
+          (put model (layer-key layer "mlp-fc2")
+            (init-weight *n-embd* *mlp-hidden* scale)))
         model)))
 
   # ── Collect parameters ─────────────────────────────────────────
@@ -85,7 +79,7 @@
     (let* [squares (map (fn [v] (ag:v* v v)) vec-in)
            sum-sq (ag:vsum squares)
            rms (ag:vpow (ag:v+s (ag:v*s sum-sq (/ 1.0 (length vec-in))) *eps*)
-                        0.5)]
+             0.5)]
       (thaw (->array (map (fn [v] (ag:v/ v rms)) vec-in)))))
   (defn softmax-values [scores]
     "Softmax over an array of Value nodes."
@@ -94,7 +88,7 @@
       (when (> (ag:v-data s) max-val) (assign max-val (ag:v-data s))))
     (def @sum-exp (ag:make-value 0.0))
     (let [exps (->array (map (fn [s] (ag:vexp (ag:v+s s (- 0.0 max-val))))
-                             scores))]
+                          scores))]
       (each e in exps
         (assign sum-exp (ag:v+ sum-exp e)))
       (thaw (->array (map (fn [e] (ag:v/ e sum-exp)) exps)))))
@@ -117,12 +111,8 @@
       (def @ti 0)
       (while (< ti n-t)
         (push attn-logits
-              (ag:v*s (ag:vdot q
-                               (layer-keys ti)
-                               *head-dim*
-                               :offset-a hs
-                               :offset-b hs)
-                      sf))
+          (ag:v*s (ag:vdot q (layer-keys ti) *head-dim* :offset-a hs
+              :offset-b hs) sf))
         (assign ti (inc ti)))  # Weighted sum of cached values
       (let [aw (softmax-values attn-logits)]
         (each j in (range *head-dim*)
@@ -176,11 +166,8 @@
            @total-loss (ag:make-value 0.0)]
       (def @pos 0)
       (while (< pos n)
-        (let* [logits (gpt-forward-token (tokens pos)
-               pos
-               kv-keys
-               kv-values
-               model)
+        (let* [logits (gpt-forward-token (tokens pos) pos kv-keys kv-values
+                 model)
                probs (softmax-values logits)]
           (assign
             total-loss

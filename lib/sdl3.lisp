@@ -229,83 +229,51 @@
   (ffi/defbind sdl-get-error libsdl "SDL_GetError" :ptr [])
 
   # Window
-  (ffi/defbind sdl-create-window
-               libsdl
-               "SDL_CreateWindow"
-               :ptr [:string :int :int :u64])
+  (ffi/defbind sdl-create-window libsdl "SDL_CreateWindow"
+    :ptr [:string :int :int :u64])
   (ffi/defbind sdl-destroy-window libsdl "SDL_DestroyWindow" :void [:ptr])
-  (ffi/defbind sdl-set-window-title
-               libsdl
-               "SDL_SetWindowTitle"
-               :bool [:ptr :string])
-  (ffi/defbind sdl-get-window-size
-               libsdl
-               "SDL_GetWindowSize"
-               :bool [:ptr :ptr :ptr])
-  (ffi/defbind sdl-set-window-size
-               libsdl
-               "SDL_SetWindowSize"
-               :bool [:ptr :int :int])
-  (ffi/defbind sdl-get-window-pos
-               libsdl
-               "SDL_GetWindowPosition"
-               :bool [:ptr :ptr :ptr])
-  (ffi/defbind sdl-set-window-pos
-               libsdl
-               "SDL_SetWindowPosition"
-               :bool [:ptr :int :int])
-  (ffi/defbind sdl-set-fullscreen
-               libsdl
-               "SDL_SetWindowFullscreen"
-               :bool [:ptr :bool])
+  (ffi/defbind sdl-set-window-title libsdl "SDL_SetWindowTitle"
+    :bool [:ptr :string])
+  (ffi/defbind sdl-get-window-size libsdl "SDL_GetWindowSize"
+    :bool [:ptr :ptr :ptr])
+  (ffi/defbind sdl-set-window-size libsdl "SDL_SetWindowSize"
+    :bool [:ptr :int :int])
+  (ffi/defbind sdl-get-window-pos libsdl "SDL_GetWindowPosition"
+    :bool [:ptr :ptr :ptr])
+  (ffi/defbind sdl-set-window-pos libsdl "SDL_SetWindowPosition"
+    :bool [:ptr :int :int])
+  (ffi/defbind sdl-set-fullscreen libsdl "SDL_SetWindowFullscreen"
+    :bool [:ptr :bool])
 
   # Renderer
-  (ffi/defbind sdl-create-renderer
-               libsdl
-               "SDL_CreateRenderer"
-               :ptr [:ptr :string])
+  (ffi/defbind sdl-create-renderer libsdl "SDL_CreateRenderer"
+    :ptr [:ptr :string])
   (ffi/defbind sdl-destroy-renderer libsdl "SDL_DestroyRenderer" :void [:ptr])
-  (ffi/defbind sdl-set-draw-color
-               libsdl
-               "SDL_SetRenderDrawColor"
-               :bool [:ptr :u8 :u8 :u8 :u8])
+  (ffi/defbind sdl-set-draw-color libsdl "SDL_SetRenderDrawColor"
+    :bool [:ptr :u8 :u8 :u8 :u8])
   (ffi/defbind sdl-render-clear libsdl "SDL_RenderClear" :bool [:ptr])
   (ffi/defbind sdl-render-present libsdl "SDL_RenderPresent" :bool [:ptr])
-  (ffi/defbind sdl-render-point
-               libsdl
-               "SDL_RenderPoint"
-               :bool [:ptr :float :float])
-  (ffi/defbind sdl-render-line
-               libsdl
-               "SDL_RenderLine"
-               :bool [:ptr :float :float :float :float])
+  (ffi/defbind sdl-render-point libsdl "SDL_RenderPoint"
+    :bool [:ptr :float :float])
+  (ffi/defbind sdl-render-line libsdl "SDL_RenderLine"
+    :bool [:ptr :float :float :float :float])
   (ffi/defbind sdl-render-rect libsdl "SDL_RenderRect" :bool [:ptr :ptr])
-  (ffi/defbind sdl-render-fill-rect
-               libsdl
-               "SDL_RenderFillRect"
-               :bool [:ptr :ptr])
-  (ffi/defbind sdl-set-blend-mode
-               libsdl
-               "SDL_SetRenderDrawBlendMode"
-               :bool [:ptr :u32])
-  (ffi/defbind sdl-set-scale
-               libsdl
-               "SDL_SetRenderScale"
-               :bool [:ptr :float :float])
+  (ffi/defbind sdl-render-fill-rect libsdl "SDL_RenderFillRect"
+    :bool [:ptr :ptr])
+  (ffi/defbind sdl-set-blend-mode libsdl "SDL_SetRenderDrawBlendMode"
+    :bool [:ptr :u32])
+  (ffi/defbind sdl-set-scale libsdl "SDL_SetRenderScale"
+    :bool [:ptr :float :float])
   (ffi/defbind sdl-set-viewport libsdl "SDL_SetRenderViewport" :bool [:ptr :ptr])
   (ffi/defbind sdl-set-vsync libsdl "SDL_SetRenderVSync" :bool [:ptr :int])
-  (ffi/defbind sdl-debug-text
-               libsdl
-               "SDL_RenderDebugText"
-               :bool [:ptr :float :float :string])
+  (ffi/defbind sdl-debug-text libsdl "SDL_RenderDebugText"
+    :bool [:ptr :float :float :string])
 
   # Events
   (ffi/defbind sdl-poll-event libsdl "SDL_PollEvent" :bool [:ptr])
   (ffi/defbind sdl-wait-event libsdl "SDL_WaitEvent" :bool [:ptr])
-  (ffi/defbind sdl-wait-event-timeout
-               libsdl
-               "SDL_WaitEventTimeout"
-               :bool [:ptr :i32])
+  (ffi/defbind sdl-wait-event-timeout libsdl "SDL_WaitEventTimeout"
+    :bool [:ptr :i32])
 
   # Timing
   (ffi/defbind sdl-get-ticks libsdl "SDL_GetTicks" :u64 [])
@@ -315,63 +283,39 @@
   (ffi/defbind sdl-perf-frequency libsdl "SDL_GetPerformanceFrequency" :u64 [])
 
   # Textures
-  (ffi/defbind sdl-create-texture
-               libsdl
-               "SDL_CreateTexture"
-               :ptr [:ptr :u32 :int :int :int])
+  (ffi/defbind sdl-create-texture libsdl "SDL_CreateTexture"
+    :ptr [:ptr :u32 :int :int :int])
   (ffi/defbind sdl-destroy-texture libsdl "SDL_DestroyTexture" :void [:ptr])
-  (ffi/defbind sdl-render-texture
-               libsdl
-               "SDL_RenderTexture"
-               :bool [:ptr :ptr :ptr :ptr])
-  (ffi/defbind sdl-render-texture-rotated
-               libsdl
-               "SDL_RenderTextureRotated"
-               :bool [:ptr :ptr :ptr :ptr :double :ptr :int])
-  (ffi/defbind sdl-set-texture-blend
-               libsdl
-               "SDL_SetTextureBlendMode"
-               :bool [:ptr :u32])
-  (ffi/defbind sdl-set-texture-alpha
-               libsdl
-               "SDL_SetTextureAlphaMod"
-               :bool [:ptr :u8])
-  (ffi/defbind sdl-set-texture-color
-               libsdl
-               "SDL_SetTextureColorMod"
-               :bool [:ptr :u8 :u8 :u8])
-  (ffi/defbind sdl-set-texture-scale-mode
-               libsdl
-               "SDL_SetTextureScaleMode"
-               :bool [:ptr :int])
-  (ffi/defbind sdl-get-texture-size
-               libsdl
-               "SDL_GetTextureSize"
-               :bool [:ptr :ptr :ptr])
-  (ffi/defbind sdl-set-render-target
-               libsdl
-               "SDL_SetRenderTarget"
-               :bool [:ptr :ptr])
-  (ffi/defbind sdl-create-texture-from-surface
-               libsdl
-               "SDL_CreateTextureFromSurface"
-               :ptr [:ptr :ptr])
+  (ffi/defbind sdl-render-texture libsdl "SDL_RenderTexture"
+    :bool [:ptr :ptr :ptr :ptr])
+  (ffi/defbind sdl-render-texture-rotated libsdl "SDL_RenderTextureRotated"
+    :bool [:ptr :ptr :ptr :ptr :double :ptr :int])
+  (ffi/defbind sdl-set-texture-blend libsdl "SDL_SetTextureBlendMode"
+    :bool [:ptr :u32])
+  (ffi/defbind sdl-set-texture-alpha libsdl "SDL_SetTextureAlphaMod"
+    :bool [:ptr :u8])
+  (ffi/defbind sdl-set-texture-color libsdl "SDL_SetTextureColorMod"
+    :bool [:ptr :u8 :u8 :u8])
+  (ffi/defbind sdl-set-texture-scale-mode libsdl "SDL_SetTextureScaleMode"
+    :bool [:ptr :int])
+  (ffi/defbind sdl-get-texture-size libsdl "SDL_GetTextureSize"
+    :bool [:ptr :ptr :ptr])
+  (ffi/defbind sdl-set-render-target libsdl "SDL_SetRenderTarget"
+    :bool [:ptr :ptr])
+  (ffi/defbind sdl-create-texture-from-surface libsdl
+    "SDL_CreateTextureFromSurface" :ptr [:ptr :ptr])
 
   # Texture streaming
-  (ffi/defbind sdl-lock-texture
-               libsdl
-               "SDL_LockTexture"
-               :bool [:ptr :ptr :ptr :ptr])
+  (ffi/defbind sdl-lock-texture libsdl "SDL_LockTexture"
+    :bool [:ptr :ptr :ptr :ptr])
   (ffi/defbind sdl-unlock-texture libsdl "SDL_UnlockTexture" :void [:ptr])
 
   # Surface
   (ffi/defbind sdl-destroy-surface libsdl "SDL_DestroySurface" :void [:ptr])
 
   # Geometry
-  (ffi/defbind sdl-render-geometry
-               libsdl
-               "SDL_RenderGeometry"
-               :bool [:ptr :ptr :ptr :int :ptr :int])
+  (ffi/defbind sdl-render-geometry libsdl "SDL_RenderGeometry"
+    :bool [:ptr :ptr :ptr :int :ptr :int])
 
   # Images (SDL3_image)
   (ffi/defbind img-load-texture libimg "IMG_LoadTexture" :ptr [:ptr :string])
@@ -384,60 +328,40 @@
   (ffi/defbind ttf-close-font libttf "TTF_CloseFont" :void [:ptr])
   (ffi/defbind ttf-set-font-size libttf "TTF_SetFontSize" :bool [:ptr :float])
   (ffi/defbind ttf-set-font-style libttf "TTF_SetFontStyle" :void [:ptr :int])
-  (ffi/defbind ttf-get-string-size
-               libttf
-               "TTF_GetStringSize"
-               :bool [:ptr :string :size :ptr :ptr])
-  (ffi/defbind ttf-render-blended
-               libttf
-               "TTF_RenderText_Blended"
-               :ptr [:ptr :string :size color-type])
+  (ffi/defbind ttf-get-string-size libttf "TTF_GetStringSize"
+    :bool [:ptr :string :size :ptr :ptr])
+  (ffi/defbind ttf-render-blended libttf "TTF_RenderText_Blended"
+    :ptr [:ptr :string :size color-type])
 
   # Audio
-  (ffi/defbind sdl-open-audio-device-stream
-               libsdl
-               "SDL_OpenAudioDeviceStream"
-               :ptr [:u32 :ptr :ptr :ptr])
-  (ffi/defbind sdl-resume-audio
-               libsdl
-               "SDL_ResumeAudioStreamDevice"
-               :bool [:ptr])
+  (ffi/defbind sdl-open-audio-device-stream libsdl "SDL_OpenAudioDeviceStream"
+    :ptr [:u32 :ptr :ptr :ptr])
+  (ffi/defbind sdl-resume-audio libsdl "SDL_ResumeAudioStreamDevice"
+    :bool [:ptr])
   (ffi/defbind sdl-pause-audio libsdl "SDL_PauseAudioStreamDevice" :bool [:ptr])
-  (ffi/defbind sdl-put-audio-data
-               libsdl
-               "SDL_PutAudioStreamData"
-               :bool [:ptr :ptr :int])
+  (ffi/defbind sdl-put-audio-data libsdl "SDL_PutAudioStreamData"
+    :bool [:ptr :ptr :int])
   (ffi/defbind sdl-clear-audio libsdl "SDL_ClearAudioStream" :bool [:ptr])
   (ffi/defbind sdl-destroy-audio libsdl "SDL_DestroyAudioStream" :void [:ptr])
   (ffi/defbind sdl-load-wav libsdl "SDL_LoadWAV" :bool [:string :ptr :ptr :ptr])
-  (ffi/defbind sdl-get-audio-playback-devices
-               libsdl
-               "SDL_GetAudioPlaybackDevices"
-               :ptr [:ptr])
+  (ffi/defbind sdl-get-audio-playback-devices libsdl
+    "SDL_GetAudioPlaybackDevices" :ptr [:ptr])
 
   # Input
   (ffi/defbind sdl-get-keyboard-state libsdl "SDL_GetKeyboardState" :ptr [:ptr])
   (ffi/defbind sdl-get-mouse-state libsdl "SDL_GetMouseState" :u32 [:ptr :ptr])
-  (ffi/defbind sdl-warp-mouse
-               libsdl
-               "SDL_WarpMouseInWindow"
-               :void [:ptr :float :float])
+  (ffi/defbind sdl-warp-mouse libsdl "SDL_WarpMouseInWindow"
+    :void [:ptr :float :float])
   (ffi/defbind sdl-show-cursor libsdl "SDL_ShowCursor" :bool [])
   (ffi/defbind sdl-hide-cursor libsdl "SDL_HideCursor" :bool [])
-  (ffi/defbind sdl-set-relative-mouse
-               libsdl
-               "SDL_SetWindowRelativeMouseMode"
-               :bool [:ptr :bool])
+  (ffi/defbind sdl-set-relative-mouse libsdl "SDL_SetWindowRelativeMouseMode"
+    :bool [:ptr :bool])
   (ffi/defbind sdl-start-text-input libsdl "SDL_StartTextInput" :bool [:ptr])
   (ffi/defbind sdl-stop-text-input libsdl "SDL_StopTextInput" :bool [:ptr])
-  (ffi/defbind sdl-set-keyboard-grab
-               libsdl
-               "SDL_SetWindowKeyboardGrab"
-               :bool [:ptr :bool])
-  (ffi/defbind sdl-set-mouse-grab
-               libsdl
-               "SDL_SetWindowMouseGrab"
-               :bool [:ptr :bool])
+  (ffi/defbind sdl-set-keyboard-grab libsdl "SDL_SetWindowKeyboardGrab"
+    :bool [:ptr :bool])
+  (ffi/defbind sdl-set-mouse-grab libsdl "SDL_SetWindowMouseGrab"
+    :bool [:ptr :bool])
 
   # Clipboard
   (ffi/defbind sdl-set-clipboard libsdl "SDL_SetClipboardText" :bool [:string])
@@ -446,25 +370,17 @@
 
   # Misc
   (ffi/defbind sdl-open-url libsdl "SDL_OpenURL" :bool [:string])
-  (ffi/defbind sdl-show-message-box
-               libsdl
-               "SDL_ShowSimpleMessageBox"
-               :bool [:u32 :string :string :ptr])
+  (ffi/defbind sdl-show-message-box libsdl "SDL_ShowSimpleMessageBox"
+    :bool [:u32 :string :string :ptr])
   (ffi/defbind sdl-get-displays libsdl "SDL_GetDisplays" :ptr [:ptr])
-  (ffi/defbind sdl-get-display-bounds
-               libsdl
-               "SDL_GetDisplayBounds"
-               :bool [:u32 :ptr])
+  (ffi/defbind sdl-get-display-bounds libsdl "SDL_GetDisplayBounds"
+    :bool [:u32 :ptr])
   (ffi/defbind sdl-disable-screensaver libsdl "SDL_DisableScreenSaver" :bool [])
   (ffi/defbind sdl-enable-screensaver libsdl "SDL_EnableScreenSaver" :bool [])
-  (ffi/defbind sdl-set-window-bordered
-               libsdl
-               "SDL_SetWindowBordered"
-               :bool [:ptr :bool])
-  (ffi/defbind sdl-set-window-opacity
-               libsdl
-               "SDL_SetWindowOpacity"
-               :bool [:ptr :float])
+  (ffi/defbind sdl-set-window-bordered libsdl "SDL_SetWindowBordered"
+    :bool [:ptr :bool])
+  (ffi/defbind sdl-set-window-opacity libsdl "SDL_SetWindowOpacity"
+    :bool [:ptr :float])
   (ffi/defbind sdl-flash-window libsdl "SDL_FlashWindow" :bool [:ptr :int])
   (ffi/defbind sdl-set-window-icon libsdl "SDL_SetWindowIcon" :bool [:ptr :ptr])
 
@@ -611,14 +527,10 @@
     [&named audio video joystick haptic gamepad events sensor camera]
     "Initialize SDL subsystems. Pass keyword flags, e.g. (sdl/init :video true).
    With no arguments, initializes video (which implies events)."
-    (let [flags (+ (if audio init-audio 0)
-                   (if video init-video 0)
-                   (if joystick init-joystick 0)
-                   (if haptic init-haptic 0)
-                   (if gamepad init-gamepad 0)
-                   (if events init-events 0)
-                   (if sensor init-sensor 0)
-                   (if camera init-camera 0))]
+    (let [flags (+ (if audio init-audio 0) (if video init-video 0)
+            (if joystick init-joystick 0) (if haptic init-haptic 0)
+            (if gamepad init-gamepad 0) (if events init-events 0)
+            (if sensor init-sensor 0) (if camera init-camera 0))]
       (let [f (if (zero? flags) init-video flags)]
         (check-bool (sdl-init f) "sdl/init"))))
   (defn sdl/quit []
@@ -631,7 +543,7 @@
     "Create a window. Returns a window pointer.
    :flags is a u64 window flags bitmask (default 0)."
     (check-ptr (sdl-create-window title width height (if flags flags 0))
-               "sdl/create-window"))
+      "sdl/create-window"))
   (defn sdl/destroy-window [win]
     "Destroy a window."
     (sdl-destroy-window win))
@@ -641,18 +553,16 @@
   (defn sdl/window-size [win]
     "Get window size as {:width w :height h}."
     (ffi/with-stack [[wp :int 0] [hp :int 0]]
-                    (check-bool (sdl-get-window-size win wp hp)
-                                "sdl/window-size")
-                    {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
+      (check-bool (sdl-get-window-size win wp hp) "sdl/window-size")
+      {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
   (defn sdl/set-window-size [win w h]
     "Set window size."
     (check-bool (sdl-set-window-size win w h) "sdl/set-window-size"))
   (defn sdl/window-position [win]
     "Get window position as {:x x :y y}."
     (ffi/with-stack [[xp :int 0] [yp :int 0]]
-                    (check-bool (sdl-get-window-pos win xp yp)
-                                "sdl/window-position")
-                    {:x (ffi/read xp :int) :y (ffi/read yp :int)}))
+      (check-bool (sdl-get-window-pos win xp yp) "sdl/window-position")
+      {:x (ffi/read xp :int) :y (ffi/read yp :int)}))
   (defn sdl/set-window-position [win x y]
     "Set window position."
     (check-bool (sdl-set-window-pos win x y) "sdl/set-window-position"))
@@ -748,9 +658,8 @@
   (defn sdl/texture-size [tex]
     "Get texture size as {:width w :height h}."
     (ffi/with-stack [[wp :float 0.0] [hp :float 0.0]]
-                    (check-bool (sdl-get-texture-size tex wp hp)
-                                "sdl/texture-size")
-                    {:width (ffi/read wp :float) :height (ffi/read hp :float)}))
+      (check-bool (sdl-get-texture-size tex wp hp) "sdl/texture-size")
+      {:width (ffi/read wp :float) :height (ffi/read hp :float)}))
   (defn sdl/set-texture-blend-mode [tex mode]
     "Set texture blend mode. Use blend-* constants."
     (check-bool (sdl-set-texture-blend tex mode) "sdl/set-texture-blend-mode"))
@@ -763,17 +672,14 @@
   (defn sdl/set-texture-scale-mode [tex mode]
     "Set texture scale mode. scalemode-nearest or scalemode-linear."
     (check-bool (sdl-set-texture-scale-mode tex mode)
-                "sdl/set-texture-scale-mode"))
+      "sdl/set-texture-scale-mode"))
   (defn sdl/render-texture [ren tex &named src dst]
     "Render a texture. src/dst are {:x :y :w :h} or nil for full."
     (when src (write-frect (src :x) (src :y) (src :w) (src :h)))
     (when dst
       (ffi/write rect-buf-2 frect-type @[(dst :x) (dst :y) (dst :w) (dst :h)]))
-    (check-bool (sdl-render-texture ren
-                                    tex
-                                    (if src rect-buf nil)
-                                    (if dst rect-buf-2 nil))
-                "sdl/render-texture"))
+    (check-bool (sdl-render-texture ren tex (if src rect-buf nil)
+        (if dst rect-buf-2 nil)) "sdl/render-texture"))
   (defn sdl/render-texture-rotated [ren tex angle &named src dst center flip]
     "Render a texture with rotation. angle in degrees.
    center is {:x :y} or nil for texture center. flip: flip-none/horizontal/vertical."
@@ -782,21 +688,16 @@
       (ffi/write rect-buf-2 frect-type @[(dst :x) (dst :y) (dst :w) (dst :h)]))
     (when center
       (ffi/write point-buf fpoint-type @[(center :x) (center :y)]))
-    (check-bool (sdl-render-texture-rotated ren
-                  tex
-                  (if src rect-buf nil)
-                  (if dst rect-buf-2 nil)
-                  (float angle)
-                  (if center point-buf nil)
-                  (if flip flip flip-none))
-                "sdl/render-texture-rotated"))
+    (check-bool (sdl-render-texture-rotated ren tex (if src rect-buf nil)
+        (if dst rect-buf-2 nil) (float angle) (if center point-buf nil)
+        (if flip flip flip-none)) "sdl/render-texture-rotated"))
   (defn sdl/set-render-target [ren tex]
     "Set render target to a texture, or nil to reset to default."
     (check-bool (sdl-set-render-target ren tex) "sdl/set-render-target"))
   (defn sdl/create-texture-from-surface [ren surface]
     "Create a texture from an SDL_Surface. Caller must destroy the surface separately."
     (check-ptr (sdl-create-texture-from-surface ren surface)
-               "sdl/create-texture-from-surface"))
+      "sdl/create-texture-from-surface"))
   (defn sdl/lock-texture [tex &named rect]
     "Lock a streaming texture for pixel access. Returns {:pixels ptr :pitch int}.
    rect is {:x :y :w :h} or nil for entire texture."
@@ -805,14 +706,9 @@
       (assign irect-buf (ffi/malloc (ffi/size irect-type)))
       (ffi/write irect-buf irect-type @[(rect :x) (rect :y) (rect :w) (rect :h)]))
     (ffi/with-stack [[pix-ptr :ptr nil] [pitch-ptr :int 0]]
-                    (check-bool (sdl-lock-texture tex
-                                (if rect irect-buf nil)
-                                pix-ptr
-                                pitch-ptr)
-                                "sdl/lock-texture")
-                    (when irect-buf (ffi/free irect-buf))
-                    {:pixels (ffi/read pix-ptr :ptr)
-                     :pitch (ffi/read pitch-ptr :int)}))
+      (check-bool (sdl-lock-texture tex (if rect irect-buf nil) pix-ptr
+          pitch-ptr) "sdl/lock-texture") (when irect-buf (ffi/free irect-buf))
+      {:pixels (ffi/read pix-ptr :ptr) :pitch (ffi/read pitch-ptr :int)}))
   (defn sdl/unlock-texture [tex]
     "Unlock a previously locked texture."
     (sdl-unlock-texture tex))
@@ -835,9 +731,8 @@
       (while (< i nv)
         (let [v (get vertices i)
               off (* i vertex-size)]
-          (ffi/write (ptr/add buf off)
-                     vertex-type
-                     @[(v :x) (v :y) (v :r) (v :g) (v :b) (v :a) (v :tx) (v :ty)]))
+          (ffi/write (ptr/add buf off) vertex-type
+            @[(v :x) (v :y) (v :r) (v :g) (v :b) (v :a) (v :tx) (v :ty)]))
         (assign i (+ i 1)))  # Write index buffer if provided
       (def @idx-buf nil)
       (def @ni 0)
@@ -847,14 +742,10 @@
         (def @j 0)
         (while (< j ni)
           (ffi/write (ptr/add idx-buf (* j (ffi/size :int)))
-                     :int (get indices j))
+            :int (get indices j))
           (assign j (+ j 1))))
-      (let [result (sdl-render-geometry ren
-              (if texture texture nil)
-              buf
-              nv
-              (if idx-buf idx-buf nil)
-              ni)]
+      (let [result (sdl-render-geometry ren (if texture texture nil) buf nv
+              (if idx-buf idx-buf nil) ni)]
         (ffi/free buf)
         (when idx-buf (ffi/free idx-buf))
         (check-bool result "sdl/render-geometry"))))
@@ -891,22 +782,15 @@
   (defn sdl/text-size [font text]
     "Measure text dimensions. Returns {:width w :height h}."
     (ffi/with-stack [[wp :int 0] [hp :int 0]]
-                    (check-bool (ttf-get-string-size font
-                                  text
-                                  (length text)
-                                  wp
-                                  hp)
-                                "sdl/text-size")
-                    {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
+      (check-bool (ttf-get-string-size font text (length text) wp hp)
+        "sdl/text-size") {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
   (defn sdl/render-text-blended [font text color]
     "Render text to a new ARGB surface with alpha blending.
    color is {:r :g :b :a} (0-255). Returns an SDL_Surface pointer.
    Caller must destroy with sdl/destroy-surface."
-    (check-ptr (ttf-render-blended font
-                                   text
-                                   (length text)
-                                   @[(color :r) (color :g) (color :b) (color :a)])
-               "sdl/render-text-blended"))
+    (check-ptr (ttf-render-blended font text (length text)
+        @[(color :r) (color :g) (color :b) (color :a)])
+      "sdl/render-text-blended"))
   (defn sdl/draw-text [ren font text x y color]
     "Convenience: render text and blit to renderer at (x,y).
    color is {:r :g :b :a} or use (sdl:rgb r g b)."
@@ -914,12 +798,8 @@
            tex (sdl/create-texture-from-surface ren surf)]
       (sdl/destroy-surface surf)
       (let [sz (sdl/texture-size tex)]
-        (sdl/render-texture ren
-                            tex
-                            :dst {:x (float x)
-                                  :y (float y)
-                                  :w (sz :width)
-                                  :h (sz :height)}))
+        (sdl/render-texture ren tex
+          :dst {:x (float x) :y (float y) :w (sz :width) :h (sz :height)}))
       (sdl/destroy-texture tex)))
 
   # ── Audio ──────────────────────────────────────────────────────────────
@@ -928,18 +808,12 @@
     "Open an audio playback stream. Returns an audio stream pointer.
    :device defaults to default playback. :format defaults to audio-f32.
    :channels defaults to 2 (stereo). :freq defaults to 48000."
-    (ffi/with-stack [[spec
-                      audio-spec-type
-                      @[(if format format audio-f32)
-                        (if channels channels 2)
+    (ffi/with-stack [[spec audio-spec-type
+                      @[(if format format audio-f32) (if channels channels 2)
                         (if freq freq 48000)]]]
-                    (check-ptr (sdl-open-audio-device-stream (if device
-                                   device
-                                   audio-device-default-playback)
-                                 spec
-                                 nil
-                                 nil)
-                               "sdl/open-audio")))
+      (check-ptr (sdl-open-audio-device-stream (if device
+            device
+            audio-device-default-playback) spec nil nil) "sdl/open-audio")))
   (defn sdl/resume-audio [stream]
     "Resume audio playback."
     (check-bool (sdl-resume-audio stream) "sdl/resume-audio"))
@@ -950,8 +824,8 @@
     "Put audio data into a stream. data is a bytes value."
     (let [ptr (ffi/pin data)]
       (defer (ffi/free ptr)
-             (check-bool (sdl-put-audio-data stream ptr (length data))
-                         "sdl/put-audio"))))
+        (check-bool (sdl-put-audio-data stream ptr (length data))
+          "sdl/put-audio"))))
   (defn sdl/clear-audio [stream]
     "Clear buffered audio data."
     (check-bool (sdl-clear-audio stream) "sdl/clear-audio"))
@@ -960,52 +834,43 @@
     (sdl-destroy-audio stream))
   (defn sdl/load-wav [path]
     "Load a WAV file. Returns {:spec {:format f :channels c :freq f} :data bytes :length n}."
-    (ffi/with-stack [[spec-buf audio-spec-type @[0 0 0]]
-                     [audio-ptr :ptr nil]
+    (ffi/with-stack [[spec-buf audio-spec-type @[0 0 0]] [audio-ptr :ptr nil]
                      [audio-len :u32 0]]
-                    (check-bool (sdl-load-wav path spec-buf audio-ptr audio-len)
-                                "sdl/load-wav")
-                    (let* [sp (ffi/read spec-buf audio-spec-type)
-                           ptr (ffi/read audio-ptr :ptr)
-                           len (ffi/read audio-len :u32)
-                           data (if (> len 0)
-                                  (ffi/read ptr (ffi/array :u8 len))
-                                  (bytes))]
-                      {:spec {:format (get sp 0)
-                              :channels (get sp 1)
-                              :freq (get sp 2)}
-                       :data data
-                       :length len})))
+      (check-bool (sdl-load-wav path spec-buf audio-ptr audio-len)
+        "sdl/load-wav")
+      (let* [sp (ffi/read spec-buf audio-spec-type)
+             ptr (ffi/read audio-ptr :ptr)
+             len (ffi/read audio-len :u32)
+             data (if (> len 0) (ffi/read ptr (ffi/array :u8 len)) (bytes))]
+        {:spec {:format (get sp 0) :channels (get sp 1) :freq (get sp 2)}
+         :data data
+         :length len})))
   (defn sdl/audio-playback-devices []
     "Get list of audio playback device IDs."
     (ffi/with-stack [[count-ptr :int 0]]
-                    (let* [ptr (sdl-get-audio-playback-devices count-ptr)
-                           count (ffi/read count-ptr :int)]
-                      (when (null? ptr)
-                        (if (= count 0)
-                          (list)
-                          (sdl-error "sdl/audio-playback-devices")))
-                      (def @result @[])
-                      (def @i 0)
-                      (while (< i count)
-                        (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
-                        (assign i (+ i 1)))
-                      result)))
+      (let* [ptr (sdl-get-audio-playback-devices count-ptr)
+             count (ffi/read count-ptr :int)]
+        (when (null? ptr)
+          (if (= count 0) (list) (sdl-error "sdl/audio-playback-devices")))
+        (def @result @[])
+        (def @i 0)
+        (while (< i count)
+          (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
+          (assign i (+ i 1)))
+        result)))
 
   # ── Input ──────────────────────────────────────────────────────────────
 
   (defn sdl/key-pressed? [scancode]
     "Check if a key is currently pressed (by scancode)."
     (ffi/with-stack [[n-ptr :int 0]]
-                    (let [state-ptr (sdl-get-keyboard-state n-ptr)]
-                      (not (= (ffi/read (ptr/add state-ptr scancode) :u8) 0)))))
+      (let [state-ptr (sdl-get-keyboard-state n-ptr)]
+        (not (= (ffi/read (ptr/add state-ptr scancode) :u8) 0)))))
   (defn sdl/mouse-state []
     "Get mouse position and button state. Returns {:x f :y f :buttons u32}."
     (ffi/with-stack [[xp :float 0.0] [yp :float 0.0]]
-                    (let [buttons (sdl-get-mouse-state xp yp)]
-                      {:x (ffi/read xp :float)
-                       :y (ffi/read yp :float)
-                       :buttons buttons})))
+      (let [buttons (sdl-get-mouse-state xp yp)]
+        {:x (ffi/read xp :float) :y (ffi/read yp :float) :buttons buttons})))
   (defn sdl/warp-mouse [win x y]
     "Move the mouse to (x,y) within a window."
     (sdl-warp-mouse win (float x) (float y)))
@@ -1051,31 +916,27 @@
     (check-bool (sdl-open-url url) "sdl/open-url"))
   (defn sdl/message-box [title message &named flags window]
     "Show a simple message box. :flags msgbox-error/warning/information."
-    (check-bool (sdl-show-message-box (if flags flags msgbox-information)
-                  title
-                  message
-                  (if window window nil))
-                "sdl/message-box"))
+    (check-bool (sdl-show-message-box (if flags flags msgbox-information) title
+        message (if window window nil)) "sdl/message-box"))
   (defn sdl/displays []
     "Get list of display IDs."
     (ffi/with-stack [[count-ptr :int 0]]
-                    (let* [ptr (sdl-get-displays count-ptr)
-                           count (ffi/read count-ptr :int)]
-                      (when (null? ptr)
-                        (if (= count 0) (list) (sdl-error "sdl/displays")))
-                      (def @result @[])
-                      (def @i 0)
-                      (while (< i count)
-                        (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
-                        (assign i (+ i 1)))
-                      result)))
+      (let* [ptr (sdl-get-displays count-ptr)
+             count (ffi/read count-ptr :int)]
+        (when (null? ptr) (if (= count 0) (list) (sdl-error "sdl/displays")))
+        (def @result @[])
+        (def @i 0)
+        (while (< i count)
+          (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
+          (assign i (+ i 1)))
+        result)))
   (defn sdl/display-bounds [display-id]
     "Get display bounds as {:x :y :w :h}."
     (ffi/with-stack [[rect-ptr irect-type @[0 0 0 0]]]
-                    (check-bool (sdl-get-display-bounds display-id rect-ptr)
-                                "sdl/display-bounds")
-                    (let [r (ffi/read rect-ptr irect-type)]
-                      {:x (get r 0) :y (get r 1) :w (get r 2) :h (get r 3)})))
+      (check-bool (sdl-get-display-bounds display-id rect-ptr)
+        "sdl/display-bounds")
+      (let [r (ffi/read rect-ptr irect-type)]
+        {:x (get r 0) :y (get r 1) :w (get r 2) :h (get r 3)})))
   (defn sdl/disable-screensaver []
     "Disable the screen saver."
     (check-bool (sdl-disable-screensaver) "sdl/disable-screensaver"))

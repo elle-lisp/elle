@@ -125,11 +125,9 @@
            rem (% (length raw) 4)]
       (when (not (= rem 0)) (repeat (- 4 rem) (push raw 0)))
       (map (fn [i]
-             (bit/or (raw i)
-                     (bit/shift-left (raw (+ i 1)) 8)
-                     (bit/shift-left (raw (+ i 2)) 16)
-                     (bit/shift-left (raw (+ i 3)) 24)))
-           (range 0 (length raw) 4))))
+             (bit/or (raw i) (bit/shift-left (raw (+ i 1)) 8)
+               (bit/shift-left (raw (+ i 2)) 16)
+               (bit/shift-left (raw (+ i 3)) 24))) (range 0 (length raw) 4))))
   (defn emit-entry-point [section exec-model fn-id name interface-ids]
     "Emit OpEntryPoint with embedded string."
     (let* [str-words (string-to-words name)
@@ -212,38 +210,23 @@
       (emit-inst (m :mem-model) op-memory-model 0 1)
 
       ## ── Entry point ─────────────────────────────────
-      (emit-entry-point (m :entry)
-                        exec-gl-compute
-                        main-fn
-                        "main"
-                        (concat [gid-var] buf-var-ids))
+      (emit-entry-point (m :entry) exec-gl-compute main-fn "main"
+        (concat [gid-var] buf-var-ids))
 
       ## ── Execution mode ──────────────────────────────
-      (emit-inst (m :exec-mode)
-                 op-execution-mode
-                 main-fn
-                 exec-mode-local-size
-                 local-size-x
-                 1
-                 1)
+      (emit-inst (m :exec-mode) op-execution-mode main-fn exec-mode-local-size
+        local-size-x 1 1)
 
       ## ── Decorations ─────────────────────────────────
-      (emit-inst (m :decorations)
-                 op-decorate
-                 gid-var
-                 dec-builtin
-                 builtin-global-invocation-id)
+      (emit-inst (m :decorations) op-decorate gid-var dec-builtin
+        builtin-global-invocation-id)
       (emit-inst (m :decorations) op-decorate rta-t dec-array-stride 4)
       (each i (range num-buffers)
         (let* [struct-id (buf-struct-ids i)
                var-id (buf-var-ids i)]
           (emit-inst (m :decorations) op-decorate struct-id dec-block)
-          (emit-inst (m :decorations)
-                     op-member-decorate
-                     struct-id
-                     0
-                     dec-offset
-                     0)
+          (emit-inst (m :decorations) op-member-decorate struct-id 0 dec-offset
+            0)
           (emit-inst (m :decorations) op-decorate var-id dec-descriptor-set 0)
           (emit-inst (m :decorations) op-decorate var-id dec-binding i)))
 
@@ -261,11 +244,8 @@
       (each i (range num-buffers)
         (let [struct-id (buf-struct-ids i)]
           (emit-inst (m :types) op-type-struct struct-id rta-t)
-          (emit-inst (m :types)
-                     op-type-pointer
-                     (buf-ptr-ids i)
-                     sc-storage-buffer
-                     struct-id)))
+          (emit-inst (m :types) op-type-pointer (buf-ptr-ids i)
+            sc-storage-buffer struct-id)))
 
       ## ── Constants ───────────────────────────────────
       (emit-inst (m :types) op-constant u32-t const-zero 0)
@@ -273,11 +253,8 @@
       ## ── Global variables ────────────────────────────
       (emit-inst (m :types) op-variable ptr-uvec3-in-t gid-var sc-input)
       (each i (range num-buffers)
-        (emit-inst (m :types)
-                   op-variable
-                   (buf-ptr-ids i)
-                   (buf-var-ids i)
-                   sc-storage-buffer))
+        (emit-inst (m :types) op-variable (buf-ptr-ids i) (buf-var-ids i)
+          sc-storage-buffer))
 
       ## ── Function body ───────────────────────────────
       ## fn-vars: OpVariable with Function storage class (must be first in entry block)
@@ -304,34 +281,20 @@
                              (let* [gv (id)
                                     ix (id)]
                                (emit-inst body op-load uvec3-t gv gid-var)
-                               (emit-inst body
-                               op-composite-extract
-                               u32-t
-                               ix
-                               gv
-                               0)
+                               (emit-inst body op-composite-extract u32-t ix gv
+                                 0)
                                ix))
                 :load (fn [buf-idx elem-idx]
                         (let* [ptr (id)
                                val (id)]
-                          (emit-inst body
-                                     op-access-chain
-                                     ptr-f32-sb-t
-                                     ptr
-                                     (buf-var-ids buf-idx)
-                                     const-zero
-                                     elem-idx)
+                          (emit-inst body op-access-chain ptr-f32-sb-t ptr
+                            (buf-var-ids buf-idx) const-zero elem-idx)
                           (emit-inst body op-load f32-t val ptr)
                           val))
                 :store (fn [buf-idx elem-idx val]
                          (let [ptr (id)]
-                           (emit-inst body
-                                      op-access-chain
-                                      ptr-f32-sb-t
-                                      ptr
-                                      (buf-var-ids buf-idx)
-                                      const-zero
-                                      elem-idx)
+                           (emit-inst body op-access-chain ptr-f32-sb-t ptr
+                             (buf-var-ids buf-idx) const-zero elem-idx)
                            (emit-inst body op-store ptr val)))
                 :fadd (fn [a b] (binop op-fadd f32-t a b))
                 :fsub (fn [a b] (binop op-fsub f32-t a b))
@@ -376,19 +339,13 @@
                          r))  ## ── Local variables ────────────────────────
                 :var-f (fn []
                          (let [v (id)]
-                           (emit-inst fn-vars
-                                      op-variable
-                                      ptr-f32-fn-t
-                                      v
-                                      sc-function)
+                           (emit-inst fn-vars op-variable ptr-f32-fn-t v
+                             sc-function)
                            {:id v :type f32-t}))
                 :var-u (fn []
                          (let [v (id)]
-                           (emit-inst fn-vars
-                                      op-variable
-                                      ptr-u32-fn-t
-                                      v
-                                      sc-function)
+                           (emit-inst fn-vars op-variable ptr-u32-fn-t v
+                             sc-function)
                            {:id v :type u32-t}))
                 :load-var (fn [v]
                             (let [r (id)]
@@ -399,11 +356,8 @@
                 :begin-block (fn [lbl] (emit-inst body op-label lbl))
                 :branch (fn [lbl] (emit-inst body op-branch lbl))
                 :branch-cond (fn [cond then else]
-                               (emit-inst body
-                               op-branch-conditional
-                               cond
-                               then
-                               else))
+                               (emit-inst body op-branch-conditional cond then
+                                 else))
                 :loop-merge (fn [merge cont]
                               (emit-inst body op-loop-merge merge cont 0))
                 :selection-merge (fn [merge]
@@ -439,12 +393,8 @@
 
         ## ── Assemble function ─────────────────────────────
         ## OpFunction + OpLabel entry + fn-vars + body + OpReturn + OpFunctionEnd
-        (emit-inst (m :functions)
-                   op-function
-                   void-t
-                   main-fn
-                   fn-control-none
-                   fn-void-t)
+        (emit-inst (m :functions) op-function void-t main-fn fn-control-none
+          fn-void-t)
         (emit-inst (m :functions) op-label entry-lbl)
         (each w fn-vars
           (push (m :functions) w))

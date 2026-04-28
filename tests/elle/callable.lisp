@@ -111,12 +111,10 @@
 # ── Error cases ───────────────────────────────────────────────────────
 (assert (protect
           (({:a 1}))
-          :error)
-        "struct call with 0 args is arity error")
+          :error) "struct call with 0 args is arity error")
 (assert (protect
           (([1 2] "x"))
-          :error)
-        "array call with string index is type error")
+          :error) "array call with string index is type error")
 
 # ── Tail position ─────────────────────────────────────────────────────
 (defn lookup [m k]

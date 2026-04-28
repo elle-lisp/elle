@@ -61,7 +61,7 @@
   (def @co2 (make-coroutine gen2))
   (coro/resume co2)
   (assert (= (coro/resume co2 10) 10)
-          "resume value flows into yield: 0 + 10 = 10"))
+    "resume value flows into yield: 0 + 10 = 10"))
 
 (begin
   (def gen2b
@@ -142,13 +142,13 @@
   (assert (= (string (coro/status co5)) "new") "state: initial is new")
   (coro/resume co5)
   (assert (= (string (coro/status co5)) "paused")
-          "state: after first yield is paused")
+    "state: after first yield is paused")
   (coro/resume co5)
   (assert (= (string (coro/status co5)) "paused")
-          "state: after second yield is paused")
+    "state: after second yield is paused")
   (coro/resume co5)
   (assert (= (string (coro/status co5)) "dead")
-          "state: after final return is dead"))
+    "state: after final return is dead"))
 
 # single yield state transitions
 (begin
@@ -160,10 +160,10 @@
   (assert (= (string (coro/status co5b)) "new") "state single: initial is new")
   (coro/resume co5b)
   (assert (= (string (coro/status co5b)) "paused")
-          "state single: after yield is paused")
+    "state single: after yield is paused")
   (coro/resume co5b)
   (assert (= (string (coro/status co5b)) "dead")
-          "state single: after return is dead"))
+    "state single: after return is dead"))
 
 # ============================================================================
 # Interleaved coroutines
@@ -216,7 +216,7 @@
   (def @co7 (make-coroutine gen7))
   (assert (= (coro/resume co7) 42) "signal threading: first resume yields value")
   (assert (= (string (coro/status co7)) "paused")
-          "signal threading: status is paused after yield"))
+    "signal threading: status is paused after yield"))
 
 (begin
   (def gen7b
@@ -226,7 +226,7 @@
   (def @co7b (make-coroutine gen7b))
   (assert (= (coro/resume co7b) -100) "signal threading: negative yield value")
   (assert (= (string (coro/status co7b)) "paused")
-          "signal threading: paused after negative yield"))
+    "signal threading: paused after negative yield"))
 
 # ============================================================================
 # Basic yield/resume tests (from integration/coroutines.rs)
@@ -678,7 +678,7 @@
   (assert (= (coro/resume co) 2) "multiple yields intermediate: first")
   (assert (= (coro/resume co 10) 5) "multiple yields intermediate: second")
   (assert (= (coro/resume co 20) 44)
-          "multiple yields intermediate: (1+10+3)+(4+20+6)=44"))
+    "multiple yields intermediate: (1+10+3)+(4+20+6)=44"))
 
 # ============================================================================
 # Error tests (from integration/coroutines.rs)
@@ -710,7 +710,7 @@
   (def @co (make-coroutine (fn [] (+ 1 2 3))))
   (assert (= (coro/resume co) 6) "silent closure completes: value")
   (assert (= (string (coro/status co)) "dead")
-          "silent closure completes: status"))
+    "silent closure completes: status"))
 
 # ============================================================================
 # Deep cross-call yield tests
@@ -734,10 +734,10 @@
   (assert (= (coro/resume co) 1) "tail position: first")
   (assert (= (coro/resume co) 2) "tail position: second")
   (assert (= (string (coro/status co)) "paused")
-          "tail position: paused after second yield")
+    "tail position: paused after second yield")
   (coro/resume co)
   (assert (= (string (coro/status co)) "dead")
-          "tail position: dead after final resume"))
+    "tail position: dead after final resume"))
 
 # test_deep_call_chain_with_multiple_yields
 (begin

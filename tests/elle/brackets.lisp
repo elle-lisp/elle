@@ -27,21 +27,15 @@
 
 (begin
   (assert (= (let [x 1]
-               x)
-             1)
-          "let_bindings_bracket_outer"))
+               x) 1) "let_bindings_bracket_outer"))
 
 (begin
   (assert (= (let [x 1]
-               x)
-             1)
-          "let_binding_pair_bracket"))
+               x) 1) "let_binding_pair_bracket"))
 
 (begin
   (assert (= (let [x 1]
-               x)
-             1)
-          "let_bindings_bracket_both"))
+               x) 1) "let_bindings_bracket_both"))
 
 # ============================================================================
 # Letrec binding brackets
@@ -49,15 +43,11 @@
 
 (begin
   (assert (= (letrec [f (fn (x) x)]
-               (f 1))
-             1)
-          "letrec_bindings_bracket"))
+               (f 1)) 1) "letrec_bindings_bracket"))
 
 (begin
   (assert (= (letrec [f (fn (x) x)]
-               (f 1))
-             1)
-          "letrec_binding_pair_bracket"))
+               (f 1)) 1) "letrec_binding_pair_bracket"))
 
 # ============================================================================
 # Cond clause brackets
@@ -65,16 +55,12 @@
 
 (begin
   (assert (= (cond
-               true 42)
-             42)
-          "cond_clause_bracket"))
+               true 42) 42) "cond_clause_bracket"))
 
 (begin
   (assert (= (cond
                false 1
-               42)
-             42)
-          "cond_clause_bracket_else"))
+               42) 42) "cond_clause_bracket_else"))
 
 # ============================================================================
 # Match arm brackets
@@ -83,9 +69,7 @@
 (begin
   (assert (= (match 42
                42 "yes"
-               _ nil)
-             "yes")
-          "match_arm_bracket"))
+               _ nil) "yes") "match_arm_bracket"))
 
 # ============================================================================
 # Error cases: non-list match arms

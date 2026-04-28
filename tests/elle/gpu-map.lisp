@@ -10,7 +10,7 @@
 # mlir/compile-spirv must exist (--features mlir)
 (def has-mlir?
   (not (empty? (filter (fn [p] (= (get p :name) "mlir/compile-spirv"))
-                       (compile/primitives)))))
+                 (compile/primitives)))))
 (when (not has-mlir?)
   (println "SKIP: mlir/compile-spirv not available (build with --features mlir)")
   (exit 0))

@@ -10,50 +10,36 @@
 
 ## ── single binding ──────────────────────────────────────────────────
 (assert (= (let [x 1]
-             x)
-           1)
-        "flat let single binding")
+             x) 1) "flat let single binding")
 
 ## ── multiple bindings ───────────────────────────────────────────────
 (assert (= (let [a 1
                  b 2]
-             (+ a b))
-           3)
-        "flat let multi binding")
+             (+ a b)) 3) "flat let multi binding")
 
 ## ── destructuring ───────────────────────────────────────────────────
 (assert (= (let [[x y] [3 4]]
-             (+ x y))
-           7)
-        "flat let destructuring")
+             (+ x y)) 7) "flat let destructuring")
 
 ## ── let is sequential (Clojure-style) ───────────────────────────────
 (assert (= (let [a 1
                  b (+ a 1)]
-             b)
-           2)
-        "let sequential pair")
+             b) 2) "let sequential pair")
 
 (assert (= (let [x 5
                  y (* x 2)
                  z (+ x y)]
-             z)
-           15)
-        "let sequential triple")
+             z) 15) "let sequential triple")
 
 ## ── let with destructuring + sequential ─────────────────────────────
 (assert (= (let [[a b] [10 20]
                  c (+ a b)]
-             c)
-           30)
-        "let destructure + sequential binding")
+             c) 30) "let destructure + sequential binding")
 
 ## ── let* still works (alias) ────────────────────────────────────────
 (assert (= (let* [a 1
                   b (+ a 1)]
-             b)
-           2)
-        "let* still works")
+             b) 2) "let* still works")
 
 ## ── letrec mutual recursion ────────────────────────────────────────
 (letrec [is-even (fn [n] (if (= n 0) true (is-odd (- n 1))))
@@ -72,8 +58,6 @@
 ## ── nested let ──────────────────────────────────────────────────────
 (assert (= (let [x 1]
              (let [y (+ x 1)]
-               (+ x y)))
-           3)
-        "flat nested let")
+               (+ x y))) 3) "flat nested let")
 
 (println "flatlet: all passed")

@@ -66,8 +66,7 @@
                               nil
                               {:error :validation
                                :expected desc
-                               :got (type-of value)})))
-                        desc))
+                               :got (type-of value)}))) desc))
       (validator? expr)  # Already a compiled validator — pass through unchanged.
        expr
       (struct? expr)  # Struct shape: compile each declared key's validator recursively.
@@ -81,8 +80,8 @@
              desc (let [parts @[]]
                     (each k in shape-keys
                       (push parts
-                            (append (append (string k) " ")
-                                    (get (get compiled-shape k) :describe))))
+                        (append (append (string k) " ")
+                          (get (get compiled-shape k) :describe))))
                     (append (append "{" (string/join parts ", ")) "}"))]
         (make-validator (fn [value]
                           (if (not (struct? value))
@@ -97,8 +96,7 @@
                                     (push failures {:key k :failure result}))))
                               (if (> (length failures) 0)
                                 {:error :validation :fields (freeze failures)}
-                                nil))))
-                        desc))
+                                nil)))) desc))
       true
         (error {:error :type-error
                 :reason :unsupported-type
@@ -132,8 +130,7 @@
                                               {:error :validation
                                               :expected (get descs i)
                                               :got (type-of value)}))))]
-                          (loop 0)))
-                      desc))))
+                          (loop 0))) desc))))
 
 # ============================================================================
 # v/and — all sub-validators must pass (accumulates ALL failures)
@@ -158,8 +155,7 @@
                               (when (not (nil? result)) (push failures result))))
                           (if (> (length failures) 0)
                             {:error :validation :all (freeze failures)}
-                            nil)))
-                      desc))))
+                            nil))) desc))))
 
 # ============================================================================
 # v/or — first passing sub-validator wins (short-circuits)
@@ -185,14 +181,13 @@
                                             :any (freeze failures)
                                             :expected desc}
                                             (let [result ((get (get validators i)
-                                              :check) value)]
+                                                :check) value)]
                                               (if (nil? result)
                                                 nil
                                                 (begin
                                                   (push failures result)
                                                   (loop (+ i 1)))))))]
-                            (loop 0))))
-                      desc))))
+                            (loop 0)))) desc))))
 
 # ============================================================================
 # v/oneof — value must equal one of the given literals
@@ -219,8 +214,7 @@
                                           (if (= value (get values i))
                                             nil
                                             (loop (+ i 1)))))]
-                          (loop 0)))
-                      desc))))
+                          (loop 0))) desc))))
 
 # ============================================================================
 # v/optional — nil passes; otherwise delegates to sub-validator
@@ -233,7 +227,7 @@
     (let* [sub (compile-validator expr)
            desc (append (append "optional(" (get sub :describe)) ")")]
       (make-validator (fn [value] (if (nil? value) nil ((get sub :check) value)))
-                      desc))))
+        desc))))
 
 # ============================================================================
 # v/arrayof — every array element must pass the sub-validator
@@ -257,16 +251,15 @@
                             (letrec [loop (fn [i]
                                        (when (< i n)
                                          (let [result ((get sub :check) (get value
-                                           i))]
+                                             i))]
                                            (when (not (nil? result))
                                              (push failures
-                                             {:index i :failure result})))
+                                               {:index i :failure result})))
                                          (loop (+ i 1))))]
                               (loop 0))
                             (if (> (length failures) 0)
                               {:error :validation :all (freeze failures)}
-                              nil))))
-                      desc))))
+                              nil)))) desc))))
 
 # ============================================================================
 # v/mapof — every struct key/value pair must pass their validators
@@ -283,9 +276,7 @@
     (let* [key-v (compile-validator key-expr)
            val-v (compile-validator val-expr)
            desc (append (append (append (append "mapof(" (get key-v :describe))
-                                        ", ")
-                                (get val-v :describe))
-                        ")")]
+                 ", ") (get val-v :describe)) ")")]
       (make-validator (fn [value]
                         (if (not (struct? value))
                           {:error :validation
@@ -296,15 +287,14 @@
                               (let [key-result ((get key-v :check) k)]
                                 (when (not (nil? key-result))
                                   (push failures
-                                        {:kind :key :key k :failure key-result})))
+                                    {:kind :key :key k :failure key-result})))
                               (let [val-result ((get val-v :check) v)]
                                 (when (not (nil? val-result))
                                   (push failures
-                                        {:kind :value :key k :failure val-result}))))
+                                    {:kind :value :key k :failure val-result}))))
                             (if (> (length failures) 0)
                               {:error :validation :all (freeze failures)}
-                              nil))))
-                      desc))))
+                              nil)))) desc))))
 
 # ============================================================================
 # validate — thin wrapper over :check
@@ -333,8 +323,8 @@
     (let [parts @["struct validation failed:"]]
       (each entry in (get failure :fields)
         (push parts
-              (append (append (append "  " (string (get entry :key))) " — ")
-                      (explain-failure (get entry :failure)))))
+          (append (append (append "  " (string (get entry :key))) " — ")
+            (explain-failure (get entry :failure)))))
       (string/join parts "\n"))
     (has? failure :any)  # v/or failure
     (let [parts @[(append (append "none matched (" (get failure :expected)) "):")]]
@@ -351,21 +341,17 @@
             (let [parts @["array validation failed:"]]
               (each entry in entries
                 (push parts
-                      (append (append (append "  index "
-                                      (string (get entry :index)))
-                                      ": ")
-                              (explain-failure (get entry :failure)))))
+                  (append (append (append "  index " (string (get entry :index)))
+                      ": ") (explain-failure (get entry :failure)))))
               (string/join parts "\n"))
             (has? first-entry :kind)  # v/mapof
             (let [parts @["map validation failed:"]]
               (each entry in entries
                 (push parts
-                      (append (append (append (append (append "  "
-                                      (string (get entry :kind)))
-                                      " at ")
-                                      (string (get entry :key)))
-                                      ": ")
-                              (explain-failure (get entry :failure)))))
+                  (append (append (append (append (append "  "
+                            (string (get entry :kind))) " at ")
+                        (string (get entry :key))) ": ")
+                    (explain-failure (get entry :failure)))))
               (string/join parts "\n"))
             true  # v/and
             (let [parts @["all of:"]]
@@ -374,8 +360,7 @@
               (string/join parts "\n"))))))
     (and (has? failure :expected) (has? failure :got))  # Leaf failure
     (append (append (append "expected " (string (get failure :expected)))
-                    ", got ")
-            (string (get failure :got)))
+          ", got ") (string (get failure :got)))
     true  # Unknown failure shape — best effort
      (string failure)))
 

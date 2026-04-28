@@ -32,13 +32,12 @@
 
 (def result
   (subprocess/system "sh"
-                     ["-c"
-                      (string "printf 'alpha\\nbeta\\ngamma\\n' | '"
-                              elle-bin
-                              "' /tmp/elle-stdin-evspawn-inner.lisp")]))
+    ["-c"
+     (string "printf 'alpha\\nbeta\\ngamma\\n' | '" elle-bin
+       "' /tmp/elle-stdin-evspawn-inner.lisp")]))
 
 (assert (= result:exit 0)
-        (string "subprocess exited " result:exit ": " result:stderr))
+  (string "subprocess exited " result:exit ": " result:stderr))
 (def output (string/trim result:stdout))
 (assert (= output "3") (string "expected '3', got '" output "'"))
 (println "stdin-evspawn: PASS")

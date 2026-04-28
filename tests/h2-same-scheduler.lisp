@@ -31,37 +31,30 @@
     (defer (begin
              (protect (http2:close session))
              (protect (port/close listener))
-             (protect (ev/abort sf)))
-           (test-fn session))))
+             (protect (ev/abort sf))) (test-fn session))))
 
 ## ── Test 1: single request ─────────────────────────────────────────────
 
 (defn test-single-request []
   (with-server (fn [req] {:status 200 :body (concat "echo:" req:path)})
-               (fn [session]
-                 (let [resp (http2:send session "GET" "/hello")]
-                   (assert (= resp:status 200)
-                           (concat "status should be 200, got "
-                                   (string resp:status)))
-                   (assert (= (string resp:body) "echo:/hello")
-                           (concat "body should be echo:/hello, got "
-                                   (string resp:body))))))
+    (fn [session]
+      (let [resp (http2:send session "GET" "/hello")]
+        (assert (= resp:status 200)
+          (concat "status should be 200, got " (string resp:status)))
+        (assert (= (string resp:body) "echo:/hello")
+          (concat "body should be echo:/hello, got " (string resp:body))))))
   (println "  PASS: single request"))
 
 ## ── Test 2: multiple sequential requests ───────────────────────────────
 
 (defn test-sequential-requests []
   (with-server (fn [req] {:status 200 :body (concat "seq:" req:path)})
-               (fn [session]
-                 (each i in (range 0 10)
-                   (let [resp (http2:send session
-                         "GET"
-                         (concat "/req-" (string i)))]
-                     (assert (= resp:status 200)
-                             (concat "seq req " (string i) " status"))
-                     (assert (= (string resp:body)
-                                (concat "seq:/req-" (string i)))
-                             (concat "seq req " (string i) " body"))))))
+    (fn [session]
+      (each i in (range 0 10)
+        (let [resp (http2:send session "GET" (concat "/req-" (string i)))]
+          (assert (= resp:status 200) (concat "seq req " (string i) " status"))
+          (assert (= (string resp:body) (concat "seq:/req-" (string i)))
+            (concat "seq req " (string i) " body"))))))
   (println "  PASS: 10 sequential requests"))
 
 ## ── Test 3: request with body ──────────────────────────────────────────
@@ -70,15 +63,12 @@
   (with-server (fn [req]
                  {:status 200
                   :body (if (nil? req:body) "nobody" (string req:body))})
-               (fn [session]
-                 (let [resp (http2:send session
-                                        "POST"
-                                        "/data"
-                                        :body "hello world")]
-                   (assert (= resp:status 200)
-                           (concat "post: status " (string resp:status)))
-                   (assert (= (string resp:body) "hello world")
-                           (concat "post: body " (string resp:body))))))
+    (fn [session]
+      (let [resp (http2:send session "POST" "/data" :body "hello world")]
+        (assert (= resp:status 200)
+          (concat "post: status " (string resp:status)))
+        (assert (= (string resp:body) "hello world")
+          (concat "post: body " (string resp:body))))))
   (println "  PASS: request with body"))
 
 ## ── Test 4: response with trailers ───────────────────────────────────
@@ -89,15 +79,13 @@
                   :headers {:content-type "application/grpc"}
                   :body "payload"
                   :trailers [["grpc-status" "0"] ["custom-trailer" "value"]]})
-               (fn [session]
-                 (let [resp (http2:send session "GET" "/trailers")]
-                   (assert (= resp:status 200) "trailers+body: status 200")
-                   (assert (= (string resp:body) "payload")
-                           "trailers+body: body")
-                   (assert (= resp:trailers:grpc-status "0")
-                           "trailers+body: grpc-status")
-                   (assert (= resp:trailers:custom-trailer "value")
-                           "trailers+body: custom-trailer"))))
+    (fn [session]
+      (let [resp (http2:send session "GET" "/trailers")]
+        (assert (= resp:status 200) "trailers+body: status 200")
+        (assert (= (string resp:body) "payload") "trailers+body: body")
+        (assert (= resp:trailers:grpc-status "0") "trailers+body: grpc-status")
+        (assert (= resp:trailers:custom-trailer "value")
+          "trailers+body: custom-trailer"))))
   (println "  PASS: trailers with body"))
 
 ## ── Test 5: trailers-only (no body) ─────────────────────────────────
@@ -107,22 +95,20 @@
                  {:status 200
                   :headers {:content-type "application/grpc"}
                   :trailers [["grpc-status" "0"]]})
-               (fn [session]
-                 (let [resp (http2:send session "GET" "/trailers-only")]
-                   (assert (= resp:status 200) "trailers-only: status 200")
-                   (assert (= resp:trailers:grpc-status "0")
-                           "trailers-only: grpc-status"))))
+    (fn [session]
+      (let [resp (http2:send session "GET" "/trailers-only")]
+        (assert (= resp:status 200) "trailers-only: status 200")
+        (assert (= resp:trailers:grpc-status "0") "trailers-only: grpc-status"))))
   (println "  PASS: trailers-only (no body)"))
 
 ## ── Test 6: no trailers (backward compat) ───────────────────────────
 
 (defn test-no-trailers []
   (with-server (fn [req] {:status 200 :body "still works"})
-               (fn [session]
-                 (let [resp (http2:send session "GET" "/no-trailers")]
-                   (assert (= resp:status 200) "no-trailers: status 200")
-                   (assert (= (string resp:body) "still works")
-                           "no-trailers: body"))))
+    (fn [session]
+      (let [resp (http2:send session "GET" "/no-trailers")]
+        (assert (= resp:status 200) "no-trailers: status 200")
+        (assert (= (string resp:body) "still works") "no-trailers: body"))))
   (println "  PASS: no trailers (backward compat)"))
 
 ## ── Run ────────────────────────────────────────────────────────────────

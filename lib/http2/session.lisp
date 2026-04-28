@@ -22,8 +22,7 @@
   (def MAX-FRAME (* 256 1024))
   (def default-settings
     [[C:settings-initial-window-size INITIAL-WINDOW]
-     [C:settings-max-frame-size MAX-FRAME]
-     [C:settings-enable-push 0]])
+     [C:settings-max-frame-size MAX-FRAME] [C:settings-enable-push 0]])
 
   ## ── Session constructor ────────────────────────────────────────────────
 
@@ -68,22 +67,16 @@
                                    (assign shutting-down true))
                                  (unless shutting-down
                                    (let [[ftype flags sid payload] item]
-                                     (frame:write-frame t
-                                     ftype
-                                     flags
-                                     sid
-                                     payload)))
+                                     (frame:write-frame t ftype flags sid
+                                       payload)))
                                  (while (> (q:size) 0)
                                    (let [next (q:take)]
                                      (when (= next :shutdown)
                                        (assign shutting-down true))
                                      (unless shutting-down
                                        (let [[ftype flags sid payload] next]
-                                         (frame:write-frame t
-                                         ftype
-                                         flags
-                                         sid
-                                         payload)))))
+                                         (frame:write-frame t ftype flags sid
+                                           payload)))))
                                  (unless shutting-down (t:flush))
                                  (when shutting-down (break nil)))))]
         (unless ok?
@@ -103,14 +96,13 @@
       (put session :settings-ack-latch latch)
       (ev/spawn (fn []
                   (let [result (ev/timeout 30
-                        (fn []
-                          (latch:wait)
-                          :acked))]
+                          (fn []
+                            (latch:wait)
+                            :acked))]
                     (when (nil? result)
                       (when (not session:closed?)
-                        (let [[ok? _] (protect (send-goaway session
-                              0
-                              C:err-settings-timeout))]
+                        (let [[ok? _] (protect (send-goaway session 0
+                                C:err-settings-timeout))]
                           (when ok? (session:write-queue:put :shutdown))))))))))
   (defn send-settings-ack [session]
     (let [[ftype flags sid payload] (frame:make-settings-ack)]
@@ -126,8 +118,7 @@
       (send-frame session ftype flags sid payload)))
   (defn send-goaway [session last-stream-id error-code &named debug-data]
     (let [[ftype flags sid payload] (frame:make-goaway-frame last-stream-id
-            error-code
-            :debug-data debug-data)]
+            error-code :debug-data debug-data)]
       (send-frame session ftype flags sid payload)))
   (defn send-rst-stream [session stream-id error-code]
     (let [[ftype flags sid payload] (frame:make-rst-stream-frame stream-id
@@ -144,17 +135,13 @@
            max-frame (get session:remote-settings :max-frame-size)
            total (length h-block)]
       (if (<= total max-frame)
-        (let [[ft fl si pl] (frame:make-headers-frame sid
-                h-block
-                end-stream?
+        (let [[ft fl si pl] (frame:make-headers-frame sid h-block end-stream?
                 true)]
           (send-frame session ft fl si pl))
         (begin
           (let* [first-chunk (slice h-block 0 max-frame)
-                 [ft fl si pl] (frame:make-headers-frame sid
-                   first-chunk
-                   end-stream?
-                   false)]
+                 [ft fl si pl] (frame:make-headers-frame sid first-chunk
+                   end-stream? false)]
             (send-frame session ft fl si pl))
           (let [@offset max-frame]
             (while (< offset total)
@@ -162,8 +149,7 @@
                      chunk-size (min remaining max-frame)
                      chunk (slice h-block offset (+ offset chunk-size))
                      end-headers? (= (+ offset chunk-size) total)
-                     [ft fl si pl] (frame:make-continuation-frame sid
-                       chunk
+                     [ft fl si pl] (frame:make-continuation-frame sid chunk
                        end-headers?)]
                 (send-frame session ft fl si pl)
                 (assign offset (+ offset chunk-size)))))))))
@@ -234,13 +220,12 @@
                 (when (not (= delta 0))
                   (each sid in (keys session:streams)
                     (when-let [s (get session:streams sid)]
-                              (if (> delta 0)
-                                (stream:apply-window-update s:flow delta)
-                                (let [lock s:flow:lock]
-                                  (lock:acquire)
-                                  (put s:flow
-                                       :send-window (+ s:flow:send-window delta))
-                                  (lock:release))))))))
+                      (if (> delta 0)
+                        (stream:apply-window-update s:flow delta)
+                        (let [lock s:flow:lock]
+                          (lock:acquire)
+                          (put s:flow :send-window (+ s:flow:send-window delta))
+                          (lock:release))))))))
           (= entry:id C:settings-max-frame-size)
             (begin
               (when (or (< entry:value 16384) (> entry:value 16777215))
@@ -253,7 +238,7 @@
             (put session:remote-settings :header-table-size entry:value)
             (hpack:set-encoder-table-size session:hpack-encoder entry:value))
           (= entry:id C:settings-max-concurrent-streams) (put session:remote-settings
-          :max-concurrent-streams entry:value)
+            :max-concurrent-streams entry:value)
           (= entry:id C:settings-enable-push)
             (begin
               (when (and (not (= entry:value 0)) (not (= entry:value 1)))
@@ -270,8 +255,7 @@
     (let [existing (get session:streams stream-id)]
       (if (nil? existing)
         (let [s (stream:make-stream stream-id
-                                    (get session:remote-settings
-                                    :initial-window-size))]
+                (get session:remote-settings :initial-window-size))]
           (put session:streams stream-id s)
           s)
         existing)))
@@ -283,10 +267,10 @@
      consumers wake up instead of hanging forever."
     (each sid in (keys session:streams)
       (when-let [s (get session:streams sid)]
-                (protect (s:data-queue:put {:type :error
-                         :error {:error :h2-error
-                                 :reason reason
-                                 :message "session closed"}}))))
+        (protect (s:data-queue:put {:type :error
+                                    :error {:error :h2-error
+                                    :reason reason
+                                    :message "session closed"}}))))
     (put session :streams @{}))
 
   ## ── Shared reader loop ─────────────────────────────────────────────────
@@ -345,16 +329,16 @@
                     (if (= sid 0)
                       (stream:apply-window-update sess:conn-flow increment)
                       (when-let [s (get sess:streams sid)]
-                                (stream:apply-window-update s:flow increment)))))
+                        (stream:apply-window-update s:flow increment)))))
 
                 ## ── RST_STREAM ──
                 (= ftype C:type-rst-stream)
                 (when-let [s (get sess:streams sid)]
-                          (stream:transition s :recv-rst)
-                          (let [err-code (frame:read-u32 payload 0)]
-                            (put s :error-code err-code)
-                            (s:data-queue:put {:type :rst :code err-code}))
-                          (del sess:streams sid))
+                  (stream:transition s :recv-rst)
+                  (let [err-code (frame:read-u32 payload 0)]
+                    (put s :error-code err-code)
+                    (s:data-queue:put {:type :rst :code err-code}))
+                  (del sess:streams sid))
 
                 ## ── HEADERS ──
                 (= ftype C:type-headers)
@@ -369,21 +353,21 @@
                       (when (has-flag? flags C:flag-end-stream)
                         (stream:transition s :recv-end-stream))
                       (put s
-                           :pending-headers @{:data payload
-                           :end-stream (has-flag? flags C:flag-end-stream)}))))
+                        :pending-headers @{:data payload
+                        :end-stream (has-flag? flags C:flag-end-stream)}))))
 
                 ## ── CONTINUATION ──
                 (= ftype C:type-continuation)
                 (when-let [s (get sess:streams sid)]
-                          (when s:pending-headers
-                            (put s:pending-headers
-                                 :data (concat s:pending-headers:data payload))
-                            (when (has-flag? flags C:flag-end-headers)
-                              (let [headers (hpack:decode sess:hpack-decoder
-                                    s:pending-headers:data)
-                                    end? s:pending-headers:end-stream]
-                                (put s :pending-headers nil)
-                                (on-headers sess s sid headers end?)))))
+                  (when s:pending-headers
+                    (put s:pending-headers
+                      :data (concat s:pending-headers:data payload))
+                    (when (has-flag? flags C:flag-end-headers)
+                      (let [headers (hpack:decode sess:hpack-decoder
+                              s:pending-headers:data)
+                            end? s:pending-headers:end-stream]
+                        (put s :pending-headers nil)
+                        (on-headers sess s sid headers end?)))))
 
                 ## ── DATA ──
                 (= ftype C:type-data)
@@ -391,20 +375,18 @@
                   (let [len (length payload)]
                     (when (> len 0) (send-window-update sess 0 len)))
                   (when-let [s (get sess:streams sid)]
-                            (let [end? (has-flag? flags C:flag-end-stream)]
-                              (s:data-queue:put {:type :data
-                              :data payload
-                              :end-stream end?})
-                              (when end? (stream:transition s :recv-end-stream))
-                              (let [len (length payload)]
-                                (when (> len 0)
-                                  (send-window-update sess sid len)))
-                              (when end? (del sess:streams sid)))))
+                    (let [end? (has-flag? flags C:flag-end-stream)]
+                      (s:data-queue:put {:type :data
+                                        :data payload
+                                        :end-stream end?})
+                      (when end? (stream:transition s :recv-end-stream))
+                      (let [len (length payload)]
+                        (when (> len 0) (send-window-update sess sid len)))
+                      (when end? (del sess:streams sid)))))
 
                 ## ── PUSH_PROMISE — reject ──
-                (= ftype C:type-push-promise) (send-rst-stream sess
-              sid
-              C:err-refused-stream)
+                (= ftype C:type-push-promise) (send-rst-stream sess sid
+                C:err-refused-stream)
 
               ## ── Unknown — ignore ──
               true nil))))))
@@ -428,16 +410,16 @@
           s1 (get-stream sess 1)]
       (assert (= s1:flow:send-window 65535) "settings: initial stream window")
       (let [payload (concat (frame:u16->bytes C:settings-initial-window-size)
-                            (frame:u32->bytes 70000))]
+              (frame:u32->bytes 70000))]
         (apply-remote-settings sess payload))
       (assert (= s1:flow:send-window 70000)
-              (concat "settings: adjusted window " (string s1:flow:send-window))))
+        (concat "settings: adjusted window " (string s1:flow:send-window))))
 
     # ── SETTINGS validation: ENABLE_PUSH ──
     (let [mock-transport {:read nil :write nil :flush nil :close nil}
           sess (make-session mock-transport "test" false)
           payload (concat (frame:u16->bytes C:settings-enable-push)
-                          (frame:u32->bytes 2))]
+            (frame:u32->bytes 2))]
       (let [[ok? _] (protect (apply-remote-settings sess payload))]
         (assert (not ok?) "settings: ENABLE_PUSH=2 rejected")))
 
@@ -445,7 +427,7 @@
     (let [mock-transport {:read nil :write nil :flush nil :close nil}
           sess (make-session mock-transport "test" false)
           payload (concat (frame:u16->bytes C:settings-max-frame-size)
-                          (frame:u32->bytes 100))]
+            (frame:u32->bytes 100))]
       (let [[ok? _] (protect (apply-remote-settings sess payload))]
         (assert (not ok?) "settings: MAX_FRAME_SIZE=100 rejected")))
 
@@ -453,7 +435,7 @@
     (let [mock-transport {:read nil :write nil :flush nil :close nil}
           sess (make-session mock-transport "test" false)
           payload (concat (frame:u16->bytes C:settings-initial-window-size)
-                          (frame:u32->bytes 2147483648))]
+            (frame:u32->bytes 2147483648))]
       (let [[ok? _] (protect (apply-remote-settings sess payload))]
         (assert (not ok?) "settings: INITIAL_WINDOW_SIZE > 2^31-1 rejected")))
 
@@ -461,12 +443,12 @@
     (let [mock-transport {:read nil :write nil :flush nil :close nil}
           sess (make-session mock-transport "test" false)
           payload (concat (frame:u16->bytes C:settings-header-table-size)
-                          (frame:u32->bytes 2048))]
+            (frame:u32->bytes 2048))]
       (assert (= sess:hpack-encoder:table:max-size 4096)
-              "settings: encoder table starts at 4096")
+        "settings: encoder table starts at 4096")
       (apply-remote-settings sess payload)
       (assert (= sess:hpack-encoder:table:max-size 2048)
-              "settings: encoder table resized to 2048"))
+        "settings: encoder table resized to 2048"))
 
     # ── strip-padding ──
     (let [padded (bytes 3 0x41 0x42 0x43 0x00 0x00 0x00)

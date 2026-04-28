@@ -9,7 +9,7 @@
 
 (def ix
   (ui:frame win
-            (ui:v-layout (ui:heading "Hello from Elle!") (ui:button :ok "OK"))))
+    (ui:v-layout (ui:heading "Hello from Elle!") (ui:button :ok "OK"))))
 
 (assert (= ix:closed false) "should not be closed")
 (assert (= (length ix:size) 2) "size should be [w h]")

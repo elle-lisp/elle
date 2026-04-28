@@ -29,12 +29,8 @@
        h ((import "std/http2/hpack") :huffman ((import "std/http2/huffman")))
        sess ((import "std/http2/session") :sync s :frame f :stream st :hpack h)
        tr ((import "std/http2/transport"))
-       m ((import "std/http2/server") :sync s
-         :hpack h
-         :frame f
-         :stream st
-         :session sess
-         :transport tr)]
+       m ((import "std/http2/server") :sync s :hpack h :frame f :stream st
+         :session sess :transport tr)]
   (m:test))
 
 (let [m ((import "std/http2"))]

@@ -10,30 +10,26 @@
           (let [x 42]
             (let [handle (spawn (fn () x))]
               (join handle)))
-          true)
-        "spawn closure with immutable capture")
+          true) "spawn closure with immutable capture")
 
 (assert (begin
           (let [msg "hello from thread"]
             (let [handle (spawn (fn () msg))]
               (join handle)))
-          true)
-        "spawn closure with string capture")
+          true) "spawn closure with string capture")
 
 (assert (begin
           (let [v [1 2 3]]
             (let [handle (spawn (fn () v))]
               (join handle)))
-          true)
-        "spawn closure with array capture")
+          true) "spawn closure with array capture")
 
 (assert (begin
           (let [x 10
                 y 20]
             (let [handle (spawn (fn () (+ x y)))]
               (join handle)))
-          true)
-        "spawn closure computation")
+          true) "spawn closure computation")
 
 (assert (begin
           (let [a 1
@@ -41,42 +37,36 @@
                 c 3]
             (let [handle (spawn (fn () (+ a (+ b c))))]
               (join handle)))
-          true)
-        "spawn closure with multiple captures")
+          true) "spawn closure with multiple captures")
 
 (assert (begin
           (let [n nil]
             (let [handle (spawn (fn () n))]
               (join handle)))
-          true)
-        "spawn closure with nil capture")
+          true) "spawn closure with nil capture")
 
 (assert (begin
           (let [f 3.14159]
             (let [handle (spawn (fn () f))]
               (join handle)))
-          true)
-        "spawn closure with float capture")
+          true) "spawn closure with float capture")
 
 (assert (begin
           (let [lst (list 1 2 3)]
             (let [handle (spawn (fn () lst))]
               (join handle)))
-          true)
-        "spawn closure with list capture")
+          true) "spawn closure with list capture")
 
 (assert (begin
           (let [handle (spawn (fn () 42))]
             (join handle))
-          true)
-        "spawn closure no captures")
+          true) "spawn closure no captures")
 
 (assert (begin
           (let [x 10]
             (let [handle (spawn (fn () (if (> x 5) "big" "small")))]
               (join handle)))
-          true)
-        "spawn closure with conditional")
+          true) "spawn closure with conditional")
 
 # ============================================================================
 # current-thread-id tests
@@ -85,8 +75,7 @@
 (assert (begin
           (let [tid (current-thread-id)]
             (int? tid))
-          true)
-        "current thread id returns integer")
+          true) "current thread id returns integer")
 
 # ============================================================================
 # JIT closure tests
@@ -97,8 +86,7 @@
             (let [closure (fn () x)]
               (let [handle (spawn closure)]
                 (join handle))))
-          true)
-        "spawn jit closure with capture")
+          true) "spawn jit closure with capture")
 
 (assert (begin
           (let [a 10
@@ -106,24 +94,21 @@
             (let [closure (fn () (+ a b))]
               (let [handle (spawn closure)]
                 (join handle))))
-          true)
-        "spawn jit closure with computation")
+          true) "spawn jit closure with computation")
 
 (assert (begin
           (let [msg "hello from jit thread"]
             (let [closure (fn () msg)]
               (let [handle (spawn closure)]
                 (join handle))))
-          true)
-        "spawn jit closure with string capture")
+          true) "spawn jit closure with string capture")
 
 (assert (begin
           (let [v [10 20 30]]
             (let [closure (fn () v)]
               (let [handle (spawn closure)]
                 (join handle))))
-          true)
-        "spawn jit closure with array capture")
+          true) "spawn jit closure with array capture")
 
 (assert (begin
           (let [a 1
@@ -132,16 +117,14 @@
             (let [closure (fn () (+ a (+ b c)))]
               (let [handle (spawn closure)]
                 (join handle))))
-          true)
-        "spawn jit closure with multiple captures")
+          true) "spawn jit closure with multiple captures")
 
 (assert (begin
           (let [x 10]
             (let [closure (fn () (if (> x 5) "big" "small"))]
               (let [handle (spawn closure)]
                 (join handle))))
-          true)
-        "spawn jit closure with conditional")
+          true) "spawn jit closure with conditional")
 
 # ============================================================================
 # Error tests (from integration/concurrency.rs)
@@ -191,26 +174,21 @@
 # ============================================================================
 
 (assert (= (let [add1 (fn (x) (+ x 1))]
-             (join (spawn (fn () (add1 41)))))
-           42)
-        "spawn closure capturing closure")
+             (join (spawn (fn () (add1 41))))) 42)
+  "spawn closure capturing closure")
 
 (assert (= (let [add1 (fn (x) (+ x 1))]
              (let [add2 (fn (x) (add1 (add1 x)))]
-               (join (spawn (fn () (add2 40))))))
-           42)
-        "spawn closure capturing nested closures")
+               (join (spawn (fn () (add2 40)))))) 42)
+  "spawn closure capturing nested closures")
 
 (assert (= (let [f (join (spawn (fn () (fn (x) (* x 2)))))]
-             (f 21))
-           42)
-        "spawn closure returning closure")
+             (f 21)) 42) "spawn closure returning closure")
 
 (assert (= (let [offset 10]
              (let [add-offset (fn (x) (+ x offset))]
-               (join (spawn (fn () (add-offset 32))))))
-           42)
-        "spawn closure capturing closure and data")
+               (join (spawn (fn () (add-offset 32)))))) 42)
+  "spawn closure capturing closure and data")
 
 (let [[ok? _] (protect ((fn ()
                           (let [t (@struct)]
@@ -226,21 +204,18 @@
                            (if (= n 0)
                              1
                              (* n (fact (- n 1)))))]
-             (join (spawn (fn () (fact 6)))))
-           720)
-        "spawn self-recursive closure")
+             (join (spawn (fn () (fact 6))))) 720)
+  "spawn self-recursive closure")
 
 (assert (= (letrec [even? (fn (n) (if (= n 0) true (odd? (- n 1))))
                     odd? (fn (n) (if (= n 0) false (even? (- n 1))))]
-             (join (spawn (fn () (even? 10)))))
-           true)
-        "spawn mutually recursive closures")
+             (join (spawn (fn () (even? 10))))) true)
+  "spawn mutually recursive closures")
 
 (assert (= (letrec [even? (fn (n) (if (= n 0) true (odd? (- n 1))))
                     odd? (fn (n) (if (= n 0) false (even? (- n 1))))]
-             (join (spawn (fn () (odd? 99)))))
-           true)
-        "spawn mutual recursion deep")
+             (join (spawn (fn () (odd? 99))))) true)
+  "spawn mutual recursion deep")
 
 # ============================================================================
 # JIT on spawned threads: closures capturing other closures in hot loops.
@@ -256,9 +231,8 @@
                              (if (= n 0)
                                acc
                                (loop (- n 1) (+ acc (double n)))))]
-               (join (spawn (fn () (loop 100 0))))))
-           10100)
-        "spawn hot loop with captured closure (JIT on worker thread)")
+               (join (spawn (fn () (loop 100 0)))))) 10100)
+  "spawn hot loop with captured closure (JIT on worker thread)")
 
 (assert (= (let [inc (fn (x) (+ x 1))
                  sq (fn (x) (* x x))]
@@ -266,9 +240,8 @@
                              (if (= n 0)
                                acc
                                (loop (- n 1) (+ acc (sq (inc n))))))]
-               (join (spawn (fn () (loop 50 0))))))
-           45525)
-        "spawn hot loop with two captured closures")
+               (join (spawn (fn () (loop 50 0)))))) 45525)
+  "spawn hot loop with two captured closures")
 
 (assert (= (let [compose (fn (f g) (fn (x) (f (g x))))]
              (let [inc (fn (x) (+ x 1))
@@ -278,9 +251,8 @@
                                  (if (= n 0)
                                    acc
                                    (loop (- n 1) (+ acc (f n)))))]
-                   (join (spawn (fn () (loop 100 0))))))))
-           10300)
-        "spawn hot loop with composed closures")
+                   (join (spawn (fn () (loop 100 0)))))))) 10300)
+  "spawn hot loop with composed closures")
 
 # ============================================================================
 # Regression test for the ClosureRef LIR-transfer fix.
@@ -311,4 +283,4 @@
   (join (sys/spawn (fn [] (inc 41))))
   (let [after (lir/closure-value-const-count)]
     (assert (> after before)
-            "ClosureRef LIR-transfer path fires when a spawned closure calls a stdlib function")))
+      "ClosureRef LIR-transfer path fires when a spawned closure calls a stdlib function")))

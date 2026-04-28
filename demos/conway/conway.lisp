@@ -70,14 +70,9 @@
 
 # Interior neighbor count — uses get (not array-as-fn) for JIT eligibility
 (defn count-neighbors-fast [g i]
-  (+ (get g (+ i off-nw))
-     (get g (+ i off-n))
-     (get g (+ i off-ne))
-     (get g (+ i off-w))
-     (get g (+ i off-e))
-     (get g (+ i off-sw))
-     (get g (+ i off-s))
-     (get g (+ i off-se))))
+  (+ (get g (+ i off-nw)) (get g (+ i off-n)) (get g (+ i off-ne))
+    (get g (+ i off-w)) (get g (+ i off-e)) (get g (+ i off-sw))
+    (get g (+ i off-s)) (get g (+ i off-se))))
 
 (defn count-alive [g]
   (def @n 0)
@@ -130,18 +125,8 @@
 
 (defn place-pulsar [g r c]
   (def offsets
-    (list @[0 2]
-          @[0 3]
-          @[0 4]
-          @[2 0]
-          @[3 0]
-          @[4 0]
-          @[2 5]
-          @[3 5]
-          @[4 5]
-          @[5 2]
-          @[5 3]
-          @[5 4]))
+    (list @[0 2] @[0 3] @[0 4] @[2 0] @[3 0] @[4 0] @[2 5] @[3 5] @[4 5] @[5 2]
+      @[5 3] @[5 4]))
   (each off offsets
     (let [dr (off 0)
           dc (off 1)]
@@ -179,31 +164,19 @@
     (when (nonzero? (g i))
       (let* [c (mod i cols)
              r (/ (- i c) cols)]
-        (sdl:fill-rect ren
-                       (float (+ (* c cell) 1))
-                       (float (+ (* r cell) 1))
-                       (float (- cell 2))
-                       (float (- cell 2)))))
+        (sdl:fill-rect ren (float (+ (* c cell) 1)) (float (+ (* r cell) 1))
+          (float (- cell 2)) (float (- cell 2)))))
     (assign i (+ i 1))))
 
 (defn render-hud [ren gen alive paused speed fps]
   (sdl:set-color ren 0 255 0)
-  (sdl:debug-text ren
-                  10.0
-                  10.0
-                  (string "Gen: " gen "  Alive: " alive "  FPS: " fps))
-  (sdl:debug-text ren
-                  10.0
-                  26.0
-                  (string "Speed: "
-                          speed
-                          "  "
-                          (if paused "[PAUSED]" "[RUNNING]")))
+  (sdl:debug-text ren 10.0 10.0
+    (string "Gen: " gen "  Alive: " alive "  FPS: " fps))
+  (sdl:debug-text ren 10.0 26.0
+    (string "Speed: " speed "  " (if paused "[PAUSED]" "[RUNNING]")))
   (sdl:set-color ren 120 120 140)
-  (sdl:debug-text ren
-                  10.0
-                  (float (- win-h 18))
-                  "SPC:pause  G:grid  R:rand  C:clear  +/-:speed  Q:quit"))
+  (sdl:debug-text ren 10.0 (float (- win-h 18))
+    "SPC:pause  G:grid  R:rand  C:clear  +/-:speed  Q:quit"))
 
 (defn render [ren g gen alive paused speed fps show-grid]
   (sdl:set-color ren 15 15 25)
@@ -239,16 +212,14 @@
 
 (defn handle-mouse [state ev]
   (when (or (= ev:type :mouse-down)
-            (and (= ev:type :mouse-motion) (nonzero? ev:state)))
+      (and (= ev:type :mouse-motion) (nonzero? ev:state)))
     (let* [gc (int (/ ev:x (float cell)))
            gr (int (/ ev:y (float cell)))]
       (when (and (>= gr 0) (< gr rows) (>= gc 0) (< gc cols))
-        (set-cell (state :grid)
-                  gr
-                  gc
-                  (if (= ev:type :mouse-down)
-                    (if (nonzero? (cell-at (state :grid) gr gc)) 0 1)
-                    1))))))
+        (set-cell (state :grid) gr gc
+          (if (= ev:type :mouse-down)
+            (if (nonzero? (cell-at (state :grid) gr gc)) 0 1)
+            1))))))
 
 (defn handle-events [state]
   (each ev (sdl:poll-events)
@@ -266,10 +237,8 @@
 (defn main []
   (sdl:init)
   (def win
-    (sdl:create-window "Conway's Game of Life"
-                       win-w
-                       win-h
-                       :flags sdl:window-resizable))
+    (sdl:create-window "Conway's Game of Life" win-w win-h
+      :flags sdl:window-resizable))
   (def ren (sdl:create-renderer win))
   (sdl:set-vsync ren 1)
 
@@ -301,7 +270,7 @@
         (assign last-tick now)
         (assign alive (count-alive (state :grid)))
         (sdl:set-title win
-                       (string "Conway's Game of Life — Gen " (state :gen)))))
+          (string "Conway's Game of Life — Gen " (state :gen)))))
 
     # Simulation steps per frame
     (unless (state :paused)
@@ -312,14 +281,8 @@
         (assign s (+ s 1))))
 
     # Render
-    (render ren
-            (state :grid)
-            (state :gen)
-            alive
-            (state :paused)
-            (state :speed)
-            fps
-            (state :show-grid)))
+    (render ren (state :grid) (state :gen) alive (state :paused) (state :speed)
+      fps (state :show-grid)))
 
   # Cleanup
   (sdl:destroy-renderer ren)

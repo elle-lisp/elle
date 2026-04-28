@@ -11,14 +11,14 @@
 
 # Verify cons appears as a Primitive
 (assert (string/contains? prim-triples "urn:elle:Primitive")
-        "primitives contain Primitive type")
+  "primitives contain Primitive type")
 (assert (string/contains? prim-triples "\"cons\"") "primitives contain cons")
 
 # Verify signal metadata is emitted
 (assert (string/contains? prim-triples "signal-silent")
-        "primitives contain signal-silent predicate")
+  "primitives contain signal-silent predicate")
 (assert (string/contains? prim-triples "jit-eligible")
-        "primitives contain jit-eligible predicate")
+  "primitives contain jit-eligible predicate")
 
 # ── File triples ───────────────────────────────────────────────────────
 
@@ -28,19 +28,19 @@
 
 (assert (string? file-triples) "file returns a string")
 (assert (string/contains? file-triples "urn:elle:Fn")
-        "file triples contain Fn type")
+  "file triples contain Fn type")
 (assert (string/contains? file-triples "\"add\"")
-        "file triples contain add function")
+  "file triples contain add function")
 (assert (string/contains? file-triples "\"test.lisp\"")
-        "file triples contain file path")
+  "file triples contain file path")
 
 # Verify call graph edges are emitted
 (assert (string/contains? file-triples "elle:calls")
-        "file triples contain calls edges")
+  "file triples contain calls edges")
 
 # add calls +, so there should be a calls edge to the + IRI
 (assert (string/contains? file-triples "fn:+>")
-        "file triples contain calls edge to + primitive")
+  "file triples contain calls edge to + primitive")
 
 # ── Encoding ───────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@
 
 (assert (= (rdf:lit "hello") "\"hello\"") "lit wraps in quotes")
 (assert (= (rdf:lit "say \"hi\"") "\"say \\\"hi\\\"\"")
-        "lit escapes internal quotes")
+  "lit escapes internal quotes")
 
 # ── Re-analysis updates triples ──────────────────────────────────────
 
@@ -62,12 +62,12 @@
 
 # farewell should appear, greet should not
 (assert (string/contains? file-triples2 "\"farewell\"")
-        "re-analyzed triples contain new function farewell")
+  "re-analyzed triples contain new function farewell")
 (assert (not (string/contains? file-triples2 "\"greet\""))
-        "re-analyzed triples do not contain removed function greet")
+  "re-analyzed triples do not contain removed function greet")
 
 # add should still be present
 (assert (string/contains? file-triples2 "\"add\"")
-        "re-analyzed triples still contain unchanged function add")
+  "re-analyzed triples still contain unchanged function add")
 
 (println "rdf: all tests passed")

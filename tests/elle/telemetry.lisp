@@ -58,15 +58,11 @@
 
 # Create instruments via constructor functions
 (def counter
-  (telemetry:counter test-meter
-                     "test.requests"
-                     :unit "1"
-                     :description "Test counter"))
+  (telemetry:counter test-meter "test.requests" :unit "1"
+    :description "Test counter"))
 (def gauge
-  (telemetry:gauge test-meter
-                   "test.temperature"
-                   :unit "C"
-                   :description "Test gauge"))
+  (telemetry:gauge test-meter "test.temperature" :unit "C"
+    :description "Test gauge"))
 
 # Record some points via the public API
 (telemetry:add counter 5 :attributes {"method" "GET"})
@@ -134,7 +130,7 @@
 (def reparsed (json-parse json-str))
 (assert (not (nil? reparsed)) "parses back")
 (assert (= (length (get reparsed "resourceMetrics")) 1)
-        "round-trip structure intact")
+  "round-trip structure intact")
 
 (println "  JSON round-trip: ok")
 
@@ -142,11 +138,8 @@
 (println "=== telemetry: histogram encoding ===")
 
 (def hist
-  (telemetry:histogram test-meter
-    "test.latency"
-    :unit "s"
-    :description "Test histogram"
-    :boundaries [0.01 0.05 0.1 0.5 1.0]))
+  (telemetry:histogram test-meter "test.latency" :unit "s"
+    :description "Test histogram" :boundaries [0.01 0.05 0.1 0.5 1.0]))
 
 # Record observations across buckets
 (telemetry:record hist 0.005)  # bucket 0 (<=0.01)
@@ -170,7 +163,7 @@
 (def hp (get hist-points 0))
 (assert (= (get hp "count") "4") "histogram count")
 (assert (= (length (get hp "bucketCounts")) 6)
-        "6 bucket counts (5 bounds + overflow)")
+  "6 bucket counts (5 bounds + overflow)")
 (assert (= (length (get hp "explicitBounds")) 5) "5 explicit bounds")
 
 (println "  histogram encoding: ok")
@@ -192,12 +185,12 @@
     :enabled true
     :on-export nil})
 (assert (nil? (telemetry:build-payload empty-meter))
-        "empty meter => nil payload")
+  "empty meter => nil payload")
 
 # Meter with instruments but no observations
 (telemetry:counter empty-meter "x" :unit "1")
 (assert (nil? (telemetry:build-payload empty-meter))
-        "no observations => nil payload")
+  "no observations => nil payload")
 
 (println "  empty payload: ok")
 
@@ -228,7 +221,7 @@
 (def ud-metrics (get (get (get ud-rm "scopeMetrics") 0) "metrics"))
 (def ud-sum (get ud-metrics 0))
 (assert (= (get (get ud-sum "sum") "isMonotonic") false)
-        "updown counter isMonotonic=false")
+  "updown counter isMonotonic=false")
 
 # Verify sum is 2 (3 + -1)
 (def ud-dp (get (get (get ud-sum "sum") "dataPoints") 0))
@@ -340,7 +333,7 @@
 (def obs-metric (get (get (get (get obs-rm "scopeMetrics") 0) "metrics") 0))
 (def obs-hdata (get obs-metric "histogram"))
 (assert (= (get (get (get obs-hdata "dataPoints") 0) "count") "2")
-        "observe: 2 observations")
+  "observe: 2 observations")
 
 (println "  observe alias: ok")
 
@@ -366,9 +359,9 @@
 (telemetry:add dis-counter 2)
 
 (assert (= (length (pairs dis-counter:aggregates)) 0)
-        "disabled meter: no aggregates")
+  "disabled meter: no aggregates")
 (assert (nil? (telemetry:build-payload disabled-meter))
-        "disabled meter: nil payload")
+  "disabled meter: nil payload")
 (assert (not (telemetry:enabled? disabled-meter)) "enabled? returns false")
 
 (println "  enabled? check: ok")
@@ -397,7 +390,7 @@
 (def delta-rm (get (get delta-payload "resourceMetrics") 0))
 (def delta-metric (get (get (get (get delta-rm "scopeMetrics") 0) "metrics") 0))
 (assert (= (get (get delta-metric "sum") "aggregationTemporality") 1)
-        "DELTA temporality code = 1")
+  "DELTA temporality code = 1")
 
 (println "  DELTA temporality: ok")
 

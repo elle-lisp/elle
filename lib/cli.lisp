@@ -52,7 +52,7 @@
                                      :got (type-of v)
                                      :param :action
                                      :message (string ":action must be a keyword, got "
-                                     (type-of v))}))))
+                                       (type-of v))}))))
              default-val (require-string spec:default "default" "cli/parse")
              required? spec:required]
         (when (and short-name (not (= (length short-name) 1)))
@@ -60,15 +60,13 @@
                   :reason :invalid-short
                   :option short-name
                   :message (string ":short must be a single character, got \""
-                                   short-name
-                                   "\"")}))
+                    short-name "\"")}))
         (unless (contains? |:set :flag :count :append| action-kw)
           (error {:error :cli-error
                   :reason :unknown-action
                   :action action-kw
-                  :message (string "unknown action "
-                                   action-kw
-                                   ", expected :set, :flag, :count, or :append")}))
+                  :message (string "unknown action " action-kw
+                    ", expected :set, :flag, :count, or :append")}))
         {:name name
          :long long-name
          :short short-name
@@ -167,10 +165,8 @@
                       _
                         (if (< (inc ci) (length chars))
                           (begin
-                            (apply-action result
-                            spec:name
-                            spec:action
-                            (slice chars (inc ci) (length chars)))
+                            (apply-action result spec:name spec:action
+                              (slice chars (inc ci) (length chars)))
                             (assign ci (length chars)))
                           (begin
                             (assign i (inc i))
@@ -178,9 +174,8 @@
                               (error {:error :cli-error
                                       :reason :missing-value
                                       :option (string "-" ch)
-                                      :message (string "-"
-                                      ch
-                                      " requires a value")}))
+                                      :message (string "-" ch
+                                        " requires a value")}))
                             (apply-action result spec:name spec:action (args i))))))
                   (assign ci (inc ci))))  ## Positional
               true
@@ -216,13 +211,12 @@
             (error {:error :cli-error
                     :reason :reserved-name
                     :name s:name
-                    :message (string "arg name "
-                                     s:name
-                                     " conflicts with reserved subcommand key")}))))
+                    :message (string "arg name " s:name
+                      " conflicts with reserved subcommand key")}))))
       (if (not has-cmds)
         (freeze (parse-argv norm-args argv))
         (let* [cmd-names (map (fn [c] (require-string c:name "name" "cli/parse"))
-                              cmds-spec)
+                 cmds-spec)
                result (init-result norm-args)
                args-arr (->array argv)
                argc (length args-arr)]
@@ -232,7 +226,7 @@
           (while (and (< i argc) (nil? found))
             (let [arg (args-arr i)]
               (if (and (not (string/starts-with? arg "-"))
-                       (find (fn [n] (= n arg)) cmd-names))
+                  (find (fn [n] (= n arg)) cmd-names))
                 (begin
                   (assign found arg)
                   (assign cmd-start (inc i)))
@@ -268,7 +262,7 @@
               :expected :list
               :got (type-of argv)
               :message (string "argv must be a list or array, got "
-                               (type-of argv))}))
+                (type-of argv))}))
     (unless spec:name
       (error {:error :cli-error
               :reason :missing-name

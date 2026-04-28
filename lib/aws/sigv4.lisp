@@ -25,13 +25,8 @@
   (defn canonical-headers [pairs]
     "Canonical headers string from sorted [name value] pairs."
     (string/join (map (fn [[name value]]
-                        (string/join [(string/lowercase name)
-                                      ":"
-                                      (string/trim value)
-                                      "\n"]
-                                     ""))
-                      pairs)
-                 ""))
+                        (string/join [(string/lowercase name) ":"
+                                      (string/trim value) "\n"] "")) pairs) ""))
   (defn signed-header-names [pairs]
     "Semicolon-separated lowercase header names."
     (string/join (map (fn [[name _]] (string/lowercase name)) pairs) ";"))
@@ -42,27 +37,13 @@
       (string/join (map (fn [[k v]] (concat k "=" v)) params) "&")))
   (defn canonical-request [method path query pairs body-hash]
     "Build the canonical request string."
-    (string/join [method
-                  "\n"
-                  path
-                  "\n"
-                  (canonical-query query)
-                  "\n"
-                  (canonical-headers pairs)
-                  "\n"
-                  (signed-header-names pairs)
-                  "\n"
-                  body-hash]
-                 ""))
+    (string/join [method "\n" path "\n" (canonical-query query) "\n"
+                  (canonical-headers pairs) "\n" (signed-header-names pairs)
+                  "\n" body-hash] ""))
   (defn string-to-sign [datetime scope creq]
     "Build the string-to-sign."
-    (string/join ["AWS4-HMAC-SHA256\n"
-                  datetime
-                  "\n"
-                  scope
-                  "\n"
-                  (bytes->hex (sha256 creq))]
-                 ""))
+    (string/join ["AWS4-HMAC-SHA256\n" datetime "\n" scope "\n"
+                  (bytes->hex (sha256 creq))] ""))
   (defn derive-key [secret date region service]
     "Derive the signing key via HMAC chain."
     (-> (concat "AWS4" secret)
@@ -83,27 +64,20 @@
     (let* [datetime (ts-format "%Y%m%dT%H%M%SZ" (ts-now))
            date (slice datetime 0 8)
            hash (payload-hash body)  ## Build sorted [name value] pairs for canonical request
-           base [["host" host]
-                 ["x-amz-content-sha256" hash]
+           base [["host" host] ["x-amz-content-sha256" hash]
                  ["x-amz-date" datetime]]
            pairs (if (nil? creds:session-token)
                    base
                    (sort (concat base
-                                 [["x-amz-security-token" creds:session-token]])))  ## Sign
+                           [["x-amz-security-token" creds:session-token]])))  ## Sign
            scope (string/join [date region service "aws4_request"] "/")
            creq (canonical-request method path query pairs hash)
            sts (string-to-sign datetime scope creq)
            key (derive-key creds:secret-key date region service)
            sig (bytes->hex (hmac-sha256 key sts))
-           auth (string/join ["AWS4-HMAC-SHA256 Credential="
-                              creds:access-key
-                              "/"
-                              scope
-                              ", SignedHeaders="
-                              (signed-header-names pairs)
-                              ", Signature="
-                              sig]
-                             "")  ## Build result struct
+           auth (string/join ["AWS4-HMAC-SHA256 Credential=" creds:access-key
+                              "/" scope ", SignedHeaders="
+                              (signed-header-names pairs) ", Signature=" sig] "")  ## Build result struct
            result {:host host
                    :x-amz-date datetime
                    :x-amz-content-sha256 hash

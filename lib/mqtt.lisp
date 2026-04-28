@@ -31,14 +31,13 @@
     "Feed and poll until pred matches a packet. Returns the matching packet.
      Non-matching packets are discarded."
     (forever
-      (if-let [pkt (plugin:poll conn:mqtt)]
-              (when (pred pkt) (break pkt))
-              (let [data (port/read conn:tcp 16384)]
-                (when (nil? data)
-                  (error {:error :mqtt-error
-                          :reason :connection-closed
-                          :message "connection closed unexpectedly"}))
-                (plugin:feed conn:mqtt data)))))
+      (if-let [pkt (plugin:poll conn:mqtt)] (when (pred pkt) (break pkt))
+        (let [data (port/read conn:tcp 16384)]
+          (when (nil? data)
+            (error {:error :mqtt-error
+                    :reason :connection-closed
+                    :message "connection closed unexpectedly"}))
+          (plugin:feed conn:mqtt data)))))
   (defn packet-type? [type-kw]
     "Return a predicate that matches packets of the given type."
     (fn [pkt] (= pkt:type type-kw)))
@@ -69,7 +68,7 @@
                                     :reason :connack-rejected
                                     :code ack:code
                                     :message (concat "CONNACK rejected, code="
-                                    (string ack:code))}))))]
+                                      (string ack:code))}))))]
         (unless ok?
           (port/close tcp-port)
           (error err)))
@@ -93,13 +92,12 @@
   (defn mqtt/recv [conn]
     "Receive one MQTT message (typically a PUBLISH).
      Blocks until a packet is available. Returns the packet struct, or nil on EOF."
-    (if-let [pkt (plugin:poll conn:mqtt)]
-            pkt
-            (forever
-              (let [data (port/read conn:tcp 16384)]
-                (when (nil? data) (break))
-                (plugin:feed conn:mqtt data)
-                (when-let [pkt (plugin:poll conn:mqtt)] (break pkt))))))
+    (if-let [pkt (plugin:poll conn:mqtt)] pkt
+      (forever
+        (let [data (port/read conn:tcp 16384)]
+          (when (nil? data) (break))
+          (plugin:feed conn:mqtt data)
+          (when-let [pkt (plugin:poll conn:mqtt)] (break pkt))))))
   (defn mqtt/listen [conn callback]
     "Loop receiving messages, calling (callback msg) for each.
      Runs until the connection is closed (port/read returns nil)."

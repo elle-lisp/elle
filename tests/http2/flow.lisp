@@ -68,9 +68,9 @@
       (defer (begin
                (protect (http2:close session))
                (protect (ev/join sf)))
-             (assert (= session:conn-flow:send-window 65535)
-                     (concat "conn-flow should be 65535, got "
-                             (string session:conn-flow:send-window))))))
+        (assert (= session:conn-flow:send-window 65535)
+          (concat "conn-flow should be 65535, got "
+            (string session:conn-flow:send-window))))))
   (println "  PASS: conn-flow initial value"))
 
 (defn test-reader-death-notification []
@@ -88,8 +88,8 @@
       (defer (begin
                (protect (http2:close session))
                (protect (ev/join sf)))
-             (let [[ok? err] (protect (http2:send session "GET" "/hang"))]
-               (assert (not ok?) "reader death: send should error, not hang")))))
+        (let [[ok? err] (protect (http2:send session "GET" "/hang"))]
+          (assert (not ok?) "reader death: send should error, not hang")))))
   (println "  PASS: reader death notification"))
 
 (defn test-many-sequential-streams []
@@ -108,35 +108,14 @@
                                 (= f:type C:type-headers)
                                   (begin
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
+                                        [[":status" "200"]])
                                       [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                        resp-hdr
-                                        false
-                                        true)]
+                                        resp-hdr false true)]
                                       (frame:write-frame t ft fl si pl))
-                                    (let* [body (bytes 0
-                                      1
-                                      2
-                                      3
-                                      4
-                                      5
-                                      6
-                                      7
-                                      8
-                                      9
-                                      0
-                                      1
-                                      2
-                                      3
-                                      4
-                                      5
-                                      6
-                                      7
-                                      8
-                                      9)
+                                    (let* [body (bytes 0 1 2 3 4 5 6 7 8 9 0 1 2
+                                        3 4 5 6 7 8 9)
                                       [ft fl si pl] (frame:make-data-frame f:stream-id
-                                        body
-                                        true)]
+                                        body true)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))
@@ -145,12 +124,12 @@
       (defer (begin
                (protect (http2:close session))
                (protect (ev/join sf)))
-             (each i in (range 0 40)
-               (let [resp (http2:send session "GET" (concat "/req-" (string i)))]
-                 (assert (= resp:status 200)
-                         (concat "many-streams: request " (string i)))))
-             (assert (= (length (keys session:streams)) 0)
-                     "many-streams: no stream leak"))))
+        (each i in (range 0 40)
+          (let [resp (http2:send session "GET" (concat "/req-" (string i)))]
+            (assert (= resp:status 200)
+              (concat "many-streams: request " (string i)))))
+        (assert (= (length (keys session:streams)) 0)
+          "many-streams: no stream leak"))))
   (println "  PASS: 40 sequential streams"))
 
 ## ── New tests ──────────────────────────────────────────────────────────
@@ -172,11 +151,9 @@
                                 (= f:type C:type-headers)
                                   (begin  # Respond, then send GOAWAY
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
+                                        [[":status" "200"]])
                                       [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                        resp-hdr
-                                        true
-                                        true)]
+                                        resp-hdr true true)]
                                       (frame:write-frame t ft fl si pl))
                                     (let [[ft fl si pl] (frame:make-goaway-frame f:stream-id
                                         C:err-no-error)]
@@ -188,12 +165,12 @@
       (defer (begin
                (protect (http2:close session))
                (protect (ev/join sf)))
-             (let [resp (http2:send session "GET" "/test")]
-               (assert (= resp:status 200) "goaway: first request ok"))  # Give reader time to process the GOAWAY
-             (ev/sleep 0.1)
-             (assert session:goaway-recvd? "goaway: goaway-recvd? set")
-             (let [[ok? _] (protect (http2:send session "GET" "/nope"))]
-               (assert (not ok?) "goaway: second request refused")))))
+        (let [resp (http2:send session "GET" "/test")]
+          (assert (= resp:status 200) "goaway: first request ok"))  # Give reader time to process the GOAWAY
+         (ev/sleep 0.1)
+        (assert session:goaway-recvd? "goaway: goaway-recvd? set")
+        (let [[ok? _] (protect (http2:send session "GET" "/nope"))]
+          (assert (not ok?) "goaway: second request refused")))))
   (println "  PASS: GOAWAY from raw server"))
 
 (defn test-concurrent-requests []
@@ -213,17 +190,14 @@
                                 (= f:type C:type-headers)
                                   (begin
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
+                                        [[":status" "200"]])
                                       [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                        resp-hdr
-                                        false
-                                        true)]
+                                        resp-hdr false true)]
                                       (frame:write-frame t ft fl si pl))
                                     (let* [body (bytes (concat "resp-"
-                                      (string f:stream-id)))
+                                        (string f:stream-id)))
                                       [ft fl si pl] (frame:make-data-frame f:stream-id
-                                        body
-                                        true)]
+                                        body true)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))
@@ -232,16 +206,15 @@
       (defer (begin
                (protect (http2:close session))
                (protect (ev/join sf)))
-             (let [fibers (map (fn [i]
-                                 (ev/spawn (fn []
-                                   (http2:send session
-                                   "GET"
-                                   (concat "/concurrent-" (string i))))))
-                               (range 0 5))
-                   results (map ev/join fibers)]
-               (each r in results
-                 (assert (= r:status 200) "concurrent: status 200"))
-               (assert (= (length results) 5) "concurrent: 5 results")))))
+        (let [fibers (map (fn [i]
+                            (ev/spawn (fn []
+                                        (http2:send session "GET"
+                                          (concat "/concurrent-" (string i))))))
+                (range 0 5))
+              results (map ev/join fibers)]
+          (each r in results
+            (assert (= r:status 200) "concurrent: status 200"))
+          (assert (= (length results) 5) "concurrent: 5 results")))))
   (println "  PASS: concurrent requests"))
 
 (defn test-settings-window-adjustment-e2e []
@@ -254,7 +227,7 @@
                           # changing INITIAL_WINDOW_SIZE
                           (ev/sleep 0.1)
                           (let [payload (concat (frame:u16->bytes C:settings-initial-window-size)
-                                (frame:u32->bytes 32768))
+                                  (frame:u32->bytes 32768))
                                 [ft fl si pl] (frame:make-settings-frame [[C:settings-initial-window-size
                                 32768]])]
                             (frame:write-frame t ft fl si pl))
@@ -269,11 +242,9 @@
                                 (= f:type C:type-headers)
                                   (begin
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
+                                        [[":status" "200"]])
                                       [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                        resp-hdr
-                                        true
-                                        true)]
+                                        resp-hdr true true)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))
@@ -282,20 +253,16 @@
       (defer (begin
                (protect (http2:close session))
                (protect (ev/join sf)))  # Poll until SETTINGS applied (up to 3s)
-             (let [@attempts 0]
-               (while (and (not (= (get session:remote-settings
-                                        :initial-window-size)
-                                   32768))
-                           (< attempts 30))
-                 (ev/sleep 0.1)
-                 (assign attempts (+ attempts 1))))
-             (assert (= (get session:remote-settings :initial-window-size) 32768)
-                     (concat "settings: window adjusted to 32768, got "
-                             (string (get session:remote-settings
-                                     :initial-window-size))))  # Verify we can still send
-             (let [resp (http2:send session "GET" "/after-settings")]
-               (assert (= resp:status 200)
-                       "settings: request after adjustment ok")))))
+        (let [@attempts 0]
+          (while (and (not (= (get session:remote-settings :initial-window-size)
+                             32768)) (< attempts 30))
+            (ev/sleep 0.1)
+            (assign attempts (+ attempts 1))))
+        (assert (= (get session:remote-settings :initial-window-size) 32768)
+          (concat "settings: window adjusted to 32768, got "
+            (string (get session:remote-settings :initial-window-size))))  # Verify we can still send
+        (let [resp (http2:send session "GET" "/after-settings")]
+          (assert (= resp:status 200) "settings: request after adjustment ok")))))
   (println "  PASS: SETTINGS window adjustment e2e"))
 
 ## ── Run ──────────────────────────────────────────────────────────────────

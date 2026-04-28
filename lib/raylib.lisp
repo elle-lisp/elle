@@ -283,228 +283,125 @@
   (ffi/defbind c-end-mode-3d lib "EndMode3D" :void [])
   (ffi/defbind c-begin-blend-mode lib "BeginBlendMode" :void [:int])
   (ffi/defbind c-end-blend-mode lib "EndBlendMode" :void [])
-  (ffi/defbind c-begin-scissor-mode
-               lib
-               "BeginScissorMode"
-               :void [:int :int :int :int])
+  (ffi/defbind c-begin-scissor-mode lib "BeginScissorMode"
+    :void [:int :int :int :int])
   (ffi/defbind c-end-scissor-mode lib "EndScissorMode" :void [])
 
   # ── Raw bindings: Shapes ─────────────────────────────────────────────
 
   (ffi/defbind c-draw-pixel lib "DrawPixel" :void [:int :int color-type])
   (ffi/defbind c-draw-line lib "DrawLine" :void [:int :int :int :int color-type])
-  (ffi/defbind c-draw-line-ex
-               lib
-               "DrawLineEx"
-               :void [vec2-type vec2-type :float color-type])
-  (ffi/defbind c-draw-line-bezier
-               lib
-               "DrawLineBezier"
-               :void [vec2-type vec2-type :float color-type])
-  (ffi/defbind c-draw-circle
-               lib
-               "DrawCircle"
-               :void [:int :int :float color-type])
-  (ffi/defbind c-draw-circle-gradient
-               lib
-               "DrawCircleGradient"
-               :void [:int :int :float color-type color-type])
-  (ffi/defbind c-draw-circle-lines
-               lib
-               "DrawCircleLines"
-               :void [:int :int :float color-type])
-  (ffi/defbind c-draw-ellipse
-               lib
-               "DrawEllipse"
-               :void [:int :int :float :float color-type])
-  (ffi/defbind c-draw-rectangle
-               lib
-               "DrawRectangle"
-               :void [:int :int :int :int color-type])
-  (ffi/defbind c-draw-rectangle-rec
-               lib
-               "DrawRectangleRec"
-               :void [rect-type color-type])
-  (ffi/defbind c-draw-rectangle-pro
-               lib
-               "DrawRectanglePro"
-               :void [rect-type vec2-type :float color-type])
-  (ffi/defbind c-draw-rectangle-gradient-v
-               lib
-               "DrawRectangleGradientV"
-               :void [:int :int :int :int color-type color-type])
-  (ffi/defbind c-draw-rectangle-gradient-h
-               lib
-               "DrawRectangleGradientH"
-               :void [:int :int :int :int color-type color-type])
-  (ffi/defbind c-draw-rectangle-lines
-               lib
-               "DrawRectangleLines"
-               :void [:int :int :int :int color-type])
-  (ffi/defbind c-draw-rectangle-lines-ex
-               lib
-               "DrawRectangleLinesEx"
-               :void [rect-type :float color-type])
-  (ffi/defbind c-draw-rectangle-rounded
-               lib
-               "DrawRectangleRounded"
-               :void [rect-type :float :int color-type])
-  (ffi/defbind c-draw-rectangle-rounded-lines
-               lib
-               "DrawRectangleRoundedLines"
-               :void [rect-type :float :int color-type])
-  (ffi/defbind c-draw-rectangle-rounded-lines-ex
-               lib
-               "DrawRectangleRoundedLinesEx"
-               :void [rect-type :float :int :float color-type])
-  (ffi/defbind c-draw-triangle
-               lib
-               "DrawTriangle"
-               :void [vec2-type vec2-type vec2-type color-type])
-  (ffi/defbind c-draw-triangle-lines
-               lib
-               "DrawTriangleLines"
-               :void [vec2-type vec2-type vec2-type color-type])
-  (ffi/defbind c-draw-poly
-               lib
-               "DrawPoly"
-               :void [vec2-type :int :float :float color-type])
-  (ffi/defbind c-draw-poly-lines
-               lib
-               "DrawPolyLines"
-               :void [vec2-type :int :float :float color-type])
-  (ffi/defbind c-draw-ring
-               lib
-               "DrawRing"
-               :void [vec2-type :float :float :float :float :int color-type])
-  (ffi/defbind c-draw-ring-lines
-               lib
-               "DrawRingLines"
-               :void [vec2-type :float :float :float :float :int color-type])
+  (ffi/defbind c-draw-line-ex lib "DrawLineEx"
+    :void [vec2-type vec2-type :float color-type])
+  (ffi/defbind c-draw-line-bezier lib "DrawLineBezier"
+    :void [vec2-type vec2-type :float color-type])
+  (ffi/defbind c-draw-circle lib "DrawCircle"
+    :void [:int :int :float color-type])
+  (ffi/defbind c-draw-circle-gradient lib "DrawCircleGradient"
+    :void [:int :int :float color-type color-type])
+  (ffi/defbind c-draw-circle-lines lib "DrawCircleLines"
+    :void [:int :int :float color-type])
+  (ffi/defbind c-draw-ellipse lib "DrawEllipse"
+    :void [:int :int :float :float color-type])
+  (ffi/defbind c-draw-rectangle lib "DrawRectangle"
+    :void [:int :int :int :int color-type])
+  (ffi/defbind c-draw-rectangle-rec lib "DrawRectangleRec"
+    :void [rect-type color-type])
+  (ffi/defbind c-draw-rectangle-pro lib "DrawRectanglePro"
+    :void [rect-type vec2-type :float color-type])
+  (ffi/defbind c-draw-rectangle-gradient-v lib "DrawRectangleGradientV"
+    :void [:int :int :int :int color-type color-type])
+  (ffi/defbind c-draw-rectangle-gradient-h lib "DrawRectangleGradientH"
+    :void [:int :int :int :int color-type color-type])
+  (ffi/defbind c-draw-rectangle-lines lib "DrawRectangleLines"
+    :void [:int :int :int :int color-type])
+  (ffi/defbind c-draw-rectangle-lines-ex lib "DrawRectangleLinesEx"
+    :void [rect-type :float color-type])
+  (ffi/defbind c-draw-rectangle-rounded lib "DrawRectangleRounded"
+    :void [rect-type :float :int color-type])
+  (ffi/defbind c-draw-rectangle-rounded-lines lib "DrawRectangleRoundedLines"
+    :void [rect-type :float :int color-type])
+  (ffi/defbind c-draw-rectangle-rounded-lines-ex lib
+    "DrawRectangleRoundedLinesEx"
+    :void [rect-type :float :int :float color-type])
+  (ffi/defbind c-draw-triangle lib "DrawTriangle"
+    :void [vec2-type vec2-type vec2-type color-type])
+  (ffi/defbind c-draw-triangle-lines lib "DrawTriangleLines"
+    :void [vec2-type vec2-type vec2-type color-type])
+  (ffi/defbind c-draw-poly lib "DrawPoly"
+    :void [vec2-type :int :float :float color-type])
+  (ffi/defbind c-draw-poly-lines lib "DrawPolyLines"
+    :void [vec2-type :int :float :float color-type])
+  (ffi/defbind c-draw-ring lib "DrawRing"
+    :void [vec2-type :float :float :float :float :int color-type])
+  (ffi/defbind c-draw-ring-lines lib "DrawRingLines"
+    :void [vec2-type :float :float :float :float :int color-type])
 
   # ── Raw bindings: 3D Shapes ──────────────────────────────────────────
 
-  (ffi/defbind c-draw-line-3d
-               lib
-               "DrawLine3D"
-               :void [vec3-type vec3-type color-type])
-  (ffi/defbind c-draw-cube
-               lib
-               "DrawCube"
-               :void [vec3-type :float :float :float color-type])
-  (ffi/defbind c-draw-cube-wires
-               lib
-               "DrawCubeWires"
-               :void [vec3-type :float :float :float color-type])
-  (ffi/defbind c-draw-sphere
-               lib
-               "DrawSphere"
-               :void [vec3-type :float color-type])
-  (ffi/defbind c-draw-sphere-ex
-               lib
-               "DrawSphereEx"
-               :void [vec3-type :float :int :int color-type])
-  (ffi/defbind c-draw-sphere-wires
-               lib
-               "DrawSphereWires"
-               :void [vec3-type :float :int :int color-type])
-  (ffi/defbind c-draw-cylinder
-               lib
-               "DrawCylinder"
-               :void [vec3-type :float :float :float :int color-type])
-  (ffi/defbind c-draw-cylinder-wires
-               lib
-               "DrawCylinderWires"
-               :void [vec3-type :float :float :float :int color-type])
-  (ffi/defbind c-draw-plane
-               lib
-               "DrawPlane"
-               :void [vec3-type vec2-type color-type])
+  (ffi/defbind c-draw-line-3d lib "DrawLine3D"
+    :void [vec3-type vec3-type color-type])
+  (ffi/defbind c-draw-cube lib "DrawCube"
+    :void [vec3-type :float :float :float color-type])
+  (ffi/defbind c-draw-cube-wires lib "DrawCubeWires"
+    :void [vec3-type :float :float :float color-type])
+  (ffi/defbind c-draw-sphere lib "DrawSphere"
+    :void [vec3-type :float color-type])
+  (ffi/defbind c-draw-sphere-ex lib "DrawSphereEx"
+    :void [vec3-type :float :int :int color-type])
+  (ffi/defbind c-draw-sphere-wires lib "DrawSphereWires"
+    :void [vec3-type :float :int :int color-type])
+  (ffi/defbind c-draw-cylinder lib "DrawCylinder"
+    :void [vec3-type :float :float :float :int color-type])
+  (ffi/defbind c-draw-cylinder-wires lib "DrawCylinderWires"
+    :void [vec3-type :float :float :float :int color-type])
+  (ffi/defbind c-draw-plane lib "DrawPlane"
+    :void [vec3-type vec2-type color-type])
   (ffi/defbind c-draw-grid lib "DrawGrid" :void [:int :float])
 
   # ── Raw bindings: Text ───────────────────────────────────────────────
 
   (ffi/defbind c-draw-fps lib "DrawFPS" :void [:int :int])
-  (ffi/defbind c-draw-text
-               lib
-               "DrawText"
-               :void [:string :int :int :int color-type])
-  (ffi/defbind c-draw-text-ex
-               lib
-               "DrawTextEx"
-               :void [font-type :string vec2-type :float :float color-type])
-  (ffi/defbind c-draw-text-pro
-               lib
-               "DrawTextPro"
-               :void [font-type
-                      :string
-                      vec2-type
-                      vec2-type
-                      :float
-                      :float
-                      :float
-                      color-type])
+  (ffi/defbind c-draw-text lib "DrawText"
+    :void [:string :int :int :int color-type])
+  (ffi/defbind c-draw-text-ex lib "DrawTextEx"
+    :void [font-type :string vec2-type :float :float color-type])
+  (ffi/defbind c-draw-text-pro lib "DrawTextPro"
+    :void [font-type :string vec2-type vec2-type :float :float :float color-type])
   (ffi/defbind c-measure-text lib "MeasureText" :int [:string :int])
-  (ffi/defbind c-measure-text-ex
-               lib
-               "MeasureTextEx"
-               vec2-type
-               [font-type :string :float :float])
+  (ffi/defbind c-measure-text-ex lib "MeasureTextEx" vec2-type
+    [font-type :string :float :float])
   (ffi/defbind c-get-font-default lib "GetFontDefault" font-type [])
   (ffi/defbind c-load-font lib "LoadFont" font-type [:string])
-  (ffi/defbind c-load-font-ex
-               lib
-               "LoadFontEx"
-               font-type
-               [:string :int :ptr :int])
+  (ffi/defbind c-load-font-ex lib "LoadFontEx" font-type
+    [:string :int :ptr :int])
   (ffi/defbind c-unload-font lib "UnloadFont" :void [font-type])
   (ffi/defbind c-set-text-line-spacing lib "SetTextLineSpacing" :void [:int])
 
   # ── Raw bindings: Textures ───────────────────────────────────────────
 
   (ffi/defbind c-load-texture lib "LoadTexture" texture-type [:string])
-  (ffi/defbind c-load-texture-from-image
-               lib
-               "LoadTextureFromImage"
-               texture-type
-               [image-type])
+  (ffi/defbind c-load-texture-from-image lib "LoadTextureFromImage" texture-type
+    [image-type])
   (ffi/defbind c-unload-texture lib "UnloadTexture" :void [texture-type])
-  (ffi/defbind c-draw-texture
-               lib
-               "DrawTexture"
-               :void [texture-type :int :int color-type])
-  (ffi/defbind c-draw-texture-v
-               lib
-               "DrawTextureV"
-               :void [texture-type vec2-type color-type])
-  (ffi/defbind c-draw-texture-ex
-               lib
-               "DrawTextureEx"
-               :void [texture-type vec2-type :float :float color-type])
-  (ffi/defbind c-draw-texture-rec
-               lib
-               "DrawTextureRec"
-               :void [texture-type rect-type vec2-type color-type])
-  (ffi/defbind c-draw-texture-pro
-               lib
-               "DrawTexturePro"
-               :void [texture-type
-                      rect-type
-                      rect-type
-                      vec2-type
-                      :float
-                      color-type])
+  (ffi/defbind c-draw-texture lib "DrawTexture"
+    :void [texture-type :int :int color-type])
+  (ffi/defbind c-draw-texture-v lib "DrawTextureV"
+    :void [texture-type vec2-type color-type])
+  (ffi/defbind c-draw-texture-ex lib "DrawTextureEx"
+    :void [texture-type vec2-type :float :float color-type])
+  (ffi/defbind c-draw-texture-rec lib "DrawTextureRec"
+    :void [texture-type rect-type vec2-type color-type])
+  (ffi/defbind c-draw-texture-pro lib "DrawTexturePro"
+    :void [texture-type rect-type rect-type vec2-type :float color-type])
 
   # ── Raw bindings: Image ──────────────────────────────────────────────
 
   (ffi/defbind c-load-image lib "LoadImage" image-type [:string])
   (ffi/defbind c-unload-image lib "UnloadImage" :void [image-type])
   (ffi/defbind c-export-image lib "ExportImage" :bool [image-type :string])
-  (ffi/defbind c-gen-image-color
-               lib
-               "GenImageColor"
-               image-type
-               [:int :int color-type])
+  (ffi/defbind c-gen-image-color lib "GenImageColor" image-type
+    [:int :int color-type])
 
   # ── Raw bindings: Input ──────────────────────────────────────────────
 
@@ -517,10 +414,8 @@
   (ffi/defbind c-set-exit-key lib "SetExitKey" :void [:int])
   (ffi/defbind c-is-mouse-button-pressed lib "IsMouseButtonPressed" :bool [:int])
   (ffi/defbind c-is-mouse-button-down lib "IsMouseButtonDown" :bool [:int])
-  (ffi/defbind c-is-mouse-button-released
-               lib
-               "IsMouseButtonReleased"
-               :bool [:int])
+  (ffi/defbind c-is-mouse-button-released lib "IsMouseButtonReleased"
+    :bool [:int])
   (ffi/defbind c-is-mouse-button-up lib "IsMouseButtonUp" :bool [:int])
   (ffi/defbind c-get-mouse-x lib "GetMouseX" :int [])
   (ffi/defbind c-get-mouse-y lib "GetMouseY" :int [])
@@ -534,18 +429,12 @@
   (ffi/defbind c-is-cursor-hidden lib "IsCursorHidden" :bool [])
   (ffi/defbind c-is-gamepad-available lib "IsGamepadAvailable" :bool [:int])
   (ffi/defbind c-get-gamepad-name lib "GetGamepadName" :ptr [:int])
-  (ffi/defbind c-is-gamepad-button-pressed
-               lib
-               "IsGamepadButtonPressed"
-               :bool [:int :int])
-  (ffi/defbind c-is-gamepad-button-down
-               lib
-               "IsGamepadButtonDown"
-               :bool [:int :int])
-  (ffi/defbind c-get-gamepad-axis-movement
-               lib
-               "GetGamepadAxisMovement"
-               :float [:int :int])
+  (ffi/defbind c-is-gamepad-button-pressed lib "IsGamepadButtonPressed"
+    :bool [:int :int])
+  (ffi/defbind c-is-gamepad-button-down lib "IsGamepadButtonDown"
+    :bool [:int :int])
+  (ffi/defbind c-get-gamepad-axis-movement lib "GetGamepadAxisMovement"
+    :float [:int :int])
   (ffi/defbind c-get-touch-x lib "GetTouchX" :int [])
   (ffi/defbind c-get-touch-y lib "GetTouchY" :int [])
   (ffi/defbind c-get-touch-position lib "GetTouchPosition" vec2-type [:int])
@@ -571,46 +460,27 @@
 
   # ── Raw bindings: Collision ──────────────────────────────────────────
 
-  (ffi/defbind c-check-collision-recs
-               lib
-               "CheckCollisionRecs"
-               :bool [rect-type rect-type])
-  (ffi/defbind c-check-collision-circles
-               lib
-               "CheckCollisionCircles"
-               :bool [vec2-type :float vec2-type :float])
-  (ffi/defbind c-check-collision-circle-rec
-               lib
-               "CheckCollisionCircleRec"
-               :bool [vec2-type :float rect-type])
-  (ffi/defbind c-check-collision-point-rec
-               lib
-               "CheckCollisionPointRec"
-               :bool [vec2-type rect-type])
-  (ffi/defbind c-check-collision-point-circle
-               lib
-               "CheckCollisionPointCircle"
-               :bool [vec2-type vec2-type :float])
-  (ffi/defbind c-get-collision-rec
-               lib
-               "GetCollisionRec"
-               rect-type
-               [rect-type rect-type])
+  (ffi/defbind c-check-collision-recs lib "CheckCollisionRecs"
+    :bool [rect-type rect-type])
+  (ffi/defbind c-check-collision-circles lib "CheckCollisionCircles"
+    :bool [vec2-type :float vec2-type :float])
+  (ffi/defbind c-check-collision-circle-rec lib "CheckCollisionCircleRec"
+    :bool [vec2-type :float rect-type])
+  (ffi/defbind c-check-collision-point-rec lib "CheckCollisionPointRec"
+    :bool [vec2-type rect-type])
+  (ffi/defbind c-check-collision-point-circle lib "CheckCollisionPointCircle"
+    :bool [vec2-type vec2-type :float])
+  (ffi/defbind c-get-collision-rec lib "GetCollisionRec" rect-type
+    [rect-type rect-type])
 
   # ── Raw bindings: Color ──────────────────────────────────────────────
 
   (ffi/defbind c-fade lib "Fade" color-type [color-type :float])
-  (ffi/defbind c-color-from-hsv
-               lib
-               "ColorFromHSV"
-               color-type
-               [:float :float :float])
+  (ffi/defbind c-color-from-hsv lib "ColorFromHSV" color-type
+    [:float :float :float])
   (ffi/defbind c-color-alpha lib "ColorAlpha" color-type [color-type :float])
-  (ffi/defbind c-color-brightness
-               lib
-               "ColorBrightness"
-               color-type
-               [color-type :float])
+  (ffi/defbind c-color-brightness lib "ColorBrightness" color-type
+    [color-type :float])
   (ffi/defbind c-color-tint lib "ColorTint" color-type [color-type color-type])
 
   # ── Raw bindings: Misc ───────────────────────────────────────────────
@@ -793,11 +663,8 @@
   (defn draw-rect-rounded-lines [rec roundness segments col]
     (c-draw-rectangle-rounded-lines rec (float roundness) segments col))
   (defn draw-rect-rounded-lines-ex [rec roundness segments thick col]
-    (c-draw-rectangle-rounded-lines-ex rec
-      (float roundness)
-      segments
-      (float thick)
-      col))
+    (c-draw-rectangle-rounded-lines-ex rec (float roundness) segments
+      (float thick) col))
   (defn draw-triangle [v1 v2 v3 col]
     "v1/v2/v3 are [x y] arrays."
     (c-draw-triangle v1 v2 v3 col))
@@ -808,21 +675,11 @@
   (defn draw-poly-lines [center sides radius rotation col]
     (c-draw-poly-lines center sides (float radius) (float rotation) col))
   (defn draw-ring [center inner outer start-angle end-angle segments col]
-    (c-draw-ring center
-                 (float inner)
-                 (float outer)
-                 (float start-angle)
-                 (float end-angle)
-                 segments
-                 col))
+    (c-draw-ring center (float inner) (float outer) (float start-angle)
+      (float end-angle) segments col))
   (defn draw-ring-lines [center inner outer start-angle end-angle segments col]
-    (c-draw-ring-lines center
-                       (float inner)
-                       (float outer)
-                       (float start-angle)
-                       (float end-angle)
-                       segments
-                       col))
+    (c-draw-ring-lines center (float inner) (float outer) (float start-angle)
+      (float end-angle) segments col))
 
   # ── Public API: 3D Shapes ────────────────────────────────────────────
 
@@ -858,14 +715,8 @@
     "pos is [x y]."
     (c-draw-text-ex font text pos (float font-size) (float spacing) col))
   (defn draw-text-pro [font text pos origin rotation font-size spacing col]
-    (c-draw-text-pro font
-                     text
-                     pos
-                     origin
-                     (float rotation)
-                     (float font-size)
-                     (float spacing)
-                     col))
+    (c-draw-text-pro font text pos origin (float rotation) (float font-size)
+      (float spacing) col))
   (defn measure-text [text size]
     (c-measure-text text size))
   (defn measure-text-ex [font text font-size spacing]

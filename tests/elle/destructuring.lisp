@@ -105,28 +105,20 @@
 
 # test_let_list_destructure
 (assert (= (let [(a b) (list 10 20)]
-             (+ a b))
-           30)
-        "let list destructure")
+             (+ a b)) 30) "let list destructure")
 
 # test_let_array_destructure
 (assert (= (let [[x y] [3 4]]
-             (+ x y))
-           7)
-        "let array destructure")
+             (+ x y)) 7) "let array destructure")
 
 # test_let_mixed_bindings
 (assert (= (let [a 1
                  (b c) (list 2 3)]
-             (+ a b c))
-           6)
-        "let mixed bindings")
+             (+ a b c)) 6) "let mixed bindings")
 
 # test_let_nested_destructure
 (assert (= (let [((a b) c) (list (list 1 2) 3)]
-             (+ a b c))
-           6)
-        "let nested destructure")
+             (+ a b c)) 6) "let nested destructure")
 
 # ============================================================
 # let*: sequential destructuring
@@ -135,30 +127,22 @@
 # test_let_star_destructure_basic
 (assert (= (let* [(a b) (list 1 2)
                   c (+ a b)]
-             c)
-           3)
-        "let* destructure basic")
+             c) 3) "let* destructure basic")
 
 # test_let_star_destructure_sequential_reference
 (assert (= (let* [(a b) (list 1 2)
                   (c d) (list a b)]
-             (+ c d))
-           3)
-        "let* destructure sequential reference")
+             (+ c d)) 3) "let* destructure sequential reference")
 
 # test_let_star_mixed_simple_and_destructure
 (assert (= (let* [x 10
                   (a b) (list x 20)]
-             (+ a b))
-           30)
-        "let* mixed simple and destructure")
+             (+ a b)) 30) "let* mixed simple and destructure")
 
 # test_let_star_shadowing_with_destructure
 (assert (= (let* [a 1
                   (a b) (list 10 20)]
-             a)
-           10)
-        "let* shadowing with destructure")
+             a) 10) "let* shadowing with destructure")
 
 # ============================================================
 # fn: parameter destructuring
@@ -231,9 +215,7 @@
 
 # test_let_destructure_in_closure
 (assert (= (let [(a b) (list 10 20)]
-             ((fn () (+ a b))))
-           30)
-        "let destructure in closure")
+             ((fn () (+ a b)))) 30) "let destructure in closure")
 
 # ============================================================
 # Wildcard _
@@ -261,9 +243,7 @@
 
 # test_wildcard_in_let
 (assert (= (let [(_ b) (list 10 20)]
-             b)
-           20)
-        "wildcard in let")
+             b) 20) "wildcard in let")
 
 # test_wildcard_in_fn_param
 (assert (= ((fn ((_ b)) b) (list 10 20)) 20) "wildcard in fn param")
@@ -301,13 +281,11 @@
 
 # test_rest_list_in_let
 (assert (= (let [(a & r) (list 10 20 30)]
-             (+ a (first r)))
-           30)
-        "rest list in let")
+             (+ a (first r))) 30) "rest list in let")
 
 # test_rest_list_in_fn_param
 (assert (= ((fn ((a & r)) (+ a (first r))) (list 10 20)) 30)
-        "rest list in fn param")
+  "rest list in fn param")
 
 # ============================================================
 # & rest: array destructuring
@@ -327,9 +305,7 @@
 
 # test_rest_array_in_let
 (assert (= (let [[a & r] [10 20 30]]
-             (+ a (get r 0)))
-           30)
-        "rest array in let")
+             (+ a (get r 0))) 30) "rest array in let")
 
 # test_rest_array_basic — rest binding preserves array type
 (begin
@@ -346,9 +322,7 @@
 
 # test_rest_array_in_let
 (assert (= (let [[a & r] [10 20 30]]
-             (+ a (get r 0)))
-           30)
-        "rest array in let")
+             (+ a (get r 0))) 30) "rest array in let")
 
 # test_rest_array_type_preserved
 (begin
@@ -383,7 +357,7 @@
 
 # test_variadic_fn_fixed_and_rest
 (assert (= ((fn (a b & rest) (+ a b)) 10 20 30 40) 30)
-        "variadic fn fixed and rest")
+  "variadic fn fixed and rest")
 
 # test_variadic_fn_rest_value
 (assert (= ((fn (a & rest) rest) 1 2 3) (list 2 3)) "variadic fn rest value")
@@ -492,16 +466,12 @@
 
 # test_let_struct
 (assert (= (let [{:x x :y y} {:x 10 :y 20}]
-             (+ x y))
-           30)
-        "let struct")
+             (+ x y)) 30) "let struct")
 
 # test_let_star_struct
 (assert (= (let* [{:x x} {:x 5}
                   {:y y} {:y x}]
-             (+ x y))
-           10)
-        "let* struct")
+             (+ x y)) 10) "let* struct")
 
 # test_fn_param_struct
 (begin
@@ -592,7 +562,7 @@
     [a b] (+ a b)
     _ :no-match))
 (assert (= match-tuple-arr :no-match)
-        "match array pattern does not match @array")
+  "match array pattern does not match @array")
 
 # test_match_array_pattern_matches_array
 (def @match-arr
@@ -621,7 +591,7 @@
     {:a x} x
     _ :no-match))
 (assert (= match-struct-tbl :no-match)
-        "match struct pattern does not match @struct")
+  "match struct pattern does not match @struct")
 
 # test_match_mutable_@struct_pattern_matches_mutable_@struct
 (def @match-tbl
@@ -636,7 +606,7 @@
     @{:a x} x
     _ :no-match))
 (assert (= match-tbl-str :no-match)
-        "match @struct pattern does not match struct")
+  "match @struct pattern does not match struct")
 
 # test_destructure_non_sequential_errors (was: test_destructure_non_sequential_gives_nil)
 (let [[ok? _] (protect ((fn ()
@@ -666,11 +636,11 @@
 
 # test_opt_multiple
 (assert (= ((fn (a &opt b c) (list a b c)) 1) (list 1 nil nil))
-        "opt multiple: none provided")
+  "opt multiple: none provided")
 (assert (= ((fn (a &opt b c) (list a b c)) 1 2) (list 1 2 nil))
-        "opt multiple: one provided")
+  "opt multiple: one provided")
 (assert (= ((fn (a &opt b c) (list a b c)) 1 2 3) (list 1 2 3))
-        "opt multiple: all provided")
+  "opt multiple: all provided")
 
 # test_opt_too_many_args
 (let [[ok? _] (protect ((fn () (eval '((fn (a &opt b) a) 1 2 3)))))]
@@ -682,12 +652,11 @@
 
 # test_opt_with_rest
 (assert (= ((fn (a &opt b & rest) (list a b rest)) 1) (list 1 nil ()))
-        "opt with rest: none")
+  "opt with rest: none")
 (assert (= ((fn (a &opt b & rest) (list a b rest)) 1 2) (list 1 2 ()))
-        "opt with rest: opt only")
+  "opt with rest: opt only")
 (assert (= ((fn (a &opt b & rest) (list a b rest)) 1 2 3 4)
-           (list 1 2 (list 3 4)))
-        "opt with rest: opt and rest")
+    (list 1 2 (list 3 4))) "opt with rest: opt and rest")
 
 # test_opt_defn
 (begin
@@ -735,7 +704,7 @@
 
 # test_keys_destructure
 (assert (= ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30)
-        "keys destructure")
+  "keys destructure")
 
 # test_keys_missing_key_destructure — missing key now signals an error
 (let [[ok? _] (protect ((fn () ((fn (a &keys {:x x :y y}) y) 1 :x 10))))]
@@ -743,16 +712,15 @@
 
 # test_keys_all_present — all keys provided, still works
 (assert (= ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30)
-        "keys destructure all present")
+  "keys destructure all present")
 
 # test_keys_with_opt
 (assert (= ((fn (a &opt b &keys opts) (list a b opts)) 1) (list 1 nil {}))
-        "keys with opt: none")
+  "keys with opt: none")
 (assert (= ((fn (a &opt b &keys opts) (list a b opts)) 1 2) (list 1 2 {}))
-        "keys with opt: opt only")
+  "keys with opt: opt only")
 (assert (= ((fn (a &opt b &keys opts) (list a b opts)) 1 2 :x 10)
-           (list 1 2 {:x 10}))
-        "keys with opt: opt and keys")
+    (list 1 2 {:x 10})) "keys with opt: opt and keys")
 
 # test_keys_odd_args_error
 (let [[ok? _] (protect ((fn () ((fn (a &keys opts) opts) 1 :x 10 :y))))]
@@ -780,12 +748,11 @@
 
 # test_named_basic
 (assert (= ((fn (a &named host port) (list host port)) 1 :host "db" :port 3306)
-           (list "db" 3306))
-        "named basic")
+    (list "db" 3306)) "named basic")
 
 # test_named_missing_key
 (assert (= ((fn (a &named host port) port) 1 :host "db") nil)
-        "named missing key")
+  "named missing key")
 
 # test_named_unknown_key_error
 (let [[ok? _] (protect ((fn ()
@@ -794,8 +761,7 @@
 
 # test_named_with_opt
 (assert (= ((fn (a &opt b &named host) (list a b host)) 1 :host "db")
-           (list 1 nil "db"))
-        "named with opt")
+    (list 1 nil "db")) "named with opt")
 
 # test_named_defn
 (begin
@@ -827,17 +793,14 @@
 
 # test_opt_destructuring_pattern
 (assert (= ((fn (a &opt (b c)) (list a b c)) (list 1 2))
-           (list (list 1 2) nil nil))
-        "opt destructuring pattern: not provided")
+    (list (list 1 2) nil nil)) "opt destructuring pattern: not provided")
 (assert (= ((fn (a &opt (b c)) (list a b c)) 1 (list 2 3)) (list 1 2 3))
-        "opt destructuring pattern: provided")
+  "opt destructuring pattern: provided")
 
 # test_keys_mutable_capture
 (assert (= ((fn (&keys opts)
               (let [f (fn () opts)]
-                (f))) :x 10)
-           {:x 10})
-        "keys mutable capture")
+                (f))) :x 10) {:x 10}) "keys mutable capture")
 
 # test_keys_tail_call_error
 (let [[ok? _] (protect ((fn ()
@@ -871,9 +834,7 @@
 
 # test_let_struct_symbol_key
 (assert (= (let [{'a v} (struct 'a 42)]
-             v)
-           42)
-        "let struct symbol key")
+             v) 42) "let struct symbol key")
 
 # test_fn_param_struct_symbol_key
 (assert (= ((fn ({'a v}) v) (struct 'a 42)) 42) "fn param struct symbol key")
@@ -921,47 +882,33 @@
 
 # test_letrec_list_destructure
 (assert (= (letrec [(a b) (list 1 2)]
-             (+ a b))
-           3)
-        "letrec list destructure")
+             (+ a b)) 3) "letrec list destructure")
 
 # test_letrec_struct_destructure
 (assert (= (letrec [{:x x} {:x 42}]
-             x)
-           42)
-        "letrec struct destructure")
+             x) 42) "letrec struct destructure")
 
 # test_letrec_array_destructure
 (assert (= (letrec [[a b] [10 20]]
-             (+ a b))
-           30)
-        "letrec array destructure")
+             (+ a b)) 30) "letrec array destructure")
 
 # test_letrec_mixed_simple_and_destructure
 (assert (= (letrec [f (fn (x) (+ x a))
                     (a b) (list 10 20)]
-             (f b))
-           30)
-        "letrec mixed simple and destructure")
+             (f b)) 30) "letrec mixed simple and destructure")
 
 # test_letrec_destructure_with_recursion
 (assert (= (letrec [f (fn (n) (if (= n 0) base (f (- n 1))))
                     {:base base} {:base 42}]
-             (f 5))
-           42)
-        "letrec destructure with recursion")
+             (f 5)) 42) "letrec destructure with recursion")
 
 # test_letrec_nested_destructure
 (assert (= (letrec [((a b) c) (list (list 1 2) 3)]
-             (+ a b c))
-           6)
-        "letrec nested destructure")
+             (+ a b c)) 6) "letrec nested destructure")
 
 # test_letrec_wildcard_destructure
 (assert (= (letrec [(_ b) (list 1 2)]
-             b)
-           2)
-        "letrec wildcard destructure")
+             b) 2) "letrec wildcard destructure")
 
 # Struct destructuring properties
 # Migrated from tests/property/destructuring.rs
@@ -1003,7 +950,7 @@
   (defn g-manual (t)
     (+ (get t :a) (get t :b)))
   (assert (= (f-destr {:a 10 :b 20}) (g-manual {:a 10 :b 20}))
-          "fn param struct equiv get"))
+    "fn param struct equiv get"))
 
 # fn_param_struct_mixed: struct param + regular param
 (begin
@@ -1013,16 +960,12 @@
 
 # let_struct_destr
 (assert (= (let [{:a a :b b} {:a 3 :b 7}]
-             (+ a b))
-           10)
-        "let struct destructure (property)")
+             (+ a b)) 10) "let struct destructure (property)")
 
 # let_star_struct_forward_ref
 (assert (= (let* [{:x v} {:x 5}
                   {:y w} {:y v}]
-             (+ v w))
-           10)
-        "let* struct forward ref (property)")
+             (+ v w)) 10) "let* struct forward ref (property)")
 
 # nested_struct_destr
 (begin
@@ -1095,61 +1038,50 @@
 
 # test_struct_rest_basic
 (assert (= (let [{:a a & rest} {:a 1 :b 2 :c 3}]
-             rest)
-           {:b 2 :c 3})
-        "struct rest basic: captures remaining keys")
+             rest) {:b 2 :c 3}) "struct rest basic: captures remaining keys")
 
 # test_struct_rest_empty_remainder
 (assert (= (let [{:a a :b b & rest} {:a 1 :b 2}]
-             rest)
-           {})
-        "struct rest empty: no extra keys → empty struct")
+             rest) {}) "struct rest empty: no extra keys → empty struct")
 
 # test_struct_rest_all_explicit
 (assert (= (let [{:a a & rest} {:a 10}]
-             [a rest])
-           [10 {}])
-        "struct rest: all keys explicit → rest is empty struct")
+             [a rest]) [10 {}])
+  "struct rest: all keys explicit → rest is empty struct")
 
 # test_struct_rest_in_fn
 (assert (= ((fn ({:x x & rest}) rest) {:x 1 :y 2 :z 3}) {:y 2 :z 3})
-        "struct rest in fn param")
+  "struct rest in fn param")
 
 # test_struct_rest_result_is_immutable
 (assert (= (type-of (let [{:a a & rest} {:a 1 :b 2}]
-                      rest))
-           :struct)
-        "struct rest result is always immutable struct")
+                      rest)) :struct)
+  "struct rest result is always immutable struct")
 
 # test_struct_rest_from_mutable
 (assert (= (let [{:a a & rest} @{:a 1 :b 2 :c 3}]
-             rest)
-           {:b 2 :c 3})
-        "struct rest from @struct input yields immutable rest")
+             rest) {:b 2 :c 3})
+  "struct rest from @struct input yields immutable rest")
 
 # test_struct_rest_in_match
 (assert (= (match {:x 1 :y 2 :z 3}
              {:x x & rest} rest
-             _ nil)
-           {:y 2 :z 3})
-        "struct rest in match pattern")
+             _ nil) {:y 2 :z 3}) "struct rest in match pattern")
 
 # test_struct_rest_table_in_match
 (assert (= (match @{:x 1 :y 2 :z 3}
              @{:x x & rest} rest
-             _ nil)
-           {:y 2 :z 3})
-        "struct rest on @struct in match pattern")
+             _ nil) {:y 2 :z 3}) "struct rest on @struct in match pattern")
 
 # test_keys_destructure_with_rest — combined &keys + struct rest
 (assert (= ((fn (a &keys {:x x & rest}) rest) 1 :x 10 :y 20 :z 30) {:y 20 :z 30})
-        "keys destructure with rest: captures extra kwargs")
+  "keys destructure with rest: captures extra kwargs")
 
 # test_keys_destructure_with_rest_no_extra
 (assert (= ((fn (a &keys {:x x & rest}) rest) 1 :x 10) {})
-        "keys destructure with rest, no extra keys")
+  "keys destructure with rest, no extra keys")
 
 # test_keys_destructure_missing_required_with_rest
 (let [[ok? _] (protect ((fn () ((fn (a &keys {:x x & rest}) rest) 1 :y 20))))]
   (assert (not ok?)
-          "keys destructure missing required key signals error even with rest"))
+    "keys destructure missing required key signals error even with rest"))

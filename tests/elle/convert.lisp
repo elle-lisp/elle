@@ -32,10 +32,10 @@
 # number_to_string_int_roundtrip
 # (parse-int (number->string n)) should equal n
 (assert (= (parse-int (number->string 42)) 42)
-        "integer(number->string(42)) == 42")
+  "integer(number->string(42)) == 42")
 (assert (= (parse-int (number->string 0)) 0) "integer(number->string(0)) == 0")
 (assert (= (parse-int (number->string -99)) -99)
-        "integer(number->string(-99)) == -99")
+  "integer(number->string(-99)) == -99")
 
 # string_from_int_matches_format
 # (string n) should format integer as string
@@ -99,14 +99,14 @@
 # Single argument backward compatibility
 (assert (= (string 42) "42") "string(42) == \"42\" (backward compat)")
 (assert (= (string "hello") "hello")
-        "string(\"hello\") == \"hello\" (backward compat)")
+  "string(\"hello\") == \"hello\" (backward compat)")
 (assert (= (string true) "true") "string(true) (backward compat)")
 
 # Multiple arguments concatenate
 (assert (= (string "count: " 42) "count: 42") "string multi: string + int")
 (assert (= (string "hello" " " "world") "hello world")
-        "string multi: three strings")
+  "string multi: three strings")
 (assert (= (string 1 " + " 2 " = " 3) "1 + 2 = 3") "string multi: mixed types")
 (assert (= (string "bool: " true ", nil: " nil) "bool: true, nil: nil")
-        "string multi: bool and nil")
+  "string multi: bool and nil")
 (assert (= (string "kw: " :hello) "kw: hello") "string multi: keyword")

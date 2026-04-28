@@ -173,21 +173,15 @@
   (let* []
     42)
   (assert (= (let* []
-               42)
-             42)
-          "let* empty bindings"))
+               42) 42) "let* empty bindings"))
 
 (begin
   (assert (= (let* []
-               -10)
-             -10)
-          "let* empty bindings negative"))
+               -10) -10) "let* empty bindings negative"))
 
 (begin
   (assert (= (let* []
-               0)
-             0)
-          "let* empty bindings zero"))
+               0) 0) "let* empty bindings zero"))
 
 # let* with single binding
 (begin
@@ -225,68 +219,50 @@
 # (-> v (+ a)) is equivalent to (+ v a)
 (begin
   (assert (= (-> 5
-                 (+ 3))
-             8)
-          "thread-first single positive"))
+                 (+ 3)) 8) "thread-first single positive"))
 
 (begin
   (assert (= (-> -10
-                 (+ 5))
-             -5)
-          "thread-first single negative"))
+                 (+ 5)) -5) "thread-first single negative"))
 
 (begin
   (assert (= (-> 0
-                 (+ 0))
-             0)
-          "thread-first single zero"))
+                 (+ 0)) 0) "thread-first single zero"))
 
 # (-> v (+ a) (* b)) is equivalent to (* (+ v a) b)
 (begin
   (assert (= (-> 2
                  (+ 3)
-                 (* 4))
-             20)
-          "thread-first chain positive"))
+                 (* 4)) 20) "thread-first chain positive"))
 
 (begin
   (assert (= (-> -5
                  (+ 10)
-                 (* 2))
-             10)
-          "thread-first chain mixed"))
+                 (* 2)) 10) "thread-first chain mixed"))
 
 (begin
   (assert (= (-> 0
                  (+ 0)
-                 (* 5))
-             0)
-          "thread-first chain zero"))
+                 (* 5)) 0) "thread-first chain zero"))
 
 # thread-first with three operations
 (begin
   (assert (= (-> 1
                  (+ 2)
                  (* 3)
-                 (- 1))
-             8)
-          "thread-first three ops positive"))
+                 (- 1)) 8) "thread-first three ops positive"))
 
 (begin
   (assert (= (-> -2
                  (+ 5)
                  (* 2)
-                 (- 3))
-             3)
-          "thread-first three ops mixed"))
+                 (- 3)) 3) "thread-first three ops mixed"))
 
 (begin
   (assert (= (-> 0
                  (+ 1)
                  (* 2)
-                 (- 0))
-             2)
-          "thread-first three ops zero"))
+                 (- 0)) 2) "thread-first three ops zero"))
 
 # thread-first identity: (-> v) == v
 (begin
@@ -305,43 +281,31 @@
 # (->> v (- a)) is equivalent to (- a v)
 (begin
   (assert (= (->> 3
-                  (- 10))
-             7)
-          "thread-last single positive"))
+                  (- 10)) 7) "thread-last single positive"))
 
 (begin
   (assert (= (->> 5
-                  (- -10))
-             -15)
-          "thread-last single negative"))
+                  (- -10)) -15) "thread-last single negative"))
 
 (begin
   (assert (= (->> 0
-                  (- 0))
-             0)
-          "thread-last single zero"))
+                  (- 0)) 0) "thread-last single zero"))
 
 # (->> v (- a) (- b)) is equivalent to (- b (- a v))
 (begin
   (assert (= (->> 2
                   (- 10)
-                  (- 5))
-             -3)
-          "thread-last chain positive"))
+                  (- 5)) -3) "thread-last chain positive"))
 
 (begin
   (assert (= (->> -3
                   (- 5)
-                  (- -2))
-             -10)
-          "thread-last chain mixed"))
+                  (- -2)) -10) "thread-last chain mixed"))
 
 (begin
   (assert (= (->> 0
                   (- 0)
-                  (- 0))
-             0)
-          "thread-last chain zero"))
+                  (- 0)) 0) "thread-last chain zero"))
 
 # thread-last identity: (->> v) == v
 (begin
@@ -361,23 +325,17 @@
 (begin
   (assert (= (block 1
                2
-               3)
-             3)
-          "block returns last positive"))
+               3) 3) "block returns last positive"))
 
 (begin
   (assert (= (block -5
                -10
-               -3)
-             -3)
-          "block returns last negative"))
+               -3) -3) "block returns last negative"))
 
 (begin
   (assert (= (block 0
                0
-               0)
-             0)
-          "block returns last zero"))
+               0) 0) "block returns last zero"))
 
 # break short-circuits
 (begin
@@ -449,23 +407,17 @@
 (begin
   (assert (= (block 1
                2
-               3)
-             3)
-          "block multiple exprs positive"))
+               3) 3) "block multiple exprs positive"))
 
 (begin
   (assert (= (block -10
                -5
-               -1)
-             -1)
-          "block multiple exprs negative"))
+               -1) -1) "block multiple exprs negative"))
 
 (begin
   (assert (= (block 0
                0
-               0)
-             0)
-          "block multiple exprs zero"))
+               0) 0) "block multiple exprs zero"))
 
 # block scope isolation
 (begin
@@ -805,7 +757,7 @@
       body)
     `(if ,cond ,body nil))
   (assert (= (when-true false 42) nil)
-          "test_macro_with_conditional_body_regression"))
+    "test_macro_with_conditional_body_regression"))
 
 (begin
   (defmacro
@@ -873,7 +825,7 @@
       `(let [,g ,val]
          ,body)))
   (assert (= (bind-val 10 (bind-val 20 (+ 1 2))) 3)
-          "test_gensym_produces_unique_bindings"))
+    "test_gensym_produces_unique_bindings"))
 
 # SECTION 7: datum->syntax — hygiene escape hatch
 
@@ -922,7 +874,7 @@
     `(let [,(datum->syntax name 'it) ,val]
        ,body))
   (assert (= (bind-it x 42 (+ it 1)) 43)
-          "test_datum_to_syntax_with_syntax_context"))
+    "test_datum_to_syntax_with_syntax_context"))
 
 # datum->syntax with a list datum — set_scopes_recursive must recurse
 # into the list structure, not just set scopes on the outer node.
@@ -931,7 +883,7 @@
     `(let [,(datum->syntax ctx 'result) (list 1 2 3)]
        result))
   (assert (= (inject-list x) (list 1 2 3))
-          "test_datum_to_syntax_with_compound_datum"))
+    "test_datum_to_syntax_with_compound_datum"))
 
 # SECTION 8: syntax->datum — scope stripping
 
@@ -946,7 +898,7 @@
 # syntax->datum on a non-syntax value returns it unchanged.
 (begin
   (assert (= (syntax->datum 42) 42)
-          "test_syntax_to_datum_non_syntax_passthrough"))
+    "test_syntax_to_datum_non_syntax_passthrough"))
 
 # ============================================================================
 # Syntax predicate tests (issue #581)
@@ -992,7 +944,7 @@
   (syntax-keyword? x))
 (assert (not (test-kw? :foo)) "syntax-keyword? on plain keyword (not syntax)")
 (assert (not (test-kw? foo))
-        "syntax-keyword? on symbol — is syntax, not keyword")
+  "syntax-keyword? on symbol — is syntax, not keyword")
 
 # syntax-nil? on non-syntax returns false
 (defmacro test-nil? (x)
@@ -1093,13 +1045,10 @@
 # End-to-end: syntax-case used in a real macro.
 # Macro with multiple params; uses syntax-case on the condition to dispatch.
 (defmacro my-if (test then else-expr)
-  (syntax-case test
-               (true (syntax->datum then))
-               (false (syntax->datum else-expr))
-               (_ (list 'if
-                        (syntax->datum test)
-                        (syntax->datum then)
-                        (syntax->datum else-expr)))))
+  (syntax-case test (true (syntax->datum then))
+    (false (syntax->datum else-expr))
+    (_ (list 'if (syntax->datum test) (syntax->datum then)
+         (syntax->datum else-expr)))))
 
 (assert (= (my-if true 1 2) 1) "end-to-end: my-if true")
 (assert (= (my-if false 1 2) 2) "end-to-end: my-if false")

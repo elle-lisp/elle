@@ -83,7 +83,7 @@
                      (let [msg (process:recv)]
                        (match msg
                          [:EXIT pid reason] (assert (= pid worker-a)
-                         "link-cascade: EXIT from worker-a")
+                           "link-cascade: EXIT from worker-a")
                          _ (assert false "link-cascade: expected EXIT message")))))))
 (println "  4. link crash cascade: ok")
 
@@ -104,7 +104,7 @@
                            (assert (= pid child) "trap-exit: EXIT from child")
                            (match reason
                              [:error _] (assert true
-                             "trap-exit: got error reason")
+                               "trap-exit: got error reason")
                              _ (assert false "trap-exit: unexpected reason")))
                        _ (assert false "trap-exit: expected EXIT message"))))))
 (println "  5. trap-exit: ok")
@@ -124,7 +124,7 @@
                            (assert (= pid child) "normal-exit: EXIT from child")
                            (match reason
                              [:normal val] (assert (= val 42)
-                             "normal-exit: value is 42")
+                               "normal-exit: value is 42")
                              _ (assert false "normal-exit: unexpected reason")))
                        _ (assert false "normal-exit: expected EXIT message"))))))
 (println "  6. normal exit: ok")
@@ -162,9 +162,8 @@
                      (process:spawn (fn () (process:send me :worker-done)))
                      (let [msg (process:recv)]
                        (assert (= msg :worker-done)
-                               "preemption: worker completes despite busy-looper")  # Kill the busy-looper so the scheduler can terminate
-                       (process:exit busy :kill)))))
-               :fuel 100)
+                         "preemption: worker completes despite busy-looper")  # Kill the busy-looper so the scheduler can terminate
+                       (process:exit busy :kill))))) :fuel 100)
 (println "  8. fuel preemption: ok")
 
 
@@ -203,7 +202,7 @@
                            (assert (= got-ref ref) "monitor-normal: correct ref")
                            (match reason
                              [:normal val] (assert (= val :done)
-                             "monitor-normal: value is :done")
+                               "monitor-normal: value is :done")
                              _ (assert false "monitor-normal: unexpected reason")))
                        _ (assert false "monitor-normal: expected DOWN message"))))))
 (println "  10. monitor normal exit: ok")
@@ -223,7 +222,7 @@
                    (process:send me :still-alive)
                    (let [msg (process:recv)]
                      (assert (= msg :still-alive)
-                             "demonitor: no DOWN after demonitor")))))
+                       "demonitor: no DOWN after demonitor")))))
 (println "  11. demonitor: ok")
 
 
@@ -238,7 +237,7 @@
                                     (let [msg (process:recv)]
                                       (match msg
                                         [from payload] (process:send from
-                                        [:echo payload])
+                                          [:echo payload])
                                         _ nil))))
 
                    # Give the echo-server a chance to register by sending ourselves a dummy
@@ -246,12 +245,12 @@
                    (process:recv)
                    (let [pid (process:whereis :echo-server)]
                      (assert (not (nil? pid))
-                             "named: whereis finds registered process"))
+                       "named: whereis finds registered process"))
                    (process:send-named :echo-server [me :hello])
                    (let [reply (process:recv)]
                      (match reply
                        [:echo payload] (assert (= payload :hello)
-                       "named: echo reply correct")
+                         "named: echo reply correct")
                        _ (assert false "named: expected echo reply"))))))
 (println "  12. named processes: ok")
 
@@ -266,13 +265,13 @@
                  (let [old (process:put-dict :counter 42)]
                    (assert (= old 0) "dict: put-dict returns old value"))
                  (assert (= (process:get-dict :counter) 42)
-                         "dict: get-dict returns current value")
+                   "dict: get-dict returns current value")
                  (assert (nil? (process:get-dict :missing))
-                         "dict: get-dict returns nil for missing key")
+                   "dict: get-dict returns nil for missing key")
                  (let [old (process:erase-dict :counter)]
                    (assert (= old 42) "dict: erase-dict returns old value"))
                  (assert (nil? (process:get-dict :counter))
-                         "dict: erased key returns nil")))
+                   "dict: erased key returns nil")))
 (println "  13. process dictionary: ok")
 
 
@@ -314,7 +313,7 @@
                    # Now receive — the scheduler will advance ticks and fire the timer
                    (let [msg (process:recv)]
                      (assert (= msg :timer-fired)
-                             "timer: delayed message arrived")))))
+                       "timer: delayed message arrived")))))
 (println "  15. send-after timer: ok")
 
 
@@ -330,7 +329,7 @@
                    (process:send me :after-cancel)
                    (let [msg (process:recv)]
                      (assert (= msg :after-cancel)
-                             "cancel-timer: cancelled message did not arrive")))))
+                       "cancel-timer: cancelled message did not arrive")))))
 (println "  16. cancel-timer: ok")
 
 
@@ -341,7 +340,7 @@
 (process:start (fn ()
                  (let [result (process:recv-timeout 1)]
                    (assert (= result :timeout)
-                           "recv-timeout: times out when no messages"))))
+                     "recv-timeout: times out when no messages"))))
 (println "  17. recv-timeout: ok")
 
 
@@ -354,7 +353,7 @@
                    (process:send me :fast)
                    (let [result (process:recv-timeout 100)]
                      (assert (= result :fast)
-                             "recv-timeout: returns message when available")))))
+                       "recv-timeout: returns message when available")))))
 (println "  18. recv-timeout with message: ok")
 
 
@@ -393,7 +392,7 @@
                    (let [msg (process:recv)]
                      (match msg
                        [:EXIT pid reason] (assert (= pid child)
-                       "self-exit: EXIT from child")
+                         "self-exit: EXIT from child")
                        _ (assert false "self-exit: expected EXIT message"))))))
 (println "  20. self-exit: ok")
 
@@ -413,7 +412,7 @@
                        _ nil))
                    (let [msg (process:recv)]
                      (assert (= msg :still-here)
-                             "monitor-survives: watcher alive after monitored crash")))))
+                       "monitor-survives: watcher alive after monitored crash")))))
 (println "  21. monitor doesn't kill watcher: ok")
 
 
@@ -426,14 +425,14 @@
   (process:inject sched 0 :external-msg)  # inject before any process exists — harmless
 
   (process:run sched
-               (fn ()
-                 (let [me (process:self)]
-                   (process:send me :hello)
-                   (assign got-msg (process:recv)))))
+    (fn ()
+      (let [me (process:self)]
+        (process:send me :hello)
+        (assign got-msg (process:recv)))))
   (assert (= got-msg :hello) "external: basic run works")
   (let [info (process:process-info sched 0)]
     (assert (= (get info :status) :dead)
-            "external: process-info shows dead after completion")))
+      "external: process-info shows dead after completion")))
 (println "  22. external API: ok")
 
 
@@ -492,7 +491,7 @@
                         [ok? val] (ev/join-protected f)]
                    (assert (not ok?) "ev/join-protected: not ok")
                    (assert (= (get val :error) :boom)
-                           "ev/join-protected: error is :boom"))))
+                     "ev/join-protected: error is :boom"))))
 (println "  25. ev/join-protected inside process: ok")
 
 

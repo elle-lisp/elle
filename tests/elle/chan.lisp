@@ -71,11 +71,11 @@
   (chan/close-recv r)
   (let [result (chan/send s 42)]
     (assert (array? result)
-            "chan/send to closed receiver should return an array")
+      "chan/send to closed receiver should return an array")
     (assert (= (length result) 1)
-            "disconnected send result should have 1 element")
+      "disconnected send result should have 1 element")
     (assert (= (get result 0) :disconnected)
-            "disconnected send should return [:disconnected]")))
+      "disconnected send should return [:disconnected]")))
 
 # ============================================================================
 # Test 8: disconnected recv
@@ -85,11 +85,11 @@
   (chan/close s)
   (let [result (chan/recv r)]
     (assert (array? result)
-            "chan/recv from closed sender should return an array")
+      "chan/recv from closed sender should return an array")
     (assert (= (length result) 1)
-            "disconnected recv result should have 1 element")
+      "disconnected recv result should have 1 element")
     (assert (= (get result 0) :disconnected)
-            "disconnected recv should return [:disconnected]")))
+      "disconnected recv should return [:disconnected]")))
 
 # ============================================================================
 # Test 9: chan/clone
@@ -155,4 +155,4 @@
     (assert (array? result) "chan/select should return a tuple")
     (assert (= (length result) 1) "select timeout result should have 1 element")
     (assert (= (get result 0) :timeout)
-            "select timeout should return [:timeout]")))
+      "select timeout should return [:timeout]")))

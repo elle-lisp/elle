@@ -76,17 +76,12 @@
 
 (assert (bytes? (let [b (@bytes 1 2)]
                   (push b 3)
-                  b))
-        "@bytes push returns @bytes")
+                  b)) "@bytes push returns @bytes")
 (assert (= (let [b (@bytes 1 2 3)]
-             (pop b))
-           3)
-        "@bytes pop returns byte")
+             (pop b)) 3) "@bytes pop returns byte")
 (assert (= (let [b (@bytes 1 2 3)]
              (put b 1 99)
-             (get b 1))
-           99)
-        "@bytes put and get")
+             (get b 1)) 99) "@bytes put and get")
 
 # ============================================================================
 # Each over bytes and blob
@@ -95,23 +90,19 @@
 (assert (= (let [@sum 0]
              (each b (bytes 1 2 3)
                (assign sum (+ sum b)))
-             sum)
-           6)
-        "each over bytes")
+             sum) 6) "each over bytes")
 
 (assert (= (let [@sum 0]
              (each b (@bytes 10 20 30)
                (assign sum (+ sum b)))
-             sum)
-           60)
-        "each over @bytes")
+             sum) 60) "each over @bytes")
 
 # ============================================================================
 # Map over bytes
 # ============================================================================
 
 (assert (= (length (map (fn (b) (* b 2)) (bytes 1 2 3))) 3)
-        "map over bytes returns list")
+  "map over bytes returns list")
 
 # ============================================================================
 # @string to bytes/@bytes conversions
@@ -126,7 +117,7 @@
 
 (assert (= (string (bytes 104 105)) "hi") "bytes->string via (string)")
 (assert (= (freeze (string (@bytes 104 105))) "hi")
-        "@bytes->string via (string)")
+  "@bytes->string via (string)")
 
 # ============================================================================
 # Mutability-preserving conversions
@@ -134,24 +125,24 @@
 
 # (string x) coerces to immutable string regardless of input mutability
 (assert (= (type (string (bytes 104 105))) :string)
-        "string from bytes is immutable")
+  "string from bytes is immutable")
 (assert (= (type (string (@bytes 104 105))) :string)
-        "string from @bytes is immutable")
+  "string from @bytes is immutable")
 
 (assert (= (type (string "hello")) :string) "string from string is immutable")
 (assert (= (type (string (thaw "hello"))) :string)
-        "string from @string is immutable")
+  "string from @string is immutable")
 
 # (bytes x) preserves mutability: string→bytes, @string→@bytes
 (assert (= (type (bytes "hello")) :bytes) "bytes from string is immutable")
 (assert (= (type (bytes (thaw "hello"))) :@bytes)
-        "bytes from @string is mutable")
+  "bytes from @string is mutable")
 
 # (bytes->hex x) preserves mutability: bytes→string, @bytes→@string
 (assert (= (type (bytes->hex (bytes 72 101 108))) :string)
-        "bytes->hex from bytes is immutable")
+  "bytes->hex from bytes is immutable")
 (assert (= (type (bytes->hex (@bytes 72 101 108))) :@string)
-        "bytes->hex from @bytes is mutable")
+  "bytes->hex from @bytes is mutable")
 
 # ============================================================================
 # seq->hex — bytes input (same as bytes->hex, backward compat)
@@ -159,9 +150,9 @@
 
 (assert (= (seq->hex (bytes 72 101 108)) "48656c") "seq->hex bytes")
 (assert (= (freeze (seq->hex (@bytes 72 101 108))) "48656c")
-        "seq->hex @bytes value")
+  "seq->hex @bytes value")
 (assert (= (type (seq->hex (@bytes 72 101 108))) :@string)
-        "seq->hex @bytes is mutable")
+  "seq->hex @bytes is mutable")
 
 # ============================================================================
 # seq->hex — integer input (big-endian minimal bytes)
@@ -183,11 +174,11 @@
 (assert (= (type (seq->hex [72 101 108])) :string) "seq->hex array is immutable")
 (assert (= (freeze (seq->hex @[72 101 108])) "48656c") "seq->hex @array value")
 (assert (= (type (seq->hex @[72 101 108])) :@string)
-        "seq->hex @array is mutable")
+  "seq->hex @array is mutable")
 (let [[ok? err] (protect ((fn () (seq->hex [256]))))]
   (assert (not ok?) "seq->hex array element out of range")
   (assert (= (get err :error) :value-error)
-          "seq->hex array element out of range"))
+    "seq->hex array element out of range"))
 (let [[ok? err] (protect ((fn () (seq->hex ["x"]))))]
   (assert (not ok?) "seq->hex array element not int")
   (assert (= (get err :error) :type-error) "seq->hex array element not int"))
@@ -210,4 +201,4 @@
 # ============================================================================
 
 (assert (= (bytes->hex (bytes 72 101 108)) "48656c")
-        "bytes->hex alias still works")
+  "bytes->hex alias still works")

@@ -18,7 +18,7 @@
 
 (let [fibers [(ev/spawn (fn [] :a)) (ev/spawn (fn [] :b)) (ev/spawn (fn [] :c))]]
   (assert (= [:a :b :c] (ev/join fibers))
-          "3a: join sequence collects results in order"))
+    "3a: join sequence collects results in order"))
 
 # === 4. ev/join — double join (two joiners on same target) ===
 
@@ -130,8 +130,7 @@
 
 # === 17. ev/join-protected — sequence ===
 
-(let [fibers [(ev/spawn (fn [] 1))
-              (ev/spawn (fn [] (error "oops")))
+(let [fibers [(ev/spawn (fn [] 1)) (ev/spawn (fn [] (error "oops")))
               (ev/spawn (fn [] 3))]]
   (let [results (ev/join-protected fibers)]
     (assert (= [true 1] (get results 0)) "17a: first succeeds")
