@@ -968,6 +968,14 @@ impl Emitter {
             }
 
             Terminator::Jump(label) => {
+                // Pop trailing orphan values so that all predecessors of a
+                // merge block agree on the operand-stack depth.  Orphans are
+                // created by DupN in ensure_on_top (e.g. inside the splice
+                // path for `apply`).  Without this, branches that create
+                // orphans leave a deeper stack than branches that don't,
+                // causing wrong DupN offsets in the merge block.
+                self.pop_trailing_orphans();
+
                 // Save stack state for the target block, but only if it hasn't
                 // been processed yet. This is used for control flow merges
                 // (e.g., if/and/or) where multiple blocks jump to the same target.

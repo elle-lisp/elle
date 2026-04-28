@@ -59,6 +59,40 @@ impl super::Emitter {
     /// `ensure_on_top` which duplicates via DupN (leaving originals as
     /// orphans), this checks whether the operands are already in position
     /// and only falls back to DupN when they aren't.
+    /// Pop trailing orphan values from the operand stack.
+    ///
+    /// An orphan is a stack entry whose register's canonical position
+    /// (in `reg_to_stack`) differs from its actual stack position.  These
+    /// are left behind when `ensure_on_top` uses DupN to copy a value to
+    /// the top — the original remains on the real VM stack but the
+    /// simulated mapping now points to the copy.
+    ///
+    /// In straight-line code orphans are harmless: they sit below the
+    /// active top and are eventually overwritten.  But when control flow
+    /// branches, one branch may create orphans while another does not,
+    /// leaving different stack depths at the merge point.  This causes
+    /// DupN offsets in the merge block to be wrong, shifting operands and
+    /// producing incorrect results (e.g. a struct value in a hash-key
+    /// slot → "expected hashable value, got struct").
+    ///
+    /// Call this before saving stack state to `yield_stack_state` in
+    /// terminators so that all predecessors of a merge block agree on
+    /// the operand-stack depth.
+    pub(super) fn pop_trailing_orphans(&mut self) {
+        while let Some(&top_reg) = self.stack.last() {
+            if self.reg_to_stack.get(&top_reg) == Some(&(self.stack.len() - 1)) {
+                break; // top element is live — stop
+            }
+            // Top element is an orphan: emit Pop to remove it from the
+            // real VM stack, and drop it from the simulated stack.
+            self.bytecode.emit(Instruction::Pop);
+            self.stack.pop();
+            // Do not call self.pop() — the orphan's register either
+            // isn't in reg_to_stack at all, or points to a different
+            // (canonical) position that must not be disturbed.
+        }
+    }
+
     pub(super) fn ensure_binary_on_top(&mut self, lhs: Reg, rhs: Reg) {
         let stack_len = self.stack.len();
         if stack_len >= 2 {
