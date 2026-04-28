@@ -55,10 +55,9 @@
                            (if (string? response:body)
                              (bytes response:body)
                              response:body))
-               h-pairs (concat [[":status" status]]
-                               (map (fn [k]
-                                      [(string k) (string (get resp-headers k))])
-                                    (keys resp-headers)))
+               @h-pairs @[[":status" status]]
+               _ (each k in (keys resp-headers)
+                   (push h-pairs [(string k) (string (get resp-headers k))]))
                has-body (> (length resp-body) 0)]
           # Send HEADERS (with CONTINUATION if needed)
           (session:send-headers-with-continuation sess sid h-pairs (not has-body))
@@ -76,7 +75,7 @@
 
   ## ── Server connection ──────────────────────────────────────────────────
 
-  (defn server-connection [transport handler sess]
+  (defn server-connection [transport handler sess &named on-error]
     "Handle one HTTP/2 server connection."
     # Read client preface
     (let [preface (frame:read-exact transport 24)]
@@ -149,7 +148,8 @@
                              (handle-server-request sess s sid hdrs end? handler))]
                              (unless ok?
                                (protect
-                                 (session:send-rst-stream sess sid C:err-internal-error))))))))
+                                 (session:send-rst-stream sess sid C:err-internal-error))
+                               (when on-error (on-error err))))))))
                    # No END_HEADERS — start buffering for CONTINUATION
                    (put s :pending-headers payload)))
 
@@ -170,7 +170,8 @@
                                (handle-server-request sess s sid hdrs end? handler))]
                                (unless ok?
                                  (protect
-                                   (session:send-rst-stream sess sid C:err-internal-error)))))))))))
+                                   (session:send-rst-stream sess sid C:err-internal-error))
+                                 (when on-error (on-error err)))))))))))
 
               (= ftype C:type-data)
                (begin
@@ -234,7 +235,8 @@
              sess (session:make-session transport "" true)]
         (ev/spawn
           (fn []
-            (let [[ok? err] (protect (server-connection transport handler sess))]
+            (let [[ok? err] (protect
+              (server-connection transport handler sess :on-error on-error))]
               (unless ok?
                 (when on-error (on-error err)))
               (protect (transport:close))))))))
