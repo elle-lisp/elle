@@ -491,7 +491,12 @@ impl<'a> Lowerer<'a> {
                 let in_scope = scope_bindings.iter().any(|(b, _)| b == target);
                 if !in_scope {
                     // Outward assign — only dangerous if value could be heap-allocated
-                    if !self.result_is_safe(value, scope_bindings) {
+                    // AND is a fresh allocation. Non-allocating accessors (rest,
+                    // first, get) return pre-existing values that won't be freed
+                    // by RegionExit or FlipSwap.
+                    if !self.result_is_safe(value, scope_bindings)
+                        && !self.value_is_non_allocating_accessor(value)
+                    {
                         return true;
                     }
                 }
@@ -569,10 +574,9 @@ impl<'a> Lowerer<'a> {
                             }
                         } else if !self.callee_is_primitive(func)
                             && !self.callee_is_rotation_safe(func)
+                            && !self.callee_is_non_escaping_stdlib(func)
+                            && !self.computed_callee_is_safe(func, scope_bindings)
                         {
-                            // Unknown user-defined function: could store args
-                            // externally or internally allocate heap values and
-                            // escape them. Reject unconditionally.
                             return true;
                         }
                         // Non-escaping primitives (concat, fiber/resume, etc.)
@@ -1392,6 +1396,72 @@ impl<'a> Lowerer<'a> {
         };
         let bi = self.arena.get(*binding);
         self.arg_escaping_primitives.contains(&bi.name)
+    }
+
+    /// QW1: Check if a value is a call to a non-allocating accessor
+    /// (rest, first, get, etc.). These return pre-existing values that
+    /// were allocated before the current scope/iteration.
+    fn value_is_non_allocating_accessor(&self, value: &Hir) -> bool {
+        let HirKind::Call { func, .. } = &value.kind else {
+            return false;
+        };
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        let bi = self.arena.get(*binding);
+        self.non_allocating_accessors.contains(&bi.name)
+    }
+
+    /// QW2: Check if a callee is a known non-escaping stdlib function
+    /// (map, filter, etc.). These are pure HOFs that create new
+    /// collections without storing args into external structures.
+    fn callee_is_non_escaping_stdlib(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        let bi = self.arena.get(*binding);
+        self.non_escaping_stdlib.contains(&bi.name)
+    }
+
+    /// QW3: Check if a computed (non-Var) callee is safe for outward-set
+    /// analysis. Handles `((f))` where f is a rotation-safe lambda that
+    /// returns a lambda, and `((fn [] body))` inline anonymous calls.
+    fn computed_callee_is_safe(&self, func: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
+        // Case 1: func is a Lambda — check its body for outward sets
+        if let HirKind::Lambda { body, .. } = &func.kind {
+            return !self.walk_for_outward_set(body, scope_bindings);
+        }
+
+        // Case 2: func is a Call to a known-safe callee — trace through
+        if let HirKind::Call {
+            func: inner_func, ..
+        } = &func.kind
+        {
+            if self.callee_is_primitive(inner_func)
+                || self.callee_is_rotation_safe(inner_func)
+                || self.callee_is_non_escaping_stdlib(inner_func)
+            {
+                // If the inner callee is a scope-bound lambda, check what
+                // it returns. If it returns a Lambda, check that body.
+                if let HirKind::Var(binding) = &inner_func.kind {
+                    if let Some((_, init)) = scope_bindings.iter().find(|(b, _)| b == binding) {
+                        if let HirKind::Lambda { body, .. } = &init.kind {
+                            if let HirKind::Lambda {
+                                body: inner_body, ..
+                            } = &body.kind
+                            {
+                                return !self.walk_for_outward_set(inner_body, scope_bindings);
+                            }
+                        }
+                    }
+                }
+                // Inner callee is safe but can't trace return type.
+                // Conservatively reject — the result could be a closure
+                // that modifies external state when called.
+            }
+        }
+
+        false
     }
 
     /// Check if an expression is statically proven to produce an immediate

@@ -367,9 +367,10 @@
 # These don't genuinely escape heap values but are rejected by
 # escape analysis conservatism. When fixed, flip to bounded?.
 
-# each over lists: (assign cur (rest cur)) assigns heap list to
-# outer @cur. rest returns an existing cons cell (no allocation)
-# but escape analysis can't distinguish accessor from allocator.
+# each over lists: the each macro desugars to coroutines. QW2
+# recognizes internal stdlib calls as non-escaping, enabling FlipSwap
+# on the outer while loop. The coroutine is fully drained within
+# each iteration, so FlipSwap at the back-edge is safe.
 (defn leak-each-list [n]
   (def before (arena/count))
   (def @i 0)
@@ -379,11 +380,11 @@
   (- (arena/count) before))
 
 (let [d100 (leak-each-list 100) d1k (leak-each-list 1000)]
-  (assert (linear? d100 d1k)
+  (assert (bounded? d100 d1k 10)
     (string "each-list: d100=" d100 " d1k=" d1k)))
 
-# map in while: map is a stdlib HOF, not a primitive. Escape
-# analysis rejects calls to unknown user-defined functions.
+# map in while: map is a stdlib HOF — QW2 recognizes non-escaping
+# stdlib functions, so FlipSwap is now eligible.
 (defn leak-map-while [n]
   (def before (arena/count))
   (def @i 0)
@@ -393,10 +394,10 @@
   (- (arena/count) before))
 
 (let [d100 (leak-map-while 100) d1k (leak-map-while 1000)]
-  (assert (linear? d100 d1k)
+  (assert (bounded? d100 d1k 10)
     (string "map-while: d100=" d100 " d1k=" d1k)))
 
-# filter in while: same as map — stdlib HOF not recognized.
+# filter in while: same as map — QW2 recognizes filter.
 (defn leak-filter-while [n]
   (def before (arena/count))
   (def @i 0)
@@ -406,11 +407,11 @@
   (- (arena/count) before))
 
 (let [d100 (leak-filter-while 100) d1k (leak-filter-while 1000)]
-  (assert (linear? d100 d1k)
+  (assert (bounded? d100 d1k 10)
     (string "filter-while: d100=" d100 " d1k=" d1k)))
 
-# nested closure: (fn [] (fn [] i)) — inner lambda is anonymous
-# (no binding), so not collected for rotation-safety analysis.
+# nested closure: (fn [] (fn [] i)) — QW3 traces through calls to
+# rotation-safe let-bound lambdas to prove the outer call is safe.
 (defn leak-nested-closure [n]
   (def before (arena/count))
   (def @i 0)
@@ -420,7 +421,7 @@
   (- (arena/count) before))
 
 (let [d100 (leak-nested-closure 100) d1k (leak-nested-closure 1000)]
-  (assert (linear? d100 d1k)
+  (assert (bounded? d100 d1k 10)
     (string "nested-closure: d100=" d100 " d1k=" d1k)))
 
 # ── Tier 4: correctness under rotation ───────────────────────────

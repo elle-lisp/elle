@@ -215,6 +215,94 @@ pub(crate) fn build_arg_escaping_primitives(symbols: &SymbolTable) -> FxHashSet<
     set
 }
 
+/// Primitives that return existing heap values without allocating.
+///
+/// These are accessors: they return a value that was already alive before
+/// the call. `rest` returns an existing cons cell, `first` returns a
+/// pre-existing element, `get` returns an element from a collection.
+///
+/// Used by `walk_for_outward_set`: an `(assign outer-binding (rest x))`
+/// is safe because the returned value wasn't allocated in the current scope
+/// or iteration — it predates the scope, so RegionExit / FlipSwap won't
+/// free it.
+/// Note: fiber/resume and coro/resume return values from the child's
+/// outbox (parent-owned arena), not from the current iteration's arena.
+/// FlipSwap won't free them, so they're safe for the same reason as
+/// accessors: the returned value predates the current scope.
+const NON_ALLOCATING_ACCESSORS: &[&str] = &[
+    "first",
+    "rest",
+    "car",
+    "cdr",
+    "get",
+    "last",
+    "fiber/resume",
+    "coro/resume",
+];
+
+/// Build the set of primitive SymbolIds that return pre-existing values.
+pub(crate) fn build_non_allocating_accessors(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
+    let mut set = FxHashSet::default();
+    for &name in NON_ALLOCATING_ACCESSORS {
+        if let Some(id) = symbols.get(name) {
+            set.insert(id);
+        }
+    }
+    set
+}
+
+/// Stdlib functions known to not escape heap values to external structures.
+///
+/// These are higher-order functions implemented in Elle (not native
+/// primitives) that are pure: they create new collections and return
+/// them, without storing arguments into external mutable structures.
+///
+/// Used by `walk_for_outward_set` and `body_escapes_heap_values` to
+/// treat calls to these as safe (equivalent to rotation-safe callees).
+const NON_ESCAPING_STDLIB: &[&str] = &[
+    "map",
+    "filter",
+    "reduce",
+    "fold",
+    "zip",
+    "flat-map",
+    "take",
+    "drop",
+    "reverse",
+    "sort",
+    "sort-by",
+    "range",
+    "repeat",
+    "interleave",
+    "partition",
+    "group-by",
+    "frequencies",
+    "distinct",
+    "flatten",
+    "take-while",
+    "drop-while",
+    "some?",
+    "every?",
+    "none?",
+    "find",
+    "count",
+    "sum",
+    "product",
+    "min-by",
+    "max-by",
+];
+
+/// Build the set of stdlib SymbolIds known to not escape heap values.
+pub(crate) fn build_non_escaping_stdlib(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
+    let mut set = FxHashSet::default();
+    for &name in NON_ESCAPING_STDLIB {
+        if let Some(id) = symbols.get(name) {
+            set.insert(id);
+        }
+    }
+    set
+}
+
 /// Build the set of primitive SymbolIds that store heap values externally.
 #[allow(dead_code)]
 pub(crate) fn build_mutating_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
