@@ -9,8 +9,8 @@ depend on other modules or plugins take them as arguments.
 | File | Purpose |
 |------|---------|
 | `http.lisp` | HTTP/1.1 client and server over TCP |
-| `http2.lisp` | HTTP/2 client and server (h2 over TLS + h2c cleartext) |
-| `http2/` | HTTP/2 submodules (huffman, hpack, frame, stream) — see [`http2/AGENTS.md`](http2/AGENTS.md) |
+| `http2.lisp` | HTTP/2 client + module init + exports (h2 over TLS + h2c cleartext) |
+| `http2/` | HTTP/2 submodules (huffman, hpack, frame, stream, session, server) — see [`http2/AGENTS.md`](http2/AGENTS.md) |
 | `websocket.lisp` | WebSocket client and server (RFC 6455, ws:// and wss://) |
 | `grpc.lisp` | gRPC client over HTTP/2 with length-prefixed framing |
 | `tls.lisp` | TLS 1.2/1.3 client and server (with ALPN support) |
@@ -294,7 +294,7 @@ Agent guide for `lib/http2.lisp` — HTTP/2 client and server (RFC 9113 + RFC 75
 
 HTTP/2 over TCP (h2c cleartext) and TLS (h2 with ALPN). Submodules in
 `lib/http2/` handle Huffman coding, HPACK header compression, frame codec,
-and stream state management.
+stream state management, shared session infrastructure, and server logic.
 
 ## Loading
 
@@ -345,7 +345,10 @@ fibers block on their data queue waiting for response frames.
 ## Running tests
 
 ```bash
-elle tests/elle/http2.lisp
+elle --home=. tests/elle/http2.lisp
+elle --home=. tests/h2-server.lisp
+elle --home=. tests/h2-same-scheduler.lisp
+elle --home=. tests/h2-flow-control.lisp
 ```
 
 ---

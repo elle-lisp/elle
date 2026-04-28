@@ -1,0 +1,102 @@
+digraph http2_architecture {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", shape=box, style="rounded,filled"];
+    edge [fontname="Helvetica", fontsize=10];
+
+    // Color scheme
+    node [fillcolor="#e8f4fd"];
+
+    // Top-level module
+    subgraph cluster_toplevel {
+        label="lib/http2.lisp (client API)";
+        style="rounded,dashed";
+        color="#4a90d9";
+        fontcolor="#4a90d9";
+
+        h2_connect [label="h2-connect\nh2-send\nh2-close", fillcolor="#b3d9ff"];
+        url_parse [label="parse-url\nresolve-host\nopen-transport", fillcolor="#d9ecff"];
+    }
+
+    // Session module
+    subgraph cluster_session {
+        label="http2/session.lisp (core)";
+        style="rounded,dashed";
+        color="#2ecc71";
+        fontcolor="#2ecc71";
+
+        make_session [label="make-session", fillcolor="#b3e6cc"];
+        read_loop [label="read-loop\n(shared dispatch)\non-headers / on-goaway", fillcolor="#80d4a8"];
+        writer_loop [label="writer-loop\n(@shutting-down flag)", fillcolor="#80d4a8"];
+        send_helpers [label="encode-and-send-headers\nsend-data-with-flow-control\nsend-frame / send-goaway\nsend-settings / send-rst-stream", fillcolor="#b3e6cc"];
+        apply_settings [label="apply-remote-settings\n(validates + adjusts windows)", fillcolor="#b3e6cc"];
+    }
+
+    // Server module
+    subgraph cluster_server {
+        label="http2/server.lisp";
+        style="rounded,dashed";
+        color="#e67e22";
+        fontcolor="#e67e22";
+
+        h2_serve [label="h2-serve\n(accept loop)", fillcolor="#f5cba7"];
+        server_conn [label="server-connection\n(handshake + read-loop)", fillcolor="#f5cba7"];
+        handler [label="handle-server-request\n(per-stream fiber)", fillcolor="#fae5d3"];
+    }
+
+    // Transport module
+    transport [label="http2/transport.lisp\ntcp-transport\ntls-transport", fillcolor="#d5dbf0"];
+
+    // Stream module
+    stream [label="http2/stream.lisp\nstate machine (FSM)\nflow control\nconsume/apply window", fillcolor="#f9e79f"];
+
+    // Frame module
+    frame [label="http2/frame.lisp\ncodec (encode/decode)\nframe builders\nparse-settings", fillcolor="#fadbd8"];
+
+    // HPACK
+    hpack [label="http2/hpack.lisp\nHPACK encoder/decoder\ndynamic tables", fillcolor="#e8daef"];
+
+    // Huffman
+    huffman [label="http2/huffman.lisp\nHuffman codec", fillcolor="#f2e4f9"];
+
+    // Dependencies
+    h2_connect -> make_session [label="creates"];
+    h2_connect -> read_loop [label="starts\n(client callbacks)"];
+    h2_connect -> writer_loop [label="starts"];
+    h2_connect -> transport [label="creates"];
+    url_parse -> h2_connect [style=invis]; // layout
+
+    h2_serve -> server_conn [label="per connection"];
+    server_conn -> read_loop [label="starts\n(server callbacks)"];
+    server_conn -> writer_loop [label="starts"];
+    server_conn -> transport [label="wraps TCP/TLS"];
+
+    read_loop -> handler [label="on-headers\n(server)", style=dashed, color="#e67e22"];
+    read_loop -> frame [label="read-frame"];
+    read_loop -> hpack [label="decode"];
+    read_loop -> stream [label="transition\nwindow-update"];
+    read_loop -> apply_settings;
+
+    writer_loop -> frame [label="write-frame"];
+    writer_loop -> transport [label="write + flush"];
+
+    send_helpers -> hpack [label="encode"];
+    send_helpers -> frame [label="make-*-frame"];
+    send_helpers -> stream [label="consume-send-window"];
+
+    handler -> send_helpers [label="send response"];
+
+    hpack -> huffman;
+
+    // Data flow annotations
+    subgraph cluster_legend {
+        label="Per-connection fibers";
+        style="rounded,dashed";
+        color="#95a5a6";
+        fontcolor="#95a5a6";
+
+        legend_reader [label="Reader fiber\n(1 per connection)", shape=ellipse, fillcolor="#80d4a8"];
+        legend_writer [label="Writer fiber\n(1 per connection)", shape=ellipse, fillcolor="#80d4a8"];
+        legend_handler [label="Handler fibers\n(1 per stream, server)", shape=ellipse, fillcolor="#fae5d3"];
+    }
+}
