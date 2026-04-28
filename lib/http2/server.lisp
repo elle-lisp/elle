@@ -44,6 +44,7 @@
       (if ok?
         (let* [status (string (or response:status 200))
                resp-headers (or response:headers {})
+               trailers response:trailers
                resp-body (if (nil? response:body)
                            (bytes)
                            (if (string? response:body)
@@ -52,10 +53,15 @@
                @h-pairs @[[":status" status]]
                _ (each k in (keys resp-headers)
                    (push h-pairs [(string k) (string (get resp-headers k))]))
-               has-body (> (length resp-body) 0)]
-          (session:encode-and-send-headers sess sid (freeze h-pairs) (not has-body))
+               has-body (> (length resp-body) 0)
+               has-trailers (and trailers (not (empty? trailers)))
+               end-on-headers (and (not has-body) (not has-trailers))]
+          (session:encode-and-send-headers sess sid (freeze h-pairs) end-on-headers)
           (when has-body
-            (session:send-data-with-flow-control sess sid s:flow resp-body))
+            (session:send-data-with-flow-control sess sid s:flow resp-body
+              :end-stream (not has-trailers)))
+          (when has-trailers
+            (session:encode-and-send-headers sess sid trailers true))
           (stream:transition s :send-end-stream))
         (begin
           (let [h-pairs [[":status" "500"]]
