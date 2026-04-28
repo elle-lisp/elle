@@ -132,6 +132,15 @@
         :body (grpc:encode (bytes 42))
         :trailers [["grpc-status" "0"]]}
 
+      ## Server-streaming: multiple gRPC frames + trailers
+      (= path "/test.Svc/Stream")
+       {:status 200
+        :headers {:content-type "application/grpc"}
+        :body (concat (grpc:encode (bytes 10 11))
+                      (grpc:encode (bytes 20 21))
+                      (grpc:encode (bytes 30 31)))
+        :trailers [["grpc-status" "0"]]}
+
       ## Default: not found
       true
        {:status 200
@@ -203,6 +212,22 @@
                   (concat "seq " (string i) ": got response")))))))
 
 
+(defn test-server-streaming []
+  "Server-streaming RPC: initial headers have no grpc-status, data arrives
+   as multiple gRPC frames, grpc-status comes in trailers."
+  (with-server grpc-handler
+    (fn [sess]
+      (let [reader (grpc:call-stream sess nil "/test.Svc/Stream"
+                     "test.Req" {} "test.Resp")]
+        (def msg1 (reader))
+        (assert (not (nil? msg1)) "stream: got message 1")
+        (def msg2 (reader))
+        (assert (not (nil? msg2)) "stream: got message 2")
+        (def msg3 (reader))
+        (assert (not (nil? msg3)) "stream: got message 3")
+        (def msg4 (reader))
+        (assert (nil? msg4) "stream: nil at end")))))
+
 ## ── Run ──────────────────────────────────────────────────────────
 
 (println "tests/elle/grpc.lisp:")
@@ -240,5 +265,7 @@
 (println "    PASS: large payload")
 (test-sequential-rpcs)
 (println "    PASS: sequential RPCs")
+(test-server-streaming)
+(println "    PASS: server-streaming (call-stream)")
 
 (println "tests/elle/grpc.lisp: all tests passed")
