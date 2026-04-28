@@ -180,20 +180,25 @@
                                         :headers headers
                                         :end-stream end?})
                      (when end? (del sess:streams sid)))
-                   # No END_HEADERS — buffer for CONTINUATION
-                   (put s :pending-headers payload)))
+                   # No END_HEADERS — buffer payload + remember END_STREAM
+                   (begin
+                     (when (has-flag? flags C:flag-end-stream)
+                       (stream:transition s :recv-end-stream))
+                     (put s :pending-headers
+                          @{:data payload
+                            :end-stream (has-flag? flags C:flag-end-stream)}))))
 
               ## ── CONTINUATION ──
               (= ftype C:type-continuation)
                (when-let [s (get sess:streams sid)]
                  (when s:pending-headers
-                   (put s :pending-headers (concat s:pending-headers payload))
+                   (put s:pending-headers :data
+                        (concat s:pending-headers:data payload))
                    (when (has-flag? flags C:flag-end-headers)
-                     (let [headers (hpack:decode sess:hpack-decoder s:pending-headers)
-                           end? (has-flag? flags C:flag-end-stream)]
+                     (let [headers (hpack:decode sess:hpack-decoder s:pending-headers:data)
+                           end? s:pending-headers:end-stream]
                        (put s :pending-headers nil)
                        (put s :headers headers)
-                       (when end? (stream:transition s :recv-end-stream))
                        (s:data-queue:put {:type :headers
                                           :headers headers
                                           :end-stream end?})

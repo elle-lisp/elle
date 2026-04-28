@@ -150,17 +150,22 @@
                                (protect
                                  (session:send-rst-stream sess sid C:err-internal-error))
                                (when on-error (on-error err))))))))
-                   # No END_HEADERS — start buffering for CONTINUATION
-                   (put s :pending-headers payload)))
+                   # No END_HEADERS — buffer payload + remember END_STREAM flag
+                   (begin
+                     (when (has-flag? flags C:flag-end-stream)
+                       (stream:transition s :recv-end-stream))
+                     (put s :pending-headers
+                          @{:data payload
+                            :end-stream (has-flag? flags C:flag-end-stream)}))))
 
               (= ftype C:type-continuation)
                (when-let [s (get sess:streams sid)]
                  (when s:pending-headers
-                   (put s :pending-headers (concat s:pending-headers payload))
+                   (put s:pending-headers :data
+                        (concat s:pending-headers:data payload))
                    (when (has-flag? flags C:flag-end-headers)
-                     (let [hdrs (hpack:decode sess:hpack-decoder s:pending-headers)
-                           # END_STREAM was on the original HEADERS, check stream state
-                           end? (= s:state :half-closed-remote)]
+                     (let [hdrs (hpack:decode sess:hpack-decoder s:pending-headers:data)
+                           end? s:pending-headers:end-stream]
                        (put s :pending-headers nil)
                        (put s :headers hdrs)
                        (ev/spawn
