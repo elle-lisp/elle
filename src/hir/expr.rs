@@ -208,10 +208,24 @@ pub enum HirKind {
     },
 
     // === Loops ===
-    /// While loop
+    /// While loop (imperative — eliminated by functionalize pass)
     While {
         cond: Box<Hir>,
         body: Box<Hir>,
+    },
+
+    /// Functional loop with named bindings. Produced by the functionalize
+    /// pass from While + Assign. `recur` jumps back to the top with new
+    /// binding values.
+    Loop {
+        bindings: Vec<(Binding, Hir)>,
+        body: Box<Hir>,
+    },
+
+    /// Jump back to the enclosing Loop with new values for its bindings.
+    /// Must appear in tail position within a Loop body.
+    Recur {
+        args: Vec<Hir>,
     },
 
     // === Pattern Matching ===

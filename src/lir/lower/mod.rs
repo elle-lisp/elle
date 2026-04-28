@@ -993,6 +993,17 @@ impl<'a> Lowerer<'a> {
                 Self::collect_rest_indices(cond, out);
                 Self::collect_rest_indices(body, out);
             }
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    Self::collect_rest_indices(init, out);
+                }
+                Self::collect_rest_indices(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_rest_indices(a, out);
+                }
+            }
             HirKind::If {
                 cond,
                 then_branch,
@@ -1170,7 +1181,8 @@ impl<'a> Lowerer<'a> {
                 }
                 mask
             }
-            HirKind::While { .. } | HirKind::Destructure { .. } => 0, // returns nil
+            HirKind::While { .. } | HirKind::Loop { .. } | HirKind::Destructure { .. } => 0, // returns nil
+            HirKind::Recur { .. } => 0, // jumps, never returns a value
 
             // Call: map callee's return_params through our args.
             //
@@ -1267,6 +1279,25 @@ impl<'a> Lowerer<'a> {
             HirKind::While { cond, body } => {
                 Self::collect_lambda_defs_with_params(cond, out);
                 Self::collect_lambda_defs_with_params(body, out);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda {
+                        params,
+                        body: lbody,
+                        ..
+                    } = &init.kind
+                    {
+                        out.push((*binding, params.clone(), lbody));
+                    }
+                    Self::collect_lambda_defs_with_params(init, out);
+                }
+                Self::collect_lambda_defs_with_params(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_lambda_defs_with_params(a, out);
+                }
             }
             HirKind::If {
                 cond,
@@ -1390,7 +1421,8 @@ impl<'a> Lowerer<'a> {
             HirKind::Match { arms, .. } => arms
                 .iter()
                 .all(|(_, _, body)| self.body_result_is_immediate(body)),
-            HirKind::While { .. } => true, // returns nil
+            HirKind::While { .. } | HirKind::Recur { .. } => true, // returns nil
+            HirKind::Loop { body, .. } => self.body_result_is_immediate(body),
 
             // ALL calls (tail or not): check if callee returns immediate
             HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
@@ -1479,6 +1511,20 @@ impl<'a> Lowerer<'a> {
             HirKind::While { cond, body } => {
                 Self::collect_lambda_defs(cond, out);
                 Self::collect_lambda_defs(body, out);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda { body: lbody, .. } = &init.kind {
+                        out.push((*binding, lbody));
+                    }
+                    Self::collect_lambda_defs(init, out);
+                }
+                Self::collect_lambda_defs(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_lambda_defs(a, out);
+                }
             }
             HirKind::If {
                 cond,

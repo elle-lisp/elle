@@ -163,6 +163,21 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(body, false, tail_blocks);
         }
 
+        // Loop: binding inits and body are never in tail position
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                mark(init, false, tail_blocks);
+            }
+            mark(body, false, tail_blocks);
+        }
+
+        // Recur: args are not in tail position
+        HirKind::Recur { args } => {
+            for arg in args {
+                mark(arg, false, tail_blocks);
+            }
+        }
+
         // Assign: value is not in tail position
         HirKind::Assign { value, .. } => {
             mark(value, false, tail_blocks);

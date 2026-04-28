@@ -73,6 +73,8 @@ impl<'a> Lowerer<'a> {
             } => self.lower_destructure_expr(pattern, value, *strict, &hir.span),
 
             HirKind::While { cond, body } => self.lower_while(cond, body),
+            HirKind::Loop { .. } => todo!("Loop lowering"),
+            HirKind::Recur { .. } => todo!("Recur lowering"),
 
             HirKind::And(exprs) => self.lower_and(exprs),
             HirKind::Or(exprs) => self.lower_or(exprs),

@@ -188,6 +188,19 @@ impl HirLinter {
                 self.check(body, symbols, arena);
             }
 
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    self.check(init, symbols, arena);
+                }
+                self.check(body, symbols, arena);
+            }
+
+            HirKind::Recur { args } => {
+                for arg in args {
+                    self.check(arg, symbols, arena);
+                }
+            }
+
             HirKind::Match { value, arms } => {
                 self.check(value, symbols, arena);
                 for (_, guard, body) in arms {

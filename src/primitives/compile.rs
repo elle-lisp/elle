@@ -154,6 +154,17 @@ fn collect_fn_signals(
             collect_fn_signals(cond, arena, symbols, map);
             collect_fn_signals(body, arena, symbols, map);
         }
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                collect_fn_signals(init, arena, symbols, map);
+            }
+            collect_fn_signals(body, arena, symbols, map);
+        }
+        HirKind::Recur { args } => {
+            for arg in args {
+                collect_fn_signals(arg, arena, symbols, map);
+            }
+        }
         HirKind::Match { value, arms } => {
             collect_fn_signals(value, arena, symbols, map);
             for (_, guard, body) in arms {
@@ -350,6 +361,17 @@ fn collect_call_edges(
         HirKind::While { cond, body } => {
             collect_call_edges(cond, arena, symbols, edges, current_fn);
             collect_call_edges(body, arena, symbols, edges, current_fn);
+        }
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                collect_call_edges(init, arena, symbols, edges, current_fn);
+            }
+            collect_call_edges(body, arena, symbols, edges, current_fn);
+        }
+        HirKind::Recur { args } => {
+            for arg in args {
+                collect_call_edges(arg, arena, symbols, edges, current_fn);
+            }
         }
         HirKind::Match { value, arms } => {
             collect_call_edges(value, arena, symbols, edges, current_fn);

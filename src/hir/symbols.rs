@@ -231,6 +231,19 @@ impl<'a> HirSymbolExtractor<'a> {
                 self.walk(body, index, symbols);
             }
 
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    self.walk(init, index, symbols);
+                }
+                self.walk(body, index, symbols);
+            }
+
+            HirKind::Recur { args } => {
+                for arg in args {
+                    self.walk(arg, index, symbols);
+                }
+            }
+
             HirKind::Match { value, arms } => {
                 self.walk(value, index, symbols);
                 for (_, guard, body) in arms {
