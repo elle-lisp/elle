@@ -159,10 +159,14 @@
 
   ## ── DATA with connection + stream flow control ─────────────────────────
 
-  (defn send-data-with-flow-control [session sid s-flow body-bytes]
+  (defn send-data-with-flow-control [session sid s-flow body-bytes
+                                    &named @end-stream]
     "Send DATA frames respecting both connection and per-stream windows.
      Computes allowed = min(remaining, max-frame, conn-window, stream-window)
-     atomically to avoid window leaks."
+     atomically to avoid window leaks.
+     When end-stream is false, omits END_STREAM on the final chunk
+     (used when trailers follow the body)."
+    (default end-stream true)
     (let* [max-frame (get session:remote-settings :max-frame-size)
            @offset 0
            total (length body-bytes)]
@@ -176,7 +180,8 @@
           (when (< allowed conn-allowed)
             (stream:apply-window-update session:conn-flow (- conn-allowed allowed)))
           (let* [chunk (slice body-bytes offset (+ offset allowed))
-                 end? (= (+ offset allowed) total)
+                 last? (= (+ offset allowed) total)
+                 end? (and last? end-stream)
                  [ft fl si pl] (frame:make-data-frame sid chunk end?)]
             (send-frame session ft fl si pl)
             (assign offset (+ offset allowed)))))))

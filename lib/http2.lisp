@@ -165,13 +165,17 @@
     "Send an HTTP/2 request. Returns response struct."
     (let* [[sid s] (send-request-frames sess method path :body body :headers headers)
            @resp-headers nil
+           @resp-trailers nil
            @resp-body @[]
            @done false]
       (while (not done)
         (let [msg (s:data-queue:take)]
           (match msg:type
-            :headers (begin (assign resp-headers msg:headers)
-                            (when msg:end-stream (assign done true)))
+            :headers (begin
+                       (if (nil? resp-headers)
+                         (assign resp-headers msg:headers)
+                         (assign resp-trailers msg:headers))
+                       (when msg:end-stream (assign done true)))
             :data    (begin (push resp-body msg:data)
                             (when msg:end-stream (assign done true)))
             :rst     (error {:error :h2-error :reason :stream-error
@@ -181,17 +185,22 @@
             _        (assign done true))))
       (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status")) resp-headers))
              status (if status-pair (parse-int (get status-pair 1)) 0)
-             hdrs @{}]
+             hdrs @{}
+             trailers @{}]
         (each h in resp-headers
           (let [name (get h 0)
                 value (get h 1)]
             (unless (string/starts-with? name ":")
               (put hdrs (keyword name) value))))
-        {:status  status
-         :headers (freeze hdrs)
-         :body    (if (empty? resp-body)
-                    (bytes)
-                    (apply concat (freeze resp-body)))})))
+        (when resp-trailers
+          (each h in resp-trailers
+            (put trailers (keyword (get h 0)) (get h 1))))
+        {:status   status
+         :headers  (freeze hdrs)
+         :trailers (freeze trailers)
+         :body     (if (empty? resp-body)
+                     (bytes)
+                     (apply concat (freeze resp-body)))})))
 
   (defn h2-send-raw [sess method path &named body headers]
     "Send request, return stream for caller to collect response."

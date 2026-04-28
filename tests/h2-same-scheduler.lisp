@@ -78,10 +78,55 @@
                 (concat "post: body " (string resp:body))))))
   (println "  PASS: request with body"))
 
+## ── Test 4: response with trailers ───────────────────────────────────
+
+(defn test-trailers-with-body []
+  (with-server
+    (fn [req]
+      {:status 200
+       :headers {:content-type "application/grpc"}
+       :body "payload"
+       :trailers [["grpc-status" "0"] ["custom-trailer" "value"]]})
+    (fn [session]
+      (let [resp (http2:send session "GET" "/trailers")]
+        (assert (= resp:status 200) "trailers+body: status 200")
+        (assert (= (string resp:body) "payload") "trailers+body: body")
+        (assert (= resp:trailers:grpc-status "0") "trailers+body: grpc-status")
+        (assert (= resp:trailers:custom-trailer "value") "trailers+body: custom-trailer"))))
+  (println "  PASS: trailers with body"))
+
+## ── Test 5: trailers-only (no body) ─────────────────────────────────
+
+(defn test-trailers-only []
+  (with-server
+    (fn [req]
+      {:status 200
+       :headers {:content-type "application/grpc"}
+       :trailers [["grpc-status" "0"]]})
+    (fn [session]
+      (let [resp (http2:send session "GET" "/trailers-only")]
+        (assert (= resp:status 200) "trailers-only: status 200")
+        (assert (= resp:trailers:grpc-status "0") "trailers-only: grpc-status"))))
+  (println "  PASS: trailers-only (no body)"))
+
+## ── Test 6: no trailers (backward compat) ───────────────────────────
+
+(defn test-no-trailers []
+  (with-server
+    (fn [req] {:status 200 :body "still works"})
+    (fn [session]
+      (let [resp (http2:send session "GET" "/no-trailers")]
+        (assert (= resp:status 200) "no-trailers: status 200")
+        (assert (= (string resp:body) "still works") "no-trailers: body"))))
+  (println "  PASS: no trailers (backward compat)"))
+
 ## ── Run ────────────────────────────────────────────────────────────────
 
 (println "h2 same-scheduler tests:")
 (test-single-request)
 (test-sequential-requests)
 (test-request-with-body)
+(test-trailers-with-body)
+(test-trailers-only)
+(test-no-trailers)
 (println "all h2 same-scheduler tests passed")

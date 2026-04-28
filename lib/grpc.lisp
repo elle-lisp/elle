@@ -43,17 +43,28 @@
 
   ## ── Connect ────────────────────────────────────────────────────────
 
+  (def h2-transport ((import "std/http2/transport")))
+
   (defn grpc-connect [socket-path]
     "Connect to a gRPC server over a Unix socket. Returns an h2 session."
-    (let* [port (unix/connect socket-path)
-           transport (http2:unix-transport port)]
+    (let [transport (h2-transport:tcp (unix/connect socket-path))]
       (http2:connect nil :transport transport)))
 
   ## ── Collect gRPC response from stream ──────────────────────────────
 
+  (defn check-grpc-status [headers]
+    "Check grpc-status in headers/trailers. Raises on non-zero status."
+    (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) headers))]
+      (when (and status-pair (not (= (get status-pair 1) "0")))
+        (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) headers))]
+          (error {:error :grpc-error
+                  :code (parse-int (get status-pair 1))
+                  :message (if msg-pair (get msg-pair 1) "unknown error")})))))
+
   (defn collect-grpc-response [s]
     "Read data + trailers from an h2 stream. Returns raw gRPC frame bytes.
-     Raises on grpc-status != 0."
+     Raises on grpc-status != 0. Handles both trailers-only and
+     headers+data+trailers gRPC responses."
     (let [@resp-headers nil
           @resp-data @[]
           @done false]
@@ -62,14 +73,13 @@
           (match msg:type
             :headers (begin
                        (if (nil? resp-headers)
-                         (assign resp-headers msg:headers)
-                         ## Trailers — check grpc-status
-                         (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
-                           (when (and status-pair (not (= (get status-pair 1) "0")))
-                             (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
-                               (error {:error :grpc-error
-                                       :code (parse-int (get status-pair 1))
-                                       :message (if msg-pair (get msg-pair 1) "unknown error")})))))
+                         (begin
+                           (assign resp-headers msg:headers)
+                           ## Trailers-only: check grpc-status on initial headers
+                           (when msg:end-stream
+                             (check-grpc-status msg:headers)))
+                         ## Trailers after data
+                         (check-grpc-status msg:headers))
                        (when msg:end-stream (assign done true)))
             :data    (begin (push resp-data msg:data)
                             (when msg:end-stream (assign done true)))
@@ -137,12 +147,7 @@
         (let [msg (s:data-queue:take)]
           (match msg:type
             :headers (begin
-                       (let [status-pair (first (filter (fn [h] (= (get h 0) "grpc-status")) msg:headers))]
-                         (when (and status-pair (not (= (get status-pair 1) "0")))
-                           (let [msg-pair (first (filter (fn [h] (= (get h 0) "grpc-message")) msg:headers))]
-                             (error {:error :grpc-error
-                                     :code (parse-int (get status-pair 1))
-                                     :message (if msg-pair (get msg-pair 1) "unknown error")}))))
+                       (check-grpc-status msg:headers)
                        (when msg:end-stream (assign done true)))
             :data    (begin
                        (assign buf (concat buf msg:data))
