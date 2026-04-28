@@ -108,11 +108,11 @@
             (u32->bytes (bit/and stream-id 0x7fffffff))))
 
   (defn decode-header [buf]
-    "Decode a 9-byte frame header from buf. Returns {:length :type :flags :stream-id}."
-    {:length    (read-u24 buf 0)
-     :type      (get buf 3)
-     :flags     (get buf 4)
-     :stream-id (bit/and (read-u32 buf 5) 0x7fffffff)})
+    "Decode a 9-byte frame header from buf. Returns mutable struct."
+    @{:length    (read-u24 buf 0)
+      :type      (get buf 3)
+      :flags     (get buf 4)
+      :stream-id (bit/and (read-u32 buf 5) 0x7fffffff)})
 
   ## ── Transport read helpers ────────────────────────────────────────────
 

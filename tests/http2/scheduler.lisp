@@ -65,3 +65,4 @@
 (test-sequential-requests)
 (test-request-with-body)
 (println "all h2 scheduler tests passed")
+(sys/exit 0)

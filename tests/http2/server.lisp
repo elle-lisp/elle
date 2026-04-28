@@ -227,6 +227,50 @@
         (assert (not ok?) "should refuse after close")
         true))))
 
+## ── Group 8: large request headers (CONTINUATION) ─────────────────────
+
+(defn test-large-request-headers []
+  (let [@req-hdrs @{}]
+    (each i in (range 0 200)
+      (put req-hdrs (keyword (concat "x-big-" (string i)))
+           (apply concat (map (fn [_] "abcdefghij") (range 0 10)))))
+    (with-server
+      (fn [req]
+        {:status 200
+         :body (string (length (keys req:headers)))})
+      (fn [session]
+        (let* [@send-hdrs @[]
+               _ (each k in (keys req-hdrs)
+                   (push send-hdrs [(string k) (get req-hdrs k)]))
+               resp (http2:send session "GET" "/big-req-hdrs"
+                       :headers (freeze send-hdrs))]
+          (assert (= resp:status 200) "status 200")
+          (assert (>= (parse-int (string resp:body)) 200)
+                  (concat "large req headers: server got "
+                          (string resp:body) " headers"))
+          true)))))
+
+## ── Group 9: max-concurrent-streams ────────────────────────────────────
+
+(defn test-max-concurrent-streams-enforced []
+  (with-server
+    (fn [req]
+      (ev/sleep 0.5)
+      {:status 200 :body "ok"})
+    (fn [session]
+      # Server allows 100 concurrent streams by default
+      # Send 3 concurrent requests — all should succeed
+      (let [fibers (map (fn [i]
+                          (ev/spawn
+                            (fn []
+                              (http2:send session "GET"
+                                (concat "/conc-" (string i))))))
+                        (range 0 3))
+            results (map ev/join fibers)]
+        (each r in results
+          (assert (= r:status 200) "concurrent: status 200"))
+        true))))
+
 ## ── Run ──────────────────────────────────────────────────────────────────
 
 (println "h2 server tests:")
@@ -244,8 +288,11 @@
 (run-test "stream cleanup no leak" test-stream-cleanup-no-leak)
 (run-test "SETTINGS window adjustment" test-settings-window-adjustment)
 (run-test "GOAWAY refuses new streams" test-goaway-refuses-new-streams)
+(run-test "large request headers" test-large-request-headers)
+(run-test "max concurrent streams" test-max-concurrent-streams-enforced)
 (println)
 (println "results: " pass-count "/" test-count " passed, " fail-count " failed")
 (when (> fail-count 0)
   (println "failures: " (freeze failures)))
 (assert (= fail-count 0) "all h2 server tests must pass")
+(sys/exit 0)

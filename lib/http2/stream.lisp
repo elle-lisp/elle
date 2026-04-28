@@ -10,11 +10,6 @@
 
 (fn [&named sync frame]
 
-  ## ── Stream states (RFC 9113 Section 5.1) ───────────────────────────────
-
-  (def STATES |:idle :open :half-closed-local :half-closed-remote
-               :reserved-local :reserved-remote :closed|)
-
   ## ── Stream constructor ─────────────────────────────────────────────────
 
   (defn make-stream [id initial-window]

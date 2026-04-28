@@ -19,45 +19,22 @@
 
   ## ── Import submodules ──────────────────────────────────────────────────
 
-  (def sync    ((import "std/sync")))
-  (def b64     ((import "std/base64")))
-  (def huffman ((import "std/http2/huffman")))
-  (def hpack   ((import "std/http2/hpack") :huffman huffman))
-  (def frame   ((import "std/http2/frame")))
-  (def stream  ((import "std/http2/stream") :sync sync :frame frame))
-  (def session ((import "std/http2/session") :sync sync :frame frame
-                                             :stream stream :hpack hpack))
-  (def server  ((import "std/http2/server") :sync sync :hpack hpack
-                                            :frame frame :stream stream
-                                            :session session :tls tls))
+  (def sync      ((import "std/sync")))
+  (def huffman   ((import "std/http2/huffman")))
+  (def hpack     ((import "std/http2/hpack") :huffman huffman))
+  (def frame     ((import "std/http2/frame")))
+  (def stream    ((import "std/http2/stream") :sync sync :frame frame))
+  (def transport ((import "std/http2/transport") :tls tls))
+  (def session   ((import "std/http2/session") :sync sync :frame frame
+                                               :stream stream :hpack hpack))
+  (def server    ((import "std/http2/server") :sync sync :hpack hpack
+                                              :frame frame :stream stream
+                                              :session session :tls tls
+                                              :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 
   (def C frame:constants)
-  (def has-flag? frame:has-flag?)
-
-  ## ── Transport abstraction ──────────────────────────────────────────────
-
-  (defn tcp-transport [port]
-    "Wrap a TCP port as a transport with buffered binary writes."
-    (def @wbuf-parts @[])
-    {:read  (fn [n] (port/read port n))
-     :write (fn [data]
-              (let [d (if (bytes? data) data (bytes data))]
-                (push wbuf-parts d)))
-     :flush (fn []
-              (when (> (length wbuf-parts) 0)
-                (let [combined (apply concat (freeze wbuf-parts))]
-                  (port/write port combined)
-                  (assign wbuf-parts @[]))))
-     :close (fn [] (port/close port))})
-
-  (defn tls-transport [conn]
-    "Wrap a TLS connection as a transport."
-    {:read  (fn [n] (tls:read conn n))
-     :write (fn [data] (tls:write conn data))
-     :flush (fn [] nil)
-     :close (fn [] (tls:close conn))})
 
   ## ── URL parsing ────────────────────────────────────────────────────────
 
@@ -101,131 +78,8 @@
                     :message "https requires :tls plugin passed to (import \"std/http2\")"}))
           (let [conn (tls:connect url-parsed:host url-parsed:port
                                   {:alpn ["h2" "http/1.1"]})]
-            {:transport (tls-transport conn) :tls-conn conn}))
-        {:transport (tcp-transport (tcp/connect ip url-parsed:port)) :tls-conn nil})))
-
-  ## ── Client reader loop ─────────────────────────────────────────────────
-
-  (defn reader-loop [sess]
-    "Read frames from transport and dispatch to stream queues."
-    (let [t sess:transport
-          max-size (get sess:local-settings :max-frame-size)]
-      (forever
-        (let [[ok? f] (protect (frame:read-frame t max-size))]
-          (when (not ok?)
-            (put sess :closed? true)
-            (sess:write-queue:put :shutdown)
-            (session:notify-all-streams sess :transport-error)
-            (break nil))
-          (when (nil? f)
-            (put sess :closed? true)
-            (sess:write-queue:put :shutdown)
-            (session:notify-all-streams sess :eof)
-            (break nil))
-          (let [ftype f:type
-                flags f:flags
-                sid   f:stream-id
-                payload f:payload]
-            (cond
-              ## ── SETTINGS ──
-              (= ftype C:type-settings)
-               (if (has-flag? flags C:flag-ack)
-                 (session:ack-settings-received sess)
-                 (begin
-                   (session:apply-remote-settings sess payload)
-                   (session:send-settings-ack sess)))
-
-              ## ── PING ──
-              (= ftype C:type-ping)
-               (unless (has-flag? flags C:flag-ack)
-                 (let [[ftype flags sid payload]
-                       (frame:make-ping-frame payload :ack? true)]
-                   (session:send-frame sess ftype flags sid payload)))
-
-              ## ── GOAWAY ──
-              (= ftype C:type-goaway)
-               (begin
-                 (put sess :goaway-recvd? true)
-                 (put sess :last-stream-id
-                      (bit/and (frame:read-u32 payload 0) 0x7fffffff)))
-
-              ## ── WINDOW_UPDATE ──
-              (= ftype C:type-window-update)
-               (let [increment (bit/and (frame:read-u32 payload 0) 0x7fffffff)]
-                 (if (= sid 0)
-                   (stream:apply-window-update sess:conn-flow increment)
-                   (when-let [s (get sess:streams sid)]
-                     (stream:apply-window-update s:flow increment))))
-
-              ## ── RST_STREAM ──
-              (= ftype C:type-rst-stream)
-               (when-let [s (get sess:streams sid)]
-                 (stream:transition s :recv-rst)
-                 (let [err-code (frame:read-u32 payload 0)]
-                   (put s :error-code err-code)
-                   (s:data-queue:put {:type :rst :code err-code}))
-                 (del sess:streams sid))
-
-              ## ── HEADERS ──
-              (= ftype C:type-headers)
-               (let [s (session:get-stream sess sid)]
-                 (when (= s:state :idle)
-                   (stream:transition s :recv-headers))
-                 (if (has-flag? flags C:flag-end-headers)
-                   (let [headers (hpack:decode sess:hpack-decoder payload)
-                         end? (has-flag? flags C:flag-end-stream)]
-                     (put s :headers headers)
-                     (when end? (stream:transition s :recv-end-stream))
-                     (s:data-queue:put {:type :headers
-                                        :headers headers
-                                        :end-stream end?})
-                     (when end? (del sess:streams sid)))
-                   # No END_HEADERS — buffer payload + remember END_STREAM
-                   (begin
-                     (when (has-flag? flags C:flag-end-stream)
-                       (stream:transition s :recv-end-stream))
-                     (put s :pending-headers
-                          @{:data payload
-                            :end-stream (has-flag? flags C:flag-end-stream)}))))
-
-              ## ── CONTINUATION ──
-              (= ftype C:type-continuation)
-               (when-let [s (get sess:streams sid)]
-                 (when s:pending-headers
-                   (put s:pending-headers :data
-                        (concat s:pending-headers:data payload))
-                   (when (has-flag? flags C:flag-end-headers)
-                     (let [headers (hpack:decode sess:hpack-decoder s:pending-headers:data)
-                           end? s:pending-headers:end-stream]
-                       (put s :pending-headers nil)
-                       (put s :headers headers)
-                       (s:data-queue:put {:type :headers
-                                          :headers headers
-                                          :end-stream end?})
-                       (when end? (del sess:streams sid))))))
-
-              ## ── DATA ──
-              (= ftype C:type-data)
-               (begin
-                 (let [len (length payload)]
-                   (when (> len 0)
-                     (session:send-window-update sess 0 len)))
-                 (when-let [s (get sess:streams sid)]
-                   (let [end? (has-flag? flags C:flag-end-stream)]
-                     (s:data-queue:put {:type :data :data payload
-                                        :end-stream end?})
-                     (when end? (stream:transition s :recv-end-stream))
-                     (let [len (length payload)]
-                       (when (> len 0)
-                         (session:send-window-update sess sid len)))
-                     (when end? (del sess:streams sid)))))
-
-              ## ── PUSH_PROMISE — reject ──
-              (= ftype C:type-push-promise)
-               (session:send-rst-stream sess sid C:err-refused-stream)
-
-              ## ── Unknown — ignore ──
-              true nil))))))
+            {:transport (transport:tls conn) :tls-conn conn}))
+        {:transport (transport:tcp (tcp/connect ip url-parsed:port)) :tls-conn nil})))
 
   ## ── Client: handshake ──────────────────────────────────────────────────
 
@@ -263,14 +117,25 @@
       (put sess :writer-fiber
            (ev/spawn (fn [] (session:writer-loop sess))))
       (put sess :reader-fiber
-           (ev/spawn (fn [] (reader-loop sess))))
+           (ev/spawn (fn [] (session:read-loop sess
+                              :on-headers (fn [sess s sid hdrs end?]
+                                (put s :headers hdrs)
+                                (when end? (stream:transition s :recv-end-stream))
+                                (s:data-queue:put {:type :headers
+                                                    :headers hdrs
+                                                    :end-stream end?})
+                                (when end? (del sess:streams sid)))
+                              :on-goaway (fn [sess payload]
+                                (put sess :goaway-recvd? true)
+                                (put sess :last-stream-id
+                                     (bit/and (frame:read-u32 payload 0) 0x7fffffff))
+                                nil)))))
       sess))
 
   ## ── Client: send request ───────────────────────────────────────────────
 
   (defn send-request-frames [sess method path &named body headers]
-    "Send HEADERS + DATA frames for a request. Returns [stream-id stream].
-     Shared by h2-send and h2-send-raw (defect 10)."
+    "Send HEADERS + DATA frames for a request. Returns [stream-id stream]."
     (when sess:closed?
       (error {:error :h2-error :reason :connection-closed
               :message "session is closed"}))
@@ -288,8 +153,8 @@
                    [":authority" authority]]
            all-headers (if (nil? headers) pseudo (concat pseudo headers))
            has-body (and body (> (length body) 0))]
+      (session:encode-and-send-headers sess sid all-headers (not has-body))
       (stream:transition s :send-headers)
-      (session:send-headers-with-continuation sess sid all-headers (not has-body))
       (when has-body
         (let [body-bytes (if (string? body) (bytes body) body)]
           (session:send-data-with-flow-control sess sid s:flow body-bytes))
@@ -321,7 +186,7 @@
           (let [name (get h 0)
                 value (get h 1)]
             (unless (string/starts-with? name ":")
-              (put hdrs (keyword (slice name 0)) value))))
+              (put hdrs (keyword name) value))))
         {:status  status
          :headers (freeze hdrs)
          :body    (if (empty? resp-body)
@@ -358,11 +223,9 @@
     (when (not sess:closed?)
       (put sess :closed? true)
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
-      # Shutdown writer — join it before closing transport (defect 8)
       (sess:write-queue:put :shutdown)
       (when sess:writer-fiber
         (ev/join-protected sess:writer-fiber))
-      # Close transport — unblocks reader fiber
       (protect (sess:transport:close))
       (when sess:reader-fiber
         (ev/join-protected sess:reader-fiber)))
@@ -391,7 +254,7 @@
            server-fiber (ev/spawn
              (fn []
                (let* [tcp (tcp/accept listener)
-                      t (tcp-transport tcp)]
+                      t (transport:tcp tcp)]
                  (frame:read-exact t 24)
                  (frame:read-frame t 16384)
                  (let [[ft fl si pl] (frame:make-settings-frame session:default-settings)]
