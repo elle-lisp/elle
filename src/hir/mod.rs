@@ -13,6 +13,7 @@ mod analyze;
 pub mod arena;
 pub mod binding;
 mod expr;
+pub mod functionalize;
 pub mod lint;
 mod pattern;
 pub mod symbols;

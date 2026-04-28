@@ -2,6 +2,7 @@
 
 use super::cache;
 use super::compile::compile_file;
+use crate::hir::functionalize::functionalize;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
@@ -42,6 +43,7 @@ pub fn eval_syntax(
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
+    functionalize(&mut analysis.hir, &mut arena);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -100,6 +102,7 @@ pub fn eval(
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
+    functionalize(&mut analysis.hir, &mut arena);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);

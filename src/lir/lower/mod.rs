@@ -219,6 +219,14 @@ impl fmt::Display for ScopeStats {
     }
 }
 
+/// Tracks an active Loop during lowering so `Recur` can find its
+/// entry label and binding slots.
+struct LoopLowerContext {
+    loop_label: Label,
+    binding_slots: Vec<u16>,
+    scope_eligible: bool,
+}
+
 /// Tracks an active block during lowering so `break` can find its
 /// result register and exit label.
 struct BlockLowerContext {
@@ -305,6 +313,8 @@ pub struct Lowerer<'a> {
     callee_rest_index: HashMap<Binding, usize>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
+    /// Stack of active loop contexts for `Recur` lowering
+    loop_lower_contexts: Vec<LoopLowerContext>,
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
     /// Current nesting depth of active allocation regions.
@@ -363,6 +373,7 @@ impl<'a> Lowerer<'a> {
             callee_return_params: HashMap::new(),
             callee_rest_index: HashMap::new(),
             immutable_values: HashMap::new(),
+            loop_lower_contexts: Vec::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
             flip_depth: 0,
