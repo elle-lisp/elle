@@ -19,13 +19,14 @@
 
   (defn make-stream [id initial-window]
     "Create a new stream with the given ID and initial flow-control window."
-    @{:id          id
-      :state       :idle
-      :send-window initial-window
-      :recv-window initial-window
-      :data-queue  (sync:make-queue 64)
-      :headers     nil
-      :error-code  nil})
+    @{:id              id
+      :state           :idle
+      :flow            (make-flow-control initial-window)
+      :recv-window     initial-window
+      :data-queue      (sync:make-queue 64)
+      :headers         nil
+      :pending-headers nil
+      :error-code      nil})
 
   ## ── State transitions ──────────────────────────────────────────────────
   ## Events: :send-headers :recv-headers :send-end-stream :recv-end-stream
@@ -122,20 +123,20 @@
     (let [s (make-stream 1 65535)]
       (assert (= s:state :idle) "stream: initial state")
       (stream-transition s :send-headers)
-      (assert (= s:state :open) "stream: idle→open")
+      (assert (= s:state :open) "stream: idle->open")
       (stream-transition s :send-end-stream)
-      (assert (= s:state :half-closed-local) "stream: open→half-closed-local")
+      (assert (= s:state :half-closed-local) "stream: open->half-closed-local")
       (stream-transition s :recv-end-stream)
-      (assert (= s:state :closed) "stream: half-closed-local→closed"))
+      (assert (= s:state :closed) "stream: half-closed-local->closed"))
 
     # ── Server-side transitions ──
     (let [s (make-stream 1 65535)]
       (stream-transition s :recv-headers)
-      (assert (= s:state :open) "stream server: idle→open")
+      (assert (= s:state :open) "stream server: idle->open")
       (stream-transition s :recv-end-stream)
-      (assert (= s:state :half-closed-remote) "stream server: open→half-closed-remote")
+      (assert (= s:state :half-closed-remote) "stream server: open->half-closed-remote")
       (stream-transition s :send-end-stream)
-      (assert (= s:state :closed) "stream server: half-closed-remote→closed"))
+      (assert (= s:state :closed) "stream server: half-closed-remote->closed"))
 
     # ── RST_STREAM ──
     (let [s (make-stream 3 65535)]
@@ -151,7 +152,20 @@
       (let [[ok? err] (protect (stream-transition s :send-end-stream))]
         (assert (not ok?) "stream: invalid transition errors")))
 
-    # ── Flow control ──
+    # ── Per-stream flow control struct ──
+    (let [s (make-stream 1 65535)]
+      (assert (= s:flow:send-window 65535) "stream: flow control initial window")
+      (let [consumed (consume-send-window s:flow 1000)]
+        (assert (= consumed 1000) "stream: flow consume")
+        (assert (= s:flow:send-window 64535) "stream: flow after consume"))
+      (apply-window-update s:flow 1000)
+      (assert (= s:flow:send-window 65535) "stream: flow after update"))
+
+    # ── Pending headers field ──
+    (let [s (make-stream 1 65535)]
+      (assert (nil? s:pending-headers) "stream: pending-headers nil initially"))
+
+    # ── Connection-level flow control ──
     (let [fc (make-flow-control 100)]
       (assert (= fc:send-window 100) "fc: initial send window")
       (let [consumed (consume-send-window fc 50)]

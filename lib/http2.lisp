@@ -297,7 +297,7 @@
                  (if (= sid 0)
                    (stream:apply-window-update session:conn-flow increment)
                    (when-let [s (get session:streams sid)]
-                     (put s :send-window (+ s:send-window increment)))))
+                     (stream:apply-window-update s:flow increment))))
 
               ## ── RST_STREAM ──
               (= ftype C:type-rst-stream)
