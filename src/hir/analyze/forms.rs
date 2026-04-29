@@ -28,6 +28,10 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Int(n) => Ok(Hir::silent(HirKind::Int(*n), span)),
             SyntaxKind::Float(f) => Ok(Hir::silent(HirKind::Float(*f), span)),
             SyntaxKind::String(s) => Ok(Hir::silent(HirKind::String(s.clone()), span)),
+            SyntaxKind::StringMut(_) => {
+                // Should never reach HIR — the expander desugars @"..." to (thaw "...")
+                unreachable!("StringMut should be desugared by the expander")
+            }
             SyntaxKind::Keyword(k) => Ok(Hir::silent(HirKind::Keyword(k.clone()), span)),
 
             // Variable reference

@@ -62,27 +62,32 @@
   # Connection preface (RFC 9113 Section 3.4)
   (def CLIENT-PREFACE
     (bytes 0x50 0x52 0x49 0x20 0x2a 0x20 0x48 0x54 0x54 0x50 0x2f 0x32 0x2e 0x30
-      0x0d 0x0a 0x0d 0x0a 0x53 0x4d 0x0d 0x0a 0x0d 0x0a))
+           0x0d 0x0a 0x0d 0x0a 0x53 0x4d 0x0d 0x0a 0x0d 0x0a))
 
   ## ── Byte packing helpers ──────────────────────────────────────────────
 
   (defn u16->bytes [n]
     (bytes (bit/and (bit/shr n 8) 0xff) (bit/and n 0xff)))
+
   (defn u24->bytes [n]
     (bytes (bit/and (bit/shr n 16) 0xff) (bit/and (bit/shr n 8) 0xff)
-      (bit/and n 0xff)))
+           (bit/and n 0xff)))
+
   (defn u32->bytes [n]
     (bytes (bit/and (bit/shr n 24) 0xff) (bit/and (bit/shr n 16) 0xff)
-      (bit/and (bit/shr n 8) 0xff) (bit/and n 0xff)))
+           (bit/and (bit/shr n 8) 0xff) (bit/and n 0xff)))
+
   (defn read-u16 [buf offset]
     (bit/or (bit/shl (get buf offset) 8) (get buf (+ offset 1))))
+
   (defn read-u24 [buf offset]
     (bit/or (bit/or (bit/shl (get buf offset) 16)
-        (bit/shl (get buf (+ offset 1)) 8)) (get buf (+ offset 2))))
+                    (bit/shl (get buf (+ offset 1)) 8)) (get buf (+ offset 2))))
+
   (defn read-u32 [buf offset]
     (bit/or (bit/or (bit/shl (get buf offset) 24)
-        (bit/shl (get buf (+ offset 1)) 16))
-      (bit/or (bit/shl (get buf (+ offset 2)) 8) (get buf (+ offset 3)))))
+                    (bit/shl (get buf (+ offset 1)) 16))
+            (bit/or (bit/shl (get buf (+ offset 2)) 8) (get buf (+ offset 3)))))
 
   ## ── Frame header codec ────────────────────────────────────────────────
   ## 9-byte header: length(24) + type(8) + flags(8) + R(1) + stream_id(31)
@@ -90,7 +95,8 @@
   (defn encode-header [frame-type flags stream-id payload-len]
     "Encode a 9-byte frame header."
     (concat (u24->bytes payload-len) (bytes frame-type) (bytes flags)
-      (u32->bytes (bit/and stream-id 0x7fffffff))))
+            (u32->bytes (bit/and stream-id 0x7fffffff))))
+
   (defn decode-header [buf]
     "Decode a 9-byte frame header from buf. Returns mutable struct."
     @{:length (read-u24 buf 0)
@@ -144,7 +150,7 @@
     "Write a complete frame to transport. Returns nil."
     (let* [payload-bytes (or payload (bytes))
            header (encode-header frame-type flags stream-id
-             (length payload-bytes))]
+                                 (length payload-bytes))]
       (transport:write header)
       (when (> (length payload-bytes) 0) (transport:write payload-bytes))))
 
@@ -153,36 +159,44 @@
   (defn make-data-frame [stream-id data end-stream?]
     "Build a DATA frame. Returns [type flags stream-id payload]."
     [TYPE-DATA (if end-stream? FLAG-END-STREAM 0) stream-id data])
+
   (defn make-headers-frame [stream-id header-block end-stream? end-headers?]
     "Build a HEADERS frame. Returns [type flags stream-id payload]."
     (let [flags (bit/or (if end-stream? FLAG-END-STREAM 0)
-            (if end-headers? FLAG-END-HEADERS 0))]
+                        (if end-headers? FLAG-END-HEADERS 0))]
       [TYPE-HEADERS flags stream-id header-block]))
+
   (defn make-settings-frame [settings]
     "Build a SETTINGS frame from a list of [id value] pairs.
      Returns [type flags stream-id payload]."
     (let [payload (fold (fn [acc pair]
                           (concat acc (u16->bytes (get pair 0))
-                            (u32->bytes (get pair 1)))) (bytes) settings)]
+                                  (u32->bytes (get pair 1)))) (bytes) settings)]
       [TYPE-SETTINGS 0 0 payload]))
+
   (defn make-settings-ack []
     "Build a SETTINGS ACK frame. Returns [type flags stream-id payload]."
     [TYPE-SETTINGS FLAG-ACK 0 (bytes)])
+
   (defn make-window-update-frame [stream-id increment]
     "Build a WINDOW_UPDATE frame. Returns [type flags stream-id payload]."
     [TYPE-WINDOW-UPDATE 0 stream-id (u32->bytes (bit/and increment 0x7fffffff))])
+
   (defn make-rst-stream-frame [stream-id error-code]
     "Build a RST_STREAM frame. Returns [type flags stream-id payload]."
     [TYPE-RST-STREAM 0 stream-id (u32->bytes error-code)])
+
   (defn make-goaway-frame [last-stream-id error-code &named debug-data]
     "Build a GOAWAY frame. Returns [type flags stream-id payload]."
     (let [payload (concat (u32->bytes (bit/and last-stream-id 0x7fffffff))
-            (u32->bytes error-code) (or debug-data (bytes)))]
+                          (u32->bytes error-code) (or debug-data (bytes)))]
       [TYPE-GOAWAY 0 0 payload]))
+
   (defn make-ping-frame [opaque-data &named ack?]
     "Build a PING frame. Returns [type flags stream-id payload].
      opaque-data must be exactly 8 bytes."
     [TYPE-PING (if ack? FLAG-ACK 0) 0 opaque-data])
+
   (defn make-continuation-frame [stream-id header-block end-headers?]
     "Build a CONTINUATION frame. Returns [type flags stream-id payload]."
     [TYPE-CONTINUATION (if end-headers? FLAG-END-HEADERS 0) stream-id
@@ -196,7 +210,8 @@
     (def @offset 0)
     (while (<= (+ offset 5) (length payload))
       (push result
-        {:id (read-u16 payload offset) :value (read-u32 payload (+ offset 2))})
+            {:id (read-u16 payload offset)
+             :value (read-u32 payload (+ offset 2))})
       (assign offset (+ offset 6)))
     (freeze result))
 
@@ -256,12 +271,15 @@
     (assert (= (u16->bytes 0) (bytes 0 0)) "u16->bytes 0")
     (assert (= (u16->bytes 256) (bytes 1 0)) "u16->bytes 256")
     (assert (= (u16->bytes 0x1234) (bytes 0x12 0x34)) "u16->bytes 0x1234")
+
     (assert (= (u24->bytes 0) (bytes 0 0 0)) "u24->bytes 0")
     (assert (= (u24->bytes 0x123456) (bytes 0x12 0x34 0x56))
-      "u24->bytes 0x123456")
+            "u24->bytes 0x123456")
+
     (assert (= (u32->bytes 0) (bytes 0 0 0 0)) "u32->bytes 0")
     (assert (= (u32->bytes 0x12345678) (bytes 0x12 0x34 0x56 0x78))
-      "u32->bytes 0x12345678")
+            "u32->bytes 0x12345678")
+
     (assert (= (read-u16 (bytes 0x12 0x34) 0) 0x1234) "read-u16")
     (assert (= (read-u24 (bytes 0x12 0x34 0x56) 0) 0x123456) "read-u24")
     (assert (= (read-u32 (bytes 0x12 0x34 0x56 0x78) 0) 0x12345678) "read-u32")
@@ -295,11 +313,11 @@
       (let [parsed (parse-settings payload)]
         (assert (= (length parsed) 2) "parse-settings: 2 entries")
         (assert (= (get (get parsed 0) :id) SETTINGS-INITIAL-WINDOW-SIZE)
-          "parse-settings: first id")
+                "parse-settings: first id")
         (assert (= (get (get parsed 0) :value) 32768)
-          "parse-settings: first value")
+                "parse-settings: first value")
         (assert (= (get (get parsed 1) :id) SETTINGS-MAX-FRAME-SIZE)
-          "parse-settings: second id")))
+                "parse-settings: second id")))
 
     # ── Settings ACK ──
     (let [[ftype flags sid payload] (make-settings-ack)]
@@ -321,22 +339,23 @@
 
     # ── GOAWAY frame ──
     (let [[ftype flags sid payload] (make-goaway-frame 5 ERR-NO-ERROR
-            :debug-data (bytes "bye"))]
+          :debug-data (bytes "bye"))]
       (assert (= ftype TYPE-GOAWAY) "goaway: type")
       (assert (= sid 0) "goaway: stream 0")
       (assert (= (bit/and (read-u32 payload 0) 0x7fffffff) 5)
-        "goaway: last-stream-id")
+              "goaway: last-stream-id")
       (assert (= (read-u32 payload 4) ERR-NO-ERROR) "goaway: error code")
       (assert (= (slice payload 8 (length payload)) (bytes "bye"))
-        "goaway: debug data"))
+              "goaway: debug data"))
 
     # ── PING frame ──
     (let [[ftype flags sid payload] (make-ping-frame (bytes 1 2 3 4 5 6 7 8))]
       (assert (= ftype TYPE-PING) "ping: type")
       (assert (= flags 0) "ping: no ack")
       (assert (= (length payload) 8) "ping: 8 bytes"))
+
     (let [[ftype flags sid payload] (make-ping-frame (bytes 1 2 3 4 5 6 7 8)
-            :ack? true)]
+          :ack? true)]
       (assert (= flags FLAG-ACK) "ping ack: flags"))
 
     # ── has-flag? ──
@@ -347,7 +366,7 @@
     # ── CLIENT-PREFACE ──
     (assert (= (length CLIENT-PREFACE) 24) "client preface: 24 bytes")
     (assert (= (string CLIENT-PREFACE) "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
-      "client preface: magic string")
+            "client preface: magic string")
 
     # ── In-memory read/write roundtrip ──
     # Build a mock transport from a buffer
@@ -368,16 +387,18 @@
 
     # ── CONTINUATION frame ──
     (let [[ftype flags sid payload] (make-continuation-frame 1 (bytes 0x82 0x86)
-            false)]
+          false)]
       (assert (= ftype TYPE-CONTINUATION) "continuation: type")
       (assert (= flags 0) "continuation: no end-headers")
       (assert (= sid 1) "continuation: stream-id")
       (assert (= payload (bytes 0x82 0x86)) "continuation: payload"))
+
     (let [[ftype flags sid payload] (make-continuation-frame 3 (bytes 0x84) true)]
       (assert (= ftype TYPE-CONTINUATION) "continuation end: type")
       (assert (has-flag? flags FLAG-END-HEADERS)
-        "continuation end: end-headers flag")
+              "continuation end: end-headers flag")
       (assert (= sid 3) "continuation end: stream-id"))
+
     true)
 
   ## ── Exports ────────────────────────────────────────────────────────────

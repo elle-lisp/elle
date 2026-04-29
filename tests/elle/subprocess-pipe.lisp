@@ -3,9 +3,9 @@
 
 (def elle
   (or (get (sys/env) "ELLE")
-    (if (file-exists? "./target/release/elle")
-      "./target/release/elle"
-      "./target/debug/elle")))
+      (if (file-exists? "./target/release/elle")
+        "./target/release/elle"
+        "./target/debug/elle")))
 
 # Test 1: echo (non-elle child, multiple lines)
 (eprintln "test 1: echo multi-line")
@@ -21,7 +21,8 @@
 (eprintln "test 3: elle two printlns via sh pipe")
 (def r3
   (subprocess/system "sh"
-    ["-c" (string "echo '(begin (println 1) (println 2))' | " elle)]))
+                     ["-c"
+                      (string "echo '(begin (println 1) (println 2))' | " elle)]))
 (eprintln "  stdout=" (string/size-of r3:stdout) " bytes: '" r3:stdout "'")
 
 # Test 4: elle child script with two printlns (via file)

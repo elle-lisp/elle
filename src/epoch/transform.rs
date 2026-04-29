@@ -324,6 +324,7 @@ fn rewrite_node(
         | SyntaxKind::Float(_)
         | SyntaxKind::Keyword(_)
         | SyntaxKind::String(_)
+        | SyntaxKind::StringMut(_)
         | SyntaxKind::SyntaxLiteral(_) => {}
     }
 

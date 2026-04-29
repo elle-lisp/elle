@@ -19,27 +19,27 @@
   "Greets someone by name"
   (append "Hello, " name))
 (assert (= (doc greet) "Greets someone by name")
-  "defn with docstring should extract it")
+        "defn with docstring should extract it")
 
 # === Builtin docstrings ===
 
 # Builtin primitives have documentation
 (let [doc-str (doc "+")]
   (assert (string/contains? doc-str "+")
-    "Builtin + should have documentation containing '+'"))
+          "Builtin + should have documentation containing '+'"))
 
 # === Missing docstrings ===
 
 # Undefined variable returns "No documentation found"
 (let [result (doc "undefined-var-xyz")]
   (assert (string/contains? result "No documentation found")
-    "Undefined variable should return 'No documentation found'"))
+          "Undefined variable should return 'No documentation found'"))
 
 # Variable without docstring returns "No documentation found"
 (def x 42)
 (let [result (doc "x")]
   (assert (string/contains? result "No documentation found")
-    "Variable without docstring should return 'No documentation found'"))
+          "Variable without docstring should return 'No documentation found'"))
 
 # === Edge cases ===
 
@@ -47,7 +47,7 @@
 (def single-string-fn (fn () "hello"))
 (let [result (doc single-string-fn)]
   (assert (string/contains? result "No documentation found")
-    "Single-body string should not be treated as docstring"))
+          "Single-body string should not be treated as docstring"))
 
 # Docstring with multiple body expressions
 (def multi-body-fn
@@ -55,7 +55,7 @@
     "Adds two numbers"
     (+ x y)))
 (assert (= (doc multi-body-fn) "Adds two numbers")
-  "Docstring with multiple body expressions should work")
+        "Docstring with multiple body expressions should work")
 
 # Docstring with complex body
 (def complex-fn
@@ -65,7 +65,7 @@
       1
       (* n (complex-fn (- n 1))))))
 (assert (= (doc complex-fn) "Computes factorial")
-  "Docstring with complex body should work")
+        "Docstring with complex body should work")
 
 # Empty docstring
 (def empty-doc-fn
@@ -78,7 +78,7 @@
 
 # Stdlib function WITH a docstring: inc is defined via defn with "Return x + 1."
 (assert (= (doc inc) "Return x + 1.")
-  "stdlib function with docstring should return it via closure path")
+        "stdlib function with docstring should return it via closure path")
 
 # Stdlib function WITH a docstring: map has a docstring.
 (assert (contains? (doc map) "Apply f") "map should have a docstring")

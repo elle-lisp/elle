@@ -12,7 +12,7 @@
 
 # import-file tests
 (assert (fn () (import-file "tests/modules/test.lisp"))
-  "import-file with valid file succeeds")
+        "import-file with valid file succeeds")
 (let [[ok? _] (protect ((fn () (import-file "./lib/nonexistent.lisp"))))]
   (assert (not ok?) "import-file with non-existent relative path fails"))
 (let [[ok? _] (protect ((fn () (import-file "/absolute/nonexistent.lisp"))))]
@@ -25,7 +25,7 @@
 # debug-print tests
 (assert (= (debug-print 42) 42) "debug-print returns the value (int)")
 (assert (= (debug-print "hello") "hello")
-  "debug-print returns the value (string)")
+        "debug-print returns the value (string)")
 (assert (= (debug-print (+ 1 2)) 3) "debug-print works with expressions")
 
 # trace tests
@@ -36,15 +36,15 @@
 (assert (fn ()
           (let [result (memory-usage)]
             (or (list? result) (nil? result))))
-  "memory-usage returns a list or nil")
+        "memory-usage returns a list or nil")
 
 # concurrency with arithmetic
 (assert (int? (+ (current-thread-id) 1))
-  "current-thread-id can be used in arithmetic")
+        "current-thread-id can be used in arithmetic")
 
 # debug-print with list operations
 (assert (= (debug-print (list 1 2 3)) (list 1 2 3))
-  "debug-print works with list operations")
+        "debug-print works with list operations")
 
 # trace with arithmetic chain
 (assert (= (trace "step1" (+ 1 2)) 3) "trace with first arithmetic")
@@ -63,11 +63,11 @@
 
 # thread id consistency
 (assert (= (current-thread-id) (current-thread-id))
-  "multiple calls to current-thread-id return same value")
+        "multiple calls to current-thread-id return same value")
 
 # debug-print with nested structures
 (assert (fn () (debug-print (list (list 1 2) (list 3 4))))
-  "debug-print with nested lists")
+        "debug-print with nested lists")
 (assert (fn () (debug-print (@array 1 2 3))) "debug-print with arrays")
 
 # phase 5 feature availability
@@ -134,7 +134,7 @@
 
 # current-thread-id no arguments
 (assert (fn () (current-thread-id))
-  "current-thread-id with no arguments succeeds")
+        "current-thread-id with no arguments succeeds")
 
 # debug-print wrong argument count
 (let [[ok? _] (protect ((fn () (eval '(debug-print)))))]
@@ -260,7 +260,7 @@
 
 # debug and trace chain
 (assert (fn () (trace "a" (debug-print (+ 1 2))))
-  "debug-print and trace can be chained")
+        "debug-print and trace can be chained")
 
 # sleep in arithmetic context
 (let [[ok? _] (protect ((fn () (+ 1 (time/sleep 0)))))]
@@ -273,26 +273,26 @@
 
 # import-file with variable definitions
 (assert (fn () (import-file "tests/modules/test.lisp"))
-  "import-file with variable definitions")
+        "import-file with variable definitions")
 
 # import multiple files sequentially
 (assert (fn () (import-file "tests/modules/test.lisp"))
-  "first import-file succeeds")
+        "first import-file succeeds")
 (assert (fn () (import-file "tests/modules/test.lisp"))
-  "second import-file succeeds")
+        "second import-file succeeds")
 
 # import same file twice idempotent
 (assert (fn ()
           (let [r1 (import-file "tests/modules/test.lisp")
                 r2 (import-file "tests/modules/test.lisp")]
             (and (list? r1) (= r2 true))))
-  "import-file idempotent: first returns list, second returns true")
+        "import-file idempotent: first returns list, second returns true")
 
 # import-file with relative paths
 (assert (fn () (import-file "./tests/modules/test.lisp"))
-  "import-file with ./ relative path")
+        "import-file with ./ relative path")
 (assert (fn () (import-file "tests/modules/test.lisp"))
-  "import-file with relative path")
+        "import-file with relative path")
 
 # ============================================================================
 # Array pattern matching tests
@@ -395,7 +395,7 @@
 (assert (= (match :bar
              :foo "matched"
              _ "no") "no")
-  "match keyword literal doesn't match different keyword")
+        "match keyword literal doesn't match different keyword")
 
 # ============================================================================
 # Variable binding test
@@ -468,7 +468,7 @@
 (assert (= (match (list 1 2 3 4 5)
              (a b c . d) (list a b c d)
              _ :no) (list 1 2 3 (list 4 5)))
-  "match improper list pattern longer")
+        "match improper list pattern longer")
 
 # match improper list pattern exact
 (assert (= (match (cons 1 2)
@@ -719,7 +719,7 @@
              false :guarded
              5 :unguarded
              _ :default) :unguarded)
-  "decision tree guard fallthrough to next constructor")
+        "decision tree guard fallthrough to next constructor")
 
 # decision tree or pattern with shared body
 (assert (= (match :b
@@ -757,7 +757,7 @@
             3 :three
             _ :other) test-result)))
 (assert (= (reverse test-result) (list :one :two :three))
-  "decision tree match in loop")
+        "decision tree match in loop")
 
 # decision tree boolean exhaustive
 (assert (= (match false

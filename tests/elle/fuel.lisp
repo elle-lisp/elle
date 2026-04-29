@@ -21,9 +21,9 @@
   (fiber/set-fuel f 5)
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
-    "backward-jump: fiber paused on fuel exhaustion")
+          "backward-jump: fiber paused on fuel exhaustion")
   (assert (= (fiber/value f) nil)
-    "backward-jump: fuel signal carries nil payload"))
+          "backward-jump: fuel signal carries nil payload"))
 
 # ============================================================================
 # Scenario 2: TailCall instruction exhausts fuel
@@ -144,7 +144,7 @@
   (let [outer (fiber/new (fn [] (fiber/resume inner)) |:fuel|)]
     (fiber/resume outer)
     (assert (= (fiber/status outer) :paused)
-      "propagate: outer paused by propagated fuel signal")
+            "propagate: outer paused by propagated fuel signal")
     (assert (= (fiber/status inner) :paused) "propagate: inner also paused")))
 
 # ============================================================================
@@ -181,7 +181,7 @@
   (assert (= (fiber/fuel f) nil) "clear-fuel: fuel is nil after clear")
   (fiber/resume f)
   (assert (= (fiber/status f) :dead)
-    "clear-fuel: runs to completion after clear"))
+          "clear-fuel: runs to completion after clear"))
 
 # ============================================================================
 # Scenario 11: Nested fibers have independent fuel
@@ -197,11 +197,11 @@
                            (fiber/set-fuel inner 3)
                            (fiber/resume inner)  # inner is now paused; outer continues unaffected
                            (assert (= (fiber/status inner) :paused)
-                             "nested: inner paused")
+                                   "nested: inner paused")
                            42) |:fuel|)]
     (fiber/set-fuel outer 1000)
     (fiber/resume outer)
     (assert (= (fiber/status outer) :dead)
-      "nested: outer completes independently")
+            "nested: outer completes independently")
     (assert (= (fiber/value outer) 42) "nested: outer return value correct")
     (assert (= (fiber/status inner) :paused) "nested: inner remains paused")))

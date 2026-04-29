@@ -44,15 +44,19 @@
 
   (def test-key (concat "elle-test/" (string (timestamp)) ".txt"))
   (def test-data "hello from elle-aws codegen")
+
   (println "\nput/get round-trip: " test-bucket "/" test-key)
+
   (def put-result (s3:put-object test-bucket test-key {:body test-data}))
   (println "  put status: " put-result:status)
   (assert (= put-result:status 200) "put-object should return 200")
+
   (def get-result (s3:get-object test-bucket test-key {:raw true}))
   (println "  get status: " get-result:status)
   (assert (= get-result:status 200) "get-object should return 200")
   (assert (= (string get-result:body) test-data) "round-trip data should match")
   (println "  round-trip OK")
+
   (def del-result (s3:delete-object test-bucket test-key))
   (println "  delete status: " del-result:status))
 

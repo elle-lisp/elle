@@ -285,7 +285,7 @@
 
 # test_rest_list_in_fn_param
 (assert (= ((fn ((a & r)) (+ a (first r))) (list 10 20)) 30)
-  "rest list in fn param")
+        "rest list in fn param")
 
 # ============================================================
 # & rest: array destructuring
@@ -357,7 +357,7 @@
 
 # test_variadic_fn_fixed_and_rest
 (assert (= ((fn (a b & rest) (+ a b)) 10 20 30 40) 30)
-  "variadic fn fixed and rest")
+        "variadic fn fixed and rest")
 
 # test_variadic_fn_rest_value
 (assert (= ((fn (a & rest) rest) 1 2 3) (list 2 3)) "variadic fn rest value")
@@ -562,7 +562,7 @@
     [a b] (+ a b)
     _ :no-match))
 (assert (= match-tuple-arr :no-match)
-  "match array pattern does not match @array")
+        "match array pattern does not match @array")
 
 # test_match_array_pattern_matches_array
 (def @match-arr
@@ -591,7 +591,7 @@
     {:a x} x
     _ :no-match))
 (assert (= match-struct-tbl :no-match)
-  "match struct pattern does not match @struct")
+        "match struct pattern does not match @struct")
 
 # test_match_mutable_@struct_pattern_matches_mutable_@struct
 (def @match-tbl
@@ -606,7 +606,7 @@
     @{:a x} x
     _ :no-match))
 (assert (= match-tbl-str :no-match)
-  "match @struct pattern does not match struct")
+        "match @struct pattern does not match struct")
 
 # test_destructure_non_sequential_errors (was: test_destructure_non_sequential_gives_nil)
 (let [[ok? _] (protect ((fn ()
@@ -636,11 +636,11 @@
 
 # test_opt_multiple
 (assert (= ((fn (a &opt b c) (list a b c)) 1) (list 1 nil nil))
-  "opt multiple: none provided")
+        "opt multiple: none provided")
 (assert (= ((fn (a &opt b c) (list a b c)) 1 2) (list 1 2 nil))
-  "opt multiple: one provided")
+        "opt multiple: one provided")
 (assert (= ((fn (a &opt b c) (list a b c)) 1 2 3) (list 1 2 3))
-  "opt multiple: all provided")
+        "opt multiple: all provided")
 
 # test_opt_too_many_args
 (let [[ok? _] (protect ((fn () (eval '((fn (a &opt b) a) 1 2 3)))))]
@@ -652,11 +652,11 @@
 
 # test_opt_with_rest
 (assert (= ((fn (a &opt b & rest) (list a b rest)) 1) (list 1 nil ()))
-  "opt with rest: none")
+        "opt with rest: none")
 (assert (= ((fn (a &opt b & rest) (list a b rest)) 1 2) (list 1 2 ()))
-  "opt with rest: opt only")
+        "opt with rest: opt only")
 (assert (= ((fn (a &opt b & rest) (list a b rest)) 1 2 3 4)
-    (list 1 2 (list 3 4))) "opt with rest: opt and rest")
+           (list 1 2 (list 3 4))) "opt with rest: opt and rest")
 
 # test_opt_defn
 (begin
@@ -704,7 +704,7 @@
 
 # test_keys_destructure
 (assert (= ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30)
-  "keys destructure")
+        "keys destructure")
 
 # test_keys_missing_key_destructure — missing key now signals an error
 (let [[ok? _] (protect ((fn () ((fn (a &keys {:x x :y y}) y) 1 :x 10))))]
@@ -712,15 +712,15 @@
 
 # test_keys_all_present — all keys provided, still works
 (assert (= ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30)
-  "keys destructure all present")
+        "keys destructure all present")
 
 # test_keys_with_opt
 (assert (= ((fn (a &opt b &keys opts) (list a b opts)) 1) (list 1 nil {}))
-  "keys with opt: none")
+        "keys with opt: none")
 (assert (= ((fn (a &opt b &keys opts) (list a b opts)) 1 2) (list 1 2 {}))
-  "keys with opt: opt only")
+        "keys with opt: opt only")
 (assert (= ((fn (a &opt b &keys opts) (list a b opts)) 1 2 :x 10)
-    (list 1 2 {:x 10})) "keys with opt: opt and keys")
+           (list 1 2 {:x 10})) "keys with opt: opt and keys")
 
 # test_keys_odd_args_error
 (let [[ok? _] (protect ((fn () ((fn (a &keys opts) opts) 1 :x 10 :y))))]
@@ -748,11 +748,11 @@
 
 # test_named_basic
 (assert (= ((fn (a &named host port) (list host port)) 1 :host "db" :port 3306)
-    (list "db" 3306)) "named basic")
+           (list "db" 3306)) "named basic")
 
 # test_named_missing_key
 (assert (= ((fn (a &named host port) port) 1 :host "db") nil)
-  "named missing key")
+        "named missing key")
 
 # test_named_unknown_key_error
 (let [[ok? _] (protect ((fn ()
@@ -761,7 +761,7 @@
 
 # test_named_with_opt
 (assert (= ((fn (a &opt b &named host) (list a b host)) 1 :host "db")
-    (list 1 nil "db")) "named with opt")
+           (list 1 nil "db")) "named with opt")
 
 # test_named_defn
 (begin
@@ -793,9 +793,9 @@
 
 # test_opt_destructuring_pattern
 (assert (= ((fn (a &opt (b c)) (list a b c)) (list 1 2))
-    (list (list 1 2) nil nil)) "opt destructuring pattern: not provided")
+           (list (list 1 2) nil nil)) "opt destructuring pattern: not provided")
 (assert (= ((fn (a &opt (b c)) (list a b c)) 1 (list 2 3)) (list 1 2 3))
-  "opt destructuring pattern: provided")
+        "opt destructuring pattern: provided")
 
 # test_keys_mutable_capture
 (assert (= ((fn (&keys opts)
@@ -950,7 +950,7 @@
   (defn g-manual (t)
     (+ (get t :a) (get t :b)))
   (assert (= (f-destr {:a 10 :b 20}) (g-manual {:a 10 :b 20}))
-    "fn param struct equiv get"))
+          "fn param struct equiv get"))
 
 # fn_param_struct_mixed: struct param + regular param
 (begin
@@ -1047,21 +1047,21 @@
 # test_struct_rest_all_explicit
 (assert (= (let [{:a a & rest} {:a 10}]
              [a rest]) [10 {}])
-  "struct rest: all keys explicit → rest is empty struct")
+        "struct rest: all keys explicit → rest is empty struct")
 
 # test_struct_rest_in_fn
 (assert (= ((fn ({:x x & rest}) rest) {:x 1 :y 2 :z 3}) {:y 2 :z 3})
-  "struct rest in fn param")
+        "struct rest in fn param")
 
 # test_struct_rest_result_is_immutable
 (assert (= (type-of (let [{:a a & rest} {:a 1 :b 2}]
                       rest)) :struct)
-  "struct rest result is always immutable struct")
+        "struct rest result is always immutable struct")
 
 # test_struct_rest_from_mutable
 (assert (= (let [{:a a & rest} @{:a 1 :b 2 :c 3}]
              rest) {:b 2 :c 3})
-  "struct rest from @struct input yields immutable rest")
+        "struct rest from @struct input yields immutable rest")
 
 # test_struct_rest_in_match
 (assert (= (match {:x 1 :y 2 :z 3}
@@ -1075,13 +1075,13 @@
 
 # test_keys_destructure_with_rest — combined &keys + struct rest
 (assert (= ((fn (a &keys {:x x & rest}) rest) 1 :x 10 :y 20 :z 30) {:y 20 :z 30})
-  "keys destructure with rest: captures extra kwargs")
+        "keys destructure with rest: captures extra kwargs")
 
 # test_keys_destructure_with_rest_no_extra
 (assert (= ((fn (a &keys {:x x & rest}) rest) 1 :x 10) {})
-  "keys destructure with rest, no extra keys")
+        "keys destructure with rest, no extra keys")
 
 # test_keys_destructure_missing_required_with_rest
 (let [[ok? _] (protect ((fn () ((fn (a &keys {:x x & rest}) rest) 1 :y 20))))]
   (assert (not ok?)
-    "keys destructure missing required key signals error even with rest"))
+          "keys destructure missing required key signals error even with rest"))

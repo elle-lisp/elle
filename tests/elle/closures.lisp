@@ -55,7 +55,7 @@
                   (let [c 3]
                     (let [get-b (fn () b)]
                       (+ a (get-b) c))))))) 6)
-  "mixed captured and non-captured lets")
+        "mixed captured and non-captured lets")
 
 # ============================================================================
 # letrec with self-recursive binding

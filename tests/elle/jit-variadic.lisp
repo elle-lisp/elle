@@ -41,11 +41,11 @@
   (list (list? rest) (length rest) (empty? rest)))
 
 (assert (= (check-rest-type) (list true 0 true))
-  "zero rest args: list? true, length 0, empty? true")
+        "zero rest args: list? true, length 0, empty? true")
 (assert (= (check-rest-type 1) (list true 1 false))
-  "one rest arg: list? true, length 1, empty? false")
+        "one rest arg: list? true, length 1, empty? false")
 (assert (= (check-rest-type 1 2 3) (list true 3 false))
-  "three rest args: list? true, length 3, empty? false")
+        "three rest args: list? true, length 3, empty? false")
 
 ## Call past JIT threshold to ensure JIT path works
 (check-rest-type)
@@ -59,7 +59,7 @@
 (check-rest-type)
 (check-rest-type)
 (assert (= (check-rest-type 10 20) (list true 2 false))
-  "post-JIT: two rest args")
+        "post-JIT: two rest args")
 (assert (= (check-rest-type) (list true 0 true)) "post-JIT: zero rest args")
 
 ## Test multiple rest args — verify cons list order

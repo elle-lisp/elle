@@ -105,7 +105,8 @@ impl Syntax {
             | SyntaxKind::Float(_)
             | SyntaxKind::Symbol(_)
             | SyntaxKind::Keyword(_)
-            | SyntaxKind::String(_) => {}
+            | SyntaxKind::String(_)
+            | SyntaxKind::StringMut(_) => {}
             // SyntaxLiteral is internal-only (created by expand_macro_call_inner);
             // it should never appear in datum->syntax input from from_value()
             SyntaxKind::SyntaxLiteral(_) => {}
@@ -155,6 +156,7 @@ impl Syntax {
             SyntaxKind::Symbol(_) => "symbol",
             SyntaxKind::Keyword(_) => "keyword",
             SyntaxKind::String(_) => "string",
+            SyntaxKind::StringMut(_) => "@string",
             SyntaxKind::List(_) => "list",
             SyntaxKind::Array(_) => "array",
             SyntaxKind::ArrayMut(_) => "@array",
@@ -184,6 +186,8 @@ pub enum SyntaxKind {
     Symbol(String),
     Keyword(String),
     String(String),
+    /// Mutable string literal: `@"..."`
+    StringMut(String),
 
     // Compounds
     List(Vec<Syntax>),

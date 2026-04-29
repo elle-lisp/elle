@@ -27,10 +27,11 @@
   (def transport ((import "std/http2/transport") :tls tls))
   (def session
     ((import "std/http2/session") :sync sync :frame frame :stream stream
-      :hpack hpack))
+                                  :hpack hpack))
   (def server
     ((import "std/http2/server") :sync sync :hpack hpack :frame frame
-      :stream stream :session session :tls tls :transport transport))
+                                 :stream stream :session session :tls tls
+                                 :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@
                     :reason :tls-not-configured
                     :message "https requires :tls plugin passed to (import \"std/http2\")"}))
           (let [conn (tls:connect url-parsed:host url-parsed:port
-                  {:alpn ["h2" "http/1.1"]})]
+                                  {:alpn ["h2" "http/1.1"]})]
             {:transport (transport:tls conn) :tls-conn conn}))
         {:transport (transport:tcp (tcp/connect ip url-parsed:port))
          :tls-conn nil})))
@@ -103,7 +104,7 @@
           (frame:write-frame sess:transport ftype flags sid payload))))
     (sess:transport:flush)
     (let [f (frame:read-frame sess:transport
-            (get sess:local-settings :max-frame-size))]
+                              (get sess:local-settings :max-frame-size))]
       (when (or (nil? f) (not (= f:type C:type-settings)))
         (error {:error :h2-error
                 :reason :protocol-error
@@ -122,26 +123,26 @@
                  (let* [parsed (parse-url url)
                         {:transport t :tls-conn tc} (open-transport parsed)]
                    (session:make-session t parsed:host false
-                     :scheme parsed:scheme)))]
+                   :scheme parsed:scheme)))]
       (client-handshake sess)
       (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))
       (put sess
-        :reader-fiber (ev/spawn (fn []
-                                  (session:read-loop sess
-                                    :on-headers (fn [sess s sid hdrs end?]
-                                      (put s :headers hdrs)
-                                      (when end?
-                                        (stream:transition s :recv-end-stream))
-                                      (s:data-queue:put {:type :headers
-                                      :headers hdrs
-                                      :end-stream end?})
-                                      (when end? (del sess:streams sid)))
-                                    :on-goaway (fn [sess payload]
-                                      (put sess :goaway-recvd? true)
-                                      (put sess
-                                        :last-stream-id (bit/and (frame:read-u32 payload
-                                            0) 0x7fffffff))
-                                      nil)))))
+           :reader-fiber (ev/spawn (fn []
+                                     (session:read-loop sess
+                                     :on-headers (fn [sess s sid hdrs end?]
+                                       (put s :headers hdrs)
+                                       (when end?
+                                         (stream:transition s :recv-end-stream))
+                                       (s:data-queue:put {:type :headers
+                                       :headers hdrs
+                                       :end-stream end?})
+                                       (when end? (del sess:streams sid)))
+                                     :on-goaway (fn [sess payload]
+                                       (put sess :goaway-recvd? true)
+                                       (put sess
+                                       :last-stream-id (bit/and (frame:read-u32 payload
+                                       0) 0x7fffffff))
+                                       nil)))))
       sess))
 
   ## ── Client: send request ───────────────────────────────────────────────
@@ -172,10 +173,11 @@
           (session:send-data-with-flow-control sess sid s:flow body-bytes))
         (stream:transition s :send-end-stream))
       [sid s]))
+
   (defn h2-send [sess method path &named body headers]
     "Send an HTTP/2 request. Returns response struct."
     (let* [[sid s] (send-request-frames sess method path :body body
-             :headers headers)
+                                        :headers headers)
            @resp-headers nil
            @resp-trailers nil
            @resp-body @[]
@@ -202,7 +204,7 @@
             :error (error msg:error)
             _ (assign done true))))
       (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status"))
-                                  resp-headers))
+                                        resp-headers))
              status (if status-pair (parse-int (get status-pair 1)) 0)
              hdrs @{}
              trailers @{}]
@@ -218,10 +220,11 @@
          :headers (freeze hdrs)
          :trailers (freeze trailers)
          :body (if (empty? resp-body) (bytes) (apply concat (freeze resp-body)))})))
+
   (defn h2-send-raw [sess method path &named body headers]
     "Send request, return stream for caller to collect response."
     (let [[sid s] (send-request-frames sess method path :body body
-            :headers headers)]
+                                       :headers headers)]
       s))
 
   ## ── Client: one-shot API ───────────────────────────────────────────────
@@ -229,14 +232,17 @@
   (defn h2-request [method url &named body headers]
     "Send a one-shot HTTP/2 request. Opens and closes a session."
     (let [sess (h2-connect url)]
-      (defer (h2-close sess)
+      (defer
+        (h2-close sess)
         (let* [parsed (parse-url url)
                path (if (nil? parsed:query)
                       parsed:path
                       (concat parsed:path "?" parsed:query))]
           (h2-send sess method path :body body :headers headers)))))
+
   (defn h2-get [url &named headers]
     (h2-request "GET" url :headers headers))
+
   (defn h2-post [url body &named headers]
     (h2-request "POST" url :body body :headers headers))
 
@@ -262,6 +268,7 @@
       (assert (= p:port 8443) "url: port")
       (assert (= p:path "/path") "url: path")
       (assert (= p:query "q=1") "url: query"))
+
     (let [p (parse-url "http://localhost/")]
       (assert (= p:scheme "http") "url: http scheme")
       (assert (= p:port 80) "url: default port"))
@@ -270,7 +277,7 @@
     (let* [listener (tcp/listen "127.0.0.1" 0)
            listen-path (port/path listener)
            listen-port (parse-int (slice listen-path
-                                    (+ 1 (string/find listen-path ":"))))
+                                  (+ 1 (string/find listen-path ":"))))
            server-fiber (ev/spawn (fn []
                                     (let* [tcp (tcp/accept listener)
                                       t (transport:tcp tcp)]
@@ -283,7 +290,7 @@
                                       (t:flush)
                                       (forever
                                         (let [[ok? f] (protect (frame:read-frame t
-                                            16384))]
+                                          16384))]
                                           (when (or (not ok?) (nil? f))
                                             (break nil))
                                           (cond
@@ -294,21 +301,21 @@
                                               (let* [dec (hpack:make-decoder)
                                                 hdrs (hpack:decode dec f:payload)
                                                 path-h (first (filter (fn [h]
-                                                    (= (get h 0) ":path")) hdrs))
+                                                  (= (get h 0) ":path")) hdrs))
                                                 path (if path-h
                                                   (get path-h 1)
                                                   "/")
                                                 enc (hpack:make-encoder :use-huffman false)
                                                 resp-hdr (hpack:encode enc
-                                                  [[":status" "200"]])
+                                                [[":status" "200"]])
                                                 [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                                  resp-hdr false true)]
+                                                resp-hdr false true)]
                                                 (frame:write-frame t ft fl si pl)
                                                 (let [[ft fl si pl] (frame:make-data-frame f:stream-id
-                                                    (bytes (concat "hello " path))
-                                                    true)]
+                                                  (bytes (concat "hello " path))
+                                                  true)]
                                                   (frame:write-frame t ft fl si
-                                                    pl))
+                                                  pl))
                                                 (t:flush))
                                             true nil)))
                                       (protect (t:close)))))]
@@ -318,8 +325,9 @@
           (assert (= resp:status 200) "loopback: status 200")
           (assert (= (string resp:body) "hello /test") "loopback: body"))
         (assert (= (length (keys sess:streams)) 0)
-          "loopback: stream removed after response")
+                "loopback: stream removed after response")
         (h2-close sess)))
+
     true)
 
   ## ── Exports ────────────────────────────────────────────────────────────

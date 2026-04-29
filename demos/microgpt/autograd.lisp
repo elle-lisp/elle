@@ -13,11 +13,13 @@
   # ── Value construction ─────────────────────────────────────────
 
   (def @*next-id* 0)
+
   (defn make-value [data]
     "Create a leaf Value node (no children)."
     (let* [id *next-id*]
       (assign *next-id* (inc *next-id*))
       @{:id id :data data :grad 0.0 :children @[] :local-grads @[]}))
+
   (defn make-op [data children local-grads]
     "Create a Value node that is the result of an operation."
     (let* [id *next-id*]
@@ -35,27 +37,36 @@
 
   (defn v+ [a b]
     (make-op (+ (v-data a) (v-data b)) @[a b] @[1.0 1.0]))
+
   (defn v* [a b]
     (make-op (* (v-data a) (v-data b)) @[a b] @[(v-data b) (v-data a)]))
+
   (defn vneg [a]
     (make-op (- (v-data a)) @[a] @[-1.0]))
+
   (defn vpow [a n]
     (make-op (pow (v-data a) n) @[a] @[(* n (pow (v-data a) (- n 1.0)))]))
+
   (defn vexp [a]
     (let* [ea (exp (v-data a))]
       (make-op ea @[a] @[ea])))
+
   (defn vlog [a]
     (make-op (log (v-data a)) @[a] @[(/ 1.0 (v-data a))]))
+
   (defn vrelu [a]
     (let* [d (v-data a)]
       (make-op (if (> d 0.0) d 0.0) @[a] @[(if (> d 0.0) 1.0 0.0)])))
+
   (defn v- [a b]
     (v+ a (vneg b)))
   (defn v/ [a b]
     (v* a (vpow b -1.0)))
+
   (defn v*s [v s]
     "Multiply Value v by scalar s."
     (v* v (make-value s)))
+
   (defn v+s [v s]
     "Add scalar s to Value v."
     (v+ v (make-value s)))
@@ -82,6 +93,7 @@
           (push grads a:data))
         (assign i (inc i)))
       (make-op sum children grads)))
+
   (defn vsum [vec]
     "Fused sum: single Value node with all inputs as children."
     (def @sum 0.0)
@@ -105,6 +117,7 @@
                         (push topo node)))]
         (walk root))
       topo))
+
   (defn backward [root]
     "Run backpropagation from root."
     (let* [topo (topo-sort root)]
@@ -121,6 +134,7 @@
                    lg (local-grads j)]
               (put child :grad (+ child:grad (* node-grad lg))))
             (assign j (inc j)))))))
+
   {:make-value make-value
    :make-op make-op
    :v-data v-data

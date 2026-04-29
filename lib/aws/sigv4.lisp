@@ -22,28 +22,34 @@
   (defn payload-hash [body]
     "SHA-256 hex digest of the request body (empty string if nil)."
     (bytes->hex (sha256 (or body ""))))
+
   (defn canonical-headers [pairs]
     "Canonical headers string from sorted [name value] pairs."
     (string/join (map (fn [[name value]]
                         (string/join [(string/lowercase name) ":"
                                       (string/trim value) "\n"] "")) pairs) ""))
+
   (defn signed-header-names [pairs]
     "Semicolon-separated lowercase header names."
     (string/join (map (fn [[name _]] (string/lowercase name)) pairs) ";"))
+
   (defn canonical-query [params]
     "Canonical query string from sorted [key value] pairs, or nil/empty."
     (if (or (nil? params) (empty? params))
       ""
       (string/join (map (fn [[k v]] (concat k "=" v)) params) "&")))
+
   (defn canonical-request [method path query pairs body-hash]
     "Build the canonical request string."
     (string/join [method "\n" path "\n" (canonical-query query) "\n"
                   (canonical-headers pairs) "\n" (signed-header-names pairs)
                   "\n" body-hash] ""))
+
   (defn string-to-sign [datetime scope creq]
     "Build the string-to-sign."
     (string/join ["AWS4-HMAC-SHA256\n" datetime "\n" scope "\n"
                   (bytes->hex (sha256 creq))] ""))
+
   (defn derive-key [secret date region service]
     "Derive the signing key via HMAC chain."
     (-> (concat "AWS4" secret)
@@ -69,7 +75,7 @@
            pairs (if (nil? creds:session-token)
                    base
                    (sort (concat base
-                           [["x-amz-security-token" creds:session-token]])))  ## Sign
+                                 [["x-amz-security-token" creds:session-token]])))  ## Sign
            scope (string/join [date region service "aws4_request"] "/")
            creq (canonical-request method path query pairs hash)
            sts (string-to-sign datetime scope creq)
@@ -85,4 +91,5 @@
       (if (nil? creds:session-token)
         result
         (merge result {:x-amz-security-token creds:session-token}))))
+
   {:sign sign-headers})

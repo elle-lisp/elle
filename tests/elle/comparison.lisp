@@ -90,7 +90,7 @@
     (assert (= (get err :error) :type-error) "error kind should be :type-error")))
 
 # Buffer comparison error
-(let [result (protect (< (thaw "a") (thaw "b")))]
+(let [result (protect (< @"a" @"b"))]
   (assert (not (get result 0)) "buffer < buffer should error")
   (let [err (get result 1)]
     (assert (= (get err :error) :type-error) "error kind should be :type-error")))

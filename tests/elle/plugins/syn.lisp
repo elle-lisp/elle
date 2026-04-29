@@ -49,37 +49,37 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (let [[ok? err] (protect ((fn () (parse-file-fn "fn broken( {}"))))]
   (assert (not ok?) "parse-file: invalid Rust returns parse-error")
   (assert (= (get err :error) :parse-error)
-    "parse-file: invalid Rust returns parse-error"))
+          "parse-file: invalid Rust returns parse-error"))
 
 ## Error: non-string argument returns type-error
 (let [[ok? err] (protect ((fn () (parse-file-fn 42))))]
   (assert (not ok?) "parse-file: non-string returns type-error")
   (assert (= (get err :error) :type-error)
-    "parse-file: non-string returns type-error"))
+          "parse-file: non-string returns type-error"))
 
 # ── syn/parse-expr ─────────────────────────────────────────────────
 
 ## Parse a valid Rust expression
 (assert (not (nil? (parse-expr-fn "1 + 2")))
-  "parse-expr: returns non-nil for valid expr")
+        "parse-expr: returns non-nil for valid expr")
 
 ## Error: invalid expression returns parse-error
 (let [[ok? err] (protect ((fn () (parse-expr-fn "fn"))))]
   (assert (not ok?) "parse-expr: invalid expr returns parse-error")
   (assert (= (get err :error) :parse-error)
-    "parse-expr: invalid expr returns parse-error"))
+          "parse-expr: invalid expr returns parse-error"))
 
 # ── syn/parse-type ─────────────────────────────────────────────────
 
 ## Parse a valid Rust type
 (assert (not (nil? (parse-type-fn "Vec<String>")))
-  "parse-type: returns non-nil for valid type")
+        "parse-type: returns non-nil for valid type")
 
 # ── syn/parse-item ─────────────────────────────────────────────────
 
 ## Parse a valid Rust item
 (assert (not (nil? (parse-item-fn "fn foo() {}")))
-  "parse-item: returns non-nil for valid item")
+        "parse-item: returns non-nil for valid item")
 
 # ── syn/items ──────────────────────────────────────────────────────
 
@@ -98,21 +98,21 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 
 ## item-kind on struct item returns :struct
 (assert (= (item-kind-fn (get items 3)) :struct)
-  "item-kind: struct item returns :struct")
+        "item-kind: struct item returns :struct")
 
 ## item-kind on enum item returns :enum
 (assert (= (item-kind-fn (get items 6)) :enum)
-  "item-kind: enum item returns :enum")
+        "item-kind: enum item returns :enum")
 
 ## item-kind on impl item returns :impl
 (assert (= (item-kind-fn (get items 7)) :impl)
-  "item-kind: impl item returns :impl")
+        "item-kind: impl item returns :impl")
 
 ## Error: non-item argument returns type-error
 (let [[ok? err] (protect ((fn () (item-kind-fn "not-an-item"))))]
   (assert (not ok?) "item-kind: non-item returns type-error")
   (assert (= (get err :error) :type-error)
-    "item-kind: non-item returns type-error"))
+          "item-kind: non-item returns type-error"))
 
 # ── syn/item-name ──────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 
 ## item-name on struct item returns "Point"
 (assert (= (item-name-fn (get items 3)) "Point")
-  "item-name: struct item returns name")
+        "item-name: struct item returns name")
 
 ## item-name on impl item returns nil (impl blocks have no ident)
 (assert (= (item-name-fn (get items 7)) nil) "item-name: impl item returns nil")
@@ -147,7 +147,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (let [[ok? err] (protect ((fn () (fn-info-fn (get items 3)))))]
   (assert (not ok?) "fn-info: struct item returns type-error")
   (assert (= (get err :error) :type-error)
-    "fn-info: struct item returns type-error"))
+          "fn-info: struct item returns type-error"))
 
 # ── syn/fn-args ────────────────────────────────────────────────────
 
@@ -165,11 +165,11 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 
 ## fn-return-type on add returns "i32"
 (assert (= (fn-return-type-fn (get items 0)) "i32")
-  "fn-return-type: add returns i32")
+        "fn-return-type: add returns i32")
 
 ## fn-return-type on fetch (no return type) returns nil
 (assert (= (fn-return-type-fn (get items 1)) nil)
-  "fn-return-type: fetch returns nil")
+        "fn-return-type: fetch returns nil")
 
 # ── syn/struct-fields ──────────────────────────────────────────────
 
@@ -177,7 +177,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (let [result (struct-fields-fn (get items 3))]
   (assert (= (get result :kind) :named) "struct-fields: Point kind is :named")
   (assert (= (length (get result :fields)) 2)
-    "struct-fields: Point has 2 fields")
+          "struct-fields: Point has 2 fields")
   (let [field (get (get result :fields) 0)]
     (assert (= (get field :name) "x") "struct-fields: first field name is x")
     (assert (= (get field :type) "f64") "struct-fields: first field type is f64")))
@@ -198,7 +198,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (let [[ok? err] (protect ((fn () (struct-fields-fn (get items 0)))))]
   (assert (not ok?) "struct-fields: fn item returns type-error")
   (assert (= (get err :error) :type-error)
-    "struct-fields: fn item returns type-error"))
+          "struct-fields: fn item returns type-error"))
 
 # ── syn/enum-variants ──────────────────────────────────────────────
 
@@ -212,15 +212,15 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
       (assert (= (get red :kind) :unit) "enum-variants: Red kind is :unit"))
     (let [green (get variants 1)]
       (assert (= (get green :name) "Green")
-        "enum-variants: second variant is Green")
+              "enum-variants: second variant is Green")
       (assert (not (nil? (get green :discriminant)))
-        "enum-variants: Green has discriminant"))))
+              "enum-variants: Green has discriminant"))))
 
 ## Error: enum-variants on fn item returns type-error
 (let [[ok? err] (protect ((fn () (enum-variants-fn (get items 0)))))]
   (assert (not ok?) "enum-variants: fn item returns type-error")
   (assert (= (get err :error) :type-error)
-    "enum-variants: fn item returns type-error"))
+          "enum-variants: fn item returns type-error"))
 
 # ── syn/attributes ─────────────────────────────────────────────────
 
@@ -231,21 +231,21 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 
 ## add has no attributes
 (assert (= (length (attributes-fn (get items 0))) 0)
-  "attributes: add has 0 attributes")
+        "attributes: add has 0 attributes")
 
 # ── syn/visibility ─────────────────────────────────────────────────
 
 ## pub fn add has :public visibility
 (assert (= (visibility-fn (get items 0)) :public)
-  "visibility: pub fn returns :public")
+        "visibility: pub fn returns :public")
 
 ## async fn fetch (no vis) has :private visibility
 (assert (= (visibility-fn (get items 1)) :private)
-  "visibility: private fn returns :private")
+        "visibility: private fn returns :private")
 
 ## pub(crate) enum Color has :pub-crate visibility
 (assert (= (visibility-fn (get items 6)) :pub-crate)
-  "visibility: pub(crate) returns :pub-crate")
+        "visibility: pub(crate) returns :pub-crate")
 
 # ── syn/to-string ──────────────────────────────────────────────────
 
@@ -266,7 +266,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (let [[ok? err] (protect ((fn () (to-string-fn "not-a-node"))))]
   (assert (not ok?) "to-string: non-syn value returns type-error")
   (assert (= (get err :error) :type-error)
-    "to-string: non-syn value returns type-error"))
+          "to-string: non-syn value returns type-error"))
 
 # ── syn/to-pretty-string ───────────────────────────────────────────
 
@@ -283,4 +283,4 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (let [[ok? err] (protect ((fn () (to-pretty-string-fn (parse-expr-fn "1 + 2")))))]
   (assert (not ok?) "to-pretty-string: expr returns type-error")
   (assert (= (get err :error) :type-error)
-    "to-pretty-string: expr returns type-error"))
+          "to-pretty-string: expr returns type-error"))

@@ -15,6 +15,7 @@
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
   (def url-chars
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
   (defn build-decode-table [chars]
     (let [tbl @[]
           cb (bytes chars)]
@@ -23,8 +24,10 @@
       (each i in (range 64)
         (put tbl (cb i) i))
       (freeze tbl)))
+
   (def std-decode (build-decode-table std-chars))
   (def url-decode (build-decode-table url-chars))
+
   (defn strip-padding [s]
     "Remove trailing '=' characters from a base64 string."
     (def @end (length s))
@@ -36,7 +39,7 @@
   (defn encode-with [data chars pad?]
     (let* [input (bytes data)
            len (length input)
-           acc (thaw "")]
+           acc @""]
       (def @i 0)
       (while (<= (+ i 2) (dec len))
         (let [a (input i)
@@ -62,6 +65,7 @@
             (when pad? (append acc "=")))
         _ nil)
       (freeze acc)))
+
   (defn encode [data]
     "Base64-encode (standard, padded)."
     (encode-with data std-chars true))
@@ -116,10 +120,12 @@
                   :reason :invalid-length
                   :message "invalid length"}))
       (freeze (bytes ;acc))))
+
   (defn decode [data]
     "Base64-decode (standard)."
     (decode-with data std-decode))
   (defn decode-url [data]
     "Base64-decode (URL-safe)."
     (decode-with data url-decode))
+
   {:encode encode :decode decode :encode-url encode-url :decode-url decode-url})

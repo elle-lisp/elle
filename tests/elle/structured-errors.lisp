@@ -20,7 +20,7 @@
 
 (def multi-src
   (string "(defn one [x] (prntln x))\n" "(defn two [x] (pirntln x))\n"
-    "(defn three [x] (println x))\n" "(three 5)"))
+          "(defn three [x] (println x))\n" "(three 5)"))
 (def multi-result (compile/analyze multi-src {:file "multi.lisp"}))
 (def multi-diags (compile/diagnostics multi-result))
 

@@ -6,6 +6,7 @@
   (let [me (process:self)]
     (defn make-node [next]
       (fn [] (process:send next (+ (process:recv) 1))))
+
     (let* [n3 (process:spawn (make-node me))
            n2 (process:spawn (make-node n3))
            n1 (process:spawn (make-node n2))

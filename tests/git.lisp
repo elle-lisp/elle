@@ -5,7 +5,7 @@
 (import-file "target/release/libelle_git.so")
 
 (let [tmp (string/concat "/tmp/elle-git-test-"
-        (number->string (integer (clock/realtime))))]
+                         (number->string (integer (clock/realtime))))]
   (let [repo (git/init tmp)]
     (assert (string? (git/path repo)) "git/path returns string")
     (assert (string? (git/workdir repo)) "git/workdir returns string")
@@ -17,7 +17,7 @@
     (git/config-set repo "user.email" "test@example.com")
     (assert (= "Test User" (git/config-get repo "user.name")) "config roundtrip")
     (assert (nil? (git/config-get repo "no.such.key"))
-      "config-get nil for missing")
+            "config-get nil for missing")
 
     # HEAD on empty repo should signal
     (let [r (protect (git/head repo))]
@@ -90,6 +90,7 @@
       # -------------------------------------------------------------------------
       (let [s (git/status repo)]
         (assert (= 0 (length s)) "status clean after commit"))
+
       (let [d (git/diff repo)]
         (assert (= 0 (:files-changed d)) "no diff on clean tree"))
 
@@ -99,9 +100,11 @@
       (let [branches (git/branches repo :local)]
         (assert (= 1 (length branches)) "one local branch")
         (assert (string? (:name (first branches))) "branch name is string"))
+
       (let [branch-oid (git/branch-create repo "feature")]
         (assert (string? branch-oid) "branch-create returns oid")
         (assert (= 2 (length (git/branches repo :local))) "two branches now"))
+
       (git/branch-delete repo "feature")
       (assert (= 1 (length (git/branches repo :local))) "back to one branch")
 
@@ -128,11 +131,14 @@
       # -------------------------------------------------------------------------
       (let [filepath (string/concat tmp "/hello.txt")]
         (spit filepath "hello world\n"))
+
       (let [s (git/status repo)]
         (assert (= :modified (:workdir (first s))) "workdir :modified"))
+
       (let [d (git/diff repo)]
         (assert (= 1 (:files-changed d)) "one file changed in diff")
         (assert (string? (:path (first (:files d)))) "file path is string"))
+
       (let [patch (git/diff-patch repo)]
         (assert (string? patch) "patch is string")
         (assert (> (string/size-of patch) 0) "patch is non-empty"))
@@ -157,7 +163,7 @@
       # -------------------------------------------------------------------------
       (git/config-set repo "core.autocrlf" "false")
       (assert (= "false" (git/config-get repo "core.autocrlf"))
-        "config-set/get roundtrip")
+              "config-set/get roundtrip")
 
       # -------------------------------------------------------------------------
       # Chunk 9: Remotes (basic, no network)

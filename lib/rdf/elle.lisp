@@ -41,12 +41,16 @@
         (string/replace "}" "%7D")
         (string/replace "/" "%2F")
         (string/replace ":" "%3A")))
+
   (defn iri [s]
     (string/format "<{}>" s))
+
   (defn elle-iri [kind name]
     (iri (string/format "{}:{}:{}" ns kind (encode-name (string name)))))
+
   (defn pred [p]
     (iri (string/format "{}:{}" ns p)))
+
   (defn lit [s]
     "Escape a string for use as an N-Triples literal."
     (def @escaped
@@ -60,7 +64,8 @@
 
   (defn make-buffer []
     "Create a fresh mutable string buffer for accumulating triples."
-    (thaw ""))
+    @"")
+
   (defn triple [buf s p o]
     "Append a single N-Triple to a buffer."
     (push buf (string/format "{} {} {} .\n" s p o)))
@@ -73,7 +78,7 @@
     (triple buf subj (pred "signal-yields") (lit (string (get sig :yields))))
     (triple buf subj (pred "signal-io") (lit (string (get sig :io))))
     (triple buf subj (pred "jit-eligible")
-      (lit (string (get sig :jit-eligible))))
+            (lit (string (get sig :jit-eligible))))
     (each bit in (get sig :bits)
       (triple buf subj (pred "signal-bit") (lit (string bit)))))
 
@@ -83,17 +88,23 @@
     "Emit triples for a single Rust primitive."
     (def @name (get prim :name))
     (def @subj (elle-iri "fn" name))
+
     (triple buf subj rdf-type (iri (string/format "{}:Primitive" ns)))
     (triple buf subj (pred "name") (lit name))
     (triple buf subj (pred "category") (lit (get prim :category)))
     (triple buf subj (pred "arity") (lit (get prim :arity)))
+
     (when (not (= (get prim :doc) ""))
       (triple buf subj (pred "doc") (lit (get prim :doc))))
+
     (emit-signal buf subj (get prim :signal))
+
     (each p in (get prim :params)
       (triple buf subj (pred "param") (lit p)))
+
     (each a in (get prim :aliases)
       (triple buf subj (pred "alias") (lit a))))
+
   (defn primitives []
     "Generate N-Triples for all Rust-defined primitives."
     (def @buf (make-buffer))
@@ -107,9 +118,11 @@
     "Emit triples for an Elle-defined function."
     (def @name (get sym :name))
     (def @subj (elle-iri "fn" name))
+
     (triple buf subj rdf-type (iri (string/format "{}:Fn" ns)))
     (triple buf subj (pred "name") (lit name))
     (triple buf subj (pred "file") (lit path))
+
     (when (get sym :arity)
       (triple buf subj (pred "arity") (lit (string (get sym :arity)))))
     (when (get sym :doc)
@@ -121,8 +134,10 @@
     (def @sig nil)
     (let [[ok? val] (protect (compile/signal analysis (keyword name)))]
       (when ok? (assign sig val)))
+
     (when sig
       (emit-signal buf subj sig)
+
       (each idx in (get sig :propagates)
         (triple buf subj (pred "signal-propagates") (lit (string idx))))
 
@@ -130,6 +145,7 @@
       (def @caps nil)
       (let [[ok? val] (protect (compile/captures analysis (keyword name)))]
         (when ok? (assign caps val)))
+
       (when caps
         (each cap in caps
           (triple buf subj (pred "capture") (lit (get cap :name)))
@@ -139,13 +155,13 @@
         (def @comp (portrait-lib:composition sig caps))
         (triple buf subj (pred "stateless") (lit (string (get comp :stateless))))
         (triple buf subj (pred "retry-safe")
-          (lit (string (get comp :retry-safe))))
+                (lit (string (get comp :retry-safe))))
         (triple buf subj (pred "parallelizable")
-          (lit (string (get comp :parallelizable))))
+                (lit (string (get comp :parallelizable))))
         (triple buf subj (pred "memoizable")
-          (lit (string (get comp :memoizable))))
+                (lit (string (get comp :memoizable))))
         (triple buf subj (pred "timeout-safe")
-          (lit (string (get comp :timeout-safe)))))))
+                (lit (string (get comp :timeout-safe)))))))
 
   # ── File triples ───────────────────────────────────────────────────────
 
@@ -154,15 +170,19 @@
     (def @buf (make-buffer))
     (def @syms (compile/symbols analysis))
     (def @graph (compile/call-graph analysis))
+
     (each sym in syms
       (def @kind (get sym :kind))
       (def @name (get sym :name))
+
       (when (= kind :function) (emit-function buf analysis path sym))
+
       (when (= kind :variable)
         (def @subj (elle-iri "def" name))
         (triple buf subj rdf-type (iri (string/format "{}:Def" ns)))
         (triple buf subj (pred "name") (lit name))
         (triple buf subj (pred "file") (lit path)))
+
       (when (= kind :macro)
         (def @subj (elle-iri "macro" name))
         (triple buf subj rdf-type (iri (string/format "{}:Macro" ns)))
@@ -174,6 +194,7 @@
       (def @caller-iri (elle-iri "fn" (get node :name)))
       (each callee-name in (get node :callees)
         (triple buf caller-iri (pred "calls") (elle-iri "fn" callee-name))))
+
     (freeze buf))
 
   # ── Export ──────────────────────────────────────────────────────────────

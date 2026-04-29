@@ -18,7 +18,7 @@
 
 (let [fibers [(ev/spawn (fn [] :a)) (ev/spawn (fn [] :b)) (ev/spawn (fn [] :c))]]
   (assert (= [:a :b :c] (ev/join fibers))
-    "3a: join sequence collects results in order"))
+          "3a: join sequence collects results in order"))
 
 # === 4. ev/join — double join (two joiners on same target) ===
 

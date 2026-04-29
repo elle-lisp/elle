@@ -70,7 +70,7 @@
 (assert (fn/gpu-eligible? ml-add) "ml-add is GPU-eligible")
 (assert (fn/gpu-eligible? ml-abs) "ml-abs is GPU-eligible")
 (assert (fn/gpu-eligible? ml-with-capture)
-  "immutable capture is constant-propagated")
+        "immutable capture is constant-propagated")
 
 # ── Branching with even values ────────────────────────────────────────
 # Before the cmpi-ne fix in MLIR, trunci took the LSB: comparison result

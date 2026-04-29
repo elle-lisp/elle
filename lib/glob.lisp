@@ -56,7 +56,7 @@
               found)
           (>= ti tlen)
             (if (= (pat pi) "*") (go (inc pi) ti) false)  ## *
-            (= (pat pi) "*")
+          (= (pat pi) "*")
             (begin
               (def @k ti)
               (def @found false)
@@ -66,17 +66,19 @@
                   (assign k tlen))
                 (assign k (inc k)))
               found)  ## ?
-            (= (pat pi) "?")
+          (= (pat pi) "?")
             (if (and sep? (= (text ti) "/")) false (go (inc pi) (inc ti)))  ## [...]
-            (= (pat pi) "[")
+          (= (pat pi) "[")
             (let [new-pi (match-class pat (inc pi) (text ti))]
               (if (nil? new-pi) false (go new-pi (inc ti))))  ## literal
-            (= (pat pi) (text ti)) (go (inc pi) (inc ti))
+          (= (pat pi) (text ti)) (go (inc pi) (inc ti))
           true false))
       (go 0 0)))
+
   (defn match? [pattern text]
     "Test if text matches a glob pattern."
     (glob-match pattern text false))
+
   (defn match-path? [pattern path]
     "Test if path matches a glob pattern (* doesn't cross /)."
     (glob-match pattern path true))
@@ -85,14 +87,17 @@
 
   (defn join-path [base name]
     (if (= base ".") name (string base "/" name)))
+
   (defn strip-base [base path]
     (if (= base ".")
       path
       (-> path
           (slice (inc (length base)) (length path)))))
+
   (defn has-glob? [s]
     (or (string/contains? s "*") (string/contains? s "?")
-      (string/contains? s "[")))
+        (string/contains? s "[")))
+
   (defn split-pattern [pattern]
     "Split into [fixed-prefix glob-suffix]."
     (let [parts (string/split pattern "/")
@@ -109,6 +114,7 @@
             (push prefix p))))
       [(if (> (length prefix) 0) (string/join (->list prefix) "/") ".")
        (string/join (->list rest) "/")]))
+
   (defn list-recursive [dir]
     "List all files under dir recursively."
     (let [acc @[]]
@@ -121,6 +127,7 @@
                 (when (path/dir? full) (walk full)))))))
       (walk dir)
       acc))
+
   (defn glob-find [pattern]
     "Return array of file paths matching a glob pattern."
     (let [[base glob-part] (split-pattern pattern)]
@@ -136,4 +143,5 @@
           (each f in files
             (when (match-path? glob-part (strip-base base f)) (push acc f)))
           acc))))
+
   {:glob glob-find :match? match? :match-path? match-path?})

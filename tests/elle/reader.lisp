@@ -38,7 +38,7 @@
 (assert (= (read-all "\"hello\"") (list "hello")) "read string hello")
 (assert (= (read-all "\"test\"") (list "test")) "read string test")
 (assert (= (read-all "\"with spaces\"") (list "with spaces"))
-  "read string with spaces")
+        "read string with spaces")
 
 # ============================================================================
 # Symbol roundtrip
@@ -56,7 +56,7 @@
 (assert (= (read-all ":a") (list :a)) "read keyword :a")
 (assert (= (read-all ":foo") (list :foo)) "read keyword :foo")
 (assert (= (read-all ":my-keyword") (list :my-keyword))
-  "read keyword :my-keyword")
+        "read keyword :my-keyword")
 (assert (= (read-all ":x") (list :x)) "read keyword :x")
 
 # ============================================================================
@@ -74,9 +74,9 @@
 
 (assert (= (read-all "((1))") (list (list (list 1)))) "read nested list depth 2")
 (assert (= (read-all "(((1)))") (list (list (list (list 1)))))
-  "read nested list depth 3")
+        "read nested list depth 3")
 (assert (= (read-all "((1 2) 3)") (list (list (list 1 2) 3)))
-  "read nested list with pair")
+        "read nested list with pair")
 
 # ============================================================================
 # Tuple roundtrip
@@ -107,7 +107,7 @@
 (assert (= (read-all "'42") (list (list 'quote 42))) "read quoted 42")
 (assert (= (read-all "'foo") (list (list 'quote 'foo))) "read quoted symbol")
 (assert (= (read-all "'(+ 1 2)") (list (list 'quote (list '+ 1 2))))
-  "read quoted list")
+        "read quoted list")
 (assert (= (read-all "'[1 2]") (list (list 'quote [1 2]))) "read quoted tuple")
 
 # ============================================================================
@@ -117,4 +117,4 @@
 (assert (= (read-all "([1 2] 3)") (list (list [1 2] 3))) "read list with tuple")
 (assert (= (read-all "[@[1] 2]") (list [@[1] 2])) "read tuple with array")
 (assert (= (read-all "(foo :bar 42)") (list (list 'foo :bar 42)))
-  "read list with symbol, keyword, int")
+        "read list with symbol, keyword, int")

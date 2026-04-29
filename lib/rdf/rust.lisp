@@ -49,16 +49,22 @@
         (string/replace "|" "%7C")
         (string/replace "\\" "%5C")
         (string/replace "^" "%5E")))
+
   (defn iri [s]
     (string/format "<{}>" s))
+
   (defn rust-iri [kind name]
     (iri (string/format "{}:{}:{}" ns kind (encode-name (string name)))))
+
   (defn elle-iri [name]
     (iri (string/format "{}:fn:{}" elle-ns (encode-name (string name)))))
+
   (defn pred [p]
     (iri (string/format "{}:{}" ns p)))
+
   (defn elle-pred [p]
     (iri (string/format "{}:{}" elle-ns p)))
+
   (defn lit [s]
     "Escape a string for N-Triples literal."
     (def @escaped
@@ -71,7 +77,8 @@
   # ── Triple buffer ─────────────────────────────────────────────────────
 
   (defn make-buffer []
-    (thaw ""))
+    @"")
+
   (defn triple [buf s p o]
     (push buf (string/format "{} {} {} .\n" s p o)))
 
@@ -79,9 +86,11 @@
 
   (defn emit-visibility [buf subj item]
     (triple buf subj (pred "visibility") (lit (string (syn:visibility item)))))
+
   (defn emit-attributes [buf subj item]
     (each attr in (syn:attributes item)
       (triple buf subj (pred "attribute") (lit attr))))
+
   (defn emit-fn [buf item file]
     (let* [info (syn:fn-info item)
            name (get info :name)
@@ -94,7 +103,7 @@
       (each arg in (get info :args)
         (triple buf subj (pred "param") (lit (get arg :name)))
         (triple buf subj (pred "param-type")
-          (lit (string/format "{}:{}" (get arg :name) (get arg :type)))))
+                (lit (string/format "{}:{}" (get arg :name) (get arg :type)))))
       (when (get info :return-type)
         (triple buf subj (pred "return-type") (lit (get info :return-type))))
       (when (get info :async?) (triple buf subj (pred "async") (lit "true")))
@@ -105,6 +114,7 @@
         (when ok?
           (each callee in calls
             (triple buf subj (pred "calls") (rust-iri "fn" callee)))))))
+
   (defn emit-struct [buf item file]
     (let* [info (syn:struct-fields item)
            name (get info :name)
@@ -120,9 +130,11 @@
         (when (get field :name)
           (triple buf subj (pred "field") (lit (get field :name)))
           (triple buf subj (pred "field-type")
-            (lit (string/format "{}:{}" (get field :name) (get field :type))))))
+                  (lit (string/format "{}:{}" (get field :name)
+                                      (get field :type))))))
       (emit-visibility buf subj item)
       (emit-attributes buf subj item)))
+
   (defn emit-enum [buf item file]
     (let* [info (syn:enum-variants item)
            name (get info :name)
@@ -137,6 +149,7 @@
         (triple buf subj (pred "variant") (lit (get variant :name))))
       (emit-visibility buf subj item)
       (emit-attributes buf subj item)))
+
   (defn emit-named [buf kind-str item file]
     (let* [name (syn:item-name item)
            subj (rust-iri kind-str name)
@@ -148,10 +161,11 @@
         (triple buf subj (pred "line") (lit (string line))))
       (emit-visibility buf subj item)
       (emit-attributes buf subj item)))
+
   (defn emit-use [buf item file]
     (let* [path (syn:to-string item)
            subj (iri (string/format "{}:use:{}:{}" ns (encode-name file)
-                       (encode-name path)))]
+                                    (encode-name path)))]
       (triple buf subj rdf-type (iri (string/format "{}:Use" ns)))
       (triple buf subj (pred "path") (lit path))
       (triple buf subj (pred "file") (lit file))
@@ -187,16 +201,16 @@
     (def @tree (syn:parse-file src))
     (each item in (syn:items tree)
       (when (and (= (syn:item-kind item) :const)
-          (= (syn:item-name item) "PRIMITIVES"))
+                 (= (syn:item-name item) "PRIMITIVES"))
         (let [[ok? defs] (protect (syn:primitive-defs item))]
           (when ok?
             (each def in defs
               (def @elle-name (get def :name))
               (def @rust-fn (get def :func))
               (triple buf (elle-iri elle-name) (elle-pred "implemented-by")
-                (rust-iri "fn" rust-fn))
+                      (rust-iri "fn" rust-fn))
               (triple buf (rust-iri "fn" rust-fn) (pred "implements")
-                (elle-iri elle-name)))))))
+                      (elle-iri elle-name)))))))
     (freeze buf))
 
   # ── Export ────────────────────────────────────────────────────────────

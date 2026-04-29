@@ -43,7 +43,7 @@
 # Narrowing composes transitively
 (let [outer (fiber/new (fn []
                          (let [inner (fiber/new (fn [] (fiber/caps)) |:error|
-                                 :deny |:ffi|)]
+                               :deny |:ffi|)]
                            (fiber/resume inner))) |:error| :deny |:io|)]
   (let [result (fiber/resume outer)]
     (assert (not (result :io)) "grandchild lacks :io (from parent)")
@@ -93,7 +93,7 @@
 # Mask-interaction: denied + not masked = denial propagates
 (let [outer (fiber/new (fn []
                          (let [inner (fiber/new (fn [] (length "x")) 0
-                                 :deny |:error|)]
+                               :deny |:error|)]
                            (fiber/resume inner))) |:error|)]
   (let [result (fiber/resume outer)]
     (assert (= (fiber/status outer) :paused) "denial propagates to grandparent")))
@@ -101,12 +101,12 @@
 # Nesting: two levels of deny compose
 (let [outer (fiber/new (fn []
                          (let [inner (fiber/new (fn [] (length "x")) |:error|
-                                 :deny |:error|)]
+                               :deny |:error|)]
                            (fiber/resume inner))) |:error| :deny |:io|)]
   (let [result (fiber/resume outer)]
     (assert (= (fiber/status outer) :dead) "outer completes normally")
     (assert (= (result :error) :capability-denied)
-      "inner denial as return value")))
+            "inner denial as return value")))
 
 # No-deny fibers work exactly as before
 (let [f (fiber/new (fn [] (length "hello")) |:error|)]

@@ -30,6 +30,7 @@
   (defn tx-key [state event]
     "Build a transition lookup key from two keywords using their hashes."
     (bit/xor (hash state) (bit/shl (hash event) 1)))
+
   (def transitions
     {(tx-key :idle :send-headers) :open
      (tx-key :idle :recv-headers) :open
@@ -49,6 +50,7 @@
      (tx-key :reserved-local :send-rst) :closed
      (tx-key :reserved-remote :recv-headers) :half-closed-local
      (tx-key :reserved-remote :send-rst) :closed})
+
   (defn stream-transition [stream event]
     "Apply a state transition to a stream. Signals :h2-error on invalid transitions."
     (let* [current stream:state
@@ -60,7 +62,7 @@
                 :stream-id stream:id
                 :code 0x1
                 :message (concat "invalid transition: " (string current) " + "
-                  (string event))})
+                                 (string event))})
         (put stream :state next-state))
       next-state))
 
@@ -75,6 +77,7 @@
         :recv-window initial-window
         :lock lock
         :cv cv}))
+
   (defn consume-send-window [fc amount]
     "Block until enough send window is available, then consume it.
      Returns the actual amount consumed (may be less than requested
@@ -87,6 +90,7 @@
         (put fc :send-window (- fc:send-window actual))
         (lock:release)
         actual)))
+
   (defn apply-window-update [fc increment]
     "Apply a WINDOW_UPDATE increment to the send window. Wakes blocked senders."
     (let [lock fc:lock
@@ -101,9 +105,11 @@
         (put fc :send-window new-window))
       (cv:broadcast)
       (lock:release)))
+
   (defn consume-recv-window [fc amount]
     "Consume recv window (for tracking). Does not block."
     (put fc :recv-window (- fc:recv-window amount)))
+
   (defn replenish-recv-window [fc amount]
     "Replenish recv window after consuming data."
     (put fc :recv-window (+ fc:recv-window amount)))
@@ -126,7 +132,7 @@
       (assert (= s:state :open) "stream server: idle->open")
       (stream-transition s :recv-end-stream)
       (assert (= s:state :half-closed-remote)
-        "stream server: open->half-closed-remote")
+              "stream server: open->half-closed-remote")
       (stream-transition s :send-end-stream)
       (assert (= s:state :closed) "stream server: half-closed-remote->closed"))
 
@@ -178,6 +184,7 @@
       (assert (= fc:recv-window 64535) "fc: recv consumed")
       (replenish-recv-window fc 1000)
       (assert (= fc:recv-window 65535) "fc: recv replenished"))
+
     true)
 
   ## ── Exports ────────────────────────────────────────────────────────────

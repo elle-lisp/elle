@@ -18,7 +18,7 @@
 (try
   (attuned-no-io)
   (catch e (assert (= (get e :error) :signal-violation))
-    (println "attune-blocks-unpermitted: ok")))
+         (println "attune-blocks-unpermitted: ok")))
 
 # ── attune composes with squelch ──────────────────────────────────
 (def multi (fn [] (yield 1)))
@@ -29,7 +29,7 @@
 (try
   (step2)
   (catch e (assert (= (get e :error) :signal-violation))
-    (println "attune-composes-with-squelch: ok")))
+         (println "attune-composes-with-squelch: ok")))
 
 # ── Compile-time signal inference ─────────────────────────────────
 # attune narrows the signal for interprocedural tracking

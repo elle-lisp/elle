@@ -30,16 +30,17 @@
     (let* [app (b:gtk-application-new app-id flags)
            handle (w:make-handle nil)
            cb (ffi/callback sig-activate
-             (fn (app-ptr data)
-               (let [win (b:gtk-application-window-new app-ptr)]
-                 (put handle :window win)
-                 (w:register-widget handle :window win :window)
-                 (b:gtk-window-present win)
-                 (on-activate handle))))]
+                            (fn (app-ptr data)
+                              (let [win (b:gtk-application-window-new app-ptr)]
+                                (put handle :window win)
+                                (w:register-widget handle :window win :window)
+                                (b:gtk-window-present win)
+                                (on-activate handle))))]
       (put handle :app app)
       (push handle:callbacks cb)
       (b:g-signal-connect-data app "activate" cb nil nil 0)
       handle))
+
   (defn app/run (handle &named @quit)
     "Run the GtkApplication event loop. Blocks until quit returns true."
     (default quit (fn [] false))
@@ -47,6 +48,7 @@
       (b:g-application-register handle:app nil nil)
       (b:g-application-activate handle:app)
       (while (not (quit)) (b:glib-wait ctx))))
+
   (defn app/window (handle)
     "Get the application window pointer."
     handle:window)

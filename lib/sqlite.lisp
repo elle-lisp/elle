@@ -23,6 +23,7 @@
     (let [p (ffi/lookup lib name)
           s (ffi/signature ret args)]
       (fn [& a] (apply ffi/call p s a))))
+
   (def c-open (cfn "sqlite3_open" :int @[:string :ptr]))
   (def c-close (cfn "sqlite3_close" :int @[:ptr]))
   (def c-errmsg (cfn "sqlite3_errmsg" :ptr @[:ptr]))
@@ -47,6 +48,7 @@
     (unless (= rc SQLITE_OK)
       (error {:error :sqlite-error
               :message (string ctx ": " (ffi/string (c-errmsg db)))})))
+
   (defn prepare [db sql]
     "Prepare a statement. Returns stmt pointer. Caller must finalize."
     (let [pp (ffi/malloc 8)]
@@ -54,6 +56,7 @@
       (let [stmt (ffi/read pp :ptr)]
         (ffi/free pp)
         stmt)))
+
   (defn bind-params [db stmt params]
     (def @i 1)
     (each p in params
@@ -68,6 +71,7 @@
           (error {:error :sqlite-error
                   :message (string "bind: unsupported type " t)}))
       (assign i (inc i))))
+
   (defn read-row [stmt ncols col-names]
     (let [row @{}]
       (each ci in (range ncols)
@@ -92,10 +96,12 @@
         (error {:error :sqlite-error
                 :message (string "open: " (ffi/string (c-errmsg db)))}))
       db))
+
   (defn close [db]
     "Close a database connection."
     (c-close db)
     nil)
+
   (defn exec [db sql & opts]
     "Execute SQL (no result rows). Optional params array. Returns rows affected."
     (let* [params (if (> (length opts) 0) (first opts) [])
@@ -105,6 +111,7 @@
       (let [n (c-changes db)]
         (c-finalize stmt)
         n)))
+
   (defn query [db sql & opts]
     "Execute a query. Returns list of structs with keyword keys."
     (let* [params (if (> (length opts) 0) (first opts) [])
@@ -112,10 +119,11 @@
       (bind-params db stmt params)
       (let* [ncols (c-col-count stmt)
              col-names (->array (map (fn [i] (ffi/string (c-col-name stmt i)))
-                                  (->list (range ncols))))
+                                     (->list (range ncols))))
              rows @[]]
         (while (= (c-step stmt) SQLITE_ROW)
           (push rows (read-row stmt ncols col-names)))
         (c-finalize stmt)
         (->list rows))))
+
   {:open open :close close :exec exec :query query})

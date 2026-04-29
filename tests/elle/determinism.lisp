@@ -38,7 +38,7 @@
              (def det-x 13)
              (def det-y -8)
              (+ det-x det-y)) 5)
-  "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
+        "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
 
 # ============================================================================
 # Closure
@@ -47,7 +47,7 @@
 # test_closure_determinism
 (assert (= (let [captured 10]
              ((fn (x) (+ x captured)) 32)) 42)
-  "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
+        "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
 
 # ============================================================================
 # Conditional

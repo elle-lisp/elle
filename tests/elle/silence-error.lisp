@@ -28,7 +28,7 @@
                    (+ x y)))))
 (assert (not ok?) "silence rejects arithmetic at compile time")
 (assert (string/contains? (get err :message) "may emit")
-  "error mentions excess signal")
+        "error mentions excess signal")
 
 # ── Compile-time rejection: yield ────────────────────────────────────
 

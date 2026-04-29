@@ -33,7 +33,7 @@
 # === with macro for resource management ===
 
 (with p (port/open "/tmp/elle-test-ports-with-474" :write) port/close
-  (assert (port/open? p) "port open inside with"))
+      (assert (port/open? p) "port open inside with"))
 
 # === File port open/close lifecycle ===
 
@@ -114,7 +114,7 @@
 
 # port/open-bytes with :timeout on a regular file completes before the timeout expires.
 (let [p (port/open-bytes "/tmp/elle-test-ports-bytes-timeout-474" :write
-        :timeout 5000)]
+                         :timeout 5000)]
   (assert (port/open? p) "port/open-bytes with :timeout works on regular file")
   (port/close p))
 
@@ -126,7 +126,7 @@
 (let [p (port/open "/tmp/elle-test-port-display-474" :write)]
   (let [s (string p)]
     (assert (string-starts-with? s "#<port:file")
-      "file port display starts with #<port:file")
+            "file port display starts with #<port:file")
     (assert (string-contains? s ":write") "file port display contains :write")
     (assert (string-contains? s ":text") "file port display contains :text"))
   (port/close p))
@@ -135,7 +135,7 @@
 (let [p (port/open-bytes "/tmp/elle-test-port-bytes-474" :write)]
   (let [s (string p)]
     (assert (string-starts-with? s "#<port:file")
-      "bytes port display starts with #<port:file")
+            "bytes port display starts with #<port:file")
     (assert (string-contains? s ":binary") "bytes port display contains :binary"))
   (port/close p))
 
@@ -161,7 +161,7 @@
 
   # Seek from end: 0 from end = past last byte = 10
   (assert (= (port/seek p 0 :from :end) 10)
-    "seek 0 from end of 10-byte file returns 10")
+          "seek 0 from end of 10-byte file returns 10")
 
   # Seek -2 from end = position 8
   (assert (= (port/seek p -2 :from :end) 8) "seek -2 from end returns 8")
@@ -171,6 +171,7 @@
 
   # Seek default (no :from) = SEEK_SET
   (assert (= (port/seek p 3) 3) "seek with default :from returns 3")
+
   (port/close p))
 
 # --- Seek + read coherence ---
@@ -179,7 +180,7 @@
   (port/write p "hello")
   (port/seek p 0 :from :start)
   (assert (= (port/read p 5) "hello")
-    "read after seek to start returns written data")
+          "read after seek to start returns written data")
   (port/close p))
 
 # --- Seek clears buffered data ---

@@ -16,9 +16,9 @@
 (assert (= (get "hello" -1) "o") "get string -1")
 (assert (= (get "hello" -5) "h") "get string -len")
 (assert (= (get "hello" -6) nil) "get string -(len+1) oob")
-(assert (= (get (thaw "hello") -1) "o") "get @string -1")
-(assert (= (get (thaw "hello") -5) "h") "get @string -len")
-(assert (= (get (thaw "hello") -6) nil) "get @string -(len+1) oob")
+(assert (= (get @"hello" -1) "o") "get @string -1")
+(assert (= (get @"hello" -5) "h") "get @string -len")
+(assert (= (get @"hello" -6) nil) "get @string -(len+1) oob")
 
 # Bytes
 (let [b (bytes 97 98 99)]
@@ -50,7 +50,7 @@
 (assert (= (put "hello" -1 "a") "hella") "put string -1")
 (assert (= (put "hello" -5 "H") "Hello") "put string -len")
 (assert (= (freeze (begin
-                     (def @s (thaw "hello"))
+                     (def @s @"hello")
                      (put s -1 "X")
                      s)) "hellX") "put @string -1")
 
@@ -91,7 +91,7 @@
 (assert (= (first [1 2 3]) 1) "first array")
 (assert (= (first @[1 2 3]) 1) "first @array")
 (assert (= (first "abc") "a") "first string")
-(assert (= (first (thaw "abc")) "a") "first @string")
+(assert (= (first @"abc") "a") "first @string")
 (assert (= (first (bytes 97 98 99)) 97) "first bytes")
 (assert (= (first (@bytes 97 98 99)) 97) "first @bytes")
 
@@ -104,7 +104,7 @@
   (assert (not ok?) "first empty @array errors"))
 (let [[ok? _] (protect ((fn [] (first ""))))]
   (assert (not ok?) "first empty string errors"))
-(let [[ok? _] (protect ((fn [] (first (thaw "")))))]
+(let [[ok? _] (protect ((fn [] (first @""))))]
   (assert (not ok?) "first empty @string errors"))
 (let [[ok? _] (protect ((fn [] (first (bytes)))))]
   (assert (not ok?) "first empty bytes errors"))
@@ -117,7 +117,7 @@
 (assert (= (second [1 2 3]) 2) "second array")
 (assert (= (second @[1 2 3]) 2) "second @array")
 (assert (= (second "abc") "b") "second string")
-(assert (= (second (thaw "abc")) "b") "second @string")
+(assert (= (second @"abc") "b") "second @string")
 (assert (= (second (bytes 97 98 99)) 98) "second bytes")
 (assert (= (second (@bytes 97 98 99)) 98) "second @bytes")
 
@@ -145,7 +145,7 @@
 (assert (= (last [1 2 3]) 3) "last array")
 (assert (= (last @[1 2 3]) 3) "last @array")
 (assert (= (last "abc") "c") "last string")
-(assert (= (last (thaw "abc")) "c") "last @string")
+(assert (= (last @"abc") "c") "last @string")
 (assert (= (last (bytes 97 98 99)) 99) "last bytes")
 (assert (= (last (@bytes 97 98 99)) 99) "last @bytes")
 
@@ -158,7 +158,7 @@
   (assert (not ok?) "last empty @array errors"))
 (let [[ok? _] (protect ((fn [] (last ""))))]
   (assert (not ok?) "last empty string errors"))
-(let [[ok? _] (protect ((fn [] (last (thaw "")))))]
+(let [[ok? _] (protect ((fn [] (last @""))))]
   (assert (not ok?) "last empty @string errors"))
 (let [[ok? _] (protect ((fn [] (last (bytes)))))]
   (assert (not ok?) "last empty bytes errors"))
@@ -171,7 +171,7 @@
 (assert (= (rest [1 2 3]) [2 3]) "rest array")
 (assert (= (rest @[1 2 3]) @[2 3]) "rest @array")
 (assert (= (rest "abc") "bc") "rest string")
-(assert (= (freeze (rest (thaw "abc"))) "bc") "rest @string")
+(assert (= (freeze (rest @"abc")) "bc") "rest @string")
 (assert (= (rest (bytes 97 98 99)) (bytes 98 99)) "rest bytes")
 (assert (= (rest (@bytes 97 98 99)) (@bytes 98 99)) "rest @bytes")
 
@@ -187,7 +187,7 @@
 (assert (= (butlast [1 2 3]) [1 2]) "butlast array")
 (assert (= (butlast @[1 2 3]) @[1 2]) "butlast @array")
 (assert (= (butlast "abc") "ab") "butlast string")
-(assert (= (freeze (butlast (thaw "abc"))) "ab") "butlast @string")
+(assert (= (freeze (butlast @"abc")) "ab") "butlast @string")
 (assert (= (butlast (bytes 97 98 99)) (bytes 97 98)) "butlast bytes")
 (assert (= (butlast (@bytes 97 98 99)) (@bytes 97 98)) "butlast @bytes")
 

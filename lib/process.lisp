@@ -102,26 +102,28 @@
         (let [pid (length procs)
               fiber (fiber/new closure |:yield :error :fuel :io :exec :wait|)]
           (push procs
-            @{:pid pid
-              :fiber fiber
-              :mbox @[]
-              :resume nil
-              :status :alive
-              :links @||
-              :monitors @{}
-              :monitored-by @{}
-              :trapping false
-              :name nil
-              :dict @{}
-              :save-queue @[]
-              :recv-pred nil})
+                @{:pid pid
+                  :fiber fiber
+                  :mbox @[]
+                  :resume nil
+                  :status :alive
+                  :links @||
+                  :monitors @{}
+                  :monitored-by @{}
+                  :trapping false
+                  :name nil
+                  :dict @{}
+                  :save-queue @[]
+                  :recv-pred nil})
           (push ready pid)
           pid)))
 
     # ---- helpers ----
 
     (def @proc-get (fn [pid] (get procs pid)))
+
     (def @alive? (fn [pid] (= (get (proc-get pid) :status) :alive)))
+
     (def @deliver
       (fn [pid msg]
         (when (alive? pid)
@@ -138,12 +140,14 @@
               lb (get (proc-get b) :links)]
           (put la b)
           (put lb a))))
+
     (def @remove-link
       (fn [a b]
         (let [la (get (proc-get a) :links)
               lb (get (proc-get b) :links)]
           (del la b)
           (del lb a))))
+
     (def @add-monitor
       (fn [watcher target]
         (let [ref (fresh-ref)
@@ -152,6 +156,7 @@
           (put (get wp :monitors) ref target)
           (put (get tp :monitored-by) ref watcher)
           ref)))
+
     (def @remove-monitor
       (fn [ref watcher-pid]
         (let [wp (proc-get watcher-pid)]
@@ -174,6 +179,7 @@
               (begin
                 (put (proc-get linked-pid) :status :dead)
                 (notify-links linked-pid [:linked dead-pid reason])))))))
+
     (def @notify-monitors
       (fn [dead-pid reason]
         (each ref in (keys (get (proc-get dead-pid) :monitored-by))
@@ -181,6 +187,7 @@
             (when (alive? watcher)
               (deliver watcher [:DOWN ref dead-pid reason])
               (del (get (proc-get watcher) :monitors) ref))))))
+
     (def @unregister-name
       (fn [pid]
         (let* [p (proc-get pid)
@@ -198,6 +205,7 @@
         (each id in to-cancel
           (del io-pending id)
           (io/cancel backend id))))
+
     (def @process-exit
       (fn [pid reason]
         (put (proc-get pid) :status :dead)
@@ -306,6 +314,7 @@
               (when (alive? pid)
                 (put (proc-get pid) :resume fiber)
                 (push ready pid)))))))
+
     (def @handle-sub-fiber-after-resume nil)
     (assign
       handle-sub-fiber-after-resume
@@ -321,7 +330,7 @@
                  (complete-sub-fiber fiber :error)
                 (not (= 0 (bit/and bits 512)))  # SIG_IO
                 (let [[ok? result] (protect (io/submit backend
-                        (fiber/value fiber)))]
+                      (fiber/value fiber)))]
                   (if ok?
                     (put io-pending result @{:fiber fiber :pid pid})
                     (begin
@@ -355,24 +364,24 @@
                 (if (not (nil? comp))  # Already completed
                   (begin
                     (put (proc-get pid)
-                      :resume [(= comp :ok) (fiber/value target)])
+                         :resume [(= comp :ok) (fiber/value target)])
                     (push ready pid))  # Check raw fiber status
                   (let [status (fiber/status target)]
                     (cond
                       (= status :dead)
                         (begin
                           (put (proc-get pid)
-                            :resume [true (fiber/value target)])
+                               :resume [true (fiber/value target)])
                           (push ready pid))
                       (= status :error)
                         (begin
                           (put (proc-get pid)
-                            :resume [false (fiber/value target)])
+                               :resume [false (fiber/value target)])
                           (push ready pid))
                       (let [ws (or (get join-waiting target)
-                              (let [w @[]]
-                                (put join-waiting target w)
-                                w))]
+                                   (let [w @[]]
+                                     (put join-waiting target w)
+                                     w))]
                         (push ws pid)  # Ensure the target fiber gets pumped
                         (when (nil? (get sub-completed target))
                           (push sub-runnable @{:fiber target :pid pid}))))))))
@@ -380,8 +389,8 @@
             (let [candidates (get request :fibers)]
               (let [done (find (fn [f]
                                  (or (not (nil? (get sub-completed f)))
-                                   (= (fiber/status f) :dead)
-                                   (= (fiber/status f) :error))) candidates)]
+                                     (= (fiber/status f) :dead)
+                                     (= (fiber/status f) :error))) candidates)]
                 (if (not (nil? done))
                   (begin
                     (put (proc-get pid) :resume done)
@@ -411,7 +420,9 @@
     (def @handle-cmd
       (fn [pid cmd]
         (let [tag (get cmd 0)]
-          (case tag
+          (case
+            tag
+
             :send
               (let [target (get cmd 1)
                     msg (get cmd 2)]
@@ -453,7 +464,7 @@
                   (let [ref (fresh-ref)
                         fire-at (+ (unbox tick) ticks)]
                     (push timers
-                      @{:ref ref :fire-at fire-at :pid pid :msg :timeout})
+                          @{:ref ref :fire-at fire-at :pid pid :msg :timeout})
                     (push waiting pid))))
             :self
               (begin
@@ -504,7 +515,7 @@
                   (process-exit pid reason)  # Kill another process
                   (when (alive? target)
                     (if (and (get (proc-get target) :trapping)
-                        (not (= reason :kill)))
+                             (not (= reason :kill)))
                       (deliver target [:EXIT pid reason])
                       (process-exit target [:killed reason]))))
                 (when (alive? pid)
@@ -587,12 +598,12 @@
             (= (fiber/status f) :dead)
               (process-exit pid [:normal (fiber/value f)])
 
-              # Error
-              (not (= 0 (bit/and bits 1)))
+            # Error
+            (not (= 0 (bit/and bits 1)))
               (process-exit pid [:error (fiber/value f)])
 
-              # Fuel exhaustion — re-queue for next round
-              (not (= 0 (bit/and bits 4096))) (push ready pid)
+            # Fuel exhaustion — re-queue for next round
+            (not (= 0 (bit/and bits 4096))) (push ready pid)
 
             # I/O — submit to async backend, park process
             (not (= 0 (bit/and bits 512)))
@@ -603,11 +614,12 @@
                     (fiber/abort f id)
                     (dispatch-signal pid f))))
 
-              # Wait — structured concurrency (ev/join, ev/select, ev/abort)
-              (not (= 0 (bit/and bits 16384))) (handle-wait pid (fiber/value f))
+            # Wait — structured concurrency (ev/join, ev/select, ev/abort)
+            (not (= 0 (bit/and bits 16384))) (handle-wait pid (fiber/value f))
 
             # Yield — scheduler command
             (not (= 0 (bit/and bits 2))) (handle-cmd pid (fiber/value f))
+
             (error {:error :scheduler-error :message "unexpected signal bits"})))))
 
     # ---- run one process ----
@@ -659,17 +671,20 @@
     (def @has-work?
       (fn []
         (or (not (empty? ready)) (not (empty? waiting))
-          (> (length io-pending) 0) (> (length sub-runnable) 0)
-          (> (length join-waiting) 0) (> (length select-sets) 0))))
+            (> (length io-pending) 0) (> (length sub-runnable) 0)
+            (> (length join-waiting) 0) (> (length select-sets) 0))))
+
     (def @sched-run
       (fn [init]
         (sched-spawn init)
+
         (while (has-work?)
           (assign tick (box (+ (unbox tick) 1)))
           (fire-timers)
           (reap-io)
           (drain-sub-runnable)
           (wake-waiting)
+
           (when (empty? ready)
             (cond  # Nothing alive anywhere — done
               (not (has-work?)) nil  # while condition will terminate
@@ -680,8 +695,8 @@
                   (complete-io (io/wait backend (- 0 1)))
                   (drain-sub-runnable))
 
-                # Waiting with timers — fast-forward tick
-                (not (empty? timers))
+              # Waiting with timers — fast-forward tick
+              (not (empty? timers))
                 (begin
                   (def @min-fire (get (get timers 0) :fire-at))
                   (each timer in timers
@@ -694,9 +709,10 @@
                     (error {:error :deadlock
                             :message "all processes waiting, no messages pending"})))
 
-                # Waiting with no timers, no I/O — deadlock
-                (not (empty? waiting)) (error {:error :deadlock
+              # Waiting with no timers, no I/O — deadlock
+              (not (empty? waiting)) (error {:error :deadlock
               :message "all processes waiting, no messages pending"})))
+
           (let [batch ready]
             (assign ready @[])
             (each pid in batch
@@ -706,6 +722,7 @@
 
     (def @sched-inject
       (fn [pid msg] (when (< pid (length procs)) (deliver pid msg))))
+
     (def @sched-process-info
       (fn [pid]
         (when (< pid (length procs))
@@ -767,8 +784,7 @@
 # Callbacks struct:
 #   {:init        (fn [arg] state)
 #    :handle-call (fn [request from state]
-#                  [:reply reply state]
-#                  | [:noreply state]
+#                  [:reply reply state] | [:noreply state]
 #                  | [:stop reason reply state])
 #    :handle-cast (fn [request state]      [:noreply state] | [:stop reason state])
 #    :handle-info (fn [msg state]          [:noreply state] | [:stop reason state])
@@ -810,9 +826,10 @@
     (send pid [:$call me ref request])
     (let [reply (recv-match (fn [m]
                               (and (array? m) (>= (length m) 3)
-                                (or (and (= (get m 0) :$reply) (= (get m 1) ref))
-                                  (and (= (get m 0) :$call-timeout)
-                                    (= (get m 1) ref))))))]
+                                   (or (and (= (get m 0) :$reply)
+                                       (= (get m 1) ref))
+                                       (and (= (get m 0) :$call-timeout)
+                                       (= (get m 1) ref))))))]
       (when (not (nil? timer-ref)) (cancel-timer timer-ref))
       (when (= (get reply 0) :$call-timeout)
         (error {:error :gen-server-timeout :message "gen-server call timed out"}))
@@ -834,9 +851,10 @@
     (send pid [:$stop me ref rsn])
     (let [reply (recv-match (fn [m]
                               (and (array? m) (>= (length m) 3)
-                                (or (and (= (get m 0) :$reply) (= (get m 1) ref))
-                                  (and (= (get m 0) :$call-timeout)
-                                    (= (get m 1) ref))))))]
+                                   (or (and (= (get m 0) :$reply)
+                                       (= (get m 1) ref))
+                                       (and (= (get m 0) :$call-timeout)
+                                       (= (get m 1) ref))))))]
       (when (not (nil? timer-ref)) (cancel-timer timer-ref))
       (when (= (get reply 0) :$call-timeout)
         (error {:error :gen-server-timeout :message "gen-server stop timed out"}))
@@ -849,7 +867,7 @@
   (let* [handle-call (get callbacks :handle-call)
          handle-cast (get callbacks :handle-cast)
          handle-info (or (get callbacks :handle-info)
-           (fn [_msg state] [:noreply state]))
+                         (fn [_msg state] [:noreply state]))
          on-terminate (or (get callbacks :terminate) (fn [_reason _state] nil))
          init-fn (get callbacks :init)]
     (spawn-link (fn []
@@ -873,6 +891,7 @@
                   (forever
                     (let [msg (recv)]
                       (match msg
+
                         [:$call caller ref request]
                           (let [result (handle-call request [caller ref] state)]
                             (match result
@@ -934,7 +953,7 @@
                                          (case (get request 0)
                                            :update
                                              [:noreply ((get request 1) state)]))}
-    nil :name name))
+                         nil :name name))
 
 (defn actor-get [actor fun]
   "Read a value derived from the actor's state."
@@ -972,13 +991,13 @@
                      (send-after timeout (self) [:$call-timeout ref]))]
     (let [reply (recv-match (fn [m]
                               (and (array? m) (>= (length m) 3)
-                                (or (and (= (get m 0) :$task-result)
-                                    (= (get m 1) ref))
-                                  (and (= (get m 0) :DOWN)
-                                    (= (get m 1) (get task 1))))
-                                (or (nil? timer-ref)
-                                  (and (= (get m 0) :$call-timeout)
-                                    (= (get m 1) ref)) true))))]
+                                   (or (and (= (get m 0) :$task-result)
+                                       (= (get m 1) ref))
+                                       (and (= (get m 0) :DOWN)
+                                       (= (get m 1) (get task 1))))
+                                   (or (nil? timer-ref)
+                                       (and (= (get m 0) :$call-timeout)
+                                       (= (get m 1) ref)) true))))]
       (when (not (nil? timer-ref)) (cancel-timer timer-ref))
       (match reply
         [:$task-result _ value] value
@@ -1033,7 +1052,9 @@
                   (def @kids @{})  # id → @[tick tick ...] — restart history for intensity tracking
                   (def @restart-history @{})  # current tick counter (incremented each supervisor loop iteration)
                   (def @sup-tick 0)
+
                   (def @sup-self (self))
+
                   (def @start-child
                     (fn [spec]
                       (let* [start-fn (get spec :start)
@@ -1046,28 +1067,31 @@
                              child-pid (spawn-link wrapped)
                              ref (monitor child-pid)]
                         (put kids (get spec :id)
-                          @{:pid child-pid :ref ref :spec spec})
+                             @{:pid child-pid :ref ref :spec spec})
                         (log {:event :child-started
                               :id (get spec :id)
                               :pid child-pid})  # If child declares readiness, wait for it before proceeding
                         (when needs-ready
                           (let [signal (recv-match (fn [m]
                                   (and (array? m) (>= (length m) 2)
-                                    (or (and (= (get m 0) :$sup-ready)
-                                        (= (get m 1) child-pid))
-                                      (and (>= (length m) 3) (= (get m 0) :DOWN)
-                                        (= (get m 2) child-pid))))))]
+                                       (or (and (= (get m 0) :$sup-ready)
+                                       (= (get m 1) child-pid))
+                                       (and (>= (length m) 3)
+                                       (= (get m 0) :DOWN)
+                                       (= (get m 2) child-pid))))))]
                             (when (= (get signal 0) :$sup-ready)
                               (log {:event :child-ready
                                     :id (get spec :id)
                                     :pid child-pid}))))
                         child-pid)))
+
                   (def @stop-child
                     (fn [id]
                       (when (has? kids id)
                         (let [info (get kids id)]
                           (exit (get info :pid) :shutdown)
                           (del kids id)))))
+
                   (def @should-restart?
                     (fn [policy reason]
                       (cond
@@ -1115,6 +1139,7 @@
                   (forever
                     (assign sup-tick (+ sup-tick 1))
                     (match (recv)
+
                       [:DOWN _ref dead-pid reason]
                         (let [dead-id (find-dead-id dead-pid)]
                           (when (not (nil? dead-id))
@@ -1126,14 +1151,15 @@
                                    spec (get info :spec)
                                    policy (or (get spec :restart) :permanent)]
                               (if (and (should-restart? policy reason)
-                                  (check-intensity dead-id))
+                                       (check-intensity dead-id))
                                 (begin
                                   (log {:event :child-restarting
                                         :id dead-id
                                         :attempt (length (or (get restart-history
-                                            dead-id) @[]))})
+                                        dead-id) @[]))})
                                   (case strat
                                     :one-for-one (start-child spec)
+
                                     :one-for-all
                                       (begin  # Stop all other children
                                         (each [id info] in (pairs kids)
@@ -1142,7 +1168,7 @@
                                         (assign kids @{})
                                         (each id in child-order
                                           (let [spec (find (fn [s]
-                                                (= (get s :id) id)) children)]
+                                              (= (get s :id) id)) children)]
                                             (when (not (nil? spec))
                                               (start-child spec)))))
                                     :rest-for-one
@@ -1164,7 +1190,7 @@
                                         (while (< i (length child-order))
                                           (let* [id (get child-order i)
                                             spec (find (fn [s]
-                                                (= (get s :id) id)) children)]
+                                              (= (get s :id) id)) children)]
                                             (when (not (nil? spec))
                                               (start-child spec)))
                                           (assign i (+ i 1))))))  # Not restarting — either policy says no or intensity exceeded
@@ -1200,7 +1226,7 @@
     (send pid [:$sup-start-child me ref spec])
     (let [reply (recv-match (fn [m]
                               (and (array? m) (= (get m 0) :$reply)
-                                (= (get m 1) ref))))]
+                                   (= (get m 1) ref))))]
       (get reply 2))))
 
 (defn supervisor-stop-child [sup id]
@@ -1211,7 +1237,7 @@
     (send pid [:$sup-stop-child me ref id])
     (let [reply (recv-match (fn [m]
                               (and (array? m) (= (get m 0) :$reply)
-                                (= (get m 1) ref))))]
+                                   (= (get m 1) ref))))]
       (get reply 2))))
 
 (defn supervisor-which-children [sup]
@@ -1222,7 +1248,7 @@
     (send pid [:$sup-which-children me ref])
     (let [reply (recv-match (fn [m]
                               (and (array? m) (= (get m 0) :$reply)
-                                (= (get m 1) ref))))]
+                                   (= (get m 1) ref))))]
       (get reply 2))))
 
 (defn supervisor-notify-ready []
@@ -1252,9 +1278,9 @@
                                              (let [ref (gen-make-ref)
                                                handler-state ((get mod :init) init-arg)]
                                                (push handlers
-                                                 @{:id ref
-                                                 :mod mod
-                                                 :state handler-state})
+                                               @{:id ref
+                                               :mod mod
+                                               :state handler-state})
                                                [:reply ref handlers])
                                            [:remove-handler ref]
                                              (begin
@@ -1262,10 +1288,10 @@
                                                (each h in handlers
                                                  (if (= (get h :id) ref)
                                                    (let [term (get (get h :mod)
-                                                       :terminate)]
+                                                     :terminate)]
                                                      (when (not (nil? term))
                                                        (term :remove (get h
-                                                         :state))))
+                                                       :state))))
                                                    (push remaining h)))
                                                [:reply :ok remaining])
                                            [:sync-notify event]
@@ -1273,18 +1299,18 @@
                                                (def @remaining @[])
                                                (each h in handlers
                                                  (let [result ((get (get h :mod)
-                                                       :handle-event) event
-                                                     (get h :state))]
+                                                   :handle-event) event
+                                                   (get h :state))]
                                                    (match result
                                                      [:ok new-state] (begin
                                                        (put h :state new-state)
                                                        (push remaining h))
                                                      [:remove _new-state]
                                                        (let [term (get (get h
-                                                             :mod) :terminate)]
+                                                         :mod) :terminate)]
                                                          (when (not (nil? term))
                                                            (term :remove (get h
-                                                             :state))))
+                                                           :state))))
                                                      _ (push remaining h))))
                                                [:reply :ok remaining])
                                            [:which-handlers]
@@ -1292,8 +1318,8 @@
                                                (def @result @[])
                                                (each h in handlers
                                                  (push result
-                                                   {:id (get h :id)
-                                                   :mod (get h :mod)}))
+                                                 {:id (get h :id)
+                                                 :mod (get h :mod)}))
                                                [:reply (freeze result) handlers])
                                            _ [:reply :unknown handlers]))
                           :handle-cast (fn [request handlers]
@@ -1303,22 +1329,22 @@
                                                (def @remaining @[])
                                                (each h in handlers
                                                  (let [result ((get (get h :mod)
-                                                       :handle-event) event
-                                                     (get h :state))]
+                                                   :handle-event) event
+                                                   (get h :state))]
                                                    (match result
                                                      [:ok new-state] (begin
                                                        (put h :state new-state)
                                                        (push remaining h))
                                                      [:remove _new-state]
                                                        (let [term (get (get h
-                                                             :mod) :terminate)]
+                                                         :mod) :terminate)]
                                                          (when (not (nil? term))
                                                            (term :remove (get h
-                                                             :state))))
+                                                           :state))))
                                                      _ (push remaining h))))
                                                [:noreply remaining])
                                            _ [:noreply handlers]))} nil
-    :name name))
+                         :name name))
 
 (defn event-manager-add-handler [manager mod init-arg]
   "Add a handler module to the event manager. Returns handler ref."

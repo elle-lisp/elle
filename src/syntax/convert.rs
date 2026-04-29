@@ -66,7 +66,7 @@ impl Syntax {
                 Value::symbol(id.0)
             }
             SyntaxKind::Keyword(s) => Value::keyword(s),
-            SyntaxKind::String(s) => Value::string(s.clone()),
+            SyntaxKind::String(s) | SyntaxKind::StringMut(s) => Value::string(s.clone()),
             SyntaxKind::List(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 crate::value::list(values)

@@ -70,9 +70,9 @@
   (assert (= result 2) "break inner continues outer"))
 
 (let [result (+ 1
-        (block :inner
-          (break :inner 10)
-          99))]
+                (block :inner
+                  (break :inner 10)
+                  99))]
   (assert (= result 11) "break inner value used by outer"))
 
 # ============================================================================

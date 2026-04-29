@@ -19,12 +19,13 @@
                 (let [[ok? conn] (protect (tcp/accept listener))]
                   (unless ok? (break nil))
                   (ev/spawn (fn []
-                              (defer (port/close conn)
+                              (defer
+                                (port/close conn)
                                 (forever
                                   (let [line (port/read-line conn)]
                                     (when (nil? line) (break nil))
                                     (port/write conn
-                                      (string "echo:" (string line) "\n"))))))))))))
+                                    (string "echo:" (string line) "\n"))))))))))))
 
 # ── Test 1: protect around I/O inside defer ────────────────────────
 #
@@ -35,7 +36,8 @@
 (let [result @[nil]]
   (let [f (ev/spawn (fn []
                       (let [conn (tcp/connect "127.0.0.1" port-num)]
-                        (defer (port/close conn)
+                        (defer
+                          (port/close conn)
                           (let [[ok? _] (protect (port/write conn "hello\n"))]
                             (assert ok? "write succeeded"))
                           (let [[ok? line] (protect (port/read-line conn))]
@@ -43,7 +45,7 @@
                             (put result 0 (string line)))))))]
     (ev/join f))
   (assert (= (get result 0) "echo:hello")
-    "value flows correctly through defer+protect fiber chain"))
+          "value flows correctly through defer+protect fiber chain"))
 (println "  1. ok")
 
 # ── Test 2: multiple sequential I/O ops inside protect ─────────────
@@ -55,7 +57,8 @@
 (let [result @[nil nil nil]]
   (let [f (ev/spawn (fn []
                       (let [conn (tcp/connect "127.0.0.1" port-num)]
-                        (defer (port/close conn)
+                        (defer
+                          (port/close conn)
                           (let [[ok? lines] (protect
                                   (port/write conn "a\n")
                                   (port/write conn "b\n")
@@ -83,10 +86,12 @@
 (let [results @[]]
   (let [f (ev/spawn (fn []
                       (let [conn (tcp/connect "127.0.0.1" port-num)]
-                        (defer (protect (port/close conn)) (var i 0)
+                        (defer
+                          (protect (port/close conn))
+                          (var i 0)
                           (while (< i 5)
                             (let [[ok? _] (protect (port/write conn
-                                    (string i "\n")))]
+                                  (string i "\n")))]
                               (unless ok? (break)))
                             (let [[ok? line] (protect (port/read-line conn))]
                               (unless ok? (break))
@@ -106,7 +111,8 @@
 (println "  4. error through nested fibers...")
 (let [result @[nil nil]]
   (let [f (ev/spawn (fn []
-                      (defer nil
+                      (defer
+                        nil
                         (let [[ok? val] (protect (error {:reason :test-error}))]
                           (put result 0 ok?)
                           (put result 1 val:reason)))))]
@@ -124,8 +130,10 @@
 (let [result @[nil]]
   (let [f (ev/spawn (fn []
                       (let [conn (tcp/connect "127.0.0.1" port-num)]
-                        (defer (port/close conn)
-                          (defer nil
+                        (defer
+                          (port/close conn)
+                          (defer
+                            nil
                             (let [[ok? _] (protect (port/write conn "deep\n"))]
                               (assert ok? "deep write"))
                             (let [[ok? line] (protect (port/read-line conn))]
@@ -133,7 +141,7 @@
                               (put result 0 (string line))))))))]
     (ev/join f))
   (assert (= (get result 0) "echo:deep")
-    "value flows through 4-level fiber chain"))
+          "value flows through 4-level fiber chain"))
 (println "  5. ok")
 
 # ── Cleanup ────────────────────────────────────────────────────────

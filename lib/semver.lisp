@@ -28,12 +28,13 @@
         (error {:error :semver-error
                 :message (string ctx ": negative \"" s "\"")}))
       n))
+
   (defn parse [version]
     "Parse a semver string into {:major :minor :patch :pre :build}."
     (unless (string? version)
       (error {:error :type-error
               :message (string "semver/parse: expected string, got "
-                (type-of version))}))
+                               (type-of version))}))
     (let* [plus-parts (string/split version "+")
            build-str (if (> (length plus-parts) 1)
                        (string/join (rest plus-parts) "+")
@@ -51,15 +52,17 @@
        :patch (parse-int-strict (parts 2) "semver/parse")
        :pre pre-str
        :build build-str}))
+
   (defn valid? [version]
     "Check if a string is a valid semver version."
     (unless (string? version)
       (error {:error :type-error
               :message (string "semver/valid?: expected string, got "
-                (type-of version))}))
+                               (type-of version))}))
     (first (protect ((fn []
                        (parse version)
                        true)))))
+
   (defn compare-pre [a b]
     "Compare pre-release strings per semver 2.0.0 spec §11."
     (if (= a b)
@@ -88,6 +91,7 @@
                                _ (compare an bn))]
                       (if (zero? r) (cmp-ids (inc ai) (inc bi)) r))))))
             (cmp-ids 0 0))))))
+
   (defn semver-compare [a b]
     "Compare two semver version strings. Returns -1, 0, or 1."
     (let [va (parse a)
@@ -99,6 +103,7 @@
                  d (compare (va f) (vb f))]
             (if (zero? d) (cmp-fields (rest fields)) d))))
       (cmp-fields (list :major :minor :patch))))
+
   (defn parse-op [s]
     "Parse operator prefix from a requirement string. Returns [ver-str op]."
     (let [len (length s)]
@@ -135,11 +140,12 @@
           (let [rv (parse ver-str)
                 pv (parse ver)]
             (and (>= c 0)
-              (if (> rv:major 0)
-                (= pv:major rv:major)
-                (if (> rv:minor 0)
-                  (and (zero? pv:major) (= pv:minor rv:minor))
-                  (and (zero? pv:major) (zero? pv:minor) (<= pv:patch rv:patch))))))
+                 (if (> rv:major 0)
+                   (= pv:major rv:major)
+                   (if (> rv:minor 0)
+                     (and (zero? pv:major) (= pv:minor rv:minor))
+                     (and (zero? pv:major) (zero? pv:minor)
+                          (<= pv:patch rv:patch))))))
         "~"
           (let [rv (parse ver-str)
                 pv (parse ver)]
@@ -147,10 +153,12 @@
         _
           (error {:error :semver-error
                   :message (string "semver/satisfies?: unknown operator " op)}))))
+
   (defn satisfies? [version requirement]
     "Check if version satisfies a requirement string (comma-separated)."
     (all? (fn [r] (satisfies-one? version (string/trim r)))
-      (string/split requirement ",")))
+          (string/split requirement ",")))
+
   (defn increment [version part]
     "Increment a version part (:major, :minor, or :patch). Clears pre/build."
     (let [v (parse version)]
@@ -161,7 +169,8 @@
         _
           (error {:error :semver-error
                   :message (string "semver/increment: expected :major, :minor, or :patch, got "
-                    part)}))))
+                                   part)}))))
+
   {:parse parse
    :valid? valid?
    :compare semver-compare

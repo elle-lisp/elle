@@ -25,7 +25,7 @@
 (def c (telemetry:counter meter "req" :unit "1"))
 (def h
   (telemetry:histogram meter "lat" :unit "s"
-    :boundaries [0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0]))
+                       :boundaries [0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0]))
 (def g (telemetry:gauge meter "conns" :unit "1"))
 (def rev (telemetry:counter meter "rev" :unit "USD"))
 

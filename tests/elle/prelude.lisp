@@ -61,13 +61,13 @@
 (assert (= (try
              (/ 1 0)
              (catch {:error kind :message msg} kind)) :division-by-zero)
-  "try destructured error kind")
+        "try destructured error kind")
 
 # Destructured error — message
 (assert (= (try
              (/ 1 0)
              (catch {:error kind :message msg} msg)) "division by zero")
-  "try destructured error message")
+        "try destructured error message")
 
 # ============================================================================
 # protect
@@ -89,20 +89,26 @@
 # defer runs cleanup
 (begin
   (def @cleaned false)
-  (defer (assign cleaned true) 42)
+  (defer
+    (assign cleaned true)
+    42)
   (assert cleaned "defer runs cleanup"))
 
 # defer returns body value
 (let [result (begin
                (def @x 0)
-               (defer (assign x 1) 42))]
+               (defer
+                 (assign x 1)
+                 42))]
   (assert (= result 42) "defer returns body value"))
 
 # defer runs cleanup on error
 (begin
   (def @cleaned false)
   (try
-    (defer (assign cleaned true) (/ 1 0))
+    (defer
+      (assign cleaned true)
+      (/ 1 0))
     (catch e nil))
   (assert cleaned "defer runs cleanup on error"))
 
@@ -150,13 +156,15 @@
              (try
                (+ f 1)
                (catch e :error))) 100)
-  "try hygiene: user binding f not captured")
+        "try hygiene: user binding f not captured")
 
 # defer macro uses internal binding `f` — user's `f` should not be affected
 (let [result (begin
                (def @cleaned false)
                (let [f 99]
-                 (defer (assign cleaned true) (+ f 1))))]
+                 (defer
+                   (assign cleaned true)
+                   (+ f 1))))]
   (assert (= result 100) "defer hygiene: user binding f not captured"))
 
 # ============================================================================
@@ -203,7 +211,7 @@
 (assert (= (if-let [x false] :then :else) :else) "if-let false is falsy")
 (assert (= (if-let [x 1 y 2] (+ x y) :else) 3) "if-let multi binding all truthy")
 (assert (= (if-let [x 1 y nil] (+ x y) :else) :else)
-  "if-let multi binding second falsy")
+        "if-let multi binding second falsy")
 (assert (= (if-let [x 42] x :else) 42) "if-let bracket binding")
 (assert (= (if-let [x nil] :then :else) :else) "if-let bracket binding falsy")
 (assert (= (if-let [x 1 y 2] (+ x y) :else) 3) "if-let bracket multi binding")
@@ -215,7 +223,7 @@
 (assert (= (when-let [x 42] x) 42) "when-let truthy")
 (assert (= (when-let [x nil] x) nil) "when-let falsy returns nil")
 (assert (= (when-let [x 1] (+ x 1) (+ x 2)) 3)
-  "when-let multi body returns last")
+        "when-let multi body returns last")
 (assert (= (when-let [x 42] (+ x 1)) 43) "when-let bracket binding")
 
 # ============================================================================
@@ -281,4 +289,4 @@
   (each _ in co
     (put calls 0 (inc (get calls 0))))
   (assert (= (get calls 0) 0)
-    "each+fiber: empty coroutine invokes body zero times"))
+          "each+fiber: empty coroutine invokes body zero times"))

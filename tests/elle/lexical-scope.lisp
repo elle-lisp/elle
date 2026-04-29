@@ -5,19 +5,19 @@
 # ============================================================================
 
 (assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a b c d))))) 1) 2) 3) 4) 10)
-  "test_capture_from_great_grandparent")
+        "test_capture_from_great_grandparent")
 
 (assert (= ((((fn (x) (fn (y) (fn (z) (+ x z)))) 10) 20) 5) 15)
-  "test_capture_skip_levels")
+        "test_capture_skip_levels")
 
 (assert (= ((((((fn (a) (fn (b) (fn (c) (fn (d) (fn (e) (+ a b c d e)))))) 1) 2) 3) 4) 5)
-    15) "test_five_level_nesting")
+           15) "test_five_level_nesting")
 
 (assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a c))))) 10) 20) 30) 40) 40)
-  "test_capture_alternating_levels")
+        "test_capture_alternating_levels")
 
 (assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (* a (+ b (- c d))))))) 2) 3) 4) 1)
-    12) "test_deeply_nested_all_params")
+           12) "test_deeply_nested_all_params")
 
 # ============================================================================
 # SECTION 2: Mixed Let/Lambda Captures
@@ -135,20 +135,20 @@
                (let [gen (fn () (yield (+ x y)))]
                  (let [co (make-coroutine gen)]
                    (coro/resume co))))) 30)
-  "test_coroutine_captures_from_nested_let")
+        "test_coroutine_captures_from_nested_let")
 
 (assert (= ((fn (base)
               (let [gen (fn () (yield base))]
                 (let [co (make-coroutine gen)]
                   (coro/resume co)))) 42) 42)
-  "test_coroutine_captures_lambda_param")
+        "test_coroutine_captures_lambda_param")
 
 (assert (= ((fn (a)
               ((fn (b)
                  (let [gen (fn () (yield (+ a b)))]
                    (let [co (make-coroutine gen)]
                      (coro/resume co)))) 20)) 10) 30)
-  "test_coroutine_captures_multiple_levels")
+        "test_coroutine_captures_multiple_levels")
 
 (assert (= (let [@counter 0]
              (let [gen (fn ()
@@ -271,14 +271,14 @@
                       1
                       (* x (fact (- x 1))))))
                 (fact n))) 6) 720)
-  "test_self_recursive_function_via_define_inside_fn")
+        "test_self_recursive_function_via_define_inside_fn")
 
 (assert (= ((fn ()
               (begin
                 (def @x 42)
                 (def f (fn () x))
                 (f)))) 42)
-  "test_nested_lambda_capturing_locally_defined_variable")
+        "test_nested_lambda_capturing_locally_defined_variable")
 
 (assert (= ((fn (initial)
               (begin
@@ -287,14 +287,14 @@
                 (def setter (fn (new-val) (assign value new-val)))
                 (setter 42)
                 (getter))) 0) 42)
-  "test_multiple_closures_sharing_mutable_state_via_define")
+        "test_multiple_closures_sharing_mutable_state_via_define")
 
 (assert (= ((fn ()
               (begin
                 (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
                 (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
                 (is-even 8)))) true)
-  "test_mutual_recursion_via_define_inside_fn")
+        "test_mutual_recursion_via_define_inside_fn")
 
 # ============================================================================
 # SECTION 8: let/letrec inside closures must use StoreCapture, not StoreLocal
@@ -328,7 +328,7 @@
              (let [result 999]
                (process 5)
                result)) 999)
-  "test_letrec_inside_closure_does_not_corrupt_caller_stack")
+        "test_letrec_inside_closure_does_not_corrupt_caller_stack")
 
 (assert (= (begin
              (def f

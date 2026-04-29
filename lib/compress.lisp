@@ -12,6 +12,7 @@
   (def libz (ffi/native "libz.so"))
   (def libzstd (ffi/native "libzstd.so"))
   (def null-ptr (ptr/from-int 0))
+
   (defn cfn [lib name ret args]
     (let [p (ffi/lookup lib name)
           s (ffi/signature ret args)]
@@ -56,6 +57,7 @@
       (each i in (range len)
         (push acc (ffi/read (ptr/add ptr i) :u8)))
       (freeze (bytes ;acc))))
+
   (defn to-input [data]
     "Coerce to bytes + pin for FFI."
     (let [b (if (string? data) (bytes data) data)]
@@ -74,7 +76,7 @@
       (each i in (range Z_STREAM_SIZE)
         (ffi/write (ptr/add stream i) :u8 0))  ## deflateInit2(stream, level, Z_DEFLATED=8, windowBits, memLevel=8, Z_DEFAULT_STRATEGY=0)
       (let [rc (z-deflateInit2 stream level 8 window-bits 8 0 ZLIB_VERSION
-              Z_STREAM_SIZE)]
+                               Z_STREAM_SIZE)]
         (unless (= rc Z_OK)
           (ffi/free stream)
           (ffi/free out-buf)
@@ -92,10 +94,8 @@
           (ffi/free out-buf)
           (error {:error :compress-error :message (string "deflate failed: " rc)})))
 
-      ## Read output size: total_out is at offset 40
-      ## (after avail_out at 32 + padding)
-      ## next_out(24,8) + avail_out(32,4)
-      ## + pad(36,4) + total_out(40,8)
+      ## Read output size: total_out is at offset 40 (after avail_out at 32 + padding)
+      ## Offsets: next_out 24:8, avail_out 32:4, pad 36:4, total_out 40:8
       (let* [avail-out (ffi/read (ptr/add stream 32) :u32)
              compressed-len (- out-size avail-out)
              result (ptr->bytes out-buf compressed-len)]
@@ -103,6 +103,7 @@
         (ffi/free stream)
         (ffi/free out-buf)
         result)))
+
   (defn deflate-decompress [data window-bits]
     "Decompress data using zlib's inflate with the given windowBits."
     (let* [input (bytes data)
@@ -138,7 +139,7 @@
                          new-buf (ffi/malloc new-size)]
                     (each i in (range total-out)
                       (ffi/write (ptr/add new-buf i)
-                        :u8 (ffi/read (ptr/add out-buf i) :u8)))
+                                 :u8 (ffi/read (ptr/add out-buf i) :u8)))
                     (ffi/free out-buf)
                     (assign out-buf new-buf)
                     (assign buf-size new-size)))
@@ -186,6 +187,7 @@
       (let [result (ptr->bytes out-buf rc)]
         (ffi/free out-buf)
         result)))
+
   (defn unzstd [data]
     (let* [input (bytes data)
            in-len (length input)
@@ -205,6 +207,7 @@
           (let [result (ptr->bytes out-buf rc)]
             (ffi/free out-buf)
             result)))))
+
   {:gzip gzip
    :gunzip gunzip
    :zlib zlib

@@ -516,20 +516,12 @@ impl SyntaxReader {
                 }
             }
             Some(OwnedToken::String(s)) => {
-                // @"..." is sugar for (thaw "...")
+                // @"..." is a mutable string literal
                 let string_val = s.clone();
-                let str_boff = self.current_byte_offset();
-                let end = str_boff + self.current_length();
+                let end = self.current_byte_offset() + self.current_length();
                 self.advance(); // skip the string token
-                let outer_span = self.make_span(start_boff, end, start_loc);
-                let sym_span = self.make_span(start_boff, start_boff + 1, start_loc);
-                let str_span = self.make_span(str_boff, end, start_loc);
-                let sym = Syntax::new(SyntaxKind::Symbol("thaw".to_string()), sym_span);
-                let str_lit = Syntax::new(SyntaxKind::String(string_val), str_span);
-                Ok(Syntax::new(
-                    SyntaxKind::List(vec![sym, str_lit]),
-                    outer_span,
-                ))
+                let span = self.make_span(start_boff, end, start_loc);
+                Ok(Syntax::new(SyntaxKind::StringMut(string_val), span))
             }
             _ => Err(format!(
                 "{}: @ must be followed by [...], {{...}}, |...|, or \"...\"",

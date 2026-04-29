@@ -16,7 +16,7 @@
 (def syms (compile/symbols a))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/symbols:      {} ms  ({} symbols)"
-           (round (* (- t1 t0) 1000)) (length syms)))
+                        (round (* (- t1 t0) 1000)) (length syms)))
 
 # ── Diagnostics ────────────────────────────────────────────────────────
 
@@ -24,7 +24,7 @@
 (def diags (compile/diagnostics a))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/diagnostics:  {} ms  ({} diagnostics)"
-           (round (* (- t1 t0) 1000)) (length diags)))
+                        (round (* (- t1 t0) 1000)) (length diags)))
 
 # ── Signal (single) ───────────────────────────────────────────────────
 
@@ -39,13 +39,13 @@
 (def silent (compile/query-signal a :silent))
 (assign t1 (clock/monotonic))
 (println (string/format "query-signal :silent: {} ms  ({} matches)"
-           (round (* (- t1 t0) 1000)) (length silent)))
+                        (round (* (- t1 t0) 1000)) (length silent)))
 
 (assign t0 (clock/monotonic))
 (def yielding (compile/query-signal a :yields))
 (assign t1 (clock/monotonic))
 (println (string/format "query-signal :yields: {} ms  ({} matches)"
-           (round (* (- t1 t0) 1000)) (length yielding)))
+                        (round (* (- t1 t0) 1000)) (length yielding)))
 
 # ── Call graph ─────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@
 (def g (compile/call-graph a))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/call-graph:   {} ms  ({} nodes)"
-           (round (* (- t1 t0) 1000)) (length (get g :nodes))))
+                        (round (* (- t1 t0) 1000)) (length (get g :nodes))))
 
 # ── Callers / callees ─────────────────────────────────────────────────
 
@@ -61,13 +61,13 @@
 (def callers (compile/callers a :map))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/callers:      {} ms  ({} callers)"
-           (round (* (- t1 t0) 1000)) (length callers)))
+                        (round (* (- t1 t0) 1000)) (length callers)))
 
 (assign t0 (clock/monotonic))
 (def callees (compile/callees a :map))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/callees:      {} ms  ({} callees)"
-           (round (* (- t1 t0) 1000)) (length callees)))
+                        (round (* (- t1 t0) 1000)) (length callees)))
 
 # ── Captures ───────────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@
 (def caps (compile/captures a :map))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/captures:     {} ms  ({} captures)"
-           (round (* (- t1 t0) 1000)) (length caps)))
+                        (round (* (- t1 t0) 1000)) (length caps)))
 
 # ── Bindings (bulk) ───────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@
 (def binds (compile/bindings a))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/bindings:     {} ms  ({} bindings)"
-           (round (* (- t1 t0) 1000)) (length binds)))
+                        (round (* (- t1 t0) 1000)) (length binds)))
 
 # ── Binding (single) ──────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@
 (def prims (compile/primitives))
 (assign t1 (clock/monotonic))
 (println (string/format "compile/primitives:   {} ms  ({} primitives)"
-           (round (* (- t1 t0) 1000)) (length prims)))
+                        (round (* (- t1 t0) 1000)) (length prims)))
 
 # ── Full portrait ──────────────────────────────────────────────────────
 
@@ -122,10 +122,10 @@
 (def pt (rdf:primitives))
 (assign t1 (clock/monotonic))
 (println (string/format "rdf:primitives:       {} ms  ({} bytes)"
-           (round (* (- t1 t0) 1000)) (length pt)))
+                        (round (* (- t1 t0) 1000)) (length pt)))
 
 (assign t0 (clock/monotonic))
 (def ft (rdf:file a "stdlib.lisp"))
 (assign t1 (clock/monotonic))
 (println (string/format "rdf:file:             {} ms  ({} bytes)"
-           (round (* (- t1 t0) 1000)) (length ft)))
+                        (round (* (- t1 t0) 1000)) (length ft)))

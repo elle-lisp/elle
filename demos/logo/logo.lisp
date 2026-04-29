@@ -44,7 +44,7 @@
          [p1 seg:p1] [p2 seg:p2]
          [p3 seg:p3]]
     (v+ (v+ (v* u3 p0) (v* (* 3.0 (* u2 t)) p1))
-      (v+ (v* (* 3.0 (* u t2)) p2) (v* t3 p3)))))
+        (v+ (v* (* 3.0 (* u t2)) p2) (v* t3 p3)))))
 
 (defn bezier-tangent [seg t]
   "Tangent vector of cubic bezier at parameter t."
@@ -217,7 +217,7 @@
   (assign
     doc
     (append doc
-      "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">\n"))
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">\n"))
 
   # Three strokes — no layering needed, draw order doesn't matter
   (each path in (render-fibers diagonal)
@@ -238,6 +238,7 @@
       (-> doc
           (append path)
           (append "\n"))))
+
   (assign doc (append doc "</svg>\n"))
   doc)
 

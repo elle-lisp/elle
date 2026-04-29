@@ -41,7 +41,7 @@
     # ── 2. http:post with JSON body ───────────────────────────────────
 
     (let [r (http:post url (json-serialize {"test" true})
-            :headers {:content-type "application/json"})]
+                       :headers {:content-type "application/json"})]
       (assert (= r:status 200) "JSON http:post works")
       (assert (= (length received) 2) "collector received JSON post"))
     (println "  2. http:post with JSON body: ok")
@@ -62,10 +62,13 @@
         :temporality :cumulative
         :enabled true
         :on-export nil})
+
     (def c (telemetry:counter meter-stub "req"))
     (telemetry:add c 1 :attributes {"method" "GET"})
+
     (def payload (telemetry:build-payload meter-stub))
     (def body (json-serialize payload))
+
     (let [r (http:post url body :headers {:content-type "application/json"})]
       (assert (= r:status 200) "telemetry-sized JSON body works")
       (assert (= (length received) 3) "collector received telemetry body"))
@@ -76,6 +79,7 @@
 
     # Reset received for clean counting
     (while (not (empty? received)) (pop received))
+
     (telemetry:flush meter-stub)
     (ev/sleep 0.05)
     (assert (= (length received) 1) "telemetry:flush delivered payload")
@@ -85,9 +89,11 @@
     # ── 5. telemetry:flush with real meter (background fiber) ─────────
 
     (while (not (empty? received)) (pop received))
+
     (def meter (telemetry:meter "test-svc" :endpoint url :interval 9999))
     (def counter (telemetry:counter meter "http.requests"))
     (telemetry:add counter 1 :attributes {"method" "GET"})
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (= (length received) 1) "telemetry:flush (real meter) delivered")
@@ -97,10 +103,12 @@
     # ── 6. Flush after telemetry:time (the previously-hanging case) ───
 
     (while (not (empty? received)) (pop received))
+
     (def latency
       (telemetry:histogram meter "latency" :unit "s"
-        :boundaries [0.01 0.05 0.1 0.5 1.0]))
+                           :boundaries [0.01 0.05 0.1 0.5 1.0]))
     (telemetry:time latency (fn [] (ev/sleep 0.001)) :attributes {"op" "test"})
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (>= (length received) 1) "flush after telemetry:time delivered")
@@ -110,11 +118,13 @@
     # ── 6b. Flush after many telemetry:time calls ──────────────────────
 
     (while (not (empty? received)) (pop received))
+
     (def @i 0)
     (while (< i 8)
       (telemetry:time latency (fn [] (ev/sleep 0.001))
-        :attributes {"op" (string "req-" i)})
+                      :attributes {"op" (string "req-" i)})
       (assign i (+ i 1)))
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (>= (length received) 1) "flush after 8x telemetry:time delivered")
@@ -124,18 +134,21 @@
     # ── 6c. Full simulation: 4 instruments, mixed recording, then flush ─
 
     (while (not (empty? received)) (pop received))
+
     (def http-requests (telemetry:counter meter "sim.requests" :unit "1"))
     (def order-revenue (telemetry:counter meter "sim.revenue" :unit "USD"))
     (def db-conns (telemetry:gauge meter "sim.connections" :unit "1"))
+
     (defn simulate-request [method path status price]
       (let [attrs {"http.method" method "http.route" path "http.status" status}]
         (telemetry:add http-requests 1 :attributes attrs)
         (telemetry:time latency
-          (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
-          :attributes attrs)
+                        (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
+                        :attributes attrs)
         (when price
           (telemetry:add order-revenue price
-            :attributes {"currency" "USD" "region" "us-east"}))))
+                         :attributes {"currency" "USD" "region" "us-east"}))))
+
     (simulate-request "GET" "/api/orders" 200 nil)
     (simulate-request "POST" "/api/orders" 201 49.99)
     (simulate-request "GET" "/api/orders/123" 200 nil)
@@ -144,9 +157,11 @@
     (simulate-request "GET" "/api/health" 200 nil)
     (simulate-request "GET" "/api/orders/999" 404 nil)
     (simulate-request "POST" "/api/orders" 201 24.95)
+
     (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 3 :attributes {"db.system" "postgresql"})
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (>= (length received) 1) "full simulation flush delivered")
@@ -175,6 +190,7 @@
     # ── 6e. Exact example sequence ──────────────────────────────────────
 
     (while (not (empty? received)) (pop received))
+
     (simulate-request "GET" "/api/orders" 200 nil)
     (simulate-request "POST" "/api/orders" 201 49.99)
     (simulate-request "GET" "/api/orders/123" 200 nil)
@@ -183,13 +199,16 @@
     (simulate-request "GET" "/api/health" 200 nil)
     (simulate-request "GET" "/api/orders/999" 404 nil)
     (simulate-request "POST" "/api/orders" 201 24.95)
+
     (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 3 :attributes {"db.system" "postgresql"})
+
     (def ex-payload (telemetry:build-payload meter))
     (def ex-rm (get (get ex-payload "resourceMetrics") 0))
     (def ex-scope (get (get (get ex-rm "scopeMetrics") 0) "metrics"))
     (assert (>= (length ex-scope) 4) "payload has instruments")
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (>= (length received) 1) "exact example sequence flush delivered")
@@ -203,6 +222,7 @@
     # nested function emission.  Fixed in #673.
 
     (while (not (empty? received)) (pop received))
+
     (simulate-request "GET" "/api/orders" 200 nil)
     (simulate-request "POST" "/api/orders" 201 49.99)
     (simulate-request "GET" "/api/orders/123" 200 nil)
@@ -211,13 +231,16 @@
     (simulate-request "GET" "/api/health" 200 nil)
     (simulate-request "GET" "/api/orders/999" 404 nil)
     (simulate-request "POST" "/api/orders" 201 24.95)
+
     (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 3 :attributes {"db.system" "postgresql"})
+
     (def f-payload (telemetry:build-payload meter))
     (def f-rm (get (get f-payload "resourceMetrics") 0))
     (def f-scope (get (get (get f-rm "scopeMetrics") 0) "metrics"))
     (assert (>= (length f-scope) 4) "6f payload has instruments")
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (>= (length received) 1) "6f flush delivered")
@@ -227,6 +250,7 @@
     # ── 7. Second flush sends nothing (points cleared) ────────────────
 
     (while (not (empty? received)) (pop received))
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (= (length received) 0) "second flush sends nothing")
@@ -247,5 +271,6 @@
     (telemetry:shutdown meter)
     (ev/abort server)
     (port/close listener)
+
     (println "")
     (println "all telemetry-export tests passed.")))

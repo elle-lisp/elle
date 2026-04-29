@@ -31,7 +31,7 @@
        h ((import "std/http2/hpack") :huffman ((import "std/http2/huffman")))
        sess ((import "std/http2/session") :sync s :frame f :stream st :hpack h)
        m ((import "std/http2/server") :sync s :hpack h :frame f :stream st
-         :session sess)]
+                                      :session sess)]
   (m:test))
 
 ## ── Full module test (includes loopback) ─────────────────────────────

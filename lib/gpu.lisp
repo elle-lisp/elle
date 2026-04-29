@@ -37,6 +37,7 @@
    body-fn: (fn [s] ...) receives shader builder context s."
     (let [bytecode (spv:compute local-size-x num-buffers body-fn plugin:f32-bits)]
       (plugin:shader ctx bytecode num-buffers)))
+
   (defn gpu-load-shader [ctx path num-buffers]
     "Load a pre-compiled SPIR-V shader from a file path."
     (plugin:shader ctx path num-buffers))
@@ -46,9 +47,11 @@
   (defn gpu-input [data]
     "Mark an array as input-only (uploaded to GPU, not read back)."
     {:data data :usage :input})
+
   (defn gpu-output [n]
     "Declare an output-only buffer of n f32 elements."
     {:size (* n 4) :usage :output})
+
   (defn gpu-inout [data]
     "Mark an array as input+output (uploaded to GPU, read back after compute)."
     {:data data :usage :inout})
@@ -61,7 +64,7 @@
    buffers: array of specs from gpu-input, gpu-output, gpu-inout.
    Fiber suspends on GPU fence fd — no thread pool thread consumed."
     (let* [handle (plugin:dispatch shader (workgroups 0) (workgroups 1)
-             (workgroups 2) buffers)
+                                   (workgroups 2) buffers)
            _ (plugin:wait handle)]
       (plugin:decode (plugin:collect handle) :f32)))
 
@@ -82,6 +85,7 @@
         (put kw (pairs i) (pairs (+ i 1)))
         (assign i (+ i 2))))
     [inputs kw])
+
   (defn gpu-map [f & rest-args]
     "Map a GPU-eligible function over N input arrays using compiler-generated SPIR-V.
    f: a GPU-eligible closure (pure arithmetic, no I/O or captures).
@@ -110,18 +114,18 @@
            dtype (or (get opts :dtype) :i64)
            wg-size (or (get opts :wg-size) 256)]
       (assert (= (length inputs) (fn/arity f))
-        "gpu:map: number of input arrays must match function arity")
+              "gpu:map: number of input arrays must match function arity")
       (let* [n (length (inputs 0))
              _ (each inp in inputs
                  (assert (= (length inp) n)
-                   "gpu:map: all input arrays must have the same length"))
+                         "gpu:map: all input arrays must have the same length"))
              num-bufs (+ (length inputs) 1)
              spirv (if (fn/git? f) (disgit f) (mlir/compile-spirv f wg-size))
              shader (plugin:shader ctx spirv num-bufs)
              wg-count (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))
              elem-size (if (= dtype :i64) 8 4)
              in-bufs (map (fn [data] {:data data :usage :input :dtype dtype})
-               inputs)
+                          inputs)
              out-buf {:size (* n elem-size) :usage :output}
              bufs (push (concat in-bufs) out-buf)
              handle (plugin:dispatch shader wg-count 1 1 bufs)

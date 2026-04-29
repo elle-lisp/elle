@@ -48,6 +48,7 @@
       (+ x 10)))
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -55,6 +56,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c 0)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (coro/resume c)
   (assert (= (coro/resume c 5) 15) "JIT yield with resume value"))
@@ -73,6 +75,7 @@
       4))
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -82,6 +85,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (assert (= (coro/resume c) 1) "JIT multiple yields: first")
   (assert (= (coro/resume c) 2) "JIT multiple yields: second")
@@ -100,6 +104,7 @@
       20))
   (def outer (fn [] (+ 1 (inner))))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -107,6 +112,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
@@ -126,6 +132,7 @@
   (def middle (fn [] (inner)))
   (def outer (fn [] (middle)))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -133,6 +140,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
@@ -152,6 +160,7 @@
         (+ offset 1))))
   (def outer (fn [] ((make-gen 10))))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -159,6 +168,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
@@ -181,6 +191,7 @@
         (let [y (inner)]
           (+ x y)))))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -188,6 +199,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
@@ -212,6 +224,7 @@
             (let [d (inner)]
               (+ a (+ b (+ c d)))))))))
   (def run (fn [] (outer)))
+
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
@@ -219,6 +232,7 @@
     (coro/resume warmup-c)
     (coro/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
+
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))

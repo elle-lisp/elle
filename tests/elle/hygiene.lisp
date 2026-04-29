@@ -15,7 +15,7 @@
     (freeze out)))
 
 (assert (= (iterate-rest 1 2 3) [1 2 3])
-  "each: template rest not captured by user rest")
+        "each: template rest not captured by user rest")
 
 ## Same with `cur` — another name used internally by `each`
 (defn iterate-cur [& cur]
@@ -25,7 +25,7 @@
     (freeze out)))
 
 (assert (= (iterate-cur "a" "b") ["a" "b"])
-  "each: template cur not captured by user cur")
+        "each: template cur not captured by user cur")
 
 ## Same with `seq`
 (defn iterate-seq [& seq]
@@ -35,7 +35,7 @@
     (freeze out)))
 
 (assert (= (iterate-seq :x :y) [:x :y])
-  "each: template seq not captured by user seq")
+        "each: template seq not captured by user seq")
 
 # ── when/unless: template symbols not captured ───────────────────────
 
@@ -53,7 +53,7 @@
     (freeze result)))
 
 (assert (= (collect-rest -1 2 -3 4) [2 4])
-  "nested macros: each+when with shadowed rest")
+        "nested macros: each+when with shadowed rest")
 
 # ── Struct iteration ─────────────────────────────────────────────────
 

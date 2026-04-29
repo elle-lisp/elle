@@ -123,15 +123,9 @@ pub(super) fn format_annotated(
     // Comments extend to end-of-line, so they MUST be followed by a
     // newline — otherwise the next token gets eaten by the comment.
     //
-    // BlankLines in trailing trivia are only emitted when followed by
-    // a comment — they provide block-vs-inline context. Otherwise,
-    // inter-sibling spacing is handled by the form formatters' own
-    // HardBreaks, and trailing blank lines before close parens must
-    // be stripped to maintain idempotency.
-    let has_trailing_comments = node
-        .trailing
-        .iter()
-        .any(|t| matches!(t, Trivia::Comment { .. }));
+    // Trailing trivia: comments and blank lines after the form.
+    // Blank lines are preserved to maintain author-intended spacing
+    // between sibling forms (e.g. between defn blocks).
     let mut seen_break = false;
     let mut inline_done = false;
     for t in &node.trailing {
@@ -150,10 +144,8 @@ pub(super) fn format_annotated(
             }
             Trivia::BlankLines { count, .. } => {
                 seen_break = true;
-                if has_trailing_comments {
-                    for _ in 0..(*count).min(2) {
-                        parts.push(Doc::hardbreak());
-                    }
+                for _ in 0..(*count).min(2) {
+                    parts.push(Doc::hardbreak());
                 }
             }
         }
@@ -279,7 +271,7 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
         }
         SyntaxKind::Symbol(s) => Doc::text(s.clone()),
         SyntaxKind::Keyword(s) => Doc::text(format!(":{}", s)),
-        SyntaxKind::String(_) => {
+        SyntaxKind::String(_) | SyntaxKind::StringMut(_) => {
             // Slice from source to preserve the raw literal (escapes, quotes).
             // SyntaxKind::String stores the unescaped value, not the source text.
             let span = &node.syntax.span;
@@ -289,6 +281,7 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
                 // Synthetic or detached span — fall back to escaped display
                 match &node.syntax.kind {
                     SyntaxKind::String(s) => Doc::text(format!("\"{}\"", s.escape_default())),
+                    SyntaxKind::StringMut(s) => Doc::text(format!("@\"{}\"", s.escape_default())),
                     _ => Doc::text("#<bad-string>"),
                 }
             }
@@ -338,7 +331,9 @@ fn format_list(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig) -
             "match" => return super::forms::format_match(children, source, config),
             "while" => return super::forms::format_while(children, source, config),
             "defmacro" => return super::forms::format_defmacro(children, source, config),
-            "begin" | "do" => return super::forms::format_begin(children, source, config),
+            "begin" | "do" | "defer" => {
+                return super::forms::format_begin(children, source, config)
+            }
             "forever" => return super::forms::format_forever(children, source, config),
             "block" => return super::forms::format_block(children, source, config),
             "parameterize" => return super::forms::format_parameterize(children, source, config),

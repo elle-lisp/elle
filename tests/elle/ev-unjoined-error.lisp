@@ -33,33 +33,33 @@
 # We write a helper script and run it as a subprocess.
 # Use sys/env to find the binary path, or fall back to the build output.
 (let* [elle (or (get (sys/env) "ELLE")
-         (if (file-exists? "./target/release/elle")
-           "./target/release/elle"
-           "./target/debug/elle"))
+                (if (file-exists? "./target/release/elle")
+                  "./target/release/elle"
+                  "./target/debug/elle"))
        tmp "/tmp/elle-unjoined-error-test.lisp"
        p (port/open tmp :write)]
   (port/write p
-    (bytes "(ev/spawn (fn [] (error {:error :boom})))\n(ev/sleep 0.01)\n"))
+              (bytes "(ev/spawn (fn [] (error {:error :boom})))\n(ev/sleep 0.01)\n"))
   (port/close p)
   (let [result (subprocess/system elle [tmp])]
     (assert (not (= (get result :exit) 0))
-      "unjoined error must crash (non-zero exit)")
+            "unjoined error must crash (non-zero exit)")
     (assert (string/contains? (get result :stderr) "boom")
-      "error message should appear in stderr")))
+            "error message should appear in stderr")))
 (println "  unjoined error crashes process: ok")
 
 # Test 5: successful unjoined fiber does NOT crash
 (let* [elle (or (get (sys/env) "ELLE")
-         (if (file-exists? "./target/release/elle")
-           "./target/release/elle"
-           "./target/debug/elle"))
+                (if (file-exists? "./target/release/elle")
+                  "./target/release/elle"
+                  "./target/debug/elle"))
        tmp "/tmp/elle-unjoined-ok-test.lisp"
        p (port/open tmp :write)]
   (port/write p (bytes "(ev/spawn (fn [] 42))\n(ev/sleep 0.01)\n"))
   (port/close p)
   (let [result (subprocess/system elle [tmp])]
     (assert (= (get result :exit) 0)
-      "successful unjoined fiber should not crash")))
+            "successful unjoined fiber should not crash")))
 (println "  successful unjoined fiber ok: ok")
 
 (println "ev-unjoined-error: all tests passed")

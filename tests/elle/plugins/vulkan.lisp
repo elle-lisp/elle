@@ -20,11 +20,11 @@
 ## ── Compile shader at runtime ─────────────────────────────────
 (def shader
   (gpu:compile ctx 256 3
-    (fn [s]
-      (let* [id (s:global-id)
-             a (s:load 0 id)
-             b (s:load 1 id)]
-        (s:store 2 id (s:fadd a b))))))
+               (fn [s]
+                 (let* [id (s:global-id)
+                        a (s:load 0 id)
+                        b (s:load 1 id)]
+                   (s:store 2 id (s:fadd a b))))))
 
 ## ── Vector addition: 256 elements = 1 workgroup ───────────────
 (def n 256)
@@ -43,61 +43,61 @@
 ## ── Mandelbrot: loops + local variables ──────────────────────
 (def mandel-shader
   (gpu:compile ctx 256 3
-    (fn [s]
-      (let* [id (s:global-id)
-             cx (s:load 0 id)
-             cy (s:load 1 id)
-             zr (s:var-f)
-             zi (s:var-f)
-             iter (s:var-u)
-             max-iter (s:const-u 64)
-             four (s:const-f 4.0)
-             zero-f (s:const-f 0.0)
-             zero-u (s:const-u 0)
-             one-u (s:const-u 1)
-             hdr (s:block)
-             body (s:block)
-             cont (s:block)
-             done (s:block)]
-        (s:store-var zr zero-f)
-        (s:store-var zi zero-f)
-        (s:store-var iter zero-u)
-        (s:branch hdr)
-        (s:begin-block hdr)
-        (let* [r (s:load-var zr)
-               i (s:load-var zi)
-               r2 (s:fmul r r)
-               i2 (s:fmul i i)
-               mag (s:fadd r2 i2)
-               ok (s:flt mag four)
-               n (s:load-var iter)
-               lim (s:slt n max-iter)
-               go (s:logical-and ok lim)]
-          (s:loop-merge done cont)
-          (s:branch-cond go body done))
-        (s:begin-block body)
-        (let* [r (s:load-var zr)
-               i (s:load-var zi)
-               ri (s:fmul r i)
-               r2 (s:fmul r r)
-               i2 (s:fmul i i)
-               nr (s:fadd (s:fsub r2 i2) cx)
-               ni (s:fadd (s:fadd ri ri) cy)]
-          (s:store-var zr nr)
-          (s:store-var zi ni)
-          (s:store-var iter (s:iadd (s:load-var iter) one-u))
-          (s:branch cont))
-        (s:begin-block cont)
-        (s:branch hdr)
-        (s:begin-block done)
-        (s:store 2 id (s:u2f (s:load-var iter)))))))
+               (fn [s]
+                 (let* [id (s:global-id)
+                        cx (s:load 0 id)
+                        cy (s:load 1 id)
+                        zr (s:var-f)
+                        zi (s:var-f)
+                        iter (s:var-u)
+                        max-iter (s:const-u 64)
+                        four (s:const-f 4.0)
+                        zero-f (s:const-f 0.0)
+                        zero-u (s:const-u 0)
+                        one-u (s:const-u 1)
+                        hdr (s:block)
+                        body (s:block)
+                        cont (s:block)
+                        done (s:block)]
+                   (s:store-var zr zero-f)
+                   (s:store-var zi zero-f)
+                   (s:store-var iter zero-u)
+                   (s:branch hdr)
+                   (s:begin-block hdr)
+                   (let* [r (s:load-var zr)
+                          i (s:load-var zi)
+                          r2 (s:fmul r r)
+                          i2 (s:fmul i i)
+                          mag (s:fadd r2 i2)
+                          ok (s:flt mag four)
+                          n (s:load-var iter)
+                          lim (s:slt n max-iter)
+                          go (s:logical-and ok lim)]
+                     (s:loop-merge done cont)
+                     (s:branch-cond go body done))
+                   (s:begin-block body)
+                   (let* [r (s:load-var zr)
+                          i (s:load-var zi)
+                          ri (s:fmul r i)
+                          r2 (s:fmul r r)
+                          i2 (s:fmul i i)
+                          nr (s:fadd (s:fsub r2 i2) cx)
+                          ni (s:fadd (s:fadd ri ri) cy)]
+                     (s:store-var zr nr)
+                     (s:store-var zi ni)
+                     (s:store-var iter (s:iadd (s:load-var iter) one-u))
+                     (s:branch cont))
+                   (s:begin-block cont)
+                   (s:branch hdr)
+                   (s:begin-block done)
+                   (s:store 2 id (s:u2f (s:load-var iter)))))))
 
 ## 4 test points: origin (inside set), far point (outside), real axis, edge
 (def mandel-cx [0.0 10.0 -2.0 0.25])
 (def mandel-cy [0.0 10.0 0.0 0.0])
 (def mandel-result
   (gpu:run mandel-shader [1 1 1]
-    [(gpu:input mandel-cx) (gpu:input mandel-cy) (gpu:output 4)]))
+           [(gpu:input mandel-cx) (gpu:input mandel-cy) (gpu:output 4)]))
 
 (assert (= (mandel-result 0) 64.0) "origin reaches max iterations")
 (assert (< (mandel-result 1) 5.0) "far point escapes quickly")
@@ -107,20 +107,20 @@
 ## ── Bitwise ops: ior, iand, ishl, ishr, bitcast, umin ────────
 (def bitwise-shader
   (gpu:compile ctx 256 2
-    (fn [s]
-      (let* [id (s:global-id)
-             a (s:f2u (s:load 0 id))
-             b (s:const-u 8)  ## test ior: a | 0xFF = 0xFF for a in [0..8]
-             or-r (s:ior a (s:const-u 0xFF))  ## test ishl: a << 8
-             shl-r (s:ishl a b)  ## test umin: min(a, 3)
-             ## pack results:
-             ## (or << 16) | (shl-low-byte << 8) | min
-             ## (all values fit in a byte
-             ## for a in [0..8])
-             min-r (s:umin a (s:const-u 3))
-             shl-byte (s:iand shl-r (s:const-u 0xFF00))
-             packed (s:ior (s:ishl or-r (s:const-u 16)) (s:ior shl-byte min-r))]
-        (s:store 1 id (s:u2f packed))))))
+               (fn [s]
+                 (let* [id (s:global-id)
+                        a (s:f2u (s:load 0 id))
+                        b (s:const-u 8)  ## test ior: a | 0xFF = 0xFF for a in [0..8]
+                        or-r (s:ior a (s:const-u 0xFF))  ## test ishl: a << 8
+                        shl-r (s:ishl a b)  ## test umin: min(a, 3)
+                        ## pack results:
+                        ## (or << 16) | (shl << 8) | min
+                        ## (all values fit in a byte, a in [0..8])
+                        min-r (s:umin a (s:const-u 3))
+                        shl-byte (s:iand shl-r (s:const-u 0xFF00))
+                        packed (s:ior (s:ishl or-r (s:const-u 16))
+                                      (s:ior shl-byte min-r))]
+                   (s:store 1 id (s:u2f packed))))))
 
 (def bitwise-input (map float (range 8)))
 (def bitwise-result
@@ -136,11 +136,11 @@
 ## ── Bitcast u32→f32 round-trip ──────────────────────────────
 (def bitcast-shader
   (gpu:compile ctx 256 2
-    (fn [s]
-      (let* [id (s:global-id)
-             val (s:const-u 0x42280000)  # IEEE 754 bits for 42.0
-             as-f (s:bitcast-u2f val)]
-        (s:store 1 id as-f)))))
+               (fn [s]
+                 (let* [id (s:global-id)
+                        val (s:const-u 0x42280000)  # IEEE 754 bits for 42.0
+                        as-f (s:bitcast-u2f val)]
+                   (s:store 1 id as-f)))))
 
 (def bitcast-result
   (gpu:run bitcast-shader [1 1 1] [(gpu:input [0.0]) (gpu:output 256)]))

@@ -174,9 +174,10 @@
 # test_large_list — create list with 100 elements
 (def @large-list
   (list 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
-    27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51
-    52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76
-    77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99))
+        27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50
+        51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74
+        75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98
+        99))
 (assert (list? large-list) "large list is list")
 (assert (= (length large-list) 100) "large list length")
 
@@ -209,7 +210,7 @@
 
 # test_append
 (assert (= (append (append (list 1 2) (list 3 4)) (list 5)) (list 1 2 3 4 5))
-  "append lists")
+        "append lists")
 
 # test_reverse
 (assert (= (reverse (list 1 2 3)) (list 3 2 1)) "reverse list")
@@ -448,11 +449,11 @@
 (def @cy 20)
 (def @cz 30)
 (assert (= ((fn [a b c] (+ a b c cx cy cz)) 1 2 3) 66)
-  "closure captures multiple")
+        "closure captures multiple")
 
 # test_closure_parameter_in_nested_expression
 (assert (= ((fn [x] (if (> x 50) (* x 2) (+ x 100))) 25) 125)
-  "closure param in nested expr")
+        "closure param in nested expr")
 
 # test_multiple_closures_independent_params
 (def f1 (fn [x] (+ x 10)))
@@ -469,7 +470,7 @@
 
 # test_closure_parameter_in_conditional
 (assert (= ((fn [n] (if (nil? n) "empty" "nonempty")) (list 1)) "nonempty")
-  "closure param in conditional")
+        "closure param in conditional")
 
 # test_closure_preserves_parameter_type
 (assert ((fn [s] (string? s)) "hello") "closure preserves param type")
@@ -900,14 +901,14 @@
 
 # test_min_max_float
 (assert (< (abs (- (min 1.5 2 0.5) 0.5)) 0.0000000001)
-  "min float: min(1.5,2,0.5)=0.5")
+        "min float: min(1.5,2,0.5)=0.5")
 
 # test_abs_float
 (assert (< (abs (- (abs -3.5) 3.5)) 0.0000000001) "abs float: abs(-3.5)=3.5")
 
 # test_type_conversions_float
 (assert (< (abs (- (float 5) 5.0)) 0.0000000001)
-  "float conversion: (float 5)=5.0")
+        "float conversion: (float 5)=5.0")
 
 # test_sqrt
 (assert (= (sqrt 4) 2.0) "sqrt 4 = 2.0")

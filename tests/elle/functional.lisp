@@ -5,7 +5,7 @@
 (assert (= (sort ()) ()) "sort: empty list")
 (assert (= (sort (list 1)) (list 1)) "sort: single element")
 (assert (= (sort (list 3 1 4 1 5 9 2 6)) (list 1 1 2 3 4 5 6 9))
-  "sort: duplicates")
+        "sort: duplicates")
 (assert (= (sort (list 1.5 0.5 2.5)) (list 0.5 1.5 2.5)) "sort: floats")
 (let [arr @[3 1 2]]
   (let [result (sort arr)]
@@ -22,7 +22,7 @@
 
 ## ── sort: non-numeric types ─────────────────────────────────────────
 (assert (= (sort (list "banana" "apple" "cherry"))
-    (list "apple" "banana" "cherry")) "sort: strings")
+           (list "apple" "banana" "cherry")) "sort: strings")
 (assert (= (sort (list :b :a :c)) (list :a :b :c)) "sort: keywords")
 # Cross-type ordering: nil < bool < int < ... (Value::Ord rank order)
 (let [result (sort [nil true 1])]
@@ -110,9 +110,9 @@
 (assert (= ((compose) 42) 42) "compose: zero fns is identity")
 (assert (= ((compose (fn (x) (+ x 1))) 5) 6) "compose: single fn")
 (assert (= ((compose (fn (x) (* x 2)) (fn (x) (+ x 1))) 3) 8)
-  "compose: f(g(x)) = (* 2 (+ 3 1))")
+        "compose: f(g(x)) = (* 2 (+ 3 1))")
 (assert (= ((comp (fn (x) (+ x 1)) (fn (x) (* x 2))) 3) 7)
-  "comp: alias, (+ 1 (* 2 3))")
+        "comp: alias, (+ 1 (* 2 3))")
 
 ## ── partial ─────────────────────────────────────────────────────────
 (assert (= ((partial + 10) 5) 15) "partial: one bound arg")
@@ -122,7 +122,7 @@
 
 ## ── juxt ────────────────────────────────────────────────────────────
 (assert (= ((juxt (fn (x) (* x 2)) (fn (x) (+ x 1))) 3) (list 6 4))
-  "juxt: two fns")
+        "juxt: two fns")
 (assert (= ((juxt even? odd?) 4) (list true false)) "juxt: predicates")
 
 ## ── all? ────────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@
 
 ## ── flatten ─────────────────────────────────────────────────────────
 (assert (= (flatten (list 1 (list 2 3) (list 4 (list 5)))) (list 1 2 3 4 5))
-  "flatten: nested lists")
+        "flatten: nested lists")
 (assert (= (flatten ()) ()) "flatten: empty")
 (assert (= (flatten (list 1 2 3)) (list 1 2 3)) "flatten: already flat")
 (let [f (flatten @[1 @[2 3] @[4]])]
@@ -205,7 +205,7 @@
 ## ── drop-while ──────────────────────────────────────────────────────
 (assert (= (drop-while even? (list 2 4 5 6)) (list 5 6)) "drop-while: list")
 (assert (= (drop-while even? (list 1 2 3)) (list 1 2 3))
-  "drop-while: none dropped")
+        "drop-while: none dropped")
 (assert (= (drop-while even? ()) ()) "drop-while: empty")
 (let [dw (drop-while even? @[2 4 5 6])]
   (assert (array? dw) "drop-while: array returns array")
@@ -236,7 +236,7 @@
 
 ## ── mapcat ──────────────────────────────────────────────────────────
 (assert (= (mapcat (fn (x) (list x (* x 10))) (list 1 2 3))
-    (list 1 10 2 20 3 30)) "mapcat: list")
+           (list 1 10 2 20 3 30)) "mapcat: list")
 (assert (= (mapcat (fn (x) ()) (list 1 2 3)) ()) "mapcat: empty results")
 (let [mc (mapcat (fn (x) @[x (* x 10)]) @[1 2 3])]
   (assert (array? mc) "mapcat: array returns array")
@@ -253,7 +253,7 @@
 
 ## ── map-indexed ─────────────────────────────────────────────────────
 (assert (= (map-indexed (fn (i x) (list i x)) (list :a :b :c))
-    (list (list 0 :a) (list 1 :b) (list 2 :c))) "map-indexed: list")
+           (list (list 0 :a) (list 1 :b) (list 2 :c))) "map-indexed: list")
 (assert (= (map-indexed (fn (i x) (list i x)) ()) ()) "map-indexed: empty")
 (let [mi (map-indexed (fn (i x) (+ i x)) @[10 20 30])]
   (assert (array? mi) "map-indexed: array returns array")
@@ -274,7 +274,7 @@
 
 ## ── interpose ───────────────────────────────────────────────────────
 (assert (= (interpose :sep (list 1 2 3)) (list 1 :sep 2 :sep 3))
-  "interpose: list")
+        "interpose: list")
 (assert (= (interpose :sep (list 1)) (list 1)) "interpose: single")
 (assert (= (interpose :sep ()) ()) "interpose: empty")
 (let [ip (interpose :sep @[1 2 3])]
@@ -300,7 +300,7 @@
 ## ── sort-by ─────────────────────────────────────────────────────────
 (assert (= (sort-by abs (list -3 1 -2)) (list 1 -2 -3)) "sort-by: abs list")
 (assert (= (sort-by identity (list 3 1 2)) (list 1 2 3))
-  "sort-by: identity = sort")
+        "sort-by: identity = sort")
 (assert (= (sort-by identity ()) ()) "sort-by: empty")
 (let [result (sort-by abs @[-3 1 -2])]
   (assert (array? result) "sort-by: array returns array")
@@ -313,20 +313,20 @@
 ## ── sort-with ────────────────────────────────────────────────────────
 # Basic list sort using compare
 (assert (= (sort-with compare (list 3 1 2)) (list 1 2 3))
-  "sort-with: basic list ascending")
+        "sort-with: basic list ascending")
 # Descending list sort
 (assert (= (sort-with (fn (a b) (compare b a)) (list 3 1 2)) (list 3 2 1))
-  "sort-with: descending")
+        "sort-with: descending")
 # String sort
 (assert (= (sort-with compare (list "banana" "apple" "cherry"))
-    (list "apple" "banana" "cherry")) "sort-with: strings")
+           (list "apple" "banana" "cherry")) "sort-with: strings")
 # Empty list
 (assert (= (sort-with compare ()) ()) "sort-with: empty")
 # Single element
 (assert (= (sort-with compare (list 42)) (list 42)) "sort-with: single")
 # Ascending with subtraction comparator
 (assert (= (sort-with (fn (a b) (- a b)) (list 3 1 2)) (list 1 2 3))
-  "sort-with: ascending subtraction")
+        "sort-with: ascending subtraction")
 # Mutable array sorted returns new mutable array
 (let [orig @[1 3 2]
       result (sort-with (fn (a b) (compare b a)) @[1 3 2])]
@@ -341,10 +341,10 @@
   (assert (= (get result 0) 1) "sort-with: array first"))
 # Stability: equal elements preserve insertion order
 (assert (= (sort-with (fn (a b) 0) (list 3 1 2)) (list 3 1 2))
-  "sort-with: all-equal preserves order")
+        "sort-with: all-equal preserves order")
 # sort-by-cmp alias works
 (assert (= (sort-by-cmp compare (list 3 1 2)) (list 1 2 3))
-  "sort-by-cmp: alias works")
+        "sort-by-cmp: alias works")
 
 ## ── freeze / thaw: structs ───────────────────────────────────────────
 (let [t @{:a 1 :b 2}]
@@ -378,15 +378,14 @@
 (assert (= (type-of (thaw (thaw [1 2 3]))) :@array) "thaw: idempotent on @array")
 
 ## ── freeze / thaw: strings ──────────────────────────────────────────
-(assert (= (freeze (thaw "hello")) "hello") "freeze @string: returns string")
-(assert (= (type-of (freeze (thaw "hello"))) :string)
-  "freeze @string: type is string")
+(assert (= (freeze @"hello") "hello") "freeze @string: returns string")
+(assert (= (type-of (freeze @"hello")) :string) "freeze @string: type is string")
 (assert (= (freeze "hello") "hello") "freeze: immutable string returns as-is")
 
 (assert (= (type-of (thaw "hello")) :@string) "thaw string: returns @string")
 (assert (= (freeze (thaw "hello")) "hello") "thaw then freeze: roundtrip")
 (assert (= (type-of (thaw (thaw "hello"))) :@string)
-  "thaw: idempotent on @string")
+        "thaw: idempotent on @string")
 
 ## ── freeze / thaw: bytes ────────────────────────────────────────────
 (let [mb (@bytes 1 2 3)]
@@ -400,9 +399,9 @@
     (assert (= (get mb 0) 1) "thaw bytes: preserves values")))
 
 (assert (= (type-of (freeze (freeze (@bytes 1 2 3)))) :bytes)
-  "freeze: idempotent on bytes")
+        "freeze: idempotent on bytes")
 (assert (= (type-of (thaw (thaw (bytes 1 2 3)))) :@bytes)
-  "thaw: idempotent on @bytes")
+        "thaw: idempotent on @bytes")
 
 ## ── freeze @string: invalid UTF-8 ──────────────────────────────────
 (let [[ok? _] (protect ((fn [] (freeze (@string 255 254)))))]

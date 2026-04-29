@@ -108,7 +108,7 @@
 
 (assert (= (+ ;(list 1 2 3)) 6) "splice list into arithmetic")
 (assert (= (+ 10 ;(list 1 2 3)) 16)
-  "splice list into arithmetic with leading arg")
+        "splice list into arithmetic with leading arg")
 (assert (= (+ ;(list 1 2) ;(list 3 4)) 10) "splice multiple lists")
 
 (let [result (list 0 ;(list 1 2 3) 4)]

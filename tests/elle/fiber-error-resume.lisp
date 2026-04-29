@@ -12,7 +12,7 @@
 
 (println "  1. resume errored fiber with recovery value...")
 (let [f (fiber/new (fn [] (+ 1 (emit :error {:reason :divide-by-zero})))
-        |:error|)]
+                   |:error|)]
   (def result (fiber/resume f))
   (assert (= (fiber/status f) :paused) "fiber with caught error is :paused")
 
@@ -37,7 +37,7 @@
     # Now resume the errored inner fiber with a recovery value
     (def recovered (fiber/resume inner 42))
     (assert (= recovered 43)
-      "errored fiber resumes and computes with recovery value")))
+            "errored fiber resumes and computes with recovery value")))
 (println "  2. ok")
 
 # ── Test 3: resume errored fiber multiple times ───────────────────
@@ -56,10 +56,13 @@
                          (when (>= count 3) (break total))))) |:error|)]
   (def v1 (fiber/resume f))
   (assert (= v1:reason :need-input) "first error caught")
+
   (def v2 (fiber/resume f 10))
   (assert (= v2:reason :need-input) "second error caught")
+
   (def v3 (fiber/resume f 20))
   (assert (= v3:reason :need-input) "third error caught")
+
   (def result (fiber/resume f 30))
   (assert (= result 60) "total is 10+20+30=60"))
 (println "  3. ok")
@@ -72,6 +75,7 @@
                      :done) |:yield|)]
   (let [outer (fiber/new (fn [] (fiber/resume f)) |:error|)]
     (assert (= (fiber/status f) :new) "starts :new")
+
     (fiber/resume outer)
     (assert (= (fiber/status f) :error) "after uncaught error: :error")
 
@@ -90,7 +94,7 @@
   (let [[ok? err] (protect (fiber/resume f))]
     (assert (not ok?) "resuming dead fiber errors")
     (assert (= err:message "fiber/resume: cannot resume completed fiber")
-      "correct error message")))
+            "correct error message")))
 (println "  5. ok")
 
 (println "  all fiber-error-resume tests passed")

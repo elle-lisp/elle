@@ -72,7 +72,7 @@
        f (fiber/new (fn () (arena/count)) 1)
        child-count (fiber/resume f)]
   (assert (= (< child-count parent-count) true)
-    "child fiber arena-count is less than parent's"))
+          "child fiber arena-count is less than parent's"))
 
 # test_child_fiber_arena_starts_near_zero
 # A child fiber's FiberHeap starts empty. The arena/count inside
@@ -91,7 +91,7 @@
        _ (fiber/resume f)
        after (arena/count)]
   (assert (= (< (- after before) 10) true)
-    "child allocations don't inflate parent arena count"))
+          "child allocations don't inflate parent arena count"))
 
 # test_child_fiber_allocations_tracked_separately
 # Child fiber allocations go to its own FiberHeap.
@@ -152,7 +152,7 @@
        p10 (measure 10)
        p50 (measure 50)]
   (assert (= (= p10 p50) true)
-    "per-iter allocation cost is constant after cache warm-up"))
+          "per-iter allocation cost is constant after cache warm-up"))
 
 # ── Shared allocator / zero-copy fiber exchange ─────────────────────
 
@@ -356,7 +356,7 @@
 # test_root_fiber_count_nonzero
 # After a full VM startup (stdlib loaded), arena/count on root must be > 0.
 (assert (> (arena/count) 0)
-  "root fiber arena/count is positive after stdlib load")
+        "root fiber arena/count is positive after stdlib load")
 
 # ── arena/checkpoint (opaque mark) ────────────────────────────────
 
@@ -378,7 +378,7 @@
 (let [[ok? err] (protect ((fn [] (arena/reset 42))))]
   (assert (not ok?) "arena/reset rejects integer (expected opaque checkpoint)")
   (assert (= (get err :error) :type-error)
-    "arena/reset rejects integer (expected opaque checkpoint)"))
+          "arena/reset rejects integer (expected opaque checkpoint)"))
 
 # test_checkpoint_reset_destructors_run
 # Objects allocated after checkpoint are logically freed (destructors run).
@@ -403,46 +403,46 @@
 (let [[ok? err] (protect ((fn [] (apply arena/count [:global]))))]
   (assert (not ok?) "arena/count rejects :global after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/count rejects :global after arity reduction"))
+          "arena/count rejects :global after arity reduction"))
 (let [[ok? err] (protect ((fn [] (apply arena/count [:fiber]))))]
   (assert (not ok?) "arena/count rejects :fiber after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/count rejects :fiber after arity reduction"))
+          "arena/count rejects :fiber after arity reduction"))
 
 # test_arena_bytes_rejects_scope_arg
 (let [[ok? err] (protect ((fn [] (apply arena/bytes [:global]))))]
   (assert (not ok?) "arena/bytes rejects :global after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/bytes rejects :global after arity reduction"))
+          "arena/bytes rejects :global after arity reduction"))
 (let [[ok? err] (protect ((fn [] (apply arena/bytes [:fiber]))))]
   (assert (not ok?) "arena/bytes rejects :fiber after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/bytes rejects :fiber after arity reduction"))
+          "arena/bytes rejects :fiber after arity reduction"))
 
 # test_arena_peak_rejects_scope_arg
 (let [[ok? err] (protect ((fn [] (apply arena/peak [:global]))))]
   (assert (not ok?) "arena/peak rejects :global after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/peak rejects :global after arity reduction"))
+          "arena/peak rejects :global after arity reduction"))
 
 # test_arena_reset_peak_rejects_scope_arg
 (let [[ok? err] (protect ((fn [] (apply arena/reset-peak [:global]))))]
   (assert (not ok?) "arena/reset-peak rejects :global after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/reset-peak rejects :global after arity reduction"))
+          "arena/reset-peak rejects :global after arity reduction"))
 
 # test_arena_object_limit_rejects_scope_arg
 (let [[ok? err] (protect ((fn [] (apply arena/object-limit [:global]))))]
   (assert (not ok?) "arena/object-limit rejects :global after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/object-limit rejects :global after arity reduction"))
+          "arena/object-limit rejects :global after arity reduction"))
 
 # test_arena_set_object_limit_rejects_scope_arg
 (let [[ok? err] (protect ((fn [] (apply arena/set-object-limit [100 :global]))))]
   (assert (not ok?)
-    "arena/set-object-limit rejects second :global arg after arity reduction")
+          "arena/set-object-limit rejects second :global arg after arity reduction")
   (assert (= (get err :error) :arity-error)
-    "arena/set-object-limit rejects second :global arg after arity reduction"))
+          "arena/set-object-limit rejects second :global arg after arity reduction"))
 
 # ── arena/stats new fields (Chunk 5) ───────────────────────────────
 
@@ -457,15 +457,15 @@
   (assert (int? (get s :dtor-count)) "arena/stats :dtor-count is int")
   (assert (int? (get s :root-live-count)) "arena/stats :root-live-count is int")
   (assert (int? (get s :root-alloc-count))
-    "arena/stats :root-alloc-count is int")
+          "arena/stats :root-alloc-count is int")
   (assert (int? (get s :shared-count)) "arena/stats :shared-count is int")
   (assert (or (= :slab (get s :active-allocator))
-      (= :bump (get s :active-allocator)))
-    "arena/stats :active-allocator is :slab or :bump")
+              (= :bump (get s :active-allocator)))
+          "arena/stats :active-allocator is :slab or :bump")
   (assert (int? (get s :scope-enter-count))
-    "arena/stats :scope-enter-count is int")
+          "arena/stats :scope-enter-count is int")
   (assert (int? (get s :scope-dtor-count))
-    "arena/stats :scope-dtor-count is int"))
+          "arena/stats :scope-dtor-count is int"))
 
 # test_arena_stats_no_capacity_field
 # The old :capacity field must be absent in the unified struct.
@@ -476,7 +476,7 @@
 # At root (no scope), :active-allocator must be :slab.
 (let* [s (arena/stats)]
   (assert (= (get s :active-allocator) :slab)
-    "arena/stats :active-allocator is :slab at root"))
+          "arena/stats :active-allocator is :slab at root"))
 
 # test_arena_stats_scope_depth_is_zero_at_root
 # At root (no scope), :scope-depth must be 0.
@@ -487,7 +487,7 @@
 # :object-limit is nil when no limit is set.
 (let* [s (arena/stats)]
   (assert (nil? (get s :object-limit))
-    "arena/stats :object-limit is nil with no limit set"))
+          "arena/stats :object-limit is nil with no limit set"))
 
 # test_arena_stats_object_limit_reflects_set_limit
 # After setting a limit, :object-limit should reflect it.
@@ -517,7 +517,7 @@
 (let [[ok? err] (protect ((fn [] (arena/stats 42))))]
   (assert (not ok?) "arena/stats rejects non-fiber argument")
   (assert (= (get err :error) :type-error)
-    "arena/stats rejects non-fiber argument"))
+          "arena/stats rejects non-fiber argument"))
 
 # test_arena_fiber_stats_via_unified_interface
 # arena/stats with a fiber arg returns stats for that fiber.
@@ -541,12 +541,12 @@
 # arena/fiber-stats primitive must no longer exist.
 # vm/primitive-meta returns nil for unknown names.
 (assert (nil? (vm/primitive-meta "arena/fiber-stats"))
-  "arena/fiber-stats is removed from primitives")
+        "arena/fiber-stats is removed from primitives")
 
 # test_arena_scope_stats_removed
 # arena/scope-stats primitive must no longer exist; its fields are in arena/stats.
 (assert (nil? (vm/primitive-meta "arena/scope-stats"))
-  "arena/scope-stats is removed from primitives")
+        "arena/scope-stats is removed from primitives")
 
 # test_scope_enter_count_is_int
 # :scope-enter-count is a non-negative integer at root.
@@ -623,7 +623,7 @@
        bytes-round2 (get (arena/stats) :allocated-bytes)
        _ (arena/reset m2)]
   (assert (= bytes-round1 bytes-round2)
-    "slab reuses freed slots: :allocated-bytes must not grow across release cycles"))
+          "slab reuses freed slots: :allocated-bytes must not grow across release cycles"))
 
 # test_scope_mark_push_pop_lifecycle
 # arena/stats :scope-depth reflects scope push/pop.
@@ -632,13 +632,13 @@
 # test verifies that :scope-depth is 0 at root (no active user scopes).
 (let* [s (arena/stats)]
   (assert (= (get s :scope-depth) 0)
-    "scope-depth is 0 at root (no user-level scope active)"))
+          "scope-depth is 0 at root (no user-level scope active)"))
 
 # test_take_alloc_error_initially_none
 # Without a limit set, :object-limit is nil.
 (let* [s (arena/stats)]
   (assert (nil? (get s :object-limit))
-    ":object-limit is nil when no limit is set"))
+          ":object-limit is nil when no limit is set"))
 
 # test_alloc_error_set_on_limit_exceeded
 # Verify limit can be set and cleared. We set a very high limit to avoid
@@ -648,7 +648,7 @@
        limit-while-set (get s :object-limit)
        _ (arena/set-object-limit nil)]
   (assert (= limit-while-set 9999999)
-    "arena/set-object-limit: limit reflected in arena/stats while set"))
+          "arena/set-object-limit: limit reflected in arena/stats while set"))
 
 # test_alloc_error_cleared_by_set_object_limit_nil
 # After removing the limit, :object-limit returns to nil.
@@ -656,12 +656,12 @@
        _ (arena/set-object-limit nil)
        s (arena/stats)]
   (assert (nil? (get s :object-limit))
-    ":object-limit is nil after removing limit"))
+          ":object-limit is nil after removing limit"))
 
 # test_active_alloc_starts_as_slab
 # At root (no scope), :active-allocator is :slab.
 (assert (= (get (arena/stats) :active-allocator) :slab)
-  "active-allocator is :slab at root")
+        "active-allocator is :slab at root")
 
 # test_alloc_tracked
 # After allocations, :object-count increases. Under the async scheduler,
@@ -674,7 +674,7 @@
        after-s (arena/stats)
        after-count (get after-s :object-count)]
   (assert (> after-count before-count)
-    ":object-count increases after allocation"))
+          ":object-count increases after allocation"))
 
 # test_create_shared_allocator_tracked
 # Resuming a yielding fiber creates a shared allocator: :shared-count increases.
@@ -692,6 +692,6 @@
        _ (fiber/resume f2)
        s (arena/stats)]
   (assert (int? (get s :shared-count))
-    ":shared-count is int after multiple yielding fibers")
+          ":shared-count is int after multiple yielding fibers")
   (assert (>= (get s :shared-count) 0)
-    ":shared-count is non-negative after multiple yielding fibers"))
+          ":shared-count is non-negative after multiple yielding fibers"))

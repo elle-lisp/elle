@@ -16,10 +16,10 @@
   (let [[ok? result] (protect (thunk))]
     (assert (not ok?) (append msg " — expected error"))
     (assert (string/contains? (string result) substring)
-      (-> msg
-          (append " — expected '")
-          (append substring)
-          (append "' in error")))))
+            (-> msg
+                (append " — expected '")
+                (append substring)
+                (append "' in error")))))
 
 # ============================================================
 # Basic eval
@@ -263,7 +263,7 @@
 # Write a temp file, import it, check the returned struct
 (def @import-test-path "/tmp/elle-test-import.lisp")
 (spit import-test-path
-  "(def internal 42)\n{:answer internal :double (* internal 2)}")
+      "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (def @import-result (import-file import-test-path))
 (assert (= (get import-result :answer) 42) "import returns last value (:answer)")
 (assert (= (get import-result :double) 84) "import returns last value (:double)")
@@ -271,6 +271,6 @@
 # test_import_destructuring
 (def @import-destr-path "/tmp/elle-test-import-destr.lisp")
 (spit import-destr-path
-  "(def internal 42)\n{:answer internal :double (* internal 2)}")
+      "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (let [{:answer a} (import-file import-destr-path)]
   (assert (= a 42) "import destructuring"))

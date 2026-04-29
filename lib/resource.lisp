@@ -39,6 +39,7 @@
   (arena/allocs (fn [] nil))  # Subtract 1: the calibration allocates its own noop closure which
   # the real measure doesn't (the thunk is passed in, not created).
   (def peak-overhead (- (arena/peak) calibration-base 1))
+
   (defn measure [thunk]
     "Run thunk, return struct of resource consumption deltas.
 
@@ -68,16 +69,18 @@
     (let [n (length s)]
       (if (>= n width)
         s
-        (let [buf (thaw "")]
+        (let [buf @""]
           (append buf s)
           (each _ in (range (- width n))
             (append buf " "))
           (freeze buf)))))
+
   (defn report [name m]
     "Format a measurement as a tab-separated key=value line."
-    (string/format (string "{}\tallocs={}\tpeak={}\tbytes={}"
-        "\tinterns={}\tsymbols={}\tkeywords={}") (pad-right name 24) (m :allocs)
-      (m :peak) (m :bytes) (m :interns) (m :symbols) (m :keywords)))
+    (let [n (pad-right name 24)]
+      (string n "\tallocs=" (m :allocs) "\tpeak=" (m :peak) "\tbytes="
+              (m :bytes) "\tinterns=" (m :interns) "\tsymbols=" (m :symbols)
+              "\tkeywords=" (m :keywords))))
 
   ## ── Suite ───────────────────────────────────────────────────────────
 
@@ -93,4 +96,5 @@
           (println (report name m))
           (push results [name m])))
       (freeze results)))
+
   {:snapshot snapshot :measure measure :report report :suite suite})

@@ -39,7 +39,7 @@
              (let [t @{}]
                (put t f 1)
                (identical? (first (keys t)) f))) true)
-  "keys roundtrip identity fiber")
+        "keys roundtrip identity fiber")
 
 (assert (= (let [f (fiber/new (fn () 1) 0)]
              (let [s (struct f :val)]
@@ -71,7 +71,7 @@
              (let [t @{}]
                (put t c 1)
                (identical? (first (keys t)) c))) true)
-  "keys roundtrip identity closure")
+        "keys roundtrip identity closure")
 
 (assert (= (let [c (fn () 1)]
              (let [s (struct c :val)]
@@ -95,7 +95,7 @@
                (put t f :fib)
                (put t c :clo)
                (list (get t f) (get t c)))) (list :fib :clo))
-  "fiber and closure are different keys")
+        "fiber and closure are different keys")
 
 # ============================================================================
 # Error tests (from integration/table_keys.rs)

@@ -44,7 +44,9 @@
 
 # Non-existent function
 (let [[ok? _] (protect (compile/extract a
-                         {:from :nonexistent :lines [1 1] :name :x}))]
+                                        {:from :nonexistent
+                                        :lines [1 1]
+                                        :name :x}))]
   (assert (not ok?) "extract from nonexistent function errors"))
 
 # Invalid line range

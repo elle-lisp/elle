@@ -70,8 +70,8 @@
                               (let [c (string/find h ":")]
                                 (when c
                                   (put hdrs
-                                    (keyword (string/lowercase (string/trim (slice h
-                                      0 c)))) (string/trim (slice h (+ c 1))))))))
+                                       (keyword (string/lowercase (string/trim (slice h
+                                       0 c)))) (string/trim (slice h (+ c 1))))))))
                           (let* [req {:method (get parts 0)
                                       :path (get parts 1)
                                       :headers (freeze hdrs)
@@ -84,7 +84,7 @@
                                     (ws:close conn)
                                     (break nil))
                                   (= msg:type :text) (ws:send conn
-                                    (string msg:data))
+                                  (string msg:data))
                                   (= msg:type :binary) (ws:send conn msg:data))))))))]
   (let* [url (string "ws://127.0.0.1:" lport "/echo")
          conn (ws:connect url)]

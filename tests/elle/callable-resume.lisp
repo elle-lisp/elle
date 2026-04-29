@@ -74,7 +74,7 @@
   (ev/join (map (fn [_]
                   (ev/spawn (fn []
                               (repeat 3 (ev/join (ev/spawn (fn [] nil))) (bump)))))
-             [1 2 3 4 5]))
+                [1 2 3 4 5]))
   (assert (= 15 (c:get)) "5a: 5 fibers x 3 bumps = 15"))
 (println "5: multi-resume bump ok")
 

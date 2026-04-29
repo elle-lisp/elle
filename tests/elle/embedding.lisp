@@ -37,7 +37,7 @@
     ((get sched :spawn) f)  # First step should process the fiber but it yields, so :pending
     (let [r ((get sched :step) 0)]
       (assert (or (= r :pending) (= r :done))
-        "step should return :pending or :done"))))
+              "step should return :pending or :done"))))
 
 (defn test-ev-step-public []
   "ev/step works inside an event loop."

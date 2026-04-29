@@ -61,13 +61,13 @@
 
 (let [[ok? result] (protect ((fn []
                                (let [r (time-let yielding-thunk
-                                       :attributes {:a 1})]
+                                     :attributes {:a 1})]
                                  (assert (number? r:elapsed)
-                                   "let* yield: elapsed is number")
+                                 "let* yield: elapsed is number")
                                  (assert (= r:result 42)
-                                   "let* yield: result is 42")
+                                 "let* yield: result is 42")
                                  (assert (struct? r:attrs)
-                                   "let* yield: attrs is struct")
+                                 "let* yield: attrs is struct")
                                  r))))]
   (if ok?
     (println "  let* yield (local defn): PASS — bug may be fixed!")

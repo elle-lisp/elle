@@ -339,7 +339,7 @@
                                           (if (>= i (length coll))
                                             (reverse acc)
                                             (loop (+ i 1)
-                                              (cons (get coll i) acc))))]
+                                            (cons (get coll i) acc))))]
                                  (loop 0 ())))]
             (apply array lst))
         true (error {:error :type-error
@@ -364,12 +364,12 @@
         result)
     (array? coll)
       (apply array
-        (fold (fn (acc x) (append acc (f x))) ()
-          (letrec [loop (fn (i acc)
-                          (if (>= i (length coll))
-                            (reverse acc)
-                            (loop (+ i 1) (cons (get coll i) acc))))]
-            (loop 0 ()))))
+             (fold (fn (acc x) (append acc (f x))) ()
+                   (letrec [loop (fn (i acc)
+                                   (if (>= i (length coll))
+                                     (reverse acc)
+                                     (loop (+ i 1) (cons (get coll i) acc))))]
+                     (loop 0 ()))))
     true (error {:error :type-error
                  :reason :not-a-sequence
                  :message "not a sequence"})))
@@ -399,11 +399,11 @@
         result)
     (array? coll)
       (apply array
-        (letrec [go (fn (i)
-                      (if (>= i (length coll))
-                        ()
-                        (cons (f i (get coll i)) (go (+ i 1)))))]
-          (go 0)))
+             (letrec [go (fn (i)
+                           (if (>= i (length coll))
+                             ()
+                             (cons (f i (get coll i)) (go (+ i 1)))))]
+               (go 0)))
     true (error {:error :type-error
                  :reason :not-a-sequence
                  :message "not a sequence"})))
@@ -421,7 +421,7 @@
                           (let [chunk @[]]
                             (letrec [inner (fn (j)
                                        (when (and (< j (+ i n))
-                                           (< j (length coll)))
+                                         (< j (length coll)))
                                          (push chunk (get coll j))
                                          (inner (+ j 1))))]
                               (inner i))
@@ -664,7 +664,7 @@
                             (string/replace ">" "\\>")))]
     (let [@result (-> "digraph {\n  label=\""
                       (append (dot-escape (string/replace (fn/cfg-label cfg)
-                                "\n" " ")))
+                              "\n" " ")))
                       (append " arity:")
                       (append (get cfg :arity))
                       (append " regs:")
@@ -1060,17 +1060,19 @@
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
       (del select-sets waiter))
+
     (defn wake-select-waiters [fiber]
       "Wake any select-set waiter that includes fiber as a candidate."
       (each [waiter entry] in (pairs select-sets)
         (when (not (nil? (find (fn [candidate] (= candidate fiber))
-                           (get entry :candidates))))
+                               (get entry :candidates))))
           (let [woken (get entry :woken)]
             (when (not (get woken 0))
               (put woken 0 true)
               (cleanup-select waiter entry)
               (fiber/resume waiter fiber)
               (handle-fiber-after-resume waiter))))))
+
     (defn complete-fiber [fiber status]
       "Handle fiber completion: wake join and select waiters."  # Record completion
       (put completed fiber status)  # Clean up fiber-io mapping
@@ -1084,6 +1086,7 @@
               (fiber/resume w pair)
               (handle-fiber-after-resume w))))  # Wake select waiters
         (wake-select-waiters fiber)))
+
     (defn get-completion [fiber]
       "Return fiber's completion status (:ok or :error), or nil if the fiber
        has not yet terminated. Lazily records completion from the fiber's raw
@@ -1103,6 +1106,7 @@
                      (complete-fiber fiber :error)
                      :error)
             nil))))
+
     (defn handle-join [caller target]
       "Handle a :join wait request. Resumes caller with [ok? value]."
       (add joined target)
@@ -1112,21 +1116,25 @@
             (fiber/resume caller [(= comp :ok) (fiber/value target)])
             (handle-fiber-after-resume caller))  # Still running — park caller on target's join waiter list
           (let [ws (or (get waiters target)
-                  (let [w @[]]
-                    (put waiters target w)
-                    w))]
-            (push ws caller)))))  # Check if any candidate already completed (records completion lazily
-    # via get-completion so the scheduler stays consistent).
+                       (let [w @[]]
+                         (put waiters target w)
+                         w))]
+            (push ws caller)))))
+
     (defn handle-select [caller candidates]
       "Handle a :select wait request."
+
+      # Check if any candidate already completed (records completion lazily
+      # via get-completion so the scheduler stays consistent).
       (let [done (find (fn [f] (not (nil? (get-completion f)))) candidates)]
-        (if done
+        (if done  # Immediate: resume with the completed fiber
           (begin
             (fiber/resume caller done)
             (handle-fiber-after-resume caller))  # Park with a select set — wake-select-waiters scans select-sets directly,
           # so we don't add to the waiters map (that's for join waiters only).
           (let [entry @{:candidates candidates :woken @[false]}]
             (put select-sets caller entry)))))
+
     (defn handle-abort [caller target]
       "Handle an :abort wait request."
       (add joined target)  # get-completion records the completion if target has already
@@ -1145,6 +1153,7 @@
         (handle-fiber-after-resume target))  # Resume caller with nil
       (fiber/resume caller nil)
       (handle-fiber-after-resume caller))
+
     (defn handle-park [caller request]
       "Handle a :park wait request (futex wait).
        If cell value == expected, park caller. Otherwise resume immediately."
@@ -1153,13 +1162,14 @@
              expected (request :expected)]
         (if (= (get val-cell 0) expected)  # Value matches — park the fiber (stays suspended)
           (let [q (or (park-queues key)
-                  (let [q @[]]
-                    (put park-queues key q)
-                    q))]
+                      (let [q @[]]
+                        (put park-queues key q)
+                        q))]
             (push q caller))  # Value changed — spurious wakeup avoidance, resume immediately
           (begin
             (fiber/resume caller :ok)
             (handle-fiber-after-resume caller)))))
+
     (defn handle-notify [caller request]
       "Handle a :notify wait request (futex wake).
        Wake min(count, queue-length) parked fibers, resume caller with woken count."
@@ -1179,6 +1189,7 @@
         (when (= (length q) 0) (del park-queues key))  # Resume caller immediately with woken count
         (fiber/resume caller woken)
         (handle-fiber-after-resume caller)))
+
     (defn handle-wait [caller request]
       "Dispatch a :wait signal based on :op."
       (case (request :op)
@@ -1191,6 +1202,7 @@
                 :reason :unknown-op
                 :op (request :op)
                 :message (string "unknown op: " (request :op))})))
+
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
       (case (fiber/status fiber)
@@ -1213,6 +1225,7 @@
               (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (bit 14)
                (handle-wait fiber (fiber/value fiber))
               true (push runnable fiber)))))
+
     (defn drain-runnable []
       "Run all runnable fibers. Guard against externally-killed fibers."
       (while (> (length runnable) 0)
@@ -1224,6 +1237,7 @@
               true (begin
                      (fiber/resume fiber)
                      (handle-fiber-after-resume fiber)))))))
+
     (defn process-completions [timeout-ms]
       "Wait for I/O completions and route fibers."
       (let [completions (io/wait backend timeout-ms)]
@@ -1236,17 +1250,16 @@
               (if (nil? (get c :error))
                 (begin
                   (fiber/resume fiber (get c :value))
-                  (handle-fiber-after-resume fiber))
-
-                # I/O error: inject error into the fiber so it propagates
+                  (handle-fiber-after-resume fiber))  # I/O error: inject error into the fiber so it propagates
                 # through protect/defer correctly.
                 (begin
                   (fiber/abort fiber (get c :error))
                   (handle-fiber-after-resume fiber))))))))
 
-    # Phase 1: abort all pending fibers (inject error, let defer run).
     (defn do-shutdown [timeout-ms]
       "Abort all pending fibers, pump for timeout-ms, cancel stragglers."
+
+      # Phase 1: abort all pending fibers (inject error, let defer run).
       (each [id fiber] in (pairs pending)
         (del pending id)
         (del fiber-io fiber)
@@ -1256,7 +1269,7 @@
       (when (> timeout-ms 0)
         (let [deadline (+ (clock/monotonic) (/ timeout-ms 1000.0))]
           (while (and (> (+ (length runnable) (length pending)) 0)
-              (< (clock/monotonic) deadline))
+                      (< (clock/monotonic) deadline))
             (drain-runnable)
             (when (> (length pending) 0)
               (let [completions (io/wait backend 10)]
@@ -1277,12 +1290,13 @@
       (while (> (length runnable) 0)
         (let [fiber (pop runnable)]
           (protect (fiber/cancel fiber {:error :shutdown})))))
+
     (defn step [timeout-ms]
       "Execute one tick of the event loop. Returns :done or :pending."
       (block :tick
         (drain-runnable)
         (when (and (= (length pending) 0) (= (length waiters) 0)
-            (= (length select-sets) 0) (= (length park-queues) 0))
+                   (= (length select-sets) 0) (= (length park-queues) 0))
           (break :tick :done))
         (let [timeout (get shutdown-req 0)]
           (unless (nil? timeout)
@@ -1290,6 +1304,7 @@
             (break :tick :done)))
         (process-completions timeout-ms)
         :pending))
+
     {:spawn  # scheduler-fn: register fiber
       (fn (fiber)
         (push runnable fiber)
@@ -1360,7 +1375,7 @@
           (mark f)
           (let [s (fiber/status f)]
             (when (and (nil? first-error)
-                (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1)))))
+                       (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1)))))
               (assign first-error (fiber/value f)))))
         (when (not (nil? first-error)) (error first-error))  # Return the last fiber's value
         (when (> (length fibers) 0)
@@ -1474,18 +1489,16 @@
       (block :done
         (forever
           (let [done (next)]
-            (when (nil? done) (break :done nil))
-
-            # Use ev/join-protected to get the scheduler's view of completion
+            (when (nil? done) (break :done nil))  # Use ev/join-protected to get the scheduler's view of completion
             # status (fiber/status stays :paused for caught errors).
             (let [[ok? val] (ev/join-protected done)]
               (when (= done body-fiber) (assign body-val val))
-
-              # Abort all remaining fibers — check :paused (running/waiting)
-              # and :new (not yet started). handle-abort is a no-op for
-              # already-completed fibers.
               (when (and (not ok?) (nil? first-error))
                 (assign first-error val)
+
+                # Abort all remaining fibers — check :paused (running/waiting)
+                # and :new (not yet started). handle-abort is a no-op for
+                # already-completed fibers.
                 (each f in scope-fibers
                   (let [s (fiber/status f)]
                     (when (or (= s :paused) (= s :new)) (ev/abort f)))))))))
@@ -1565,10 +1578,12 @@
                      {:stdin :null}
                      (merge {:stdin :null} (freeze (first opts))))
 
-         # Drain pipes BEFORE subprocess/wait (deadlock invariant — see
-         # docstring). port/read-all returns nil on immediate EOF (empty
-         # pipe) — coerce to empty bytes.
+         # Drain pipes BEFORE subprocess/wait
+         # (deadlock invariant -- see docstring).
          proc (subprocess/exec program args exec-opts)
+
+         # port/read-all returns nil on immediate EOF
+         # (empty pipe) -- coerce to empty bytes.
          stdout-bytes (if (nil? (get proc :stdout))
                         (bytes)
                         (let [raw (port/read-all (get proc :stdout))]

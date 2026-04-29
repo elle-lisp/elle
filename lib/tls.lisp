@@ -134,6 +134,7 @@
           (port/close tcp-port)
           (error result))
         {:tcp tcp-port :tls tls})))
+
   (defn tls/accept [listener config]
     "Accept a TLS connection on a TCP listener. Returns a tls-conn struct.
      listener: a TcpListener port from (tcp/listen host port).
@@ -178,6 +179,7 @@
           # be sent or the connection stalls.
           (let [out (get-outgoing-fn tls)]
             (when (> (length out) 0) (port/write port out)))))))
+
   (defn tls/read-line [conn]
     "Read a line (through \\n, byte 10) from a TLS connection.
      Returns a string including the newline, or nil on EOF.
@@ -225,6 +227,7 @@
           # Accumulate any newly decrypted plaintext.
           (let [pt (get-plaintext-fn tls)]
             (when (> (length pt) 0) (push chunks pt)))))))
+
   (defn tls/write [conn data]
     "Encrypt data and send over TLS. data may be bytes or string.
      Returns the number of plaintext bytes written.
@@ -238,6 +241,7 @@
       (let [out result:outgoing]
         (when (> (length out) 0) (port/write port out)))  # async
       (length plaintext)))
+
   (defn tls/close [conn]
     "Close a TLS connection. Sends a TLS close_notify alert then closes the TCP port.
      Complies with RFC 8446 §6.1: each party must send close_notify before
@@ -268,6 +272,7 @@
                         (tls/close conn)
                         (break))
                       (yield line)))))))
+
   (defn tls/chunks [conn size]
     "Return a coroutine that yields byte chunks of `size` from a TLS connection.
      Final chunk may be smaller. Closes the connection when exhausted.
@@ -280,6 +285,7 @@
                         (tls/close conn)
                         (break))
                       (yield chunk)))))))
+
   (defn tls/writer [conn]
     "Return a write-stream coroutine. Resume with bytes/string to write.
      Resume with nil to close the connection.

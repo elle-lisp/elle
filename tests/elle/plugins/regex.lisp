@@ -54,14 +54,14 @@
 # ── regex/find ─────────────────────────────────────────────────────
 
 (assert (= (get (find-fn (compile-fn "\\d+") "abc123def") :match) "123")
-  "regex/find match value")
+        "regex/find match value")
 
 (let [m (find-fn (compile-fn "\\d+") "abc123def")]
   (assert (= (get m :start) 3) "regex/find start")
   (assert (= (get m :end) 6) "regex/find end"))
 
 (assert (= (find-fn (compile-fn "\\d+") "abc") nil)
-  "regex/find no match returns nil")
+        "regex/find no match returns nil")
 
 (let [[ok? _] (protect ((fn () (find-fn (compile-fn "x")))))]
   (assert (not ok?) "regex/find wrong arity"))
@@ -69,13 +69,13 @@
 # ── regex/find-all ─────────────────────────────────────────────────
 
 (assert (= (length (find-all-fn (compile-fn "\\d+") "a1b22c333")) 3)
-  "regex/find-all multiple matches count")
+        "regex/find-all multiple matches count")
 
 (assert (= (get (first (find-all-fn (compile-fn "\\d+") "a1b22c333")) :match)
-    "1") "regex/find-all first match value")
+           "1") "regex/find-all first match value")
 
 (assert (empty? (find-all-fn (compile-fn "\\d+") "abc"))
-  "regex/find-all no matches")
+        "regex/find-all no matches")
 
 # ── regex/captures ─────────────────────────────────────────────────
 
@@ -85,12 +85,12 @@
   (assert (= (get c :2) "hello") "regex/captures group 2"))
 
 (let [c (captures-fn (compile-fn "(?P<year>\\d{4})-(?P<month>\\d{2})")
-        "2024-01-15")]
+                     "2024-01-15")]
   (assert (= (get c :year) "2024") "regex/captures named: year")
   (assert (= (get c :month) "01") "regex/captures named: month"))
 
 (assert (= (captures-fn (compile-fn "\\d+") "abc") nil)
-  "regex/captures no match returns nil")
+        "regex/captures no match returns nil")
 
 (let [[ok? _] (protect ((fn () (captures-fn (compile-fn "x")))))]
   (assert (not ok?) "regex/captures wrong arity"))
@@ -103,18 +103,18 @@
   (assert (= (get (first results) :2) "a") "regex/captures-all first group 2"))
 
 (assert (empty? (captures-all-fn (compile-fn "\\d+") "abc"))
-  "regex/captures-all no matches")
+        "regex/captures-all no matches")
 
 # ── regex/replace ──────────────────────────────────────────────────
 
 (assert (= (replace-fn (compile-fn "\\d+") "a1b2c3" "N") "aNb2c3")
-  "regex/replace first only")
+        "regex/replace first only")
 
 (assert (= (replace-fn (compile-fn "\\d+") "abc" "N") "abc")
-  "regex/replace no match unchanged")
+        "regex/replace no match unchanged")
 
 (assert (= (replace-fn (compile-fn "(\\d+)") "val=42" "[$1]") "val=[42]")
-  "regex/replace backreference")
+        "regex/replace backreference")
 
 (let [[ok? _] (protect ((fn () (replace-fn (compile-fn "x") "abc"))))]
   (assert (not ok?) "regex/replace wrong arity"))
@@ -122,10 +122,10 @@
 # ── regex/replace-all ──────────────────────────────────────────────
 
 (assert (= (replace-all-fn (compile-fn "\\d+") "a1b2c3" "N") "aNbNcN")
-  "regex/replace-all all matches")
+        "regex/replace-all all matches")
 
 (assert (= (replace-all-fn (compile-fn "\\d+") "abc" "N") "abc")
-  "regex/replace-all no match unchanged")
+        "regex/replace-all no match unchanged")
 
 # ── regex/split ────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@
   (assert (= (last parts) "c") "regex/split last"))
 
 (assert (= (length (split-fn (compile-fn ",") "abc")) 1)
-  "regex/split no delimiter")
+        "regex/split no delimiter")
 
 (let [[ok? _] (protect ((fn () (split-fn (compile-fn ",")))))]
   (assert (not ok?) "regex/split wrong arity"))

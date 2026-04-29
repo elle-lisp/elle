@@ -57,10 +57,10 @@
                has-trailers (and trailers (not (empty? trailers)))
                end-on-headers (and (not has-body) (not has-trailers))]
           (session:encode-and-send-headers sess sid (freeze h-pairs)
-            end-on-headers)
+          end-on-headers)
           (when has-body
             (session:send-data-with-flow-control sess sid s:flow resp-body
-              :end-stream (not has-trailers)))
+            :end-stream (not has-trailers)))
           (when has-trailers
             (session:encode-and-send-headers sess sid trailers true))
           (stream:transition s :send-end-stream))
@@ -85,12 +85,13 @@
             (del sess:streams sid)
             (session:send-rst-stream sess sid C:err-refused-stream))
           (ev/spawn (fn []
-                      (defer (del sess:streams sid)
+                      (defer
+                        (del sess:streams sid)
                         (let [[ok? err] (protect (handle-server-request sess s
-                                sid hdrs end? handler))]
+                              sid hdrs end? handler))]
                           (unless ok?
                             (protect (session:send-rst-stream sess sid
-                                       C:err-internal-error))
+                                     C:err-internal-error))
                             (when on-error (on-error err)))))))))))
 
   ## ── Server connection ──────────────────────────────────────────────────
@@ -103,7 +104,7 @@
                 :reason :protocol-error
                 :message "invalid client connection preface"})))  # Read client SETTINGS
     (let [f (frame:read-frame transport
-            (get sess:local-settings :max-frame-size))]
+                              (get sess:local-settings :max-frame-size))]
       (when (or (nil? f) (not (= f:type C:type-settings)))
         (error {:error :h2-error
                 :reason :protocol-error
@@ -120,9 +121,9 @@
     (transport:flush)  # Start writer fiber
     (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))  # Shared reader loop with server callbacks
     (session:read-loop sess :on-headers (make-on-headers handler on-error)
-      :on-goaway (fn [sess payload]
-                   (sess:write-queue:put :shutdown)
-                   true)))
+                       :on-goaway (fn [sess payload]
+                                    (sess:write-queue:put :shutdown)
+                                    true)))
 
   ## ── h2-serve ───────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@
              sess (session:make-session t "" true)]
         (ev/spawn (fn []
                     (let [[ok? err] (protect (server-connection t handler sess
-                            :on-error on-error))]
+                          :on-error on-error))]
                       (unless ok? (when on-error (on-error err)))
                       (protect (t:close))))))))
 

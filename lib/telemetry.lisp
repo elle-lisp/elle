@@ -110,7 +110,8 @@
     :description (or description "")
     :meter meter
     :boundaries (or boundaries
-      [0.005 0.01 0.025 0.05 0.075 0.1 0.25 0.5 0.75 1.0 2.5 5.0 7.5 10.0])
+                    [0.005 0.01 0.025 0.05 0.075 0.1 0.25 0.5 0.75 1.0 2.5 5.0
+                     7.5 10.0])
     :aggregates @{}})
 
 # ============================================================================
@@ -165,13 +166,13 @@
               (assign i (+ i 1)))
             (put counts bi 1)
             (put aggs key
-              @{:counts counts
-                :sum (float value)
-                :count 1
-                :min value
-                :max value
-                :time now
-                :attrs (or attrs {})})))))))
+                 @{:counts counts
+                   :sum (float value)
+                   :count 1
+                   :min value
+                   :max value
+                   :time now
+                   :attrs (or attrs {})})))))))
 
 # ============================================================================
 # Snapshot-and-clear — atomic under cooperative scheduling
@@ -200,10 +201,10 @@
   (let [result @[]]
     (each [_ agg] in (pairs snapshot)
       (push result
-        {"attributes" (encode-attributes agg:attrs)
-         "startTimeUnixNano" (string start-nanos)
-         "timeUnixNano" (string agg:time)
-         "asDouble" (float agg:sum)}))
+            {"attributes" (encode-attributes agg:attrs)
+             "startTimeUnixNano" (string start-nanos)
+             "timeUnixNano" (string agg:time)
+             "asDouble" (float agg:sum)}))
     (freeze result)))
 
 (defn encode-gauge-datapoints [snapshot]
@@ -211,9 +212,9 @@
   (let [result @[]]
     (each [_ agg] in (pairs snapshot)
       (push result
-        {"attributes" (encode-attributes agg:attrs)
-         "timeUnixNano" (string agg:time)
-         "asDouble" (float agg:value)}))
+            {"attributes" (encode-attributes agg:attrs)
+             "timeUnixNano" (string agg:time)
+             "asDouble" (float agg:value)}))
     (freeze result)))
 
 (defn encode-histogram-datapoints [snapshot boundaries start-nanos]
@@ -221,15 +222,15 @@
   (let [result @[]]
     (each [key agg] in (pairs snapshot)
       (push result
-        {"attributes" (encode-attributes agg:attrs)
-         "startTimeUnixNano" (string start-nanos)
-         "timeUnixNano" (string agg:time)
-         "count" (string agg:count)
-         "sum" agg:sum
-         "min" (float agg:min)
-         "max" (float agg:max)
-         "explicitBounds" boundaries
-         "bucketCounts" (map (fn [c] (string c)) (freeze agg:counts))}))
+            {"attributes" (encode-attributes agg:attrs)
+             "startTimeUnixNano" (string start-nanos)
+             "timeUnixNano" (string agg:time)
+             "count" (string agg:count)
+             "sum" agg:sum
+             "min" (float agg:min)
+             "max" (float agg:max)
+             "explicitBounds" boundaries
+             "bucketCounts" (map (fn [c] (string c)) (freeze agg:counts))}))
     (freeze result)))
 
 (defn temporality-code [meter]
@@ -247,16 +248,16 @@
       (case metric:type
         "sum"
           (put base "sum"
-            {"dataPoints" (encode-sum-datapoints snapshot start-nanos)
-             "aggregationTemporality" (temporality-code meter)
-             "isMonotonic" metric:monotonic})
+               {"dataPoints" (encode-sum-datapoints snapshot start-nanos)
+                "aggregationTemporality" (temporality-code meter)
+                "isMonotonic" metric:monotonic})
         "gauge"
           (put base "gauge" {"dataPoints" (encode-gauge-datapoints snapshot)})
         "histogram"
           (put base "histogram"
-            {"dataPoints" (encode-histogram-datapoints snapshot
-               metric:boundaries start-nanos)
-             "aggregationTemporality" (temporality-code meter)})
+               {"dataPoints" (encode-histogram-datapoints snapshot
+                metric:boundaries start-nanos)
+                "aggregationTemporality" (temporality-code meter)})
         base))))
 
 (defn build-export-payload [meter snapshots]
@@ -264,7 +265,7 @@
   (let [encoded @[]]
     (each snap in snapshots
       (let [enc (encode-metric (get snap :metric) (get snap :snapshot)
-              meter:start-nanos)]
+                               meter:start-nanos)]
         (unless (nil? enc) (push encoded enc))))
     (if (empty? encoded)
       nil
@@ -324,12 +325,14 @@
               endpoint meter:endpoint
               headers (or meter:headers {})]
           (when meter:on-export (meter:on-export payload))
+
+          # Export with retry (up to 3 attempts, backoff 1s/2s)
           (def @attempts 0)
           (def @success false)
           (while (and (< attempts 3) (not success))
             (let [[ok? result] (protect (http:post endpoint body
-                                          :headers (merge {:content-type "application/json"}
-                                            headers)))]
+                                        :headers (merge {:content-type "application/json"}
+                                        headers)))]
               (if (and ok? (>= result:status 200) (< result:status 300))
                 (assign success true)
                 (begin
@@ -375,7 +378,7 @@
                     "telemetry.sdk.version" *telemetry-version*
                     "telemetry.sdk.language" "elle"}
          base-resource (merge (merge sdk-attrs {"service.name" service-name})
-           (or resource {}))]
+                              (or resource {}))]
     (def meter
       @{:service service-name
         :endpoint (or endpoint "http://localhost:9090/api/v1/otlp/v1/metrics")

@@ -22,8 +22,10 @@
   (defn init-weight [rows cols scale]
     "Create a rows x cols 2D array of Value nodes with Gaussian random init."
     (helpers:make-2d rows cols (fn [r c] (ag:make-value (rng:normal 0.0 scale)))))
+
   (defn layer-key [i suffix]
     (string/format "layer{}.{}" i suffix))
+
   (defn init-model [vocab-size]
     "Initialize all model parameters. Returns an @struct of named weight matrices."
     (let [scale (/ 1.0 (sqrt (float *n-embd*)))]
@@ -32,17 +34,17 @@
                     :lm-head (init-weight vocab-size *n-embd* scale)}]
         (each layer in (range *n-layer*)
           (put model (layer-key layer "attn-wq")
-            (init-weight *n-embd* *n-embd* scale))
+               (init-weight *n-embd* *n-embd* scale))
           (put model (layer-key layer "attn-wk")
-            (init-weight *n-embd* *n-embd* scale))
+               (init-weight *n-embd* *n-embd* scale))
           (put model (layer-key layer "attn-wv")
-            (init-weight *n-embd* *n-embd* scale))
+               (init-weight *n-embd* *n-embd* scale))
           (put model (layer-key layer "attn-wo")
-            (init-weight *n-embd* *n-embd* scale))
+               (init-weight *n-embd* *n-embd* scale))
           (put model (layer-key layer "mlp-fc1")
-            (init-weight *mlp-hidden* *n-embd* scale))
+               (init-weight *mlp-hidden* *n-embd* scale))
           (put model (layer-key layer "mlp-fc2")
-            (init-weight *n-embd* *mlp-hidden* scale)))
+               (init-weight *n-embd* *mlp-hidden* scale)))
         model)))
 
   # ── Collect parameters ─────────────────────────────────────────
@@ -66,6 +68,7 @@
       (each row in mat
         (push result (ag:vdot row vec-in n)))
       result))
+
   (defn vec-add [a b]
     "Element-wise autograd addition of two vectors."
     (let [result @[]]
@@ -74,13 +77,15 @@
         (push result (ag:v+ (a i) (b i)))
         (assign i (inc i)))
       result))
+
   (defn rms-norm [vec-in]
     "RMS normalization: x / sqrt(mean(x^2) + eps)."
     (let* [squares (map (fn [v] (ag:v* v v)) vec-in)
            sum-sq (ag:vsum squares)
            rms (ag:vpow (ag:v+s (ag:v*s sum-sq (/ 1.0 (length vec-in))) *eps*)
-             0.5)]
+                        0.5)]
       (thaw (->array (map (fn [v] (ag:v/ v rms)) vec-in)))))
+
   (defn softmax-values [scores]
     "Softmax over an array of Value nodes."
     (def @max-val (ag:v-data (scores 0)))
@@ -88,10 +93,11 @@
       (when (> (ag:v-data s) max-val) (assign max-val (ag:v-data s))))
     (def @sum-exp (ag:make-value 0.0))
     (let [exps (->array (map (fn [s] (ag:vexp (ag:v+s s (- 0.0 max-val))))
-                          scores))]
+                             scores))]
       (each e in exps
         (assign sum-exp (ag:v+ sum-exp e)))
       (thaw (->array (map (fn [e] (ag:v/ e sum-exp)) exps)))))
+
   (defn layer-weights [model i]
     "Get all weight matrices for transformer layer i."
     {:wq (model (layer-key i "attn-wq"))
@@ -111,8 +117,8 @@
       (def @ti 0)
       (while (< ti n-t)
         (push attn-logits
-          (ag:v*s (ag:vdot q (layer-keys ti) *head-dim* :offset-a hs
-              :offset-b hs) sf))
+              (ag:v*s (ag:vdot q (layer-keys ti) *head-dim* :offset-a hs
+                               :offset-b hs) sf))
         (assign ti (inc ti)))  # Weighted sum of cached values
       (let [aw (softmax-values attn-logits)]
         (each j in (range *head-dim*)
@@ -122,6 +128,7 @@
             (assign acc (ag:v+ acc (ag:v* (aw t2) ((layer-vals t2) (+ hs j)))))
             (assign t2 (inc t2)))
           (put x-attn (+ hs j) acc)))))
+
   (defn attn-block [x weights kv-keys kv-values li]
     "Multi-head attention with KV cache. Returns updated x with residual."
     (let* [x-norm (rms-norm x)
@@ -139,12 +146,14 @@
       (each h in (range *n-head*)
         (attn-head h q layer-keys layer-vals n-t x-attn))
       (vec-add (mat-vec-mul weights:wo x-attn) x)))
+
   (defn mlp-block [x weights]
     "MLP block with residual connection."
     (let* [h (mat-vec-mul weights:fc1 (rms-norm x))
            h (thaw (->array (map ag:vrelu h)))
            h (mat-vec-mul weights:fc2 h)]
       (vec-add h x)))
+
   (defn gpt-forward-token [token-id pos-id kv-keys kv-values model]
     "Forward pass for a single token at position pos-id.
      Mutates kv-keys and kv-values by appending new k/v vectors.
@@ -167,13 +176,14 @@
       (def @pos 0)
       (while (< pos n)
         (let* [logits (gpt-forward-token (tokens pos) pos kv-keys kv-values
-                 model)
+               model)
                probs (softmax-values logits)]
           (assign
             total-loss
             (ag:v+ total-loss (ag:vneg (ag:vlog (probs (tokens (inc pos))))))))
         (assign pos (inc pos)))
       (ag:v*s total-loss (/ 1.0 (float n)))))
+
   {:init-model init-model
    :collect-params collect-params
    :gpt-forward-token gpt-forward-token

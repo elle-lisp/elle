@@ -186,7 +186,9 @@
 ## Errors in body are propagated after cleanup.
 (defmacro with (binding ctor dtor & body)
   `(let [,binding ,ctor]
-     (defer (,dtor ,binding) ,;body)))
+     (defer
+       (,dtor ,binding)
+       ,;body)))
 
 ## yield* - delegate to sub-coroutine
 ## Resumes the sub-coroutine, yielding each of its values to the caller.
@@ -226,7 +228,7 @@
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
   (let* [has-in (and (not (empty? forms)) (not (empty? (rest forms)))
-           (= (syntax->datum iter-or-in) 'in))
+                     (= (syntax->datum iter-or-in) 'in))
          iter (if has-in (first forms) iter-or-in)
          body (if has-in (rest forms) forms)]
     `(let [seq ,iter]
@@ -311,8 +313,8 @@
 ## Sugar for (if-let bindings (begin body...) nil)
 (defmacro when-let (bindings & body)
   `(if-let ,bindings
-    (begin
-      ,;body) nil))
+           (begin
+             ,;body) nil))
 
 ## when-ok - protect + destructure in one step
 ## (when-ok [val (expr)] body...) => runs body with val if expr succeeds
@@ -376,10 +378,14 @@
                val (first (rest rest-b))]
           `(let [,name (ffi/malloc (ffi/size ,typ))]
              (ffi/write ,name ,typ ,val)
-             (defer (ffi/free ,name) ,inner)))  # [name size] — raw buffer
+             (defer
+               (ffi/free ,name)
+               ,inner)))  # [name size] — raw buffer
         (let* [size (first rest-b)]
           `(let [,name (ffi/malloc ,size)]
-             (defer (ffi/free ,name) ,inner)))))))
+             (defer
+               (ffi/free ,name)
+               ,inner)))))))
 
 ## with-allocator - route heap allocations through a custom allocator
 ## (with-allocator alloc body...) => installs alloc, runs body in defer, uninstalls
@@ -389,4 +395,6 @@
 (defmacro with-allocator (allocator & body)
   `(begin
      (allocator/install ,allocator)
-     (defer (allocator/uninstall) ,;body)))
+     (defer
+       (allocator/uninstall)
+       ,;body)))

@@ -37,7 +37,7 @@
 
 # append_associative: append is associative
 (assert (= (append (append "a" "b") "c") (append "a" (append "b" "c")))
-  "append is associative")
+        "append is associative")
 
 # ============================================================================
 # Case conversion
@@ -45,25 +45,25 @@
 
 # upcase_downcase_roundtrip: upcase then downcase returns original
 (assert (= (string/downcase (string/upcase "hello")) "hello")
-  "upcase then downcase (hello)")
+        "upcase then downcase (hello)")
 (assert (= (string/downcase (string/upcase "abc")) "abc")
-  "upcase then downcase (abc)")
+        "upcase then downcase (abc)")
 
 # upcase_idempotent: upcase is idempotent
 (assert (= (string/upcase (string/upcase "ABC")) (string/upcase "ABC"))
-  "upcase is idempotent")
+        "upcase is idempotent")
 
 # downcase_idempotent: downcase is idempotent
 (assert (= (string/downcase (string/downcase "abc")) (string/downcase "abc"))
-  "downcase is idempotent")
+        "downcase is idempotent")
 
 # upcase_preserves_content_length: upcase preserves length
 (assert (= (length (string/upcase "hello")) (length "hello"))
-  "upcase preserves length")
+        "upcase preserves length")
 
 # downcase_preserves_content_length: downcase preserves length
 (assert (= (length (string/downcase "HELLO")) (length "HELLO"))
-  "downcase preserves length")
+        "downcase preserves length")
 
 # ============================================================================
 # Contains / starts-with / ends-with
@@ -94,7 +94,7 @@
 
 # replace_with_self_is_identity: replacing with same value is identity
 (assert (= (string/replace "hello world" "o" "o") "hello world")
-  "replace o with o is identity")
+        "replace o with o is identity")
 
 # replace_empty_old_errors: replacing empty string should error
 (let [[ok? _] (protect ((fn [] (string/replace "hello" "" "x"))))]
@@ -106,7 +106,7 @@
 
 # trim_idempotent: trim is idempotent
 (assert (= (string/trim (string/trim "  hello  ")) (string/trim "  hello  "))
-  "trim is idempotent")
+        "trim is idempotent")
 
 # trim_of_trimmed_is_noop: trimming already-trimmed string is noop
 (assert (= (string/trim "hello") "hello") "trim of trimmed is noop")
@@ -153,7 +153,7 @@
 # slice_reversed_range_returns_empty: reversed range returns empty
 (assert (= (slice "hello" 3 1) "") "slice reversed range returns empty (hello)")
 (assert (= (slice "abcdef" 5 2) "")
-  "slice reversed range returns empty (abcdef)")
+        "slice reversed range returns empty (abcdef)")
 
 # ============================================================================
 # Split / Join roundtrip (migrated from property tests)
@@ -161,11 +161,11 @@
 
 # split_join_roundtrip: split then join recovers original
 (assert (= (string/join (string/split "a,b,c" ",") ",") "a,b,c")
-  "split/join roundtrip: comma")
+        "split/join roundtrip: comma")
 (assert (= (string/join (string/split "x;y;z" ";") ";") "x;y;z")
-  "split/join roundtrip: semicolon")
+        "split/join roundtrip: semicolon")
 (assert (= (string/join (string/split "one|two|three" "|") "|") "one|two|three")
-  "split/join roundtrip: pipe")
+        "split/join roundtrip: pipe")
 
 # split_produces_array: split produces an array
 (assert (array? (string/split "a,b" ",")) "split produces an array")
@@ -177,11 +177,11 @@
 
 # number_to_string_roundtrip: number->string->parse-int roundtrip
 (assert (= (parse-int (number->string 42)) 42)
-  "number->string->parse-int roundtrip: 42")
+        "number->string->parse-int roundtrip: 42")
 (assert (= (parse-int (number->string -100)) -100)
-  "number->string->parse-int roundtrip: -100")
+        "number->string->parse-int roundtrip: -100")
 (assert (= (parse-int (number->string 0)) 0)
-  "number->string->parse-int roundtrip: 0")
+        "number->string->parse-int roundtrip: 0")
 
 # string_to_integer_roundtrip: parse-int from string
 (assert (= (parse-int "42") 42) "parse-int from string: 42")
@@ -213,11 +213,11 @@
 (assert (= (string/index "hello" "l") 2) "string/index finds l in hello")
 (assert (= (string/index "abcdef" "d") 3) "string/index finds d in abcdef")
 (assert (= (string/index "test" "t") 0)
-  "string/index finds t in test (first occurrence)")
+        "string/index finds t in test (first occurrence)")
 
 # string_index_not_found_returns_nil: string/index returns nil when not found
 (assert (= (string/index "hello" "z") nil)
-  "string/index returns nil for z in hello")
+        "string/index returns nil for z in hello")
 (assert (= (string/index "abc" "x") nil) "string/index returns nil for x in abc")
 
 # ============================================================================
@@ -226,46 +226,46 @@
 
 # unicode_append_preserves_content: unicode append preserves content
 (assert (= (append "hello" "world") "helloworld")
-  "unicode append: hello + world")
+        "unicode append: hello + world")
 (assert (= (append "café" "latte") "cafélatte")
-  "unicode append: café + latte")
+        "unicode append: café + latte")
 (assert (= (append "" "test") "test") "unicode append: empty + test")
 
 # unicode_upcase_downcase_roundtrip: upcase/downcase roundtrip (ASCII)
 (assert (= (string/downcase (string/upcase "hello")) "hello")
-  "upcase/downcase roundtrip: hello")
+        "upcase/downcase roundtrip: hello")
 (assert (= (string/downcase (string/upcase "abc")) "abc")
-  "upcase/downcase roundtrip: abc")
+        "upcase/downcase roundtrip: abc")
 (assert (= (string/downcase (string/upcase "xyz")) "xyz")
-  "upcase/downcase roundtrip: xyz")
+        "upcase/downcase roundtrip: xyz")
 
 # ============================================================================
 # string/format — positional interpolation
 # ============================================================================
 
 (assert (= (string/format "{} + {} = {}" 1 2 3) "1 + 2 = 3")
-  "format positional basic")
+        "format positional basic")
 
 (assert (= (string/format "Hello, {}!" "Alice") "Hello, Alice!")
-  "format positional with string")
+        "format positional with string")
 
 (assert (= (string/format "{}" 42) "42") "format positional single")
 
 (assert (= (string/format "no placeholders") "no placeholders")
-  "format no placeholders")
+        "format no placeholders")
 
 (assert (= (string/format "literal {{braces}}") "literal {braces}")
-  "format escaped braces")
+        "format escaped braces")
 
 # ============================================================================
 # string/format — named interpolation
 # ============================================================================
 
 (assert (= (string/format "{name} is {age}" :name "Alice" :age 30) "Alice is 30")
-  "format named basic")
+        "format named basic")
 
 (assert (= (string/format "{greeting}, {name}!" :greeting "Hello" :name "Bob")
-    "Hello, Bob!") "format named multiple")
+           "Hello, Bob!") "format named multiple")
 
 # ============================================================================
 # string/format — format specs
@@ -292,20 +292,20 @@
 (assert (= (string/format "{:e}" 1000.0) "1e3") "format scientific")
 
 (assert (= (string/format "{:*^10}" "hi") "****hi****")
-  "format custom fill center")
+        "format custom fill center")
 
 (assert (= (string/format "{:>10d}" 42) "        42")
-  "format right align integer")
+        "format right align integer")
 
 # Default alignment: numbers right-align, strings left-align
 (assert (= (string/format "{:10}" 42) "        42")
-  "format default align integer (right)")
+        "format default align integer (right)")
 (assert (= (string/format "{:10}" "hi") "hi        ")
-  "format default align string (left)")
+        "format default align string (left)")
 
 # Named with format specs
 (assert (= (string/format "{val:.2f}" :val 3.14159) "3.14")
-  "format named with spec")
+        "format named with spec")
 
 # ============================================================================
 # string/format — error cases

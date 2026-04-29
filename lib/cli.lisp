@@ -52,7 +52,7 @@
                                      :got (type-of v)
                                      :param :action
                                      :message (string ":action must be a keyword, got "
-                                       (type-of v))}))))
+                                     (type-of v))}))))
              default-val (require-string spec:default "default" "cli/parse")
              required? spec:required]
         (when (and short-name (not (= (length short-name) 1)))
@@ -60,13 +60,13 @@
                   :reason :invalid-short
                   :option short-name
                   :message (string ":short must be a single character, got \""
-                    short-name "\"")}))
+                                   short-name "\"")}))
         (unless (contains? |:set :flag :count :append| action-kw)
           (error {:error :cli-error
                   :reason :unknown-action
                   :action action-kw
                   :message (string "unknown action " action-kw
-                    ", expected :set, :flag, :count, or :append")}))
+                                   ", expected :set, :flag, :count, or :append")}))
         {:name name
          :long long-name
          :short short-name
@@ -78,10 +78,13 @@
 
   (defn find-by-long [specs long-name]
     (find (fn [s] (= s:long long-name)) specs))
+
   (defn find-by-short [specs ch]
     (find (fn [s] (= s:short ch)) specs))
+
   (defn positionals [specs]
     (filter (fn [s] (and (nil? s:long) (nil? s:short))) specs))
+
   (defn apply-action [result name action value]
     (let [k (keyword name)]
       (match action
@@ -94,6 +97,7 @@
             (push (result k) value)
             result)
         _ result)))
+
   (defn init-result [specs]
     (let [r @{}]
       (each s in specs
@@ -104,6 +108,7 @@
             :append (put r k @[])
             _ (put r k s:default))))
       r))
+
   (defn parse-argv [specs argv]
     "Parse argv list against normalized specs. Returns mutable struct."
     (let* [result (init-result specs)
@@ -126,7 +131,7 @@
                           :option (string "--" name)
                           :message (string "unknown option --" name)}))
                 (apply-action result spec:name spec:action value))  ## --long
-              (string/starts-with? arg "--")
+            (string/starts-with? arg "--")
               (let* [name (slice arg 2 (length arg))
                      spec (find-by-long specs name)]
                 (unless spec
@@ -144,11 +149,9 @@
                         (error {:error :cli-error
                                 :reason :missing-value
                                 :option (string "--" name)
-                                :message (string "--" name " requires a value")}))
+                                :message (string "--" name " requires a value")}))  ## -x short — handles stacked flags like -vvv
                       (apply-action result spec:name spec:action (args i)))))
-
-              ## -x (short) — handles stacked flags like -vvv
-              (and (string/starts-with? arg "-") (> (length arg) 1))
+            (and (string/starts-with? arg "-") (> (length arg) 1))
               (let [chars (slice arg 1 (length arg))]
                 (def @ci 0)
                 (while (< ci (length chars))
@@ -166,7 +169,7 @@
                         (if (< (inc ci) (length chars))
                           (begin
                             (apply-action result spec:name spec:action
-                              (slice chars (inc ci) (length chars)))
+                            (slice chars (inc ci) (length chars)))
                             (assign ci (length chars)))
                           (begin
                             (assign i (inc i))
@@ -175,10 +178,10 @@
                                       :reason :missing-value
                                       :option (string "-" ch)
                                       :message (string "-" ch
-                                        " requires a value")}))
+                                      " requires a value")}))
                             (apply-action result spec:name spec:action (args i))))))
                   (assign ci (inc ci))))  ## Positional
-              true
+            true
               (if (< pi (length pos-specs))
                 (begin
                   (put result (keyword ((pos-specs pi) :name)) arg)
@@ -212,11 +215,11 @@
                     :reason :reserved-name
                     :name s:name
                     :message (string "arg name " s:name
-                      " conflicts with reserved subcommand key")}))))
+                                     " conflicts with reserved subcommand key")}))))
       (if (not has-cmds)
         (freeze (parse-argv norm-args argv))
         (let* [cmd-names (map (fn [c] (require-string c:name "name" "cli/parse"))
-                 cmds-spec)
+                              cmds-spec)
                result (init-result norm-args)
                args-arr (->array argv)
                argc (length args-arr)]
@@ -226,7 +229,7 @@
           (while (and (< i argc) (nil? found))
             (let [arg (args-arr i)]
               (if (and (not (string/starts-with? arg "-"))
-                  (find (fn [n] (= n arg)) cmd-names))
+                       (find (fn [n] (= n arg)) cmd-names))
                 (begin
                   (assign found arg)
                   (assign cmd-start (inc i)))
@@ -262,11 +265,12 @@
               :expected :list
               :got (type-of argv)
               :message (string "argv must be a list or array, got "
-                (type-of argv))}))
+                               (type-of argv))}))
     (unless spec:name
       (error {:error :cli-error
               :reason :missing-name
               :message "spec must have a :name key"}))  ## Skip argv[0] (program name)
     (let [user-argv (if (> (length argv) 0) (rest argv) ())]
       (parse-with-commands spec (->list user-argv))))
+
   {:parse parse})

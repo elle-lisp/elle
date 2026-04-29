@@ -80,7 +80,7 @@
 
 (def simple-doc
   (svg:svg 100 100 (svg:rect 0 0 100 100 {:fill "white"})
-    (svg:circle 50 50 40 {:fill "red"})))
+           (svg:circle 50 50 40 {:fill "red"})))
 
 (def png-bytes (svg:render simple-doc))
 (assert (> (length png-bytes) 0) "render produces bytes")

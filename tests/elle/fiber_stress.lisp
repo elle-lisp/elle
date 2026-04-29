@@ -19,7 +19,7 @@
   (let [@i 0]
     (while (< i 25)
       (assert (= (coro/resume co) i)
-        (string "sustained direct yield: iteration " i))
+              (string "sustained direct yield: iteration " i))
       (assign i (+ i 1))))
   (assert (= (coro/resume co) 25) "sustained direct yield: final return"))
 
@@ -45,10 +45,11 @@
         (assign expected (+ expected i))
         (if (<= i 19)
           (assert (= result expected)
-            (string "resume values: iteration " i " acc=" result " expected="
-              expected))
+                  (string "resume values: iteration " i " acc=" result
+                          " expected=" expected))
           (assert (= result expected)
-            (string "resume values: final acc=" result " expected=" expected))))
+                  (string "resume values: final acc=" result " expected="
+                          expected))))
       (assign i (+ i 1)))))
 
 # ============================================================================
@@ -65,7 +66,7 @@
     (let [@i 0]
       (while (< i 20)
         (assert (= (fiber/resume f) i)
-          (string "sustained fiber emit: iteration " i))
+                (string "sustained fiber emit: iteration " i))
         (assign i (+ i 1))))
     (assert (= (fiber/resume f) :done) "sustained fiber emit: final")))
 
@@ -113,7 +114,7 @@
         (assert (= (get result 0) 0) "nested sustained: first is 0")
         (assert (= (get result 14) 14) "nested sustained: 15th is 14")
         (assert (= (get result 15) :inner-done)
-          "nested sustained: last is :inner-done")))))
+                "nested sustained: last is :inner-done")))))
 
 # ============================================================================
 # Deep call chain yield-through-call (3 levels)
@@ -137,7 +138,7 @@
     (while (< i 20)
       (let [v (coro/resume co)]
         (assert (= v (* i 10))
-          (string "deep chain: yield " i " expected " (* i 10) " got " v)))
+                (string "deep chain: yield " i " expected " (* i 10) " got " v)))
       (assign i (+ i 1))))
   (assert (= (coro/resume co) :done) "deep chain: final"))
 
@@ -181,7 +182,7 @@
   (assert (= (coro/resume co) 10) "yield-through-call resume: first yield")
   (assert (= (coro/resume co 100) 20) "yield-through-call resume: second yield")
   (assert (= (coro/resume co 200) (list 101 201))
-    "yield-through-call resume: final"))
+          "yield-through-call resume: final"))
 
 # ============================================================================
 # SIG_IO inside coroutine body (print emits SIG_IO which propagates
@@ -244,6 +245,7 @@
     (while (< i 25)
       (let [v (coro/resume co)]
         (assert (= v (* i 10))
-          (string "JIT sustained: yield " i " expected " (* i 10) " got " v)))
+                (string "JIT sustained: yield " i " expected " (* i 10) " got "
+                        v)))
       (assign i (+ i 1))))
   (assert (= (coro/resume co) :done) "JIT sustained: final"))

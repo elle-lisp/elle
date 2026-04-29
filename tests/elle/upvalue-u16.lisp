@@ -285,6 +285,7 @@
      # A function that reads high-indexed captures to verify LoadUpvalue works.
      (defn read-high []
        (+ d255 d256 d257 d258 d259))
+
      {:test-fn test-fn :read-high read-high})))
 
 (assert (nil? (m:test-fn 1)) "no flag => nil")

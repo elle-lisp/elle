@@ -73,7 +73,7 @@
 (assert (= (let [f (fiber/new (fn () (p6)) 1)]
              (fiber/resume f nil)
              (fiber/value f)) 99)
-  "child fiber sees parent default outside parameterize")
+        "child fiber sees parent default outside parameterize")
 
 # ============================================================================
 # Type and error tests (from integration/parameters.rs)

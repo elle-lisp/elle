@@ -3,7 +3,7 @@
 ## === vm/list-primitives returns symbols ===
 
 (assert (= (type-of (first (vm/list-primitives))) :symbol)
-  "list-primitives elements are symbols")
+        "list-primitives elements are symbols")
 
 ## === vm/primitive-meta accepts symbols ===
 

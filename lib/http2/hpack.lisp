@@ -32,6 +32,7 @@
      ["range" ""] ["referer" ""] ["refresh" ""] ["retry-after" ""] ["server" ""]
      ["set-cookie" ""] ["strict-transport-security" ""] ["transfer-encoding" ""]
      ["user-agent" ""] ["vary" ""] ["via" ""] ["www-authenticate" ""]])
+
   (def STATIC-TABLE-SIZE 61)
 
   ## ── Static table reverse lookup ────────────────────────────────────────
@@ -50,6 +51,7 @@
           (when (nil? (get by-pair pair-key)) (put by-pair pair-key i)))
         (assign i (+ i 1)))
       {:by-name (freeze by-name) :by-pair (freeze by-pair)}))
+
   (def static-index (build-static-index))
 
   ## ── Dynamic table ──────────────────────────────────────────────────────
@@ -59,9 +61,11 @@
   (defn make-dynamic-table [max-size]
     "Create a dynamic table with given max size. Returns mutable struct."
     @{:entries @[] :size 0 :max-size max-size})
+
   (defn dt-entry-size [name value]
     "Size of a dynamic table entry: 32 + name-length + value-length."
     (+ 32 (string/size-of name) (string/size-of value)))
+
   (defn dt-evict [dt]
     "Evict entries from the dynamic table until size <= max-size."
     (while (> dt:size dt:max-size)
@@ -73,6 +77,7 @@
              entry-sz (dt-entry-size name value)]
         (remove entries last-idx)
         (put dt :size (- dt:size entry-sz)))))
+
   (defn dt-add [dt name value]
     "Add an entry to the dynamic table, evicting as needed."
     (let [entry-sz (dt-entry-size name value)]
@@ -80,10 +85,12 @@
         (insert entries 0 [name value]))
       (put dt :size (+ dt:size entry-sz))
       (dt-evict dt)))
+
   (defn dt-set-max-size [dt new-max]
     "Update the dynamic table max size and evict if necessary."
     (put dt :max-size new-max)
     (dt-evict dt))
+
   (defn dt-lookup [dt name value]
     "Look up a header in static + dynamic tables.
      Returns {:index i :exact? bool} or nil."
@@ -113,6 +120,7 @@
              (when (not (nil? dyn-name-idx))
                (break {:index dyn-name-idx :exact? false}))
              nil)))
+
   (defn dt-get [dt index]
     "Get [name value] from the combined static+dynamic table by HPACK index.
      Index 1-61 = static, 62+ = dynamic."
@@ -128,7 +136,7 @@
             (error {:error :h2-error
                     :reason :compression-error
                     :message (concat "HPACK: dynamic table index out of range: "
-                      (string index))}))
+                                     (string index))}))
           (get entries dyn-idx))))
 
   ## ── Variable-length integer codec (RFC 7541 Section 5.1) ──────────────
@@ -145,6 +153,7 @@
             (assign v (bit/shr v 7)))
           (push result v)
           (freeze result)))))
+
   (defn decode-int [buf offset prefix-bits]
     "Decode a variable-length integer. Returns {:value int :offset next-offset}."
     (let* [max-prefix (- (bit/shl 1 prefix-bits) 1)
@@ -179,6 +188,7 @@
         (let* [len-ints (encode-int (length str-bytes) 7)
                first-byte (bit/and 0x7f (get len-ints 0))]
           (concat (apply bytes first-byte (rest len-ints)) str-bytes)))))
+
   (defn decode-string [buf offset]
     "Decode an HPACK string literal. Returns {:value string :offset next-offset}."
     (let* [huffman? (not (= 0 (bit/and (get buf offset) 0x80)))
@@ -203,6 +213,7 @@
     (default table-size 4096)
     (default use-huffman true)
     @{:table (make-dynamic-table table-size) :huffman use-huffman})
+
   (defn hpack-encode [encoder headers]
     "Encode a list of [name value] pairs into an HPACK header block. Returns bytes."
     (let [dt encoder:table
@@ -218,16 +229,16 @@
                      first-byte (bit/or 0x80 (get idx-ints 0))]
                 (push parts (apply bytes first-byte (rest idx-ints))))
 
-              # Name match — literal with incremental indexing (Section 6.2.1)
-              (and lookup (not lookup:exact?))
+            # Name match — literal with incremental indexing (Section 6.2.1)
+            (and lookup (not lookup:exact?))
               (let* [idx-ints (encode-int lookup:index 6)
                      first-byte (bit/or 0x40 (get idx-ints 0))]
                 (push parts (apply bytes first-byte (rest idx-ints)))
                 (push parts (encode-string value use-huff))
                 (dt-add dt name value))
 
-              # No match — literal with incremental indexing, new name
-              true
+            # No match — literal with incremental indexing, new name
+            true
               (begin
                 (push parts (bytes 0x40))
                 (push parts (encode-string name use-huff))
@@ -241,6 +252,7 @@
     "Create an HPACK decoder. Returns mutable decoder state."
     (default table-size 4096)
     @{:table (make-dynamic-table table-size)})
+
   (defn hpack-decode [decoder buf]
     "Decode an HPACK header block. Returns a list of [name value] pairs."
     (let [dt decoder:table
@@ -255,8 +267,8 @@
                   (push result [name value])
                   (assign offset int-res:offset)))
 
-              # 01xxxxxx: Literal with incremental indexing (Section 6.2.1)
-              (not (= 0 (bit/and b 0x40)))
+            # 01xxxxxx: Literal with incremental indexing (Section 6.2.1)
+            (not (= 0 (bit/and b 0x40)))
               (let [int-res (decode-int buf offset 6)]
                 (if (= int-res:value 0)  # New name
                   (let* [name-res (decode-string buf int-res:offset)
@@ -270,14 +282,14 @@
                     (dt-add dt name value-res:value)
                     (assign offset value-res:offset))))
 
-              # 001xxxxx: Dynamic table size update (Section 6.3)
-              (not (= 0 (bit/and b 0x20)))
+            # 001xxxxx: Dynamic table size update (Section 6.3)
+            (not (= 0 (bit/and b 0x20)))
               (let [int-res (decode-int buf offset 5)]
                 (dt-set-max-size dt int-res:value)
                 (assign offset int-res:offset))
 
-              # 0001xxxx: Literal never indexed (Section 6.2.3)
-              (not (= 0 (bit/and b 0x10)))
+            # 0001xxxx: Literal never indexed (Section 6.2.3)
+            (not (= 0 (bit/and b 0x10)))
               (let [int-res (decode-int buf offset 4)]
                 (if (= int-res:value 0)
                   (let* [name-res (decode-string buf int-res:offset)
@@ -289,8 +301,8 @@
                     (push result [name value-res:value])
                     (assign offset value-res:offset))))
 
-              # 0000xxxx: Literal without indexing (Section 6.2.2)
-              true
+            # 0000xxxx: Literal without indexing (Section 6.2.2)
+            true
               (let [int-res (decode-int buf offset 4)]
                 (if (= int-res:value 0)
                   (let* [name-res (decode-string buf int-res:offset)
@@ -309,7 +321,7 @@
     (assert (= (encode-int 10 5) [10]) "encode-int: 10 in 5-bit prefix")
     (assert (= (encode-int 31 5) [31 0]) "encode-int: 31 in 5-bit prefix")
     (assert (= (encode-int 1337 5) [31 154 10])
-      "encode-int: 1337 in 5-bit prefix")
+            "encode-int: 1337 in 5-bit prefix")
 
     # Roundtrip
     (each [val prefix] in [[0 5] [10 5] [30 5] [31 5] [127 7] [128 7] [255 8]
@@ -318,11 +330,11 @@
              buf (apply bytes encoded)
              decoded (decode-int buf 0 prefix)]
         (assert (= decoded:value val)
-          (concat "int roundtrip: " (string val) "/" (string prefix)))))
+                (concat "int roundtrip: " (string val) "/" (string prefix)))))
 
     # ── Static table ──
     (assert (= (get (get static-table 1) 0) ":authority")
-      "static table: index 1")
+            "static table: index 1")
     (assert (= (get (get static-table 2) 0) ":method") "static table: index 2")
     (assert (= (get (get static-table 2) 1) "GET") "static table: index 2 value")
 
@@ -387,13 +399,13 @@
            encoded (hpack-encode encoder headers)
            decoded (hpack-decode decoder encoded)]
       (assert (= (length decoded) (length headers))
-        "multi-header roundtrip: count")
+              "multi-header roundtrip: count")
       (def @k 0)
       (while (< k (length headers))
         (assert (= (get (get decoded k) 0) (get (get headers k) 0))
-          (concat "multi-header roundtrip: name " (string k)))
+                (concat "multi-header roundtrip: name " (string k)))
         (assert (= (get (get decoded k) 1) (get (get headers k) 1))
-          (concat "multi-header roundtrip: value " (string k)))
+                (concat "multi-header roundtrip: value " (string k)))
         (assign k (+ k 1))))
 
     # ── Dynamic table shared state across requests ──
@@ -404,10 +416,10 @@
            dec1 (hpack-decode decoder enc1)  # Second request — same header should be indexed
            enc2 (hpack-encode encoder hdrs1)
            dec2 (hpack-decode decoder enc2)]
-      (assert (= (length dec1) 1) "shared state: first decode")  ## Second encoding should be shorter via indexing
-      (assert (= (length dec2) 1) "shared state: second decode")
+      (assert (= (length dec1) 1) "shared state: first decode")
+      (assert (= (length dec2) 1) "shared state: second decode")  # Second encoding should be shorter -- indexed
       (assert (< (length enc2) (length enc1))
-        "shared state: second encoding shorter"))
+              "shared state: second encoding shorter"))
 
     # ── RFC 7541 C.2.4: Indexed Header Field ──
     # :method GET is static index 2
@@ -416,11 +428,11 @@
            encoded (hpack-encode encoder [[":method" "GET"]])
            decoded (hpack-decode decoder encoded)]
       (assert (= (length decoded) 1) "C.2.4: one header")
-      (let [hdr (get decoded 0)]
-        (assert (= (get hdr 0) ":method") "C.2.4: name")
-        (assert (= (get hdr 1) "GET") "C.2.4: value"))
+      (assert (= (get (get decoded 0) 0) ":method") "C.2.4: name")
+      (assert (= (get (get decoded 0) 1) "GET") "C.2.4: value")  # Should be a single byte, 0x82
       (assert (= (length encoded) 1) "C.2.4: single byte")
       (assert (= (get encoded 0) 0x82) "C.2.4: byte is 0x82"))
+
     true)
 
   ## ── Table size update ─────────────────────────────────────────────────

@@ -59,11 +59,7 @@
      [0xfffff5 24] [0x3ffffea 26] [0x7ffff4 23] [0x3ffffeb 26] [0x7ffffe6 27]
      [0x3ffffec 26] [0x3ffffed 26] [0x7ffffe7 27] [0x7ffffe8 27] [0x7ffffe9 27]
      [0x7ffffea 27] [0x7ffffeb 27] [0xffffffe 28] [0x7ffffec 27] [0x7ffffed 27]
-     [0x7ffffee 27] [0x7ffffef 27] [0x7fffff0 27]
-     [0x3ffffee 26]
-
-     # EOS -- index 256
-      [0x3fffffff 30]])
+     [0x7ffffee 27] [0x7ffffef 27] [0x7fffff0 27] [0x3ffffee 26] [0x3fffffff 30]])  # EOS, index 256
 
   ## ── Build decode tree ──────────────────────────────────────────────────
   ## Binary trie: each node is [left right] or a leaf integer (byte value).
@@ -88,6 +84,7 @@
           (put cur bit sym)))
       (assign sym (+ sym 1)))
     (freeze root))
+
   (def decode-tree (build-decode-tree))
 
   ## ── Encode ─────────────────────────────────────────────────────────────
@@ -113,7 +110,7 @@
       (when (> buf-bits 0)
         (let [pad (- 8 buf-bits)]
           (push out
-            (bit/and (bit/or (bit/shl buf pad) (- (bit/shl 1 pad) 1)) 0xff))))
+                (bit/and (bit/or (bit/shl buf pad) (- (bit/shl 1 pad) 1)) 0xff))))
       (apply bytes out)))
 
   ## ── Decode ─────────────────────────────────────────────────────────────
@@ -155,49 +152,49 @@
   (defn run-tests []  # ── Roundtrip: ASCII printable range ──
     (let [input (bytes "Hello, World!")]
       (assert (= (huffman-decode (huffman-encode input)) input)
-        "huffman roundtrip: Hello, World!"))
+              "huffman roundtrip: Hello, World!"))
 
     # ── Roundtrip: empty ──
     (assert (= (huffman-decode (huffman-encode (bytes))) (bytes))
-      "huffman roundtrip: empty")
+            "huffman roundtrip: empty")
 
     # ── Roundtrip: single byte ──
     (each b in (list 0 32 65 97 127 255)
       (let [input (bytes b)]
         (assert (= (huffman-decode (huffman-encode input)) input)
-          (concat "huffman roundtrip: byte " (string b)))))
+                (concat "huffman roundtrip: byte " (string b)))))
 
     # ── RFC 7541 examples ──
     # C.4.1: www.example.com
     (let* [input (bytes "www.example.com")
            encoded (huffman-encode input)]
       (assert (= (huffman-decode encoded) input)
-        "huffman: www.example.com roundtrip")  # Known encoding from RFC
+              "huffman: www.example.com roundtrip")  # Known encoding from RFC
       (assert (= encoded
-          (bytes 0xf1 0xe3 0xc2 0xe5 0xf2 0x3a 0x6b 0xa0 0xab 0x90 0xf4 0xff))
-        "huffman: www.example.com encoding"))
+                 (bytes 0xf1 0xe3 0xc2 0xe5 0xf2 0x3a 0x6b 0xa0 0xab 0x90 0xf4
+                        0xff)) "huffman: www.example.com encoding"))
 
     # C.4.1: no-cache
     (let* [input (bytes "no-cache")
            encoded (huffman-encode input)]
       (assert (= (huffman-decode encoded) input) "huffman: no-cache roundtrip")
       (assert (= encoded (bytes 0xa8 0xeb 0x10 0x64 0x9c 0xbf))
-        "huffman: no-cache encoding"))
+              "huffman: no-cache encoding"))
 
     # C.6.1: custom-key
     (let* [input (bytes "custom-key")
            encoded (huffman-encode input)]
       (assert (= (huffman-decode encoded) input) "huffman: custom-key roundtrip")
       (assert (= encoded (bytes 0x25 0xa8 0x49 0xe9 0x5b 0xa9 0x7d 0x7f))
-        "huffman: custom-key encoding"))
+              "huffman: custom-key encoding"))
 
     # C.6.1: custom-value
     (let* [input (bytes "custom-value")
            encoded (huffman-encode input)]
       (assert (= (huffman-decode encoded) input)
-        "huffman: custom-value roundtrip")
+              "huffman: custom-value roundtrip")
       (assert (= encoded (bytes 0x25 0xa8 0x49 0xe9 0x5b 0xb8 0xe8 0xb4 0xbf))
-        "huffman: custom-value encoding"))
+              "huffman: custom-value encoding"))
 
     # ── Roundtrip: all byte values ──
     (def @all-bytes @[])
@@ -207,13 +204,14 @@
       (assign b (+ b 1)))
     (let [input (apply bytes all-bytes)]
       (assert (= (huffman-decode (huffman-encode input)) input)
-        "huffman roundtrip: all 256 byte values"))
+              "huffman roundtrip: all 256 byte values"))
 
     # ── Compression: ASCII should compress ──
     (let* [input (bytes "this is a typical http header value")
            encoded (huffman-encode input)]
       (assert (< (length encoded) (length input))
-        "huffman: ASCII text compresses"))
+              "huffman: ASCII text compresses"))
+
     true)
 
   ## ── Exports ────────────────────────────────────────────────────────────

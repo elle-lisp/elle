@@ -14,7 +14,7 @@
 (defn resp-encode [& args]
   "Encode a Redis command as a RESP2 array of bulk strings.
    Each argument is converted to a string and sent as a bulk string."
-  (def buf (thaw ""))
+  (def buf @"")
   (push buf (string "*" (length args) "\r\n"))
   (each arg in args
     (let [s (string arg)]
@@ -59,8 +59,8 @@
                           :message "unexpected EOF reading bulk string"}))
                 (string (slice data 0 len)))))
 
-          # Array
-          "*"
+        # Array
+        "*"
           (let [count (parse-int body)]
             (if (= count -1)
               nil
@@ -142,7 +142,10 @@
       "Execute thunk with a managed Redis connection."
       (def @conn (redis-connect host port))
       (def @attempts 0)
-      (defer (port/close conn) (def @result nil) (def @done false)
+      (defer
+        (port/close conn)
+        (def @result nil)
+        (def @done false)
         (while (not done)
           (let [[ok? val] (protect (parameterize ((param conn))
                                      (thunk)))]
@@ -157,6 +160,7 @@
                   (when (>= attempts retries) (error val))  # Reconnect
                   (let [[close-ok? _] (protect (port/close conn))])
                   (assign conn (redis-connect host port)))))))))
+
     {:run run-with-manager :port-param param}))
 
 ## ── Client — simplified connection for direct use ─────────────────────
@@ -164,7 +168,8 @@
 (defn redis-with [host port thunk]
   "Open a Redis connection, run thunk with *redis-port* bound, close on exit."
   (let [conn (redis-connect host port)]
-    (defer (port/close conn)
+    (defer
+      (port/close conn)
       (parameterize ((*redis-port* conn))
         (thunk)))))
 
@@ -711,44 +716,52 @@
 
   # resp-encode
   (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n") "resp-encode PING")
+
   (assert (= (resp-encode "SET" "key" "value")
-      "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
-    "resp-encode SET key value")
+             "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
+          "resp-encode SET key value")
+
   (assert (= (resp-encode "GET" "mykey") "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
-    "resp-encode GET mykey")
+          "resp-encode GET mykey")
 
   # resp-encode with multibyte string
   (assert (= (resp-encode "SET" "k" "café")
-      "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
-    "resp-encode multibyte uses byte length")
+             "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
+          "resp-encode multibyte uses byte length")
 
   # resp-read: simple string
   (spit "/tmp/elle-redis-test-simple" "+OK\r\n")
   (let [p (port/open "/tmp/elle-redis-test-simple" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (= (resp-read p) "OK") "resp-read simple string")))
 
   # resp-read: integer
   (spit "/tmp/elle-redis-test-int" ":42\r\n")
   (let [p (port/open "/tmp/elle-redis-test-int" :read)]
-    (defer (port/close p) (assert (= (resp-read p) 42) "resp-read integer")))
+    (defer
+      (port/close p)
+      (assert (= (resp-read p) 42) "resp-read integer")))
 
   # resp-read: bulk string
   (spit "/tmp/elle-redis-test-bulk" "$5\r\nhello\r\n")
   (let [p (port/open "/tmp/elle-redis-test-bulk" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (= (resp-read p) "hello") "resp-read bulk string")))
 
   # resp-read: nil bulk string
   (spit "/tmp/elle-redis-test-nil" "$-1\r\n")
   (let [p (port/open "/tmp/elle-redis-test-nil" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (nil? (resp-read p)) "resp-read nil bulk string")))
 
   # resp-read: array
   (spit "/tmp/elle-redis-test-arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
   (let [p (port/open "/tmp/elle-redis-test-arr" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read p)]
         (assert (= (length result) 2) "resp-read array length")
         (assert (= (get result 0) "foo") "resp-read array element 0")
@@ -757,17 +770,19 @@
   # resp-read: error
   (spit "/tmp/elle-redis-test-err" "-ERR unknown command\r\n")
   (let [p (port/open "/tmp/elle-redis-test-err" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [[ok? val] (protect (resp-read p))]
         (assert (not ok?) "resp-read error signals")
         (assert (= (get val :error) :redis-error) "resp-read error kind")
         (assert (= (get val :message) "ERR unknown command")
-          "resp-read error message"))))
+                "resp-read error message"))))
 
   # resp-read-raw: error returns struct instead of signaling
   (spit "/tmp/elle-redis-test-raw-err" "-ERR bad\r\n")
   (let [p (port/open "/tmp/elle-redis-test-raw-err" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read-raw p)]
         (assert (struct? result) "resp-read-raw error is struct")
         (assert (= (get result :error) :redis-error) "resp-read-raw error kind"))))
@@ -782,9 +797,10 @@
 
   # resp-read: nested array
   (spit "/tmp/elle-redis-test-nested"
-    "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
+        "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
   (let [p (port/open "/tmp/elle-redis-test-nested" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read p)]
         (assert (= (length result) 2) "nested array length")
         (assert (= (get (get result 0) 0) 1) "nested array [0][0]")
@@ -793,9 +809,11 @@
   # resp-read: empty array
   (spit "/tmp/elle-redis-test-empty-arr" "*0\r\n")
   (let [p (port/open "/tmp/elle-redis-test-empty-arr" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read p)]
         (assert (= (length result) 0) "empty array"))))
+
   true)
 
 ## ── Exports ───────────────────────────────────────────────────────────

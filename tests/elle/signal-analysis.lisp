@@ -9,7 +9,7 @@
 (assert (fn/errors? (fn [x] (error "boom"))) "explicit error produces SIG_ERROR")
 
 (assert (fn/errors? (fn [a b] (+ a b)))
-  "arithmetic has SIG_ERROR (type checking)")
+        "arithmetic has SIG_ERROR (type checking)")
 
 (assert (fn/errors? (fn [a b] (* a b))) "multiplication has SIG_ERROR")
 
@@ -24,17 +24,17 @@
 (assert (not (fn/errors? (fn [] 42))) "constant has no SIG_ERROR")
 
 (assert (not (fn/errors? (fn [x] (if x 1 0))))
-  "if with constants has no SIG_ERROR")
+        "if with constants has no SIG_ERROR")
 
 # ── silent?: suspension check ────────────────────────────────────────
 
 (assert (silent? (fn [x] x)) "identity is silent")
 
 (assert (silent? (fn [a b] (+ a b)))
-  "arithmetic is silent (error doesn't suspend)")
+        "arithmetic is silent (error doesn't suspend)")
 
 (assert (silent? (fn [x] (error "boom")))
-  "error-only is silent (error doesn't suspend)")
+        "error-only is silent (error doesn't suspend)")
 
 (assert (not (silent? (fn [x] (yield x)))) "yield is not silent")
 
@@ -47,21 +47,21 @@
 (defn calls-error [x]
   (inner-error x))
 (assert (fn/errors? calls-error)
-  "calling an error function propagates SIG_ERROR")
+        "calling an error function propagates SIG_ERROR")
 
 (defn inner-pure [x]
   x)
 (defn calls-pure [x]
   (inner-pure x))
 (assert (not (fn/errors? calls-pure))
-  "calling a pure function does not add SIG_ERROR")
+        "calling a pure function does not add SIG_ERROR")
 
 (defn arith-wrapper [a b]
   (+ a b))
 (defn double-wrap [x]
   (arith-wrapper x x))
 (assert (fn/errors? double-wrap)
-  "SIG_ERROR propagates through chains of arithmetic wrappers")
+        "SIG_ERROR propagates through chains of arithmetic wrappers")
 
 # ── Yield propagation ────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@
 (defn calls-yielder [x]
   (yielder x))
 (assert (not (silent? calls-yielder))
-  "calling a yielding function propagates suspension")
+        "calling a yielding function propagates suspension")
 
 (assert (silent? calls-pure) "calling a pure function stays silent")
 
@@ -80,7 +80,7 @@
   (if (> x 0) (yield x) (error "negative")))
 (assert (fn/errors? error-and-yield) "mixed function has SIG_ERROR")
 (assert (not (silent? error-and-yield))
-  "mixed function is not silent (has yield)")
+        "mixed function is not silent (has yield)")
 
 # ── Conditional paths ────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@
   c)
 (assert (not (silent? multi-var)) "multiple vars accumulate yielding signal")
 (assert (fn/errors? multi-var)
-  "multiple vars accumulate SIG_ERROR from arithmetic")
+        "multiple vars accumulate SIG_ERROR from arithmetic")
 
 # var inside conditional
 (defn var-in-if [x f]

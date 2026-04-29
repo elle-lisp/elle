@@ -690,6 +690,7 @@
     `(let [tmp ,a]
        (assign ,a ,b)
        (assign ,b tmp)))
+
   (let [tmp 10
         @x 1
         @y 2]
@@ -702,6 +703,7 @@
   (defmacro with-internal (body)
     `(let [internal-var 42]
        ,body))
+
   (assert (= (with-internal (+ 1 2)) 3) "test_macro_no_leak"))
 
 # Two different macros both introduce `tmp`. They must not interfere.
@@ -709,9 +711,11 @@
   (defmacro add-tmp-a (x)
     `(let [tmp ,x]
        (+ tmp 1)))
+
   (defmacro add-tmp-b (x)
     `(let [tmp ,x]
        (+ tmp 2)))
+
   (assert (= (+ (add-tmp-a 10) (add-tmp-b 20)) 33) "test_nested_macro_hygiene"))
 
 # SECTION 2: Non-macro code unchanged
@@ -734,6 +738,7 @@
 (begin
   (defmacro double (x)
     `(+ ,x ,x))
+
   (let [val 7]
     (assert (= (double val) 14) "test_macro_with_expression_arg")))
 
@@ -741,6 +746,7 @@
 (begin
   (defmacro make-adder (n)
     `(fn (x) (+ x ,n)))
+
   (let [amount 5]
     (let [f (make-adder amount)]
       (assert (= (f 10) 15) "test_macro_closure_captures_callsite"))))
@@ -756,8 +762,9 @@
     (cond
       body)
     `(if ,cond ,body nil))
+
   (assert (= (when-true false 42) nil)
-    "test_macro_with_conditional_body_regression"))
+          "test_macro_with_conditional_body_regression"))
 
 (begin
   (defmacro
@@ -765,6 +772,7 @@
     (cond
       body)
     `(if ,cond ,body nil))
+
   (assert (= (when-true2 true 42) 42) "test_macro_with_conditional_body_true"))
 
 # SECTION 5: Swap macro end-to-end
@@ -775,6 +783,7 @@
     `(let [tmp ,a]
        (assign ,a ,b)
        (assign ,b tmp)))
+
   (let [@x 1
         @y 2]
     (my-swap2 x y)
@@ -786,6 +795,7 @@
     `(let [tmp ,a]
        (assign ,a ,b)
        (assign ,b tmp)))
+
   (let [tmp 100
         @x 1
         @y 2]
@@ -802,6 +812,7 @@
     (let [tmp (gensym "tmp")]
       `(let [,tmp 42]
          ,body)))
+
   (assert (= (with-temp (+ 1 2)) 3) "test_gensym_in_macro"))
 
 # Macro A expands to code that invokes macro B, passing A's arguments
@@ -811,8 +822,10 @@
 (begin
   (defmacro inner-add (x y)
     `(+ ,x ,y))
+
   (defmacro outer-add (a b)
     `(inner-add ,a ,b))
+
   (let [x 10
         y 20]
     (assert (= (outer-add x y) 30) "test_nested_macro_scope_preservation")))
@@ -824,8 +837,9 @@
     (let [g (gensym "v")]
       `(let [,g ,val]
          ,body)))
+
   (assert (= (bind-val 10 (bind-val 20 (+ 1 2))) 3)
-    "test_gensym_produces_unique_bindings"))
+          "test_gensym_produces_unique_bindings"))
 
 # SECTION 7: datum->syntax — hygiene escape hatch
 
@@ -835,6 +849,7 @@
   (defmacro aif (test then else)
     `(let [,(datum->syntax test 'it) ,test]
        (if ,(datum->syntax test 'it) ,then ,else)))
+
   (assert (= (aif 42 it 0) 42) "test_anaphoric_if"))
 
 # When the test is falsy, the else branch is taken.
@@ -842,6 +857,7 @@
   (defmacro aif2 (test then else)
     `(let [,(datum->syntax test 'it) ,test]
        (if ,(datum->syntax test 'it) ,then ,else)))
+
   (assert (= (aif2 false 42 0) 0) "test_anaphoric_if_false_branch"))
 
 # datum->syntax works when the test is a compound expression.
@@ -849,6 +865,7 @@
   (defmacro aif3 (test then else)
     `(let [,(datum->syntax test 'it) ,test]
        (if ,(datum->syntax test 'it) ,then ,else)))
+
   (assert (= (aif3 (+ 1 2) (+ it 10) 0) 13) "test_anaphoric_if_with_expression"))
 
 # An outer `it` binding should not be affected by the macro's `it`.
@@ -856,6 +873,7 @@
   (defmacro aif4 (test then else)
     `(let [,(datum->syntax test 'it) ,test]
        (if ,(datum->syntax test 'it) ,then ,else)))
+
   (let [it 999]
     (assert (= (aif4 42 it 0) 42) "test_anaphoric_if_no_capture_of_outer_it")))
 
@@ -864,6 +882,7 @@
   (defmacro bind-as-x (val body)
     `(let [,(datum->syntax val 'x) ,val]
        ,body))
+
   (assert (= (bind-as-x 100 (+ x 1)) 101) "test_datum_to_syntax_with_symbol"))
 
 # When the context IS a syntax object (symbol argument), datum->syntax
@@ -873,8 +892,9 @@
   (defmacro bind-it (name val body)
     `(let [,(datum->syntax name 'it) ,val]
        ,body))
+
   (assert (= (bind-it x 42 (+ it 1)) 43)
-    "test_datum_to_syntax_with_syntax_context"))
+          "test_datum_to_syntax_with_syntax_context"))
 
 # datum->syntax with a list datum — set_scopes_recursive must recurse
 # into the list structure, not just set scopes on the outer node.
@@ -882,8 +902,9 @@
   (defmacro inject-list (ctx)
     `(let [,(datum->syntax ctx 'result) (list 1 2 3)]
        result))
+
   (assert (= (inject-list x) (list 1 2 3))
-    "test_datum_to_syntax_with_compound_datum"))
+          "test_datum_to_syntax_with_compound_datum"))
 
 # SECTION 8: syntax->datum — scope stripping
 
@@ -893,12 +914,13 @@
 (begin
   (defmacro get-datum (x)
     (syntax->datum x))
+
   (assert (= (get-datum 42) 42) "test_syntax_to_datum_strips_scopes"))
 
 # syntax->datum on a non-syntax value returns it unchanged.
 (begin
   (assert (= (syntax->datum 42) 42)
-    "test_syntax_to_datum_non_syntax_passthrough"))
+          "test_syntax_to_datum_non_syntax_passthrough"))
 
 # ============================================================================
 # Syntax predicate tests (issue #581)
@@ -932,10 +954,10 @@
 (defmacro test-sym? (x)
   (syntax-symbol? x))
 (assert (test-sym? foo) "syntax-symbol? on symbol")
+(assert (not (test-sym? 42)) "syntax-symbol? on int")
 
 # :kw arrives as plain Value::keyword (not syntax),
 # so syntax-symbol? returns false
-(assert (not (test-sym? 42)) "syntax-symbol? on int")
 (assert (not (test-sym? :kw)) "syntax-symbol? on keyword (plain value)")
 
 # syntax-keyword? — keywords arrive as plain Value::keyword, not syntax objects,
@@ -944,7 +966,7 @@
   (syntax-keyword? x))
 (assert (not (test-kw? :foo)) "syntax-keyword? on plain keyword (not syntax)")
 (assert (not (test-kw? foo))
-  "syntax-keyword? on symbol — is syntax, not keyword")
+        "syntax-keyword? on symbol — is syntax, not keyword")
 
 # syntax-nil? on non-syntax returns false
 (defmacro test-nil? (x)
@@ -1046,9 +1068,9 @@
 # Macro with multiple params; uses syntax-case on the condition to dispatch.
 (defmacro my-if (test then else-expr)
   (syntax-case test (true (syntax->datum then))
-    (false (syntax->datum else-expr))
-    (_ (list 'if (syntax->datum test) (syntax->datum then)
-         (syntax->datum else-expr)))))
+               (false (syntax->datum else-expr))
+               (_ (list 'if (syntax->datum test) (syntax->datum then)
+                        (syntax->datum else-expr)))))
 
 (assert (= (my-if true 1 2) 1) "end-to-end: my-if true")
 (assert (= (my-if false 1 2) 2) "end-to-end: my-if false")

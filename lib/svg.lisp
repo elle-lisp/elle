@@ -28,6 +28,7 @@
 
   (defn opt-attrs [opts]
     (if (empty? opts) nil (first opts)))
+
   (defn merge-attrs [base user]
     (if (nil? user) base (merge base user)))
 
@@ -46,19 +47,23 @@
                                  :y (float y)
                                  :width (float w)
                                  :height (float h)} (opt-attrs opts)) []))
+
   (defn circle [cx cy r & opts]
     (element :circle (merge-attrs {:cx (float cx) :cy (float cy) :r (float r)}
-        (opt-attrs opts)) []))
+                                  (opt-attrs opts)) []))
+
   (defn ellipse [cx cy rx ry & opts]
     (element :ellipse (merge-attrs {:cx (float cx)
                                     :cy (float cy)
                                     :rx (float rx)
                                     :ry (float ry)} (opt-attrs opts)) []))
+
   (defn line [x1 y1 x2 y2 & opts]
     (element :line (merge-attrs {:x1 (float x1)
                                  :y1 (float y1)
                                  :x2 (float x2)
                                  :y2 (float y2)} (opt-attrs opts)) []))
+
   (defn path [d & opts]
     (element :path (merge-attrs {:d d} (opt-attrs opts)) []))
 
@@ -66,12 +71,14 @@
 
   (defn points->string [pts]
     (string/join (map (fn [p] (string (p 0) "," (p 1))) pts) " "))
+
   (defn polyline [pts & opts]
     (element :polyline (merge-attrs {:points (points->string pts)}
-        (opt-attrs opts)) []))
+                                    (opt-attrs opts)) []))
+
   (defn polygon [pts & opts]
     (element :polygon (merge-attrs {:points (points->string pts)}
-        (opt-attrs opts)) []))
+                                   (opt-attrs opts)) []))
 
   # ── Text ───────────────────────────────────────────────────────────
 
@@ -86,6 +93,7 @@
           (string? item) (push children item)  ## SVG element child (tspan etc.)
           true (push children item)))
       (element :text attrs (freeze children))))
+
   (defn tspan [content & opts]
     (element :tspan (or (first opts) {}) [content]))
 
@@ -93,13 +101,16 @@
 
   (defn group [& args]
     (if (and (not (empty? args)) (struct? (first args))
-        (nil? (get (first args) :tag)))
+             (nil? (get (first args) :tag)))
       (element :g (first args) (slice args 1))
       (element :g {} args)))
+
   (defn translate [dx dy & children]
     (element :g {:transform (string "translate(" dx "," dy ")")} children))
+
   (defn rotate [deg & children]
     (element :g {:transform (string "rotate(" deg ")")} children))
+
   (defn scale [sx & rest]
     (if (and (not (empty? rest)) (number? (first rest)))
       (let [sy (first rest)]
@@ -110,15 +121,20 @@
 
   (defn defs [& children]
     (element :defs {} children))
+
   (defn linear-gradient [id attrs & stops]
     (element :linearGradient (merge {:id id} attrs) stops))
+
   (defn radial-gradient [id attrs & stops]
     (element :radialGradient (merge {:id id} attrs) stops))
+
   (defn stop [offset color & opts]
     (element :stop (merge-attrs {:offset (string (* offset 100.0) "%")
                                  :stop-color color} (opt-attrs opts)) []))
+
   (defn clip-path [id & children]
     (element :clipPath {:id id} children))
+
   (defn mask [id & children]
     (element :mask {:id id} children))
 
@@ -126,10 +142,12 @@
 
   (defn set-attr [elem key value]
     (put elem :attrs (put (get elem :attrs) key value)))
+
   (defn add-child [elem child]
     (let [kids (thaw (get elem :children))]
       (push kids child)
       (put elem :children (freeze kids))))
+
   (defn wrap [elem tag & opts]
     (element tag (or (first opts) {}) [elem]))
 
@@ -140,12 +158,14 @@
         (string/replace "&" "&amp;")
         (string/replace "<" "&lt;")
         (string/replace ">" "&gt;")))
+
   (defn xml-escape-attr [s]
     (-> s
         (string/replace "&" "&amp;")
         (string/replace "<" "&lt;")
         (string/replace ">" "&gt;")
         (string/replace "\"" "&quot;")))
+
   (defn emit-attr-value [v]
     (cond
       (string? v) (xml-escape-attr v)
@@ -153,6 +173,7 @@
       (float? v) (string v)
       (keyword? v) (string v)
       true nil))
+
   (defn emit-element [elem]
     (cond
       (string? elem) (xml-escape elem)
@@ -160,7 +181,7 @@
         (let* [tag (get elem :tag)
                attrs (get elem :attrs)
                children (get elem :children)
-               out (thaw "")]
+               out @""]
           (append out (string "<" tag))
           (when attrs
             (each [k v] in attrs
@@ -175,6 +196,7 @@
               (append out (string "</" tag ">"))))
           (freeze out))
       true ""))
+
   (defn emit [doc]
     (string "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" (emit-element doc)))
 
@@ -210,8 +232,8 @@
   ## If renderer plugin provided, add rendering functions
   (if renderer
     (merge exports
-      {:render (get renderer :render)
-       :render-raw (get renderer :render-raw)
-       :render-to-file (get renderer :render-to-file)
-       :dimensions (get renderer :dimensions)})
+           {:render (get renderer :render)
+            :render-raw (get renderer :render-raw)
+            :render-to-file (get renderer :render-to-file)
+            :dimensions (get renderer :dimensions)})
     exports))

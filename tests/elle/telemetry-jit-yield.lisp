@@ -35,16 +35,17 @@
     (def meter (telemetry:meter "t" :endpoint url :interval 9999))
     (def lat
       (telemetry:histogram meter "lat" :unit "s"
-        :boundaries [0.01 0.05 0.1 0.5 1.0]))
+                           :boundaries [0.01 0.05 0.1 0.5 1.0]))
     (def req-c (telemetry:counter meter "reqs" :unit "1"))
     (def rev-c (telemetry:counter meter "rev" :unit "USD"))
     (def gauge (telemetry:gauge meter "conns" :unit "1"))
+
     (defn sim [method path status price]
       (let [attrs {"m" method "p" path "s" status}]
         (telemetry:add req-c 1 :attributes attrs)
         (telemetry:time lat
-          (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
-          :attributes attrs)
+                        (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
+                        :attributes attrs)
         (when price (telemetry:add rev-c price :attributes {"cur" "USD"}))))
 
     # 16 sim calls — exceeds JIT threshold (10).
@@ -75,10 +76,12 @@
     (def scope (get (get rm "scopeMetrics") 0))
     (def metrics (get scope "metrics"))
     (assert (>= (length metrics) 3) "payload has instruments after JIT")
+
     (telemetry:flush meter)
     (ev/sleep 0.05)
     (assert (>= (length received) 1) "post-JIT sim+inspect+flush delivered")
     (println "  3. sim+inspect+flush after JIT: ok")
+
     (telemetry:shutdown meter)
     (ev/abort server)
     (port/close listener)

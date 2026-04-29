@@ -25,9 +25,9 @@
   # ── Surfaces ─────────────────────────────────────────────────────
 
   (ffi/defbind image-surface lib "cairo_image_surface_create"
-    :ptr [:int :int :int])
+               :ptr [:int :int :int])
   (ffi/defbind image-surface-for-data lib "cairo_image_surface_create_for_data"
-    :ptr [:ptr :int :int :int :int])
+               :ptr [:ptr :int :int :int :int])
   (ffi/defbind surface-destroy lib "cairo_surface_destroy" :void [:ptr])
   (ffi/defbind surface-flush lib "cairo_surface_flush" :void [:ptr])
 
@@ -47,17 +47,17 @@
   # ── Source ───────────────────────────────────────────────────────
 
   (ffi/defbind set-source-rgb lib "cairo_set_source_rgb"
-    :void [:ptr :double :double :double])
+               :void [:ptr :double :double :double])
   (ffi/defbind set-source-rgba lib "cairo_set_source_rgba"
-    :void [:ptr :double :double :double :double])
+               :void [:ptr :double :double :double :double])
   (ffi/defbind set-source-surface lib "cairo_set_source_surface"
-    :void [:ptr :ptr :double :double])
+               :void [:ptr :ptr :double :double])
 
   # ── Drawing ──────────────────────────────────────────────────────
 
   (ffi/defbind paint lib "cairo_paint" :void [:ptr])
   (ffi/defbind paint-with-alpha lib "cairo_paint_with_alpha"
-    :void [:ptr :double])
+               :void [:ptr :double])
   (ffi/defbind stroke lib "cairo_stroke" :void [:ptr])
   (ffi/defbind fill lib "cairo_fill" :void [:ptr])
   (ffi/defbind set-line-width lib "cairo_set_line_width" :void [:ptr :double])
@@ -67,11 +67,11 @@
   (ffi/defbind move-to lib "cairo_move_to" :void [:ptr :double :double])
   (ffi/defbind line-to lib "cairo_line_to" :void [:ptr :double :double])
   (ffi/defbind curve-to lib "cairo_curve_to"
-    :void [:ptr :double :double :double :double :double :double])
+               :void [:ptr :double :double :double :double :double :double])
   (ffi/defbind arc lib "cairo_arc"
-    :void [:ptr :double :double :double :double :double])
+               :void [:ptr :double :double :double :double :double])
   (ffi/defbind rectangle lib "cairo_rectangle"
-    :void [:ptr :double :double :double :double])
+               :void [:ptr :double :double :double :double])
   (ffi/defbind close-path lib "cairo_close_path" :void [:ptr])
   (ffi/defbind new-path lib "cairo_new_path" :void [:ptr])
 

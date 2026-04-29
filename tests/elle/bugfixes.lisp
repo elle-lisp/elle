@@ -120,7 +120,7 @@
 (begin
   (def @list-str (string (list 1 2 3)))
   (assert (not (string/contains? list-str ". ()"))
-    "list display no dot terminator"))
+          "list display no dot terminator"))
 
 # cons chain display
 (begin
@@ -161,7 +161,7 @@
           (append (list n) (foo (- n 1) (cons n seen)))
           (foo (- n 1) seen)))))
   (assert (= (length (foo 5 (list 0))) 3)
-    "or in recursive predicate (n=5,4,3 safe)"))
+          "or in recursive predicate (n=5,4,3 safe)"))
 
 # ============================================================================
 # Combined: shorthand + let + list display
@@ -200,10 +200,11 @@
 (begin
   (defn do-write (port msg)
     (port/write port msg))
+
   (let [p (port/open "/tmp/elle_bugfix5_test" :write)]
     (do-write p "hello")
     (assert (= (type p) :port)
-      "fiber locals not corrupted after yield through nested tail-call-to-native")
+            "fiber locals not corrupted after yield through nested tail-call-to-native")
     (port/close p)))
 
 # ============================================================================
@@ -242,10 +243,13 @@
           p 16]
       (port/write port msg)
       (+ a b c d e f g h i j k l m n o p)))
+
   (let [port (port/open "/tmp/elle_bugfix6_test" :write)]
-    (let [result (defer (port/close port) (inner-with-many-locals port "hello"))]
+    (let [result (defer
+                   (port/close port)
+                   (inner-with-many-locals port "hello"))]
       (assert (= result 136)
-        "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)"))))
+              "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)"))))
 
 # ============================================================================
 # Bug 7: defer + I/O inside ev/spawn uses FiberResume chain correctly
@@ -266,7 +270,8 @@
               client-got @[nil]]
           (let [server-fiber (ev/spawn (fn ()  # server: accept, read, write, close via defer
                                        (let [conn (tcp/accept listener)]
-                                         (defer (port/close conn)
+                                         (defer
+                                           (port/close conn)
                                            (let [data (port/read conn 4)]
                                              (put server-got 0 data)
                                              (port/write conn "pong"))))))
@@ -282,9 +287,9 @@
           (port/close listener)  # TCP ports use binary encoding; port/read returns bytes.
           # Convert to string for assertion.
           (assert (= (string (get server-got 0)) "ping")
-            "server received data from client (Bug 7)")
+                  "server received data from client (Bug 7)")
           (assert (= (string (get client-got 0)) "pong")
-            "client received response from server (Bug 7)"))))))
+                  "client received response from server (Bug 7)"))))))
 
 # ============================================================================
 # Bug 612: cond/match corrupt previously-evaluated arguments in variadic calls
@@ -305,44 +310,45 @@
 
 # cond as non-first arg to native variadic call
 (assert (= (path/join "a"
-      (cond
-        true "b")) "a/b") "cond as second arg to path/join")
+                      (cond
+                        true "b")) "a/b") "cond as second arg to path/join")
 
 # match as non-first arg to native variadic call
 (assert (= (path/join "a"
-      (match 1
-        1 "b"
-        _ "c")) "a/b") "match as second arg to path/join")
+                      (match 1
+                        1 "b"
+                        _ "c")) "a/b") "match as second arg to path/join")
 
 # cond in second position of three-arg list
 (assert (= (list 1
-      (cond
-        true 2) 3) (list 1 2 3)) "cond as second arg in list")
+                 (cond
+                   true 2) 3) (list 1 2 3)) "cond as second arg in list")
 
 # cond in third position of three-arg list
 (assert (= (list 1 2
-      (cond
-        true 3)) (list 1 2 3)) "cond as third arg in list")
+                 (cond
+                   true 3)) (list 1 2 3)) "cond as third arg in list")
 
 # match in second position of three-arg list
 (assert (= (list 1
-      (match 1
-        1 2
-        _ 0) 3) (list 1 2 3)) "match as second arg in list")
+                 (match 1
+                   1 2
+                   _ 0) 3) (list 1 2 3)) "match as second arg in list")
 
 # match in third position (wildcard arm)
 (assert (= (list 1 2
-      (match 5
-        1 "nope"
-        _ 3)) (list 1 2 3)) "match wildcard as third arg in list")
+                 (match 5
+                   1 "nope"
+                   _ 3)) (list 1 2 3)) "match wildcard as third arg in list")
 
 # cond with multiple clauses, non-first arg
 (assert (= (path/join "a"
-      (cond
-        false "x"
-        true "b")) "a/b") "cond with two clauses as second arg to path/join")
+                      (cond
+                        false "x"
+                        true "b")) "a/b")
+        "cond with two clauses as second arg to path/join")
 
 # cond as first arg still works (was never broken)
 (assert (= (path/join (cond
                         true "a") "b") "a/b")
-  "cond as first arg to path/join (regression guard)")
+        "cond as first arg to path/join (regression guard)")

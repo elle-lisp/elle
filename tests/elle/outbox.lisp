@@ -26,11 +26,11 @@
       (assert (= (result :name) "alice") "yield-nested: name field")
       (assert (= (first (result :scores)) 90) "yield-nested: first score")
       (assert (= (first (rest (result :scores))) 85)
-        "yield-nested: second score")
+              "yield-nested: second score")
       (assert (= (first (rest (rest (result :scores)))) 92)
-        "yield-nested: third score")
+              "yield-nested: third score")
       (assert (= ((result :meta) :grade) "A")
-        "yield-nested: nested struct field")
+              "yield-nested: nested struct field")
       (println "1: yield-nested-struct ok"))))
 
 (test-yield-nested-struct)
@@ -41,13 +41,13 @@
   "Generator yields 1000 structs. Memory should be bounded, not linear."
   (let [m (res:measure (fn []
                          (let [f (fiber/new (fn []
-                                   (each i in (range 1000)
-                                     (yield {:index i :data (cons i nil)})))
-                                 |:yield|)]
+                                 (each i in (range 1000)
+                                   (yield {:index i :data (cons i nil)})))
+                               |:yield|)]
                            (each _ in (range 1000)
                              (fiber/resume f)))))]
     (assert (< (m :peak) 200)
-      (string "multi-yield: peak should be bounded, got " (m :peak)))
+            (string "multi-yield: peak should be bounded, got " (m :peak)))
     (println (string "2: multi-yield-generator ok (peak=" (m :peak) ")"))))
 
 (test-multi-yield-generator)
@@ -61,9 +61,6 @@
                        (yield {:x 99 :y "world"})) |:yield|)]
     (let [v1 (fiber/resume f)]
       (assert (= (v1 :x) 42) "yield-survives: v1.x before resume")
-
-      # Copy what we need before resume
-      # (reset-on-resume semantics)
       (assert (= (v1 :y) "hello") "yield-survives: v1.y before resume")
       (let [saved-x (v1 :x)
             v2 (fiber/resume f)]
@@ -87,7 +84,7 @@
                          (length local-state))) |:yield|)]
     (assert (= (fiber/resume f) 3) "private-heap: first yield = 3")
     (assert (= (fiber/resume f) 4)
-      "private-heap: second yield = 4 (local survived)")
+            "private-heap: second yield = 4 (local survived)")
     (assert (= (fiber/resume f) 5) "private-heap: final return = 5"))
   (println "4: private-heap-intact ok"))
 
@@ -124,6 +121,7 @@
                              (yield {:i i :data (cons i nil)}))) |:yield|)]
         (each _ in (range 1000)
           (fiber/resume f))))]
+
    ["outbox-yield-string-100"
     (fn []
       (let [f (fiber/new (fn []
@@ -131,12 +129,13 @@
                              (yield (string "item-" i)))) |:yield|)]
         (each _ in (range 100)
           (fiber/resume f))))]
+
    ["outbox-yield-cons-chain"
     (fn []
       (let [f (fiber/new (fn []
                            (each i in (range 100)
                              (yield (cons i (cons (+ i 1) (cons (+ i 2) nil))))))
-              |:yield|)]
+                         |:yield|)]
         (each _ in (range 100)
           (fiber/resume f))))]])
 
@@ -154,7 +153,7 @@
 
 (let [m (find-outbox-result "outbox-yield-struct-1000")]
   (assert (< (m :peak) 200)
-    (string "outbox-yield-struct-1000: peak bounded, got " (m :peak))))
+          (string "outbox-yield-struct-1000: peak bounded, got " (m :peak))))
 
 (println "6: outbox resource assertions ok")
 (println "all outbox tests passed")

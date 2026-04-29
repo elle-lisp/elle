@@ -34,9 +34,9 @@
 
 (let [[ok? _] (protect ((fn []
                           (stream/collect (stream/map (fn [v]
-                              (when (= v 1)
-                                (error {:error :test-error :message "stop at 1"}))
-                              v) (make-range 3))))))]
+                            (when (= v 1)
+                              (error {:error :test-error :message "stop at 1"}))
+                            v) (make-range 3))))))]
   (assert (not ok?) "2: stream/map transform error propagates through collect"))
 
 # === 3. Basic async I/O with ev/join (no error) ===
@@ -44,7 +44,7 @@
 (spit "/tmp/elle-async-err-test-3" "line1\nline2\nline3\n")
 (let [result (ev/join (ev/spawn (fn []
                                   (let [p (port/open "/tmp/elle-async-err-test-3"
-                                          :read)]
+                                        :read)]
                                     (stream/collect (port/lines p))))))]
   (assert (= (length result) 3) "3: ev/join + port/lines collects 3 lines"))
 
@@ -53,14 +53,14 @@
 (spit "/tmp/elle-async-err-test-4" "some data")
 (let [[ok? val] (ev/join-protected (ev/spawn (fn []
                                      (let [p (port/open "/tmp/elle-async-err-test-4"
-                                         :read)]
+                                       :read)]
                                        (port/close p)
                                        (stream/collect (port/lines p))))))]
   (assert ok?
-    "4: stream/collect succeeds (error yielded as value, not signaled)")
+          "4: stream/collect succeeds (error yielded as value, not signaled)")
   (assert (= (length val) 1) "4: one element collected")
   (assert (= (get (first val) :error) :io-error)
-    "4: collected element is io-error"))
+          "4: collected element is io-error"))
 
 # === 5. Multiple fibers, one errors — ev/join-protected catches ===
 

@@ -16,7 +16,7 @@
     (if (safe? col queens)
       (let [nq (cons col queens)]
         (append (solve-helper n (+ row 1) nq)
-          (try-cols-helper n (+ col 1) queens row)))
+                (try-cols-helper n (+ col 1) queens row)))
       (try-cols-helper n (+ col 1) queens row))))
 
 (defn solve-helper [n row queens]

@@ -6,14 +6,14 @@
 ## ── ffi/with-stack ────────────────────────────────────────────────────
 
 (ffi/with-stack [[p :int 42]]
-  (assert (= (ffi/read p :int) 42) "ffi/with-stack typed scalar"))
+                (assert (= (ffi/read p :int) 42) "ffi/with-stack typed scalar"))
 
 (ffi/with-stack [[buf 16]] (ffi/write buf :int 99)
-  (assert (= (ffi/read buf :int) 99) "ffi/with-stack raw buffer"))
+                (assert (= (ffi/read buf :int) 99) "ffi/with-stack raw buffer"))
 
 (ffi/with-stack [[a :int 10] [b :int 20]]
-  (assert (= (+ (ffi/read a :int) (ffi/read b :int)) 30)
-    "ffi/with-stack multiple"))
+                (assert (= (+ (ffi/read a :int) (ffi/read b :int)) 30)
+                        "ffi/with-stack multiple"))
 
 ## ── ffi/pin ───────────────────────────────────────────────────────────
 
@@ -149,7 +149,7 @@
 (assert (= result-str "num: 42") "ffi/call snprintf")
 
 (assert (not (nil? (ffi/signature :int @[:ptr :size :string :int] 3)))
-  "ffi/variadic signature creation")
+        "ffi/variadic signature creation")
 (let [[ok? _] (protect ((fn () (ffi/signature :int @[:int] 5))))]
   (assert (not ok?) "ffi/variadic fixed args out of range"))
 
@@ -216,7 +216,7 @@
 (def st (ffi/struct @[:i8 :u8 :i16 :u16 :i32 :u32 :i64 :u64 :float :double]))
 (def buf (ffi/malloc (ffi/size st)))
 (ffi/write buf st
-  @[-1 255 -1000 60000 -100000 3000000000 -999999999 999999999 1.5 2.5])
+           @[-1 255 -1000 60000 -100000 3000000000 -999999999 999999999 1.5 2.5])
 (def vals (ffi/read buf st))
 (ffi/free buf)
 (assert (= (get vals 0) -1) "ffi/struct all numeric types i8")
@@ -347,7 +347,7 @@
 (def direction 1)
 (def compar
   (ffi/callback compar-sig
-    (fn (a b) (* direction (- (ffi/read a :i32) (ffi/read b :i32))))))
+                (fn (a b) (* direction (- (ffi/read a :i32) (ffi/read b :i32))))))
 (def qsort-sig (ffi/signature :void @[:ptr :size :size :ptr]))
 (def arr (ffi/malloc 12))
 (ffi/write arr (ffi/array :i32 3) @[3 1 2])

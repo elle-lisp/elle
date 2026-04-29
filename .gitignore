@@ -29,3 +29,4 @@ node_modules/
 package*.json
 wip.md
 .claude/
+demos/embedding/chost

@@ -20,10 +20,12 @@
                   (port/write port combined)
                   (assign wbuf-parts @[]))))
      :close (fn [] (port/close port))})
+
   (defn tls-transport [conn]
     "Wrap a TLS connection as a transport."
     {:read (fn [n] (tls:read conn n))
      :write (fn [data] (tls:write conn data))
      :flush (fn [] nil)
      :close (fn [] (tls:close conn))})
+
   {:tcp tcp-transport :tls tls-transport})

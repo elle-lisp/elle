@@ -46,9 +46,9 @@
 (def @i 0)
 (while (< i 50)
   (timed-op table
-    (fn []
-      (ev/sleep 0.001)
-      :done) :attributes {:method "GET"})
+            (fn []
+              (ev/sleep 0.001)
+              :done) :attributes {:method "GET"})
   (assign i (+ i 1)))
 
 (ev/sleep 0.05)

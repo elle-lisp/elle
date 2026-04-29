@@ -21,17 +21,17 @@
 # ============================================================================
 
 (assert (= (+ 1
-      (match 42
-        42 42
-        _ 0)) 43) "match result in call: exact match")
+              (match 42
+                42 42
+                _ 0)) 43) "match result in call: exact match")
 (assert (= (+ 1
-      (match 99
-        99 99
-        _ 0)) 100) "match result in call: another exact match")
+              (match 99
+                99 99
+                _ 0)) 100) "match result in call: another exact match")
 (assert (= (+ 1
-      (match 7
-        7 7
-        _ 0)) 8) "match result in call: small value")
+              (match 7
+                7 7
+                _ 0)) 8) "match result in call: small value")
 
 # ============================================================================
 # Guard sees binding

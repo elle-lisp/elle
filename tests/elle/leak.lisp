@@ -30,7 +30,7 @@
 (let [d100 (t0-let-struct 100)
       d10k (t0-let-struct 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0 let-struct: d100=" d100 " d10k=" d10k)))
+          (string "t0 let-struct: d100=" d100 " d10k=" d10k)))
 
 # Discarded struct (no let binding) — scope still reclaims.
 
@@ -45,7 +45,7 @@
 (let [d100 (t0-discard-struct 100)
       d10k (t0-discard-struct 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0 discard-struct: d100=" d100 " d10k=" d10k)))
+          (string "t0 discard-struct: d100=" d100 " d10k=" d10k)))
 
 # String allocation in while loop — scope reclaims.
 
@@ -167,7 +167,7 @@
 (let [d100 (t3-yield-struct 100)
       d10k (t3-yield-struct 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t3 yield-struct: d100=" d100 " d10k=" d10k)))
+          (string "t3 yield-struct: d100=" d100 " d10k=" d10k)))
 
 # 3b: string per iteration
 
@@ -184,7 +184,7 @@
 (let [d100 (t3-yield-string 100)
       d10k (t3-yield-string 10000)]
   (assert (bounded? d100 d10k 20)
-    (string "t3 yield-string: d100=" d100 " d10k=" d10k)))
+          (string "t3 yield-string: d100=" d100 " d10k=" d10k)))
 
 # 3c: multiple allocations per iteration
 
@@ -203,7 +203,7 @@
 (let [d100 (t3-yield-multi 100)
       d10k (t3-yield-multi 10000)]
   (assert (bounded? d100 d10k 30)
-    (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
+          (string "t3 yield-multi: d100=" d100 " d10k=" d10k)))
 
 # ── Tier 0c: while loops with closures, fibers, concat, protect ──
 # These patterns now pass escape analysis: closures are collected
@@ -223,7 +223,7 @@
 (let [d100 (t0c-closure-while 100)
       d10k (t0c-closure-while 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0c closure-while: d100=" d100 " d10k=" d10k)))
+          (string "t0c closure-while: d100=" d100 " d10k=" d10k)))
 
 # fiber/new + fiber/resume: primitives with heap-returning args
 (defn t0c-fiber-while [n]
@@ -238,7 +238,7 @@
 (let [d100 (t0c-fiber-while 100)
       d10k (t0c-fiber-while 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0c fiber-while: d100=" d100 " d10k=" d10k)))
+          (string "t0c fiber-while: d100=" d100 " d10k=" d10k)))
 
 # concat with number->string: chain of primitives returning heap values
 (defn t0c-concat-while [n]
@@ -252,7 +252,7 @@
 (let [d100 (t0c-concat-while 100)
       d10k (t0c-concat-while 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0c concat-while: d100=" d100 " d10k=" d10k)))
+          (string "t0c concat-while: d100=" d100 " d10k=" d10k)))
 
 # protect: primitives creating closure + fiber internally
 (defn t0c-protect-while [n]
@@ -267,7 +267,7 @@
 (let [d100 (t0c-protect-while 100)
       d10k (t0c-protect-while 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0c protect-while: d100=" d100 " d10k=" d10k)))
+          (string "t0c protect-while: d100=" d100 " d10k=" d10k)))
 
 # Same patterns in yielding while — also bounded now
 (defn t0c-closure-yield [n]
@@ -284,7 +284,7 @@
 (let [d100 (t0c-closure-yield 100)
       d10k (t0c-closure-yield 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0c closure-yield: d100=" d100 " d10k=" d10k)))
+          (string "t0c closure-yield: d100=" d100 " d10k=" d10k)))
 
 (defn t0c-concat-yield [n]
   (drain-fiber (fiber/new (fn []
@@ -299,7 +299,7 @@
 (let [d100 (t0c-concat-yield 100)
       d10k (t0c-concat-yield 10000)]
   (assert (bounded? d100 d10k 10)
-    (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
+          (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
 
 # ── Known leaks: inherent ────────────────────────────────────────
 # These genuinely escape heap values to outer bindings or collections.
@@ -442,7 +442,7 @@
 (let [d100 (leak-nested-closure 100)
       d1k (leak-nested-closure 1000)]
   (assert (bounded? d100 d1k 10)
-    (string "nested-closure: d100=" d100 " d1k=" d1k)))
+          (string "nested-closure: d100=" d100 " d1k=" d1k)))
 
 # ── Tier 4: correctness under rotation ───────────────────────────
 # Rotation must not corrupt live values. Returned heap values and
@@ -457,7 +457,7 @@
       (t4-return (- n 1)))))
 
 (assert (= (t4-return 10000) "result-0")
-  (string "t4 return: " (t4-return 10000)))
+        (string "t4 return: " (t4-return 10000)))
 
 # Yielded heap values survive across resume boundaries.
 (let* [fiber (fiber/new (fn []
@@ -475,7 +475,7 @@
   (if (= n 0) acc (t4-accum (- n 1) (+ acc n))))
 
 (assert (= (t4-accum 10000 0) 50005000)
-  (string "t4 accumulator: " (t4-accum 10000 0)))
+        (string "t4 accumulator: " (t4-accum 10000 0)))
 
 # Yielded heap values survive per-iteration scope release at scale.
 (let* [fiber (fiber/new (fn []
@@ -489,6 +489,6 @@
                 (assign acc (append acc [(fiber/resume fiber)])))
               acc)]
   (assert (= (get vals 0) "val-0")
-    (string "t4 yield-at-scale first: " (get vals 0)))
+          (string "t4 yield-at-scale first: " (get vals 0)))
   (assert (= (get vals 999) "val-999")
-    (string "t4 yield-at-scale last: " (get vals 999))))
+          (string "t4 yield-at-scale last: " (get vals 999))))

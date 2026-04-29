@@ -16,7 +16,7 @@
 (let [ips (sys/resolve "127.0.0.1")]
   (assert (> (length ips) 0) "resolving an IP should return at least one result")
   (assert (= (first ips) "127.0.0.1")
-    "resolving 127.0.0.1 should return 127.0.0.1")
+          "resolving 127.0.0.1 should return 127.0.0.1")
   (print "test 3 passed: IP passthrough\n"))
 
 # Test 4: sys/resolve returns multiple addresses

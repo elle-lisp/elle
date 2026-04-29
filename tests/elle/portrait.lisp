@@ -18,7 +18,7 @@
 (assert (empty? (get p1 :captures)) "add has no captures")
 # add has SIG_ERROR so portrait considers it non-memoizable (conservative)
 (assert (not (get (get p1 :composition) :memoizable))
-  "add not memoizable (has SIG_ERROR)")
+        "add not memoizable (has SIG_ERROR)")
 (assert (get (get p1 :composition) :parallelizable) "add is parallelizable")
 (assert (get (get p1 :composition) :jit-eligible) "add is jit-eligible")
 (assert (get (get p1 :composition) :stateless) "add is stateless")
@@ -61,7 +61,7 @@
 
 # my-map propagates parameter 0's signals
 (assert (not (empty? (get (get p3 :signal) :propagates)))
-  "my-map propagates parameter signals")
+        "my-map propagates parameter signals")
 
 # Should have unsandboxed delegation observation
 (def obs (get p3 :observations))
@@ -82,7 +82,7 @@
 (def p4 (portrait:function a3 :next))
 (assert (not (empty? (get p4 :captures))) "next has captures")
 (assert (not (get (get p4 :composition) :parallelizable))
-  "next is not parallelizable (mutable capture)")
+        "next is not parallelizable (mutable capture)")
 (assert (not (get (get p4 :composition) :stateless)) "next is not stateless")
 
 # ── Phase classification ────────────────────────────────────────────────

@@ -18,6 +18,7 @@
   (defn matches-filter? [event ext]
     "Check if the event path matches the extension filter."
     (if (nil? ext) true (string/ends-with? (get event :path) ext)))
+
   (defn filter-events [events ext]
     "Filter event batch by extension. Returns list (may be empty)."
     (if (nil? ext)
@@ -34,6 +35,7 @@
     (def w (watch))
     (watch-add w path {:recursive recursive})
     {:watcher w :filter filter})
+
   (defn next-events [handle]
     "Wait for filesystem events. Yields to the scheduler (zero polling).
      Returns a list of event structs [{:kind :modify :path \"...\"}].
@@ -41,6 +43,7 @@
     (let [raw (watch-next (get handle :watcher))
           ext (get handle :filter)]
       (filter-events raw ext)))
+
   (defn each-event [handle callback]
     "Loop calling callback on each event. Yields between batches.
      Runs forever until the watcher is closed."
@@ -48,6 +51,7 @@
       (let [events (next-events handle)]
         (each event in events
           (callback event)))))
+
   (defn stop [handle]
     "Close the watcher."
     (watch-close (get handle :watcher)))

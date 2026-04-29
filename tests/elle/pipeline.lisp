@@ -31,7 +31,7 @@
           (defmacro my-when (test body)
             `(if ,test ,body nil))
           (expand-macro '(my-when true 42)))
-  "expand-macro returns expanded form")
+        "expand-macro returns expanded form")
 
 ## === Qualified Symbol Access ===
 
@@ -127,7 +127,7 @@
 (assert (= (let [s (struct "x" 1)]
              (let [s2 (put s "x" 2)]
                (list (get s "x") (get s2 "x")))) (list 1 2))
-  "struct put returns new")
+        "struct put returns new")
 
 (assert (= (let [t (@struct)]
              (get t "missing" 42)) 42) "get @struct with default")
@@ -164,7 +164,7 @@
 (assert (= (get [1 2 3] 2) 3) "get array by index last")
 (assert (= (get [1 2 3] 10) nil) "get array out of bounds")
 (assert (= (get [1 2 3] 10 :missing) :missing)
-  "get array out of bounds with default")
+        "get array out of bounds with default")
 (assert (= (get [1 2 3] -1) 3) "get array negative index")
 (assert (= (get [1 2 3] -1 :default) 3) "get array negative index with default")
 (assert (= (get [] 0) nil) "get empty array")
@@ -178,7 +178,7 @@
 (assert (= (get @[1 2 3] 2) 3) "get array by index last")
 (assert (= (get @[1 2 3] 10) nil) "get array out of bounds")
 (assert (= (get @[1 2 3] 10 :missing) :missing)
-  "get array out of bounds with default")
+        "get array out of bounds with default")
 (assert (= (get @[1 2 3] -1) 3) "get @array negative index")
 (assert (= (get @[] 0) nil) "get empty array")
 (let [[ok? _] (protect ((fn () (get @[1 2 3] :key))))]
@@ -191,7 +191,7 @@
 (assert (= (get "hello" 4) "o") "get string by char index last")
 (assert (= (get "hello" 10) nil) "get string out of bounds")
 (assert (= (get "hello" 10 :missing) :missing)
-  "get string out of bounds with default")
+        "get string out of bounds with default")
 (assert (= (get "hello" -1) "o") "get string negative index")
 (assert (= (get "" 0) nil) "get empty string")
 (let [[ok? _] (protect ((fn () (get "hello" :key))))]
@@ -204,7 +204,7 @@
 (assert (= (get {"x" 10} "x") 10) "get struct by string key")
 (assert (= (get {:a 1} :b) nil) "get struct missing key")
 (assert (= (get {:a 1} :b :missing) :missing)
-  "get struct missing key with default")
+        "get struct missing key with default")
 (assert (= (get {} :a) nil) "get empty struct")
 
 ## === Polymorphic get - @structs ===
@@ -213,7 +213,7 @@
 (assert (= (get @{"x" 10} "x") 10) "get @struct by string key")
 (assert (= (get @{:a 1} :b) nil) "get @struct missing key")
 (assert (= (get @{:a 1} :b :missing) :missing)
-  "get @struct missing key with default")
+        "get @struct missing key with default")
 (assert (= (get @{} :a) nil) "get empty @struct")
 
 ## === get Error Cases ===
@@ -241,7 +241,7 @@
 (assert (= (let [t [1 2 3]]
              (let [t2 (put t 0 99)]
                (list t t2))) (list [1 2 3] [99 2 3]))
-  "put array immutable original unchanged")
+        "put array immutable original unchanged")
 
 (let [[ok? _] (protect ((fn () (put [1 2 3] :key 99))))]
   (assert (not ok?) "put array non-integer index error"))
@@ -278,7 +278,7 @@
 (assert (= (let [s "hello"]
              (let [s2 (put s 0 "a")]
                (list s s2))) (list "hello" "aello"))
-  "put string immutable original unchanged")
+        "put string immutable original unchanged")
 
 (let [[ok? _] (protect ((fn () (put "hello" :key "a"))))]
   (assert (not ok?) "put string non-integer index error"))
@@ -295,7 +295,7 @@
 (assert (= (let [s {:a 1}]
              (let [s2 (put s :a 99)]
                (list (get s :a) (get s2 :a)))) (list 1 99))
-  "put struct immutable original unchanged")
+        "put struct immutable original unchanged")
 
 (assert (= (get (put {} :a 1) :a) 1) "put empty struct")
 
@@ -506,7 +506,7 @@
 (assert (= (let [t [1 2]]
              (let [t2 (append t [3 4])]
                (list t t2))) (list [1 2] [1 2 3 4]))
-  "append arrays original unchanged")
+        "append arrays original unchanged")
 
 ## === append - @strings ===
 
@@ -515,7 +515,7 @@
 (assert (= (let [s "hello"]
              (let [s2 (append s " world")]
                (list s s2))) (list "hello" "hello world"))
-  "append @strings returns new")
+        "append @strings returns new")
 
 ## === append - Empty Collections ===
 
@@ -534,7 +534,7 @@
 (let [[ok? _] (protect ((fn () (eval '(append @[1 2] @[3 4] @[5 6])))))]
   (assert (not ok?) "append wrong arity too many args"))
 (assert (= (append @[1 2] [3 4]) @[1 2 3 4])
-  "append @array + array (cross-mutability)")
+        "append @array + array (cross-mutability)")
 (let [[ok? _] (protect ((fn () (append 42 99))))]
   (assert (not ok?) "append unsupported type error"))
 
@@ -545,7 +545,7 @@
 (assert (= (let [a @[1 2]]
              (let [a2 (concat a @[3 4])]
                (list a a2))) (list @[1 2] @[1 2 3 4]))
-  "concat @arrays original unchanged")
+        "concat @arrays original unchanged")
 
 ## === concat - Arrays ===
 
@@ -580,27 +580,27 @@
 ## === concat - bytes ===
 
 (assert (= (concat (bytes 1 2) (bytes 3 4)) (bytes 1 2 3 4))
-  "concat bytes basic")
+        "concat bytes basic")
 (assert (= (concat (bytes) (bytes 1 2)) (bytes 1 2)) "concat bytes empty left")
 (assert (= (concat (bytes 1 2) (bytes)) (bytes 1 2)) "concat bytes empty right")
 (assert (= (concat (bytes 1) (bytes 2) (bytes 3)) (bytes 1 2 3))
-  "concat bytes three")
+        "concat bytes three")
 (assert (= (concat (bytes 1)) (bytes 1)) "concat bytes single identity")
 (assert (= (let [a (bytes 1 2)]
              (let [b (concat a (bytes 3 4))]
                (list (length a) (length b)))) (list 2 4))
-  "concat bytes non-destructive")
+        "concat bytes non-destructive")
 
 ## === concat - @bytes ===
 
 (assert (= (concat (@bytes 1 2) (@bytes 3 4)) (@bytes 1 2 3 4))
-  "concat @bytes basic")
+        "concat @bytes basic")
 (assert (= (concat (@bytes) (@bytes 1 2)) (@bytes 1 2))
-  "concat @bytes empty left")
+        "concat @bytes empty left")
 (assert (= (concat (@bytes 1 2) (@bytes)) (@bytes 1 2))
-  "concat @bytes empty right")
+        "concat @bytes empty right")
 (assert (= (concat (@bytes 1) (@bytes 2) (@bytes 3)) (@bytes 1 2 3))
-  "concat @bytes three")
+        "concat @bytes three")
 (assert (= (concat (@bytes 1)) (@bytes 1)) "concat @bytes single identity")
 
 ## === concat - set ===
@@ -625,26 +625,26 @@
 
 (assert (= (concat {:a 1} {:b 2}) {:a 1 :b 2}) "concat structs disjoint")
 (assert (= (concat {:a 1 :b 2} {:b 3 :c 4}) {:a 1 :b 3 :c 4})
-  "concat structs right wins")
+        "concat structs right wins")
 (assert (= (concat {} {:a 1}) {:a 1}) "concat struct empty left")
 (assert (= (concat {:a 1} {}) {:a 1}) "concat struct empty right")
 (assert (= (concat {:a 1} {:b 2} {:c 3}) {:a 1 :b 2 :c 3})
-  "concat structs three")
+        "concat structs three")
 (assert (= (concat {:a 1} {:a 2} {:a 3}) {:a 3})
-  "concat structs three last wins")
+        "concat structs three last wins")
 (assert (= (concat {:a 1}) {:a 1}) "concat struct single identity")
 
 ## === concat - @struct ===
 
 (assert (= (concat @{:a 1} @{:b 2}) @{:a 1 :b 2}) "concat @structs disjoint")
 (assert (= (concat @{:a 1 :b 2} @{:b 3 :c 4}) @{:a 1 :b 3 :c 4})
-  "concat @structs right wins")
+        "concat @structs right wins")
 (assert (= (concat @{} @{:a 1}) @{:a 1}) "concat @struct empty left")
 (assert (= (concat @{:a 1} @{}) @{:a 1}) "concat @struct empty right")
 (assert (= (concat @{:a 1} @{:b 2} @{:c 3}) @{:a 1 :b 2 :c 3})
-  "concat @structs three")
+        "concat @structs three")
 (assert (= (concat @{:a 1} @{:a 2} @{:a 3}) @{:a 3})
-  "concat @structs three last wins")
+        "concat @structs three last wins")
 (assert (= (concat @{:a 1}) @{:a 1}) "concat @struct single identity")
 
 ## === concat - new type mismatch errors ===
@@ -666,10 +666,10 @@
 
 (assert (= (merge {:a 1} {:b 2}) {:a 1 :b 2}) "merge: immutable + immutable")
 (assert (= (merge {:a 1 :b 2} {:b 3 :c 4}) {:a 1 :b 3 :c 4})
-  "merge: immutable right overrides left")
+        "merge: immutable right overrides left")
 (assert (= (merge @{:a 1} @{:b 2}) @{:a 1 :b 2}) "merge: mutable + mutable")
 (assert (= (merge @{:a 1 :b 2} @{:b 3 :c 4}) @{:a 1 :b 3 :c 4})
-  "merge: mutable right overrides left")
+        "merge: mutable right overrides left")
 (assert (= (merge {} {:a 1}) {:a 1}) "merge: empty immutable left")
 (assert (= (merge {:a 1} {}) {:a 1}) "merge: empty immutable right")
 (assert (= (merge @{} @{:a 1}) @{:a 1}) "merge: empty mutable left")
@@ -701,7 +701,7 @@
 (assert (= (get (list 10 20 30) 2) 30) "get list by index last")
 (assert (= (get (list 10 20 30) 10) nil) "get list out of bounds")
 (assert (= (get (list 10 20 30) 10 :missing) :missing)
-  "get list out of bounds with default")
+        "get list out of bounds with default")
 (assert (= (get (list 10 20 30) -1) 30) "get list negative index")
 (assert (= (get (list) 0) nil) "get empty list")
 (let [[ok? _] (protect ((fn () (get (list 1 2 3) :key))))]

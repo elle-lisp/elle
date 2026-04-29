@@ -8,19 +8,19 @@
 
 (let [r (cli:parse {:name "app"
                     :args [{:name "verbose" :short "v" :action :flag}]}
-        ["app" "-v"])]
+                   ["app" "-v"])]
   (assert (= r:verbose true) "short flag"))
 
 # ── Long option with value ───────────────────────────────────────
 
 (let [r (cli:parse {:name "app" :args [{:name "output" :long "output"}]}
-        ["app" "--output" "file.txt"])]
+                   ["app" "--output" "file.txt"])]
   (assert (= r:output "file.txt") "long option value"))
 
 # ── Long option with = syntax ────────────────────────────────────
 
 (let [r (cli:parse {:name "app" :args [{:name "output" :long "output"}]}
-        ["app" "--output=file.txt"])]
+                   ["app" "--output=file.txt"])]
   (assert (= r:output "file.txt") "long option = syntax"))
 
 # ── Default value ────────────────────────────────────────────────
@@ -33,14 +33,14 @@
 
 (let [r (cli:parse {:name "app"
                     :args [{:name "verbose" :short "v" :action :count}]}
-        ["app" "-vvv"])]
+                   ["app" "-vvv"])]
   (assert (= r:verbose 3) "stacked count"))
 
 # ── Append action ────────────────────────────────────────────────
 
 (let [r (cli:parse {:name "app"
                     :args [{:name "include" :long "include" :action :append}]}
-        ["app" "--include" "a" "--include" "b"])]
+                   ["app" "--include" "a" "--include" "b"])]
   (assert (= (length r:include) 2) "append count")
   (assert (= (r:include 0) "a") "append first")
   (assert (= (r:include 1) "b") "append second"))
@@ -55,7 +55,7 @@
 (let [r (cli:parse {:name "app"
                     :args [{:name "verbose" :short "v" :action :flag}
                            {:name "output" :long "output"} {:name "file"}]}
-        ["app" "-v" "--output" "out.txt" "in.txt"])]
+                   ["app" "-v" "--output" "out.txt" "in.txt"])]
   (assert (= r:verbose true) "mixed: flag")
   (assert (= r:output "out.txt") "mixed: option")
   (assert (= r:file "in.txt") "mixed: positional"))
@@ -80,7 +80,7 @@
                     :args [{:name "verbose" :short "v" :action :flag}]
                     :commands [{:name "build"
                                 :args [{:name "target" :long "target"}]}]}
-        ["app" "-v" "build" "--target" "release"])]
+                   ["app" "-v" "build" "--target" "release"])]
   (assert (= r:verbose true) "subcommand: parent flag")
   (assert (= r:command "build") "subcommand: name")
   (assert (= r:command-args:target "release") "subcommand: child option"))
