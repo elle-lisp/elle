@@ -495,50 +495,210 @@ impl<'a> FnCtx<'a> {
         )
     }
 
-    /// Transform a Begin sequence, converting sequential Assigns to
-    /// Define of fresh SSA bindings.
+    /// Transform a Begin sequence. Processes expressions left-to-right:
+    /// - Assign → Let wrapping the continuation (proper SSA let-chain)
+    /// - If/Cond/Match containing assigns → phi-let insertion after merge
+    /// - Everything else → transform and continue
     fn transform_begin(&mut self, exprs: &[Hir], span: crate::syntax::Span, signal: Signal) -> Hir {
-        if exprs.is_empty() {
+        self.transform_begin_at(exprs, 0, span, signal)
+    }
+
+    /// Recursive helper: transform exprs[start..] as a begin sequence.
+    fn transform_begin_at(
+        &mut self,
+        exprs: &[Hir],
+        start: usize,
+        span: crate::syntax::Span,
+        signal: Signal,
+    ) -> Hir {
+        if start >= exprs.len() {
             return Hir::new(HirKind::Nil, span, signal);
         }
 
-        let mut result_exprs = Vec::new();
+        let expr = &exprs[start];
 
-        for expr in exprs {
-            match &expr.kind {
-                HirKind::Assign { target, value } if !self.arena.get(*target).needs_capture() => {
-                    // Sequential assign → Define of fresh SSA binding.
-                    // This preserves sequential semantics: the fresh
-                    // binding is allocated and stored, and subsequent
-                    // expressions see the new version via renames.
-                    //
-                    // TODO: proper let-chain wrapping (each Define wraps
-                    // the continuation) would give region inference better
-                    // structural information. For now, Define (slot-based)
-                    // is correct and the lowerer handles it.
-                    let new_value = self.transform(value);
-                    let fresh = self.fresh_version(*target);
-                    self.renames.insert(*target, fresh);
-                    result_exprs.push(Hir::new(
-                        HirKind::Define {
-                            binding: fresh,
-                            value: Box::new(new_value),
-                        },
-                        expr.span.clone(),
-                        expr.signal,
-                    ));
-                }
-                _ => {
-                    result_exprs.push(self.transform(expr));
-                }
+        // Sequential assign → Let wrapping the continuation
+        if let HirKind::Assign { target, value } = &expr.kind {
+            if !self.arena.get(*target).needs_capture() {
+                let new_value = self.transform(value);
+                let fresh = self.fresh_version(*target);
+                self.renames.insert(*target, fresh);
+                let continuation = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+                return Hir::new(
+                    HirKind::Let {
+                        bindings: vec![(fresh, new_value)],
+                        body: Box::new(continuation),
+                    },
+                    span,
+                    signal,
+                );
             }
         }
 
-        if result_exprs.len() == 1 {
-            result_exprs.pop().unwrap()
-        } else {
-            Hir::new(HirKind::Begin(result_exprs), span, signal)
+        // If with assigns in branches → transform + phi-let insertion
+        if let HirKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } = &expr.kind
+        {
+            let mut then_assigns = BTreeSet::new();
+            let mut else_assigns = BTreeSet::new();
+            self.collect_assigned_bindings(then_branch, &mut then_assigns);
+            self.collect_assigned_bindings(else_branch, &mut else_assigns);
+            let all_assigned: BTreeSet<_> = then_assigns.union(&else_assigns).copied().collect();
+
+            if !all_assigned.is_empty() {
+                return self.transform_if_with_phi(
+                    cond,
+                    then_branch,
+                    else_branch,
+                    &all_assigned,
+                    exprs,
+                    start,
+                    span,
+                    signal,
+                );
+            }
         }
+
+        // Default: transform this expr, then the rest
+        let transformed = self.transform(expr);
+        if start + 1 >= exprs.len() {
+            // Last expression — its value is the Begin's result
+            return transformed;
+        }
+        let rest = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+        Hir::new(HirKind::Begin(vec![transformed, rest]), span, signal)
+    }
+
+    /// Transform an If that contains assigns in its branches, inserting
+    /// phi-lets after the merge point for each assigned binding.
+    ///
+    /// ```text
+    /// (begin (if cond (assign x 1)) (println x))
+    /// →
+    /// (let [x_1 (if cond 1 x_0)]
+    ///   (println x_1))
+    /// ```
+    #[allow(clippy::too_many_arguments)]
+    fn transform_if_with_phi(
+        &mut self,
+        cond: &Hir,
+        then_branch: &Hir,
+        else_branch: &Hir,
+        assigned: &BTreeSet<Binding>,
+        exprs: &[Hir],
+        start: usize,
+        span: crate::syntax::Span,
+        signal: Signal,
+    ) -> Hir {
+        let new_cond = self.transform(cond);
+
+        // Transform each branch, extracting the final SSA value of
+        // each assigned binding. Assigns are removed from the branch
+        // body; their values are collected for phi construction.
+        let saved = self.renames.clone();
+
+        let (new_then, then_versions) =
+            self.transform_branch_extracting_assigns(then_branch, assigned);
+        self.renames = saved.clone();
+
+        let (new_else, else_versions) =
+            self.transform_branch_extracting_assigns(else_branch, assigned);
+        self.renames = saved.clone();
+
+        // Emit the If (with assigns removed from branches)
+        let if_expr = Hir::new(
+            HirKind::If {
+                cond: Box::new(new_cond.clone()),
+                then_branch: Box::new(new_then),
+                else_branch: Box::new(new_else),
+            },
+            cond.span.clone(),
+            signal,
+        );
+
+        // Build phi-lets: for each assigned binding, create
+        // (let [x_fresh (if cond then_val else_val)] ...continuation...)
+        let phi_bindings: Vec<_> = assigned
+            .iter()
+            .map(|&orig| {
+                let then_val = then_versions
+                    .get(&orig)
+                    .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
+                    .unwrap_or_else(|| {
+                        // Not assigned in then → use pre-if version
+                        let pre = saved.get(&orig).copied().unwrap_or(orig);
+                        Hir::silent(HirKind::Var(pre), span.clone())
+                    });
+                let else_val = else_versions
+                    .get(&orig)
+                    .map(|&b| Hir::silent(HirKind::Var(b), span.clone()))
+                    .unwrap_or_else(|| {
+                        let pre = saved.get(&orig).copied().unwrap_or(orig);
+                        Hir::silent(HirKind::Var(pre), span.clone())
+                    });
+
+                let fresh = self.fresh_version(orig);
+                self.renames.insert(orig, fresh);
+
+                let phi_val = Hir::new(
+                    HirKind::If {
+                        cond: Box::new(new_cond.clone()),
+                        then_branch: Box::new(then_val),
+                        else_branch: Box::new(else_val),
+                    },
+                    span.clone(),
+                    Signal::silent(),
+                );
+                (fresh, phi_val)
+            })
+            .collect();
+
+        // Transform the continuation with the phi bindings active
+        let mut result = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+
+        // Wrap: if_expr; (let [phis...] continuation)
+        for (binding, phi_val) in phi_bindings.into_iter().rev() {
+            result = Hir::new(
+                HirKind::Let {
+                    bindings: vec![(binding, phi_val)],
+                    body: Box::new(result),
+                },
+                span.clone(),
+                signal,
+            );
+        }
+
+        // Prepend the if expression (for its side effects)
+        Hir::new(HirKind::Begin(vec![if_expr, result]), span, signal)
+    }
+
+    /// Transform a branch body, converting assigns to the target
+    /// bindings into Defines (so the value is captured) and recording
+    /// which SSA version each binding ended up at.
+    fn transform_branch_extracting_assigns(
+        &mut self,
+        branch: &Hir,
+        targets: &BTreeSet<Binding>,
+    ) -> (Hir, HashMap<Binding, Binding>) {
+        // Transform the branch normally — assigns inside it become
+        // Defines (via transform_begin) or stay as Assign.
+        let transformed = self.transform(branch);
+        // Collect the final SSA version of each target binding
+        let versions: HashMap<Binding, Binding> = targets
+            .iter()
+            .filter_map(|&orig| {
+                let current = self.resolve(orig);
+                if current != orig {
+                    Some((orig, current))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (transformed, versions)
     }
 }
 
