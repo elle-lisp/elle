@@ -237,7 +237,7 @@ impl ThreadPoolBackend {
                     Ok(stream) => {
                         let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or(addr);
                         let new_fd = stream.into_raw_fd();
-                        crate::io::uring::apply_socket_options(new_fd, &options);
+                        crate::io::request::apply_socket_options(new_fd, &options);
                         (new_fd, peer.into_bytes())
                     }
                     Err(e) => (
@@ -253,7 +253,7 @@ impl ThreadPoolBackend {
                             Vec::new(),
                         )
                     } else {
-                        crate::io::uring::apply_socket_options(sock_fd, &options);
+                        crate::io::request::apply_socket_options(sock_fd, &options);
                         match crate::io::sockaddr::build_unix(&path) {
                             Err(msg) => {
                                 unsafe { libc::close(sock_fd) };

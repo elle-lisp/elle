@@ -4,57 +4,13 @@ use crate::io::aio::TIMEOUT_USER_DATA_TAG;
 use crate::io::completion::process_raw_completion;
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, IoOp, SocketOptions};
+use crate::io::request::{apply_socket_options, ConnectAddr, IoOp};
 use crate::io::types::{FdState, PortKey};
 use crate::io::Completion;
 use crate::port::{Port, PortKind};
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
-
-/// Apply socket options (SO_SNDBUF, SO_RCVBUF, TCP_NODELAY, SO_KEEPALIVE) to a socket fd.
-pub(super) fn apply_socket_options(fd: RawFd, opts: &SocketOptions) {
-    unsafe {
-        if let Some(val) = opts.sndbuf {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_SNDBUF,
-                &val as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-        if let Some(val) = opts.rcvbuf {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_RCVBUF,
-                &val as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-        if let Some(val) = opts.nodelay {
-            let opt: i32 = val as i32;
-            libc::setsockopt(
-                fd,
-                libc::IPPROTO_TCP,
-                libc::TCP_NODELAY,
-                &opt as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-        if let Some(val) = opts.keepalive {
-            let opt: i32 = val as i32;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_KEEPALIVE,
-                &opt as *const i32 as *const libc::c_void,
-                std::mem::size_of::<i32>() as libc::socklen_t,
-            );
-        }
-    }
-}
 
 /// Submit a stream I/O operation (Read, ReadLine, ReadAll, Write, Flush).
 ///
@@ -1015,6 +971,7 @@ pub(super) fn submit_uring_watch_next(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::request::SocketOptions;
 
     /// Verify apply_socket_options actually sets SO_SNDBUF on a socket fd.
     #[test]

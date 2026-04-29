@@ -245,6 +245,50 @@ pub struct SocketOptions {
     pub keepalive: Option<bool>,
 }
 
+/// Apply socket options (SO_SNDBUF, SO_RCVBUF, TCP_NODELAY, SO_KEEPALIVE) to a socket fd.
+pub(crate) fn apply_socket_options(fd: std::os::unix::io::RawFd, opts: &SocketOptions) {
+    unsafe {
+        if let Some(val) = opts.sndbuf {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &val as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.rcvbuf {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &val as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.nodelay {
+            let opt: i32 = val as i32;
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                &opt as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.keepalive {
+            let opt: i32 = val as i32;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_KEEPALIVE,
+                &opt as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+    }
+}
+
 /// Address for connect operations.
 #[derive(Debug)]
 pub enum ConnectAddr {

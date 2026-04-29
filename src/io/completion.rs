@@ -436,7 +436,7 @@ pub(super) fn process_raw_completion(
                     let peer_addr = crate::io::sockaddr::peer_address(fd);
                     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
                     // Apply user-specified socket options to the accepted fd.
-                    crate::io::uring::apply_socket_options(fd.as_raw_fd(), options);
+                    crate::io::request::apply_socket_options(fd.as_raw_fd(), options);
                     let new_port = match listener_kind {
                         Some(PortKind::TcpListener) => {
                             set_tcp_nodelay(&fd);
