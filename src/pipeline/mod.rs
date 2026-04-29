@@ -14,7 +14,8 @@ pub use cache::{
     update_cache_with_stdlib,
 };
 pub use compile::{
-    compile, compile_file, compile_file_repl, compile_file_to_lir, compile_to_lir, splice_includes,
+    compile, compile_file, compile_file_repl, compile_file_to_fhir, compile_file_to_lir,
+    compile_to_lir, splice_includes,
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 

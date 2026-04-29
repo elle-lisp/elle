@@ -20,6 +20,7 @@ fn print_help() {
     println!("  --dump=KW[,KW,...]    Dump compiler artifacts and exit. Keywords:");
     println!("                          ast  — parsed syntax forms");
     println!("                          hir  — resolved HIR");
+    println!("                          fhir — functionalized HIR (s-expression)");
     println!("                          lir  — lowered LIR (SSA)");
     println!("                          jit  — JIT eligibility per function");
     println!("                          cfg  — per-function control-flow graph");
@@ -191,6 +192,17 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
     // HIR / LIR / CFG / DFA / JIT / git (SPIR-V) all flow off
     // compile_file_to_lir. Only run the pipeline once if any of them are
     // requested.
+    // FHIR — functionalized HIR (s-expression dump before lowering)
+    if cfg.dump.contains("fhir") {
+        println!(";; ── fhir (functionalized HIR) ──────────────────────────────");
+        let (hir, arena, names) =
+            elle::pipeline::compile_file_to_fhir(contents, symbols, source_name).map_err(|e| {
+                eprintln!("{}", e);
+                e
+            })?;
+        println!("{}", elle::hir::display::display_hir(&hir, &arena, &names));
+    }
+
     let needs_pipeline = cfg
         .dump
         .iter()

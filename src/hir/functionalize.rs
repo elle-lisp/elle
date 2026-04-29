@@ -708,7 +708,11 @@ impl<'a> FnCtx<'a> {
             let mut else_assigns = BTreeSet::new();
             self.collect_assigned_bindings(then_branch, &mut then_assigns);
             self.collect_assigned_bindings(else_branch, &mut else_assigns);
-            let all_assigned: BTreeSet<_> = then_assigns.union(&else_assigns).copied().collect();
+            let all_assigned: BTreeSet<_> = then_assigns
+                .union(&else_assigns)
+                .copied()
+                .filter(|b| !self.loop_params.contains(&self.resolve(*b)))
+                .collect();
 
             if !all_assigned.is_empty() {
                 return self.transform_if_with_phi(

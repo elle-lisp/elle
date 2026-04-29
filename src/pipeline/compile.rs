@@ -287,6 +287,115 @@ pub fn compile_file_to_lir(
 
 /// Compile a file as a single synthetic letrec.
 ///
+/// Compile to functionalized HIR (for `--dump=fhir`). Returns the HIR tree,
+/// the binding arena, and the symbol name map.
+pub fn compile_file_to_fhir(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<
+    (
+        crate::hir::Hir,
+        BindingArena,
+        std::collections::HashMap<u32, String>,
+    ),
+    String,
+> {
+    intern_primitive_names(symbols);
+
+    let mut syntaxes = read_syntax_all_for(source, source_name)?;
+    let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
+    if let Some(epoch) = source_epoch {
+        crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+    }
+
+    let (expanded_forms, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+        let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
+            syntaxes.into()
+        } else {
+            let file_scope = expander.fresh_scope();
+            syntaxes
+                .into_iter()
+                .map(|s| expander.stamp_scope(s, file_scope))
+                .collect()
+        };
+        let mut expanded_forms = Vec::new();
+        let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+        while let Some(syntax) = pending.pop_front() {
+            if let Some((spec, is_include)) = extract_include(&syntax) {
+                let path = if is_include {
+                    crate::primitives::modules::resolve_import(&spec)
+                } else {
+                    resolve_include_file(&spec, source_name)
+                };
+                let path =
+                    path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
+                if !included.insert(path.clone()) {
+                    return Err(format!(
+                        "{}: include: circular dependency on '{}'",
+                        syntax.span, path
+                    ));
+                }
+                let contents = std::fs::read_to_string(&path).map_err(|e| {
+                    format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
+                })?;
+                let forms = read_syntax_all_for(&contents, &path)?;
+                for (i, form) in forms.into_iter().enumerate() {
+                    pending.insert(i, form);
+                }
+                continue;
+            }
+            let expanded = expander.expand(syntax, symbols, macro_vm)?;
+            expanded_forms.push(expanded);
+        }
+        Ok((expanded_forms, meta))
+    })?;
+
+    let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
+    let span = if expanded_forms.is_empty() {
+        Span::synthetic()
+    } else {
+        expanded_forms[0]
+            .span
+            .merge(&expanded_forms[expanded_forms.len() - 1].span)
+    };
+
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
+    let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
+    analyzer.set_immutable_by_default(effective_epoch >= 8);
+    analyzer.bind_primitives(&meta);
+    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let errors = analyzer.take_errors();
+    drop(analyzer);
+
+    if !errors.is_empty() {
+        let err = &errors[0];
+        let msg = match &err.location {
+            Some(loc) => format!(
+                "{}:{}:{}: {}",
+                loc.file,
+                loc.line,
+                loc.col,
+                err.description()
+            ),
+            None => err.description(),
+        };
+        return Err(msg);
+    }
+
+    mark_tail_calls(&mut hir);
+    functionalize(&mut hir, &mut arena);
+
+    let names = symbols.all_names();
+    Ok((hir, arena, names))
+}
+
 /// All top-level forms are analyzed together, enabling mutual recursion.
 /// Returns a single `CompileResult`. Primitives are pre-bound as immutable
 /// Global bindings in an outer scope.
