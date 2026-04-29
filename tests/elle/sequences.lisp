@@ -8,9 +8,11 @@
 ## reverse_involution_list
 ## Verify that reversing a list twice returns the original list
 
-(assert (= (reverse (reverse (list 1 2 3))) (list 1 2 3)) "reverse involution: (list 1 2 3)")
+(assert (= (reverse (reverse (list 1 2 3))) (list 1 2 3))
+        "reverse involution: (list 1 2 3)")
 
-(assert (= (reverse (reverse (list -5 0 7))) (list -5 0 7)) "reverse involution: (list -5 0 7)")
+(assert (= (reverse (reverse (list -5 0 7))) (list -5 0 7))
+        "reverse involution: (list -5 0 7)")
 
 (assert (= (reverse (reverse (list))) (list)) "reverse involution: empty list")
 

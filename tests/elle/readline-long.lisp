@@ -20,16 +20,19 @@
 
 # Read it back with port/read-line
 (let [p (port/open "/tmp/elle-readline-long-test" :read)]
-  (defer (port/close p)
+  (defer
+    (port/close p)
     (let [line (port/read-line p)]
       (assert (= (string/size-of line) 8192)
-        (string/join ["expected 8192 bytes, got " (string (string/size-of line))] ""))
+              (string/join ["expected 8192 bytes, got "
+                            (string (string/size-of line))] ""))
       (assert (= line long-line) "read-line content mismatch"))))
 
 # Also test a line well under the limit still works
 (spit "/tmp/elle-readline-short-test" "hello\nworld\n")
 (let [p (port/open "/tmp/elle-readline-short-test" :read)]
-  (defer (port/close p)
+  (defer
+    (port/close p)
     (let [line1 (port/read-line p)
           line2 (port/read-line p)
           line3 (port/read-line p)]
@@ -40,9 +43,10 @@
 # Test multiple long lines in sequence
 (def medium-line (make-long-string 5000))
 (spit "/tmp/elle-readline-multi-test"
-  (string/join [long-line "\n" medium-line "\n" "short\n"] ""))
+      (string/join [long-line "\n" medium-line "\n" "short\n"] ""))
 (let [p (port/open "/tmp/elle-readline-multi-test" :read)]
-  (defer (port/close p)
+  (defer
+    (port/close p)
     (let [l1 (port/read-line p)
           l2 (port/read-line p)
           l3 (port/read-line p)]

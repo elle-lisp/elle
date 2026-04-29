@@ -47,13 +47,15 @@
 (assert (= (length named) 1) "root has 1 named child")
 
 (def func-def (first named))
-(assert (= (ts:node-type func-def) "function_definition") "child is function_definition")
+(assert (= (ts:node-type func-def) "function_definition")
+        "child is function_definition")
 
 ## ── ts/child-by-field ─────────────────────────────────────────
 
 (def body (ts:child-by-field func-def "body"))
 (assert (not (nil? body)) "function_definition has body field")
-(assert (= (ts:node-type body) "compound_statement") "body is compound_statement")
+(assert (= (ts:node-type body) "compound_statement")
+        "body is compound_statement")
 
 (def missing (ts:child-by-field func-def "nonexistent"))
 (assert (nil? missing) "missing field returns nil")
@@ -61,7 +63,8 @@
 ## ── ts/parent ─────────────────────────────────────────────────
 
 (def parent-node (ts:parent func-def))
-(assert (= (ts:node-type parent-node) "translation_unit") "parent is translation_unit")
+(assert (= (ts:node-type parent-node) "translation_unit")
+        "parent is translation_unit")
 (assert (nil? (ts:parent root)) "parent of root is nil")
 
 ## ── ts/node-range ─────────────────────────────────────────────
@@ -76,7 +79,8 @@
 
 (def sexp (ts:node-sexp root))
 (assert (string? sexp) "node-sexp returns string")
-(assert (string/starts-with? sexp "(translation_unit") "sexp starts with translation_unit")
+(assert (string/starts-with? sexp "(translation_unit")
+        "sexp starts with translation_unit")
 
 ## ── ts/query + ts/matches ─────────────────────────────────────
 
@@ -84,17 +88,20 @@
 (def multi-tree (ts:parse multi-src c-lang))
 (def multi-root (ts:root multi-tree))
 
-(def q (ts:query c-lang "(function_declarator declarator: (identifier) @fn-name)"))
+(def q
+  (ts:query c-lang "(function_declarator declarator: (identifier) @fn-name)"))
 (def matches (ts:matches q multi-root))
 
 (assert (= (length matches) 2) "query finds 2 functions")
 
 (def m0 (first matches))
 (assert (= (get m0 :pattern) 0) "match pattern index is 0")
-(assert (= (ts:node-text (get (get m0 :captures) :fn-name)) "foo") "first match is foo")
+(assert (= (ts:node-text (get (get m0 :captures) :fn-name)) "foo")
+        "first match is foo")
 
 (def m1 (first (rest matches)))
-(assert (= (ts:node-text (get (get m1 :captures) :fn-name)) "bar") "second match is bar")
+(assert (= (ts:node-text (get (get m1 :captures) :fn-name)) "bar")
+        "second match is bar")
 
 ## ── ts/captures ───────────────────────────────────────────────
 
@@ -121,4 +128,5 @@
 (def rq (ts:query rust-lang "(function_item name: (identifier) @name)"))
 (def rust-caps (ts:captures rq rust-root))
 (assert (= (length rust-caps) 1) "Rust query finds 1 function")
-(assert (= (ts:node-text (get (first rust-caps) :node)) "greet") "Rust fn name is greet")
+(assert (= (ts:node-text (get (first rust-caps) :node)) "greet")
+        "Rust fn name is greet")

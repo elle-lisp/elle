@@ -54,9 +54,7 @@
     (def fd (plugin:display-fd handle))
     (if (nil? fd)
       (ev/sleep (or timeout 0.016))
-      (if (nil? timeout)
-        (ev/poll-fd fd :read)
-        (ev/poll-fd fd :read timeout))))
+      (if (nil? timeout) (ev/poll-fd fd :read) (ev/poll-fd fd :read timeout))))
 
   (defn frame [handle tree]
     "Render one frame. Synchronous — pumps events, renders, returns interactions."
@@ -66,8 +64,14 @@
 
   (defn empty-ix []
     "Empty interactions struct for the first render-fn call."
-    {:clicks || :text {} :checks {} :sliders {}
-     :combos {} :collapsed {} :closed false :size [0 0]})
+    {:clicks ||
+     :text {}
+     :checks {}
+     :sliders {}
+     :combos {}
+     :collapsed {}
+     :closed false
+     :size [0 0]})
 
   (defn run [handle render-fn]
     "Immediate-mode GUI loop. render-fn: (fn [interactions] tree).
@@ -226,26 +230,43 @@
 
   ## ── Export struct ──────────────────────────────────────────────────
 
-  {# lifecycle
-   :open open :close close :open? open?
-   :frame frame :wait-event wait-event :run run
-   # display widgets
-   :label label :heading heading :progress-bar progress-bar
-   :separator separator :spacer spacer
-   # input widgets
-   :button button :text-input text-input :text-edit text-edit
-   :checkbox checkbox :slider slider :combo-box combo-box
-   # layout
-   :v-layout v-layout :h-layout h-layout
-   :centered centered :centered-justified centered-justified
+  {
+   # lifecycle
+   :open open
+   :close close
+   :open? open?
+   :frame frame
+   :wait-event wait-event
+   :run run  # display widgets
+   :label label
+   :heading heading
+   :progress-bar progress-bar
+   :separator separator
+   :spacer spacer  # input widgets
+   :button button
+   :text-input text-input
+   :text-edit text-edit
+   :checkbox checkbox
+   :slider slider
+   :combo-box combo-box  # layout
+   :v-layout v-layout
+   :h-layout h-layout
+   :centered centered
+   :centered-justified centered-justified
    :scroll-area scroll-area
-   :collapsing collapsing :group group :grid grid
-   # compound
-   :labeled labeled
-   # interaction readers
-   :clicked? clicked? :text-val text-val :check-val check-val
-   :slider-val slider-val :combo-val combo-val
-   :collapsed? collapsed? :window-size window-size
-   # state setters
-   :set-text set-text :set-check set-check :set-slider set-slider
-   :set-combo set-combo :set-title set-title})
+   :collapsing collapsing
+   :group group
+   :grid grid  # compound
+   :labeled labeled  # interaction readers
+   :clicked? clicked?
+   :text-val text-val
+   :check-val check-val
+   :slider-val slider-val
+   :combo-val combo-val
+   :collapsed? collapsed?
+   :window-size window-size  # state setters
+   :set-text set-text
+   :set-check set-check
+   :set-slider set-slider
+   :set-combo set-combo
+   :set-title set-title})

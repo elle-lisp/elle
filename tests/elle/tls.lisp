@@ -16,9 +16,7 @@
 ## Try release build first, fall back to debug.
 (def [ok? tls-plugin]
   (let [[ok? r] (protect (import-file "target/release/libelle_tls.so"))]
-    (if ok?
-      [ok? r]
-      (protect (import-file "target/debug/libelle_tls.so")))))
+    (if ok? [ok? r] (protect (import-file "target/debug/libelle_tls.so")))))
 
 (when (not ok?)
   (print "SKIP: elle-tls plugin not built (run: cargo build -p elle-tls)\n")
@@ -41,60 +39,62 @@
 
 (when has-network
 
-## ── Chunk 4: handshake test ─────────────────────────────────────────────────
+  ## ── Chunk 4: handshake test ─────────────────────────────────────────────────
 
-((fn []
-  (let [conn (tls:connect "example.com" 443)]
-    (assert (not (nil? conn:tcp)) "tls: conn:tcp must be a port")
-    (assert (not (nil? conn:tls)) "tls: conn:tls must be a tls-state")
-    (assert (handshake-complete? conn:tls) "tls: handshake must be complete")
-    (port/close conn:tcp))))
+  ((fn []
+     (let [conn (tls:connect "example.com" 443)]
+       (assert (not (nil? conn:tcp)) "tls: conn:tcp must be a port")
+       (assert (not (nil? conn:tls)) "tls: conn:tls must be a tls-state")
+       (assert (handshake-complete? conn:tls) "tls: handshake must be complete")
+       (port/close conn:tcp))))
 
-(println "tls chunk 4: handshake test PASSED\n")
+  (println "tls chunk 4: handshake test PASSED\n")
 
-## ── Chunk 5a: HTTPS GET with tls/read-all ─────────────────────────────────
+  ## ── Chunk 5a: HTTPS GET with tls/read-all ─────────────────────────────────
 
-((fn []
-  (let [conn (tls:connect "example.com" 443)]
-    (defer (tls:close conn)
-      (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-      (let [body (string (tls:read-all conn))]
-        (assert (> (length body) 0)
-                "tls: read-all must return non-empty body")
-        (assert (string/contains? body "Example Domain")
-                "tls: response body must contain 'Example Domain'"))))))
+  ((fn []
+     (let [conn (tls:connect "example.com" 443)]
+       (defer
+         (tls:close conn)
+         (tls:write conn
+                    "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+         (let [body (string (tls:read-all conn))]
+           (assert (> (length body) 0)
+                   "tls: read-all must return non-empty body")
+           (assert (string/contains? body "Example Domain")
+                   "tls: response body must contain 'Example Domain'"))))))
 
-(println "tls chunk 5a: HTTPS GET with read-all PASSED\n")
+  (println "tls chunk 5a: HTTPS GET with read-all PASSED\n")
 
-## ── Chunk 5b: tls/lines with stream/collect ───────────────────────────────
+  ## ── Chunk 5b: tls/lines with stream/collect ───────────────────────────────
 
-((fn []
-  (let [conn (tls:connect "example.com" 443)]
-    (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-    (let [lines (stream/collect (stream/take 5 (tls:lines conn)))]
-      (assert (> (length lines) 0) "tls: lines must yield at least one line")
-      (assert (string? (first lines)) "tls: each line must be a string")))))
+  ((fn []
+     (let [conn (tls:connect "example.com" 443)]
+       (tls:write conn
+                  "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+       (let [lines (stream/collect (stream/take 5 (tls:lines conn)))]
+         (assert (> (length lines) 0) "tls: lines must yield at least one line")
+         (assert (string? (first lines)) "tls: each line must be a string")))))
 
-(println "tls chunk 5b: tls/lines with stream/collect PASSED\n")
+  (println "tls chunk 5b: tls/lines with stream/collect PASSED\n")
 
-## ── Chunk 5c: tls/chunks with stream/map ──────────────────────────────────
+  ## ── Chunk 5c: tls/chunks with stream/map ──────────────────────────────────
 
-((fn []
-  (let [conn (tls:connect "example.com" 443)]
-    (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-    (let [sizes (stream/collect
-                   (stream/map length
-                     (stream/take 3 (tls:chunks conn 1024))))]
-      (assert (> (length sizes) 0) "tls: chunks must yield at least one chunk")
-      (each sz in sizes
-        (assert (> sz 0) "tls: each chunk must be non-empty"))))))
+  ((fn []
+     (let [conn (tls:connect "example.com" 443)]
+       (tls:write conn
+                  "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+       (let [sizes (stream/collect (stream/map length
+                                   (stream/take 3 (tls:chunks conn 1024))))]
+         (assert (> (length sizes) 0)
+                 "tls: chunks must yield at least one chunk")
+         (each sz in sizes
+           (assert (> sz 0) "tls: each chunk must be non-empty"))))))
 
-(println "tls chunk 5c: tls/chunks with stream/map PASSED\n")
+  (println "tls chunk 5c: tls/chunks with stream/map PASSED\n"))
+# end (when has-network)
 
-) # end (when has-network)
-
-(unless has-network
-  (println "tls chunks 4-5: SKIPPED (no network access)\n"))
+(unless has-network (println "tls chunks 4-5: SKIPPED (no network access)\n"))
 
 ## ── Chunk 6: loopback echo server/client ──────────────────────────────────
 ##
@@ -103,20 +103,16 @@
 
 ## Generate test certificates. If openssl is not available or fails, skip.
 (let [cert-path "/tmp/elle-tls-test.cert.pem"
-      key-path  "/tmp/elle-tls-test.key.pem"]
-
-  (let [gen-result
-          (subprocess/system "openssl"
-            ["req" "-x509" "-newkey" "rsa:2048"
-             "-keyout" key-path
-             "-out" cert-path
-             "-days" "1" "-nodes"
-             "-subj" "/CN=localhost"])]
+      key-path "/tmp/elle-tls-test.key.pem"]
+  (let [gen-result (subprocess/system "openssl"
+                                      ["req" "-x509" "-newkey" "rsa:2048"
+                                       "-keyout" key-path "-out" cert-path
+                                       "-days" "1" "-nodes" "-subj"
+                                       "/CN=localhost"])]
     (if (not (= gen-result:exit 0))
       (println "tls chunk 6: SKIPPED (openssl not available)\n")
 
-      (begin
-        ## Shared mutable cell: the client fiber writes true here when done.
+      (begin  ## Shared mutable cell: the client fiber writes true here when done.
         ## Checked after the async scheduler to confirm the client fiber actually completed.
         (def loopback-ok @[false])
 
@@ -134,26 +130,30 @@
 
         (def server-fiber
           (ev/spawn (fn []
-            (let [conn (tls:accept listener server-config)]
-              (defer (tls:close conn)
-                (let [msg (tls:read-line conn)]
-                  (when (not (nil? msg))
-                    (let [trimmed (string/trim msg)]
-                      (tls:write conn (string "echo: " trimmed "\n"))))))))))
+                      (let [conn (tls:accept listener server-config)]
+                        (defer
+                          (tls:close conn)
+                          (let [msg (tls:read-line conn)]
+                            (when (not (nil? msg))
+                              (let [trimmed (string/trim msg)]
+                                (tls:write conn (string "echo: " trimmed "\n"))))))))))
         (def client-fiber
           (ev/spawn (fn []
-            (let [conn (tls:connect "127.0.0.1" server-port {:no-verify true})]
-              (defer (tls:close conn)
-                (tls:write conn "hello\n")
-                (let [response (tls:read-line conn)]
-                  (assert (= response "echo: hello\n")
-                          (string "tls loopback: expected \"echo: hello\\n\", got: "
-                                  response))
-                  (put loopback-ok 0 true)))))))
+                      (let [conn (tls:connect "127.0.0.1" server-port
+                            {:no-verify true})]
+                        (defer
+                          (tls:close conn)
+                          (tls:write conn "hello\n")
+                          (let [response (tls:read-line conn)]
+                            (assert (= response "echo: hello\n")
+                                    (string "tls loopback: expected \"echo: hello\\n\", got: "
+                                    response))
+                            (put loopback-ok 0 true)))))))
         (ev/join server-fiber)
         (ev/join client-fiber)
 
-        (assert (get loopback-ok 0) "tls loopback: client fiber must complete and verify response")
+        (assert (get loopback-ok 0)
+                "tls loopback: client fiber must complete and verify response")
         (port/close listener)
         (println "tls chunk 6: loopback echo test PASSED\n")))))
 
@@ -163,10 +163,10 @@
 ## Plugin primitives accessed via the tls-plugin struct.
 
 ## Extract primitives we need to call directly for error-path testing.
-(def client-state-fn   (get tls-plugin :client-state))
-(def process-fn        (get tls-plugin :process))
+(def client-state-fn (get tls-plugin :client-state))
+(def process-fn (get tls-plugin :process))
 (def write-plaintext-fn (get tls-plugin :write-plaintext))
-(def server-config-fn  (get tls-plugin :server-config))
+(def server-config-fn (get tls-plugin :server-config))
 
 ## Error 1: empty hostname → :tls-error signal
 (let [[ok? err] (protect (client-state-fn ""))]
@@ -197,7 +197,8 @@
 (println "tls chunk 7: write-plaintext before handshake returns error struct ✓\n")
 
 ## Error 4: tls/server-config with non-existent cert path → :io-error signal
-(let [[ok? err] (protect (server-config-fn "/nonexistent/cert.pem" "/nonexistent/key.pem"))]
+(let [[ok? err] (protect (server-config-fn "/nonexistent/cert.pem"
+                         "/nonexistent/key.pem"))]
   (assert (not ok?) "invalid cert path: must signal an error")
   (assert (= (get err :error) :io-error)
           (string "invalid cert path: must be :io-error, got: "
@@ -208,11 +209,9 @@
 ## Error 5: tls/connect to a closed port → :io-error or :connect-error
 ## Port 19999 on 127.0.0.1 should have nothing listening.
 ## the async scheduler propagates errors out, so protect wraps the the async scheduler call.
-(let [[ok? err] (protect ((fn []
-                                    (tls:connect "127.0.0.1" 19999))))]
+(let [[ok? err] (protect ((fn [] (tls:connect "127.0.0.1" 19999))))]
   (assert (not ok?) "connect to closed port: must signal an error")
-  (assert (or (= (get err :error) :io-error)
-              (= (get err :error) :connect-error)
+  (assert (or (= (get err :error) :io-error) (= (get err :error) :connect-error)
               (= (get err :error) :tls-error))
           (string "connect to closed port: must be :io-error or :connect-error, got: "
                   (string (get err :error)))))
@@ -223,11 +222,9 @@
 ## Requires network access.
 (if has-network
   (begin
-    (let [[ok? err] (protect ((fn []
-                                        (tls:connect "example.com" 80))))]
+    (let [[ok? err] (protect ((fn [] (tls:connect "example.com" 80))))]
       (assert (not ok?) "connect to plain HTTP port: must signal an error")
-      (assert (or (= (get err :error) :tls-error)
-                  (= (get err :error) :io-error)
+      (assert (or (= (get err :error) :tls-error) (= (get err :error) :io-error)
                   (= (get err :error) :connect-error))
               (string "connect to plain HTTP port: must be :tls-error or :io-error, got: "
                       (string (get err :error)))))

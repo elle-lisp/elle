@@ -17,7 +17,7 @@
 (defn make-matrix [rows cols initial-value]
   "Create an m×n matrix (@array of arrays, row-major)."
   (@array ;(map (fn [_] (@array ;(map (fn [_] initial-value) (range cols))))
-               (range rows))))
+                (range rows))))
 
 (defn matrix-ref [m i j]
   "Get element at (i, j)."
@@ -26,7 +26,8 @@
 (defn matrix-set [m i j val]
   "Return a new matrix with element at (i, j) set to val."
   (let* [row (m i)
-         new-row (@array ;(map (fn [k v] (if (= k j) val v)) (range (length row)) row))
+         new-row (@array ;(map (fn [k v] (if (= k j) val v))
+                               (range (length row)) row))
          rows (map (fn [k r] (if (= k i) new-row r)) (range (length m)) m)]
     (@array ;rows)))
 
@@ -36,29 +37,21 @@
 
 (defn matrix-cols [m]
   "Get number of columns."
-  (if (> (length m) 0)
-    (length (m 0))
-    0))
+  (if (> (length m) 0) (length (m 0)) 0))
 
 (defn matrix-map [f m]
   "Apply function f to every element, returning a new matrix."
-  (@array ;(map (fn [row]
-                 (@array ;(map f row)))
-               m)))
+  (@array ;(map (fn [row] (@array ;(map f row))) m)))
 
 (defn matrix-add [m1 m2]
   "Element-wise addition of two matrices."
-  (@array ;(map (fn [r1 r2]
-                 (@array ;(map + r1 r2)))
-               m1 m2)))
+  (@array ;(map (fn [r1 r2] (@array ;(map + r1 r2))) m1 m2)))
 
 # ── Heat diffusion ───────────────────────────────────────────────────
 
 (defn get-neighbor [m i j rows cols default]
   "Get element at (i, j), or default if out of bounds."
-  (if (and (>= i 0) (< i rows) (>= j 0) (< j cols))
-    (matrix-ref m i j)
-    default))
+  (if (and (>= i 0) (< i rows) (>= j 0) (< j cols)) (matrix-ref m i j) default))
 
 (defn diffuse-step [m alpha]
   "Perform one diffusion step using the discrete Laplacian.
@@ -68,16 +61,18 @@
          cols (matrix-cols m)
          coeff (- 1.0 (* 4.0 alpha))]
     (@array ;(map (fn [i]
-                   (@array ;(map (fn [j]
-                                  (let* [cell (matrix-ref m i j)
-                                         up (get-neighbor m (- i 1) j rows cols 0.0)
-                                         down (get-neighbor m (+ i 1) j rows cols 0.0)
-                                         left (get-neighbor m i (- j 1) rows cols 0.0)
-                                         right (get-neighbor m i (+ j 1) rows cols 0.0)
-                                         neighbors (+ up down left right)]
-                                    (+ (* cell coeff) (* alpha neighbors))))
-                                (range cols))))
-                 (range rows)))))
+                    (@array ;(map (fn [j]
+                                    (let* [cell (matrix-ref m i j)
+                                      up (get-neighbor m (- i 1) j rows cols 0.0)
+                                      down (get-neighbor m (+ i 1) j rows cols
+                                      0.0)
+                                      left (get-neighbor m i (- j 1) rows cols
+                                      0.0)
+                                      right (get-neighbor m i (+ j 1) rows cols
+                                      0.0)
+                                      neighbors (+ up down left right)]
+                                      (+ (* cell coeff) (* alpha neighbors))))
+                                  (range cols)))) (range rows)))))
 
 # ── Visualization ────────────────────────────────────────────────────
 
@@ -91,10 +86,7 @@
 
 (defn find-max [m]
   "Find the maximum value in the matrix."
-  (fold (fn [acc row]
-          (fold max acc row))
-        0.0
-        m))
+  (fold (fn [acc row] (fold max acc row)) 0.0 m))
 
 (defn render-frame [m]
   "Render a matrix as ASCII art."
@@ -112,12 +104,10 @@
   (let* [center-i (/ rows 2)
          center-j (/ cols 2)]
     (@array ;(map (fn [i]
-                   (@array ;(map (fn [j]
-                                  (if (and (= i center-i) (= j center-j))
-                                    1.0
-                                    0.0))
-                                (range cols))))
-                 (range rows)))))
+                    (@array ;(map (fn [j]
+                                    (if (and (= i center-i) (= j center-j))
+                                      1.0
+                                      0.0)) (range cols)))) (range rows)))))
 
 (defn simulate [grid steps alpha]
   "Run the diffusion simulation for a given number of steps."

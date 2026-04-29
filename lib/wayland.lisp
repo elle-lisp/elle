@@ -55,8 +55,7 @@
         (ev/poll-fd fd :read 0.033)
         (wayland/dispatch conn)
         (each ev in (wayland/poll-events conn)
-          (when (= (handler ev) :stop)
-            (break nil))))))
+          (when (= (handler ev) :stop) (break nil))))))
 
   ## ── Queries ─────────────────────────────────────────────────────────
 
@@ -70,7 +69,9 @@
 
   ## ── Layer shell ─────────────────────────────────────────────────────
 
-  (defn wayland/layer-surface [conn &named @width @height @anchor @layer @namespace @exclusive-zone]
+  (defn
+    wayland/layer-surface
+    [conn &named @width @height @anchor @layer @namespace @exclusive-zone]
     "Create a layer-shell surface.
      :layer      — :background, :bottom, :top, :overlay (default :overlay)
      :anchor     — array of :top, :bottom, :left, :right (default [:top :left :right])
@@ -83,8 +84,13 @@
     (default height 50)
     (default exclusive-zone 0)
     (default namespace "elle")
-    (plugin:layer-surface conn {:layer layer :anchor anchor :width width :height height
-                                :exclusive-zone exclusive-zone :namespace namespace}))
+    (plugin:layer-surface conn
+                          {:layer layer
+                           :anchor anchor
+                           :width width
+                           :height height
+                           :exclusive-zone exclusive-zone
+                           :namespace namespace}))
 
   (defn wayland/layer-configure [conn surface-id]
     "Acknowledge a layer surface configure."

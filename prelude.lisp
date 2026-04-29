@@ -14,12 +14,14 @@
 ## let is already sequential; let* expands to nested single-binding lets
 (defmacro let* (bindings & body)
   (if (empty? bindings)
-    `(begin ,;body)
+    `(begin
+       ,;body)
     (let [name (first bindings)
-          val  (first (rest bindings))
+          val (first (rest bindings))
           more (rest (rest bindings))]
       (if (empty? more)
-        `(let [,name ,val] ,;body)
+        `(let [,name ,val]
+           ,;body)
         `(let [,name ,val]
            (let* ,more ,;body))))))
 
@@ -33,7 +35,8 @@
            threaded (if (pair? form)
                       `(,(first form) ,val ,;(rest form))
                       `(,form ,val))]
-      `(-> ,threaded ,;rest-forms))))
+      `(-> ,threaded
+           ,;rest-forms))))
 
 ## ->> thread-last: insert value as last argument
 ## (->> val (f a) (g b)) => (g b (f a val))
@@ -45,7 +48,8 @@
            threaded (if (pair? form)
                       `(,;form ,val)
                       `(,form ,val))]
-      `(->> ,threaded ,;rest-forms))))
+      `(->> ,threaded
+            ,;rest-forms))))
 
 ## as-> - thread with named binding
 ## (as-> val var (f var) (g var)) => binds val to var, threads through forms
@@ -53,7 +57,8 @@
   (if (empty? forms)
     val
     (if (empty? (rest forms))
-      `(let [,var ,val] ,(first forms))
+      `(let [,var ,val]
+         ,(first forms))
       `(let [,var ,val]
          (as-> ,(first forms) ,var ,;(rest forms))))))
 
@@ -69,8 +74,10 @@
                       `(,(first form) ,g ,;(rest form))
                       `(,form ,g))]
       `(let [,g ,val]
-         (if (nil? ,g) nil
-           (some-> ,threaded ,;rest-forms))))))
+         (if (nil? ,g)
+           nil
+           (some-> ,threaded
+                   ,;rest-forms))))))
 
 ## some->> - thread-last, short-circuiting on nil
 ## (some->> val (f a) (g b)) => like ->> but stops if any step returns nil
@@ -84,16 +91,24 @@
                       `(,;form ,g)
                       `(,form ,g))]
       `(let [,g ,val]
-         (if (nil? ,g) nil
-           (some->> ,threaded ,;rest-forms))))))
+         (if (nil? ,g)
+           nil
+           (some->> ,threaded
+                    ,;rest-forms))))))
 
 ## when - execute body if test is truthy, return nil otherwise
 (defmacro when (test & body)
-  `(if ,test (begin ,;body) nil))
+  `(if ,test
+     (begin
+       ,;body)
+     nil))
 
 ## unless - execute body if test is falsy, return nil otherwise
 (defmacro unless (test & body)
-  `(if ,test nil (begin ,;body)))
+  `(if ,test
+     nil
+     (begin
+       ,;body)))
 
 ## default - supply a default value for a &named parameter
 ## (default x 42) assigns x to 42 only if x is nil (not provided).
@@ -112,7 +127,10 @@
 ## (error value) => (emit :error value)
 (defmacro error (& args)
   (if (> (length args) 1)
-    (emit :error {:error :arity-error :reason :too-many-args :maximum 1 :message "expected 0 or 1 arguments"})
+    (emit :error {:error :arity-error
+                  :reason :too-many-args
+                  :maximum 1
+                  :message "expected 0 or 1 arguments"})
     `(emit :error ,(if (empty? args) nil (first args)))))
 
 ## try/catch - error handling via fibers
@@ -160,9 +178,7 @@
   `(let [f (fiber/new (fn () ,;body) 1)]
      (fiber/resume f nil)
      ,cleanup
-     (if (= (fiber/status f) :dead)
-       (fiber/value f)
-       (fiber/propagate f))))
+     (if (= (fiber/status f) :dead) (fiber/value f) (fiber/propagate f))))
 
 ## with - resource management (acquire/release)
 ## Usage: (with binding ctor dtor body...)
@@ -170,7 +186,9 @@
 ## Errors in body are propagated after cleanup.
 (defmacro with (binding ctor dtor & body)
   `(let [,binding ,ctor]
-     (defer (,dtor ,binding) ,;body)))
+     (defer
+       (,dtor ,binding)
+       ,;body)))
 
 ## yield* - delegate to sub-coroutine
 ## Resumes the sub-coroutine, yielding each of its values to the caller.
@@ -179,8 +197,7 @@
 (defmacro yield* (co)
   `(let [c ,co]
      (coro/resume c nil)
-     (while (not (coro/done? c))
-       (coro/resume c (yield (coro/value c))))
+     (while (not (coro/done? c)) (coro/resume c (yield (coro/value c))))
      (coro/value c)))
 
 ## ffi/defbind - convenient FFI function binding
@@ -202,17 +219,15 @@
                     (gen 0))
                   (apply list p))]
     `(def ,name
-       (let [ptr__ (ffi/lookup ,lib ,cname)
-             sig__ (ffi/signature ,ret-type ,arg-types)]
-          (fn ,params
-             (ffi/call ptr__ sig__ ,;params))))))
+      (let [ptr__ (ffi/lookup ,lib ,cname)
+            sig__ (ffi/signature ,ret-type ,arg-types)]
+        (fn ,params (ffi/call ptr__ sig__ ,;params))))))
 
 ## each - iterate over a sequence
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
-  (let* [has-in (and (not (empty? forms))
-                     (not (empty? (rest forms)))
+  (let* [has-in (and (not (empty? forms)) (not (empty? (rest forms)))
                      (= (syntax->datum iter-or-in) 'in))
          iter (if has-in (first forms) iter-or-in)
          body (if has-in (rest forms) forms)]
@@ -222,36 +237,43 @@
            (unless (empty? seq)
              (def @cur seq)
              (while (pair? cur)
-               (let [,var (first cur)] ,;body)
+               (let [,var (first cur)]
+                 ,;body)
                (assign cur (rest cur))))
          (or :array :@array :string :@string :bytes :@bytes)
            (begin
              (def @idx 0)
              (def @len (length seq))
              (while (< idx len)
-               (let [,var (get seq idx)] ,;body)
+               (let [,var (get seq idx)]
+                 ,;body)
                (assign idx (+ idx 1))))
          (or :set :@set)
            (let [items (set->array seq)]
              (def @idx 0)
              (def @len (length items))
              (while (< idx len)
-               (let [,var (get items idx)] ,;body)
+               (let [,var (get items idx)]
+                 ,;body)
                (assign idx (+ idx 1))))
          (or :struct :@struct)
            (let [pairs (pairs seq)]
              (def @idx 0)
              (def @len (length pairs))
              (while (< idx len)
-               (let [,var (get pairs idx)] ,;body)
+               (let [,var (get pairs idx)]
+                 ,;body)
                (assign idx (+ idx 1))))
          :fiber
            (begin
              (def @v (coro/resume seq))
              (while v
-               (let [,var v] ,;body)
+               (let [,var v]
+                 ,;body)
                (assign v (coro/resume seq))))
-         _ (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+         _ (error {:error :type-error
+                   :reason :not-a-sequence
+                   :message "not a sequence"})))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])
@@ -278,7 +300,7 @@
   (if (empty? bindings)
     then
     (let* [name (first bindings)
-           val  (first (rest bindings))]
+           val (first (rest bindings))]
       `(let [,name ,val]
          (if ,name
            ,(if (empty? (rest (rest bindings)))
@@ -290,7 +312,9 @@
 ## (when-let [x expr ...] body...)
 ## Sugar for (if-let bindings (begin body...) nil)
 (defmacro when-let (bindings & body)
-  `(if-let ,bindings (begin ,;body) nil))
+  `(if-let ,bindings
+           (begin
+             ,;body) nil))
 
 ## when-ok - protect + destructure in one step
 ## (when-ok [val (expr)] body...) => runs body with val if expr succeeds
@@ -339,25 +363,29 @@
 ## raw buffers. Pointers are malloc'd, written, and freed on scope exit.
 (defmacro ffi/with-stack (bindings & body)
   (if (empty? bindings)
-    `(begin ,;body)
+    `(begin
+       ,;body)
     (let* [b (first bindings)
            name (first b)
            rest-b (rest b)
            rest-bindings (rest bindings)
            inner (if (empty? rest-bindings)
-                   `(begin ,;body)
+                   `(begin
+                      ,;body)
                    `(ffi/with-stack ,rest-bindings ,;body))]
-      (if (= (length b) 3)
-        # [name type value] — typed scalar
+      (if (= (length b) 3)  # [name type value] — typed scalar
         (let* [typ (first rest-b)
                val (first (rest rest-b))]
           `(let [,name (ffi/malloc (ffi/size ,typ))]
              (ffi/write ,name ,typ ,val)
-             (defer (ffi/free ,name) ,inner)))
-        # [name size] — raw buffer
+             (defer
+               (ffi/free ,name)
+               ,inner)))  # [name size] — raw buffer
         (let* [size (first rest-b)]
           `(let [,name (ffi/malloc ,size)]
-             (defer (ffi/free ,name) ,inner)))))))
+             (defer
+               (ffi/free ,name)
+               ,inner)))))))
 
 ## with-allocator - route heap allocations through a custom allocator
 ## (with-allocator alloc body...) => installs alloc, runs body in defer, uninstalls
@@ -367,5 +395,6 @@
 (defmacro with-allocator (allocator & body)
   `(begin
      (allocator/install ,allocator)
-     (defer (allocator/uninstall)
+     (defer
+       (allocator/uninstall)
        ,;body)))

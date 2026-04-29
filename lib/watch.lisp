@@ -17,9 +17,7 @@
 
   (defn matches-filter? [event ext]
     "Check if the event path matches the extension filter."
-    (if (nil? ext)
-      true
-      (string/ends-with? (get event :path) ext)))
+    (if (nil? ext) true (string/ends-with? (get event :path) ext)))
 
   (defn filter-events [events ext]
     "Filter event batch by extension. Returns list (may be empty)."
@@ -59,7 +57,4 @@
     (watch-close (get handle :watcher)))
 
   ## ── Export ───────────────────────────────────────────────────────────
-  {:start start
-   :next  next-events
-   :each  each-event
-   :stop  stop})
+  {:start start :next next-events :each each-event :stop stop})

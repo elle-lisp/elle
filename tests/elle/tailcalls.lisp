@@ -18,9 +18,7 @@
 # This should be tail-optimized and handle large n without overflow
 (defn sum-to [n acc]
   "Sum 1..n using tail recursion with accumulator"
-  (if (= n 0)
-      acc
-      (sum-to (- n 1) (+ acc n))))
+  (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
 
 (assert (= (sum-to 10 0) 55) "sum-to 10")
 (assert (= (sum-to 100 0) 5050) "sum-to 100")
@@ -29,9 +27,7 @@
 # This is a basic tail-recursive pattern
 (defn countdown [n]
   "Count down from n to 0, returning n"
-  (if (<= n 0)
-      0
-      (countdown (- n 1))))
+  (if (<= n 0) 0 (countdown (- n 1))))
 
 (assert (= (countdown 5) 0) "countdown 5")
 (assert (= (countdown 10) 0) "countdown 10")
@@ -64,9 +60,7 @@
 (defn block-with-break [n]
   "Block with break and tail call"
   (block :b
-    (if (< n 0)
-        (break :b -1)
-        (sum-to n 0))))
+    (if (< n 0) (break :b -1) (sum-to n 0))))
 
 (assert (= (block-with-break 10) 55) "block with break, positive n")
 (assert (= (block-with-break -5) -1) "block with break, negative n")
@@ -81,8 +75,8 @@
   "Break with a call as the value"
   (block :b
     (if (< n 0)
-        (break :b (sum-to (- n) 0))
-        (sum-to n 0))))
+      (break :b (sum-to (- n) 0))
+      (sum-to n 0))))
 
 (assert (= (break-with-call 10) 55) "break with call, positive n")
 (assert (= (break-with-call -10) 55) "break with call, negative n")
@@ -94,8 +88,8 @@
   (block :outer
     (block :inner
       (if (< n 0)
-          (break :outer (sum-to (- n) 0))
-          (sum-to n 0)))))
+        (break :outer (sum-to (- n) 0))
+        (sum-to n 0)))))
 
 (assert (= (nested-breaks 10) 55) "nested breaks, positive n")
 (assert (= (nested-breaks -10) 55) "nested breaks, negative n")
@@ -108,9 +102,7 @@
 # This test proves tail call optimization is working
 (defn countdown-large [n]
   "Count down from n to 0 (tail-optimized)"
-  (if (<= n 0)
-      :done
-      (countdown-large (- n 1))))
+  (if (<= n 0) :done (countdown-large (- n 1))))
 
 # This would overflow without TCO
 (assert (= (countdown-large 100000) :done) "countdown 100,000 (TCO required)")
@@ -119,9 +111,7 @@
 # Accumulator-based recursion at large scale
 (defn sum-large [n acc]
   "Sum 1..n with large n (tail-optimized)"
-  (if (= n 0)
-      acc
-      (sum-large (- n 1) (+ acc n))))
+  (if (= n 0) acc (sum-large (- n 1) (+ acc n))))
 
 # This would overflow without TCO
 (assert (= (sum-large 10000 0) 50005000) "sum to 10,000 (TCO required)")
@@ -130,9 +120,7 @@
 # Compute fib(n) using tail recursion with accumulators
 (defn fib-iter [n a b]
   "Compute fibonacci(n) iteratively with tail recursion"
-  (if (<= n 0)
-      a
-      (fib-iter (- n 1) b (+ a b))))
+  (if (<= n 0) a (fib-iter (- n 1) b (+ a b))))
 
 (defn fib [n]
   "Fibonacci using tail-recursive helper"
@@ -191,9 +179,9 @@
 (defn coro-multi-yield [n]
   "Test multiple yields with tail calls"
   (coro/new (fn ()
-    (yield (sum-to n 0))
-    (yield (sum-to (+ n 1) 0))
-    (sum-to (+ n 2) 0))))
+              (yield (sum-to n 0))
+              (yield (sum-to (+ n 1) 0))
+              (sum-to (+ n 2) 0))))
 
 (begin
   (let [co (coro-multi-yield 5)]
@@ -208,15 +196,11 @@
 # Mutual recursion with tail calls
 (defn is-even [n]
   "Check if n is even using mutual recursion"
-  (if (= n 0)
-      true
-      (is-odd (- n 1))))
+  (if (= n 0) true (is-odd (- n 1))))
 
 (defn is-odd [n]
   "Check if n is odd using mutual recursion"
-  (if (= n 0)
-      false
-      (is-even (- n 1))))
+  (if (= n 0) false (is-even (- n 1))))
 
 (assert (= (is-even 0) true) "is-even 0")
 (assert (= (is-even 4) true) "is-even 4")
@@ -230,9 +214,7 @@
 # Tail call in conditional branches
 (defn conditional-tail [n]
   "Tail calls in both branches of conditional"
-  (if (< n 0)
-      (countdown-large (- n))
-      (countdown-large n)))
+  (if (< n 0) (countdown-large (- n)) (countdown-large n)))
 
 (assert (= (conditional-tail 100) :done) "conditional tail call positive")
 (assert (= (conditional-tail -100) :done) "conditional tail call negative")

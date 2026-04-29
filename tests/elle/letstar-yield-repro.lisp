@@ -31,23 +31,24 @@
 # Background fiber that reads the table
 (def reader
   (ev/spawn (fn []
-    (def @checks 0)
-    (while (< checks 200)
-      (ev/sleep 0.001)
-      (let [entry (get table "latest")]
-        (when entry
-          (let [[ok? err] (protect (get entry :data))]
-            (unless ok?
-              (push errors err)
-              (break)))))
-      (assign checks (+ checks 1))))))
+              (def @checks 0)
+              (while (< checks 200)
+                (ev/sleep 0.001)
+                (let [entry (get table "latest")]
+                  (when entry
+                    (let [[ok? err] (protect (get entry :data))]
+                      (unless ok?
+                        (push errors err)
+                        (break)))))
+                (assign checks (+ checks 1))))))
 
 # Run many timed operations
 (def @i 0)
 (while (< i 50)
   (timed-op table
-    (fn [] (ev/sleep 0.001) :done)
-    :attributes {:method "GET"})
+            (fn []
+              (ev/sleep 0.001)
+              :done) :attributes {:method "GET"})
   (assign i (+ i 1)))
 
 (ev/sleep 0.05)

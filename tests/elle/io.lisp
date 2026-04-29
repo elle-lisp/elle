@@ -23,8 +23,9 @@
 (spit "/tmp/elle-test-ev-spawn-lisp" "spawn content")
 (let [result @[]]
   (ev/spawn (fn []
-    (push result (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read)))))
-  # Pump happens naturally; spawned fiber runs before user code returns.
+              (push result
+                    (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp"
+                                   :read)))))  # Pump happens naturally; spawned fiber runs before user code returns.
   )
 
 # === Error propagation ===
@@ -37,22 +38,24 @@
 
 (spit "/tmp/elle-test-readline-lisp" "line1\nline2\nline3")
 (let [line (let [p (port/open "/tmp/elle-test-readline-lisp" :read)]
-              (port/read-line p))]
+             (port/read-line p))]
   (assert (= line "line1") "port/read-line reads first line"))
 
 # === io/backend errors ===
 
-(let [[ok? _] (protect ((fn () (io/backend :invalid))))] (assert (not ok?) "io/backend :invalid errors"))
+(let [[ok? _] (protect ((fn () (io/backend :invalid))))]
+  (assert (not ok?) "io/backend :invalid errors"))
 
 # === stream I/O ===
 
 (spit "/tmp/elle-test-toplevel-io-lisp" "top level")
-(assert (= (string (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read)))
-           "top level") "stream I/O works")
+(assert (= (string (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp"
+                                  :read))) "top level") "stream I/O works")
 
 # === stdlib functions work with scheduler ===
 
-(assert (= (map (fn [x] (* x x)) (list 1 2 3)) (list 1 4 9)) "stdlib map works with scheduler")
+(assert (= (map (fn [x] (* x x)) (list 1 2 3)) (list 1 4 9))
+        "stdlib map works with scheduler")
 
 # === Async backend ===
 
@@ -82,10 +85,12 @@
 (spit "/tmp/elle-test-submit-sync-lisp" "test")
 (let [submit-sync-port (port/open "/tmp/elle-test-submit-sync-lisp" :read)]
   (let [[ok? _] (protect ((fn ()
-      (let* [backend (io/backend :sync)
-             f (fiber/new (fn [] (port/read-all submit-sync-port)) 512)]
-        (fiber/resume f)
-        (io/submit backend (fiber/value f))))))] (assert (not ok?) "io/submit on sync backend errors")))
+                            (let* [backend (io/backend :sync)
+                                   f (fiber/new (fn []
+                                     (port/read-all submit-sync-port)) 512)]
+                              (fiber/resume f)
+                              (io/submit backend (fiber/value f))))))]
+    (assert (not ok?) "io/submit on sync backend errors")))
 
 # === io/submit + io/wait roundtrip ===
 
@@ -107,7 +112,8 @@
   (fiber/resume f)
   (let [id (io/submit backend (fiber/value f))]
     (let [completions (io/wait backend -1)]
-      (assert (= id (get (get completions 0) :id)) "completion :id matches submission id"))))
+      (assert (= id (get (get completions 0) :id))
+              "completion :id matches submission id"))))
 
 # === Completion struct has :error nil ===
 
@@ -118,7 +124,8 @@
   (fiber/resume f)
   (let [id (io/submit backend (fiber/value f))]
     (let [completions (io/wait backend -1)]
-      (assert (nil? (get (get completions 0) :error)) "completion :error is nil on success"))))
+      (assert (nil? (get (get completions 0) :error))
+              "completion :error is nil on success"))))
 
 # === make-async-scheduler ===
 
@@ -131,8 +138,9 @@
 # === I/O thunk (direct) ===
 
 (spit "/tmp/elle-test-ev-run-io-lisp" "async scheduler")
-(assert (= (string (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))
-           "async scheduler") "I/O thunk reads file")
+(assert (= (string (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp"
+                                  :read))) "async scheduler")
+        "I/O thunk reads file")
 
 # === multiple concurrent fibers ===
 
@@ -140,23 +148,29 @@
 (spit "/tmp/elle-test-ev-multi-2-lisp" "second")
 (let [results @[]]
   (let [f1 (ev/spawn (fn []
-              (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp" :read)))))
+                       (push results
+                             (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp"
+                             :read)))))
         f2 (ev/spawn (fn []
-              (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp" :read)))))]
+                       (push results
+                             (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp"
+                             :read)))))]
     (ev/join f1)
     (ev/join f2))
   (assert (= (length results) 2) "concurrent fibers both complete"))
 
 # === error propagation ===
 
-(let [[ok? _] (protect ((fn () (error :async-boom))))] (assert (not ok?) "protect captures errors"))
+(let [[ok? _] (protect ((fn () (error :async-boom))))]
+  (assert (not ok?) "protect captures errors"))
 
 # === async write ===
 
 (let [p (port/open "/tmp/elle-test-ev-write-lisp" :write)]
   (port/write p "async write test")
   (port/flush p))
-(assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test") "async write thunk")
+(assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test")
+        "async write thunk")
 
 # ============================================================================
 # ev/sleep tests
@@ -181,17 +195,20 @@
     (ev/join f2)
     (ev/join f3))
   (let [elapsed (- (clock/monotonic) t0)]
-    (assert (< elapsed 0.5) "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
+    (assert (< elapsed 0.5)
+            "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
 
 # === ev/sleep interleaved with I/O ===
 
 (spit "/tmp/elle-test-sleep-io-lisp" "sleep-and-io")
 (let [result @[]]
   (let [f1 (ev/spawn (fn []
-              (ev/sleep 0.01)
-              (push result :slept)))
+                       (ev/sleep 0.01)
+                       (push result :slept)))
         f2 (ev/spawn (fn []
-              (push result (string (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read))))))]
+                       (push result
+                             (string (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp"
+                                     :read))))))]
     (ev/join f1)
     (ev/join f2))
   (assert (= (length result) 2) "ev/sleep + I/O: both fibers complete")
@@ -202,11 +219,11 @@
 
 (let [result @[]]
   (let [f1 (ev/spawn (fn []
-              (ev/sleep 0.1)
-              (push result :slow)))
+                       (ev/sleep 0.1)
+                       (push result :slow)))
         f2 (ev/spawn (fn []
-              (ev/sleep 0.01)
-              (push result :fast)))]
+                       (ev/sleep 0.01)
+                       (push result :fast)))]
     (ev/join f1)
     (ev/join f2))
   (assert (= (get result 0) :fast) "shorter sleep finishes first")
@@ -215,27 +232,29 @@
 # === ev/sleep error: negative duration ===
 # User code already runs in the async scheduler.
 
-(let [[ok? _] (protect (ev/sleep -1))] (assert (not ok?) "ev/sleep rejects negative int"))
+(let [[ok? _] (protect (ev/sleep -1))]
+  (assert (not ok?) "ev/sleep rejects negative int"))
 
-(let [[ok? _] (protect (ev/sleep -0.5))] (assert (not ok?) "ev/sleep rejects negative float"))
+(let [[ok? _] (protect (ev/sleep -0.5))]
+  (assert (not ok?) "ev/sleep rejects negative float"))
 
 # === ev/sleep error: non-numeric ===
 
-(let [[ok? _] (protect (ev/sleep "hello"))] (assert (not ok?) "ev/sleep rejects non-numeric"))
+(let [[ok? _] (protect (ev/sleep "hello"))]
+  (assert (not ok?) "ev/sleep rejects non-numeric"))
 
 # === ev/sleep error: wrong arity ===
 
-(let [[ok? _] (protect ((fn () (eval '(ev/sleep)))))] (assert (not ok?) "ev/sleep rejects zero args"))
+(let [[ok? _] (protect ((fn () (eval '(ev/sleep)))))]
+  (assert (not ok?) "ev/sleep rejects zero args"))
 
-(let [[ok? _] (protect ((fn () (eval '(ev/sleep 1 2)))))] (assert (not ok?) "ev/sleep rejects two args"))
-
+(let [[ok? _] (protect ((fn () (eval '(ev/sleep 1 2)))))]
+  (assert (not ok?) "ev/sleep rejects two args"))
 # ============================================================================
 # Error tests (from integration/io.rs)
 # ============================================================================
-
 # stream_write_outside_scheduler_errors — SKIPPED
 # SIG_IO propagates as an uncatchable signal outside a scheduler.
 # This is testable from Rust (eval_source catches all signals) but not from Elle.
-
 # stream_write_non_port_errors — SKIPPED
 # Same issue: port/write yields SIG_IO before type checking the port argument.

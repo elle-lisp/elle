@@ -2,7 +2,9 @@
 ## Git module tests (FFI to libgit2)
 
 (def [ok? _] (protect ((fn [] (ffi/native "libgit2.so")))))
-(unless ok? (println "SKIP: libgit2.so not available") (exit 0))
+(unless ok?
+  (println "SKIP: libgit2.so not available")
+  (exit 0))
 
 (def git ((import "std/git")))
 
@@ -34,13 +36,15 @@
 (let [entries (git:log repo {:limit 3})]
   (assert (> (length entries) 0) "log has entries")
   (assert (<= (length entries) 3) "log respects limit")
-  (let [e (first entries)] (assert (string? e:summary) "log entry has summary")))
+  (let [e (first entries)]
+    (assert (string? e:summary) "log entry has summary")))
 
 ## Branches
 (let [bs (git:branches repo :local)]
   (assert (list? bs) "branches returns list")
   (when (> (length bs) 0)
-    (let [b (first bs)] (assert (string? b:name) "branch has name"))))
+    (let [b (first bs)]
+      (assert (string? b:name) "branch has name"))))
 
 ## Tags
 (assert (list? (git:tags repo)) "tags returns list")

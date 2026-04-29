@@ -34,7 +34,8 @@
 
 (assert (= @|1 2 3| @|1 2 3|) "mutable set literals are equal")
 
-(assert (= @|3 1 2| @|1 2 3|) "mutable set order doesn't matter (both are equal)")
+(assert (= @|3 1 2| @|1 2 3|)
+        "mutable set order doesn't matter (both are equal)")
 
 (assert (= (length @|1 1 2|) 2) "mutable set deduplicates elements")
 
@@ -64,15 +65,25 @@
 # Or-Patterns
 # ============================================================================
 
-(assert (= (match 1 (or 1 3 5) :odd _ :even) :odd) "or-pattern: 1 is odd")
+(assert (= (match 1
+             (or 1 3 5) :odd
+             _ :even) :odd) "or-pattern: 1 is odd")
 
-(assert (= (match 2 (or 1 3 5) :odd _ :even) :even) "or-pattern: 2 is even")
+(assert (= (match 2
+             (or 1 3 5) :odd
+             _ :even) :even) "or-pattern: 2 is even")
 
-(assert (= (match 3 (or 1 3 5) :odd _ :even) :odd) "or-pattern: 3 is odd")
+(assert (= (match 3
+             (or 1 3 5) :odd
+             _ :even) :odd) "or-pattern: 3 is odd")
 
-(assert (= (match 5 (or 1 3 5) :odd _ :even) :odd) "or-pattern: 5 is odd")
+(assert (= (match 5
+             (or 1 3 5) :odd
+             _ :even) :odd) "or-pattern: 5 is odd")
 
-(assert (= (match 4 (or 1 3 5) :odd _ :even) :even) "or-pattern: 4 is even")
+(assert (= (match 4
+             (or 1 3 5) :odd
+             _ :even) :even) "or-pattern: 4 is even")
 
 # ============================================================================
 # Set Inside a List (Set as Expression via Constructor)
@@ -152,11 +163,13 @@
 # Deduplication
 # ============================================================================
 
-(assert (= (length (set 1 1 2)) 2) "set deduplicates: (set 1 1 2) has 2 elements")
+(assert (= (length (set 1 1 2)) 2)
+        "set deduplicates: (set 1 1 2) has 2 elements")
 
 (assert (= (length (set 1 2 3 1 2 3)) 3) "set deduplicates multiple duplicates")
 
-(assert (= (length (@set 1 1 2)) 2) "@set deduplicates: (@set 1 1 2) has 2 elements")
+(assert (= (length (@set 1 1 2)) 2)
+        "@set deduplicates: (@set 1 1 2) has 2 elements")
 
 (assert (= (length (set)) 0) "empty set has 0 elements")
 
@@ -186,9 +199,11 @@
 
 (assert (= (type-of @|1 2 3|) :@set) "type-of returns :@set for mutable set")
 
-(assert (= (type-of (set 1 2 3)) :set) "type-of returns :set for set constructor result")
+(assert (= (type-of (set 1 2 3)) :set)
+        "type-of returns :set for set constructor result")
 
-(assert (= (type-of (@set 1 2 3)) :@set) "type-of returns :@set for @set constructor result")
+(assert (= (type-of (@set 1 2 3)) :@set)
+        "type-of returns :@set for @set constructor result")
 
 # ============================================================================
 # Equality
@@ -196,39 +211,50 @@
 
 (assert (= (set 1 2 3) (set 1 2 3)) "identical immutable sets are equal")
 
-(assert (= (set 1 2 3) (set 3 2 1)) "immutable sets are equal regardless of order")
+(assert (= (set 1 2 3) (set 3 2 1))
+        "immutable sets are equal regardless of order")
 
-(assert (= (set 1 2 3) (set 2 1 3)) "immutable sets are equal regardless of order (different permutation)")
+(assert (= (set 1 2 3) (set 2 1 3))
+        "immutable sets are equal regardless of order (different permutation)")
 
-(assert (not (= (set 1 2 3) (set 1 2))) "immutable sets with different elements are not equal")
+(assert (not (= (set 1 2 3) (set 1 2)))
+        "immutable sets with different elements are not equal")
 
-(assert (not (= (set 1 2 3) (set 1 2 3 4))) "immutable sets with different sizes are not equal")
+(assert (not (= (set 1 2 3) (set 1 2 3 4)))
+        "immutable sets with different sizes are not equal")
 
 (assert (= @|1 2 3| @|1 2 3|) "identical mutable sets are equal")
 
 (assert (= @|1 2 3| @|3 2 1|) "mutable sets are equal regardless of order")
 
-(assert (not (= @|1 2 3| @|1 2|)) "mutable sets with different elements are not equal")
+(assert (not (= @|1 2 3| @|1 2|))
+        "mutable sets with different elements are not equal")
 
-(assert (= (set 1 2 3) @|1 2 3|) "set = @set (cross-mutability equality, different types)")
+(assert (= (set 1 2 3) @|1 2 3|)
+        "set = @set (cross-mutability equality, different types)")
 
 (assert (= (set 1 2 3) (set 1 2 3)) "sets created with constructor are equal")
 
-(assert (= (set 1 2 3) (set 3 2 1)) "sets created with constructor are equal regardless of order")
+(assert (= (set 1 2 3) (set 3 2 1))
+        "sets created with constructor are equal regardless of order")
 
-(assert (= (set 1 2 3) (@set 1 2 3)) "set = @set from constructors (cross-mutability equality)")
+(assert (= (set 1 2 3) (@set 1 2 3))
+        "set = @set from constructors (cross-mutability equality)")
 
 # ============================================================================
 # Freezing on Insert
 # ============================================================================
 
-(assert (= (type-of (get (set->array (set @[1 2])) 0)) :array) "mutable @struct is frozen when inserted into set")
+(assert (= (type-of (get (set->array (set @[1 2])) 0)) :array)
+        "mutable @struct is frozen when inserted into set")
 
-(assert (= (type-of (get (set->array (set @{:a 1})) 0)) :struct) "mutable @string is frozen when inserted into set")
+(assert (= (type-of (get (set->array (set @{:a 1})) 0)) :struct)
+        "mutable @string is frozen when inserted into set")
 
 (assert (array? (get (set->array (set @[1 2])) 0)) "frozen array is an array")
 
-(assert (struct? (get (set->array (set @{:a 1})) 0)) "frozen @struct is a struct")
+(assert (struct? (get (set->array (set @{:a 1})) 0))
+        "frozen @struct is a struct")
 
 # ============================================================================
 # Length and Empty
@@ -246,13 +272,16 @@
 
 (assert (empty? (set)) "empty? returns true for empty set from constructor")
 
-(assert (not (empty? (set 1))) "empty? returns false for non-empty immutable set")
+(assert (not (empty? (set 1)))
+        "empty? returns false for non-empty immutable set")
 
-(assert (not (empty? (set 1))) "empty? returns false for non-empty set from constructor")
+(assert (not (empty? (set 1)))
+        "empty? returns false for non-empty set from constructor")
 
 (assert (empty? @||) "empty? returns true for empty mutable set")
 
-(assert (empty? (@set)) "empty? returns true for empty mutable set from constructor")
+(assert (empty? (@set))
+        "empty? returns true for empty mutable set from constructor")
 
 (assert (not (empty? @|1|)) "empty? returns false for non-empty mutable set")
 
@@ -266,37 +295,49 @@
 
 (assert (contains? (set 1 2 3) 3) "contains? returns true for last element")
 
-(assert (not (contains? (set 1 2 3) 4)) "contains? returns false for element not in set")
+(assert (not (contains? (set 1 2 3) 4))
+        "contains? returns false for element not in set")
 
-(assert (not (contains? (set 1 2 3) 0)) "contains? returns false for element not in set (before range)")
+(assert (not (contains? (set 1 2 3) 0))
+        "contains? returns false for element not in set (before range)")
 
-(assert (contains? @|1 2 3| 2) "contains? returns true for element in mutable set")
+(assert (contains? @|1 2 3| 2)
+        "contains? returns true for element in mutable set")
 
-(assert (not (contains? @|1 2 3| 4)) "contains? returns false for element not in mutable set")
+(assert (not (contains? @|1 2 3| 4))
+        "contains? returns false for element not in mutable set")
 
-(assert (not (contains? || 1)) "contains? returns false for element in empty set")
+(assert (not (contains? || 1))
+        "contains? returns false for element in empty set")
 
-(assert (not (contains? (set) 1)) "contains? returns false for element in empty set from constructor")
+(assert (not (contains? (set) 1))
+        "contains? returns false for element in empty set from constructor")
 
 # ============================================================================
 # Conversions: set->array
 # ============================================================================
 
-(assert (array? (set->array (set 1 2 3))) "set->array on immutable set returns an array")
+(assert (array? (set->array (set 1 2 3)))
+        "set->array on immutable set returns an array")
 
-(assert (= (length (set->array (set 1 2 3))) 3) "set->array preserves element count")
+(assert (= (length (set->array (set 1 2 3))) 3)
+        "set->array preserves element count")
 
-(assert (= (length (set->array ||)) 0) "set->array of empty set returns empty array")
+(assert (= (length (set->array ||)) 0)
+        "set->array of empty set returns empty array")
 
-(assert (array? (set->array (set 1 2 3))) "set->array works with constructor-created sets")
+(assert (array? (set->array (set 1 2 3)))
+        "set->array works with constructor-created sets")
 
-(assert (array? (set->array @|1 2 3|)) "set->array on mutable set returns an array")
+(assert (array? (set->array @|1 2 3|))
+        "set->array on mutable set returns an array")
 
 # ============================================================================
 # Conversions: seq->set
 # ============================================================================
 
-(assert (= (seq->set (list 1 2 3)) (set 1 2 3)) "seq->set from list creates immutable set")
+(assert (= (seq->set (list 1 2 3)) (set 1 2 3))
+        "seq->set from list creates immutable set")
 
 (assert (= (seq->set (list 1 1 2)) (set 1 2)) "seq->set deduplicates elements")
 
@@ -304,23 +345,30 @@
 
 (assert (set? (seq->set (list 1 2 3))) "seq->set from list result is a set")
 
-(assert (= (type-of (seq->set (list 1 2 3))) :set) "seq->set from list creates immutable set")
+(assert (= (type-of (seq->set (list 1 2 3))) :set)
+        "seq->set from list creates immutable set")
 
-(assert (= (seq->set [1 2 3]) (set 1 2 3)) "seq->set from array creates immutable set")
+(assert (= (seq->set [1 2 3]) (set 1 2 3))
+        "seq->set from array creates immutable set")
 
-(assert (= (type-of (seq->set @[1 2 3])) :@set) "seq->set from array creates mutable set")
+(assert (= (type-of (seq->set @[1 2 3])) :@set)
+        "seq->set from array creates mutable set")
 
-(assert (= (seq->set "abc") (set "a" "b" "c")) "seq->set from string creates immutable set of chars")
+(assert (= (seq->set "abc") (set "a" "b" "c"))
+        "seq->set from string creates immutable set of chars")
 
-(assert (= (type-of (seq->set "abc")) :set) "seq->set from string creates immutable set")
+(assert (= (type-of (seq->set "abc")) :set)
+        "seq->set from string creates immutable set")
 
-(assert (= (type-of (seq->set @"abc")) :@set) "seq->set from @string creates mutable set")
+(assert (= (type-of (seq->set @"abc")) :@set)
+        "seq->set from @string creates mutable set")
 
 # ============================================================================
 # Freeze/Thaw
 # ============================================================================
 
-(assert (= (freeze @|1 2 3|) (set 1 2 3)) "freeze converts mutable set to immutable")
+(assert (= (freeze @|1 2 3|) (set 1 2 3))
+        "freeze converts mutable set to immutable")
 
 (assert (= (type-of (freeze @|1 2 3|)) :set) "freeze produces :set type")
 
@@ -328,13 +376,17 @@
 
 (assert (= (type-of (thaw (set 1 2 3))) :@set) "thaw produces :@set type")
 
-(assert (= (freeze (freeze @|1 2 3|)) (set 1 2 3)) "freeze is idempotent on already-frozen sets")
+(assert (= (freeze (freeze @|1 2 3|)) (set 1 2 3))
+        "freeze is idempotent on already-frozen sets")
 
-(assert (= (thaw (thaw (set 1 2 3))) @|1 2 3|) "thaw is idempotent on already-thawed sets")
+(assert (= (thaw (thaw (set 1 2 3))) @|1 2 3|)
+        "thaw is idempotent on already-thawed sets")
 
-(assert (= (freeze (thaw (set 1 2 3))) (set 1 2 3)) "freeze after thaw returns to original")
+(assert (= (freeze (thaw (set 1 2 3))) (set 1 2 3))
+        "freeze after thaw returns to original")
 
-(assert (= (thaw (freeze @|1 2 3|)) @|1 2 3|) "thaw after freeze returns to original")
+(assert (= (thaw (freeze @|1 2 3|)) @|1 2 3|)
+        "thaw after freeze returns to original")
 
 # ============================================================================
 # Set with Various Element Types
@@ -342,9 +394,11 @@
 
 (assert (= (length (set 1 "hello" :keyword)) 3) "set can contain mixed types")
 
-(assert (contains? (set 1 "hello" :keyword) "hello") "set contains string element")
+(assert (contains? (set 1 "hello" :keyword) "hello")
+        "set contains string element")
 
-(assert (contains? (set 1 "hello" :keyword) :keyword) "set contains keyword element")
+(assert (contains? (set 1 "hello" :keyword) :keyword)
+        "set contains keyword element")
 
 (assert (= (length (set true false nil)) 3) "set can contain booleans and nil")
 
@@ -383,7 +437,8 @@
 # add on immutable set returns new set
 (assert (= (add (set 1 2) 3) (set 1 2 3)) "add to immutable set returns new set")
 
-(assert (= (add (set 1 2) 2) (set 1 2)) "add existing element is no-op on immutable set")
+(assert (= (add (set 1 2) 2) (set 1 2))
+        "add existing element is no-op on immutable set")
 
 # add on mutable set mutates
 (def ms @|1 2|)
@@ -391,9 +446,11 @@
 (assert (contains? ms 3) "add mutates mutable set")
 
 # del on immutable set returns new set
-(assert (= (del (set 1 2 3) 2) (set 1 3)) "del from immutable set returns new set")
+(assert (= (del (set 1 2 3) 2) (set 1 3))
+        "del from immutable set returns new set")
 
-(assert (= (del (set 1 2 3) 4) (set 1 2 3)) "del non-existent element is no-op on immutable set")
+(assert (= (del (set 1 2 3) 4) (set 1 2 3))
+        "del non-existent element is no-op on immutable set")
 
 # del on mutable set mutates
 (def ms2 @|1 2 3|)
@@ -406,14 +463,17 @@
 
 (assert (= (union (set 1 2) (set 2 3)) (set 1 2 3)) "union of immutable sets")
 
-(assert (= (intersection (set 1 2 3) (set 2 3 4)) (set 2 3)) "intersection of immutable sets")
+(assert (= (intersection (set 1 2 3) (set 2 3 4)) (set 2 3))
+        "intersection of immutable sets")
 
-(assert (= (difference (set 1 2 3) (set 2 3)) (set 1)) "difference of immutable sets")
+(assert (= (difference (set 1 2 3) (set 2 3)) (set 1))
+        "difference of immutable sets")
 
 # mutable set algebra
 (assert (= (union @|1 2| @|2 3|) @|1 2 3|) "union of mutable sets")
 
-(assert (= (intersection @|1 2 3| @|2 3 4|) @|2 3|) "intersection of mutable sets")
+(assert (= (intersection @|1 2 3| @|2 3 4|) @|2 3|)
+        "intersection of mutable sets")
 
 (assert (= (difference @|1 2 3| @|2 3|) @|1|) "difference of mutable sets")
 

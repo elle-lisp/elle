@@ -57,8 +57,10 @@
   (assert (= (get msg:params 1) "hello") "tagged msg: text"))
 
 # Format roundtrip with tags
-(let* [msg {:tags {:time "2024-01-01"} :source {:nick "n" :user "u" :host "h"}
-             :command "PRIVMSG" :params ["#ch" "hi there"]}
+(let* [msg {:tags {:time "2024-01-01"}
+            :source {:nick "n" :user "u" :host "h"}
+            :command "PRIVMSG"
+            :params ["#ch" "hi there"]}
        line (irc:format-message msg)
        reparsed (irc:parse-message line)]
   (assert (= reparsed:command "PRIVMSG") "tag roundtrip: command")

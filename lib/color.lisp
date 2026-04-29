@@ -17,8 +17,10 @@
 
   # ── Helpers ────────────────────────────────────────────────────────
 
-  (defn clamp01 [x] (max 0.0 (min 1.0 x)))
-  (defn normalize-hue [h] (if (< h 0.0) (+ h 360.0) h))
+  (defn clamp01 [x]
+    (max 0.0 (min 1.0 x)))
+  (defn normalize-hue [h]
+    (if (< h 0.0) (+ h 360.0) h))
 
   # ── Construction ───────────────────────────────────────────────────
 
@@ -52,36 +54,41 @@
   # ── sRGB ↔ HSL ────────────────────────────────────────────────────
 
   (defn rgb->hsl [c]
-    (let* [r c:r g c:g b c:b
+    (let* [r c:r
+           g c:g
+           b c:b
            mx (max r (max g b))
            mn (min r (min g b))
-           d  (- mx mn)
-           l  (/ (+ mx mn) 2.0)
-           s  (if (= d 0.0) 0.0
-                 (/ d (- 1.0 (abs (- (* 2.0 l) 1.0)))))
-           h  (if (= d 0.0) 0.0
-                 (cond
-                   (= mx r) (* 60.0 (fmod (/ (- g b) d) 6.0))
-                   (= mx g) (* 60.0 (+ (/ (- b r) d) 2.0))
-                   true     (* 60.0 (+ (/ (- r g) d) 4.0))))]
-      {:space :hsl
-       :h (normalize-hue h)
-       :s (clamp01 s)
-       :l (clamp01 l)}))
+           d (- mx mn)
+           l (/ (+ mx mn) 2.0)
+           s (if (= d 0.0)
+               0.0
+               (/ d (- 1.0 (abs (- (* 2.0 l) 1.0)))))
+           h (if (= d 0.0)
+               0.0
+               (cond
+                 (= mx r)
+                   (* 60.0 (fmod (/ (- g b) d) 6.0))
+                 (= mx g)
+                   (* 60.0 (+ (/ (- b r) d) 2.0))
+                 true
+                   (* 60.0 (+ (/ (- r g) d) 4.0))))]
+      {:space :hsl :h (normalize-hue h) :s (clamp01 s) :l (clamp01 l)}))
 
   (defn hsl->rgb [c]
-    (let* [h c:h s c:s l c:l
-           ch  (* (- 1.0 (abs (- (* 2.0 l) 1.0))) s)
-           hp  (/ (fmod h 360.0) 60.0)
-           x   (* ch (- 1.0 (abs (- (fmod hp 2.0) 1.0))))
-           [r1 g1 b1]
-            (cond
-              (< hp 1.0) [ch x  0.0]
-              (< hp 2.0) [x  ch 0.0]
-              (< hp 3.0) [0.0 ch x]
-              (< hp 4.0) [0.0 x  ch]
-              (< hp 5.0) [x  0.0 ch]
-              true       [ch 0.0 x])
+    (let* [h c:h
+           s c:s
+           l c:l
+           ch (* (- 1.0 (abs (- (* 2.0 l) 1.0))) s)
+           hp (/ (fmod h 360.0) 60.0)
+           x (* ch (- 1.0 (abs (- (fmod hp 2.0) 1.0))))
+           [r1 g1 b1] (cond
+                        (< hp 1.0) [ch x 0.0]
+                        (< hp 2.0) [x ch 0.0]
+                        (< hp 3.0) [0.0 ch x]
+                        (< hp 4.0) [0.0 x ch]
+                        (< hp 5.0) [x 0.0 ch]
+                        true [ch 0.0 x])
            m (- l (/ ch 2.0))]
       {:space :srgb :r (+ r1 m) :g (+ g1 m) :b (+ b1 m)}))
 
@@ -97,10 +104,12 @@
        :z (+ (* 0.0193339 rl) (* 0.1191920 gl) (* 0.9503041 bl))}))
 
   (defn xyz->rgb [c]
-    (let* [x c:x y c:y z c:z
-           rl (+ (* 3.2404542  x) (* -1.5371385 y) (* -0.4985314 z))
-           gl (+ (* -0.9692660 x) (* 1.8760108  y) (* 0.0415560  z))
-           bl (+ (* 0.0556434  x) (* -0.2040259 y) (* 1.0572252  z))]
+    (let* [x c:x
+           y c:y
+           z c:z
+           rl (+ (* 3.2404542 x) (* -1.5371385 y) (* -0.4985314 z))
+           gl (+ (* -0.9692660 x) (* 1.8760108 y) (* 0.0415560 z))
+           bl (+ (* 0.0556434 x) (* -0.2040259 y) (* 1.0572252 z))]
       {:space :srgb
        :r (clamp01 (linear-to-srgb rl))
        :g (clamp01 (linear-to-srgb gl))
@@ -121,7 +130,8 @@
 
   (defn lab-f-inv [t]
     (let [t3 (* t t t)]
-      (if (> t3 LAB-E) t3
+      (if (> t3 LAB-E)
+        t3
         (/ (- (* 116.0 t) 16.0) LAB-K))))
 
   (defn xyz->lab [c]
@@ -134,7 +144,9 @@
        :b (* 200.0 (- fy fz))}))
 
   (defn lab->xyz [c]
-    (let* [l c:l a c:a b c:b
+    (let* [l c:l
+           a c:a
+           b c:b
            fy (/ (+ l 16.0) 116.0)
            fx (+ (/ a 500.0) fy)
            fz (- fy (/ b 200.0))]
@@ -145,8 +157,10 @@
 
   # ── sRGB ↔ Lab shortcut ───────────────────────────────────────────
 
-  (defn rgb->lab [c] (xyz->lab (rgb->xyz c)))
-  (defn lab->rgb [c] (xyz->rgb (lab->xyz c)))
+  (defn rgb->lab [c]
+    (xyz->lab (rgb->xyz c)))
+  (defn lab->rgb [c]
+    (xyz->rgb (lab->xyz c)))
 
   # ── Lab ↔ Oklch ────────────────────────────────────────────────────
   ## Oklch uses the Oklab perceptual space with cylindrical coordinates.
@@ -159,18 +173,24 @@
            l_ (+ (* 0.4122214708 rl) (* 0.5363325363 gl) (* 0.0514459929 bl))
            m_ (+ (* 0.2119034982 rl) (* 0.6806995451 gl) (* 0.1073969566 bl))
            s_ (+ (* 0.0883024619 rl) (* 0.2817188376 gl) (* 0.6299787005 bl))
-           l (math/cbrt l_) m (math/cbrt m_) s (math/cbrt s_)]
+           l (math/cbrt l_)
+           m (math/cbrt m_)
+           s (math/cbrt s_)]
       {:space :oklab
        :l (+ (* 0.2104542553 l) (* 0.7936177850 m) (* -0.0040720468 s))
        :a (+ (* 1.9779984951 l) (* -2.4285922050 m) (* 0.4505937099 s))
        :b (+ (* 0.0259040371 l) (* 0.7827717662 m) (* -0.8086757660 s))}))
 
   (defn oklab->rgb [c]
-    (let* [L c:l A c:a B c:b
+    (let* [L c:l
+           A c:a
+           B c:b
            l_ (+ L (* 0.3963377774 A) (* 0.2158037573 B))
            m_ (+ L (* -0.1055613458 A) (* -0.0638541728 B))
            s_ (+ L (* -0.0894841775 A) (* -1.2914855480 B))
-           l (* l_ l_ l_) m (* m_ m_ m_) s (* s_ s_ s_)
+           l (* l_ l_ l_)
+           m (* m_ m_ m_)
+           s (* s_ s_ s_)
            rl (+ (* 4.0767416621 l) (* -3.3077115913 m) (* 0.2309699292 s))
            gl (+ (* -1.2684380046 l) (* 2.6097574011 m) (* -0.3413193965 s))
            bl (+ (* -0.0041960863 l) (* -0.7034186147 m) (* 1.7076147010 s))]
@@ -183,46 +203,55 @@
   (def RAD (/ (math/pi) 180.0))
 
   (defn oklab->oklch [c]
-    (let* [a c:a b c:b
+    (let* [a c:a
+           b c:b
            ch (math/sqrt (+ (* a a) (* b b)))
-           h  (* (math/atan2 b a) DEG)]
+           h (* (math/atan2 b a) DEG)]
       {:space :oklch :l c:l :c ch :h (normalize-hue h)}))
 
   (defn oklch->oklab [c]
-    (let* [ch c:c h (* c:h RAD)]
+    (let* [ch c:c
+           h (* c:h RAD)]
       {:space :oklab :l c:l :a (* ch (math/cos h)) :b (* ch (math/sin h))}))
 
-  (defn rgb->oklch [c] (oklab->oklch (rgb->oklab c)))
-  (defn oklch->rgb [c] (oklab->rgb (oklch->oklab c)))
+  (defn rgb->oklch [c]
+    (oklab->oklch (rgb->oklab c)))
+  (defn oklch->rgb [c]
+    (oklab->rgb (oklch->oklab c)))
 
   # ── Conversion dispatch ───────────────────────────────────────────
 
   (defn to-srgb [c]
     (match c:space
-      :srgb  c
-      :hsl   (hsl->rgb c)
-      :lab   (lab->rgb c)
-      :xyz   (xyz->rgb c)
+      :srgb c
+      :hsl (hsl->rgb c)
+      :lab (lab->rgb c)
+      :xyz (xyz->rgb c)
       :oklab (oklab->rgb c)
       :oklch (oklch->rgb c)
-      _      (error {:error :color-error :message (string "unknown space " c:space)})))
+      _
+        (error {:error :color-error :message (string "unknown space " c:space)})))
 
   (defn convert [c space]
     (let [s (to-srgb c)]
       (match space
-        :srgb  s
-        :hsl   (rgb->hsl s)
-        :lab   (rgb->lab s)
-        :xyz   (rgb->xyz s)
+        :srgb s
+        :hsl (rgb->hsl s)
+        :lab (rgb->lab s)
+        :xyz (rgb->xyz s)
         :oklab (rgb->oklab s)
         :oklch (rgb->oklch s)
-        _      (error {:error :color-error :message (string "unknown target space " space)}))))
+        _
+          (error {:error :color-error
+                  :message (string "unknown target space " space)}))))
 
   # ── Operations ─────────────────────────────────────────────────────
 
   (defn mix [c1 c2 t]
-    (let* [a (to-srgb c1) b (to-srgb c2)
-           t (float t) inv (- 1.0 t)]
+    (let* [a (to-srgb c1)
+           b (to-srgb c2)
+           t (float t)
+           inv (- 1.0 t)]
       {:space :srgb
        :r (+ (* a:r inv) (* b:r t))
        :g (+ (* a:g inv) (* b:g t))
@@ -230,8 +259,7 @@
 
   (defn gradient [c1 c2 n]
     (let [steps (max 2 n)]
-      (map (fn [i] (mix c1 c2 (/ (float i) (float (dec steps)))))
-           (range steps))))
+      (map (fn [i] (mix c1 c2 (/ (float i) (float (dec steps))))) (range steps))))
 
   (defn lighten [c amount]
     (let [h (convert c :hsl)]
@@ -254,16 +282,21 @@
   # ── CIEDE2000 color distance ───────────────────────────────────────
 
   (defn distance [c1 c2]
-    (let* [a (convert c1 :lab) b (convert c2 :lab)
-           l1 a:l a1 a:a b1 a:b
-           l2 b:l a2 b:a b2 b:b
+    (let* [a (convert c1 :lab)
+           b (convert c2 :lab)
+           l1 a:l
+           a1 a:a
+           b1 a:b
+           l2 b:l
+           a2 b:a
+           b2 b:b
            dl (- l2 l1)
            lb (/ (+ l1 l2) 2.0)
            c1s (math/sqrt (+ (* a1 a1) (* b1 b1)))
            c2s (math/sqrt (+ (* a2 a2) (* b2 b2)))
-           cb  (/ (+ c1s c2s) 2.0)
+           cb (/ (+ c1s c2s) 2.0)
            cb7 (math/pow cb 7.0)
-           g   (* 0.5 (- 1.0 (math/sqrt (/ cb7 (+ cb7 (math/pow 25.0 7.0))))))
+           g (* 0.5 (- 1.0 (math/sqrt (/ cb7 (+ cb7 (math/pow 25.0 7.0))))))
            a1p (* a1 (+ 1.0 g))
            a2p (* a2 (+ 1.0 g))
            c1p (math/sqrt (+ (* a1p a1p) (* b1 b1)))
@@ -271,45 +304,43 @@
            dcp (- c2p c1p)
            cbp (/ (+ c1p c2p) 2.0)
            h1p (let [h (* (math/atan2 b1 a1p) DEG)]
-                  (if (< h 0.0) (+ h 360.0) h))
+                 (if (< h 0.0) (+ h 360.0) h))
            h2p (let [h (* (math/atan2 b2 a2p) DEG)]
-                  (if (< h 0.0) (+ h 360.0) h))
+                 (if (< h 0.0) (+ h 360.0) h))
            dhp (cond
-                  (or (= c1p 0.0) (= c2p 0.0)) 0.0
-                  (<= (abs (- h2p h1p)) 180.0) (- h2p h1p)
-                  (> (- h2p h1p) 180.0) (- (- h2p h1p) 360.0)
-                  true (+ (- h2p h1p) 360.0))
+                 (or (= c1p 0.0) (= c2p 0.0)) 0.0
+                 (<= (abs (- h2p h1p)) 180.0) (- h2p h1p)
+                 (> (- h2p h1p) 180.0) (- (- h2p h1p) 360.0)
+                 true (+ (- h2p h1p) 360.0))
            dHp (* 2.0 (math/sqrt (* c1p c2p)) (math/sin (* (/ dhp 2.0) RAD)))
            Hbp (cond
-                  (or (= c1p 0.0) (= c2p 0.0)) (+ h1p h2p)
-                  (<= (abs (- h1p h2p)) 180.0) (/ (+ h1p h2p) 2.0)
-                  (< (+ h1p h2p) 360.0) (/ (+ h1p h2p 360.0) 2.0)
-                  true (/ (+ h1p h2p -360.0) 2.0))
-           T (+ 1.0
-                 (* -0.17 (math/cos (* (- Hbp 30.0) RAD)))
-                 (* 0.24  (math/cos (* (* 2.0 Hbp) RAD)))
-                 (* 0.32  (math/cos (* (+ (* 3.0 Hbp) 6.0) RAD)))
-                 (* -0.20 (math/cos (* (- (* 4.0 Hbp) 63.0) RAD))))
+                 (or (= c1p 0.0) (= c2p 0.0)) (+ h1p h2p)
+                 (<= (abs (- h1p h2p)) 180.0) (/ (+ h1p h2p) 2.0)
+                 (< (+ h1p h2p) 360.0) (/ (+ h1p h2p 360.0) 2.0)
+                 true (/ (+ h1p h2p -360.0) 2.0))
+           T (+ 1.0 (* -0.17 (math/cos (* (- Hbp 30.0) RAD)))
+                (* 0.24 (math/cos (* (* 2.0 Hbp) RAD)))
+                (* 0.32 (math/cos (* (+ (* 3.0 Hbp) 6.0) RAD)))
+                (* -0.20 (math/cos (* (- (* 4.0 Hbp) 63.0) RAD))))
            lbm50sq (* (- lb 50.0) (- lb 50.0))
            sl (+ 1.0 (/ (* 0.015 lbm50sq) (math/sqrt (+ 20.0 lbm50sq))))
            sc (+ 1.0 (* 0.045 cbp))
            sh (+ 1.0 (* 0.015 cbp T))
            cbp7 (math/pow cbp 7.0)
            rt (* -2.0 (math/sqrt (/ cbp7 (+ cbp7 (math/pow 25.0 7.0))))
-                 (math/sin (* 60.0 (math/pow 2.718281828
-                                     (* -1.0 (* (/ (- Hbp 275.0) 25.0) (/ (- Hbp 275.0) 25.0))))))
-                 RAD)]
-      (math/sqrt (+ (* (/ dl sl) (/ dl sl))
-                    (* (/ dcp sc) (/ dcp sc))
-                    (* (/ dHp sh) (/ dHp sh))
-                    (* rt (/ dcp sc) (/ dHp sh))))))
+                 (math/sin (* 60.0
+                              (math/pow 2.718281828
+                                        (* -1.0
+                                        (* (/ (- Hbp 275.0) 25.0)
+                                        (/ (- Hbp 275.0) 25.0)))))) RAD)]
+      (math/sqrt (+ (* (/ dl sl) (/ dl sl)) (* (/ dcp sc) (/ dcp sc))
+                    (* (/ dHp sh) (/ dHp sh)) (* rt (/ dcp sc) (/ dHp sh))))))
 
   # ── Pixel interop ──────────────────────────────────────────────────
 
   (defn to-rgba8 [c]
     (let [s (to-srgb c)]
-      [(integer (* (clamp01 s:r) 255.0))
-       (integer (* (clamp01 s:g) 255.0))
+      [(integer (* (clamp01 s:r) 255.0)) (integer (* (clamp01 s:g) 255.0))
        (integer (* (clamp01 s:b) 255.0))
        (integer (* (clamp01 (or s:a 1.0)) 255.0))]))
 
@@ -322,11 +353,20 @@
 
   # ── Export ─────────────────────────────────────────────────────────
 
-  {:rgb rgb :rgba rgba :hsl hsl :lab lab :oklch oklch
-   :convert convert :to-srgb to-srgb
-   :mix mix :gradient gradient
-   :lighten lighten :darken darken
-   :saturate saturate :desaturate desaturate
+  {:rgb rgb
+   :rgba rgba
+   :hsl hsl
+   :lab lab
+   :oklch oklch
+   :convert convert
+   :to-srgb to-srgb
+   :mix mix
+   :gradient gradient
+   :lighten lighten
+   :darken darken
+   :saturate saturate
+   :desaturate desaturate
    :complement complement
    :distance distance
-   :to-rgba8 to-rgba8 :from-rgba8 from-rgba8})
+   :to-rgba8 to-rgba8
+   :from-rgba8 from-rgba8})

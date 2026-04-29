@@ -74,21 +74,18 @@
 (def dark-red (color:rgb 0.5 0.0 0.0))
 (def lighter (color:lighten dark-red 0.2))
 (assert (> (get (color:convert lighter :hsl) :l)
-           (get (color:convert dark-red :hsl) :l))
-  "lighten increases lightness")
+           (get (color:convert dark-red :hsl) :l)) "lighten increases lightness")
 
 (def darker (color:darken dark-red 0.1))
 (assert (< (get (color:convert darker :hsl) :l)
-           (get (color:convert dark-red :hsl) :l))
-  "darken decreases lightness")
+           (get (color:convert dark-red :hsl) :l)) "darken decreases lightness")
 
 # ── Saturate / Desaturate ────────────────────────────────────────────
 
 (def muted (color:rgb 0.5 0.3 0.3))
 (def more-sat (color:saturate muted 0.2))
 (assert (> (get (color:convert more-sat :hsl) :s)
-           (get (color:convert muted :hsl) :s))
-  "saturate increases saturation")
+           (get (color:convert muted :hsl) :s)) "saturate increases saturation")
 
 # ── Complement ───────────────────────────────────────────────────────
 

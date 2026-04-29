@@ -14,12 +14,12 @@
 # ============================================================================
 
 # datum->syntax takes (context datum); use nil as context for synthetic span/scopes.
-(def syn-int   (datum->syntax nil 42))
-(def syn-bool  (datum->syntax nil true))
-(def syn-str   (datum->syntax nil "hello"))
-(def syn-sym   (datum->syntax nil 'foo))
-(def syn-kw    (datum->syntax nil :bar))
-(def syn-nil   (datum->syntax nil nil))
+(def syn-int (datum->syntax nil 42))
+(def syn-bool (datum->syntax nil true))
+(def syn-str (datum->syntax nil "hello"))
+(def syn-sym (datum->syntax nil 'foo))
+(def syn-kw (datum->syntax nil :bar))
+(def syn-nil (datum->syntax nil nil))
 (def syn-list1 (datum->syntax nil (list 1)))
 (def syn-list2 (datum->syntax nil (list 1 2)))
 (def syn-empty (datum->syntax nil ()))
@@ -56,10 +56,12 @@
   (assert (= (length result) 0) "syntax->list: empty list → empty array"))
 
 # Error: non-syntax argument
-(let [[ok? _] (protect ((fn () (syntax->list 42))))] (assert (not ok?) "syntax->list: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax->list 42))))]
+  (assert (not ok?) "syntax->list: non-syntax errors"))
 
 # Error: syntax wrapping a non-list (e.g. an int)
-(let [[ok? _] (protect ((fn () (syntax->list syn-int))))] (assert (not ok?) "syntax->list: syntax non-list errors"))
+(let [[ok? _] (protect ((fn () (syntax->list syn-int))))]
+  (assert (not ok?) "syntax->list: syntax non-list errors"))
 
 # ============================================================================
 # syntax-first — runtime callable
@@ -70,13 +72,16 @@
   (assert (= (syntax-e elem) 1) "syntax-first: returns first element"))
 
 # Error: empty syntax list
-(let [[ok? _] (protect ((fn () (syntax-first syn-empty))))] (assert (not ok?) "syntax-first: empty list errors"))
+(let [[ok? _] (protect ((fn () (syntax-first syn-empty))))]
+  (assert (not ok?) "syntax-first: empty list errors"))
 
 # Error: syntax wrapping a non-list
-(let [[ok? _] (protect ((fn () (syntax-first syn-int))))] (assert (not ok?) "syntax-first: non-list errors"))
+(let [[ok? _] (protect ((fn () (syntax-first syn-int))))]
+  (assert (not ok?) "syntax-first: non-list errors"))
 
 # Error: plain non-syntax value
-(let [[ok? _] (protect ((fn () (syntax-first 42))))] (assert (not ok?) "syntax-first: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax-first 42))))]
+  (assert (not ok?) "syntax-first: non-syntax errors"))
 
 # ============================================================================
 # syntax-rest — runtime callable
@@ -89,13 +94,16 @@
     (assert (= (syntax-e (first items)) 2) "syntax-rest: rest element is 2")))
 
 # Error: empty syntax list
-(let [[ok? _] (protect ((fn () (syntax-rest syn-empty))))] (assert (not ok?) "syntax-rest: empty list errors"))
+(let [[ok? _] (protect ((fn () (syntax-rest syn-empty))))]
+  (assert (not ok?) "syntax-rest: empty list errors"))
 
 # Error: syntax wrapping a non-list
-(let [[ok? _] (protect ((fn () (syntax-rest syn-int))))] (assert (not ok?) "syntax-rest: non-list errors"))
+(let [[ok? _] (protect ((fn () (syntax-rest syn-int))))]
+  (assert (not ok?) "syntax-rest: non-list errors"))
 
 # Error: plain non-syntax value
-(let [[ok? _] (protect ((fn () (syntax-rest 42))))] (assert (not ok?) "syntax-rest: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax-rest 42))))]
+  (assert (not ok?) "syntax-rest: non-syntax errors"))
 
 # ============================================================================
 # syntax-e — runtime callable
@@ -113,5 +121,7 @@
   (assert (not (nil? result)) "syntax-e: compound returns non-nil"))
 
 # Error: non-syntax argument
-(let [[ok? _] (protect ((fn () (syntax-e 42))))] (assert (not ok?) "syntax-e: non-syntax errors"))
-(let [[ok? _] (protect ((fn () (syntax-e :foo))))] (assert (not ok?) "syntax-e: plain keyword errors"))
+(let [[ok? _] (protect ((fn () (syntax-e 42))))]
+  (assert (not ok?) "syntax-e: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax-e :foo))))]
+  (assert (not ok?) "syntax-e: plain keyword errors"))

@@ -30,10 +30,9 @@
             (when (= ch (pat ci)) (assign matched true))
             (assign ci (inc ci)))))
       (when (or (>= ci plen) (not (= (pat ci) "]")))
-        (error {:error :pattern-error :message "glob: unterminated character class"}))
-      (if (if negated (not matched) matched)
-        (inc ci)
-        nil)))
+        (error {:error :pattern-error
+                :message "glob: unterminated character class"}))
+      (if (if negated (not matched) matched) (inc ci) nil)))
 
   ## ── Core matching ────────────────────────────────────────────────
 
@@ -44,34 +43,34 @@
       (defn go [pi ti]
         (cond
           (and (>= pi plen) (>= ti tlen)) true
-          (>= pi plen) false
-          ## **
+          (>= pi plen) false  ## **
           (and (< (inc pi) plen) (= (pat pi) "*") (= (pat (inc pi)) "*"))
-           (let [npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
-                        (+ pi 3) (+ pi 2))]
-             (def @k ti)
-             (def @found false)
-             (while (and (<= k tlen) (not found))
-               (when (go npi k) (assign found true))
-               (assign k (inc k)))
-             found)
+            (let [npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
+                        (+ pi 3)
+                        (+ pi 2))]
+              (def @k ti)
+              (def @found false)
+              (while (and (<= k tlen) (not found))
+                (when (go npi k) (assign found true))
+                (assign k (inc k)))
+              found)
           (>= ti tlen)
-           (if (= (pat pi) "*") (go (inc pi) ti) false)
-          ## *
-          (= (pat pi) "*") (begin (def @k ti) (def @found false) (while (and (<= k tlen) (not found))
-             (when (go (inc pi) k) (assign found true))
-             (when (and (not found) (< k tlen) sep? (= (text k) "/"))
-               (assign k tlen))
-             (assign k (inc k))) found)
-          ## ?
+            (if (= (pat pi) "*") (go (inc pi) ti) false)  ## *
+          (= (pat pi) "*")
+            (begin
+              (def @k ti)
+              (def @found false)
+              (while (and (<= k tlen) (not found))
+                (when (go (inc pi) k) (assign found true))
+                (when (and (not found) (< k tlen) sep? (= (text k) "/"))
+                  (assign k tlen))
+                (assign k (inc k)))
+              found)  ## ?
           (= (pat pi) "?")
-           (if (and sep? (= (text ti) "/")) false
-             (go (inc pi) (inc ti)))
-          ## [...]
+            (if (and sep? (= (text ti) "/")) false (go (inc pi) (inc ti)))  ## [...]
           (= (pat pi) "[")
-           (let [new-pi (match-class pat (inc pi) (text ti))]
-             (if (nil? new-pi) false (go new-pi (inc ti))))
-          ## literal
+            (let [new-pi (match-class pat (inc pi) (text ti))]
+              (if (nil? new-pi) false (go new-pi (inc ti))))  ## literal
           (= (pat pi) (text ti)) (go (inc pi) (inc ti))
           true false))
       (go 0 0)))
@@ -90,8 +89,10 @@
     (if (= base ".") name (string base "/" name)))
 
   (defn strip-base [base path]
-    (if (= base ".") path
-      (-> path (slice (inc (length base)) (length path)))))
+    (if (= base ".")
+      path
+      (-> path
+          (slice (inc (length base)) (length path)))))
 
   (defn has-glob? [s]
     (or (string/contains? s "*") (string/contains? s "?")
@@ -104,9 +105,12 @@
           rest @[]]
       (def @in-glob false)
       (each p in parts
-        (if in-glob (push rest p)
+        (if in-glob
+          (push rest p)
           (if (has-glob? p)
-            (begin (assign in-glob true) (push rest p))
+            (begin
+              (assign in-glob true)
+              (push rest p))
             (push prefix p))))
       [(if (> (length prefix) 0) (string/join (->list prefix) "/") ".")
        (string/join (->list rest) "/")]))
@@ -130,13 +134,14 @@
       (if (= glob-part "")
         (if (path/exists? pattern) @[pattern] @[])
         (let* [files (if (string/contains? glob-part "/")
-                        (list-recursive base)
-                        (let [[ok? entries] (protect ((fn [] (file/ls base))))]
-                          (if ok? (map (fn [e] (join-path base e)) entries) @[])))
+                       (list-recursive base)
+                       (let [[ok? entries] (protect ((fn [] (file/ls base))))]
+                         (if ok?
+                           (map (fn [e] (join-path base e)) entries)
+                           @[])))
                acc @[]]
           (each f in files
-            (when (match-path? glob-part (strip-base base f))
-              (push acc f)))
+            (when (match-path? glob-part (strip-base base f)) (push acc f)))
           acc))))
 
   {:glob glob-find :match? match? :match-path? match-path?})

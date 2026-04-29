@@ -24,13 +24,14 @@
     "Create a Value node that is the result of an operation."
     (let* [id *next-id*]
       (assign *next-id* (inc *next-id*))
-      @{:id id :data data :grad 0.0
-        :children children :local-grads local-grads}))
+      @{:id id :data data :grad 0.0 :children children :local-grads local-grads}))
 
   # ── Accessors ──────────────────────────────────────────────────
 
-  (defn v-data [v] v:data)
-  (defn v-grad [v] v:grad)
+  (defn v-data [v]
+    v:data)
+  (defn v-grad [v]
+    v:grad)
 
   # ── Arithmetic operations ──────────────────────────────────────
 
@@ -57,8 +58,10 @@
     (let* [d (v-data a)]
       (make-op (if (> d 0.0) d 0.0) @[a] @[(if (> d 0.0) 1.0 0.0)])))
 
-  (defn v- [a b] (v+ a (vneg b)))
-  (defn v/ [a b] (v* a (vpow b -1.0)))
+  (defn v- [a b]
+    (v+ a (vneg b)))
+  (defn v/ [a b]
+    (v* a (vpow b -1.0)))
 
   (defn v*s [v s]
     "Multiply Value v by scalar s."
@@ -77,7 +80,8 @@
     (default offset-a 0)
     (default offset-b 0)
     (def @sum 0.0)
-    (let* [children @[] grads @[]]
+    (let* [children @[]
+           grads @[]]
       (def @i 0)
       (while (< i n)
         (let* [a (avec (+ offset-a i))
@@ -106,11 +110,11 @@
     (let* [topo @[]
            visited @||]
       (letrec [walk (fn [node]
-        (when (not (contains? visited node:id))
-          (add visited node:id)
-          (each child in node:children
-            (walk child))
-          (push topo node)))]
+                      (when (not (contains? visited node:id))
+                        (add visited node:id)
+                        (each child in node:children
+                          (walk child))
+                        (push topo node)))]
         (walk root))
       topo))
 
@@ -121,19 +125,31 @@
         (put node :grad 0.0))
       (put root :grad 1.0)
       (each node in (reverse topo)
-        (let* [children   node:children
+        (let* [children node:children
                local-grads node:local-grads
-               node-grad  node:grad]
+               node-grad node:grad]
           (def @j 0)
           (while (< j (length children))
             (let* [child (children j)
-                   lg    (local-grads j)]
+                   lg (local-grads j)]
               (put child :grad (+ child:grad (* node-grad lg))))
             (assign j (inc j)))))))
 
-  {:make-value make-value :make-op make-op
-   :v-data v-data :v-grad v-grad
-   :v+ v+ :v* v* :vneg vneg :vpow vpow :vexp vexp :vlog vlog :vrelu vrelu
-   :v- v- :v/ v/ :v*s v*s :v+s v+s
-   :vdot vdot :vsum vsum
+  {:make-value make-value
+   :make-op make-op
+   :v-data v-data
+   :v-grad v-grad
+   :v+ v+
+   :v* v*
+   :vneg vneg
+   :vpow vpow
+   :vexp vexp
+   :vlog vlog
+   :vrelu vrelu
+   :v- v-
+   :v/ v/
+   :v*s v*s
+   :v+s v+s
+   :vdot vdot
+   :vsum vsum
    :backward backward})

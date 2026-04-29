@@ -85,6 +85,7 @@
   (assert (= (bytes b) b) "bytes: equal on bytes"))
 (let [mb (@bytes 1 2 3)]
   (assert (identical? (@bytes mb) mb) "@bytes: idempotent on @bytes"))
-(assert (identical? (bytes (bytes 1 2 3)) (bytes 1 2 3)) "bytes: nested idempotent")
+(assert (identical? (bytes (bytes 1 2 3)) (bytes 1 2 3))
+        "bytes: nested idempotent")
 
 (println "migrated: all tests passed")

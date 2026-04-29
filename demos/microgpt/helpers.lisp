@@ -2,7 +2,6 @@
 ## helpers.lisp — Utility functions for microgpt
 
 (fn []
-
   (defn make-2d [rows cols init-fn]
     "Create a rows x cols mutable 2D array, calling (init-fn r c) for each cell."
     (let* [[result @[]]]

@@ -17,7 +17,6 @@
 ##   (spit "out.png" (svg:render doc))
 
 (fn [& opts]
-
   (def renderer (if (empty? opts) nil (first opts)))
 
   # ── Element constructor ────────────────────────────────────────────
@@ -36,45 +35,37 @@
   # ── Document root ──────────────────────────────────────────────────
 
   (defn svg [w h & children]
-    (element :svg
-      {:xmlns "http://www.w3.org/2000/svg"
-       :width (float w) :height (float h)
-       :viewBox (string "0 0 " w " " h)}
-      children))
+    (element :svg {:xmlns "http://www.w3.org/2000/svg"
+                   :width (float w)
+                   :height (float h)
+                   :viewBox (string "0 0 " w " " h)} children))
 
   # ── Shape elements ─────────────────────────────────────────────────
 
   (defn rect [x y w h & opts]
-    (element :rect
-      (merge-attrs {:x (float x) :y (float y)
-                    :width (float w) :height (float h)}
-                   (opt-attrs opts))
-      []))
+    (element :rect (merge-attrs {:x (float x)
+                                 :y (float y)
+                                 :width (float w)
+                                 :height (float h)} (opt-attrs opts)) []))
 
   (defn circle [cx cy r & opts]
-    (element :circle
-      (merge-attrs {:cx (float cx) :cy (float cy) :r (float r)}
-                   (opt-attrs opts))
-      []))
+    (element :circle (merge-attrs {:cx (float cx) :cy (float cy) :r (float r)}
+                                  (opt-attrs opts)) []))
 
   (defn ellipse [cx cy rx ry & opts]
-    (element :ellipse
-      (merge-attrs {:cx (float cx) :cy (float cy)
-                    :rx (float rx) :ry (float ry)}
-                   (opt-attrs opts))
-      []))
+    (element :ellipse (merge-attrs {:cx (float cx)
+                                    :cy (float cy)
+                                    :rx (float rx)
+                                    :ry (float ry)} (opt-attrs opts)) []))
 
   (defn line [x1 y1 x2 y2 & opts]
-    (element :line
-      (merge-attrs {:x1 (float x1) :y1 (float y1)
-                    :x2 (float x2) :y2 (float y2)}
-                   (opt-attrs opts))
-      []))
+    (element :line (merge-attrs {:x1 (float x1)
+                                 :y1 (float y1)
+                                 :x2 (float x2)
+                                 :y2 (float y2)} (opt-attrs opts)) []))
 
   (defn path [d & opts]
-    (element :path
-      (merge-attrs {:d d} (opt-attrs opts))
-      []))
+    (element :path (merge-attrs {:d d} (opt-attrs opts)) []))
 
   # ── Points helpers ─────────────────────────────────────────────────
 
@@ -82,14 +73,12 @@
     (string/join (map (fn [p] (string (p 0) "," (p 1))) pts) " "))
 
   (defn polyline [pts & opts]
-    (element :polyline
-      (merge-attrs {:points (points->string pts)} (opt-attrs opts))
-      []))
+    (element :polyline (merge-attrs {:points (points->string pts)}
+                                    (opt-attrs opts)) []))
 
   (defn polygon [pts & opts]
-    (element :polygon
-      (merge-attrs {:points (points->string pts)} (opt-attrs opts))
-      []))
+    (element :polygon (merge-attrs {:points (points->string pts)}
+                                   (opt-attrs opts)) []))
 
   # ── Text ───────────────────────────────────────────────────────────
 
@@ -97,25 +86,22 @@
     (let [@attrs {:x (float x) :y (float y)}
           children @[]]
       (each item in rest
-        (cond
-          ## Attrs struct (not an SVG element)
-          (and (struct? item) (nil? (get item :tag)))
-            (assign attrs (merge attrs item))
-          ## String content
-          (string? item) (push children item)
-          ## SVG element child (tspan etc.)
+        (cond  ## Attrs struct (not an SVG element)
+          (and (struct? item) (nil? (get item :tag))) (assign
+            attrs
+            (merge attrs item))  ## String content
+          (string? item) (push children item)  ## SVG element child (tspan etc.)
           true (push children item)))
       (element :text attrs (freeze children))))
 
   (defn tspan [content & opts]
-    (element :tspan
-      (or (first opts) {})
-      [content]))
+    (element :tspan (or (first opts) {}) [content]))
 
   # ── Grouping and transforms ───────────────────────────────────────
 
   (defn group [& args]
-    (if (and (not (empty? args)) (struct? (first args)) (nil? (get (first args) :tag)))
+    (if (and (not (empty? args)) (struct? (first args))
+             (nil? (get (first args) :tag)))
       (element :g (first args) (slice args 1))
       (element :g {} args)))
 
@@ -143,11 +129,8 @@
     (element :radialGradient (merge {:id id} attrs) stops))
 
   (defn stop [offset color & opts]
-    (element :stop
-      (merge-attrs {:offset (string (* offset 100.0) "%")
-                    :stop-color color}
-                   (opt-attrs opts))
-      []))
+    (element :stop (merge-attrs {:offset (string (* offset 100.0) "%")
+                                 :stop-color color} (opt-attrs opts)) []))
 
   (defn clip-path [id & children]
     (element :clipPath {:id id} children))
@@ -203,8 +186,7 @@
           (when attrs
             (each [k v] in attrs
               (let [val-str (emit-attr-value v)]
-                (when val-str
-                  (append out (string " " k "=\"" val-str "\""))))))
+                (when val-str (append out (string " " k "=\"" val-str "\""))))))
           (if (or (nil? children) (empty? children))
             (append out "/>")
             (begin
@@ -221,21 +203,37 @@
   # ── Export ─────────────────────────────────────────────────────────
 
   (def exports
-    {:svg svg :rect rect :circle circle :ellipse ellipse
-     :line line :path path :polyline polyline :polygon polygon
-     :text text :tspan tspan
-     :group group :translate translate :rotate rotate :scale scale
-     :defs defs :linear-gradient linear-gradient
-     :radial-gradient radial-gradient :stop stop
-     :clip-path clip-path :mask mask
-     :set-attr set-attr :add-child add-child :wrap wrap
-     :emit emit :element element})
+    {:svg svg
+     :rect rect
+     :circle circle
+     :ellipse ellipse
+     :line line
+     :path path
+     :polyline polyline
+     :polygon polygon
+     :text text
+     :tspan tspan
+     :group group
+     :translate translate
+     :rotate rotate
+     :scale scale
+     :defs defs
+     :linear-gradient linear-gradient
+     :radial-gradient radial-gradient
+     :stop stop
+     :clip-path clip-path
+     :mask mask
+     :set-attr set-attr
+     :add-child add-child
+     :wrap wrap
+     :emit emit
+     :element element})
 
   ## If renderer plugin provided, add rendering functions
   (if renderer
     (merge exports
-      {:render      (get renderer :render)
-       :render-raw  (get renderer :render-raw)
-       :render-to-file (get renderer :render-to-file)
-       :dimensions  (get renderer :dimensions)})
+           {:render (get renderer :render)
+            :render-raw (get renderer :render-raw)
+            :render-to-file (get renderer :render-to-file)
+            :dimensions (get renderer :dimensions)})
     exports))

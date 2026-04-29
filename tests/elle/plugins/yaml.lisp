@@ -9,9 +9,9 @@
   (exit 0))
 
 ## Extract plugin functions from the returned struct
-(def parse-fn     (get plugin :parse))
+(def parse-fn (get plugin :parse))
 (def parse-all-fn (get plugin :parse-all))
-(def encode-fn    (get plugin :encode))
+(def encode-fn (get plugin :encode))
 
 ## ── yaml/parse: simple mapping ──────────────────────────────────
 
@@ -79,8 +79,11 @@
 
 ## ── error: parse invalid YAML ───────────────────────────────────
 
-(let [[ok? err] (protect ((fn () (parse-fn ":\n  - [invalid"))))] (assert (not ok?) "yaml/parse invalid") (assert (= (get err :error) :yaml-error) "yaml/parse invalid"))
+(let [[ok? err] (protect ((fn () (parse-fn ":\n  - [invalid"))))]
+  (assert (not ok?) "yaml/parse invalid")
+  (assert (= (get err :error) :yaml-error) "yaml/parse invalid"))
 
 ## ── error: wrong type to parse ──────────────────────────────────
 
-(let [[ok? _] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "yaml/parse wrong type"))
+(let [[ok? _] (protect ((fn () (parse-fn 42))))]
+  (assert (not ok?) "yaml/parse wrong type"))

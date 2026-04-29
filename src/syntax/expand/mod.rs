@@ -228,6 +228,25 @@ impl Expander {
                     syntax.scopes,
                 ))
             }
+            SyntaxKind::StringMut(s) => {
+                // @"..." desugars to (thaw "...") at expansion time.
+                // The thaw symbol carries ScopeId(0) (primitive scope).
+                let thaw_sym = Syntax::with_scopes(
+                    SyntaxKind::Symbol("thaw".into()),
+                    syntax.span.clone(),
+                    vec![ScopeId(0)],
+                );
+                let str_lit = Syntax::with_scopes(
+                    SyntaxKind::String(s.clone()),
+                    syntax.span.clone(),
+                    syntax.scopes.clone(),
+                );
+                Ok(Syntax::with_scopes(
+                    SyntaxKind::List(vec![thaw_sym, str_lit]),
+                    syntax.span,
+                    syntax.scopes,
+                ))
+            }
             _ => Ok(syntax),
         }
     }

@@ -12,7 +12,10 @@
 
 # test_jit_yield_through_call
 (begin
-  (def inner (fn [] (yield 42) 99))
+  (def inner
+    (fn []
+      (yield 42)
+      99))
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
 
@@ -39,7 +42,10 @@
 
 # test_jit_yield_through_call_with_resume_value
 (begin
-  (def inner (fn [] (def x (yield 1)) (+ x 10)))
+  (def inner
+    (fn []
+      (def x (yield 1))
+      (+ x 10)))
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
 
@@ -61,7 +67,12 @@
 
 # test_jit_yield_through_call_multiple_yields
 (begin
-  (def inner (fn [] (yield 1) (yield 2) (yield 3) 4))
+  (def inner
+    (fn []
+      (yield 1)
+      (yield 2)
+      (yield 3)
+      4))
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
 
@@ -87,7 +98,10 @@
 
 # test_jit_yield_through_call_stack_preservation
 (begin
-  (def inner (fn [] (yield 10) 20))
+  (def inner
+    (fn []
+      (yield 10)
+      20))
   (def outer (fn [] (+ 1 (inner))))
   (def run (fn [] (outer)))
 
@@ -111,7 +125,10 @@
 
 # test_jit_yield_through_nested_calls
 (begin
-  (def inner (fn [] (yield 42) 99))
+  (def inner
+    (fn []
+      (yield 42)
+      99))
   (def middle (fn [] (inner)))
   (def outer (fn [] (middle)))
   (def run (fn [] (outer)))
@@ -136,8 +153,11 @@
 
 # test_jit_yield_with_captures
 (begin
-  (def make-gen (fn (offset)
-    (fn [] (yield offset) (+ offset 1))))
+  (def make-gen
+    (fn (offset)
+      (fn []
+        (yield offset)
+        (+ offset 1))))
   (def outer (fn [] ((make-gen 10))))
   (def run (fn [] (outer)))
 
@@ -161,11 +181,15 @@
 
 # test_jit_yield_locals_survive_yield_resume
 (begin
-  (def inner (fn [] (yield 1) 2))
-  (def outer (fn []
-    (let [x 10]
-      (let [y (inner)]
-        (+ x y)))))
+  (def inner
+    (fn []
+      (yield 1)
+      2))
+  (def outer
+    (fn []
+      (let [x 10]
+        (let [y (inner)]
+          (+ x y)))))
   (def run (fn [] (outer)))
 
   (def @warmup-i 0)
@@ -188,13 +212,17 @@
 
 # test_jit_yield_multiple_locals_survive
 (begin
-  (def inner (fn [] (yield 100) 200))
-  (def outer (fn []
-    (let [a 1]
-      (let [b 2]
-        (let [c 3]
-          (let [d (inner)]
-            (+ a (+ b (+ c d)))))))))
+  (def inner
+    (fn []
+      (yield 100)
+      200))
+  (def outer
+    (fn []
+      (let [a 1]
+        (let [b 2]
+          (let [c 3]
+            (let [d (inner)]
+              (+ a (+ b (+ c d)))))))))
   (def run (fn [] (outer)))
 
   (def @warmup-i 0)

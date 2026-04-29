@@ -38,19 +38,18 @@
 ##   (ev/spawn (fn [] (each msg in conn:messages (q:put msg))))
 
 (fn [&named tls]
-
   (def b64 ((import "std/base64")))
 
   ## ── Constants ─────────────────────────────────────────────────────
 
   (def DEFAULT-PORT-PLAIN 6667)
-  (def DEFAULT-PORT-TLS   6697)
+  (def DEFAULT-PORT-TLS 6697)
   (def SOH (string (bytes 1)))
 
   (def DESIRED-CAPS
-    ["multi-prefix" "server-time" "echo-message" "account-notify"
-     "away-notify" "extended-join" "chghost" "userhost-in-names"
-     "message-tags" "batch" "labeled-response"])
+    ["multi-prefix" "server-time" "echo-message" "account-notify" "away-notify"
+     "extended-join" "chghost" "userhost-in-names" "message-tags" "batch"
+     "labeled-response"])
 
   ## ── Tag escaping ──────────────────────────────────────────────────
 
@@ -73,13 +72,13 @@
       (if (and (= (get s i) "\\") (< (inc i) (length s)))
         (let [next (get s (inc i))]
           (append result
-            (match next
-              ":" ";"
-              "s" " "
-              "\\" "\\"
-              "r" "\r"
-              "n" "\n"
-              _ next))
+                  (match next
+                    ":" ";"
+                    "s" " "
+                    "\\" "\\"
+                    "r" "\r"
+                    "n" "\n"
+                    _ next))
           (assign i (+ i 2)))
         (begin
           (append result (get s i))
@@ -97,7 +96,7 @@
         (let [eq (string/find part "=")]
           (if eq
             (put result (keyword (slice part 0 eq))
-                        (unescape-tag-value (slice part (inc eq))))
+                 (unescape-tag-value (slice part (inc eq))))
             (put result (keyword part) true)))))
     (freeze result))
 
@@ -129,12 +128,17 @@
         (assign rest (slice rest 1)))
       (when (= (length rest) 0) (break))
       (if (= (get rest 0) ":")
-        (begin (push params (slice rest 1)) (break))
+        (begin
+          (push params (slice rest 1))
+          (break))
         (let [sp (string/find rest " ")]
           (if sp
-            (begin (push params (slice rest 0 sp))
-                   (assign rest (slice rest (inc sp))))
-            (begin (push params rest) (break))))))
+            (begin
+              (push params (slice rest 0 sp))
+              (assign rest (slice rest (inc sp))))
+            (begin
+              (push params rest)
+              (break))))))
     (freeze params))
 
   (defn parse-message [line]
@@ -198,9 +202,10 @@
     "Format a tags struct to key1=val1;key2 string (without leading @)."
     (def parts @[])
     (each [k v] in (pairs tags)
-      (push parts (if (= v true)
-                    (string k)
-                    (string k "=" (escape-tag-value (string v))))))
+      (push parts
+            (if (= v true)
+              (string k)
+              (string k "=" (escape-tag-value (string v))))))
     (string/join (freeze parts) ";"))
 
   (defn format-source [source]
@@ -209,16 +214,16 @@
       source:server
       (if (and source:user source:host)
         (string source:nick "!" source:user "@" source:host)
-        (if source:user
-          (string source:nick "!" source:user)
-          source:nick))))
+        (if source:user (string source:nick "!" source:user) source:nick))))
 
   (defn format-message [msg]
     "Format a parsed message struct back to an IRC protocol line.
      Inverse of parse-message (modulo command case and optional : on trailing)."
     (def @parts @[])
-    (when msg:tags   (push parts (string "@" (format-tags msg:tags))))
-    (when msg:source (push parts (string ":" (format-source msg:source))))
+    (when msg:tags
+      (push parts (string "@" (format-tags msg:tags))))
+    (when msg:source
+      (push parts (string ":" (format-source msg:source))))
     (push parts msg:command)
     (when (> (length msg:params) 0)
       (let* [n (length msg:params)
@@ -236,8 +241,7 @@
   (defn parse-ctcp [text]
     "Parse CTCP from message text. Returns {:command :text} or nil.
      CTCP messages are delimited by SOH (0x01) characters."
-    (when (and (string/starts-with? text SOH)
-               (string/ends-with? text SOH)
+    (when (and (string/starts-with? text SOH) (string/ends-with? text SOH)
                (> (length text) 1))
       (let* [inner (slice text 1 (dec (length text)))
              sp (string/find inner " ")]
@@ -265,9 +269,8 @@
     (each token in tokens
       (let [eq (string/find token "=")]
         (when eq
-          (put result
-            (keyword (string/downcase (slice token 0 eq)))
-            (slice token (inc eq))))))
+          (put result (keyword (string/downcase (slice token 0 eq)))
+               (slice token (inc eq))))))
     (freeze result))
 
   ## ── Transport ─────────────────────────────────────────────────────
@@ -275,8 +278,7 @@
   (defn strip-crlf [s]
     "Strip trailing CRLF, LF, or CR from a line.
      CRLF is a single grapheme in Elle, so all cases strip one grapheme."
-    (if (or (string/ends-with? s "\r\n")
-            (string/ends-with? s "\n")
+    (if (or (string/ends-with? s "\r\n") (string/ends-with? s "\n")
             (string/ends-with? s "\r"))
       (slice s 0 (dec (length s)))
       s))
@@ -286,23 +288,26 @@
      Uses TLS if the tls module was provided to the constructor."
     (if tls
       (let [conn (tls:connect host port-num)]
-        {:read-line (fn [] (let [line (tls:read-line conn)]
-                             (when line (strip-crlf line))))
-         :write     (fn [data] (tls:write conn (string data "\r\n")))
-         :close     (fn [] (tls:close conn))})
+        {:read-line (fn []
+                      (let [line (tls:read-line conn)]
+                        (when line (strip-crlf line))))
+         :write (fn [data] (tls:write conn (string data "\r\n")))
+         :close (fn [] (tls:close conn))})
       (let* [ip (first (sys/resolve host))
              port (tcp/connect ip port-num)]
         {:read-line (fn [] (port/read-line port))
-         :write     (fn [data] (port/write port (string data "\r\n"))
-                               (port/flush port))
-         :close     (fn [] (port/close port))})))
+         :write (fn [data]
+                  (port/write port (string data "\r\n"))
+                  (port/flush port))
+         :close (fn [] (port/close port))})))
 
   ## ── Registration ──────────────────────────────────────────────────
 
   (defn register [transport nick username realname &named sasl]
     "Perform IRC connection registration with IRCv3 CAP negotiation.
      sasl: [authcid password] or nil. Returns registration result struct."
-    (defn send [line] ((get transport :write) line))
+    (defn send [line]
+      ((get transport :write) line))
     (defn recv []
       (let [line ((get transport :read-line))]
         (when line (parse-message line))))
@@ -320,8 +325,7 @@
     (def @sasl-in-progress false)
 
     (defn handle-cap-ls [msg]
-      (let* [has-more (and (>= (length msg:params) 4)
-                            (= (get msg:params 2) "*"))
+      (let* [has-more (and (>= (length msg:params) 4) (= (get msg:params 2) "*"))
              cap-str (if has-more (get msg:params 3) (get msg:params 2))]
         (each cap in (string/split cap-str " ")
           (when (> (length cap) 0)
@@ -334,37 +338,41 @@
             (each cap in desired
               (when (contains? offered cap) (push to-req cap)))
             (if (> (length to-req) 0)
-              (send (build-line "CAP"
-                      ["REQ" (string/join (freeze to-req) " ")]))
+              (send (build-line "CAP" ["REQ" (string/join (freeze to-req) " ")]))
               (send (build-line "CAP" ["END"])))))))
 
     (defn handle-cap-ack [msg]
-      (let [acked (string/split
-                     (get msg:params (dec (length msg:params))) " ")]
-        (assign negotiated-caps
+      (let [acked (string/split (get msg:params (dec (length msg:params))) " ")]
+        (assign
+          negotiated-caps
           (apply set (filter (fn [s] (> (length s) 0)) acked))))
       (if (and sasl (contains? negotiated-caps "sasl"))
-        (begin (send "AUTHENTICATE PLAIN")
-               (assign sasl-in-progress true))
+        (begin
+          (send "AUTHENTICATE PLAIN")
+          (assign sasl-in-progress true))
         (send (build-line "CAP" ["END"]))))
 
     (defn handle-cap [msg]
       (when (>= (length msg:params) 3)
         (match (get msg:params 1)
-          "LS"  (handle-cap-ls msg)
+          "LS" (handle-cap-ls msg)
           "ACK" (handle-cap-ack msg)
-          "NAK" (send (build-line "CAP" ["END"]))
+          "NAK"
+            (send (build-line "CAP" ["END"]))
           _ nil)))
 
     (defn handle-auth [msg]
       (when (and sasl-in-progress (= (get msg:params 0) "+"))
         (let [[authcid password] sasl]
           (send (build-line "AUTHENTICATE"
-                  [(sasl-plain-payload authcid password)])))))
+                            [(sasl-plain-payload authcid password)])))))
 
     (defn handle-nick-collision []
       (when (zero? nick-retries)
-        (error {:error :irc-error :reason :nick-collision :nick current-nick :message "nick collision: retries exhausted"}))
+        (error {:error :irc-error
+                :reason :nick-collision
+                :nick current-nick
+                :message "nick collision: retries exhausted"}))
       (assign current-nick (string current-nick "_"))
       (assign nick-retries (dec nick-retries))
       (send (build-line "NICK" [current-nick])))
@@ -378,23 +386,32 @@
     (forever
       (let [msg (recv)]
         (when (nil? msg)
-          (error {:error :irc-error :reason :connection-closed :phase :registration :message "connection closed during registration"}))
+          (error {:error :irc-error
+                  :reason :connection-closed
+                  :phase :registration
+                  :message "connection closed during registration"}))
         (match msg:command
-          "CAP"          (handle-cap msg)
+          "CAP" (handle-cap msg)
           "AUTHENTICATE" (handle-auth msg)
-          "903" (begin (assign sasl-in-progress false) (send (build-line "CAP" ["END"])))
-          "904"          (error {:error :irc-error :reason :sasl-failed
-                                  :message "SASL authentication failed"})
-          "433"          (handle-nick-collision)
-          "004"          (when (>= (length msg:params) 2)
-                            (assign server-name (get msg:params 1)))
-          "005"          (handle-isupport msg)
-          "PING"         (send (build-line "PONG"
-                                  [(or (get msg:params 0) "")]))
-          "001"          (break {:nick current-nick
-                                  :caps negotiated-caps
-                                  :server (or server-name "unknown")
-                                  :isupport (freeze isupport-map)})
+          "903"
+            (begin
+              (assign sasl-in-progress false)
+              (send (build-line "CAP" ["END"])))
+          "904" (error {:error :irc-error
+                        :reason :sasl-failed
+                        :message "SASL authentication failed"})
+          "433" (handle-nick-collision)
+          "004"
+            (when (>= (length msg:params) 2)
+              (assign server-name (get msg:params 1)))
+          "005" (handle-isupport msg)
+          "PING"
+            (send (build-line "PONG" [(or (get msg:params 0) "")]))
+          "001"
+            (break {:nick current-nick
+                    :caps negotiated-caps
+                    :server (or server-name "unknown")
+                    :isupport (freeze isupport-map)})
           _ nil))))
 
   ## ── Connect ───────────────────────────────────────────────────────
@@ -411,42 +428,42 @@
      :realname real name (default: nick)
      :sasl     [authcid password] for SASL PLAIN auth"
     (when (nil? nick)
-      (error {:error :irc-error :reason :missing-param :param :nick :message "irc:connect requires :nick"}))
+      (error {:error :irc-error
+              :reason :missing-param
+              :param :nick
+              :message "irc:connect requires :nick"}))
     (default username nick)
     (default realname nick)
 
     (let [transport (make-transport host port)]
-      (let [[ok? result] (protect
-                            (register transport nick username realname
-                                      :sasl sasl))]
+      (let [[ok? result] (protect (register transport nick username realname
+                                  :sasl sasl))]
         (unless ok?
           (protect ((get transport :close)))
           (error result))
 
         (let* [write-fn (get transport :write)
-               read-fn  (get transport :read-line)
+               read-fn (get transport :read-line)
                close-fn (get transport :close)
-               messages
-                (coro/new (fn []
-                  (forever
-                    (let [line (read-fn)]
-                      (when (nil? line) (break))
-                      (let [msg (parse-message line)]
-                        (if (= msg:command "PING")
-                          (write-fn (build-line "PONG"
-                                      [(or (get msg:params 0) "")]))
-                          (yield msg)))))))]
-
+               messages (coro/new (fn []
+                                    (forever
+                                      (let [line (read-fn)]
+                                        (when (nil? line) (break))
+                                        (let [msg (parse-message line)]
+                                          (if (= msg:command "PING")
+                                            (write-fn (build-line "PONG"
+                                            [(or (get msg:params 0) "")]))
+                                            (yield msg)))))))]
           {:messages messages
-           :send     (fn [command & params]
-                       (write-fn (build-line command [;params])))
-           :close    (fn [& args]
-                       (let [message (or (get args 0) "Leaving")]
-                         (protect (write-fn (build-line "QUIT" [message])))
-                         (close-fn)))
-           :nick     result:nick
-           :caps     result:caps
-           :server   result:server
+           :send (fn [command & params]
+                   (write-fn (build-line command [;params])))
+           :close (fn [& args]
+                    (let [message (or (get args 0) "Leaving")]
+                      (protect (write-fn (build-line "QUIT" [message])))
+                      (close-fn)))
+           :nick result:nick
+           :caps result:caps
+           :server result:server
            :isupport result:isupport}))))
 
   ## ── Internal tests ────────────────────────────────────────────────
@@ -456,28 +473,20 @@
 
     ## ── Tag escaping ──
 
-    (assert (= (escape-tag-value "hello world") "hello\\sworld")
-      "escape: space")
-    (assert (= (escape-tag-value "a;b") "a\\:b")
-      "escape: semicolon")
-    (assert (= (escape-tag-value "a\\b") "a\\\\b")
-      "escape: backslash")
-    (assert (= (escape-tag-value "plain") "plain")
-      "escape: no special chars")
+    (assert (= (escape-tag-value "hello world") "hello\\sworld") "escape: space")
+    (assert (= (escape-tag-value "a;b") "a\\:b") "escape: semicolon")
+    (assert (= (escape-tag-value "a\\b") "a\\\\b") "escape: backslash")
+    (assert (= (escape-tag-value "plain") "plain") "escape: no special chars")
 
     (assert (= (unescape-tag-value "hello\\sworld") "hello world")
-      "unescape: space")
-    (assert (= (unescape-tag-value "a\\:b") "a;b")
-      "unescape: semicolon")
-    (assert (= (unescape-tag-value "a\\\\b") "a\\b")
-      "unescape: backslash")
-    (assert (= (unescape-tag-value "plain") "plain")
-      "unescape: no escapes")
+            "unescape: space")
+    (assert (= (unescape-tag-value "a\\:b") "a;b") "unescape: semicolon")
+    (assert (= (unescape-tag-value "a\\\\b") "a\\b") "unescape: backslash")
+    (assert (= (unescape-tag-value "plain") "plain") "unescape: no escapes")
 
     # Roundtrip
     (assert (= (unescape-tag-value (escape-tag-value "a;b c\\d\r\n"))
-               "a;b c\\d\r\n")
-      "tag escape roundtrip")
+               "a;b c\\d\r\n") "tag escape roundtrip")
 
     ## ── Tag parsing ──
 
@@ -548,17 +557,13 @@
 
     ## ── Message formatting ──
 
-    (assert (= (build-line "JOIN" ["#test"]) "JOIN #test")
-      "format JOIN")
+    (assert (= (build-line "JOIN" ["#test"]) "JOIN #test") "format JOIN")
     (assert (= (build-line "PRIVMSG" ["#ch" "Hello world"])
-               "PRIVMSG #ch :Hello world")
-      "format PRIVMSG with trailing")
-    (assert (= (build-line "NICK" ["bot"]) "NICK bot")
-      "format NICK")
+               "PRIVMSG #ch :Hello world") "format PRIVMSG with trailing")
+    (assert (= (build-line "NICK" ["bot"]) "NICK bot") "format NICK")
     (assert (= (build-line "QUIT" ["Bye bye"]) "QUIT :Bye bye")
-      "format QUIT with spaces")
-    (assert (= (build-line "PING" ["token"]) "PING token")
-      "format PING")
+            "format QUIT with spaces")
+    (assert (= (build-line "PING" ["token"]) "PING token") "format PING")
 
     # Format/parse structural roundtrip
     (let* [original ":nick!user@host PRIVMSG #channel :Hello world"
@@ -566,8 +571,10 @@
            formatted (format-message parsed)
            reparsed (parse-message formatted)]
       (assert (= reparsed:command parsed:command) "roundtrip: command")
-      (assert (= (get reparsed:params 0) (get parsed:params 0)) "roundtrip: target")
-      (assert (= (get reparsed:params 1) (get parsed:params 1)) "roundtrip: text")
+      (assert (= (get reparsed:params 0) (get parsed:params 0))
+              "roundtrip: target")
+      (assert (= (get reparsed:params 1) (get parsed:params 1))
+              "roundtrip: text")
       (assert (= reparsed:source:nick parsed:source:nick) "roundtrip: nick"))
 
     ## ── CTCP ──
@@ -600,7 +607,8 @@
 
     ## ── ISUPPORT ──
 
-    (let [params (parse-isupport ["CHANTYPES=#&" "PREFIX=(ov)@+" "NETWORK=Libera"])]
+    (let [params (parse-isupport ["CHANTYPES=#&" "PREFIX=(ov)@+"
+                                  "NETWORK=Libera"])]
       (assert (= params:chantypes "#&") "isupport: CHANTYPES")
       (assert (= params:prefix "(ov)@+") "isupport: PREFIX")
       (assert (= params:network "Libera") "isupport: NETWORK"))
@@ -621,10 +629,10 @@
 
   ## ── Exports ───────────────────────────────────────────────────────
 
-  {:connect        irc/connect
-   :parse-message  parse-message
+  {:connect irc/connect
+   :parse-message parse-message
    :format-message format-message
-   :parse-tags     parse-tags
-   :parse-source   parse-source
-   :parse-ctcp     parse-ctcp
-   :test           run-internal-tests})
+   :parse-tags parse-tags
+   :parse-source parse-source
+   :parse-ctcp parse-ctcp
+   :test run-internal-tests})

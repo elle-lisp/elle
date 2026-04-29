@@ -8,7 +8,9 @@
 # ── Basic emit with keywords ─────────────────────────────────────────
 
 # (emit :yield val) behaves like old (yield val)
-(let [f (fiber/new (fn [] (let [r (emit :yield 42)] (+ r 10))) |:yield|)]
+(let [f (fiber/new (fn []
+                     (let [r (emit :yield 42)]
+                       (+ r 10))) |:yield|)]
   (assert (= (fiber/resume f) 42) "emit :yield produces yield value")
   (assert (= (fiber/status f) :paused) "emit :yield pauses fiber")
   (assert (= (fiber/resume f 5) 15) "emit :yield resumes: 5 + 10 = 15"))
@@ -29,20 +31,24 @@
   (let [result (fiber/resume f)]
     (assert (= result :data) "emit set: value received")
     (let [bits (fiber/bits f)]
-      # bits should contain both :yield (2) and :io (512)
       (assert (not (= bits 0)) "emit set: non-zero signal bits")
       (assert (= (bit/and bits 2) 2) "emit set: :yield bit present")
       (assert (= (bit/and bits 512) 512) "emit set: :io bit present"))))
 
 # ── yield still works (it's still a special form for now) ────────────
 
-(let [f (fiber/new (fn [] (yield 10) (yield 20) 30) |:yield|)]
+(let [f (fiber/new (fn []
+                     (yield 10)
+                     (yield 20)
+                     30) |:yield|)]
   (assert (= (fiber/resume f) 10) "yield works: first")
   (assert (= (fiber/resume f) 20) "yield works: second")
   (assert (= (fiber/resume f) 30) "yield works: final"))
 
 # (yield) with no args yields nil
-(let [f (fiber/new (fn [] (yield) 42) |:yield|)]
+(let [f (fiber/new (fn []
+                     (yield)
+                     42) |:yield|)]
   (assert (= (fiber/resume f) nil) "yield no-arg yields nil")
   (assert (= (fiber/resume f) 42) "yield no-arg: final value"))
 
@@ -54,18 +60,18 @@
 
 # ── Resume value flows back through emit ─────────────────────────────
 
-(let [f (fiber/new (fn [] (let [x (emit :yield 1)] (+ x 10))) |:yield|)]
+(let [f (fiber/new (fn []
+                     (let [x (emit :yield 1)]
+                       (+ x 10))) |:yield|)]
   (assert (= (fiber/resume f) 1) "first emit value")
   (assert (= (fiber/resume f 5) 15) "resume value 5 + 10 = 15"))
 
 # ── Multiple emits in sequence ───────────────────────────────────────
 
-(let [f (fiber/new
-           (fn []
-             (let [a (emit :yield :first)]
-               (let [b (emit :yield :second)]
-                 (list a b))))
-           |:yield|)]
+(let [f (fiber/new (fn []
+                     (let [a (emit :yield :first)]
+                       (let [b (emit :yield :second)]
+                         (list a b)))) |:yield|)]
   (assert (= (fiber/resume f) :first) "multi-emit: first")
   (assert (= (fiber/resume f :a) :second) "multi-emit: second")
   (assert (= (fiber/resume f :b) (list :a :b)) "multi-emit: collected"))

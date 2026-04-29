@@ -19,18 +19,19 @@
 
   ## ── Import submodules ──────────────────────────────────────────────────
 
-  (def sync      ((import "std/sync")))
-  (def huffman   ((import "std/http2/huffman")))
-  (def hpack     ((import "std/http2/hpack") :huffman huffman))
-  (def frame     ((import "std/http2/frame")))
-  (def stream    ((import "std/http2/stream") :sync sync :frame frame))
+  (def sync ((import "std/sync")))
+  (def huffman ((import "std/http2/huffman")))
+  (def hpack ((import "std/http2/hpack") :huffman huffman))
+  (def frame ((import "std/http2/frame")))
+  (def stream ((import "std/http2/stream") :sync sync :frame frame))
   (def transport ((import "std/http2/transport") :tls tls))
-  (def session   ((import "std/http2/session") :sync sync :frame frame
-                                               :stream stream :hpack hpack))
-  (def server    ((import "std/http2/server") :sync sync :hpack hpack
-                                              :frame frame :stream stream
-                                              :session session :tls tls
-                                              :transport transport))
+  (def session
+    ((import "std/http2/session") :sync sync :frame frame :stream stream
+                                  :hpack hpack))
+  (def server
+    ((import "std/http2/server") :sync sync :hpack hpack :frame frame
+                                 :stream stream :session session :tls tls
+                                 :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 
@@ -41,9 +42,11 @@
   (defn parse-url [url]
     "Parse an HTTP/2 URL. Supports http:// and https://."
     (let* [is-https (string/starts-with? url "https://")
-           is-http  (string/starts-with? url "http://")
+           is-http (string/starts-with? url "http://")
            _ (when (not (or is-https is-http))
-               (error {:error :h2-error :reason :unsupported-scheme :url url
+               (error {:error :h2-error
+                       :reason :unsupported-scheme
+                       :url url
                        :message "URL must start with http:// or https://"}))
            prefix-len (if is-https 8 7)
            scheme (if is-https "https" "http")
@@ -54,9 +57,14 @@
            path+query (if (nil? slash) "/" (slice tail slash))
            colon (string/find auth ":")
            host (if (nil? colon) auth (slice auth 0 colon))
-           port (if (nil? colon) default-port (parse-int (slice auth (inc colon))))]
+           port (if (nil? colon)
+                  default-port
+                  (parse-int (slice auth (inc colon))))]
       (when (empty? host)
-        (error {:error :h2-error :reason :empty-host :url url :message "empty host"}))
+        (error {:error :h2-error
+                :reason :empty-host
+                :url url
+                :message "empty host"}))
       (let* [q-pos (string/find path+query "?")
              path (if (nil? q-pos) path+query (slice path+query 0 q-pos))
              query (if (nil? q-pos) nil (slice path+query (inc q-pos)))]
@@ -74,12 +82,14 @@
       (if (= url-parsed:scheme "https")
         (begin
           (when (nil? tls)
-            (error {:error :h2-error :reason :tls-not-configured
+            (error {:error :h2-error
+                    :reason :tls-not-configured
                     :message "https requires :tls plugin passed to (import \"std/http2\")"}))
           (let [conn (tls:connect url-parsed:host url-parsed:port
                                   {:alpn ["h2" "http/1.1"]})]
             {:transport (transport:tls conn) :tls-conn conn}))
-        {:transport (transport:tcp (tcp/connect ip url-parsed:port)) :tls-conn nil})))
+        {:transport (transport:tcp (tcp/connect ip url-parsed:port))
+         :tls-conn nil})))
 
   ## ── Client: handshake ──────────────────────────────────────────────────
 
@@ -94,9 +104,10 @@
           (frame:write-frame sess:transport ftype flags sid payload))))
     (sess:transport:flush)
     (let [f (frame:read-frame sess:transport
-              (get sess:local-settings :max-frame-size))]
+                              (get sess:local-settings :max-frame-size))]
       (when (or (nil? f) (not (= f:type C:type-settings)))
-        (error {:error :h2-error :reason :protocol-error
+        (error {:error :h2-error
+                :reason :protocol-error
                 :message "expected SETTINGS as first server frame"}))
       (session:apply-remote-settings sess f:payload)
       (let [[ftype flags sid payload] (frame:make-settings-ack)]
@@ -107,29 +118,31 @@
 
   (defn h2-connect [url &named transport host]
     "Open an HTTP/2 session."
-    (let [sess
-          (if transport
-            (session:make-session transport (or host "localhost") false)
-            (let* [parsed (parse-url url)
-                   {:transport t :tls-conn tc} (open-transport parsed)]
-              (session:make-session t parsed:host false :scheme parsed:scheme)))]
+    (let [sess (if transport
+                 (session:make-session transport (or host "localhost") false)
+                 (let* [parsed (parse-url url)
+                        {:transport t :tls-conn tc} (open-transport parsed)]
+                   (session:make-session t parsed:host false
+                   :scheme parsed:scheme)))]
       (client-handshake sess)
-      (put sess :writer-fiber
-           (ev/spawn (fn [] (session:writer-loop sess))))
-      (put sess :reader-fiber
-           (ev/spawn (fn [] (session:read-loop sess
-                              :on-headers (fn [sess s sid hdrs end?]
-                                (put s :headers hdrs)
-                                (when end? (stream:transition s :recv-end-stream))
-                                (s:data-queue:put {:type :headers
-                                                    :headers hdrs
-                                                    :end-stream end?})
-                                (when end? (del sess:streams sid)))
-                              :on-goaway (fn [sess payload]
-                                (put sess :goaway-recvd? true)
-                                (put sess :last-stream-id
-                                     (bit/and (frame:read-u32 payload 0) 0x7fffffff))
-                                nil)))))
+      (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))
+      (put sess
+           :reader-fiber (ev/spawn (fn []
+                                     (session:read-loop sess
+                                     :on-headers (fn [sess s sid hdrs end?]
+                                       (put s :headers hdrs)
+                                       (when end?
+                                         (stream:transition s :recv-end-stream))
+                                       (s:data-queue:put {:type :headers
+                                       :headers hdrs
+                                       :end-stream end?})
+                                       (when end? (del sess:streams sid)))
+                                     :on-goaway (fn [sess payload]
+                                       (put sess :goaway-recvd? true)
+                                       (put sess
+                                       :last-stream-id (bit/and (frame:read-u32 payload
+                                       0) 0x7fffffff))
+                                       nil)))))
       sess))
 
   ## ── Client: send request ───────────────────────────────────────────────
@@ -137,20 +150,20 @@
   (defn send-request-frames [sess method path &named body headers]
     "Send HEADERS + DATA frames for a request. Returns [stream-id stream]."
     (when sess:closed?
-      (error {:error :h2-error :reason :connection-closed
+      (error {:error :h2-error
+              :reason :connection-closed
               :message "session is closed"}))
     (when sess:goaway-recvd?
-      (error {:error :h2-error :reason :goaway-received
+      (error {:error :h2-error
+              :reason :goaway-received
               :last-stream-id sess:last-stream-id
               :message "peer sent GOAWAY, refusing new streams"}))
     (let* [sid sess:next-stream-id
            _ (put sess :next-stream-id (+ sid 2))
            s (session:get-stream sess sid)
            authority sess:host
-           pseudo [[":method" method]
-                   [":path" path]
-                   [":scheme" (or sess:scheme "http")]
-                   [":authority" authority]]
+           pseudo [[":method" method] [":path" path]
+                   [":scheme" (or sess:scheme "http")] [":authority" authority]]
            all-headers (if (nil? headers) pseudo (concat pseudo headers))
            has-body (and body (> (length body) 0))]
       (session:encode-and-send-headers sess sid all-headers (not has-body))
@@ -163,7 +176,8 @@
 
   (defn h2-send [sess method path &named body headers]
     "Send an HTTP/2 request. Returns response struct."
-    (let* [[sid s] (send-request-frames sess method path :body body :headers headers)
+    (let* [[sid s] (send-request-frames sess method path :body body
+                                        :headers headers)
            @resp-headers nil
            @resp-trailers nil
            @resp-body @[]
@@ -171,19 +185,26 @@
       (while (not done)
         (let [msg (s:data-queue:take)]
           (match msg:type
-            :headers (begin
-                       (if (nil? resp-headers)
-                         (assign resp-headers msg:headers)
-                         (assign resp-trailers msg:headers))
-                       (when msg:end-stream (assign done true)))
-            :data    (begin (push resp-body msg:data)
-                            (when msg:end-stream (assign done true)))
-            :rst     (error {:error :h2-error :reason :stream-error
-                             :stream-id sid :code msg:code
-                             :message (concat "stream reset: " (string msg:code))})
-            :error   (error msg:error)
-            _        (assign done true))))
-      (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status")) resp-headers))
+            :headers
+              (begin
+                (if (nil? resp-headers)
+                  (assign resp-headers msg:headers)
+                  (assign resp-trailers msg:headers))
+                (when msg:end-stream (assign done true)))
+            :data
+              (begin
+                (push resp-body msg:data)
+                (when msg:end-stream (assign done true)))
+            :rst
+              (error {:error :h2-error
+                      :reason :stream-error
+                      :stream-id sid
+                      :code msg:code
+                      :message (concat "stream reset: " (string msg:code))})
+            :error (error msg:error)
+            _ (assign done true))))
+      (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status"))
+                                        resp-headers))
              status (if status-pair (parse-int (get status-pair 1)) 0)
              hdrs @{}
              trailers @{}]
@@ -195,16 +216,15 @@
         (when resp-trailers
           (each h in resp-trailers
             (put trailers (keyword (get h 0)) (get h 1))))
-        {:status   status
-         :headers  (freeze hdrs)
+        {:status status
+         :headers (freeze hdrs)
          :trailers (freeze trailers)
-         :body     (if (empty? resp-body)
-                     (bytes)
-                     (apply concat (freeze resp-body)))})))
+         :body (if (empty? resp-body) (bytes) (apply concat (freeze resp-body)))})))
 
   (defn h2-send-raw [sess method path &named body headers]
     "Send request, return stream for caller to collect response."
-    (let [[sid s] (send-request-frames sess method path :body body :headers headers)]
+    (let [[sid s] (send-request-frames sess method path :body body
+                                       :headers headers)]
       s))
 
   ## ── Client: one-shot API ───────────────────────────────────────────────
@@ -212,7 +232,8 @@
   (defn h2-request [method url &named body headers]
     "Send a one-shot HTTP/2 request. Opens and closes a session."
     (let [sess (h2-connect url)]
-      (defer (h2-close sess)
+      (defer
+        (h2-close sess)
         (let* [parsed (parse-url url)
                path (if (nil? parsed:query)
                       parsed:path
@@ -233,17 +254,14 @@
       (put sess :closed? true)
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
-      (when sess:writer-fiber
-        (ev/join-protected sess:writer-fiber))
+      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
       (protect (sess:transport:close))
-      (when sess:reader-fiber
-        (ev/join-protected sess:reader-fiber)))
+      (when sess:reader-fiber (ev/join-protected sess:reader-fiber)))
     nil)
 
   ## ── Tests ──────────────────────────────────────────────────────────────
 
-  (defn run-tests []
-    # ── URL parsing ──
+  (defn run-tests []  # ── URL parsing ──
     (let [p (parse-url "https://example.com:8443/path?q=1")]
       (assert (= p:scheme "https") "url: scheme")
       (assert (= p:host "example.com") "url: host")
@@ -259,42 +277,48 @@
     (let* [listener (tcp/listen "127.0.0.1" 0)
            listen-path (port/path listener)
            listen-port (parse-int (slice listen-path
-                                        (+ 1 (string/find listen-path ":"))))
-           server-fiber (ev/spawn
-             (fn []
-               (let* [tcp (tcp/accept listener)
-                      t (transport:tcp tcp)]
-                 (frame:read-exact t 24)
-                 (frame:read-frame t 16384)
-                 (let [[ft fl si pl] (frame:make-settings-frame session:default-settings)]
-                   (frame:write-frame t ft fl si pl))
-                 (let [[ft fl si pl] (frame:make-settings-ack)]
-                   (frame:write-frame t ft fl si pl))
-                 (t:flush)
-                 (forever
-                   (let [[ok? f] (protect (frame:read-frame t 16384))]
-                     (when (or (not ok?) (nil? f)) (break nil))
-                     (cond
-                       (= f:type C:type-settings) nil
-                       (= f:type C:type-window-update) nil
-                       (= f:type C:type-goaway) (break nil)
-                       (= f:type C:type-headers)
-                        (let* [dec (hpack:make-decoder)
-                               hdrs (hpack:decode dec f:payload)
-                               path-h (first (filter (fn [h] (= (get h 0) ":path")) hdrs))
-                               path (if path-h (get path-h 1) "/")
-                               enc (hpack:make-encoder :use-huffman false)
-                               resp-hdr (hpack:encode enc [[":status" "200"]])
-                               [ft fl si pl] (frame:make-headers-frame
-                                               f:stream-id resp-hdr false true)]
-                          (frame:write-frame t ft fl si pl)
-                          (let [[ft fl si pl]
-                                (frame:make-data-frame f:stream-id
-                                  (bytes (concat "hello " path)) true)]
-                            (frame:write-frame t ft fl si pl))
-                          (t:flush))
-                       true nil)))
-                 (protect (t:close)))))]
+                                  (+ 1 (string/find listen-path ":"))))
+           server-fiber (ev/spawn (fn []
+                                    (let* [tcp (tcp/accept listener)
+                                      t (transport:tcp tcp)]
+                                      (frame:read-exact t 24)
+                                      (frame:read-frame t 16384)
+                                      (let [[ft fl si pl] (frame:make-settings-frame session:default-settings)]
+                                        (frame:write-frame t ft fl si pl))
+                                      (let [[ft fl si pl] (frame:make-settings-ack)]
+                                        (frame:write-frame t ft fl si pl))
+                                      (t:flush)
+                                      (forever
+                                        (let [[ok? f] (protect (frame:read-frame t
+                                          16384))]
+                                          (when (or (not ok?) (nil? f))
+                                            (break nil))
+                                          (cond
+                                            (= f:type C:type-settings) nil
+                                            (= f:type C:type-window-update) nil
+                                            (= f:type C:type-goaway) (break nil)
+                                            (= f:type C:type-headers)
+                                              (let* [dec (hpack:make-decoder)
+                                                hdrs (hpack:decode dec f:payload)
+                                                path-h (first (filter (fn [h]
+                                                  (= (get h 0) ":path")) hdrs))
+                                                path (if path-h
+                                                  (get path-h 1)
+                                                  "/")
+                                                enc (hpack:make-encoder :use-huffman false)
+                                                resp-hdr (hpack:encode enc
+                                                [[":status" "200"]])
+                                                [ft fl si pl] (frame:make-headers-frame f:stream-id
+                                                resp-hdr false true)]
+                                                (frame:write-frame t ft fl si pl)
+                                                (let [[ft fl si pl] (frame:make-data-frame f:stream-id
+                                                  (bytes (concat "hello " path))
+                                                  true)]
+                                                  (frame:write-frame t ft fl si
+                                                  pl))
+                                                (t:flush))
+                                            true nil)))
+                                      (protect (t:close)))))]
       (let* [url (concat "http://127.0.0.1:" (string listen-port))
              sess (h2-connect url)]
         (let [resp (h2-send sess "GET" "/test")]
@@ -308,13 +332,13 @@
 
   ## ── Exports ────────────────────────────────────────────────────────────
 
-  {:get      h2-get
-   :post     h2-post
-   :request  h2-request
-   :connect  h2-connect
-   :send     h2-send
+  {:get h2-get
+   :post h2-post
+   :request h2-request
+   :connect h2-connect
+   :send h2-send
    :send-raw h2-send-raw
-   :close    h2-close
-   :serve    server:serve
+   :close h2-close
+   :serve server:serve
    :parse-url parse-url
-   :test     run-tests})
+   :test run-tests})

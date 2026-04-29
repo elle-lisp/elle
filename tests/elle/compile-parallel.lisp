@@ -3,7 +3,8 @@
 
 # ── Safe: independent functions ──────────────────────────────────────
 
-(def src "
+(def src
+  "
 (defn fetch-a [] (+ 1 2))
 (defn fetch-b [] (+ 3 4))
 (defn fetch-c [] (+ 5 6))
@@ -18,7 +19,8 @@
 
 # ── Unsafe: shared mutable capture ───────────────────────────────────
 
-(def src2 "
+(def src2
+  "
 (var state 0)
 (defn update-counter [] (assign state (+ state 1)))
 (defn update-state [] (assign state (* state 2)))

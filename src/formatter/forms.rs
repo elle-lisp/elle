@@ -13,7 +13,6 @@
 use super::config::FormatterConfig;
 use super::doc::Doc;
 use super::format::{format_annotated, format_trailing_trivia, format_without_trailing};
-use super::render::measure_flat;
 use super::trivia::AnnotatedSyntax;
 use crate::syntax::SyntaxKind;
 
@@ -21,7 +20,10 @@ use crate::syntax::SyntaxKind;
 
 /// Check if a node is a string literal (for docstring detection).
 fn is_string_literal(node: &AnnotatedSyntax) -> bool {
-    matches!(node.syntax.kind, SyntaxKind::String(_))
+    matches!(
+        node.syntax.kind,
+        SyntaxKind::String(_) | SyntaxKind::StringMut(_)
+    )
 }
 
 /// Check if a node is a collection type (List, Array, etc.).
@@ -61,7 +63,8 @@ fn is_trivial_depth(node: &AnnotatedSyntax, budget: usize) -> bool {
         | SyntaxKind::Float(_)
         | SyntaxKind::Symbol(_)
         | SyntaxKind::Keyword(_)
-        | SyntaxKind::String(_) => true,
+        | SyntaxKind::String(_)
+        | SyntaxKind::StringMut(_) => true,
 
         // A list costs 1 depth level
         SyntaxKind::List(_) => node
@@ -282,6 +285,13 @@ pub(super) fn format_let(
     config: &FormatterConfig,
 ) -> Doc {
     if children.len() < 3 {
+        return format_generic_call(children, source, config);
+    }
+
+    // Only apply let-specific formatting when the bindings position is
+    // actually a bracket form.  Inside quasiquotes the "bindings" slot
+    // can be an unquote (`,more`) which must not be wrapped in brackets.
+    if !matches!(children[1].syntax.kind, SyntaxKind::Array(_)) {
         return format_generic_call(children, source, config);
     }
 
@@ -801,13 +811,19 @@ fn format_flat_pairs(
         let test = format_annotated(&children[i], source, config);
         i += 1;
         if i < children.len() {
-            let result = format_annotated(&children[i], source, config);
             if is_trivial(&children[i]) {
+                let result = format_annotated(&children[i], source, config);
                 pair_docs.push(Doc::concat([test, Doc::text(" "), result]));
             } else {
+                // Format body without trailing trivia inside the nest,
+                // then append trailing trivia outside so comment breaks
+                // don't inherit the nest indent.
+                let body = format_without_trailing(&children[i], source, config);
+                let trivia = format_trailing_trivia(&children[i]);
                 pair_docs.push(Doc::concat([
                     test,
-                    Doc::concat([Doc::HardBreak, result]).nest(1),
+                    Doc::concat([Doc::HardBreak, body]).nest(1),
+                    trivia,
                 ]));
             }
             i += 1;
@@ -929,36 +945,15 @@ pub(super) fn format_generic_call(
     // positional args stand alone.
     let arg_units = build_arg_units(&children[1..], source, config);
 
-    // First arg column relative to the "(": 1 + head_width + 1
-    let head_width = measure_flat(&head).unwrap_or(0);
-    let first_arg_col = 1 + head_width + 1;
-
-    // Columnar alignment if head is short enough, otherwise fall back to +2 indent
-    if first_arg_col <= config.line_length / 4 {
-        // Columnar: Align captures the first arg's column; Break inside
-        // aligns subsequent args to that column.
-        Doc::concat([
-            Doc::text("("),
-            head,
-            Doc::text(" "),
-            Doc::align(Doc::intersperse(arg_units)).group(),
-            Doc::text(")"),
-        ])
-    } else {
-        // Fallback: +2 indent for long heads
-        let mut all_parts: Vec<Doc> = Vec::new();
-        all_parts.push(Doc::concat([head, Doc::text(" "), arg_units[0].clone()]));
-        for arg in &arg_units[1..] {
-            all_parts.push(Doc::Break);
-            all_parts.push(arg.clone());
-        }
-
-        Doc::concat([
-            Doc::text("("),
-            Doc::concat(all_parts).nest(1).group(),
-            Doc::text(")"),
-        ])
-    }
+    // Columnar fill: args align to the first arg's column and
+    // fill-wrap greedily (each element independently wraps).
+    Doc::concat([
+        Doc::text("("),
+        head,
+        Doc::text(" "),
+        Doc::align(Doc::fill(arg_units)),
+        Doc::text(")"),
+    ])
 }
 
 /// Build argument units for generic calls, grouping `:keyword value` pairs.

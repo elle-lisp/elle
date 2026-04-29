@@ -32,7 +32,8 @@
 (assert (= (+ (+ 1 2) 3) (+ 1 (+ 2 3))) "add_associative: positive integers")
 (assert (= (+ (+ -10 5) -3) (+ -10 (+ 5 -3))) "add_associative: mixed signs")
 (assert (= (+ (+ 0 0) 0) (+ 0 (+ 0 0))) "add_associative: all zeros")
-(assert (= (+ (+ 100 -100) 50) (+ 100 (+ -100 50))) "add_associative: cancellation")
+(assert (= (+ (+ 100 -100) 50) (+ 100 (+ -100 50)))
+        "add_associative: cancellation")
 
 # ============================================================================
 # mul_associative: (* (* a b) c) == (* a (* b c))
@@ -40,7 +41,8 @@
 
 (assert (= (* (* 2 3) 4) (* 2 (* 3 4))) "mul_associative: positive integers")
 (assert (= (* (* -1 5) -3) (* -1 (* 5 -3))) "mul_associative: mixed signs")
-(assert (= (* (* 0 7) 9) (* 0 (* 7 9))) "mul_associative: zero in first position")
+(assert (= (* (* 0 7) 9) (* 0 (* 7 9)))
+        "mul_associative: zero in first position")
 (assert (= (* (* 10 -10) 5) (* 10 (* -10 5))) "mul_associative: cancellation")
 
 # ============================================================================
@@ -85,9 +87,11 @@
 # ============================================================================
 
 (assert (= (* 2 (+ 3 4)) (+ (* 2 3) (* 2 4))) "distributive: positive integers")
-(assert (= (* -1 (+ 5 -3)) (+ (* -1 5) (* -1 -3))) "distributive: negative multiplier")
+(assert (= (* -1 (+ 5 -3)) (+ (* -1 5) (* -1 -3)))
+        "distributive: negative multiplier")
 (assert (= (* 0 (+ 7 9)) (+ (* 0 7) (* 0 9))) "distributive: zero multiplier")
-(assert (= (* 10 (+ -5 3)) (+ (* 10 -5) (* 10 3))) "distributive: mixed signs in sum")
+(assert (= (* 10 (+ -5 3)) (+ (* 10 -5) (* 10 3)))
+        "distributive: mixed signs in sum")
 
 # ============================================================================
 # div_inverse_of_mul: (/ (* a b) b) == a (b != 0)
@@ -102,9 +106,12 @@
 # div_by_zero_is_error: division by zero signals an error
 # ============================================================================
 
-(let [[ok? _] (protect ((fn [] (/ 0 0))))] (assert (not ok?) "div_by_zero_is_error: zero divided by zero"))
-(let [[ok? _] (protect ((fn [] (/ 42 0))))] (assert (not ok?) "div_by_zero_is_error: positive divided by zero"))
-(let [[ok? _] (protect ((fn [] (/ -1 0))))] (assert (not ok?) "div_by_zero_is_error: negative divided by zero"))
+(let [[ok? _] (protect ((fn [] (/ 0 0))))]
+  (assert (not ok?) "div_by_zero_is_error: zero divided by zero"))
+(let [[ok? _] (protect ((fn [] (/ 42 0))))]
+  (assert (not ok?) "div_by_zero_is_error: positive divided by zero"))
+(let [[ok? _] (protect ((fn [] (/ -1 0))))]
+  (assert (not ok?) "div_by_zero_is_error: negative divided by zero"))
 
 # ============================================================================
 # eq_reflexive: (= a a) == true
@@ -126,15 +133,19 @@
 # lt_antisymmetric: for a != b, exactly one of (< a b) or (< b a) is true
 # ============================================================================
 
-(let [a 3 b 5]
+(let [a 3
+      b 5]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: 3 vs 5 - one is true")
   (assert (not (and (< a b) (< b a))) "lt_antisymmetric: 3 vs 5 - not both true"))
 
-(let [a -7 b 4]
+(let [a -7
+      b 4]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: -7 vs 4 - one is true")
-  (assert (not (and (< a b) (< b a))) "lt_antisymmetric: -7 vs 4 - not both true"))
+  (assert (not (and (< a b) (< b a)))
+          "lt_antisymmetric: -7 vs 4 - not both true"))
 
-(let [a 0 b 1]
+(let [a 0
+      b 1]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: 0 vs 1 - one is true")
   (assert (not (and (< a b) (< b a))) "lt_antisymmetric: 0 vs 1 - not both true"))
 

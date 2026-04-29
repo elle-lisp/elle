@@ -51,9 +51,7 @@
 
 # ── Gradients ────────────────────────────────────────────────────────
 
-(def grad (svg:linear-gradient "g1" {}
-            (svg:stop 0 "red")
-            (svg:stop 1 "blue")))
+(def grad (svg:linear-gradient "g1" {} (svg:stop 0 "red") (svg:stop 1 "blue")))
 (assert (= (get grad :tag) :linearGradient) "linearGradient tag")
 (assert (= (length (get grad :children)) 2) "gradient has 2 stops")
 
@@ -80,9 +78,9 @@
 
 # ── Rendering (via plugin) ───────────────────────────────────────────
 
-(def simple-doc (svg:svg 100 100
-                  (svg:rect 0 0 100 100 {:fill "white"})
-                  (svg:circle 50 50 40 {:fill "red"})))
+(def simple-doc
+  (svg:svg 100 100 (svg:rect 0 0 100 100 {:fill "white"})
+           (svg:circle 50 50 40 {:fill "red"})))
 
 (def png-bytes (svg:render simple-doc))
 (assert (> (length png-bytes) 0) "render produces bytes")

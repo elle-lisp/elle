@@ -11,7 +11,8 @@
 
 # ── 1. Polymorphic: call struct as function via parameter ────────────
 
-(defn lookup [s k] (s k))
+(defn lookup [s k]
+  (s k))
 (def data {:x 42 :y 99 :z 7})
 
 # Hot loop to trigger JIT
@@ -22,12 +23,13 @@
 
 (assert (= 42 (lookup data :x)) "1a: struct call via JIT param")
 (assert (= 99 (lookup data :y)) "1b: struct call different key")
-(assert (= 7  (lookup data :z)) "1c: struct call third key")
+(assert (= 7 (lookup data :z)) "1c: struct call third key")
 (println "1: polymorphic struct call ok")
 
 # ── 2. Polymorphic: call array as function via parameter ─────────────
 
-(defn nth [arr idx] (arr idx))
+(defn nth [arr idx]
+  (arr idx))
 (def nums @[10 20 30 40 50])
 
 (def @i 0)
@@ -42,7 +44,8 @@
 
 # ── 3. Polymorphic: call string as function via parameter ────────────
 
-(defn char-at [s idx] (s idx))
+(defn char-at [s idx]
+  (s idx))
 (def text "hello")
 
 (def @i 0)
@@ -70,8 +73,8 @@
   (assign i (+ i 1)))
 
 (assert (= 4950 (sum-to 100)) "4a: hot loop result correct")
-(assert (= 0    (sum-to 0))   "4b: edge case n=0")
-(assert (= 1    (sum-to 2))   "4c: small n")
+(assert (= 0 (sum-to 0)) "4b: edge case n=0")
+(assert (= 1 (sum-to 2)) "4c: small n")
 (println "4: pure computation ok")
 
 # ── 5. Mixed: polymorphic + computation in hot loop ──────────────────
@@ -95,8 +98,8 @@
   (assign i (+ i 1)))
 
 (assert (= 55 (sum-array test-arr 10)) "5a: sum-array full")
-(assert (= 15 (sum-array test-arr 5))  "5b: sum-array partial")
-(assert (= 0  (sum-array test-arr 0))  "5c: sum-array empty")
+(assert (= 15 (sum-array test-arr 5)) "5b: sum-array partial")
+(assert (= 0 (sum-array test-arr 0)) "5c: sum-array empty")
 (println "5: polymorphic hot loop ok")
 
 # ── 6. Verify no spurious rejections ─────────────────────────────────
@@ -109,16 +112,15 @@
 (defn name-rejected? [name]
   (def @found false)
   (each r rejections
-    (when (= (get r :name) name)
-      (assign found true)))
+    (when (= (get r :name) name) (assign found true)))
   found)
 
 # These should have been JIT-compiled, not rejected
-(assert (not (name-rejected? "lookup"))    "6a: lookup not rejected")
-(assert (not (name-rejected? "nth"))       "6b: nth not rejected")
-(assert (not (name-rejected? "char-at"))   "6c: char-at not rejected")
+(assert (not (name-rejected? "lookup")) "6a: lookup not rejected")
+(assert (not (name-rejected? "nth")) "6b: nth not rejected")
+(assert (not (name-rejected? "char-at")) "6c: char-at not rejected")
 (assert (not (name-rejected? "sum-array")) "6d: sum-array not rejected")
-(assert (not (name-rejected? "sum-to"))    "6e: sum-to not rejected")
+(assert (not (name-rejected? "sum-to")) "6e: sum-to not rejected")
 (println "6: no spurious rejections ok")
 
 (println "all jit-suspending tests passed")

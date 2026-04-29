@@ -22,7 +22,8 @@
 
 # Same with non-empty body-parts (exercises the else branch)
 (def @parts @["hello" " " "world"])
-(def result2 {:headers {} :body (if (empty? parts) nil (apply concat (freeze parts)))})
+(def result2
+  {:headers {} :body (if (empty? parts) nil (apply concat (freeze parts)))})
 (assert (= (get result2 :headers) {}) "headers preserved with non-empty parts")
 (assert (= (get result2 :body) "hello world") "body should be concatenated")
 
@@ -36,12 +37,10 @@
 
 # Inside a defn called from different contexts
 (defn build-request [body-parts]
-  {:method  :get
-   :path    "/test"
+  {:method :get
+   :path "/test"
    :headers {}
-   :body    (if (empty? body-parts)
-              nil
-              (apply concat (freeze body-parts)))})
+   :body (if (empty? body-parts) nil (apply concat (freeze body-parts)))})
 
 (def r1 (build-request @[]))
 (assert (= (get r1 :method) :get) "method from defn")
@@ -53,6 +52,6 @@
 
 # Inside ev/spawn (original failure context)
 (ev/spawn (fn []
-  (def r3 (build-request @[]))
-  (assert (= (get r3 :headers) {}) "headers in fiber")
-  (assert (= (get r3 :body) nil) "body nil in fiber")))
+            (def r3 (build-request @[]))
+            (assert (= (get r3 :headers) {}) "headers in fiber")
+            (assert (= (get r3 :body) nil) "body nil in fiber")))

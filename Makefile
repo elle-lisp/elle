@@ -1,6 +1,7 @@
 .PHONY: all elle docs docgen smoke test test-git clean help \
        smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir smoke-diff doctest \
-       elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding
+       elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
+       fmt fmt-check
 
 .DEFAULT_GOAL := all
 
@@ -14,6 +15,7 @@ else
   CARGO_PROFILE :=
 endif
 TIMEOUT ?= 30s
+LISP_FILES := $(shell find stdlib.lisp prelude.lisp lib/ tests/ demos/ -name '*.lisp' 2>/dev/null)
 
 all: elle docs  ## Build everything
 
@@ -43,6 +45,16 @@ docs/pipeline.svg: docs/pipeline.dot
 docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 	$(ELLE) demos/docgen/generate.lisp
+
+# ── Format ─────────────────────────────────────────────────────────
+
+fmt: elle  ## Format all Elle source in-place
+	@echo "=== elle fmt ==="
+	@printf '%s\n' $(LISP_FILES) | parallel -j $(JOBS) '$(ELLE) fmt {}'
+
+fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
+	@echo "=== elle fmt --check ==="
+	@printf '%s\n' $(LISP_FILES) | parallel -j $(JOBS) '$(ELLE) fmt --check {}'
 
 # ── Test ────────────────────────────────────────────────────────────
 

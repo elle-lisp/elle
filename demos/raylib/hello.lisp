@@ -8,7 +8,7 @@
 
 (def rl ((import "std/raylib")))
 
-(def width  800)
+(def width 800)
 (def height 450)
 
 (rl:init-window width height "Elle + Raylib")
@@ -21,8 +21,7 @@
 (def @dy 3.0)
 (def radius 20.0)
 
-(while (not (rl:window-should-close))
-  # Update
+(while (not (rl:window-should-close))  # Update
   (assign bx (+ bx dx))
   (assign by (+ by dy))
   (when (or (>= bx (- (float width) radius)) (<= bx radius))

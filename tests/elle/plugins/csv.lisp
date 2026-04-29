@@ -9,9 +9,9 @@
   (exit 0))
 
 ## Extract plugin functions from the returned struct
-(def parse-fn      (get plugin :parse))
+(def parse-fn (get plugin :parse))
 (def parse-rows-fn (get plugin :parse-rows))
-(def write-fn      (get plugin :write))
+(def write-fn (get plugin :write))
 (def write-rows-fn (get plugin :write-rows))
 
 ## ── csv/parse ───────────────────────────────────────────────────
@@ -77,6 +77,8 @@
 
 ## ── error cases ─────────────────────────────────────────────────
 
-(let [[ok? _] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "csv/parse wrong type"))
+(let [[ok? _] (protect ((fn () (parse-fn 42))))]
+  (assert (not ok?) "csv/parse wrong type"))
 
-(let [[ok? _] (protect ((fn () (write-fn 42))))] (assert (not ok?) "csv/write non-array"))
+(let [[ok? _] (protect ((fn () (write-fn 42))))]
+  (assert (not ok?) "csv/write non-array"))

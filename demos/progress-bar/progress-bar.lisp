@@ -14,19 +14,19 @@
 
 ## ── Colors (ARGB8888) ──────────────────────────────────────────────────
 
-(def fill-color 0xDD7EC8E3)   # light blue, slightly transparent
-(def track-color 0x55000000) # transparent black
+(def fill-color 0xDD7EC8E3)
+# light blue, slightly transparent
+(def track-color 0x55000000)
+# transparent black
 
 ## ── Connect and create full-screen overlay ──────────────────────────────
 
 (def conn (wl:connect))
 (def fd (wl:fd conn))
 
-(def surf-id (wl:layer-surface conn
-  :layer :overlay
-  :anchor [:top :bottom :left :right]
-  :height 0
-  :exclusive-zone 0))
+(def surf-id
+  (wl:layer-surface conn :layer :overlay :anchor [:top :bottom :left :right]
+                    :height 0 :exclusive-zone 0))
 
 ## ── Wait for the initial configure event ────────────────────────────────
 
@@ -51,9 +51,9 @@
 
 (def bar-height (max 1 (int (* screen-h 0.03))))
 
-(def bar-w  (int (/ screen-w 2)))
-(def bar-x  (int (/ (- screen-w bar-w) 2)))
-(def bar-y  (- screen-h (int (/ screen-h 4)) (int (/ bar-height 2))))
+(def bar-w (int (/ screen-w 2)))
+(def bar-x (int (/ (- screen-w bar-w) 2)))
+(def bar-y (- screen-h (int (/ screen-h 4)) (int (/ bar-height 2))))
 
 ## ── Create SHM buffer (full screen, mostly transparent) ────────────────
 
@@ -64,24 +64,27 @@
 (defn render-bar [pct]
   "Fill buffer: clear to transparent, draw pill-shaped bar with rounded endcaps."
   (wl:buffer-fill conn buf-id 0x00000000)
-  (def r (int (/ bar-height 2)))
-  # bar track — transparent black pill
+  (def r (int (/ bar-height 2)))  # bar track — transparent black pill
   (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r track-color)
-  (wl:buffer-fill-circle conn buf-id (+ bar-x bar-w (- r)) (+ bar-y r) r track-color)
-  (wl:buffer-fill-rect conn buf-id (+ bar-x r) bar-y (- bar-w (* 2 r)) bar-height track-color)
+  (wl:buffer-fill-circle conn buf-id (+ bar-x bar-w (- r)) (+ bar-y r) r
+                         track-color)
+  (wl:buffer-fill-rect conn buf-id (+ bar-x r) bar-y (- bar-w (* 2 r))
+                       bar-height track-color)
+
   # progress fill — light blue pill (clipped to fill width)
   (def fill-w (int (* bar-w (/ (max 0 (min 100 pct)) 100.0))))
   (when (> fill-w 0)
-    (cond
-      # fill is smaller than one diameter — just a circle
-      (<= fill-w (* 2 r))
-        (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r fill-color)
-      # fill spans past one diameter — left cap + rect + right cap
+    (cond  # fill is smaller than one diameter — just a circle
+      (<= fill-w (* 2 r)) (wl:buffer-fill-circle conn buf-id (+ bar-x r)
+      (+ bar-y r) r fill-color)  # fill spans past one diameter — left cap + rect + right cap
       true
         (begin
-          (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r fill-color)
-          (wl:buffer-fill-rect conn buf-id (+ bar-x r) bar-y (- fill-w (* 2 r)) bar-height fill-color)
-          (wl:buffer-fill-circle conn buf-id (+ bar-x fill-w (- r)) (+ bar-y r) r fill-color))))
+          (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r
+                                 fill-color)
+          (wl:buffer-fill-rect conn buf-id (+ bar-x r) bar-y (- fill-w (* 2 r))
+                               bar-height fill-color)
+          (wl:buffer-fill-circle conn buf-id (+ bar-x fill-w (- r)) (+ bar-y r)
+                                 r fill-color))))
   (wl:attach conn surf-id buf-id)
   (wl:damage conn surf-id 0 0 screen-w screen-h)
   (wl:commit conn surf-id))
@@ -99,17 +102,17 @@
 (def @done false)
 
 (ev/spawn (fn []
-  (forever
-    (def line (port/read-line (*stdin*)))
-    (when (nil? line)
-      (assign done true)
-      (break))
-    (assign target-pct (float (parse-int line))))))
+            (forever
+              (def line (port/read-line (*stdin*)))
+              (when (nil? line)
+                (assign done true)
+                (break))
+              (assign target-pct (float (parse-int line))))))
 
-(def anim-step 0.15)   # ease-out fraction per frame
+(def anim-step 0.15)
+# ease-out fraction per frame
 
-(while (not done)
-  # ease toward target
+(while (not done)  # ease toward target
   (when (not (= display-pct target-pct))
     (assign display-pct (+ display-pct (* (- target-pct display-pct) anim-step)))
     (when (< (abs (- display-pct target-pct)) 0.5)
@@ -118,7 +121,8 @@
   (wl:flush conn)
   (ev/poll-fd fd :read 0.033)
   (wl:dispatch conn)
-  (each _ev in (wl:poll-events conn) nil))
+  (each _ev in (wl:poll-events conn)
+    nil))
 
 ## ── Cleanup ────────────────────────────────────────────────────────────
 

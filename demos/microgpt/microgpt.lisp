@@ -8,9 +8,9 @@
 # Usage: cargo run --release -- demos/microgpt/microgpt.lisp
 
 (def rng (import "plugin/random"))
-(def ag      ((import "demos/microgpt/autograd.lisp")))
+(def ag ((import "demos/microgpt/autograd.lisp")))
 (def helpers ((import "demos/microgpt/helpers.lisp")))
-(def gpt     ((import "demos/microgpt/model.lisp") ag helpers rng))
+(def gpt ((import "demos/microgpt/model.lisp") ag helpers rng))
 
 # ── Data loading and tokenizer ──────────────────────────────────
 
@@ -19,8 +19,7 @@
   (let* [result @[]]
     (each line in (read-lines path)
       (let [trimmed (string/trim line)]
-        (when (> (length trimmed) 0)
-          (push result trimmed))))
+        (when (> (length trimmed) 0) (push result trimmed))))
     result))
 
 (defn build-tokenizer [names]
@@ -38,8 +37,7 @@
       (put id->char idx ch)
       (assign idx (inc idx)))
     (put id->char idx "<BOS>")
-    @{:char->id char->id :id->char id->char
-      :vocab-size (inc idx) :bos idx}))
+    @{:char->id char->id :id->char id->char :vocab-size (inc idx) :bos idx}))
 
 (defn tokenize [name tokenizer]
   "Tokenize a name into array of integer IDs. Prepends and appends BOS."
@@ -54,7 +52,11 @@
 
 (defn make-adam [params lr beta1 beta2 eps]
   "Create Adam optimizer state."
-  @{:params params :lr lr :beta1 beta1 :beta2 beta2 :eps eps
+  @{:params params
+    :lr lr
+    :beta1 beta1
+    :beta2 beta2
+    :eps eps
     :m (array/new (length params) 0.0)
     :v (array/new (length params) 0.0)
     :step 0})
@@ -73,7 +75,9 @@
              v-hat (/ v-new (- 1.0 (pow opt:beta2 (float step))))]
         (put opt:m i m-new)
         (put opt:v i v-new)
-        (put p :data (- (ag:v-data p) (* lr-current (/ m-hat (+ (sqrt v-hat) opt:eps))))))
+        (put p
+             :data (- (ag:v-data p)
+                      (* lr-current (/ m-hat (+ (sqrt v-hat) opt:eps))))))
       (assign i (inc i)))))
 
 # ── Training ────────────────────────────────────────────────────
@@ -88,16 +92,17 @@
     (while (< step num-steps)
       (let* [tokens (tokenize (names (mod step n-names)) tokenizer)
              tokens (if (> (length tokens) (inc gpt:*block-size*))
-                       (slice tokens 0 (inc gpt:*block-size*))
-                       tokens)
+                      (slice tokens 0 (inc gpt:*block-size*))
+                      tokens)
              loss (gpt:cross-entropy-loss-incremental model tokens)
              lr-current (* lr (- 1.0 (/ (float step) (float num-steps))))]
         (ag:backward loss)
         (adam-step opt lr-current)
-        (each p in params (put p :grad 0.0))
+        (each p in params
+          (put p :grad 0.0))
         (when (= (mod step 100) 0)
-          (println (string/format "step {:>4d} / {} | loss {:.4f}"
-                                  step num-steps (ag:v-data loss)))))
+          (println (string/format "step {:>4d} / {} | loss {:.4f}" step
+                                  num-steps (ag:v-data loss)))))
       (assign step (inc step)))))
 
 # ── Inference ───────────────────────────────────────────────────
@@ -118,19 +123,20 @@
 (defn generate [model tokenizer n-samples temperature max-len]
   "Generate n-samples names using incremental forward pass."
   (repeat n-samples
-    (let* [chars @[]
-           [kv-keys kv-values] (helpers:make-kv-caches gpt:*n-layer*)]
-      (def @token-id tokenizer:bos)
-      (def @pos 0)
-      (block :gen
-        (while (< pos max-len)
-          (let* [logits (gpt:gpt-forward-token token-id pos kv-keys kv-values model)
-                 next-tok (sample-token logits temperature)]
-            (when (= next-tok tokenizer:bos) (break :gen))
-            (assign token-id next-tok)
-            (push chars (tokenizer:id->char next-tok))
-            (assign pos (inc pos)))))
-      (println " " (string/join chars "")))))
+          (let* [chars @[]
+                 [kv-keys kv-values] (helpers:make-kv-caches gpt:*n-layer*)]
+            (def @token-id tokenizer:bos)
+            (def @pos 0)
+            (block :gen
+              (while (< pos max-len)
+                (let* [logits (gpt:gpt-forward-token token-id pos kv-keys
+                       kv-values model)
+                       next-tok (sample-token logits temperature)]
+                  (when (= next-tok tokenizer:bos) (break :gen))
+                  (assign token-id next-tok)
+                  (push chars (tokenizer:id->char next-tok))
+                  (assign pos (inc pos)))))
+            (println " " (string/join chars "")))))
 
 # ── Gradient check ──────────────────────────────────────────────
 
@@ -139,12 +145,13 @@
   (let* [a (ag:make-value 3.0)
          b (ag:make-value 4.0)
          c (ag:v+ (ag:v* a b) (ag:vpow a 2.0))]
-    (ag:backward c)
-    # dc/da = b + 2a = 4 + 6 = 10, dc/db = a = 3
+    (ag:backward c)  # dc/da = b + 2a = 4 + 6 = 10, dc/db = a = 3
     (when (> (abs (- (ag:v-grad a) 10.0)) 0.000001)
-      (error (string/format "grad check failed: da = {} (expected 10.0)" (ag:v-grad a))))
+      (error (string/format "grad check failed: da = {} (expected 10.0)"
+                            (ag:v-grad a))))
     (when (> (abs (- (ag:v-grad b) 3.0)) 0.000001)
-      (error (string/format "grad check failed: db = {} (expected 3.0)" (ag:v-grad b))))
+      (error (string/format "grad check failed: db = {} (expected 3.0)"
+                            (ag:v-grad b))))
     (println "Gradient check passed.")))
 
 # ── Main ────────────────────────────────────────────────────────
@@ -162,7 +169,6 @@
 
       (println "Initializing model...")
       (let [model (gpt:init-model tokenizer:vocab-size)]
-
         (println "Training...")
         (let [start (clock/monotonic)]
           (train model tokenizer names 1000 0.01)

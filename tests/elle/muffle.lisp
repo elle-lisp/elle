@@ -42,12 +42,19 @@
 
 # ── silence alone still rejects unmuffled signals ────────────────────
 
-(def [ok? _] (protect (eval '(defn bad [x y] (silence) (+ x y)))))
+(def [ok? _]
+  (protect (eval '(defn bad [x y]
+                   (silence)
+                   (+ x y)))))
 (assert (not ok?) "silence without muffle still rejects arithmetic")
 
 # ── muffle doesn't help with unmuffled signals ───────────────────────
 
-(def [ok2? _] (protect (eval '(defn bad2 [] (silence) (muffle :error) (yield 1)))))
+(def [ok2? _]
+  (protect (eval '(defn bad2 []
+                   (silence)
+                   (muffle :error)
+                   (yield 1)))))
 (assert (not ok2?) "muffle :error doesn't help with :yield")
 
 # ── muffle outside function is an error ──────────────────────────────

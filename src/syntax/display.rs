@@ -19,6 +19,7 @@ impl fmt::Display for SyntaxKind {
             SyntaxKind::Symbol(s) => write!(f, "{}", s),
             SyntaxKind::Keyword(s) => write!(f, ":{}", s),
             SyntaxKind::String(s) => write!(f, "\"{}\"", s.escape_default()),
+            SyntaxKind::StringMut(s) => write!(f, "@\"{}\"", s.escape_default()),
             SyntaxKind::List(items) => {
                 write!(f, "(")?;
                 for (i, item) in items.iter().enumerate() {

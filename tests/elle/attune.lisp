@@ -10,12 +10,15 @@
 (println "attune-permitted-passes: ok")
 
 # ── Non-permitted signals are converted to :error ─────────────────
-(def io-fn (fn [] (println "side effect") :done))
+(def io-fn
+  (fn []
+    (println "side effect")
+    :done))
 (def attuned-no-io (attune |:error| io-fn))
-(try (attuned-no-io)
-  (catch e
-    (assert (= (get e :error) :signal-violation))
-    (println "attune-blocks-unpermitted: ok")))
+(try
+  (attuned-no-io)
+  (catch e (assert (= (get e :error) :signal-violation))
+         (println "attune-blocks-unpermitted: ok")))
 
 # ── attune composes with squelch ──────────────────────────────────
 (def multi (fn [] (yield 1)))
@@ -23,10 +26,10 @@
 (def step2 (squelch step1 :yield))
 # step2: attune allows only yield+error, then squelch removes yield
 # net effect: only error is possible
-(try (step2)
-  (catch e
-    (assert (= (get e :error) :signal-violation))
-    (println "attune-composes-with-squelch: ok")))
+(try
+  (step2)
+  (catch e (assert (= (get e :error) :signal-violation))
+         (println "attune-composes-with-squelch: ok")))
 
 # ── Compile-time signal inference ─────────────────────────────────
 # attune narrows the signal for interprocedural tracking
@@ -49,10 +52,11 @@
 
 # ── attune! rejects functions that exceed the ceiling ─────────────
 # This should fail at compile time: function does IO but ceiling is :yield
-(def failed (try
-  (eval '(fn []
-    (attune! :yield)
-    (println "oops")))
-  (catch e e)))
+(def failed
+  (try
+    (eval '(fn []
+             (attune! :yield)
+             (println "oops")))
+    (catch e e)))
 (assert (get failed :error))
 (println "attune!-rejects-excess: ok")

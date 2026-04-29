@@ -3,7 +3,8 @@
 
 # ── Basic extraction ─────────────────────────────────────────────────
 
-(def src "
+(def src
+  "
 (defn process [data config]
   (let [x (+ data 1)]
     (let [y (* x config)]
@@ -42,7 +43,10 @@
 # ── Error cases ──────────────────────────────────────────────────────
 
 # Non-existent function
-(let [[ok? _] (protect (compile/extract a {:from :nonexistent :lines [1 1] :name :x}))]
+(let [[ok? _] (protect (compile/extract a
+                                        {:from :nonexistent
+                                        :lines [1 1]
+                                        :name :x}))]
   (assert (not ok?) "extract from nonexistent function errors"))
 
 # Invalid line range

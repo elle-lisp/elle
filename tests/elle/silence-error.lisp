@@ -22,18 +22,28 @@
 
 # ── Compile-time rejection: arithmetic emits {:error} ────────────────
 
-(def [ok? err] (protect (eval '(defn bad-add [x y] (silence) (+ x y)))))
+(def [ok? err]
+  (protect (eval '(defn bad-add [x y]
+                   (silence)
+                   (+ x y)))))
 (assert (not ok?) "silence rejects arithmetic at compile time")
-(assert (string/contains? (get err :message) "may emit") "error mentions excess signal")
+(assert (string/contains? (get err :message) "may emit")
+        "error mentions excess signal")
 
 # ── Compile-time rejection: yield ────────────────────────────────────
 
-(def [ok2? _] (protect (eval '(defn bad-yield [] (silence) (yield 1)))))
+(def [ok2? _]
+  (protect (eval '(defn bad-yield []
+                   (silence)
+                   (yield 1)))))
 (assert (not ok2?) "silence rejects yield at compile time")
 
 # ── Compile-time rejection: I/O ──────────────────────────────────────
 
-(def [ok3? _] (protect (eval '(defn bad-io [x] (silence) (println x)))))
+(def [ok3? _]
+  (protect (eval '(defn bad-io [x]
+                   (silence)
+                   (println x)))))
 (assert (not ok3?) "silence rejects I/O at compile time")
 
 (println "all silence compile-time enforcement tests passed")

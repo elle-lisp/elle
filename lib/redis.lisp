@@ -28,43 +28,51 @@
    Returns Elle values: string, integer, array, or nil."
   (let [line (port/read-line port)]
     (when (nil? line)
-      (error {:error :redis-error :reason :unexpected-eof :message "unexpected EOF"}))
+      (error {:error :redis-error
+              :reason :unexpected-eof
+              :message "unexpected EOF"}))
     (let [prefix (get line 0)
-          body   (slice line 1)]
-      (case prefix
-        # Simple string
+          body (slice line 1)]
+      (case
+        prefix  # Simple string
         "+" body
 
         # Error
-        "-" (error {:error :redis-error :reason :server-error :body body :message body})
+        "-" (error {:error :redis-error
+                    :reason :server-error
+                    :body body
+                    :message body})
 
         # Integer
         ":" (parse-int body)
 
         # Bulk string
-        "$" (let [len (parse-int body)]
-              (if (= len -1)
-                nil
-                (let [data (port/read port (+ len 2))]
-                  # data includes trailing \r\n; slice bytes first (byte-indexed), then convert
-                  (when (nil? data)
-                    (error {:error :redis-error :reason :unexpected-eof :phase :bulk-string :message "unexpected EOF reading bulk string"}))
-                  (string (slice data 0 len)))))
+        "$"
+          (let [len (parse-int body)]
+            (if (= len -1)
+              nil
+              (let [data (port/read port (+ len 2))]
+                (when (nil? data)
+                  (error {:error :redis-error
+                          :reason :unexpected-eof
+                          :phase :bulk-string
+                          :message "unexpected EOF reading bulk string"}))
+                (string (slice data 0 len)))))
 
         # Array
-        "*" (let [count (parse-int body)]
-              (if (= count -1)
-                nil
-                (block
-                  (def result @[])
-                  (def @i 0)
-                  (while (< i count)
-                    (push result (resp-read port))
-                    (assign i (+ i 1)))
-                  (freeze result))))
-
+        "*"
+          (let [count (parse-int body)]
+            (if (= count -1)
+              nil
+              (block (def result @[])
+                (def @i 0)
+                (while (< i count)
+                  (push result (resp-read port))
+                  (assign i (+ i 1)))
+                (freeze result))))
         (error {:error :redis-error
-                :reason :unexpected-prefix :prefix prefix
+                :reason :unexpected-prefix
+                :prefix prefix
                 :message (string "unexpected RESP prefix: " prefix)})))))
 
 (defn resp-read-raw [port]
@@ -91,7 +99,9 @@
   "Send a command on the current Redis port and read the reply."
   (let [port (*redis-port*)]
     (when (nil? port)
-      (error {:error :redis-error :reason :no-connection :message "no active Redis connection"}))
+      (error {:error :redis-error
+              :reason :no-connection
+              :message "no active Redis connection"}))
     (port/write port (apply resp-encode args))
     (port/flush port)
     (resp-read port)))
@@ -117,8 +127,7 @@
   "Default predicate for terminal errors. Auth failures and protocol
    corruption are terminal; everything else is retryable."
   (let [kind (get err :error)]
-    (or (= kind :auth-error)
-        (= kind :protocol-error))))
+    (or (= kind :auth-error) (= kind :protocol-error))))
 
 (defn redis-manager [host port &named terminal? max-retries]
   "Create a manager fiber that owns a Redis connection.
@@ -127,19 +136,19 @@
    where run is a function that takes a thunk and executes it
    with the managed connection."
   (let [is-terminal (or terminal? default-terminal?)
-        retries     (or max-retries 3)
-        param       (parameter nil)]
+        retries (or max-retries 3)
+        param (parameter nil)]
     (defn run-with-manager [thunk]
       "Execute thunk with a managed Redis connection."
       (def @conn (redis-connect host port))
       (def @attempts 0)
-      (defer (port/close conn)
+      (defer
+        (port/close conn)
         (def @result nil)
         (def @done false)
         (while (not done)
-          (let [[ok? val] (protect
-                            (parameterize ((param conn))
-                              (thunk)))]
+          (let [[ok? val] (protect (parameterize ((param conn))
+                                     (thunk)))]
             (if ok?
               (begin
                 (assign result val)
@@ -148,21 +157,19 @@
                 (error val)
                 (begin
                   (assign attempts (+ attempts 1))
-                  (when (>= attempts retries)
-                    (error val))
-                  # Reconnect
+                  (when (>= attempts retries) (error val))  # Reconnect
                   (let [[close-ok? _] (protect (port/close conn))])
                   (assign conn (redis-connect host port)))))))))
 
-    {:run        run-with-manager
-     :port-param param}))
+    {:run run-with-manager :port-param param}))
 
 ## ── Client — simplified connection for direct use ─────────────────────
 
 (defn redis-with [host port thunk]
   "Open a Redis connection, run thunk with *redis-port* bound, close on exit."
   (let [conn (redis-connect host port)]
-    (defer (port/close conn)
+    (defer
+      (port/close conn)
       (parameterize ((*redis-port* conn))
         (thunk)))))
 
@@ -175,8 +182,12 @@
 (defn redis-set [key value &named ex px nx xx]
   "SET key value [EX seconds] [PX ms] [NX|XX] — returns true on OK."
   (def args @["SET" key value])
-  (when ex (push args "EX") (push args (string ex)))
-  (when px (push args "PX") (push args (string px)))
+  (when ex
+    (push args "EX")
+    (push args (string ex)))
+  (when px
+    (push args "PX")
+    (push args (string px)))
   (when nx (push args "NX"))
   (when xx (push args "XX"))
   (resp-ok? (apply redis-cmd (freeze args))))
@@ -277,8 +288,12 @@
   "SCAN cursor [MATCH pattern] [COUNT count] — incrementally iterate keys.
    Returns [next-cursor keys-array]. Cursor \"0\" starts; returns \"0\" when done."
   (def args @["SCAN" (string cursor)])
-  (when match (push args "MATCH") (push args match))
-  (when count (push args "COUNT") (push args (string count)))
+  (when match
+    (push args "MATCH")
+    (push args match))
+  (when count
+    (push args "COUNT")
+    (push args (string count)))
   (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
@@ -286,8 +301,12 @@
   "HSCAN key cursor [MATCH pattern] [COUNT count] — iterate hash fields.
    Returns [next-cursor flat-array] where flat-array is [field val field val ...]."
   (def args @["HSCAN" key (string cursor)])
-  (when match (push args "MATCH") (push args match))
-  (when count (push args "COUNT") (push args (string count)))
+  (when match
+    (push args "MATCH")
+    (push args match))
+  (when count
+    (push args "COUNT")
+    (push args (string count)))
   (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
@@ -295,8 +314,12 @@
   "SSCAN key cursor [MATCH pattern] [COUNT count] — iterate set members.
    Returns [next-cursor members-array]."
   (def args @["SSCAN" key (string cursor)])
-  (when match (push args "MATCH") (push args match))
-  (when count (push args "COUNT") (push args (string count)))
+  (when match
+    (push args "MATCH")
+    (push args match))
+  (when count
+    (push args "COUNT")
+    (push args (string count)))
   (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
@@ -304,8 +327,12 @@
   "ZSCAN key cursor [MATCH pattern] [COUNT count] — iterate sorted set members.
    Returns [next-cursor flat-array] where flat-array is [member score member score ...]."
   (def args @["ZSCAN" key (string cursor)])
-  (when match (push args "MATCH") (push args match))
-  (when count (push args "COUNT") (push args (string count)))
+  (when match
+    (push args "MATCH")
+    (push args match))
+  (when count
+    (push args "COUNT")
+    (push args (string count)))
   (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
@@ -527,9 +554,7 @@
 
 (defn redis-info [&named section]
   "INFO [section] — returns server info string."
-  (if section
-    (redis-cmd "INFO" section)
-    (redis-cmd "INFO")))
+  (if section (redis-cmd "INFO" section) (redis-cmd "INFO")))
 
 ## ── Transactions ──────────────────────────────────────────────────────
 
@@ -575,22 +600,20 @@
   (def @result nil)
   (def @done false)
   (while (not done)
-    (when (not (empty? watch-keys))
-      (apply redis-watch watch-keys))
+    (when (not (empty? watch-keys)) (apply redis-watch watch-keys))
     (let [[ok? val] (protect (body-fn))]
       (if ok?
         (let [exec-result (redis-exec)]
           (if (nil? exec-result)
-            (begin
-              # WATCH was violated — retry
+            (begin  # WATCH was violated — retry
               (assign attempts (+ attempts 1))
               (when (>= attempts 16)
                 (error {:error :redis-error
-                        :reason :watch-conflict :message "too many retries (WATCH conflict)"})))
+                        :reason :watch-conflict
+                        :message "too many retries (WATCH conflict)"})))
             (begin
               (assign result exec-result)
-              (assign done true))))
-        # body-fn errored — discard and re-raise
+              (assign done true))))  # body-fn errored — discard and re-raise
         (begin
           (let [[_ _] (protect (redis-discard))])
           (error val)))))
@@ -625,8 +648,7 @@
 (defn redis-subscribe [port & channels]
   "Send SUBSCRIBE command on port. Returns the port (now in sub mode)."
   (port/write port (apply resp-encode (cons "SUBSCRIBE" channels)))
-  (port/flush port)
-  # Read the subscription confirmations
+  (port/flush port)  # Read the subscription confirmations
   (each ch in channels
     (resp-read port))
   port)
@@ -644,8 +666,7 @@
 (defn redis-unsubscribe [port & channels]
   "Send UNSUBSCRIBE command on port."
   (port/write port (apply resp-encode (cons "UNSUBSCRIBE" channels)))
-  (port/flush port)
-  # Read the unsubscription confirmations
+  (port/flush port)  # Read the unsubscription confirmations
   (each ch in channels
     (resp-read port)))
 
@@ -677,12 +698,12 @@
    Returns array of results."
   (let [port (*redis-port*)]
     (when (nil? port)
-      (error {:error :redis-error :reason :no-connection :message "no active Redis connection"}))
-    # Send all commands
+      (error {:error :redis-error
+              :reason :no-connection
+              :message "no active Redis connection"}))  # Send all commands
     (each cmd in commands
       (port/write port (apply resp-encode cmd)))
-    (port/flush port)
-    # Read all replies
+    (port/flush port)  # Read all replies
     (def results @[])
     (each cmd in commands
       (push results (resp-read-raw port)))
@@ -694,51 +715,53 @@
   "Self-tests for RESP encoding and decoding."
 
   # resp-encode
-  (assert (= (resp-encode "PING")
-             "*1\r\n$4\r\nPING\r\n")
-    "resp-encode PING")
+  (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n") "resp-encode PING")
 
   (assert (= (resp-encode "SET" "key" "value")
              "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
-    "resp-encode SET key value")
+          "resp-encode SET key value")
 
-  (assert (= (resp-encode "GET" "mykey")
-             "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
-    "resp-encode GET mykey")
+  (assert (= (resp-encode "GET" "mykey") "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
+          "resp-encode GET mykey")
 
   # resp-encode with multibyte string
   (assert (= (resp-encode "SET" "k" "café")
              "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
-    "resp-encode multibyte uses byte length")
+          "resp-encode multibyte uses byte length")
 
   # resp-read: simple string
   (spit "/tmp/elle-redis-test-simple" "+OK\r\n")
   (let [p (port/open "/tmp/elle-redis-test-simple" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (= (resp-read p) "OK") "resp-read simple string")))
 
   # resp-read: integer
   (spit "/tmp/elle-redis-test-int" ":42\r\n")
   (let [p (port/open "/tmp/elle-redis-test-int" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (= (resp-read p) 42) "resp-read integer")))
 
   # resp-read: bulk string
   (spit "/tmp/elle-redis-test-bulk" "$5\r\nhello\r\n")
   (let [p (port/open "/tmp/elle-redis-test-bulk" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (= (resp-read p) "hello") "resp-read bulk string")))
 
   # resp-read: nil bulk string
   (spit "/tmp/elle-redis-test-nil" "$-1\r\n")
   (let [p (port/open "/tmp/elle-redis-test-nil" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (assert (nil? (resp-read p)) "resp-read nil bulk string")))
 
   # resp-read: array
   (spit "/tmp/elle-redis-test-arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
   (let [p (port/open "/tmp/elle-redis-test-arr" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read p)]
         (assert (= (length result) 2) "resp-read array length")
         (assert (= (get result 0) "foo") "resp-read array element 0")
@@ -747,16 +770,19 @@
   # resp-read: error
   (spit "/tmp/elle-redis-test-err" "-ERR unknown command\r\n")
   (let [p (port/open "/tmp/elle-redis-test-err" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [[ok? val] (protect (resp-read p))]
         (assert (not ok?) "resp-read error signals")
         (assert (= (get val :error) :redis-error) "resp-read error kind")
-        (assert (= (get val :message) "ERR unknown command") "resp-read error message"))))
+        (assert (= (get val :message) "ERR unknown command")
+                "resp-read error message"))))
 
   # resp-read-raw: error returns struct instead of signaling
   (spit "/tmp/elle-redis-test-raw-err" "-ERR bad\r\n")
   (let [p (port/open "/tmp/elle-redis-test-raw-err" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read-raw p)]
         (assert (struct? result) "resp-read-raw error is struct")
         (assert (= (get result :error) :redis-error) "resp-read-raw error kind"))))
@@ -770,9 +796,11 @@
   (assert (= (resp-bool 0) false) "resp-bool 0")
 
   # resp-read: nested array
-  (spit "/tmp/elle-redis-test-nested" "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
+  (spit "/tmp/elle-redis-test-nested"
+        "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
   (let [p (port/open "/tmp/elle-redis-test-nested" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read p)]
         (assert (= (length result) 2) "nested array length")
         (assert (= (get (get result 0) 0) 1) "nested array [0][0]")
@@ -781,7 +809,8 @@
   # resp-read: empty array
   (spit "/tmp/elle-redis-test-empty-arr" "*0\r\n")
   (let [p (port/open "/tmp/elle-redis-test-empty-arr" :read)]
-    (defer (port/close p)
+    (defer
+      (port/close p)
       (let [result (resp-read p)]
         (assert (= (length result) 0) "empty array"))))
 
@@ -790,93 +819,94 @@
 ## ── Exports ───────────────────────────────────────────────────────────
 
 (fn []
-  {# Connection
-   :connect   redis-connect
-   :close     redis-close
-   :with      redis-with
-   :auth      redis-auth
+  {
+   # Connection
+   :connect redis-connect
+   :close redis-close
+   :with redis-with
+   :auth redis-auth
 
    # Manager
-   :manager   redis-manager
+   :manager redis-manager
 
    # Commands — String
-   :get       redis-get
-   :set       redis-set
-   :mget      redis-mget
-   :mset      redis-mset
-   :incr      redis-incr
-   :decr      redis-decr
-   :incrby    redis-incrby
-   :decrby    redis-decrby
-   :append    redis-append
-   :strlen    redis-strlen
-   :getset    redis-getset
-   :setnx     redis-setnx
+   :get redis-get
+   :set redis-set
+   :mget redis-mget
+   :mset redis-mset
+   :incr redis-incr
+   :decr redis-decr
+   :incrby redis-incrby
+   :decrby redis-decrby
+   :append redis-append
+   :strlen redis-strlen
+   :getset redis-getset
+   :setnx redis-setnx
 
    # Commands — Keys
-   :del       redis-del
-   :exists    redis-exists
-   :expire    redis-expire
-   :pexpire   redis-pexpire
-   :expireat  redis-expireat
+   :del redis-del
+   :exists redis-exists
+   :expire redis-expire
+   :pexpire redis-pexpire
+   :expireat redis-expireat
    :pexpireat redis-pexpireat
-   :ttl       redis-ttl
-   :pttl      redis-pttl
-   :type      redis-type
-   :keys      redis-keys
-   :rename    redis-rename
-   :persist   redis-persist
+   :ttl redis-ttl
+   :pttl redis-pttl
+   :type redis-type
+   :keys redis-keys
+   :rename redis-rename
+   :persist redis-persist
 
    # Commands — Scan
-   :scan      redis-scan
-   :hscan     redis-hscan
-   :sscan     redis-sscan
-   :zscan     redis-zscan
-   :scan-all  redis-scan-all
+   :scan redis-scan
+   :hscan redis-hscan
+   :sscan redis-sscan
+   :zscan redis-zscan
+   :scan-all redis-scan-all
 
    # Commands — Hash
-   :hset      redis-hset
-   :hget      redis-hget
-   :hdel      redis-hdel
-   :hexists   redis-hexists
-   :hgetall   redis-hgetall
-   :hkeys     redis-hkeys
-   :hvals     redis-hvals
-   :hlen      redis-hlen
-   :hmset     redis-hmset
-   :hmget     redis-hmget
-   :hincrby   redis-hincrby
+   :hset redis-hset
+   :hget redis-hget
+   :hdel redis-hdel
+   :hexists redis-hexists
+   :hgetall redis-hgetall
+   :hkeys redis-hkeys
+   :hvals redis-hvals
+   :hlen redis-hlen
+   :hmset redis-hmset
+   :hmget redis-hmget
+   :hincrby redis-hincrby
 
    # Commands — List
-   :lpush     redis-lpush
-   :rpush     redis-rpush
-   :lpop      redis-lpop
-   :rpop      redis-rpop
-   :llen      redis-llen
-   :lrange    redis-lrange
-   :lindex    redis-lindex
-   :lset      redis-lset
+   :lpush redis-lpush
+   :rpush redis-rpush
+   :lpop redis-lpop
+   :rpop redis-rpop
+   :llen redis-llen
+   :lrange redis-lrange
+   :lindex redis-lindex
+   :lset redis-lset
 
    # Commands — Set
-   :sadd      redis-sadd
-   :srem      redis-srem
+   :sadd redis-sadd
+   :srem redis-srem
    :sismember redis-sismember
-   :smembers  redis-smembers
-   :scard     redis-scard
-   :sunion    redis-sunion
-   :sinter    redis-sinter
-   :sdiff     redis-sdiff
+   :smembers redis-smembers
+   :scard redis-scard
+   :sunion redis-sunion
+   :sinter redis-sinter
+   :sdiff redis-sdiff
 
    # Commands — Sorted Set
-   :zadd      redis-zadd
-   :zscore    redis-zscore
-   :zrank     redis-zrank
-   :zrange    redis-zrange
+   :zadd redis-zadd
+   :zscore redis-zscore
+   :zrank redis-zrank
+   :zrange redis-zrange
    :zrangebyscore redis-zrangebyscore
-   :zrem      redis-zrem
-   :zcard     redis-zcard
-   :zincrby   redis-zincrby
-   :zcount    redis-zcount
+   :zrem redis-zrem
+   :zcard redis-zcard
+   :zincrby redis-zincrby
+   :zcount redis-zcount
    :zrevrange redis-zrevrange
    :zrevrangebyscore redis-zrevrangebyscore
    :zrange-withscores redis-zrange-withscores
@@ -884,43 +914,43 @@
    :zrevrange-withscores redis-zrevrange-withscores
 
    # Commands — Server
-   :ping      redis-ping
-   :echo      redis-echo
-   :select    redis-select
-   :flushdb   redis-flushdb
-   :dbsize    redis-dbsize
-   :info      redis-info
+   :ping redis-ping
+   :echo redis-echo
+   :select redis-select
+   :flushdb redis-flushdb
+   :dbsize redis-dbsize
+   :info redis-info
 
    # Transactions
-   :multi     redis-multi
-   :exec      redis-exec
-   :discard   redis-discard
-   :watch     redis-watch
-   :unwatch   redis-unwatch
-   :atomic    redis-atomic
+   :multi redis-multi
+   :exec redis-exec
+   :discard redis-discard
+   :watch redis-watch
+   :unwatch redis-unwatch
+   :atomic redis-atomic
 
    # Lua scripting
-   :eval      redis-eval
-   :evalsha   redis-evalsha
-   :script-load   redis-script-load
+   :eval redis-eval
+   :evalsha redis-evalsha
+   :script-load redis-script-load
    :script-exists redis-script-exists
-   :script-flush  redis-script-flush
+   :script-flush redis-script-flush
 
    # Pub/Sub
-   :subscribe   redis-subscribe
-   :recv        redis-recv
+   :subscribe redis-subscribe
+   :recv redis-recv
    :unsubscribe redis-unsubscribe
-   :publish     redis-publish
-   :psubscribe  redis-psubscribe
+   :publish redis-publish
+   :psubscribe redis-psubscribe
    :punsubscribe redis-punsubscribe
 
    # Pipelining
-   :pipeline  redis-pipeline
+   :pipeline redis-pipeline
 
    # RESP primitives (for advanced use)
-   :resp-encode   resp-encode
-   :resp-read     resp-read
+   :resp-encode resp-encode
+   :resp-read resp-read
    :resp-read-raw resp-read-raw
 
    # Internal tests
-   :test      run-internal-tests})
+   :test run-internal-tests})

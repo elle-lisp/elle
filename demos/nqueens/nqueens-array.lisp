@@ -12,8 +12,7 @@
     true
     (let* [placed-col (get queens idx)
            row-dist (- row idx)]
-      (if (or (= col placed-col)
-              (= row-dist (abs (- col placed-col))))
+      (if (or (= col placed-col) (= row-dist (abs (- col placed-col))))
         false
         (check-safe col queens (+ idx 1) row)))))
 
@@ -44,7 +43,8 @@
 
 (defn benchmark [n]
   (let* [solutions (solve-nqueens n)]
-    (println "Solving N-Queens for N=" n "... Found " (length solutions) " solution(s)")))
+    (println "Solving N-Queens for N=" n "... Found " (length solutions)
+             " solution(s)")))
 
 (println "=== N-Queens Solver (Elle, array) ===")
 (println)

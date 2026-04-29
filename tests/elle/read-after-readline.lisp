@@ -21,7 +21,8 @@
 (spit "/tmp/elle-test-read-after-readline" "+OK\r\n$5\r\nhello\r\n")
 
 (let [p (port/open "/tmp/elle-test-read-after-readline" :read)]
-  (defer (port/close p)
+  (defer
+    (port/close p)
     (let [line1 (port/read-line p)]
       (println (string/join ["  line1: " (string line1)] ""))
       (assert (= line1 "+OK") "line 1 content"))
@@ -32,7 +33,8 @@
     (let [body (port/read p 7)]
       (assert (not (nil? body)) "read returned data")
       (assert (= (string/size-of body) 7)
-        (string/join ["expected 7 bytes, got " (string (string/size-of body))] ""))
+              (string/join ["expected 7 bytes, got "
+                            (string (string/size-of body))] ""))
       (assert (= (string body) "hello\r\n") "read body content"))))
 
 (println "  single read-after-readline: ok")
@@ -49,24 +51,28 @@
   (def @i 0)
   (while (< i n)
     (let [val (string i)]
-      (push buf (string/join ["$" (string (string/size-of val)) "\r\n" val "\r\n"] "")))
+      (push buf
+            (string/join ["$" (string (string/size-of val)) "\r\n" val "\r\n"]
+                         "")))
     (assign i (+ i 1)))
   (freeze buf))
 
 (spit "/tmp/elle-test-read-after-readline-multi" (make-bulk-sequence 20))
 
 (let [p (port/open "/tmp/elle-test-read-after-readline-multi" :read)]
-  (defer (port/close p)
+  (defer
+    (port/close p)
     (def @i 0)
     (while (< i 20)
       (let [header (port/read-line p)]
         (assert (not (nil? header))
-          (string/join ["round " (string i) ": header is nil"] ""))
+                (string/join ["round " (string i) ": header is nil"] ""))
         (let [expected-len (parse-int (slice header 1))]
           (let [body (port/read p (+ expected-len 2))]
             (let [val (slice (string body) 0 expected-len)]
               (assert (= val (string i))
-                (string/join ["round " (string i) ": expected " (string i) " got " val] ""))))))
+                      (string/join ["round " (string i) ": expected " (string i)
+                                    " got " val] ""))))))
       (assign i (+ i 1)))))
 
 (println "  20 sequential bulk reads: ok")

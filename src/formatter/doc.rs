@@ -145,6 +145,27 @@ impl Doc {
         }
         Doc::Group(Box::new(self))
     }
+
+    /// Fill layout: greedily pack elements, wrapping per-element.
+    ///
+    /// Produces: `a Group(Break b) Group(Break c) Group(Break d)`
+    /// Each Group independently decides: space+elem if it fits on the
+    /// current line, newline+elem if it doesn't.
+    pub fn fill(docs: impl IntoIterator<Item = Doc>) -> Self {
+        let docs: Vec<Doc> = docs.into_iter().collect();
+        if docs.is_empty() {
+            return Doc::Empty;
+        }
+        let mut parts = Vec::with_capacity(docs.len());
+        for (i, doc) in docs.into_iter().enumerate() {
+            if i == 0 {
+                parts.push(doc);
+            } else {
+                parts.push(Doc::Group(Box::new(Doc::concat([Doc::Break, doc]))));
+            }
+        }
+        Doc::Concat(parts)
+    }
 }
 
 #[cfg(test)]

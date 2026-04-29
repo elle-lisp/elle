@@ -17,22 +17,24 @@
 ##   (uuid:v5 "6ba7b810-9dad-11d1-80b4-00c04fd430c8" "example.com")
 
 (fn [& opts]
-
   (def hex-chars "0123456789abcdef")
 
   (defn byte->hex [b]
     (string (hex-chars (bit/shr b 4)) (hex-chars (bit/and b 15))))
 
   (defn hex-char? [c]
-    (or (and (>= c "0") (<= c "9"))
-        (and (>= c "a") (<= c "f"))
+    (or (and (>= c "0") (<= c "9")) (and (>= c "a") (<= c "f"))
         (and (>= c "A") (<= c "F"))))
 
   (defn hex->nibble [c]
-    (if (and (>= c "0") (<= c "9")) (- (first (bytes c)) 48)
-      (if (and (>= c "a") (<= c "f")) (+ (- (first (bytes c)) 97) 10)
-        (if (and (>= c "A") (<= c "F")) (+ (- (first (bytes c)) 65) 10)
-          (error {:error :uuid-error :message (string "uuid: invalid hex char '" c "'")})))))
+    (if (and (>= c "0") (<= c "9"))
+      (- (first (bytes c)) 48)
+      (if (and (>= c "a") (<= c "f"))
+        (+ (- (first (bytes c)) 97) 10)
+        (if (and (>= c "A") (<= c "F"))
+          (+ (- (first (bytes c)) 65) 10)
+          (error {:error :uuid-error
+                  :message (string "uuid: invalid hex char '" c "'")})))))
 
   (defn bytes->hex [b start len]
     (let [acc @""]
@@ -50,15 +52,10 @@
   (defn v4 []
     "Generate a random UUID (version 4)."
     (let [b (thaw (random-bytes 16))]
-      ## Set version: byte 6 = 0100xxxx
-      (put b 6 (bit/or (bit/and (b 6) 15) 64))
-      ## Set variant: byte 8 = 10xxxxxx
+      (put b 6 (bit/or (bit/and (b 6) 15) 64))  ## Set variant: byte 8 = 10xxxxxx
       (put b 8 (bit/or (bit/and (b 8) 63) 128))
-      (string (bytes->hex b 0 4) "-"
-              (bytes->hex b 4 2) "-"
-              (bytes->hex b 6 2) "-"
-              (bytes->hex b 8 2) "-"
-              (bytes->hex b 10 6))))
+      (string (bytes->hex b 0 4) "-" (bytes->hex b 4 2) "-" (bytes->hex b 6 2)
+              "-" (bytes->hex b 8 2) "-" (bytes->hex b 10 6))))
 
   (defn parse-uuid [s]
     "Parse and normalize a UUID string to lowercase hyphenated form."
@@ -66,7 +63,6 @@
       (error {:error :type-error
               :message (string "uuid/parse: expected string, got " (type-of s))}))
     (let [lower (string/downcase s)]
-      ## Validate format: 8-4-4-4-12 hex with hyphens
       (unless (= (length lower) 36)
         (error {:error :uuid-error
                 :message (string "uuid/parse: invalid UUID: " s)}))
@@ -78,7 +74,8 @@
                       :message (string "uuid/parse: expected '-' at position " i)}))
             (unless (hex-char? c)
               (error {:error :uuid-error
-                      :message (string "uuid/parse: invalid hex char at position " i)})))))
+                      :message (string "uuid/parse: invalid hex char at position "
+                                       i)})))))
       lower))
 
   (defn uuid-nil []
@@ -89,9 +86,9 @@
     "Return the version number of a UUID, or nil for version 0."
     (unless (string? uuid-str)
       (error {:error :type-error
-              :message (string "uuid/version: expected string, got " (type-of uuid-str))}))
+              :message (string "uuid/version: expected string, got "
+                               (type-of uuid-str))}))
     (let [parsed (parse-uuid uuid-str)]
-      ## Version is the high nibble of byte 6, which is char at position 14
       (let [v (hex->nibble (parsed 14))]
         (if (zero? v) nil v))))
 
@@ -100,14 +97,12 @@
   (def hash-plugin (if (> (length opts) 0) (first opts) nil))
 
   (defn parse-hex-byte [s offset]
-    (+ (* (hex->nibble (s offset)) 16)
-       (hex->nibble (s (inc offset)))))
+    (+ (* (hex->nibble (s offset)) 16) (hex->nibble (s (inc offset)))))
 
   (defn uuid->bytes [uuid-str]
     "Parse a UUID string into 16 raw bytes."
     (let [s (parse-uuid uuid-str)
           acc @[]]
-      ## 8-4-4-4-12 hex → skip dashes at 8,13,18,23
       (each i in [0 2 4 6 9 11 14 16 19 21 24 26 28 30 32 34]
         (push acc (parse-hex-byte s i)))
       (freeze (bytes ;acc))))
@@ -118,23 +113,17 @@
       (error {:error :uuid-error
               :message "uuid/v5: hash plugin required — pass it to (import \"std/uuid\")"}))
     (let* [ns-bytes (uuid->bytes namespace)
-           name-bytes (bytes name)
-           ## Concatenate namespace + name
+           name-bytes (bytes name)  ## Concatenate namespace + name
            input (@bytes)
-           _ (each i in (range (length ns-bytes)) (push input (ns-bytes i)))
-           _ (each i in (range (length name-bytes)) (push input (name-bytes i)))
-           ## SHA-1 hash
-           digest (thaw (hash-plugin:sha1 (freeze input)))
-           ## Take first 16 bytes, set version and variant
+           _ (each i in (range (length ns-bytes))
+               (push input (ns-bytes i)))
+           _ (each i in (range (length name-bytes))
+               (push input (name-bytes i)))  ## SHA-1 hash
+           digest (thaw (hash-plugin:sha1 (freeze input)))  ## Take first 16 bytes, set version and variant
            b (thaw (slice digest 0 16))]
-      ## Set version: byte 6 = 0101xxxx (version 5)
-      (put b 6 (bit/or (bit/and (b 6) 15) 80))
-      ## Set variant: byte 8 = 10xxxxxx
+      (put b 6 (bit/or (bit/and (b 6) 15) 80))  ## Set variant: byte 8 = 10xxxxxx
       (put b 8 (bit/or (bit/and (b 8) 63) 128))
-      (string (bytes->hex b 0 4) "-"
-              (bytes->hex b 4 2) "-"
-              (bytes->hex b 6 2) "-"
-              (bytes->hex b 8 2) "-"
-              (bytes->hex b 10 6))))
+      (string (bytes->hex b 0 4) "-" (bytes->hex b 4 2) "-" (bytes->hex b 6 2)
+              "-" (bytes->hex b 8 2) "-" (bytes->hex b 10 6))))
 
   {:v4 v4 :v5 v5 :parse parse-uuid :nil uuid-nil :version version})

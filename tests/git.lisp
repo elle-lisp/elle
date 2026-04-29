@@ -4,11 +4,8 @@
 
 (import-file "target/release/libelle_git.so")
 
-(let [tmp (string/concat "/tmp/elle-git-test-" (number->string (integer (clock/realtime))))]
-
-  # -------------------------------------------------------------------------
-  # Chunk 2: Repo lifecycle
-  # -------------------------------------------------------------------------
+(let [tmp (string/concat "/tmp/elle-git-test-"
+                         (number->string (integer (clock/realtime))))]
   (let [repo (git/init tmp)]
     (assert (string? (git/path repo)) "git/path returns string")
     (assert (string? (git/workdir repo)) "git/workdir returns string")
@@ -19,7 +16,8 @@
     (git/config-set repo "user.name" "Test User")
     (git/config-set repo "user.email" "test@example.com")
     (assert (= "Test User" (git/config-get repo "user.name")) "config roundtrip")
-    (assert (nil? (git/config-get repo "no.such.key")) "config-get nil for missing")
+    (assert (nil? (git/config-get repo "no.such.key"))
+            "config-get nil for missing")
 
     # HEAD on empty repo should signal
     (let [r (protect (git/head repo))]
@@ -52,7 +50,6 @@
 
     # Cached diff: may error if HEAD is unborn
     (let [r (protect (git/diff repo {:cached true}))]
-      # Either succeeds or errors cleanly — both acceptable
       (assert (or (first r) (not (first r))) "diff cached does not crash"))
 
     # -------------------------------------------------------------------------
@@ -165,14 +162,14 @@
       # Chunk 10: Config (additional coverage)
       # -------------------------------------------------------------------------
       (git/config-set repo "core.autocrlf" "false")
-      (assert (= "false" (git/config-get repo "core.autocrlf")) "config-set/get roundtrip")
+      (assert (= "false" (git/config-get repo "core.autocrlf"))
+              "config-set/get roundtrip")
 
       # -------------------------------------------------------------------------
       # Chunk 9: Remotes (basic, no network)
       # -------------------------------------------------------------------------
       (let [remote-list (git/remotes repo)]
-        (assert (= 0 (length remote-list)) "no remotes in fresh repo"))
-    ))
+        (assert (= 0 (length remote-list)) "no remotes in fresh repo"))))
 
   # Cleanup
   (subprocess/system "rm" ["-rf" tmp])

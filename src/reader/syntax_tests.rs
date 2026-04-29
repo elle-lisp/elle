@@ -372,27 +372,13 @@ fn test_unexpected_closing_brace() {
 #[test]
 fn test_parse_buffer_literal() {
     let result = lex_and_parse(r#"@"hello""#).unwrap();
-    match result.kind {
-        SyntaxKind::List(ref items) => {
-            assert_eq!(items.len(), 2);
-            assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "thaw"));
-            assert!(matches!(items[1].kind, SyntaxKind::String(ref s) if s == "hello"));
-        }
-        _ => panic!("Expected list (thaw \"hello\")"),
-    }
+    assert!(matches!(result.kind, SyntaxKind::StringMut(ref s) if s == "hello"));
 }
 
 #[test]
 fn test_parse_buffer_literal_empty() {
     let result = lex_and_parse(r#"@"""#).unwrap();
-    match result.kind {
-        SyntaxKind::List(ref items) => {
-            assert_eq!(items.len(), 2);
-            assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "thaw"));
-            assert!(matches!(items[1].kind, SyntaxKind::String(ref s) if s.is_empty()));
-        }
-        _ => panic!("Expected list (thaw \"\")"),
-    }
+    assert!(matches!(result.kind, SyntaxKind::StringMut(ref s) if s.is_empty()));
 }
 
 #[test]

@@ -24,9 +24,9 @@
   "Classic fizzbuzz — nested branching."
   (cond
     (= (mod n 15) 0) "fizzbuzz"
-    (= (mod n 3) 0)  "fizz"
-    (= (mod n 5) 0)  "buzz"
-    true              n))
+    (= (mod n 3) 0) "fizz"
+    (= (mod n 5) 0) "buzz"
+    true n))
 
 (defn make-adder [x]
   "Returns a closure — shows captured variable in LIR."
@@ -37,8 +37,8 @@
    Match dispatch, recursion, let-binding, conditional error —
    produces a complex CFG with many blocks and cross-edges."
   (match expr
-    [:lit n]   n
-    [:neg a]   (- 0 (eval-expr a))
+    [:lit n] n
+    [:neg a] (- 0 (eval-expr a))
     [:add a b] (+ (eval-expr a) (eval-expr b))
     [:sub a b] (- (eval-expr a) (eval-expr b))
     [:mul a b] (* (eval-expr a) (eval-expr b))
@@ -46,7 +46,8 @@
       (let* [divisor (eval-expr b)
              dividend (eval-expr a)]
         (if (= divisor 0)
-          (error {:error :division-by-zero :message "division by zero in expression"})
+          (error {:error :division-by-zero
+                  :message "division by zero in expression"})
           (/ dividend divisor)))
     _ (error "unknown expression")))
 

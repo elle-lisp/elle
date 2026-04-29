@@ -49,7 +49,10 @@
 (assert (= (get (put @[1 2 3] -1 99) -1) 99) "put @array -1")
 (assert (= (put "hello" -1 "a") "hella") "put string -1")
 (assert (= (put "hello" -5 "H") "Hello") "put string -len")
-(assert (= (freeze (begin (def @s @"hello") (put s -1 "X") s)) "hellX") "put @string -1")
+(assert (= (freeze (begin
+                     (def @s @"hello")
+                     (put s -1 "X")
+                     s)) "hellX") "put @string -1")
 
 # ── callable form with negative index ────────────────────────────────
 
@@ -70,11 +73,17 @@
 
 # ── insert with negative index ───────────────────────────────────────
 
-(assert (= (begin (def @a @[1 2 3]) (insert a -1 99) a) @[1 2 99 3]) "insert @array -1")
+(assert (= (begin
+             (def @a @[1 2 3])
+             (insert a -1 99)
+             a) @[1 2 99 3]) "insert @array -1")
 
 # ── remove with negative index ───────────────────────────────────────
 
-(assert (= (begin (def @a @[1 2 3]) (remove a -1) a) @[1 2]) "remove @array -1")
+(assert (= (begin
+             (def @a @[1 2 3])
+             (remove a -1)
+             a) @[1 2]) "remove @array -1")
 
 # ── first on all sequence types ──────────────────────────────────────
 
@@ -87,13 +96,20 @@
 (assert (= (first (@bytes 97 98 99)) 97) "first @bytes")
 
 # first on empty → error
-(let [[ok? _] (protect ((fn [] (first (list)))))] (assert (not ok?) "first empty list errors"))
-(let [[ok? _] (protect ((fn [] (first []))))] (assert (not ok?) "first empty array errors"))
-(let [[ok? _] (protect ((fn [] (first @[]))))] (assert (not ok?) "first empty @array errors"))
-(let [[ok? _] (protect ((fn [] (first ""))))] (assert (not ok?) "first empty string errors"))
-(let [[ok? _] (protect ((fn [] (first @""))))] (assert (not ok?) "first empty @string errors"))
-(let [[ok? _] (protect ((fn [] (first (bytes)))))] (assert (not ok?) "first empty bytes errors"))
-(let [[ok? _] (protect ((fn [] (first (@bytes)))))] (assert (not ok?) "first empty @bytes errors"))
+(let [[ok? _] (protect ((fn [] (first (list)))))]
+  (assert (not ok?) "first empty list errors"))
+(let [[ok? _] (protect ((fn [] (first []))))]
+  (assert (not ok?) "first empty array errors"))
+(let [[ok? _] (protect ((fn [] (first @[]))))]
+  (assert (not ok?) "first empty @array errors"))
+(let [[ok? _] (protect ((fn [] (first ""))))]
+  (assert (not ok?) "first empty string errors"))
+(let [[ok? _] (protect ((fn [] (first @""))))]
+  (assert (not ok?) "first empty @string errors"))
+(let [[ok? _] (protect ((fn [] (first (bytes)))))]
+  (assert (not ok?) "first empty bytes errors"))
+(let [[ok? _] (protect ((fn [] (first (@bytes)))))]
+  (assert (not ok?) "first empty @bytes errors"))
 
 # ── second on all sequence types ─────────────────────────────────────
 
@@ -106,14 +122,22 @@
 (assert (= (second (@bytes 97 98 99)) 98) "second @bytes")
 
 # second on empty/single → error
-(let [[ok? _] (protect ((fn [] (second (list)))))] (assert (not ok?) "second empty list errors"))
-(let [[ok? _] (protect ((fn [] (second (list 1)))))] (assert (not ok?) "second single list errors"))
-(let [[ok? _] (protect ((fn [] (second []))))] (assert (not ok?) "second empty array errors"))
-(let [[ok? _] (protect ((fn [] (second [1]))))] (assert (not ok?) "second single array errors"))
-(let [[ok? _] (protect ((fn [] (second ""))))] (assert (not ok?) "second empty string errors"))
-(let [[ok? _] (protect ((fn [] (second "a"))))] (assert (not ok?) "second single string errors"))
-(let [[ok? _] (protect ((fn [] (second (bytes)))))] (assert (not ok?) "second empty bytes errors"))
-(let [[ok? _] (protect ((fn [] (second (bytes 1)))))] (assert (not ok?) "second single bytes errors"))
+(let [[ok? _] (protect ((fn [] (second (list)))))]
+  (assert (not ok?) "second empty list errors"))
+(let [[ok? _] (protect ((fn [] (second (list 1)))))]
+  (assert (not ok?) "second single list errors"))
+(let [[ok? _] (protect ((fn [] (second []))))]
+  (assert (not ok?) "second empty array errors"))
+(let [[ok? _] (protect ((fn [] (second [1]))))]
+  (assert (not ok?) "second single array errors"))
+(let [[ok? _] (protect ((fn [] (second ""))))]
+  (assert (not ok?) "second empty string errors"))
+(let [[ok? _] (protect ((fn [] (second "a"))))]
+  (assert (not ok?) "second single string errors"))
+(let [[ok? _] (protect ((fn [] (second (bytes)))))]
+  (assert (not ok?) "second empty bytes errors"))
+(let [[ok? _] (protect ((fn [] (second (bytes 1)))))]
+  (assert (not ok?) "second single bytes errors"))
 
 # ── last on all sequence types ───────────────────────────────────────
 
@@ -126,13 +150,20 @@
 (assert (= (last (@bytes 97 98 99)) 99) "last @bytes")
 
 # last on empty → error
-(let [[ok? _] (protect ((fn [] (last (list)))))] (assert (not ok?) "last empty list errors"))
-(let [[ok? _] (protect ((fn [] (last []))))] (assert (not ok?) "last empty array errors"))
-(let [[ok? _] (protect ((fn [] (last @[]))))] (assert (not ok?) "last empty @array errors"))
-(let [[ok? _] (protect ((fn [] (last ""))))] (assert (not ok?) "last empty string errors"))
-(let [[ok? _] (protect ((fn [] (last @""))))] (assert (not ok?) "last empty @string errors"))
-(let [[ok? _] (protect ((fn [] (last (bytes)))))] (assert (not ok?) "last empty bytes errors"))
-(let [[ok? _] (protect ((fn [] (last (@bytes)))))] (assert (not ok?) "last empty @bytes errors"))
+(let [[ok? _] (protect ((fn [] (last (list)))))]
+  (assert (not ok?) "last empty list errors"))
+(let [[ok? _] (protect ((fn [] (last []))))]
+  (assert (not ok?) "last empty array errors"))
+(let [[ok? _] (protect ((fn [] (last @[]))))]
+  (assert (not ok?) "last empty @array errors"))
+(let [[ok? _] (protect ((fn [] (last ""))))]
+  (assert (not ok?) "last empty string errors"))
+(let [[ok? _] (protect ((fn [] (last @""))))]
+  (assert (not ok?) "last empty @string errors"))
+(let [[ok? _] (protect ((fn [] (last (bytes)))))]
+  (assert (not ok?) "last empty bytes errors"))
+(let [[ok? _] (protect ((fn [] (last (@bytes)))))]
+  (assert (not ok?) "last empty @bytes errors"))
 
 # ── rest on all sequence types ───────────────────────────────────────
 

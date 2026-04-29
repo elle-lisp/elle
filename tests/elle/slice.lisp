@@ -82,14 +82,16 @@
 # ============================================================================
 
 (assert (= (slice (@bytes 1 2 3 4 5) 1 3) (@bytes 2 3)) "@bytes slice middle")
-(assert (= (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3)) "@bytes slice end clamped")
+(assert (= (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3))
+        "@bytes slice end clamped")
 (assert (bytes? (slice (@bytes 1 2 3) 0 2)) "@bytes slice returns @bytes")
 
 # ============================================================================
 # Error cases
 # ============================================================================
 
-(let [[ok? _] (protect ((fn () (slice 42 0 1))))] (assert (not ok?) "slice on non-sequence errors"))
+(let [[ok? _] (protect ((fn () (slice 42 0 1))))]
+  (assert (not ok?) "slice on non-sequence errors"))
 (assert (= (slice [1 2 3] -1 3) [3]) "slice negative start resolves")
 (assert (= (slice [1 2 3] 0 -1) [1 2]) "slice negative end resolves")
 (assert (= (slice [1 2 3] -2 -1) [2]) "slice both negative")

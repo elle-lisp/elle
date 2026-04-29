@@ -26,7 +26,7 @@
     (parse-int (get parts (- (length parts) 1)))))
 
 (defn percentile [sorted-arr p]
-  (let* [n   (length sorted-arr)
+  (let* [n (length sorted-arr)
          idx (min (- n 1) (floor (* (/ p 100.0) n)))]
     (get sorted-arr idx)))
 
@@ -60,7 +60,8 @@
 
 (defn server-defer [conn n latencies]
   "Mode C: defer wrapping the loop body.  2 fiber levels."
-  (defer nil
+  (defer
+    nil
     (var i 0)
     (while (< i n)
       (let [t0 (clock/monotonic)]
@@ -71,7 +72,8 @@
 
 (defn server-defer-protect [conn n latencies]
   "Mode D: defer + protect (connection-loop shape).  3 fiber levels."
-  (defer (protect nil)
+  (defer
+    (protect nil)
     (var i 0)
     (while (< i n)
       (let [t0 (clock/monotonic)]
@@ -86,31 +88,29 @@
 (defn run-test [label server-fn iterations]
   "Start an echo server in the given mode, run a client against it,
    print latency distribution."
-  (let* [listener  (tcp/listen "127.0.0.1" 0)
-         port-num  (get-port listener)
+  (let* [listener (tcp/listen "127.0.0.1" 0)
+         port-num (get-port listener)
          latencies @[]]
     (repeat iterations (push latencies 0.0))
-    (let* [server
-             (ev/spawn (fn []
-               (let [conn (tcp/accept listener)]
-                 (server-fn conn iterations latencies)
-                 (port/close conn))))
-           client
-             (ev/spawn (fn []
-               (let [conn (tcp/connect "127.0.0.1" port-num)]
-                 (var i 0)
-                 (while (< i iterations)
-                   (port/write conn "req\n")
-                   (port/read-line conn)
-                   (assign i (+ i 1)))
-                 (port/close conn))))]
+    (let* [server (ev/spawn (fn []
+                              (let [conn (tcp/accept listener)]
+                                (server-fn conn iterations latencies)
+                                (port/close conn))))
+           client (ev/spawn (fn []
+                              (let [conn (tcp/connect "127.0.0.1" port-num)]
+                                (var i 0)
+                                (while (< i iterations)
+                                  (port/write conn "req\n")
+                                  (port/read-line conn)
+                                  (assign i (+ i 1)))
+                                (port/close conn))))]
       (ev/join server)
       (ev/join client))
     (port/close listener)
     (let [sorted (sort (->list latencies))]
       (let [sorted-arr (->array sorted)]
-        (println (string/format "  {:<35} p50={:.3f}  p95={:.3f}  p99={:.3f}  max={:.3f} ms"
-                                label
+        (println (string/format (string "  {:<35} p50={:.3f}  p95={:.3f}"
+                                        "  p99={:.3f}  max={:.3f} ms") label
                                 (percentile sorted-arr 50)
                                 (percentile sorted-arr 95)
                                 (percentile sorted-arr 99)
@@ -124,9 +124,9 @@
 (run-test "(warmup)" server-flat 100)
 (println "")
 
-(run-test "A: flat (1 fiber level)"          server-flat          n)
-(run-test "B: protect (2 fiber levels)"      server-protect       n)
-(run-test "C: defer (2 fiber levels)"        server-defer         n)
-(run-test "D: defer+protect (3 levels)"      server-defer-protect n)
+(run-test "A: flat (1 fiber level)" server-flat n)
+(run-test "B: protect (2 fiber levels)" server-protect n)
+(run-test "C: defer (2 fiber levels)" server-defer n)
+(run-test "D: defer+protect (3 levels)" server-defer-protect n)
 
 (println "\ndone")

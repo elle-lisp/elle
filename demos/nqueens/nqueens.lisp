@@ -12,8 +12,7 @@
   "Walk placed queens checking column conflicts and diagonals."
   (if (empty? remaining)
     true
-    (if (or (= col (first remaining))
-            (= offset (abs (- col (first remaining)))))
+    (if (or (= col (first remaining)) (= offset (abs (- col (first remaining)))))
       false
       (check-safe col (rest remaining) (+ offset 1)))))
 
@@ -26,15 +25,13 @@
   (if (= col n)
     count
     (try-col n (+ col 1) queens row
-      (if (safe? col queens)
-        (search n (+ row 1) (cons col queens) count)
-        count))))
+             (if (safe? col queens)
+               (search n (+ row 1) (cons col queens) count)
+               count))))
 
 (defn search [n row queens count]
   "Recursive backtracking from row, returning total solution count."
-  (if (= row n)
-    (+ count 1)
-    (try-col n 0 queens row count)))
+  (if (= row n) (+ count 1) (try-col n 0 queens row count)))
 
 (defn solve [n]
   "Count all N-Queens solutions for an n*n board."

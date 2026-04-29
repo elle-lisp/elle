@@ -70,9 +70,12 @@
 (let [[s r] (chan)]
   (chan/close-recv r)
   (let [result (chan/send s 42)]
-    (assert (array? result) "chan/send to closed receiver should return an array")
-    (assert (= (length result) 1) "disconnected send result should have 1 element")
-    (assert (= (get result 0) :disconnected) "disconnected send should return [:disconnected]")))
+    (assert (array? result)
+            "chan/send to closed receiver should return an array")
+    (assert (= (length result) 1)
+            "disconnected send result should have 1 element")
+    (assert (= (get result 0) :disconnected)
+            "disconnected send should return [:disconnected]")))
 
 # ============================================================================
 # Test 8: disconnected recv
@@ -81,9 +84,12 @@
 (let [[s r] (chan)]
   (chan/close s)
   (let [result (chan/recv r)]
-    (assert (array? result) "chan/recv from closed sender should return an array")
-    (assert (= (length result) 1) "disconnected recv result should have 1 element")
-    (assert (= (get result 0) :disconnected) "disconnected recv should return [:disconnected]")))
+    (assert (array? result)
+            "chan/recv from closed sender should return an array")
+    (assert (= (length result) 1)
+            "disconnected recv result should have 1 element")
+    (assert (= (get result 0) :disconnected)
+            "disconnected recv should return [:disconnected]")))
 
 # ============================================================================
 # Test 9: chan/clone
@@ -115,19 +121,15 @@
          r2 (chan/recv r)
          r3 (chan/recv r)
          r4 (chan/recv r)]
-    # r1 should be [:ok :empty]
     (assert (= (length r1) 2) "r1 should have 2 elements")
-    (assert (= (get r1 0) :ok) "r1 status should be :ok")
+    (assert (= (get r1 0) :ok) "r1 status should be :ok")  # r2 should be [:ok :full]
     (assert (= (get r1 1) :empty) "r1 message should be :empty")
-    # r2 should be [:ok :full]
     (assert (= (length r2) 2) "r2 should have 2 elements")
     (assert (= (get r2 0) :ok) "r2 status should be :ok")
-    (assert (= (get r2 1) :full) "r2 message should be :full")
-    # r3 should be [:ok :ok]
+    (assert (= (get r2 1) :full) "r2 message should be :full")  # r3 should be [:ok :ok]
     (assert (= (length r3) 2) "r3 should have 2 elements")
     (assert (= (get r3 0) :ok) "r3 status should be :ok")
-    (assert (= (get r3 1) :ok) "r3 message should be :ok")
-    # r4 should be [:ok :disconnected]
+    (assert (= (get r3 1) :ok) "r3 message should be :ok")  # r4 should be [:ok :disconnected]
     (assert (= (length r4) 2) "r4 should have 2 elements")
     (assert (= (get r4 0) :ok) "r4 status should be :ok")
     (assert (= (get r4 1) :disconnected) "r4 message should be :disconnected")))
@@ -152,4 +154,5 @@
   (let [result (chan/select @[r] 10)]
     (assert (array? result) "chan/select should return a tuple")
     (assert (= (length result) 1) "select timeout result should have 1 element")
-    (assert (= (get result 0) :timeout) "select timeout should return [:timeout]")))
+    (assert (= (get result 0) :timeout)
+            "select timeout should return [:timeout]")))

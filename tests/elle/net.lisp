@@ -14,13 +14,16 @@
 
 (assert (port? (tcp/listen "127.0.0.1" 0)) "tcp/listen returns a port")
 
-(let [[ok? _] (protect ((fn () (tcp/listen "127.0.0.1" 99999))))] (assert (not ok?) "tcp/listen with invalid port (99999) signals error"))
+(let [[ok? _] (protect ((fn () (tcp/listen "127.0.0.1" 99999))))]
+  (assert (not ok?) "tcp/listen with invalid port (99999) signals error"))
 
-(let [[ok? _] (protect ((fn () (tcp/listen 42 0))))] (assert (not ok?) "tcp/listen with non-string addr signals error"))
+(let [[ok? _] (protect ((fn () (tcp/listen 42 0))))]
+  (assert (not ok?) "tcp/listen with non-string addr signals error"))
 
 # === TCP/accept ===
 
-(let [[ok? _] (protect ((fn () (tcp/accept 42))))] (assert (not ok?) "tcp/accept with non-port arg signals error"))
+(let [[ok? _] (protect ((fn () (tcp/accept 42))))]
+  (assert (not ok?) "tcp/accept with non-port arg signals error"))
 
 # === UDP/bind ===
 
@@ -42,4 +45,5 @@
 
 # === TCP/shutdown ===
 
-(let [[ok? _] (protect ((fn () (tcp/shutdown 42 :foo))))] (assert (not ok?) "tcp/shutdown with bad keyword signals error"))
+(let [[ok? _] (protect ((fn () (tcp/shutdown 42 :foo))))]
+  (assert (not ok?) "tcp/shutdown with bad keyword signals error"))

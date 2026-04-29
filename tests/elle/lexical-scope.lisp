@@ -4,15 +4,20 @@
 # SECTION 1: Deeply Nested Captures (4+ levels)
 # ============================================================================
 
-(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a b c d))))) 1) 2) 3) 4) 10) "test_capture_from_great_grandparent")
+(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a b c d))))) 1) 2) 3) 4) 10)
+        "test_capture_from_great_grandparent")
 
-(assert (= ((((fn (x) (fn (y) (fn (z) (+ x z)))) 10) 20) 5) 15) "test_capture_skip_levels")
+(assert (= ((((fn (x) (fn (y) (fn (z) (+ x z)))) 10) 20) 5) 15)
+        "test_capture_skip_levels")
 
-(assert (= ((((((fn (a) (fn (b) (fn (c) (fn (d) (fn (e) (+ a b c d e)))))) 1) 2) 3) 4) 5) 15) "test_five_level_nesting")
+(assert (= ((((((fn (a) (fn (b) (fn (c) (fn (d) (fn (e) (+ a b c d e)))))) 1) 2) 3) 4) 5)
+           15) "test_five_level_nesting")
 
-(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a c))))) 10) 20) 30) 40) 40) "test_capture_alternating_levels")
+(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a c))))) 10) 20) 30) 40) 40)
+        "test_capture_alternating_levels")
 
-(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (* a (+ b (- c d))))))) 2) 3) 4) 1) 12) "test_deeply_nested_all_params")
+(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (* a (+ b (- c d))))))) 2) 3) 4) 1)
+           12) "test_deeply_nested_all_params")
 
 # ============================================================================
 # SECTION 2: Mixed Let/Lambda Captures
@@ -25,15 +30,16 @@
 
 (assert (= (let [a 1]
              (let [f ((fn (b)
-                         (let [c 3]
-                           (fn () (+ a b c)))) 2)]
+                        (let [c 3]
+                          (fn () (+ a b c)))) 2)]
                (f))) 6) "test_nested_let_lambda_let")
 
 (assert (= (let [x 5]
              (let [f (fn () x)]
                (f))) 5) "test_lambda_captures_let_binding")
 
-(assert (= (let [x 10 y 20]
+(assert (= (let [x 10
+                 y 20]
              (let [f1 (fn () x)
                    f2 (fn () y)]
                (+ (f1) (f2)))) 30) "test_multiple_lambdas_same_let_scope")
@@ -53,36 +59,72 @@
 # ============================================================================
 
 (assert (= (let [@x 0]
-              (let [inc (fn () (begin (assign x (+ x 1)) x))]
-                (begin (inc) (inc) (inc)))) 3) "test_set_on_let_bound_capture")
+             (let [inc (fn ()
+                         (begin
+                           (assign x (+ x 1))
+                           x))]
+               (begin
+                 (inc)
+                 (inc)
+                 (inc)))) 3) "test_set_on_let_bound_capture")
 
 (assert (= ((fn ()
               (begin
                 (def @counter 0)
-                 (def inc (fn () (begin (assign counter (+ counter 1)) counter)))
-                (begin (inc) (inc) (inc))))) 3) "test_set_on_locally_defined_capture")
+                (def inc
+                  (fn ()
+                    (begin
+                      (assign counter (+ counter 1))
+                      counter)))
+                (begin
+                  (inc)
+                  (inc)
+                  (inc))))) 3) "test_set_on_locally_defined_capture")
 
 (assert (= (let [@x 0]
-              (let [inc (fn () (assign x (+ x 1)))
-                    get (fn () x)]
-                (begin (inc) (inc) (get)))) 2) "test_multiple_closures_share_mutable_capture")
+             (let [inc (fn () (assign x (+ x 1)))
+                   get (fn () x)]
+               (begin
+                 (inc)
+                 (inc)
+                 (get)))) 2) "test_multiple_closures_share_mutable_capture")
 
 (assert (= (let [@x 0]
-             (let [f (fn () (let [@y 0]
-                                (fn () (begin (assign x (+ x 1)) (assign y (+ y 1)) (+ x y)))))]
+             (let [f (fn ()
+                       (let [@y 0]
+                         (fn ()
+                           (begin
+                             (assign x (+ x 1))
+                             (assign y (+ y 1))
+                             (+ x y)))))]
                (let [g (f)]
-                 (begin (g) (g) (g))))) 6) "test_nested_mutable_captures")
+                 (begin
+                   (g)
+                   (g)
+                   (g))))) 6) "test_nested_mutable_captures")
 
 (assert (= (let [@counter 0]
-              (let [f (fn () (fn () (begin (assign counter (+ counter 1)) counter)))]
+             (let [f (fn ()
+                       (fn ()
+                         (begin
+                           (assign counter (+ counter 1))
+                           counter)))]
                (let [g (f)]
-                 (begin (g) (g) (g))))) 3) "test_mutable_capture_across_lambda_levels")
+                 (begin
+                   (g)
+                   (g)
+                   (g))))) 3) "test_mutable_capture_across_lambda_levels")
 
-(assert (= (let [@x 0 @y 0]
-              (let [inc-x (fn () (assign x (+ x 1)))
-                    inc-y (fn () (assign y (+ y 1)))
+(assert (= (let [@x 0
+                 @y 0]
+             (let [inc-x (fn () (assign x (+ x 1)))
+                   inc-y (fn () (assign y (+ y 1)))
                    sum (fn () (+ x y))]
-               (begin (inc-x) (inc-y) (inc-x) (sum)))) 3) "test_multiple_mutable_captures")
+               (begin
+                 (inc-x)
+                 (inc-y)
+                 (inc-x)
+                 (sum)))) 3) "test_multiple_mutable_captures")
 
 # ============================================================================
 # SECTION 4: CPS/Coroutine Captures
@@ -92,21 +134,27 @@
              (let [y 20]
                (let [gen (fn () (yield (+ x y)))]
                  (let [co (make-coroutine gen)]
-                   (coro/resume co))))) 30) "test_coroutine_captures_from_nested_let")
+                   (coro/resume co))))) 30)
+        "test_coroutine_captures_from_nested_let")
 
 (assert (= ((fn (base)
               (let [gen (fn () (yield base))]
                 (let [co (make-coroutine gen)]
-                  (coro/resume co)))) 42) 42) "test_coroutine_captures_lambda_param")
+                  (coro/resume co)))) 42) 42)
+        "test_coroutine_captures_lambda_param")
 
 (assert (= ((fn (a)
               ((fn (b)
                  (let [gen (fn () (yield (+ a b)))]
                    (let [co (make-coroutine gen)]
-                     (coro/resume co)))) 20)) 10) 30) "test_coroutine_captures_multiple_levels")
+                     (coro/resume co)))) 20)) 10) 30)
+        "test_coroutine_captures_multiple_levels")
 
 (assert (= (let [@counter 0]
-              (let [gen (fn () (begin (assign counter (+ counter 1)) (yield counter)))]
+             (let [gen (fn ()
+                         (begin
+                           (assign counter (+ counter 1))
+                           (yield counter)))]
                (let [co (make-coroutine gen)]
                  (coro/resume co)))) 1) "test_coroutine_with_mutable_capture")
 
@@ -131,7 +179,9 @@
                  (g)))) 20) "test_shadowing_in_nested_scopes")
 
 (assert (= (let [x 10]
-             (let [f (fn () (let [x 20] (fn () x)))]
+             (let [f (fn ()
+                       (let [x 20]
+                         (fn () x)))]
                (let [g (f)]
                  (g)))) 20) "test_capture_with_shadowing_outer")
 
@@ -146,8 +196,15 @@
                  (g)))) 10) "test_capture_in_conditional")
 
 (assert (= (let [@x 0]
-              (let [f (fn () (begin (assign x (+ x 1)) x))]
-                (begin (f) (f) (f) x))) 3) "test_capture_in_loop_body")
+             (let [f (fn ()
+                       (begin
+                         (assign x (+ x 1))
+                         x))]
+               (begin
+                 (f)
+                 (f)
+                 (f)
+                 x))) 3) "test_capture_in_loop_body")
 
 # ============================================================================
 # SECTION 6: Edge Cases and Stress Tests
@@ -157,11 +214,16 @@
 
 (assert (= ((fn (x) 42) 10) 42) "test_lambda_unused_parameter")
 
-(assert (= (let [x 10 y 20]
+(assert (= (let [x 10
+                 y 20]
              (let [f (fn () x)]
                (f))) 10) "test_capture_unused_let_binding")
 
-(assert (= (let [a 1 b 2 c 3 d 4 e 5]
+(assert (= (let [a 1
+                 b 2
+                 c 3
+                 d 4
+                 e 5]
              (let [f (fn () (+ a b c d e))]
                (f))) 15) "test_many_captures_same_closure")
 
@@ -181,7 +243,10 @@
                  (g 30)))) 30) "test_nested_lambda_param_shadowing")
 
 (assert (= (let [x 10]
-             (let [f (fn () (begin (def @y (+ x 5)) y))]
+             (let [f (fn ()
+                       (begin
+                         (def @y (+ x 5))
+                         y))]
                (f))) 15) "test_capture_with_define_in_lambda")
 
 (assert (= (let [limit 4]
@@ -200,67 +265,89 @@
 
 (assert (= ((fn (n)
               (begin
-                (def fact (fn (x) (if (= x 0) 1 (* x (fact (- x 1))))))
-                (fact n))) 6) 720) "test_self_recursive_function_via_define_inside_fn")
+                (def fact
+                  (fn (x)
+                    (if (= x 0)
+                      1
+                      (* x (fact (- x 1))))))
+                (fact n))) 6) 720)
+        "test_self_recursive_function_via_define_inside_fn")
 
 (assert (= ((fn ()
               (begin
                 (def @x 42)
                 (def f (fn () x))
-                (f)))) 42) "test_nested_lambda_capturing_locally_defined_variable")
+                (f)))) 42)
+        "test_nested_lambda_capturing_locally_defined_variable")
 
 (assert (= ((fn (initial)
               (begin
                 (def @value initial)
                 (def getter (fn () value))
-                 (def setter (fn (new-val) (assign value new-val)))
+                (def setter (fn (new-val) (assign value new-val)))
                 (setter 42)
-                (getter))) 0) 42) "test_multiple_closures_sharing_mutable_state_via_define")
+                (getter))) 0) 42)
+        "test_multiple_closures_sharing_mutable_state_via_define")
 
 (assert (= ((fn ()
               (begin
                 (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
                 (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
-                (is-even 8)))) true) "test_mutual_recursion_via_define_inside_fn")
+                (is-even 8)))) true)
+        "test_mutual_recursion_via_define_inside_fn")
 
 # ============================================================================
 # SECTION 8: let/letrec inside closures must use StoreCapture, not StoreLocal
 # ============================================================================
 
 (assert (= (begin
-             (def check (fn (val)
-               (let [temp (+ val 1)]
-                 temp)))
+             (def check
+               (fn (val)
+                 (let [temp (+ val 1)]
+                   temp)))
              (let [x 100]
                (check 5)
                x)) 100) "test_let_inside_closure_does_not_corrupt_caller_stack")
 
 (assert (= (begin
-             (def f (fn (a b)
-               (let [sum (+ a b)
-                     diff (- a b)]
-                 (+ sum diff))))
+             (def f
+               (fn (a b)
+                 (let [sum (+ a b)
+                       diff (- a b)]
+                   (+ sum diff))))
              (f 10 3)) 20) "test_let_inside_closure_returns_correct_value")
 
 (assert (= (begin
-             (def process (fn (n)
-               (letrec [helper (fn (x) (if (= x 0) 0 (+ x (helper (- x 1)))))]
-                 (helper n))))
+             (def process
+               (fn (n)
+                 (letrec [helper (fn (x)
+                                   (if (= x 0)
+                                     0
+                                     (+ x (helper (- x 1)))))]
+                   (helper n))))
              (let [result 999]
                (process 5)
-               result)) 999) "test_letrec_inside_closure_does_not_corrupt_caller_stack")
+               result)) 999)
+        "test_letrec_inside_closure_does_not_corrupt_caller_stack")
 
 (assert (= (begin
-             (def f (fn (x) (let [a (+ x 1)] a)))
-             (def g (fn (x) (let [b (* x 2)] b)))
+             (def f
+               (fn (x)
+                 (let [a (+ x 1)]
+                   a)))
+             (def g
+               (fn (x)
+                 (let [b (* x 2)]
+                   b)))
              (let [r1 (f 10)
                    r2 (g 20)]
                (+ r1 r2))) 51) "test_multiple_closures_with_let_dont_interfere")
 
 (assert (= (begin
-             (def checker (fn (s)
-               (let [result (string-contains? s "hello")]
-                 result)))
+             (def checker
+               (fn (s)
+                 (let [result (string-contains? s "hello")]
+                   result)))
              (let [msg "say hello world"]
                (checker msg))) true) "test_closure_let_with_string_operations")
 
@@ -269,19 +356,36 @@
 # ============================================================================
 
 (assert (= (let [@x 0]
-             (begin (assign x 10) x)) 10) "test_set_basic")
+             (begin
+               (assign x 10)
+               x)) 10) "test_set_basic")
 
 (assert (= (let [@x 0]
-             (let [inc (fn () (begin (assign x (+ x 1)) x))]
-               (begin (inc) (inc) (inc)))) 3) "test_set_in_closure")
+             (let [inc (fn ()
+                         (begin
+                           (assign x (+ x 1))
+                           x))]
+               (begin
+                 (inc)
+                 (inc)
+                 (inc)))) 3) "test_set_in_closure")
 
 (assert (= (let [@x 5]
-             (begin (assign x 10) (assign x 20) (assign x 30) x)) 30) "test_set_multiple_times")
+             (begin
+               (assign x 10)
+               (assign x 20)
+               (assign x 30)
+               x)) 30) "test_set_multiple_times")
 
 (assert (= (let [@x 5]
-             (begin (assign x (+ x 10)) x)) 15) "test_set_with_expression")
+             (begin
+               (assign x (+ x 10))
+               x)) 15) "test_set_with_expression")
 
 (assert (= (let [@x 0]
              (let [inc (fn () (assign x (+ x 1)))
                    get (fn () x)]
-               (begin (inc) (inc) (get)))) 2) "test_set_shared_capture")
+               (begin
+                 (inc)
+                 (inc)
+                 (get)))) 2) "test_set_shared_capture")

@@ -27,7 +27,6 @@
   (let* [addr (port/path listener)
          port-num (parse-int (get (string/split addr ":") 1))
          url (string "http://127.0.0.1:" port-num "/v1/metrics")]
-
     (def server (ev/spawn (fn [] (http:serve listener collector-handler))))
 
 
@@ -42,7 +41,7 @@
     # ── 2. http:post with JSON body ───────────────────────────────────
 
     (let [r (http:post url (json-serialize {"test" true})
-               :headers {:content-type "application/json"})]
+                       :headers {:content-type "application/json"})]
       (assert (= r:status 200) "JSON http:post works")
       (assert (= (length received) 2) "collector received JSON post"))
     (println "  2. http:post with JSON body: ok")
@@ -51,18 +50,18 @@
     # ── 3. http:post with telemetry-sized JSON body ───────────────────
 
     (def meter-stub
-      @{:service     "test"
-        :endpoint    url
-        :interval    9999
-        :resource    {"service.name" "test"}
-        :headers     {}
-        :metrics     @[]
+      @{:service "test"
+        :endpoint url
+        :interval 9999
+        :resource {"service.name" "test"}
+        :headers {}
+        :metrics @[]
         :start-nanos 1000000000000000000
-        :shutdown?   false
-        :exporter    nil
+        :shutdown? false
+        :exporter nil
         :temporality :cumulative
-        :enabled     true
-        :on-export   nil})
+        :enabled true
+        :on-export nil})
 
     (def c (telemetry:counter meter-stub "req"))
     (telemetry:add c 1 :attributes {"method" "GET"})
@@ -105,8 +104,9 @@
 
     (while (not (empty? received)) (pop received))
 
-    (def latency (telemetry:histogram meter "latency" :unit "s"
-      :boundaries [0.01 0.05 0.1 0.5 1.0]))
+    (def latency
+      (telemetry:histogram meter "latency" :unit "s"
+                           :boundaries [0.01 0.05 0.1 0.5 1.0]))
     (telemetry:time latency (fn [] (ev/sleep 0.001)) :attributes {"op" "test"})
 
     (telemetry:flush meter)
@@ -122,7 +122,7 @@
     (def @i 0)
     (while (< i 8)
       (telemetry:time latency (fn [] (ev/sleep 0.001))
-        :attributes {"op" (string "req-" i)})
+                      :attributes {"op" (string "req-" i)})
       (assign i (+ i 1)))
 
     (telemetry:flush meter)
@@ -143,20 +143,20 @@
       (let [attrs {"http.method" method "http.route" path "http.status" status}]
         (telemetry:add http-requests 1 :attributes attrs)
         (telemetry:time latency
-          (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
-          :attributes attrs)
+                        (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
+                        :attributes attrs)
         (when price
           (telemetry:add order-revenue price
-            :attributes {"currency" "USD" "region" "us-east"}))))
+                         :attributes {"currency" "USD" "region" "us-east"}))))
 
-    (simulate-request "GET"  "/api/orders"     200 nil)
-    (simulate-request "POST" "/api/orders"     201 49.99)
-    (simulate-request "GET"  "/api/orders/123" 200 nil)
-    (simulate-request "POST" "/api/orders"     201 129.50)
-    (simulate-request "GET"  "/api/orders"     200 nil)
-    (simulate-request "GET"  "/api/health"     200 nil)
-    (simulate-request "GET"  "/api/orders/999" 404 nil)
-    (simulate-request "POST" "/api/orders"     201 24.95)
+    (simulate-request "GET" "/api/orders" 200 nil)
+    (simulate-request "POST" "/api/orders" 201 49.99)
+    (simulate-request "GET" "/api/orders/123" 200 nil)
+    (simulate-request "POST" "/api/orders" 201 129.50)
+    (simulate-request "GET" "/api/orders" 200 nil)
+    (simulate-request "GET" "/api/health" 200 nil)
+    (simulate-request "GET" "/api/orders/999" 404 nil)
+    (simulate-request "POST" "/api/orders" 201 24.95)
 
     (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
@@ -191,14 +191,14 @@
 
     (while (not (empty? received)) (pop received))
 
-    (simulate-request "GET"  "/api/orders"     200 nil)
-    (simulate-request "POST" "/api/orders"     201 49.99)
-    (simulate-request "GET"  "/api/orders/123" 200 nil)
-    (simulate-request "POST" "/api/orders"     201 129.50)
-    (simulate-request "GET"  "/api/orders"     200 nil)
-    (simulate-request "GET"  "/api/health"     200 nil)
-    (simulate-request "GET"  "/api/orders/999" 404 nil)
-    (simulate-request "POST" "/api/orders"     201 24.95)
+    (simulate-request "GET" "/api/orders" 200 nil)
+    (simulate-request "POST" "/api/orders" 201 49.99)
+    (simulate-request "GET" "/api/orders/123" 200 nil)
+    (simulate-request "POST" "/api/orders" 201 129.50)
+    (simulate-request "GET" "/api/orders" 200 nil)
+    (simulate-request "GET" "/api/health" 200 nil)
+    (simulate-request "GET" "/api/orders/999" 404 nil)
+    (simulate-request "POST" "/api/orders" 201 24.95)
 
     (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
@@ -223,14 +223,14 @@
 
     (while (not (empty? received)) (pop received))
 
-    (simulate-request "GET"  "/api/orders"     200 nil)
-    (simulate-request "POST" "/api/orders"     201 49.99)
-    (simulate-request "GET"  "/api/orders/123" 200 nil)
-    (simulate-request "POST" "/api/orders"     201 129.50)
-    (simulate-request "GET"  "/api/orders"     200 nil)
-    (simulate-request "GET"  "/api/health"     200 nil)
-    (simulate-request "GET"  "/api/orders/999" 404 nil)
-    (simulate-request "POST" "/api/orders"     201 24.95)
+    (simulate-request "GET" "/api/orders" 200 nil)
+    (simulate-request "POST" "/api/orders" 201 49.99)
+    (simulate-request "GET" "/api/orders/123" 200 nil)
+    (simulate-request "POST" "/api/orders" 201 129.50)
+    (simulate-request "GET" "/api/orders" 200 nil)
+    (simulate-request "GET" "/api/health" 200 nil)
+    (simulate-request "GET" "/api/orders/999" 404 nil)
+    (simulate-request "POST" "/api/orders" 201 24.95)
 
     (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
     (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
