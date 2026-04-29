@@ -1,5 +1,6 @@
 //! Thread-pool backend and stdin thread for async I/O.
 
+use crate::io::request::SocketOptions;
 use std::os::unix::io::{IntoRawFd, RawFd};
 
 /// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
@@ -20,9 +21,11 @@ pub(super) enum PoolOp {
     },
     ConnectTcp {
         addr: String,
+        options: SocketOptions,
     },
     ConnectUnix {
         path: String,
+        options: SocketOptions,
     },
     SendTo {
         fd: RawFd,
@@ -61,6 +64,10 @@ pub(super) enum PoolOp {
     /// Read until a newline is found or EOF. Loops internally so the caller
     /// always receives data containing `\n` (or the final chunk at EOF).
     ReadLine {
+        fd: RawFd,
+    },
+    /// Read until EOF. Loops internally, accumulating all data.
+    ReadAll {
         fd: RawFd,
     },
     /// Blocking read on an inotify/kqueue fd for filesystem watch events.
@@ -112,41 +119,20 @@ impl ThreadPoolBackend {
             let (result_code, data) = match op {
                 PoolOp::Read { fd, size } => {
                     let mut buf = vec![0u8; size];
-                    let mut total = 0usize;
-                    loop {
-                        let ret = unsafe {
-                            libc::read(
-                                fd,
-                                buf[total..].as_mut_ptr() as *mut libc::c_void,
-                                size - total,
-                            )
-                        };
-                        if ret < 0 {
-                            if total == 0 {
-                                break (
-                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                                    Vec::new(),
-                                );
-                            }
-                            // Return whatever we accumulated before the error
-                            break (total as i32, {
-                                buf.truncate(total);
-                                buf
-                            });
-                        }
-                        if ret == 0 {
-                            break (total as i32, {
-                                buf.truncate(total);
-                                buf
-                            });
-                        }
-                        total += ret as usize;
-                        if total >= size {
-                            break (total as i32, buf);
-                        }
+                    let ret =
+                        unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, size) };
+                    if ret < 0 {
+                        (
+                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                            Vec::new(),
+                        )
+                    } else {
+                        buf.truncate(ret as usize);
+                        (ret as i32, buf)
                     }
                 }
-                PoolOp::ReadLine { fd } => {
+                PoolOp::ReadLine { fd } | PoolOp::ReadAll { fd } => {
+                    let until_newline = matches!(op, PoolOp::ReadLine { .. });
                     let mut accumulated = Vec::new();
                     let mut chunk = vec![0u8; 4096];
                     loop {
@@ -168,22 +154,34 @@ impl ThreadPoolBackend {
                             break (accumulated.len() as i32, accumulated);
                         }
                         accumulated.extend_from_slice(&chunk[..ret as usize]);
-                        if accumulated.contains(&b'\n') {
+                        if until_newline && accumulated.contains(&b'\n') {
                             break (accumulated.len() as i32, accumulated);
                         }
                     }
                 }
                 PoolOp::Write { fd, data } => {
-                    let ret = unsafe {
-                        libc::write(fd, data.as_ptr() as *const libc::c_void, data.len())
-                    };
-                    if ret < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
-                    } else {
-                        (ret as i32, Vec::new())
+                    let mut total = 0usize;
+                    loop {
+                        let ret = unsafe {
+                            libc::write(
+                                fd,
+                                data[total..].as_ptr() as *const libc::c_void,
+                                data.len() - total,
+                            )
+                        };
+                        if ret < 0 {
+                            if total == 0 {
+                                break (
+                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                                    Vec::new(),
+                                );
+                            }
+                            break (total as i32, Vec::new());
+                        }
+                        total += ret as usize;
+                        if total >= data.len() {
+                            break (total as i32, Vec::new());
+                        }
                     }
                 }
                 PoolOp::Flush { fd } => {
@@ -230,10 +228,11 @@ impl ThreadPoolBackend {
                         (new_fd, result_data)
                     }
                 }
-                PoolOp::ConnectTcp { addr } => match std::net::TcpStream::connect(&addr) {
+                PoolOp::ConnectTcp { addr, options } => match std::net::TcpStream::connect(&addr) {
                     Ok(stream) => {
                         let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or(addr);
                         let new_fd = stream.into_raw_fd();
+                        crate::io::request::apply_socket_options(new_fd, &options);
                         (new_fd, peer.into_bytes())
                     }
                     Err(e) => (
@@ -241,7 +240,7 @@ impl ThreadPoolBackend {
                         format!("{}", e).into_bytes(),
                     ),
                 },
-                PoolOp::ConnectUnix { path } => {
+                PoolOp::ConnectUnix { path, options } => {
                     let sock_fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
                     if sock_fd < 0 {
                         (
@@ -249,6 +248,7 @@ impl ThreadPoolBackend {
                             Vec::new(),
                         )
                     } else {
+                        crate::io::request::apply_socket_options(sock_fd, &options);
                         match crate::io::sockaddr::build_unix(&path) {
                             Err(msg) => {
                                 unsafe { libc::close(sock_fd) };

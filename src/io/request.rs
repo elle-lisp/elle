@@ -178,7 +178,8 @@ pub enum IoOp {
     /// Returns the logical byte offset as int.
     Tell,
     /// Accept a connection on a listener. Returns new stream port.
-    Accept,
+    /// Socket options are applied to the accepted fd after accept(2).
+    Accept { options: SocketOptions },
     /// Connect to a remote address. Returns connected stream port.
     Connect { addr: ConnectAddr },
     /// Send data to a remote address via UDP. Returns bytes sent.
@@ -235,11 +236,80 @@ pub enum IoOp {
     },
 }
 
+/// Socket options for connect operations.
+#[derive(Debug, Default, Clone)]
+pub struct SocketOptions {
+    pub sndbuf: Option<i32>,
+    pub rcvbuf: Option<i32>,
+    pub nodelay: Option<bool>,
+    pub keepalive: Option<bool>,
+}
+
+/// Apply socket options (SO_SNDBUF, SO_RCVBUF, TCP_NODELAY, SO_KEEPALIVE) to a socket fd.
+pub(crate) fn apply_socket_options(fd: std::os::unix::io::RawFd, opts: &SocketOptions) {
+    unsafe {
+        if let Some(val) = opts.sndbuf {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &val as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.rcvbuf {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &val as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.nodelay {
+            let opt: i32 = val as i32;
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                &opt as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.keepalive {
+            let opt: i32 = val as i32;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_KEEPALIVE,
+                &opt as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+    }
+}
+
 /// Address for connect operations.
 #[derive(Debug)]
 pub enum ConnectAddr {
-    Tcp { addr: String, port: u16 },
-    Unix { path: String },
+    Tcp {
+        addr: String,
+        port: u16,
+        options: SocketOptions,
+    },
+    Unix {
+        path: String,
+        options: SocketOptions,
+    },
+}
+
+impl ConnectAddr {
+    pub fn options(&self) -> &SocketOptions {
+        match self {
+            ConnectAddr::Tcp { options, .. } => options,
+            ConnectAddr::Unix { options, .. } => options,
+        }
+    }
 }
 
 /// A typed I/O request. Wrapped as ExternalObject with type_name "io-request".

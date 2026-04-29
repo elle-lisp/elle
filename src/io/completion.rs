@@ -171,10 +171,10 @@ pub(super) fn process_raw_completion(
             let fd = connect_fd.unwrap_or(result_code as RawFd);
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
             let peer_addr = match addr {
-                ConnectAddr::Tcp { addr: host, port } => {
-                    crate::io::sockaddr::format_host_port(host, *port)
-                }
-                ConnectAddr::Unix { path } => path.clone(),
+                ConnectAddr::Tcp {
+                    addr: host, port, ..
+                } => crate::io::sockaddr::format_host_port(host, *port),
+                ConnectAddr::Unix { path, .. } => path.clone(),
             };
             let new_port = match addr {
                 ConnectAddr::Tcp { .. } => {
@@ -429,12 +429,14 @@ pub(super) fn process_raw_completion(
                 }
                 IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
                 IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-                IoOp::Accept => {
+                IoOp::Accept { ref options } => {
                     // Accept: result_code is the new fd (from both io_uring and thread pool).
                     // Peer address is obtained via getpeername() — works uniformly.
                     let fd = result_code;
                     let peer_addr = crate::io::sockaddr::peer_address(fd);
                     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+                    // Apply user-specified socket options to the accepted fd.
+                    crate::io::request::apply_socket_options(fd.as_raw_fd(), options);
                     let new_port = match listener_kind {
                         Some(PortKind::TcpListener) => {
                             set_tcp_nodelay(&fd);
