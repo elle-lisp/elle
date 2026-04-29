@@ -8,18 +8,18 @@
 # ── Helpers ──────────────────────────────────────────────────────────
 
 (defn echo-server [listener]
-  "Accept one connection, read until EOF, write it back, close."
+  "Accept one connection, read a chunk, write it back, close."
   (ev/spawn (fn []
     (let [conn (unix/accept listener :timeout 5000)
-          data (port/read-all conn)]
+          data (port/read conn 65536)]
       (port/write conn data)
       (port/close conn)))))
 
 (defn tcp-echo-server [listener]
-  "Accept one connection, read until EOF, write it back, close."
+  "Accept one connection, read a chunk, write it back, close."
   (ev/spawn (fn []
     (let [conn (tcp/accept listener :timeout 5000)
-          data (port/read-all conn)]
+          data (port/read conn 65536)]
       (port/write conn data)
       (port/close conn)))))
 
@@ -35,8 +35,7 @@
   (echo-server listener)
   (let [conn (unix/connect path :sndbuf 1048576 :timeout 5000)]
     (port/write conn "hello-sndbuf")
-    (unix/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-sndbuf") "unix :sndbuf roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -48,8 +47,7 @@
   (echo-server listener)
   (let [conn (unix/connect path :rcvbuf 1048576 :timeout 5000)]
     (port/write conn "hello-rcvbuf")
-    (unix/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-rcvbuf") "unix :rcvbuf roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -61,8 +59,7 @@
   (tcp-echo-server listener)
   (let [conn (tcp/connect "127.0.0.1" port :sndbuf 1048576 :timeout 5000)]
     (port/write conn "hello-tcp-sndbuf")
-    (tcp/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-tcp-sndbuf") "tcp :sndbuf roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -74,8 +71,7 @@
   (tcp-echo-server listener)
   (let [conn (tcp/connect "127.0.0.1" port :nodelay true :timeout 5000)]
     (port/write conn "hello-nodelay")
-    (tcp/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-nodelay") "tcp :nodelay roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -87,8 +83,7 @@
   (tcp-echo-server listener)
   (let [conn (tcp/connect "127.0.0.1" port :keepalive true :timeout 5000)]
     (port/write conn "hello-keepalive")
-    (tcp/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-keepalive") "tcp :keepalive roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -100,8 +95,7 @@
   (tcp-echo-server listener)
   (let [conn (tcp/connect "127.0.0.1" port :rcvbuf 1048576 :timeout 5000)]
     (port/write conn "hello-tcp-rcvbuf")
-    (tcp/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-tcp-rcvbuf") "tcp :rcvbuf roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -113,8 +107,7 @@
   (echo-server listener)
   (let [conn (unix/connect path :keepalive true :timeout 5000)]
     (port/write conn "hello-unix-keepalive")
-    (unix/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "hello-unix-keepalive") "unix :keepalive roundtrip"))
     (port/close conn))
   (port/close listener))
@@ -126,8 +119,7 @@
   (echo-server listener)
   (let [conn (unix/connect path :sndbuf 1048576 :timeout 5000)]
     (port/write conn "combined-test")
-    (unix/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "combined-test") "unix combined :sndbuf :timeout"))
     (port/close conn))
   (port/close listener))
@@ -141,8 +133,7 @@
                :sndbuf 1048576 :rcvbuf 524288 :nodelay true :keepalive true
                :timeout 5000)]
     (port/write conn "all-four-options")
-    (tcp/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "all-four-options") "tcp all four options combined"))
     (port/close conn))
   (port/close listener))
@@ -254,13 +245,12 @@
       port (tcp-port listener)]
   (ev/spawn (fn []
     (let [conn (tcp/accept listener :sndbuf 1048576 :timeout 5000)
-          data (port/read-all conn)]
+          data (port/read conn 65536)]
       (port/write conn data)
       (port/close conn))))
   (let [conn (tcp/connect "127.0.0.1" port :timeout 5000)]
     (port/write conn "accept-tcp-sndbuf")
-    (tcp/shutdown conn :write)
-    (let [resp (string (port/read-all conn))]
+    (let [resp (string (port/read conn 1024))]
       (assert (= resp "accept-tcp-sndbuf") "tcp/accept :sndbuf roundtrip"))
     (port/close conn))
   (port/close listener))

@@ -115,38 +115,16 @@ impl ThreadPoolBackend {
             let (result_code, data) = match op {
                 PoolOp::Read { fd, size } => {
                     let mut buf = vec![0u8; size];
-                    let mut total = 0usize;
-                    loop {
-                        let ret = unsafe {
-                            libc::read(
-                                fd,
-                                buf[total..].as_mut_ptr() as *mut libc::c_void,
-                                size - total,
-                            )
-                        };
-                        if ret < 0 {
-                            if total == 0 {
-                                break (
-                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                                    Vec::new(),
-                                );
-                            }
-                            // Return whatever we accumulated before the error
-                            break (total as i32, {
-                                buf.truncate(total);
-                                buf
-                            });
-                        }
-                        if ret == 0 {
-                            break (total as i32, {
-                                buf.truncate(total);
-                                buf
-                            });
-                        }
-                        total += ret as usize;
-                        if total >= size {
-                            break (total as i32, buf);
-                        }
+                    let ret =
+                        unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, size) };
+                    if ret < 0 {
+                        (
+                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                            Vec::new(),
+                        )
+                    } else {
+                        buf.truncate(ret as usize);
+                        (ret as i32, buf)
                     }
                 }
                 PoolOp::ReadLine { fd } => {
