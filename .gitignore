@@ -1,6 +1,7 @@
 /target
 /.cargo/
 site/
+demos/embedding/chost
 
 # Profiling data
 perf.data
