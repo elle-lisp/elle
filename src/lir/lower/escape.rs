@@ -244,8 +244,13 @@ impl<'a> Lowerer<'a> {
             HirKind::While { .. } => true,
 
             // Loop returns the body's result (non-Recur exit path).
-            HirKind::Loop { body, .. } => {
-                self.result_is_safe_impl(body, scope_bindings, trust_return_safe)
+            // Loop bindings are inner scope — add them to scope_bindings
+            // so that Var references to loop params are correctly treated
+            // as in-scope (not outer).
+            HirKind::Loop { bindings, body } => {
+                let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
+                extended.extend(bindings.iter().map(|(b, init)| (*b, init)));
+                self.result_is_safe_impl(body, &extended, trust_return_safe)
             }
 
             // Recur jumps — never produces a result value.
