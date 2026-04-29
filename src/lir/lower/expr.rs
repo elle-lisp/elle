@@ -73,6 +73,8 @@ impl<'a> Lowerer<'a> {
             } => self.lower_destructure_expr(pattern, value, *strict, &hir.span),
 
             HirKind::While { cond, body } => self.lower_while(cond, body),
+            HirKind::Loop { bindings, body } => self.lower_loop(bindings, body),
+            HirKind::Recur { args } => self.lower_recur(args),
 
             HirKind::And(exprs) => self.lower_and(exprs),
             HirKind::Or(exprs) => self.lower_or(exprs),
@@ -87,6 +89,10 @@ impl<'a> Lowerer<'a> {
             HirKind::Match { value, arms } => self.lower_match(value, arms),
             HirKind::Eval { expr, env } => self.lower_eval(expr, env),
             HirKind::Parameterize { bindings, body } => self.lower_parameterize(bindings, body),
+
+            HirKind::MakeCell { value } => self.lower_make_cell(value),
+            HirKind::DerefCell { cell } => self.lower_deref_cell(cell),
+            HirKind::SetCell { cell, value } => self.lower_set_cell(cell, value),
 
             HirKind::Error => Err(format!(
                 "internal: error poison node in lowerer at {}",
@@ -204,51 +210,87 @@ impl<'a> Lowerer<'a> {
         Ok(result_reg)
     }
 
+    /// Collect Define and Destructure bindings reachable through
+    /// structural wrappings (Let, Begin, Loop, Block) without crossing
+    /// Lambda or branching boundaries (If, Match, Cond). Used by the
+    /// Begin pre-pass to pre-allocate slots for mutual recursion.
+    ///
+    /// Only scans through Let/Begin/Loop/Block — these are structural
+    /// wrappers. Does NOT scan into If/Match/Cond because different
+    /// branches may define bindings with overlapping slot allocation.
+    fn collect_preallocate_bindings(hir: &Hir, out: &mut Vec<Binding>) {
+        match &hir.kind {
+            HirKind::Define { binding, .. } => out.push(*binding),
+            HirKind::Destructure { pattern, .. } => out.extend(pattern.bindings().bindings),
+            HirKind::Lambda { .. } => {}
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (_, init) in bindings {
+                    Self::collect_preallocate_bindings(init, out);
+                }
+                Self::collect_preallocate_bindings(body, out);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    Self::collect_preallocate_bindings(e, out);
+                }
+            }
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    Self::collect_preallocate_bindings(init, out);
+                }
+                Self::collect_preallocate_bindings(body, out);
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    Self::collect_preallocate_bindings(e, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn lower_begin(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
         // Pre-allocate slots for all local Define and Destructure bindings
-        // This enables mutual recursion where lambda A captures variable B
-        // before B's Define has been lowered
+        // reachable from this Begin (including inside Let/Loop/If bodies
+        // but NOT inside Lambdas). This enables mutual recursion where
+        // lambda A captures variable B before B's Define has been lowered.
+        let mut bindings_to_preallocate = Vec::new();
         for expr in exprs {
-            let bindings_to_preallocate: Vec<Binding> = match &expr.kind {
-                HirKind::Define { binding, .. } => vec![*binding],
-                HirKind::Destructure { pattern, .. } => pattern.bindings().bindings,
-                _ => continue,
-            };
-            for binding in bindings_to_preallocate {
-                // Allocate slot now so captures can find it
-                if !self.binding_to_slot.contains_key(&binding) {
-                    let needs_capture = self.arena.get(binding).needs_capture();
-                    let slot = self.allocate_slot(binding);
+            Self::collect_preallocate_bindings(expr, &mut bindings_to_preallocate);
+        }
+        for &binding in &bindings_to_preallocate {
+            // Allocate slot now so captures can find it
+            if !self.binding_to_slot.contains_key(&binding) {
+                let needs_capture = self.arena.get(binding).needs_capture();
+                let slot = self.allocate_slot(binding);
 
-                    // Inside lambdas, only LBox locals live in the closure
-                    // environment (LoadCapture/StoreCapture). Non-LBox locals
-                    // use fast local storage (LoadLocal/StoreLocal).
-                    if self.in_lambda && needs_capture {
-                        self.upvalue_bindings.insert(binding);
-                    }
+                // Inside lambdas, only LBox locals live in the closure
+                // environment (LoadCapture/StoreCapture). Non-LBox locals
+                // use fast local storage (LoadLocal/StoreLocal).
+                if self.in_lambda && needs_capture {
+                    self.upvalue_bindings.insert(binding);
+                }
 
-                    // Only create cells for top-level locals (outside lambdas)
-                    // Inside lambdas, the VM creates cells for locally-defined variables
-                    // when building the closure environment
-                    if needs_capture && !self.in_lambda {
-                        // Create a cell containing nil
-                        // This cell will be captured by nested lambdas
-                        // and updated when the Define is lowered
-                        let nil_reg = self.emit_const(LirConst::Nil)?;
-                        let cell_reg = self.fresh_reg();
-                        self.emit(LirInstr::MakeCaptureCell {
-                            dst: cell_reg,
-                            value: nil_reg,
-                        });
-                        self.emit(LirInstr::StoreLocal {
-                            slot,
-                            src: cell_reg,
-                        });
-                    }
+                // Only create cells for top-level locals (outside lambdas)
+                // Inside lambdas, the VM creates cells for locally-defined variables
+                // when building the closure environment
+                if needs_capture && !self.in_lambda {
+                    // Create a cell containing nil
+                    // This cell will be captured by nested lambdas
+                    // and updated when the Define is lowered
+                    let nil_reg = self.emit_const(LirConst::Nil)?;
+                    let cell_reg = self.fresh_reg();
+                    self.emit(LirInstr::MakeCaptureCell {
+                        dst: cell_reg,
+                        value: nil_reg,
+                    });
+                    self.emit(LirInstr::StoreLocal {
+                        slot,
+                        src: cell_reg,
+                    });
                 }
             }
         }
-
         // Now lower all expressions (slots are available for capture lookup)
         // Pop intermediate results to keep the stack clean
         if exprs.is_empty() {
@@ -442,6 +484,142 @@ impl<'a> Lowerer<'a> {
             value: LirConst::Nil,
         });
         Ok(result_reg)
+    }
+
+    fn lower_loop(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> Result<Reg, String> {
+        let result_reg = self.fresh_reg();
+        let flip_eligible = self.can_flip_while_loop(body);
+
+        let loop_label = self.fresh_label();
+        let done_label = self.fresh_label();
+
+        let entry_label = self.current_block.label;
+
+        // Initialize loop bindings
+        let mut binding_slots = Vec::new();
+        for (binding, init) in bindings {
+            let init_reg = self.lower_expr(init)?;
+            let slot = self.allocate_slot(*binding);
+            self.emit(LirInstr::StoreLocal {
+                slot,
+                src: init_reg,
+            });
+            binding_slots.push(slot);
+        }
+
+        // Jump to loop header
+        self.terminate(Terminator::Jump(loop_label));
+        self.finish_block();
+
+        // Loop body
+        if flip_eligible {
+            self.flip_depth += 1;
+        }
+        let scope_eligible = flip_eligible;
+        self.current_block = BasicBlock::new(loop_label);
+
+        if scope_eligible {
+            self.emit_region_enter();
+        }
+
+        // Save depth counters — Recur emits RegionExit which decrements
+        // region_depth in the back-edge path, but that path jumps to the
+        // loop header. The normal exit path needs the original depths.
+        let saved_region_depth = self.region_depth;
+        let saved_flip_depth = self.flip_depth;
+
+        // Push loop context so Recur can find us
+        self.loop_lower_contexts.push(LoopLowerContext {
+            loop_label,
+            binding_slots: binding_slots.clone(),
+            scope_eligible,
+        });
+
+        let body_reg = self.lower_expr(body)?;
+
+        self.loop_lower_contexts.pop();
+
+        // Restore depth counters for normal exit path
+        self.region_depth = saved_region_depth;
+        self.flip_depth = saved_flip_depth;
+
+        // If we reach here (no Recur), body_reg is the loop result.
+        // Store to a slot so it's accessible from the done block
+        // (same pattern as lower_if).
+        let result_slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
+        self.emit(LirInstr::StoreLocal {
+            slot: result_slot,
+            src: body_reg,
+        });
+
+        if scope_eligible {
+            self.emit_region_exit();
+        }
+
+        let back_edge_label = self.current_block.label;
+        self.terminate(Terminator::Jump(done_label));
+        self.finish_block();
+
+        if flip_eligible {
+            self.flip_depth -= 1;
+            self.current_func
+                .while_loops
+                .push((entry_label, back_edge_label, done_label));
+        }
+
+        // Done block — load result from slot
+        self.current_block = BasicBlock::new(done_label);
+        self.emit(LirInstr::LoadLocal {
+            dst: result_reg,
+            slot: result_slot,
+        });
+        Ok(result_reg)
+    }
+
+    fn lower_recur(&mut self, args: &[Hir]) -> Result<Reg, String> {
+        let ctx = self
+            .loop_lower_contexts
+            .last()
+            .ok_or_else(|| "recur outside of loop".to_string())?;
+
+        let loop_label = ctx.loop_label;
+        let binding_slots = ctx.binding_slots.clone();
+        let scope_eligible = ctx.scope_eligible;
+
+        if args.len() != binding_slots.len() {
+            return Err(format!(
+                "recur: expected {} arguments, got {}",
+                binding_slots.len(),
+                args.len()
+            ));
+        }
+
+        // Evaluate all args before storing (avoid order-dependent overwrites)
+        let mut arg_regs = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_regs.push(self.lower_expr(arg)?);
+        }
+
+        // Release iteration allocs before the back-edge jump
+        if scope_eligible {
+            self.emit_region_exit();
+        }
+
+        // Store new values to loop binding slots
+        for (reg, &slot) in arg_regs.iter().zip(&binding_slots) {
+            self.emit(LirInstr::StoreLocal { slot, src: *reg });
+        }
+
+        // Jump back to loop header
+        self.terminate(Terminator::Jump(loop_label));
+        self.finish_block();
+
+        // Dead block after unconditional jump
+        let dead_label = self.fresh_label();
+        self.current_block = BasicBlock::new(dead_label);
+        let nil_reg = self.emit_const(LirConst::Nil)?;
+        Ok(nil_reg)
     }
 
     fn lower_cond(

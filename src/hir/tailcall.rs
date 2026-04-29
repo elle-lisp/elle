@@ -163,6 +163,21 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(body, false, tail_blocks);
         }
 
+        // Loop: binding inits and body are never in tail position
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                mark(init, false, tail_blocks);
+            }
+            mark(body, false, tail_blocks);
+        }
+
+        // Recur: args are not in tail position
+        HirKind::Recur { args } => {
+            for arg in args {
+                mark(arg, false, tail_blocks);
+            }
+        }
+
         // Assign: value is not in tail position
         HirKind::Assign { value, .. } => {
             mark(value, false, tail_blocks);
@@ -197,6 +212,18 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
                 mark(value, false, tail_blocks);
             }
             mark(body, false, tail_blocks);
+        }
+
+        // MakeCell/DerefCell/SetCell: children are not in tail position
+        HirKind::MakeCell { value } => {
+            mark(value, false, tail_blocks);
+        }
+        HirKind::DerefCell { cell } => {
+            mark(cell, false, tail_blocks);
+        }
+        HirKind::SetCell { cell, value } => {
+            mark(cell, false, tail_blocks);
+            mark(value, false, tail_blocks);
         }
 
         // Leaves: nothing to recurse into
@@ -340,7 +367,38 @@ mod tests {
             HirKind::Break { value, .. } => {
                 collect_calls(value, calls);
             }
-            _ => {}
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    collect_calls(init, calls);
+                }
+                collect_calls(body, calls);
+            }
+            HirKind::Recur { args } => {
+                for arg in args {
+                    collect_calls(arg, calls);
+                }
+            }
+            HirKind::MakeCell { value } => {
+                collect_calls(value, calls);
+            }
+            HirKind::DerefCell { cell } => {
+                collect_calls(cell, calls);
+            }
+            HirKind::SetCell { cell, value } => {
+                collect_calls(cell, calls);
+                collect_calls(value, calls);
+            }
+            // Leaves: no children to recurse into
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 

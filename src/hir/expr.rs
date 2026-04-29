@@ -6,6 +6,24 @@ use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::Value;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Unique identifier for a HIR node. Used as a key for analysis side
+/// tables (region assignments, type annotations, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HirId(pub u32);
+
+/// Global monotonic counter for HirId assignment.
+static NEXT_HIR_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Reset the HirId counter (call between compilation units).
+pub fn reset_hir_ids() {
+    NEXT_HIR_ID.store(0, Ordering::Relaxed);
+}
+
+fn fresh_hir_id() -> HirId {
+    HirId(NEXT_HIR_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 /// A declared signal bound on a function parameter.
 #[derive(Debug, Clone)]
@@ -14,26 +32,33 @@ pub struct ParamBound {
     pub signal: Signal,
 }
 
-/// HIR expression with source location and signal
+/// HIR expression with source location, signal, and unique ID.
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub kind: HirKind,
     pub span: Span,
     pub signal: Signal,
+    pub id: HirId,
 }
 
 impl Hir {
-    /// Create a new HIR node
+    /// Create a new HIR node with an auto-assigned unique ID.
     pub fn new(kind: HirKind, span: Span, signal: Signal) -> Self {
-        Hir { kind, span, signal }
+        Hir {
+            kind,
+            span,
+            signal,
+            id: fresh_hir_id(),
+        }
     }
 
-    /// Create a silent HIR node (no signals)
+    /// Create a silent HIR node (no signals) with an auto-assigned ID.
     pub fn silent(kind: HirKind, span: Span) -> Self {
         Hir {
             kind,
             span,
             signal: Signal::silent(),
+            id: fresh_hir_id(),
         }
     }
 }
@@ -183,10 +208,24 @@ pub enum HirKind {
     },
 
     // === Loops ===
-    /// While loop
+    /// While loop (imperative — eliminated by functionalize pass)
     While {
         cond: Box<Hir>,
         body: Box<Hir>,
+    },
+
+    /// Functional loop with named bindings. Produced by the functionalize
+    /// pass from While + Assign. `recur` jumps back to the top with new
+    /// binding values.
+    Loop {
+        bindings: Vec<(Binding, Hir)>,
+        body: Box<Hir>,
+    },
+
+    /// Jump back to the enclosing Loop with new values for its bindings.
+    /// Must appear in tail position within a Loop body.
+    Recur {
+        args: Vec<Hir>,
     },
 
     // === Pattern Matching ===
@@ -240,6 +279,24 @@ pub enum HirKind {
         body: Box<Hir>,
     },
 
+    // === Cell operations (explicit CaptureCell) ===
+    /// Wrap a value in a mutable cell (CaptureCell).
+    /// Produced by functionalize for bindings that needs_capture().
+    MakeCell {
+        value: Box<Hir>,
+    },
+
+    /// Read the current value from a cell.
+    DerefCell {
+        cell: Box<Hir>,
+    },
+
+    /// Write a new value to a cell. Returns the written value.
+    SetCell {
+        cell: Box<Hir>,
+        value: Box<Hir>,
+    },
+
     /// Poison node — inserted when a recoverable error is accumulated
     /// during analysis. The lowerer should never see this; the pipeline
     /// checks for accumulated errors before lowering.
@@ -250,5 +307,116 @@ impl Hir {
     /// Create an error poison node (for error accumulation)
     pub fn error(span: Span) -> Self {
         Hir::silent(HirKind::Error, span)
+    }
+
+    /// Iterate over the immediate child HIR nodes of this node.
+    pub(crate) fn for_each_child(&self, mut f: impl FnMut(&Hir)) {
+        match &self.kind {
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
+
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (_, init) in bindings {
+                    f(init);
+                }
+                f(body);
+            }
+            HirKind::Lambda { body, .. } => f(body),
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                f(cond);
+                f(then_branch);
+                f(else_branch);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    f(e);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    f(e);
+                }
+            }
+            HirKind::Break { value, .. } => f(value),
+            HirKind::Call { func, args, .. } => {
+                f(func);
+                for a in args {
+                    f(&a.expr);
+                }
+            }
+            HirKind::Assign { value, .. }
+            | HirKind::Define { value, .. }
+            | HirKind::MakeCell { value } => f(value),
+            HirKind::DerefCell { cell } => f(cell),
+            HirKind::SetCell { cell, value } => {
+                f(cell);
+                f(value);
+            }
+            HirKind::While { cond, body } => {
+                f(cond);
+                f(body);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    f(init);
+                }
+                f(body);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    f(a);
+                }
+            }
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    f(e);
+                }
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    f(c);
+                    f(b);
+                }
+                if let Some(eb) = else_branch {
+                    f(eb);
+                }
+            }
+            HirKind::Emit { value, .. } => f(value),
+            HirKind::Match { value, arms } => {
+                f(value);
+                for (_, guard, body) in arms {
+                    if let Some(g) = guard {
+                        f(g);
+                    }
+                    f(body);
+                }
+            }
+            HirKind::Destructure { value, .. } => f(value),
+            HirKind::Eval { expr, env } => {
+                f(expr);
+                f(env);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (_, v) in bindings {
+                    f(v);
+                }
+                f(body);
+            }
+        }
     }
 }

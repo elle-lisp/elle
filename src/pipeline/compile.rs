@@ -2,6 +2,7 @@
 
 use super::cache;
 use super::CompileResult;
+use crate::hir::functionalize::functionalize;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
@@ -42,6 +43,7 @@ pub fn compile_to_lir(
     drop(analyzer);
 
     mark_tail_calls(&mut analysis.hir);
+    functionalize(&mut analysis.hir, &mut arena);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -260,6 +262,7 @@ pub fn compile_file_to_lir(
     }
 
     mark_tail_calls(&mut hir);
+    functionalize(&mut hir, &mut arena);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -282,50 +285,37 @@ pub fn compile_file_to_lir(
     result
 }
 
-/// Compile a file as a single synthetic letrec.
+/// Shared front-end for file compilation: parse, epoch migration, macro
+/// expansion (with file-scope stamping and include resolution), analysis,
+/// error surfacing, tail-call marking, and functionalization.
 ///
-/// All top-level forms are analyzed together, enabling mutual recursion.
-/// Returns a single `CompileResult`. Primitives are pre-bound as immutable
-/// Global bindings in an outer scope.
-pub fn compile_file(
+/// Returns `(hir, arena, expander, prim_values, signal_projection)`.
+/// Callers that don't need all fields can ignore the extras.
+#[allow(clippy::type_complexity)]
+fn compile_file_frontend(
     source: &str,
     symbols: &mut SymbolTable,
     source_name: &str,
-) -> Result<CompileResult, String> {
-    compile_file_inner(source, symbols, source_name).map(|(result, _)| result)
-}
-
-/// Like `compile_file`, but also returns the Expander after expansion.
-/// The REPL uses this to persist macro definitions across inputs.
-pub fn compile_file_repl(
-    source: &str,
-    symbols: &mut SymbolTable,
-    source_name: &str,
-) -> Result<(CompileResult, crate::syntax::Expander), String> {
-    compile_file_inner(source, symbols, source_name)
-}
-
-fn compile_file_inner(
-    source: &str,
-    symbols: &mut SymbolTable,
-    source_name: &str,
-) -> Result<(CompileResult, crate::syntax::Expander), String> {
+) -> Result<
+    (
+        crate::hir::Hir,
+        BindingArena,
+        crate::syntax::Expander,
+        std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
+        Option<std::collections::HashMap<String, crate::signals::Signal>>,
+    ),
+    String,
+> {
     intern_primitive_names(symbols);
 
     let mut syntaxes = read_syntax_all_for(source, source_name)?;
-
-    // Phase 0: Epoch migration — rewrite old-epoch syntax before expansion
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
     }
 
-    // Phase 2: Macro expansion (cached VM held only for this phase)
     let (expanded_forms, expander, meta) =
         cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-            // Stamp a file scope on user code so user bindings are
-            // distinguishable from primitives (Flatt 2016 §3). Skip for
-            // internal sources (<stdlib>, <internal>).
             let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
                 syntaxes.into()
             } else {
@@ -367,10 +357,7 @@ fn compile_file_inner(
             Ok((expanded_forms, expander, meta))
         })?;
 
-    // Classify each form
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
-
-    // Compute span covering all forms (or synthetic for empty)
     let span = if expanded_forms.is_empty() {
         Span::synthetic()
     } else {
@@ -379,7 +366,6 @@ fn compile_file_inner(
             .merge(&expanded_forms[expanded_forms.len() - 1].span)
     };
 
-    // Analyze
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(
         symbols,
@@ -396,9 +382,6 @@ fn compile_file_inner(
     let errors = analyzer.take_errors();
     drop(analyzer);
 
-    // If there are accumulated errors, return the first one in the
-    // standard "file:line:col: message" format that main.rs knows how
-    // to parse back into an LError for structured display.
     if !errors.is_empty() {
         let err = &errors[0];
         let msg = match &err.location {
@@ -414,8 +397,62 @@ fn compile_file_inner(
         return Err(msg);
     }
 
-    // Mark tail calls
     mark_tail_calls(&mut hir);
+    functionalize(&mut hir, &mut arena);
+
+    Ok((hir, arena, expander, prim_values, signal_projection))
+}
+
+/// Compile a file as a single synthetic letrec.
+///
+/// Compile to functionalized HIR (for `--dump=fhir`). Returns the HIR tree,
+/// the binding arena, and the symbol name map.
+pub fn compile_file_to_fhir(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<
+    (
+        crate::hir::Hir,
+        BindingArena,
+        std::collections::HashMap<u32, String>,
+    ),
+    String,
+> {
+    let (hir, arena, _expander, _prim_values, _signal_projection) =
+        compile_file_frontend(source, symbols, source_name)?;
+    let names = symbols.all_names();
+    Ok((hir, arena, names))
+}
+
+/// All top-level forms are analyzed together, enabling mutual recursion.
+/// Returns a single `CompileResult`. Primitives are pre-bound as immutable
+/// Global bindings in an outer scope.
+pub fn compile_file(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<CompileResult, String> {
+    compile_file_inner(source, symbols, source_name).map(|(result, _)| result)
+}
+
+/// Like `compile_file`, but also returns the Expander after expansion.
+/// The REPL uses this to persist macro definitions across inputs.
+pub fn compile_file_repl(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<(CompileResult, crate::syntax::Expander), String> {
+    compile_file_inner(source, symbols, source_name)
+}
+
+fn compile_file_inner(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<(CompileResult, crate::syntax::Expander), String> {
+    let (hir, arena, expander, prim_values, signal_projection) =
+        compile_file_frontend(source, symbols, source_name)?;
 
     // Lower to LIR
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);

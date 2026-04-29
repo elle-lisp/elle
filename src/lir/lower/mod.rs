@@ -219,6 +219,14 @@ impl fmt::Display for ScopeStats {
     }
 }
 
+/// Tracks an active Loop during lowering so `Recur` can find its
+/// entry label and binding slots.
+struct LoopLowerContext {
+    loop_label: Label,
+    binding_slots: Vec<u16>,
+    scope_eligible: bool,
+}
+
 /// Tracks an active block during lowering so `break` can find its
 /// result register and exit label.
 struct BlockLowerContext {
@@ -305,6 +313,8 @@ pub struct Lowerer<'a> {
     callee_rest_index: HashMap<Binding, usize>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
+    /// Stack of active loop contexts for `Recur` lowering
+    loop_lower_contexts: Vec<LoopLowerContext>,
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
     /// Current nesting depth of active allocation regions.
@@ -363,6 +373,7 @@ impl<'a> Lowerer<'a> {
             callee_return_params: HashMap::new(),
             callee_rest_index: HashMap::new(),
             immutable_values: HashMap::new(),
+            loop_lower_contexts: Vec::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
             flip_depth: 0,
@@ -993,6 +1004,17 @@ impl<'a> Lowerer<'a> {
                 Self::collect_rest_indices(cond, out);
                 Self::collect_rest_indices(body, out);
             }
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    Self::collect_rest_indices(init, out);
+                }
+                Self::collect_rest_indices(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_rest_indices(a, out);
+                }
+            }
             HirKind::If {
                 cond,
                 then_branch,
@@ -1054,7 +1076,23 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_rest_indices(body, out);
             }
-            _ => {} // Leaves: Var, literals, Quote, Error
+            HirKind::MakeCell { value } => Self::collect_rest_indices(value, out),
+            HirKind::DerefCell { cell } => Self::collect_rest_indices(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_rest_indices(cell, out);
+                Self::collect_rest_indices(value, out);
+            }
+            // Leaves: Var, literals, Quote, Error
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 
@@ -1170,7 +1208,8 @@ impl<'a> Lowerer<'a> {
                 }
                 mask
             }
-            HirKind::While { .. } | HirKind::Destructure { .. } => 0, // returns nil
+            HirKind::While { .. } | HirKind::Loop { .. } => 0, // returns nil
+            HirKind::Recur { .. } => 0,                        // jumps, never returns a value
 
             // Call: map callee's return_params through our args.
             //
@@ -1220,9 +1259,18 @@ impl<'a> Lowerer<'a> {
             // Parameterize: result is body's result
             HirKind::Parameterize { body, .. } => self.compute_return_params(body, params),
 
-            // Assign, Define, Yield, Eval, Break — not return positions
-            // or covered by other analysis.
-            _ => 0,
+            // Cell ops, Assign, Define, Eval, Break, Emit, Destructure
+            // — not return positions or covered by other analysis.
+            HirKind::MakeCell { .. }
+            | HirKind::DerefCell { .. }
+            | HirKind::SetCell { .. }
+            | HirKind::Assign { .. }
+            | HirKind::Define { .. }
+            | HirKind::Emit { .. }
+            | HirKind::Destructure { .. }
+            | HirKind::Eval { .. }
+            | HirKind::Break { .. }
+            | HirKind::Error => 0,
         }
     }
 
@@ -1267,6 +1315,25 @@ impl<'a> Lowerer<'a> {
             HirKind::While { cond, body } => {
                 Self::collect_lambda_defs_with_params(cond, out);
                 Self::collect_lambda_defs_with_params(body, out);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda {
+                        params,
+                        body: lbody,
+                        ..
+                    } = &init.kind
+                    {
+                        out.push((*binding, params.clone(), lbody));
+                    }
+                    Self::collect_lambda_defs_with_params(init, out);
+                }
+                Self::collect_lambda_defs_with_params(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_lambda_defs_with_params(a, out);
+                }
             }
             HirKind::If {
                 cond,
@@ -1329,7 +1396,23 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_lambda_defs_with_params(body, out);
             }
-            _ => {} // Leaves: Var, literals, Quote, Error
+            HirKind::MakeCell { value } => Self::collect_lambda_defs_with_params(value, out),
+            HirKind::DerefCell { cell } => Self::collect_lambda_defs_with_params(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_lambda_defs_with_params(cell, out);
+                Self::collect_lambda_defs_with_params(value, out);
+            }
+            // Leaves: Var, literals, Quote, Error
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 
@@ -1390,13 +1473,28 @@ impl<'a> Lowerer<'a> {
             HirKind::Match { arms, .. } => arms
                 .iter()
                 .all(|(_, _, body)| self.body_result_is_immediate(body)),
-            HirKind::While { .. } => true, // returns nil
+            HirKind::While { .. } | HirKind::Recur { .. } => true, // returns nil
+            HirKind::Loop { body, .. } => self.body_result_is_immediate(body),
 
             // ALL calls (tail or not): check if callee returns immediate
             HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
 
-            // Heap-allocating: Lambda, String, Quote, etc.
-            _ => false,
+            // Cell ops: MakeCell creates a heap cell, DerefCell/SetCell
+            // may return heap values — conservatively not immediate.
+            HirKind::MakeCell { .. } | HirKind::DerefCell { .. } | HirKind::SetCell { .. } => false,
+
+            // Heap-allocating or unknown: Lambda, String, Quote, etc.
+            HirKind::Lambda { .. }
+            | HirKind::String(_)
+            | HirKind::Quote(_)
+            | HirKind::Assign { .. }
+            | HirKind::Define { .. }
+            | HirKind::Destructure { .. }
+            | HirKind::Emit { .. }
+            | HirKind::Eval { .. }
+            | HirKind::Break { .. }
+            | HirKind::Parameterize { .. }
+            | HirKind::Error => false,
         }
     }
 
@@ -1480,6 +1578,20 @@ impl<'a> Lowerer<'a> {
                 Self::collect_lambda_defs(cond, out);
                 Self::collect_lambda_defs(body, out);
             }
+            HirKind::Loop { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda { body: lbody, .. } = &init.kind {
+                        out.push((*binding, lbody));
+                    }
+                    Self::collect_lambda_defs(init, out);
+                }
+                Self::collect_lambda_defs(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_lambda_defs(a, out);
+                }
+            }
             HirKind::If {
                 cond,
                 then_branch,
@@ -1541,7 +1653,23 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_lambda_defs(body, out);
             }
-            _ => {} // Leaves: Var, literals, Quote, Error
+            HirKind::MakeCell { value } => Self::collect_lambda_defs(value, out),
+            HirKind::DerefCell { cell } => Self::collect_lambda_defs(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_lambda_defs(cell, out);
+                Self::collect_lambda_defs(value, out);
+            }
+            // Leaves: Var, literals, Quote, Error
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 

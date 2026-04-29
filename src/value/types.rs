@@ -17,6 +17,12 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SymbolId(pub u32);
 
+impl SymbolId {
+    /// Sentinel value for compiler-generated bindings with no source-level
+    /// symbol name (phi temporaries, etc.). Not a valid interned symbol.
+    pub const SYNTHETIC: Self = Self(u32::MAX);
+}
+
 impl fmt::Display for SymbolId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Symbol({})", self.0)

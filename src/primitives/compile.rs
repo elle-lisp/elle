@@ -154,6 +154,17 @@ fn collect_fn_signals(
             collect_fn_signals(cond, arena, symbols, map);
             collect_fn_signals(body, arena, symbols, map);
         }
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                collect_fn_signals(init, arena, symbols, map);
+            }
+            collect_fn_signals(body, arena, symbols, map);
+        }
+        HirKind::Recur { args } => {
+            for arg in args {
+                collect_fn_signals(arg, arena, symbols, map);
+            }
+        }
         HirKind::Match { value, arms } => {
             collect_fn_signals(value, arena, symbols, map);
             for (_, guard, body) in arms {
@@ -191,6 +202,16 @@ fn collect_fn_signals(
                 collect_fn_signals(v, arena, symbols, map);
             }
             collect_fn_signals(body, arena, symbols, map);
+        }
+        HirKind::MakeCell { value } => {
+            collect_fn_signals(value, arena, symbols, map);
+        }
+        HirKind::DerefCell { cell } => {
+            collect_fn_signals(cell, arena, symbols, map);
+        }
+        HirKind::SetCell { cell, value } => {
+            collect_fn_signals(cell, arena, symbols, map);
+            collect_fn_signals(value, arena, symbols, map);
         }
         // Leaves: no children to recurse into.
         HirKind::Nil
@@ -351,6 +372,17 @@ fn collect_call_edges(
             collect_call_edges(cond, arena, symbols, edges, current_fn);
             collect_call_edges(body, arena, symbols, edges, current_fn);
         }
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                collect_call_edges(init, arena, symbols, edges, current_fn);
+            }
+            collect_call_edges(body, arena, symbols, edges, current_fn);
+        }
+        HirKind::Recur { args } => {
+            for arg in args {
+                collect_call_edges(arg, arena, symbols, edges, current_fn);
+            }
+        }
         HirKind::Match { value, arms } => {
             collect_call_edges(value, arena, symbols, edges, current_fn);
             for (_, guard, body) in arms {
@@ -388,6 +420,16 @@ fn collect_call_edges(
                 collect_call_edges(v, arena, symbols, edges, current_fn);
             }
             collect_call_edges(body, arena, symbols, edges, current_fn);
+        }
+        HirKind::MakeCell { value } => {
+            collect_call_edges(value, arena, symbols, edges, current_fn);
+        }
+        HirKind::DerefCell { cell } => {
+            collect_call_edges(cell, arena, symbols, edges, current_fn);
+        }
+        HirKind::SetCell { cell, value } => {
+            collect_call_edges(cell, arena, symbols, edges, current_fn);
+            collect_call_edges(value, arena, symbols, edges, current_fn);
         }
         HirKind::Nil
         | HirKind::EmptyList

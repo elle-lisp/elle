@@ -243,6 +243,19 @@ impl<'a> Lowerer<'a> {
             // While always returns nil (an immediate).
             HirKind::While { .. } => true,
 
+            // Loop returns the body's result (non-Recur exit path).
+            // Loop bindings are inner scope — add them to scope_bindings
+            // so that Var references to loop params are correctly treated
+            // as in-scope (not outer).
+            HirKind::Loop { bindings, body } => {
+                let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
+                extended.extend(bindings.iter().map(|(b, init)| (*b, init)));
+                self.result_is_safe_impl(body, &extended, trust_return_safe)
+            }
+
+            // Recur jumps — never produces a result value.
+            HirKind::Recur { .. } => true,
+
             // Destructure always returns nil (an immediate).
             HirKind::Destructure { .. } => true,
 
@@ -357,7 +370,8 @@ impl<'a> Lowerer<'a> {
             HirKind::Match { arms, .. } => arms
                 .iter()
                 .all(|(_, _, body)| self.tail_arg_is_safe_extended(body)),
-            HirKind::While { .. } | HirKind::Destructure { .. } => true, // returns nil
+            HirKind::While { .. } | HirKind::Recur { .. } | HirKind::Destructure { .. } => true, // returns nil / jumps
+            HirKind::Loop { body, .. } => self.tail_arg_is_safe_extended(body),
             HirKind::Parameterize { body, .. } => self.tail_arg_is_safe_extended(body),
 
             // Call: check callee_result_immediate OR callee_return_safe
@@ -616,11 +630,22 @@ impl<'a> Lowerer<'a> {
                     || self.walk_for_outward_set(body, scope_bindings)
             }
 
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.walk_for_outward_set(init, scope_bindings))
+                    || self.walk_for_outward_set(body, scope_bindings)
+            }
+
             HirKind::Block { body, .. } => body
                 .iter()
                 .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
             HirKind::Break { value, .. } => self.walk_for_outward_set(value, scope_bindings),
+
+            HirKind::Recur { args } => args
+                .iter()
+                .any(|a| self.walk_for_outward_set(a, scope_bindings)),
 
             HirKind::Match { value, arms } => {
                 self.walk_for_outward_set(value, scope_bindings)
@@ -648,6 +673,13 @@ impl<'a> Lowerer<'a> {
                     self.walk_for_outward_set(param, scope_bindings)
                         || self.walk_for_outward_set(value, scope_bindings)
                 }) || self.walk_for_outward_set(body, scope_bindings)
+            }
+
+            HirKind::MakeCell { value } => self.walk_for_outward_set(value, scope_bindings),
+            HirKind::DerefCell { cell } => self.walk_for_outward_set(cell, scope_bindings),
+            HirKind::SetCell { cell, value } => {
+                self.walk_for_outward_set(cell, scope_bindings)
+                    || self.walk_for_outward_set(value, scope_bindings)
             }
 
             HirKind::Error => false,
@@ -770,6 +802,17 @@ impl<'a> Lowerer<'a> {
                     && self.hir_break_values_safe(body, target_id, scope_bindings)
             }
 
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .all(|(_, init)| self.hir_break_values_safe(init, target_id, scope_bindings))
+                    && self.hir_break_values_safe(body, target_id, scope_bindings)
+            }
+
+            HirKind::Recur { args } => args
+                .iter()
+                .all(|a| self.hir_break_values_safe(a, target_id, scope_bindings)),
+
             HirKind::Block { body, .. } => body
                 .iter()
                 .all(|e| self.hir_break_values_safe(e, target_id, scope_bindings)),
@@ -801,6 +844,17 @@ impl<'a> Lowerer<'a> {
                     self.hir_break_values_safe(param, target_id, scope_bindings)
                         && self.hir_break_values_safe(value, target_id, scope_bindings)
                 }) && self.hir_break_values_safe(body, target_id, scope_bindings)
+            }
+
+            HirKind::MakeCell { value } => {
+                self.hir_break_values_safe(value, target_id, scope_bindings)
+            }
+            HirKind::DerefCell { cell } => {
+                self.hir_break_values_safe(cell, target_id, scope_bindings)
+            }
+            HirKind::SetCell { cell, value } => {
+                self.hir_break_values_safe(cell, target_id, scope_bindings)
+                    && self.hir_break_values_safe(value, target_id, scope_bindings)
             }
 
             HirKind::Error => true,
@@ -904,6 +958,17 @@ impl<'a> Lowerer<'a> {
                     || Self::walk_for_escaping_break(body, inner_blocks)
             }
 
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| Self::walk_for_escaping_break(init, inner_blocks))
+                    || Self::walk_for_escaping_break(body, inner_blocks)
+            }
+
+            HirKind::Recur { args } => args
+                .iter()
+                .any(|a| Self::walk_for_escaping_break(a, inner_blocks)),
+
             HirKind::Match { value, arms } => {
                 Self::walk_for_escaping_break(value, inner_blocks)
                     || arms.iter().any(|(_, guard, body)| {
@@ -930,6 +995,13 @@ impl<'a> Lowerer<'a> {
                     Self::walk_for_escaping_break(param, inner_blocks)
                         || Self::walk_for_escaping_break(value, inner_blocks)
                 }) || Self::walk_for_escaping_break(body, inner_blocks)
+            }
+
+            HirKind::MakeCell { value } => Self::walk_for_escaping_break(value, inner_blocks),
+            HirKind::DerefCell { cell } => Self::walk_for_escaping_break(cell, inner_blocks),
+            HirKind::SetCell { cell, value } => {
+                Self::walk_for_escaping_break(cell, inner_blocks)
+                    || Self::walk_for_escaping_break(value, inner_blocks)
             }
 
             HirKind::Error => false,
@@ -1011,6 +1083,15 @@ impl<'a> Lowerer<'a> {
                 self.all_breaks_have_safe_values(cond) && self.all_breaks_have_safe_values(body)
             }
 
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .all(|(_, init)| self.all_breaks_have_safe_values(init))
+                    && self.all_breaks_have_safe_values(body)
+            }
+
+            HirKind::Recur { args } => args.iter().all(|a| self.all_breaks_have_safe_values(a)),
+
             HirKind::Match { value, arms } => {
                 self.all_breaks_have_safe_values(value)
                     && arms.iter().all(|(_, guard, body)| {
@@ -1034,6 +1115,12 @@ impl<'a> Lowerer<'a> {
                     self.all_breaks_have_safe_values(param)
                         && self.all_breaks_have_safe_values(value)
                 }) && self.all_breaks_have_safe_values(body)
+            }
+
+            HirKind::MakeCell { value } => self.all_breaks_have_safe_values(value),
+            HirKind::DerefCell { cell } => self.all_breaks_have_safe_values(cell),
+            HirKind::SetCell { cell, value } => {
+                self.all_breaks_have_safe_values(cell) && self.all_breaks_have_safe_values(value)
             }
 
             HirKind::Error => true,
@@ -1172,6 +1259,15 @@ impl<'a> Lowerer<'a> {
                 Self::hir_references_binding(cond, binding)
                     || Self::hir_references_binding(body, binding)
             }
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| Self::hir_references_binding(init, binding))
+                    || Self::hir_references_binding(body, binding)
+            }
+            HirKind::Recur { args } => args
+                .iter()
+                .any(|a| Self::hir_references_binding(a, binding)),
             HirKind::Block { body, .. } => body
                 .iter()
                 .any(|e| Self::hir_references_binding(e, binding)),
@@ -1196,6 +1292,12 @@ impl<'a> Lowerer<'a> {
                     Self::hir_references_binding(p, binding)
                         || Self::hir_references_binding(v, binding)
                 }) || Self::hir_references_binding(body, binding)
+            }
+            HirKind::MakeCell { value } => Self::hir_references_binding(value, binding),
+            HirKind::DerefCell { cell } => Self::hir_references_binding(cell, binding),
+            HirKind::SetCell { cell, value } => {
+                Self::hir_references_binding(cell, binding)
+                    || Self::hir_references_binding(value, binding)
             }
         }
     }
@@ -1362,6 +1464,22 @@ impl<'a> Lowerer<'a> {
                     .iter()
                     .any(|(_, v)| self.body_escapes_heap_values(v))
                     || self.body_escapes_heap_values(body)
+            }
+            // Loop: recurse into bindings and body (same as Let/While)
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.body_escapes_heap_values(init))
+                    || self.body_escapes_heap_values(body)
+            }
+            // Recur: args cross iteration boundaries. Only escapes if
+            // any arg is heap-allocated (not an immediate/safe value).
+            HirKind::Recur { args } => args.iter().any(|a| !self.result_is_safe(a, &[])),
+            // Cell ops: structural recursion
+            HirKind::MakeCell { value } => self.body_escapes_heap_values(value),
+            HirKind::DerefCell { cell } => self.body_escapes_heap_values(cell),
+            HirKind::SetCell { cell, value } => {
+                self.body_escapes_heap_values(cell) || self.body_escapes_heap_values(value)
             }
             _ => true,
         }
