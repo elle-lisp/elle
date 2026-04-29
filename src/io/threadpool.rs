@@ -1,5 +1,6 @@
 //! Thread-pool backend and stdin thread for async I/O.
 
+use crate::io::request::SocketOptions;
 use std::os::unix::io::{IntoRawFd, RawFd};
 
 /// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
@@ -20,9 +21,11 @@ pub(super) enum PoolOp {
     },
     ConnectTcp {
         addr: String,
+        options: SocketOptions,
     },
     ConnectUnix {
         path: String,
+        options: SocketOptions,
     },
     SendTo {
         fd: RawFd,
@@ -230,10 +233,11 @@ impl ThreadPoolBackend {
                         (new_fd, result_data)
                     }
                 }
-                PoolOp::ConnectTcp { addr } => match std::net::TcpStream::connect(&addr) {
+                PoolOp::ConnectTcp { addr, options } => match std::net::TcpStream::connect(&addr) {
                     Ok(stream) => {
                         let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or(addr);
                         let new_fd = stream.into_raw_fd();
+                        crate::io::uring::apply_socket_options(new_fd, &options);
                         (new_fd, peer.into_bytes())
                     }
                     Err(e) => (
@@ -241,7 +245,7 @@ impl ThreadPoolBackend {
                         format!("{}", e).into_bytes(),
                     ),
                 },
-                PoolOp::ConnectUnix { path } => {
+                PoolOp::ConnectUnix { path, options } => {
                     let sock_fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
                     if sock_fd < 0 {
                         (
@@ -249,6 +253,7 @@ impl ThreadPoolBackend {
                             Vec::new(),
                         )
                     } else {
+                        crate::io::uring::apply_socket_options(sock_fd, &options);
                         match crate::io::sockaddr::build_unix(&path) {
                             Err(msg) => {
                                 unsafe { libc::close(sock_fd) };

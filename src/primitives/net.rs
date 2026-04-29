@@ -9,7 +9,7 @@
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
 use crate::port::{Port, PortKind};
 use crate::primitives::def::PrimitiveDef;
-use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::primitives::kwarg::{extract_connect_kwargs, extract_keyword_timeout};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
@@ -244,23 +244,29 @@ fn prim_tcp_listen(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (tcp/accept listener [:timeout ms]) → stream-port
+/// (tcp/accept listener [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool] [:timeout ms]) → stream-port
 fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
     let port_val = match extract_port_of_kind(&args[0], PortKind::TcpListener, "tcp/accept") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "tcp/accept") {
-        Ok(t) => t,
+    let kwargs = match extract_connect_kwargs(args, 1, "tcp/accept") {
+        Ok(k) => k,
         Err(e) => return e,
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::Accept, port_val, timeout),
+        IoRequest::with_timeout(
+            IoOp::Accept {
+                options: kwargs.options,
+            },
+            port_val,
+            kwargs.timeout,
+        ),
     )
 }
 
-/// (tcp/connect addr port [:timeout ms]) → stream-port
+/// (tcp/connect addr port [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool] [:timeout ms]) → stream-port
 fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
     let addr = match extract_string(&args[0], "addr", "tcp/connect") {
         Ok(s) => s,
@@ -270,18 +276,22 @@ fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 2, "tcp/connect") {
-        Ok(t) => t,
+    let kwargs = match extract_connect_kwargs(args, 2, "tcp/connect") {
+        Ok(k) => k,
         Err(e) => return e,
     };
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             IoOp::Connect {
-                addr: ConnectAddr::Tcp { addr, port },
+                addr: ConnectAddr::Tcp {
+                    addr,
+                    port,
+                    options: kwargs.options,
+                },
             },
             Value::NIL,
-            timeout,
+            kwargs.timeout,
         ),
     )
 }

@@ -3,7 +3,7 @@
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
 use crate::port::{Port, PortKind};
 use crate::primitives::def::PrimitiveDef;
-use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::primitives::kwarg::extract_connect_kwargs;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
@@ -89,40 +89,49 @@ pub(crate) fn prim_unix_listen(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::external("port", p))
 }
 
-/// (unix/accept listener [:timeout ms]) → stream-port
+/// (unix/accept listener [:sndbuf n] [:rcvbuf n] [:keepalive bool] [:timeout ms]) → stream-port
 pub(crate) fn prim_unix_accept(args: &[Value]) -> (SignalBits, Value) {
     let port_val = match extract_port_of_kind(&args[0], PortKind::UnixListener, "unix/accept") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "unix/accept") {
-        Ok(t) => t,
+    let kwargs = match extract_connect_kwargs(args, 1, "unix/accept") {
+        Ok(k) => k,
         Err(e) => return e,
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::Accept, port_val, timeout),
+        IoRequest::with_timeout(
+            IoOp::Accept {
+                options: kwargs.options,
+            },
+            port_val,
+            kwargs.timeout,
+        ),
     )
 }
 
-/// (unix/connect path [:timeout ms]) → stream-port
+/// (unix/connect path [:sndbuf n] [:rcvbuf n] [:keepalive bool] [:timeout ms]) → stream-port
 pub(crate) fn prim_unix_connect(args: &[Value]) -> (SignalBits, Value) {
     let path = match extract_string(&args[0], "path", "unix/connect") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "unix/connect") {
-        Ok(t) => t,
+    let kwargs = match extract_connect_kwargs(args, 1, "unix/connect") {
+        Ok(k) => k,
         Err(e) => return e,
     };
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             IoOp::Connect {
-                addr: ConnectAddr::Unix { path },
+                addr: ConnectAddr::Unix {
+                    path,
+                    options: kwargs.options,
+                },
             },
             Value::NIL,
-            timeout,
+            kwargs.timeout,
         ),
     )
 }

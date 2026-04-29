@@ -4,13 +4,57 @@ use crate::io::aio::TIMEOUT_USER_DATA_TAG;
 use crate::io::completion::process_raw_completion;
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, IoOp};
+use crate::io::request::{ConnectAddr, IoOp, SocketOptions};
 use crate::io::types::{FdState, PortKey};
 use crate::io::Completion;
 use crate::port::{Port, PortKind};
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
+
+/// Apply socket options (SO_SNDBUF, SO_RCVBUF, TCP_NODELAY, SO_KEEPALIVE) to a socket fd.
+pub(super) fn apply_socket_options(fd: RawFd, opts: &SocketOptions) {
+    unsafe {
+        if let Some(val) = opts.sndbuf {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &val as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.rcvbuf {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &val as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.nodelay {
+            let opt: i32 = val as i32;
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                &opt as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+        if let Some(val) = opts.keepalive {
+            let opt: i32 = val as i32;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_KEEPALIVE,
+                &opt as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+    }
+}
 
 /// Submit a stream I/O operation (Read, ReadLine, ReadAll, Write, Flush).
 ///
@@ -158,6 +202,7 @@ pub(super) fn submit_uring_connect(
         ConnectAddr::Tcp {
             addr: host,
             port: port_num,
+            ..
         } => {
             let resolved = format!("{}:{}", host, port_num)
                 .parse::<std::net::SocketAddr>()
@@ -179,7 +224,7 @@ pub(super) fn submit_uring_connect(
             let (sa_bytes, sa_len) = crate::io::sockaddr::build_inet(&resolved);
             (fd, sa_bytes, sa_len)
         }
-        ConnectAddr::Unix { path } => {
+        ConnectAddr::Unix { path, .. } => {
             let fd =
                 unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0) };
             if fd < 0 {
@@ -205,6 +250,9 @@ pub(super) fn submit_uring_connect(
             (fd, bytes, addr_len)
         }
     };
+
+    // Apply socket options before connect
+    apply_socket_options(sock_fd, addr.options());
 
     // Stash the sockaddr in the caller's buffer so it lives until the CQE
     // completes. The caller passes its buf_handle — no second allocation.
@@ -962,4 +1010,214 @@ pub(super) fn submit_uring_watch_next(
     ring.submit()
         .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify apply_socket_options actually sets SO_SNDBUF on a socket fd.
+    #[test]
+    fn test_apply_sndbuf() {
+        let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let opts = SocketOptions {
+            sndbuf: Some(1048576),
+            ..Default::default()
+        };
+        apply_socket_options(fd, &opts);
+
+        let mut val: i32 = 0;
+        let mut len: libc::socklen_t = std::mem::size_of::<i32>() as libc::socklen_t;
+        let ret = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &mut val as *mut i32 as *mut libc::c_void,
+                &mut len,
+            )
+        };
+        unsafe { libc::close(fd) };
+        assert_eq!(ret, 0, "getsockopt failed");
+        // Linux doubles the value (adds overhead accounting)
+        assert!(
+            val >= 1048576,
+            "SO_SNDBUF should be >= requested: got {}",
+            val
+        );
+    }
+
+    /// Verify apply_socket_options actually sets SO_RCVBUF.
+    #[test]
+    fn test_apply_rcvbuf() {
+        let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let opts = SocketOptions {
+            rcvbuf: Some(524288),
+            ..Default::default()
+        };
+        apply_socket_options(fd, &opts);
+
+        let mut val: i32 = 0;
+        let mut len: libc::socklen_t = std::mem::size_of::<i32>() as libc::socklen_t;
+        let ret = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &mut val as *mut i32 as *mut libc::c_void,
+                &mut len,
+            )
+        };
+        unsafe { libc::close(fd) };
+        assert_eq!(ret, 0, "getsockopt failed");
+        assert!(
+            val >= 524288,
+            "SO_RCVBUF should be >= requested: got {}",
+            val
+        );
+    }
+
+    /// Verify SO_KEEPALIVE is actually enabled.
+    #[test]
+    fn test_apply_keepalive() {
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let opts = SocketOptions {
+            keepalive: Some(true),
+            ..Default::default()
+        };
+        apply_socket_options(fd, &opts);
+
+        let mut val: i32 = 0;
+        let mut len: libc::socklen_t = std::mem::size_of::<i32>() as libc::socklen_t;
+        let ret = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_KEEPALIVE,
+                &mut val as *mut i32 as *mut libc::c_void,
+                &mut len,
+            )
+        };
+        unsafe { libc::close(fd) };
+        assert_eq!(ret, 0, "getsockopt failed");
+        assert_eq!(val, 1, "SO_KEEPALIVE should be enabled");
+    }
+
+    /// Verify TCP_NODELAY is actually enabled.
+    #[test]
+    fn test_apply_nodelay() {
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let opts = SocketOptions {
+            nodelay: Some(true),
+            ..Default::default()
+        };
+        apply_socket_options(fd, &opts);
+
+        let mut val: i32 = 0;
+        let mut len: libc::socklen_t = std::mem::size_of::<i32>() as libc::socklen_t;
+        let ret = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                &mut val as *mut i32 as *mut libc::c_void,
+                &mut len,
+            )
+        };
+        unsafe { libc::close(fd) };
+        assert_eq!(ret, 0, "getsockopt failed");
+        assert_eq!(val, 1, "TCP_NODELAY should be enabled");
+    }
+
+    /// TCP_NODELAY on a Unix socket doesn't panic (silently ignored).
+    #[test]
+    fn test_nodelay_on_unix_is_harmless() {
+        let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let opts = SocketOptions {
+            nodelay: Some(true),
+            ..Default::default()
+        };
+        apply_socket_options(fd, &opts);
+        unsafe { libc::close(fd) };
+    }
+
+    /// Default SocketOptions is a no-op.
+    #[test]
+    fn test_default_is_noop() {
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let mut before: i32 = 0;
+        let mut len: libc::socklen_t = std::mem::size_of::<i32>() as libc::socklen_t;
+        unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &mut before as *mut i32 as *mut libc::c_void,
+                &mut len,
+            );
+        }
+
+        apply_socket_options(fd, &SocketOptions::default());
+
+        let mut after: i32 = 0;
+        unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &mut after as *mut i32 as *mut libc::c_void,
+                &mut len,
+            );
+        }
+        unsafe { libc::close(fd) };
+        assert_eq!(before, after, "default options should not change SO_SNDBUF");
+    }
+
+    /// All four options can be set together without conflict.
+    #[test]
+    fn test_all_combined() {
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket() failed");
+
+        let opts = SocketOptions {
+            sndbuf: Some(2097152),
+            rcvbuf: Some(1048576),
+            nodelay: Some(true),
+            keepalive: Some(true),
+        };
+        apply_socket_options(fd, &opts);
+
+        let read_opt = |level: i32, optname: i32| -> i32 {
+            let mut val: i32 = 0;
+            let mut len: libc::socklen_t = std::mem::size_of::<i32>() as libc::socklen_t;
+            unsafe {
+                libc::getsockopt(
+                    fd,
+                    level,
+                    optname,
+                    &mut val as *mut i32 as *mut libc::c_void,
+                    &mut len,
+                );
+            }
+            val
+        };
+
+        assert!(read_opt(libc::SOL_SOCKET, libc::SO_SNDBUF) >= 2097152);
+        assert!(read_opt(libc::SOL_SOCKET, libc::SO_RCVBUF) >= 1048576);
+        assert_eq!(read_opt(libc::IPPROTO_TCP, libc::TCP_NODELAY), 1);
+        assert_eq!(read_opt(libc::SOL_SOCKET, libc::SO_KEEPALIVE), 1);
+        unsafe { libc::close(fd) };
+    }
 }

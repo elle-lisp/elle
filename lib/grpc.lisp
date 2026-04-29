@@ -44,7 +44,8 @@
 
   (defn grpc-connect [socket-path]
     "Connect to a gRPC server over a Unix socket. Returns an h2 session."
-    (let [transport (h2-transport:tcp (unix/connect socket-path))]
+    (let [transport (h2-transport:tcp
+                      (unix/connect socket-path :sndbuf 2097152))]
       (http2:connect nil :transport transport)))
 
   ## ── Collect gRPC response from stream ──────────────────────────────

@@ -178,7 +178,8 @@ pub enum IoOp {
     /// Returns the logical byte offset as int.
     Tell,
     /// Accept a connection on a listener. Returns new stream port.
-    Accept,
+    /// Socket options are applied to the accepted fd after accept(2).
+    Accept { options: SocketOptions },
     /// Connect to a remote address. Returns connected stream port.
     Connect { addr: ConnectAddr },
     /// Send data to a remote address via UDP. Returns bytes sent.
@@ -235,11 +236,36 @@ pub enum IoOp {
     },
 }
 
+/// Socket options for connect operations.
+#[derive(Debug, Default, Clone)]
+pub struct SocketOptions {
+    pub sndbuf: Option<i32>,
+    pub rcvbuf: Option<i32>,
+    pub nodelay: Option<bool>,
+    pub keepalive: Option<bool>,
+}
+
 /// Address for connect operations.
 #[derive(Debug)]
 pub enum ConnectAddr {
-    Tcp { addr: String, port: u16 },
-    Unix { path: String },
+    Tcp {
+        addr: String,
+        port: u16,
+        options: SocketOptions,
+    },
+    Unix {
+        path: String,
+        options: SocketOptions,
+    },
+}
+
+impl ConnectAddr {
+    pub fn options(&self) -> &SocketOptions {
+        match self {
+            ConnectAddr::Tcp { options, .. } => options,
+            ConnectAddr::Unix { options, .. } => options,
+        }
+    }
 }
 
 /// A typed I/O request. Wrapped as ExternalObject with type_name "io-request".

@@ -366,7 +366,7 @@ impl AsyncBackend {
 
         // Dispatch by operation type
         match &request.op {
-            IoOp::Accept => {
+            IoOp::Accept { ref options } => {
                 let listener_kind = Some(port.kind());
 
                 let AsyncBackendInner {
@@ -390,7 +390,9 @@ impl AsyncBackend {
                 pending.insert(
                     id,
                     PendingOp::Port {
-                        op: IoOp::Accept,
+                        op: IoOp::Accept {
+                            options: options.clone(),
+                        },
                         port_key,
                         port: request.port,
                         buffer_handle: buf_handle,
@@ -639,12 +641,18 @@ impl AsyncBackend {
                         // If parsing failed (hostname), fall back to thread pool
                         // which uses TcpStream::connect (calls getaddrinfo internally).
                         let pool_op = match addr {
-                            ConnectAddr::Tcp { addr: host, port } => PoolOp::ConnectTcp {
+                            ConnectAddr::Tcp {
+                                addr: host,
+                                port,
+                                ref options,
+                            } => PoolOp::ConnectTcp {
                                 addr: crate::io::sockaddr::format_host_port(host, *port),
+                                options: options.clone(),
                             },
-                            ConnectAddr::Unix { path } => {
-                                PoolOp::ConnectUnix { path: path.clone() }
-                            }
+                            ConnectAddr::Unix { path, ref options } => PoolOp::ConnectUnix {
+                                path: path.clone(),
+                                options: options.clone(),
+                            },
                         };
                         network_pool.submit(id, pool_op)?;
                         None
@@ -654,10 +662,18 @@ impl AsyncBackend {
             PlatformBackend::ThreadPool(_) => {
                 let _ = buffer_pool;
                 let pool_op = match addr {
-                    ConnectAddr::Tcp { addr: host, port } => PoolOp::ConnectTcp {
+                    ConnectAddr::Tcp {
+                        addr: host,
+                        port,
+                        ref options,
+                    } => PoolOp::ConnectTcp {
                         addr: crate::io::sockaddr::format_host_port(host, *port),
+                        options: options.clone(),
                     },
-                    ConnectAddr::Unix { path } => PoolOp::ConnectUnix { path: path.clone() },
+                    ConnectAddr::Unix { path, ref options } => PoolOp::ConnectUnix {
+                        path: path.clone(),
+                        options: options.clone(),
+                    },
                 };
                 network_pool.submit(id, pool_op)?;
                 None
@@ -668,11 +684,19 @@ impl AsyncBackend {
             id,
             PendingOp::Connect {
                 addr: match addr {
-                    ConnectAddr::Tcp { addr: host, port } => ConnectAddr::Tcp {
+                    ConnectAddr::Tcp {
+                        addr: host,
+                        port,
+                        ref options,
+                    } => ConnectAddr::Tcp {
                         addr: host.clone(),
                         port: *port,
+                        options: options.clone(),
                     },
-                    ConnectAddr::Unix { path } => ConnectAddr::Unix { path: path.clone() },
+                    ConnectAddr::Unix { path, ref options } => ConnectAddr::Unix {
+                        path: path.clone(),
+                        options: options.clone(),
+                    },
                 },
                 buffer_handle: buf_handle,
                 connect_fd: uring_fd,
@@ -1447,7 +1471,7 @@ impl AsyncBackendInner {
             IoOp::ReadAll => StdinOpKind::ReadAll,
             IoOp::Write { .. }
             | IoOp::Flush
-            | IoOp::Accept
+            | IoOp::Accept { .. }
             | IoOp::Connect { .. }
             | IoOp::SendTo { .. }
             | IoOp::RecvFrom { .. }
@@ -1840,7 +1864,9 @@ mod tests {
         let backend = AsyncBackend::new().unwrap();
         let accept_id = backend
             .submit(&IoRequest {
-                op: IoOp::Accept,
+                op: IoOp::Accept {
+                    options: Default::default(),
+                },
                 port: listener_port,
                 timeout: None,
             })
@@ -1931,7 +1957,9 @@ mod tests {
 
         // Submit Accept
         let accept_req = IoRequest {
-            op: IoOp::Accept,
+            op: IoOp::Accept {
+                options: Default::default(),
+            },
             port: listener_port,
             timeout: None,
         };
@@ -1992,6 +2020,7 @@ mod tests {
                 addr: crate::io::request::ConnectAddr::Tcp {
                     addr: "127.0.0.1".to_string(),
                     port: bound_addr.port(),
+                    options: Default::default(),
                 },
             },
             port: Value::NIL,
@@ -2070,7 +2099,9 @@ mod tests {
 
         let accept_id = backend
             .submit(&IoRequest {
-                op: IoOp::Accept,
+                op: IoOp::Accept {
+                    options: Default::default(),
+                },
                 port: listener_port,
                 timeout: None,
             })
@@ -2082,6 +2113,7 @@ mod tests {
                     addr: crate::io::request::ConnectAddr::Tcp {
                         addr: "127.0.0.1".to_string(),
                         port: bound_port,
+                        options: Default::default(),
                     },
                 },
                 port: Value::NIL,

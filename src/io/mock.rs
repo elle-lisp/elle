@@ -110,7 +110,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::ReadAll => "read-all",
             IoOp::Write { .. } => "write",
             IoOp::Flush => "flush",
-            IoOp::Accept => "accept",
+            IoOp::Accept { .. } => "accept",
             IoOp::Connect { .. } => "connect",
             IoOp::SendTo { .. } => "send-to",
             IoOp::RecvFrom { .. } => "recv-from",
@@ -172,7 +172,7 @@ impl crate::io::IoBackend for MockBackend {
                     });
                     return Ok(id);
                 }
-                IoOp::Accept => Err(error_val("io-error", "mock: accept not supported")),
+                IoOp::Accept { .. } => Err(error_val("io-error", "mock: accept not supported")),
                 IoOp::Connect { .. } => Err(error_val("io-error", "mock: connect not supported")),
                 IoOp::SendTo { data, .. } => {
                     let len = data
