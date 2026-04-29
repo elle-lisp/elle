@@ -39,6 +39,7 @@ pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
         arena,
         renames: HashMap::new(),
         cell_bindings: BTreeSet::new(),
+        loop_params: BTreeSet::new(),
     };
     *hir = ctx.transform(hir);
 }
@@ -49,6 +50,9 @@ struct FnCtx<'a> {
     /// Bindings that have been wrapped in cells (needs_capture).
     /// References to these must go through DerefCell, assigns through SetCell.
     cell_bindings: BTreeSet<Binding>,
+    /// Bindings that are loop parameters — assigns to these should NOT
+    /// be SSA-converted (they're threaded via Recur).
+    loop_params: BTreeSet<Binding>,
 }
 
 impl<'a> FnCtx<'a> {
@@ -62,9 +66,13 @@ impl<'a> FnCtx<'a> {
         new_binding
     }
 
-    /// Look up the current SSA version of a binding.
+    /// Look up the current SSA version of a binding, following chains.
     fn resolve(&self, b: Binding) -> Binding {
-        self.renames.get(&b).copied().unwrap_or(b)
+        let mut current = b;
+        while let Some(&next) = self.renames.get(&current) {
+            current = next;
+        }
+        current
     }
 
     /// Collect bindings that are Assign'd within a HIR subtree,
@@ -140,7 +148,9 @@ impl<'a> FnCtx<'a> {
                 }
             }
 
-            HirKind::While { cond, body } => self.transform_while(cond, body, span, signal),
+            HirKind::While { cond, body } => {
+                self.transform_while(cond, body, span, signal, &BTreeSet::new())
+            }
 
             HirKind::Begin(exprs) => self.transform_begin(exprs, span, signal),
 
@@ -197,15 +207,19 @@ impl<'a> FnCtx<'a> {
             }
 
             // No forking/merging for branches — assigns inside if/match/cond
-            // stay as Assign. Phi insertion deferred to Layer 2.
+            // stay as Assign. Each branch gets independent renames so
+            // while→loop conversions in one branch don't leak into others.
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
                 let new_cond = self.transform(cond);
+                let saved = self.renames.clone();
                 let new_then = self.transform(then_branch);
+                self.renames = saved.clone();
                 let new_else = self.transform(else_branch);
+                self.renames = saved;
                 Hir::new(
                     HirKind::If {
                         cond: Box::new(new_cond),
@@ -363,11 +377,17 @@ impl<'a> FnCtx<'a> {
                 clauses,
                 else_branch,
             } => {
+                let saved = self.renames.clone();
                 let new_clauses: Vec<_> = clauses
                     .iter()
-                    .map(|(c, b)| (self.transform(c), self.transform(b)))
+                    .map(|(c, b)| {
+                        self.renames = saved.clone();
+                        (self.transform(c), self.transform(b))
+                    })
                     .collect();
+                self.renames = saved.clone();
                 let new_else = else_branch.as_ref().map(|e| Box::new(self.transform(e)));
+                self.renames = saved;
                 Hir::new(
                     HirKind::Cond {
                         clauses: new_clauses,
@@ -380,9 +400,11 @@ impl<'a> FnCtx<'a> {
 
             HirKind::Match { value, arms } => {
                 let new_value = self.transform(value);
+                let saved = self.renames.clone();
                 let new_arms: Vec<_> = arms
                     .iter()
                     .map(|(pat, guard, body)| {
+                        self.renames = saved.clone();
                         (
                             pat.clone(),
                             guard.as_ref().map(|g| self.transform(g)),
@@ -390,6 +412,7 @@ impl<'a> FnCtx<'a> {
                         )
                     })
                     .collect();
+                self.renames = saved;
                 Hir::new(
                     HirKind::Match {
                         value: Box::new(new_value),
@@ -471,18 +494,65 @@ impl<'a> FnCtx<'a> {
         }
     }
 
+    /// Collect bindings introduced (Define or Let/Letrec) within a HIR
+    /// subtree. Used to filter out locally-scoped bindings from while→loop
+    /// parameter promotion.
+    fn collect_locally_introduced(hir: &Hir, out: &mut BTreeSet<Binding>) {
+        match &hir.kind {
+            HirKind::Define { binding, value } => {
+                out.insert(*binding);
+                Self::collect_locally_introduced(value, out);
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (b, init) in bindings {
+                    out.insert(*b);
+                    Self::collect_locally_introduced(init, out);
+                }
+                Self::collect_locally_introduced(body, out);
+            }
+            HirKind::Lambda { .. } => {} // Don't look inside lambdas
+            _ => {
+                for_each_child(hir, |child| {
+                    Self::collect_locally_introduced(child, out);
+                });
+            }
+        }
+    }
+
     /// Transform a While loop into a Loop/Recur.
+    ///
+    /// `scope_defines`: bindings Define'd in the while's enclosing begin
+    /// (sibling defines). Only these bindings (plus those defined inside
+    /// the while body) can be promoted to loop parameters. Bindings from
+    /// outer scopes stay as Assign — the lowerer handles them via slot
+    /// mutation.
     fn transform_while(
         &mut self,
         cond: &Hir,
         body: &Hir,
         span: crate::syntax::Span,
         signal: Signal,
+        scope_defines: &BTreeSet<Binding>,
     ) -> Hir {
         // Collect bindings assigned in the loop body (deterministic order)
         let mut assigned = BTreeSet::new();
         self.collect_assigned_bindings(body, &mut assigned);
         self.collect_assigned_bindings(cond, &mut assigned);
+
+        // Filter out bindings introduced inside the while body (via
+        // Define, Let, or Letrec) — they can't be loop parameters since
+        // they don't exist before the loop starts.
+        let mut locally_introduced = BTreeSet::new();
+        Self::collect_locally_introduced(body, &mut locally_introduced);
+        Self::collect_locally_introduced(cond, &mut locally_introduced);
+        assigned.retain(|b| !locally_introduced.contains(b));
+
+        // Only promote bindings that are in the while's enclosing scope
+        // (sibling defines). Outer-scope bindings stay as Assign — their
+        // values are maintained via slot mutation by the lowerer.
+        if !scope_defines.is_empty() {
+            assigned.retain(|b| scope_defines.contains(b));
+        }
 
         if assigned.is_empty() {
             // No mutations — leave as While
@@ -518,8 +588,12 @@ impl<'a> FnCtx<'a> {
 
         // Inside the loop, rename original bindings to fresh versions
         let saved = self.renames.clone();
+        let saved_loop_params = self.loop_params.clone();
         for &(orig, fresh) in &loop_bindings {
             self.renames.insert(orig, fresh);
+            // Mark loop parameters so transform_begin_at skips SSA
+            // conversion of assigns to them — they're threaded via Recur.
+            self.loop_params.insert(fresh);
         }
 
         // Transform condition and body with new names
@@ -541,9 +615,10 @@ impl<'a> FnCtx<'a> {
             body.signal,
         );
 
-        // Restore renames, then set loop parameter versions as active
-        // (code after the loop sees the loop parameter bindings)
+        // Restore renames and loop_params, then set loop parameter
+        // versions as active (code after the loop sees them)
         self.renames = saved;
+        self.loop_params = saved_loop_params;
         for &(orig, fresh) in &loop_bindings {
             self.renames.insert(orig, fresh);
         }
@@ -589,12 +664,16 @@ impl<'a> FnCtx<'a> {
 
         let expr = &exprs[start];
 
-        // Sequential assign → Let wrapping the continuation
+        // Sequential assign → Let wrapping the continuation.
+        // Skip SSA for loop parameters (threaded via Recur) and cell bindings.
         if let HirKind::Assign { target, value } = &expr.kind {
-            if !self.arena.get(*target).needs_capture() {
+            let resolved_target = self.resolve(*target);
+            if !self.arena.get(resolved_target).needs_capture()
+                && !self.loop_params.contains(&resolved_target)
+            {
                 let new_value = self.transform(value);
-                let fresh = self.fresh_version(*target);
-                self.renames.insert(*target, fresh);
+                let fresh = self.fresh_version(resolved_target);
+                self.renames.insert(resolved_target, fresh);
                 let continuation = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
                 return Hir::new(
                     HirKind::Let {
@@ -632,6 +711,24 @@ impl<'a> FnCtx<'a> {
                     signal,
                 );
             }
+        }
+
+        // While in a begin: collect sibling defines for scope context
+        if let HirKind::While { cond, body } = &expr.kind {
+            // Collect Define bindings from earlier expressions in this begin
+            let mut scope_defines = BTreeSet::new();
+            for prior in &exprs[..start] {
+                if let HirKind::Define { binding, .. } = &prior.kind {
+                    scope_defines.insert(*binding);
+                }
+            }
+            let transformed =
+                self.transform_while(cond, body, expr.span.clone(), expr.signal, &scope_defines);
+            if start + 1 >= exprs.len() {
+                return transformed;
+            }
+            let rest = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
+            return Hir::new(HirKind::Begin(vec![transformed, rest]), span, signal);
         }
 
         // Default: transform this expr, then the rest

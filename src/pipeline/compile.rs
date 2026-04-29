@@ -420,6 +420,9 @@ fn compile_file_inner(
     // Mark tail calls
     mark_tail_calls(&mut hir);
 
+    // Functionalize: SSA conversion, while→loop/recur, cell ops
+    functionalize(&mut hir, &mut arena);
+
     // Lower to LIR
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
