@@ -109,7 +109,7 @@ impl JitCompiler {
         // Variadic functions with struct/named varargs require fiber access
         // for error reporting on invalid keyword arguments. The JIT entry
         // block has no fiber pointer, so these fall back to the interpreter.
-        // VarargKind::List variadics are fully supported (cons loop in entry block).
+        // VarargKind::List variadics are fully supported (pair loop in entry block).
         if matches!(lir.arity, Arity::AtLeast(_))
             && !matches!(lir.vararg_kind, crate::hir::VarargKind::List)
         {
@@ -604,7 +604,7 @@ impl JitCompiler {
             let arg_payload = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 8);
             let cons_ref = translator
                 .module
-                .declare_func_in_func(translator.helpers.cons, builder.func);
+                .declare_func_in_func(translator.helpers.pair, builder.func);
             let call_inst = builder.ins().call(
                 cons_ref,
                 &[arg_tag, arg_payload, acc_tag_body, acc_pay_body],

@@ -127,13 +127,13 @@ pub(crate) fn resolve_signal_bits(
         return resolve_keyword_slice(&elems, context);
     }
 
-    // 6. List of keywords (cons chain)
-    if val.as_cons().is_some() {
+    // 6. List of keywords (pair chain)
+    if val.as_pair().is_some() {
         let reg = crate::signals::registry::global_registry().lock().unwrap();
         let mut bits = SignalBits::EMPTY;
         let mut current = *val;
-        while let Some(cons) = current.as_cons() {
-            let name = cons.first.as_keyword_name().ok_or_else(|| {
+        while let Some(pair) = current.as_pair() {
+            let name = pair.first.as_keyword_name().ok_or_else(|| {
                 (
                     SIG_ERROR,
                     error_val(
@@ -141,7 +141,7 @@ pub(crate) fn resolve_signal_bits(
                         format!(
                             "{}: list elements must be keywords, got {}",
                             context,
-                            cons.first.type_name()
+                            pair.first.type_name()
                         ),
                     ),
                 )
@@ -156,7 +156,7 @@ pub(crate) fn resolve_signal_bits(
                 )
             })?;
             bits = bits.union(b);
-            current = cons.rest;
+            current = pair.rest;
         }
         return Ok(bits);
     }

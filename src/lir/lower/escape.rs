@@ -276,6 +276,10 @@ impl<'a> Lowerer<'a> {
             // not on the fiber heap. Safe to return from a scope.
             HirKind::String(_) => true,
 
+            // Intrinsic: safe iff the op doesn't allocate (arithmetic,
+            // comparisons, etc. produce immediates; %list allocates).
+            HirKind::Intrinsic { op, .. } => !op.allocates(),
+
             // Everything else: conservatively unsafe
             // Lambda, Yield, Quote, Eval, Set, Define
             _ => false,
@@ -401,6 +405,9 @@ impl<'a> Lowerer<'a> {
                 false
             }
 
+            // Intrinsic: non-allocating ops return immediates; %list allocates.
+            HirKind::Intrinsic { op, .. } => !op.allocates(),
+
             // Everything else: conservatively unsafe
             _ => false,
         }
@@ -460,8 +467,13 @@ impl<'a> Lowerer<'a> {
     /// escape to external mutable structures — they only produce return
     /// values and/or mutate their arguments (caught separately).
     fn callee_is_primitive(&self, func: &Hir) -> bool {
-        let HirKind::Var(binding) = &func.kind else {
-            return false;
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
         };
         if let Some(val) = self.immutable_values.get(binding) {
             return val.is_native_fn();
@@ -682,6 +694,11 @@ impl<'a> Lowerer<'a> {
                     || self.walk_for_outward_set(value, scope_bindings)
             }
 
+            // Intrinsics never perform outward set! operations; walk args only.
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| self.walk_for_outward_set(a, scope_bindings)),
+
             HirKind::Error => false,
         }
     }
@@ -857,6 +874,11 @@ impl<'a> Lowerer<'a> {
                     && self.hir_break_values_safe(value, target_id, scope_bindings)
             }
 
+            // Intrinsics contain no breaks; walk args.
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .all(|a| self.hir_break_values_safe(a, target_id, scope_bindings)),
+
             HirKind::Error => true,
         }
     }
@@ -875,6 +897,7 @@ impl<'a> Lowerer<'a> {
     /// - Does NOT recurse into `Lambda` bodies (break can't cross fn boundaries).
     /// - DOES recurse into nested `Block` bodies, registering their `BlockId`
     ///   so that inner breaks targeting them are recognized as safe.
+    #[allow(dead_code)]
     pub(super) fn hir_contains_escaping_break(hir: &Hir) -> bool {
         let mut inner_blocks = HashSet::new();
         Self::walk_for_escaping_break(hir, &mut inner_blocks)
@@ -1004,6 +1027,11 @@ impl<'a> Lowerer<'a> {
                     || Self::walk_for_escaping_break(value, inner_blocks)
             }
 
+            // Intrinsics contain no breaks; walk args.
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| Self::walk_for_escaping_break(a, inner_blocks)),
+
             HirKind::Error => false,
         }
     }
@@ -1123,6 +1151,11 @@ impl<'a> Lowerer<'a> {
                 self.all_breaks_have_safe_values(cell) && self.all_breaks_have_safe_values(value)
             }
 
+            // Intrinsics contain no breaks; walk args.
+            HirKind::Intrinsic { args, .. } => {
+                args.iter().all(|a| self.all_breaks_have_safe_values(a))
+            }
+
             HirKind::Error => true,
         }
     }
@@ -1156,7 +1189,7 @@ fn collect_destructure_bindings<'a>(
     match pattern {
         HirPattern::Var(b) => out.push((*b, sentinel)),
         HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
-        HirPattern::Cons { head, tail } => {
+        HirPattern::Pair { head, tail } => {
             collect_destructure_bindings(head, sentinel, out);
             collect_destructure_bindings(tail, sentinel, out);
         }
@@ -1299,6 +1332,10 @@ impl<'a> Lowerer<'a> {
                 Self::hir_references_binding(cell, binding)
                     || Self::hir_references_binding(value, binding)
             }
+            // Intrinsics: walk args for binding references.
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| Self::hir_references_binding(a, binding)),
         }
     }
 
@@ -1355,14 +1392,23 @@ impl<'a> Lowerer<'a> {
                 // Refined for self-tail-calls: per-parameter independence
                 // analysis. A heap-allocating arg is safe if it does not
                 // reference any parameter whose arg is also heap-allocating.
-                // This handles `(loop (- i 1) {:a i :b (cons i nil)})`:
+                // This handles `(loop (- i 1) {:a i :b (pair i nil)})`:
                 // arg 1 references param 0 (i), but param 0's arg is
                 // immediate, so no cross-generation reference chain.
                 if *is_tail {
                     if let (Some(self_binding), Some(ref params)) =
                         (self.current_function_binding, &self.current_function_params)
                     {
-                        if let HirKind::Var(callee_binding) = &func.kind {
+                        // Look through DerefCell for letrec-bound callees
+                        let callee_binding = match &func.kind {
+                            HirKind::Var(b) => Some(b),
+                            HirKind::DerefCell { cell } => match &cell.kind {
+                                HirKind::Var(b) => Some(b),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        if let Some(callee_binding) = callee_binding {
                             if *callee_binding == self_binding {
                                 // Self-tail-call: per-parameter analysis.
                                 let heap_args: Vec<bool> = args
@@ -1481,15 +1527,27 @@ impl<'a> Lowerer<'a> {
             HirKind::SetCell { cell, value } => {
                 self.body_escapes_heap_values(cell) || self.body_escapes_heap_values(value)
             }
+            // Intrinsics never store args into external mutable structures;
+            // %list stores args into its own freshly-allocated result (not external).
+            // Walk args for nested escapes.
+            HirKind::Intrinsic { args, .. } => {
+                args.iter().any(|a| self.body_escapes_heap_values(a))
+            }
             _ => true,
         }
     }
 
     /// Check if a callee is a known rotation-safe user function.
     /// Uses the `callee_rotation_safe` map populated during lowering.
+    /// Looks through DerefCell (functionalize wraps letrec-bound vars).
     fn callee_is_rotation_safe(&self, func: &Hir) -> bool {
-        let HirKind::Var(binding) = &func.kind else {
-            return false;
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
         };
         self.callee_rotation_safe
             .get(binding)
@@ -1498,8 +1556,13 @@ impl<'a> Lowerer<'a> {
     }
 
     fn callee_is_mutating_primitive(&self, func: &Hir) -> bool {
-        let HirKind::Var(binding) = &func.kind else {
-            return false;
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
         };
         let bi = self.arena.get(*binding);
         self.mutating_primitives.contains(&bi.name)

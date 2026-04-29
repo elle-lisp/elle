@@ -321,6 +321,14 @@ impl LivenessAnalyzer {
                 live.union_with(&live_body);
                 self.analyze(cond, &live)
             }
+
+            HirKind::Intrinsic { args, .. } => {
+                let mut live = live_after.clone();
+                for a in args.iter().rev() {
+                    live = self.analyze(a, &live);
+                }
+                live
+            }
         }
     }
 

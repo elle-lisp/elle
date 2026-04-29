@@ -168,11 +168,11 @@ impl VM {
         }
     }
 
-    /// Collect values into an Elle list (cons chain terminated by EMPTY_LIST).
+    /// Collect values into an Elle list (pair chain terminated by EMPTY_LIST).
     fn args_to_list(args: &[Value]) -> Value {
         let mut list = Value::EMPTY_LIST;
         for arg in args.iter().rev() {
-            list = Value::cons(*arg, list);
+            list = Value::pair(*arg, list);
         }
         list
     }

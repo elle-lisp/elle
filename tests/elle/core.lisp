@@ -63,11 +63,11 @@
 (assert (= (length (list 1 2 3)) 3) "list construction length")
 
 # test_cons
-(def @cons-list (cons 1 (cons 2 (cons 3 nil))))
-(assert (list? cons-list) "cons builds list")
-(assert (= (first cons-list) 1) "cons first")
-(assert (= (first (rest cons-list)) 2) "cons second")
-(assert (= (first (rest (rest cons-list))) 3) "cons third")
+(def @pair-list (pair 1 (pair 2 (pair 3 nil))))
+(assert (list? pair-list) "pair builds list")
+(assert (= (first pair-list) 1) "pair first")
+(assert (= (first (rest pair-list)) 2) "pair second")
+(assert (= (first (rest (rest pair-list))) 3) "pair third")
 
 # test_first_rest
 (assert (= (first (list 10 20 30)) 10) "first of list")
@@ -99,7 +99,7 @@
 (assert (= (nil? 0) false) "nil? 0")
 (assert (= (number? 42) true) "number? 42")
 (assert (= (number? nil) false) "number? nil")
-(assert (= (pair? (cons 1 2)) true) "pair? cons")
+(assert (= (pair? (pair 1 2)) true) "pair? pair")
 (assert (= (pair? nil) false) "pair? nil")
 
 # ============================================================================
@@ -285,12 +285,12 @@
 # test_type_of_list_consistency (Issue #308)
 (def @type-empty (type-of ()))
 (def @type-proper (type-of (list 1 2)))
-(def @type-cons (type-of (cons 1 2)))
+(def @type-pair (type-of (pair 1 2)))
 (assert (keyword? type-empty) "type-of empty list is keyword")
 (assert (keyword? type-proper) "type-of proper list is keyword")
-(assert (keyword? type-cons) "type-of cons cell is keyword")
+(assert (keyword? type-pair) "type-of pair cell is keyword")
 (assert (= type-empty type-proper) "empty list and proper list same type")
-(assert (= type-proper type-cons) "proper list and cons cell same type")
+(assert (= type-proper type-pair) "proper list and pair cell same type")
 (assert (= (type-of ()) :list) "type-of () is :list")
 
 # ============================================================================

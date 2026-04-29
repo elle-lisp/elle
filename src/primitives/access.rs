@@ -312,7 +312,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // List (cons-based)
-    if args[0].is_cons() || args[0].is_empty_list() {
+    if args[0].is_pair() || args[0].is_empty_list() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -335,7 +335,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             // Walk to compute length
             let mut len = 0usize;
             let mut cur = args[0];
-            while let Some(c) = cur.as_cons() {
+            while let Some(c) = cur.as_pair() {
                 len += 1;
                 cur = c.rest;
             }
@@ -351,11 +351,11 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             if current.is_empty_list() || current.is_nil() {
                 return (SIG_OK, default);
             }
-            if let Some(cons) = current.as_cons() {
+            if let Some(pair) = current.as_pair() {
                 if i == resolved {
-                    return (SIG_OK, cons.first);
+                    return (SIG_OK, pair.first);
                 }
-                current = cons.rest;
+                current = pair.rest;
                 i += 1;
             } else {
                 return (SIG_OK, default);

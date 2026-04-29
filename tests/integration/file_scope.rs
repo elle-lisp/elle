@@ -129,7 +129,7 @@ fn test_file_primitive_immutability() {
 fn test_file_primitive_shadowing() {
     // File-level def can shadow a primitive.
     assert_eq!(
-        eval_file_source("(def cons 42) cons").unwrap(),
+        eval_file_source("(def pair 42) pair").unwrap(),
         Value::int(42)
     );
 }

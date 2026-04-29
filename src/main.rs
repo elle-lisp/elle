@@ -215,6 +215,17 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
         print!("{}", elle::hir::format_dataflow(&info, &arena, &names));
     }
 
+    if cfg.dump.contains("regions") {
+        println!(";; ── regions (Tofte-Talpin region inference) ─────────────────");
+        let (hir, arena, names) =
+            elle::pipeline::compile_file_to_fhir(contents, symbols, source_name).map_err(|e| {
+                eprintln!("{}", e);
+                e
+            })?;
+        let info = elle::hir::analyze_regions(&hir, &arena);
+        print!("{}", elle::hir::format_regions(&info, &arena, &names));
+    }
+
     let needs_pipeline = cfg
         .dump
         .iter()

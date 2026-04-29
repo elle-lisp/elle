@@ -317,7 +317,7 @@ proptest! {
 
     #[test]
     fn cons_then_first(a in -100i64..100, b in -100i64..100) {
-        let expr = format!("(first (cons {} {}))", a, b);
+        let expr = format!("(first (pair {} {}))", a, b);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -326,7 +326,7 @@ proptest! {
 
     #[test]
     fn cons_then_rest(a in -100i64..100, b in -100i64..100) {
-        let expr = format!("(rest (cons {} {}))", a, b);
+        let expr = format!("(rest (pair {} {}))", a, b);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);

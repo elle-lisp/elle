@@ -15,7 +15,7 @@
     (+ (fib (- n 1)) (fib (- n 2)))))
 
 (defn build-list [n acc]
-  (if (= n 0) acc (build-list (- n 1) (cons n acc))))
+  (if (= n 0) acc (build-list (- n 1) (pair n acc))))
 
 (defn sum-list [lst acc]
   (if (empty? lst)
@@ -27,9 +27,9 @@
 (def scenarios
   [["fib-15" (fn [] (fib 15))]
 
-   ["cons-build-100" (fn [] (build-list 100 (list)))]
+   ["pair-build-100" (fn [] (build-list 100 (list)))]
 
-   ["cons-sum-100" (fn [] (sum-list (build-list 100 (list)) 0))]
+   ["pair-sum-100" (fn [] (sum-list (build-list 100 (list)) 0))]
 
    ["closures-100"
     (fn []
@@ -79,12 +79,12 @@
         (loop 10000)))]
 
    ["tco-alloc-10000"
-    (fn []  # Per-parameter independence: {:a i :b (cons i nil)} does not
+    (fn []  # Per-parameter independence: {:a i :b (pair i nil)} does not
     # reference prev, so no cross-generation chain. Rotation safe.
     (letrec [loop (fn [i prev]
                     (if (= i 0)
                       prev
-                      (loop (- i 1) {:a i :b (cons i nil)})))]
+                      (loop (- i 1) {:a i :b (pair i nil)})))]
       (loop 10000 nil)))]
 
    ["tco-replace-10000"
@@ -98,10 +98,10 @@
 
    ["tco-mixed-10000"
     (fn []  # Mixed: param 1 (prev) is replaced each iteration (rotation-safe),
-    # param 2 (acc) accumulates via cons (rotation-unsafe because
-    # (cons i acc) references acc).
+    # param 2 (acc) accumulates via pair (rotation-unsafe because
+    # (pair i acc) references acc).
     (letrec [loop (fn [i prev acc]
-                    (if (= i 0) acc (loop (- i 1) {:x i} (cons i acc))))]
+                    (if (= i 0) acc (loop (- i 1) {:x i} (pair i acc))))]
       (loop 10000 nil nil)))]
 
    ["let-no-escape"
@@ -127,10 +127,10 @@
                         (loop (- i 1)))))]
       (loop 100)))]
 
-   ["tco-cons-replace"
-    (fn []  # Each iteration replaces prev with a new cons cell.
+   ["tco-pair-replace"
+    (fn []  # Each iteration replaces prev with a new pair cell.
     # DropValue + Cons fuses into ReuseSlotCons (in-place reuse).
-    (letrec [loop (fn [i prev] (if (= i 0) prev (loop (- i 1) (cons i nil))))]
+    (letrec [loop (fn [i prev] (if (= i 0) prev (loop (- i 1) (pair i nil))))]
       (loop 10000 nil)))]
 
    ["string-build-100"
@@ -172,10 +172,10 @@
   (assert (< (m :peak) 10)
           "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
 
-# TCO with per-iteration struct + cons: rotation keeps this bounded at
+# TCO with per-iteration struct + pair: rotation keeps this bounded at
 # function-entry scope. tco-alloc replaces `prev` each iteration; the
 # rotation pool frees the previous iteration's struct (and its inner
-# cons) before the next iteration lives long enough to accumulate.
+# pair) before the next iteration lives long enough to accumulate.
 (let [m (find-result "tco-alloc-10000")]
   (assert (< (m :allocs) 10) "tco-alloc-10000: allocs bounded by rotation"))
 
@@ -187,7 +187,7 @@
   (assert (< (m :peak) 10) "tco-replace-10000: peak bounded (rotation working)"))
 
 # TCO mixed: both `prev` and `acc` are replaced each iteration.
-# `acc` aliases via `(cons i acc)` — trampoline rotation considered
+# `acc` aliases via `(pair i acc)` — trampoline rotation considered
 # this unsafe, but function-level flip rotation (now on by default)
 # resets alloc_count at each tail call, keeping net allocs bounded.
 (let [m (find-result "tco-mixed-10000")]
@@ -199,11 +199,11 @@
   (assert (= (m :allocs) 0)
           "fib-15: pure arithmetic should allocate 0 heap objects"))
 
-# cons-build-100: tail-recursive build-list gets flip rotation,
+# pair-build-100: tail-recursive build-list gets flip rotation,
 # so net allocs (visible_len delta) is bounded, not 100.
-(let [m (find-result "cons-build-100")]
+(let [m (find-result "pair-build-100")]
   (assert (< (m :allocs) 10)
-          "cons-build-100: flip rotation keeps allocs bounded"))
+          "pair-build-100: flip rotation keeps allocs bounded"))
 
 # string-build-100: flip rotation resets alloc_count at each tail call,
 # so net allocs may be 0 despite actual heap activity. Check peak instead.
@@ -219,10 +219,10 @@
   (assert (< (m :allocs) 300)
           "let-drop-struct: allocs bounded by 2 per iteration"))
 
-# tco-cons-replace: rotation should keep allocs at minimum
-(let [m (find-result "tco-cons-replace")]
+# tco-pair-replace: rotation should keep allocs at minimum
+(let [m (find-result "tco-pair-replace")]
   (assert (< (m :allocs) 10)
-          "tco-cons-replace: allocs bounded (rotation working)"))
+          "tco-pair-replace: allocs bounded (rotation working)"))
 
 # All measurements should have non-negative allocs
 (each entry in results

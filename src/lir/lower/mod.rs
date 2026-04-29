@@ -12,7 +12,8 @@ mod pattern;
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
-use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
+use crate::hir::region::{RegionInfo, RegionKind};
+use crate::hir::{Binding, BlockId, CallArg, Hir, HirId, HirKind, HirPattern};
 use crate::syntax::Span;
 use crate::value::fiber::SignalBits;
 use crate::value::{Arity, SymbolId, Value};
@@ -345,6 +346,9 @@ pub struct Lowerer<'a> {
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
     current_function_params: Option<Vec<Binding>>,
+    /// Tofte-Talpin region inference results. Scope decisions use region
+    /// assignments instead of syntactic escape analysis.
+    region_info: RegionInfo,
 }
 
 impl<'a> Lowerer<'a> {
@@ -384,6 +388,7 @@ impl<'a> Lowerer<'a> {
             closures: Vec::new(),
             current_function_binding: None,
             current_function_params: None,
+            region_info: RegionInfo::empty(),
         }
     }
 
@@ -434,6 +439,29 @@ impl<'a> Lowerer<'a> {
     pub fn with_primitive_values(mut self, values: HashMap<Binding, Value>) -> Self {
         self.immutable_values.extend(values);
         self
+    }
+
+    /// Set Tofte-Talpin region inference results.
+    pub fn with_region_info(mut self, info: RegionInfo) -> Self {
+        self.region_info = info;
+        self
+    }
+
+    /// Check region inference for a scope node.
+    fn region_scope_check(&self, hir_id: HirId) -> bool {
+        matches!(
+            self.region_info.scope_kind.get(&hir_id),
+            Some(RegionKind::Scope)
+        )
+    }
+
+    /// Check region inference for a loop node.
+    #[allow(dead_code)]
+    fn region_loop_check(&self, hir_id: HirId) -> bool {
+        matches!(
+            self.region_info.scope_kind.get(&hir_id),
+            Some(RegionKind::Loop | RegionKind::Scope)
+        )
     }
 
     /// Return compile-time scope allocation statistics.
@@ -665,6 +693,7 @@ impl<'a> Lowerer<'a> {
     ///
     /// Increments `scope_stats.scopes_analyzed` and updates rejection counters
     /// for each failed condition (short-circuits on first failure).
+    #[allow(dead_code)]
     fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no captures
@@ -732,6 +761,7 @@ impl<'a> Lowerer<'a> {
     /// Determine if a `letrec` scope's allocations can be safely released.
     /// Identical analysis to `let` — letrec's mutual recursion and two-phase
     /// initialization don't change the escape conditions.
+    #[allow(dead_code)]
     fn can_scope_allocate_letrec(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.can_scope_allocate_let(bindings, body)
     }
@@ -744,6 +774,7 @@ impl<'a> Lowerer<'a> {
     /// 2. Body result is provably immediate
     /// 3. All break values targeting this block are safe immediates
     /// 4. No `set!` to non-local bindings (blocks have no own bindings)
+    #[allow(dead_code)]
     fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
         self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no suspension
@@ -1082,6 +1113,11 @@ impl<'a> Lowerer<'a> {
                 Self::collect_rest_indices(cell, out);
                 Self::collect_rest_indices(value, out);
             }
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    Self::collect_rest_indices(a, out);
+                }
+            }
             // Leaves: Var, literals, Quote, Error
             HirKind::Nil
             | HirKind::EmptyList
@@ -1271,6 +1307,9 @@ impl<'a> Lowerer<'a> {
             | HirKind::Eval { .. }
             | HirKind::Break { .. }
             | HirKind::Error => 0,
+
+            // Intrinsics: result is not one of our params
+            HirKind::Intrinsic { .. } => 0,
         }
     }
 
@@ -1402,6 +1441,11 @@ impl<'a> Lowerer<'a> {
                 Self::collect_lambda_defs_with_params(cell, out);
                 Self::collect_lambda_defs_with_params(value, out);
             }
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    Self::collect_lambda_defs_with_params(a, out);
+                }
+            }
             // Leaves: Var, literals, Quote, Error
             HirKind::Nil
             | HirKind::EmptyList
@@ -1494,6 +1538,7 @@ impl<'a> Lowerer<'a> {
             | HirKind::Eval { .. }
             | HirKind::Break { .. }
             | HirKind::Parameterize { .. }
+            | HirKind::Intrinsic { .. }
             | HirKind::Error => false,
         }
     }
@@ -1659,6 +1704,11 @@ impl<'a> Lowerer<'a> {
                 Self::collect_lambda_defs(cell, out);
                 Self::collect_lambda_defs(value, out);
             }
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    Self::collect_lambda_defs(a, out);
+                }
+            }
             // Leaves: Var, literals, Quote, Error
             HirKind::Nil
             | HirKind::EmptyList
@@ -1715,6 +1765,7 @@ impl<'a> Lowerer<'a> {
     /// still execute within the scope and their suspension is dangerous.
     ///
     /// Returns true if any non-tail sub-expression may suspend.
+    #[allow(dead_code)]
     fn non_tail_subexprs_may_suspend(hir: &Hir) -> bool {
         match &hir.kind {
             // A bare tail call has no preceding expressions.

@@ -422,7 +422,12 @@ impl<'a> Analyzer<'a> {
                                 span
                             ));
                         }
-                        _ => {}
+                        _ => {
+                            // %-intrinsic recognition: %name (not bare %)
+                            if name.starts_with('%') && name.len() > 1 {
+                                return self.analyze_intrinsic(name, &items[1..], span);
+                            }
+                        }
                     }
                 }
 
@@ -430,6 +435,57 @@ impl<'a> Analyzer<'a> {
                 self.analyze_call(items, span)
             }
         }
+    }
+
+    /// Analyze a %-prefixed intrinsic call.
+    fn analyze_intrinsic(
+        &mut self,
+        name: &str,
+        args: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        use crate::hir::expr::IntrinsicOp;
+
+        let op = IntrinsicOp::from_name(name)
+            .ok_or_else(|| format!("{}: unknown intrinsic: {}", span, name))?;
+
+        let (min, max) = op.arity();
+        if args.len() < min || args.len() > max {
+            if min == max {
+                return Err(format!(
+                    "{}: {} requires exactly {} argument{}, got {}",
+                    span,
+                    name,
+                    min,
+                    if min == 1 { "" } else { "s" },
+                    args.len()
+                ));
+            } else {
+                return Err(format!(
+                    "{}: {} requires {}-{} arguments, got {}",
+                    span,
+                    name,
+                    min,
+                    max,
+                    args.len()
+                ));
+            }
+        }
+
+        let mut hir_args = Vec::with_capacity(args.len());
+        let mut signal = Signal::silent();
+        for arg in args {
+            let hir = self.analyze_expr(arg)?;
+            signal = signal.combine(hir.signal);
+            hir_args.push(hir);
+        }
+
+        // %-intrinsics are silent — they never yield, error, or perform IO
+        Ok(Hir::new(
+            HirKind::Intrinsic { op, args: hir_args },
+            span,
+            signal,
+        ))
     }
 
     pub(crate) fn analyze_if(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {

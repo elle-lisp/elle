@@ -317,7 +317,7 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
 fn args_to_list(args: &[Value]) -> Value {
     let mut list = Value::EMPTY_LIST;
     for arg in args.iter().rev() {
-        list = Value::cons(*arg, list);
+        list = Value::pair(*arg, list);
     }
     list
 }

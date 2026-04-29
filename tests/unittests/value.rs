@@ -1,5 +1,5 @@
 // DEFENSE: Value type is the foundation - must be rock solid
-use elle::value::{cons, list, Arity, Value};
+use elle::value::{pair, list, Arity, Value};
 
 #[test]
 fn test_value_equality() {
@@ -42,7 +42,7 @@ fn test_truthiness() {
     assert!(Value::int(1).is_truthy());
     assert!(Value::float(0.0).is_truthy());
     assert!(Value::bool(true).is_truthy());
-    assert!(cons(Value::int(1), Value::EMPTY_LIST).is_truthy());
+    assert!(pair(Value::int(1), Value::EMPTY_LIST).is_truthy());
     assert!(Value::EMPTY_LIST.is_truthy()); // Empty list is truthy
 
     // Falsy values
@@ -73,8 +73,8 @@ fn test_type_conversions() {
 
 #[test]
 fn test_cons_cell() {
-    let cons_cell = cons(Value::int(1), Value::int(2));
-    let cons_ref = cons_cell.as_cons().unwrap();
+    let cons_cell = pair(Value::int(1), Value::int(2));
+    let cons_ref = cons_cell.as_pair().unwrap();
 
     assert_eq!(cons_ref.first, Value::int(1));
     assert_eq!(cons_ref.rest, Value::int(2));
@@ -105,7 +105,7 @@ fn test_empty_list() {
 #[test]
 fn test_improper_list() {
     // (1 . 2) is not a proper list
-    let improper = cons(Value::int(1), Value::int(2));
+    let improper = pair(Value::int(1), Value::int(2));
     assert!(!improper.is_list());
     assert!(improper.list_to_vec().is_err());
 }
@@ -170,10 +170,10 @@ fn test_arity_matching() {
 
 #[test]
 fn test_cons_sharing() {
-    // Cons cells should allow efficient sharing
-    let tail = cons(Value::int(2), Value::EMPTY_LIST);
-    let list1 = cons(Value::int(1), tail);
-    let list2 = cons(Value::int(0), tail);
+    // Pair cells should allow efficient sharing
+    let tail = pair(Value::int(2), Value::EMPTY_LIST);
+    let list1 = pair(Value::int(1), tail);
+    let list2 = pair(Value::int(0), tail);
 
     // Both lists share the same tail
     assert!(list1.is_list());

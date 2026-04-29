@@ -377,7 +377,7 @@
 # test_variadic_defn_fixed_and_rest
 (begin
   (defn f3 (x & rest)
-    (cons x rest))
+    (pair x rest))
   (assert (= (f3 1 2 3) (list 1 2 3)) "variadic defn fixed and rest"))
 
 # test_variadic_let_binding

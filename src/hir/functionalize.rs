@@ -85,12 +85,13 @@ impl<'a> FnCtx<'a> {
     }
 
     /// Collect bindings that are Assign'd within a HIR subtree,
-    /// excluding CaptureCell bindings. Uses BTreeSet for deterministic
-    /// ordering (reproducible Loop binding order across runs).
+    /// excluding CaptureCell and cell_bindings. Uses BTreeSet for
+    /// deterministic ordering (reproducible Loop binding order across runs).
     fn collect_assigned_bindings(&self, hir: &Hir, out: &mut BTreeSet<Binding>) {
         match &hir.kind {
             HirKind::Assign { target, value } => {
-                if !self.arena.get(*target).needs_capture() {
+                if !self.arena.get(*target).needs_capture() && !self.cell_bindings.contains(target)
+                {
                     out.insert(*target);
                 }
                 self.collect_assigned_bindings(value, out);
@@ -215,13 +216,18 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // If does NOT save/restore renames across branches (unlike
-            // Match/Cond). Phi-insertion for If is handled in
-            // transform_begin via transform_if_with_phi, which manages
-            // branch isolation and phi-lets explicitly. Doing
-            // save/restore here would lose the SSA versions created
-            // inside branches, breaking phi-insertion's ability to
-            // read which bindings each branch assigned.
+            // If: transform branches without save/restore. SSA renames
+            // from assigns in branches propagate outward. When the If
+            // is directly in a begin sequence, transform_begin_at handles
+            // phi-insertion for proper merge semantics. When nested
+            // (e.g. inside let body), assigns in branches are either:
+            // - cell-backed (letrec mutated bindings) → set-cell is correct
+            // - in a begin context that handles phi-insertion
+            // - simple cases where propagation is harmless
+            //
+            // Cond/Match DO save/restore because they have multiple
+            // alternative branches; If has exactly two branches and the
+            // begin-level phi handles the merge.
             HirKind::If {
                 cond,
                 then_branch,
@@ -270,8 +276,15 @@ impl<'a> FnCtx<'a> {
                 // handles two-pass cell init (create cell in pass 1, store
                 // value into existing cell in pass 2) so that forward
                 // references through closures see the shared cell.
+                //
+                // Also mark mutated bindings as cell-backed even when not
+                // captured. This ensures assigns in branches (if/match/cond)
+                // go through SetCell rather than SSA conversion, which is
+                // necessary because SSA renames from one branch must not
+                // leak to subsequent letrec bindings.
                 for (b, _) in bindings {
-                    if self.arena.get(*b).needs_capture() {
+                    let bi = self.arena.get(*b);
+                    if bi.needs_capture() || bi.is_mutated {
                         self.cell_bindings.insert(*b);
                     }
                 }
@@ -535,6 +548,18 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
+            HirKind::Intrinsic { op, args } => {
+                let new_args: Vec<_> = args.iter().map(|a| self.transform(a)).collect();
+                Hir::new(
+                    HirKind::Intrinsic {
+                        op: *op,
+                        args: new_args,
+                    },
+                    span,
+                    signal,
+                )
+            }
+
             // Leaves: no children to transform
             HirKind::Nil
             | HirKind::EmptyList
@@ -606,20 +631,6 @@ impl<'a> FnCtx<'a> {
         // values are maintained via slot mutation by the lowerer.
         if !scope_defines.is_empty() {
             assigned.retain(|b| scope_defines.contains(b));
-        }
-
-        if assigned.is_empty() {
-            // No mutations — leave as While
-            let new_cond = self.transform(cond);
-            let new_body = self.transform(body);
-            return Hir::new(
-                HirKind::While {
-                    cond: Box::new(new_cond),
-                    body: Box::new(new_body),
-                },
-                span,
-                signal,
-            );
         }
 
         // Create fresh bindings for loop parameters
@@ -734,6 +745,7 @@ impl<'a> FnCtx<'a> {
         if let HirKind::Assign { target, value } = &expr.kind {
             let resolved_target = self.resolve(*target);
             if !self.arena.get(resolved_target).needs_capture()
+                && !self.cell_bindings.contains(&resolved_target)
                 && !self.assign_preserved.contains(&resolved_target)
             {
                 let new_value = self.transform(value);

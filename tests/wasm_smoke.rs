@@ -92,7 +92,7 @@ fn test_call_length() {
 
 #[test]
 fn test_call_cons() {
-    assert_eq!(eval("(cons 1 (list 2 3))"), "(1 2 3)");
+    assert_eq!(eval("(pair 1 (list 2 3))"), "(1 2 3)");
 }
 
 #[test]
@@ -121,8 +121,8 @@ fn test_array_literal() {
 
 #[test]
 fn test_first_rest() {
-    assert_eq!(eval("(first (cons 1 2))"), "1");
-    assert_eq!(eval("(rest (cons 1 2))"), "2");
+    assert_eq!(eval("(first (pair 1 2))"), "1");
+    assert_eq!(eval("(rest (pair 1 2))"), "2");
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn test_map_over_list() {
         eval(concat!(
             "(defn map [f lst]\n",
             "  (if (empty? lst) ()\n",
-            "    (cons (f (first lst)) (map f (rest lst)))))\n",
+            "    (pair (f (first lst)) (map f (rest lst)))))\n",
             "(map (fn [x] (* x x)) (list 1 2 3))"
         )),
         "(1 4 9)"

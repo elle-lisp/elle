@@ -1,51 +1,86 @@
 (elle/epoch 9)
-## Mutability tests — epoch 8 immutable-by-default bindings
-## Positive tests only; negative tests (reject assign) stay in Rust integration tests.
+# Mutability regression tests
+#
+# Guards against assign-in-dead-branch executing unconditionally.
 
-## ── def @ ──────────────────────────────────────────────────────────────
+# ── Assign in dead if-then branch (with begin) ───────────────
 
+# test_assign_dead_branch_begin
+# (when cond body) expands to (if cond (begin body) nil).
+# Assign inside the begin must NOT execute when condition is false.
 (def @x 1)
-(assign x 2)
-(assert (= x 2) "def @ allows assign")
+(if (> 0 1)
+  (begin
+    (assign x 99))
+  nil)
+(assert (= x 1) "assign in dead if-then+begin should not execute")
 
-## ── let @ ──────────────────────────────────────────────────────────────
+# test_assign_dead_when
+(def @y 1)
+(when (> 0 1) (assign y 99))
+(assert (= y 1) "assign in dead when should not execute")
 
-(let [@y 10]
-  (assign y 20)
-  (assert (= y 20) "let @ allows assign"))
+# test_assign_live_branch_begin
+(def @z 1)
+(if (> 1 0)
+  (begin
+    (assign z 99))
+  nil)
+(assert (= z 99) "assign in live if-then+begin should execute")
 
-## ── letrec @ ───────────────────────────────────────────────────────────
+# test_assign_live_when
+(def @w 1)
+(when (> 1 0) (assign w 99))
+(assert (= w 99) "assign in live when should execute")
 
-(letrec [@count 0
-         tick (fn []
-                (assign count (inc count))
-                count)]
-  (tick)
-  (tick)
-  (assert (= count 2) "letrec @ allows assign"))
+# ── Assign without begin (always worked) ─────────────────────
 
-## ── fn @ ───────────────────────────────────────────────────────────────
+# test_assign_dead_branch_no_begin
+(def @a 1)
+(if (> 0 1) (assign a 99) nil)
+(assert (= a 1) "assign in dead if-then (no begin) stays 1")
 
-(defn mutate-param [@n]
-  (assign n (* n 2))
-  n)
-(assert (= (mutate-param 5) 10) "fn @ allows assign to param")
+# ── Let-scoped mutable (always worked) ───────────────────────
 
-## ── mixed @ and non-@ in same let ──────────────────────────────────────
+# test_let_scoped_assign_dead_branch
+(let [@b 1]
+  (if (> 0 1)
+    (begin
+      (assign b 99))
+    nil)
+  (assert (= b 1) "let-scoped assign in dead branch stays 1"))
 
-(let [a 1
-      @b 2]
-  (assign b 99)
-  (assert (= a 1) "non-@ binding stays immutable value")
-  (assert (= b 99) "@ binding allows assign"))
+# ── Multiple assigns in branches ──────────────────────────────
 
-## ── immutable def used as value ────────────────────────────────────────
+# test_multiple_assigns_correct_branch
+(def @p 0)
+(def @q 0)
+(if (> 1 0)
+  (begin
+    (assign p 10)
+    (assign q 20))
+  (begin
+    (assign p 30)
+    (assign q 40)))
+(assert (= p 10) "then-branch assign p")
+(assert (= q 20) "then-branch assign q")
 
-(def pi 3)
-(assert (= pi 3) "immutable def works as value")
+# test_multiple_assigns_else_branch
+(def @r 0)
+(def @s 0)
+(if (> 0 1)
+  (begin
+    (assign r 10)
+    (assign s 20))
+  (begin
+    (assign r 30)
+    (assign s 40)))
+(assert (= r 30) "else-branch assign r")
+(assert (= s 40) "else-branch assign s")
 
-## ── destructure @ ──────────────────────────────────────────────────────
+# ── Nested if with assigns ────────────────────────────────────
 
-(def [@m n] [1 2])
-(assign m 10)
-(assert (= (+ m n) 12) "destructure @ allows assign")
+# test_nested_if_assigns
+(def @n 0)
+(if true (if false (assign n 1) (assign n 2)) (assign n 3))
+(assert (= n 2) "nested if assign correct branch")

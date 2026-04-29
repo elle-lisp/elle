@@ -251,7 +251,7 @@ fn write_hir(
         }
 
         HirKind::SetCell { cell, value } => {
-            buf.push_str("(set-cell! ");
+            buf.push_str("(set-cell ");
             write_hir(buf, cell, arena, names, depth + 1);
             buf.push(' ');
             write_hir(buf, value, arena, names, depth + 1);
@@ -352,6 +352,15 @@ fn write_hir(
             buf.push_str("]\n");
             indent(buf, depth + 1);
             write_hir(buf, body, arena, names, depth + 1);
+            buf.push(')');
+        }
+
+        HirKind::Intrinsic { op, args } => {
+            write!(buf, "({}", op.name()).unwrap();
+            for a in args {
+                buf.push(' ');
+                write_hir(buf, a, arena, names, depth + 1);
+            }
             buf.push(')');
         }
     }

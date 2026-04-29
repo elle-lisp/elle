@@ -4,7 +4,7 @@
 #
 # count-list tail-calls itself with (rest lst). The rest result shares
 # structure with the original list. If JIT rotation frees the original
-# list's cons cells, (first lst) in the next iteration reads freed memory.
+# list's pair cells, (first lst) in the next iteration reads freed memory.
 
 (defn count-list [lst acc]
   (if (empty? lst) acc (count-list (rest lst) (+ acc 1))))

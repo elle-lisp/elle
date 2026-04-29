@@ -44,6 +44,11 @@ pub fn eval_syntax(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
+    let region_info = crate::hir::analyze_regions_with(
+        &analysis.hir,
+        &arena,
+        crate::lir::intrinsics::build_call_classification(symbols),
+    );
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -60,7 +65,8 @@ pub fn eval_syntax(
         .with_non_allocating_accessors(acc_prims.clone())
         .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone());
+        .with_symbol_names(symbol_names.clone())
+        .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     let mut emitter = Emitter::new_with_symbols(symbol_names);
@@ -103,6 +109,11 @@ pub fn eval(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
+    let region_info = crate::hir::analyze_regions_with(
+        &analysis.hir,
+        &arena,
+        crate::lir::intrinsics::build_call_classification(symbols),
+    );
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -119,7 +130,8 @@ pub fn eval(
         .with_non_allocating_accessors(acc_prims.clone())
         .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone());
+        .with_symbol_names(symbol_names.clone())
+        .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     let mut emitter = Emitter::new_with_symbols(symbol_names);

@@ -51,8 +51,8 @@
   (assert (= result 0) "nil thunk allocates 0 net objects"))
 
 # test_arena_allocs_cons
-(let [result (rest (arena/allocs (fn () (cons 1 2))))]
-  (assert (= result 1) "cons allocates 1 object"))
+(let [result (rest (arena/allocs (fn () (pair 1 2))))]
+  (assert (= result 1) "pair allocates 1 object"))
 
 # test_arena_allocs_preserves_result
 (let [result (first (arena/allocs (fn () (+ 40 2))))]
@@ -60,7 +60,7 @@
 
 # test_arena_allocs_list
 (let [result (rest (arena/allocs (fn () (list 1 2 3 4 5))))]
-  (assert (= result 5) "list of 5 allocates 5 cons cells"))
+  (assert (= result 5) "list of 5 allocates 5 pair cells"))
 
 # ── Fiber heap isolation ────────────────────────────────────────────
 
@@ -122,8 +122,8 @@
 # Values allocated in a child fiber survive across yield/resume cycles
 # because the FiberHeap persists on the Fiber struct.
 (let* [f (fiber/new (fn ()
-                      (yield (cons 1 2))
-                      (cons 3 4)) 2)
+                      (yield (pair 1 2))
+                      (pair 3 4)) 2)
        first-val (fiber/resume f)
        second-val (fiber/resume f)]
   (assert (= (first first-val) 1) "first yield value first element")
@@ -281,7 +281,7 @@
   (assert (= result 42) "yield immediate no shared alloc"))
 
 # test_yield_list_parent_traverses
-# Fiber yields a cons list. Parent traverses all elements.
+# Fiber yields a pair list. Parent traverses all elements.
 # The list cells are heap-allocated — they go to shared alloc.
 (let* [f (fiber/new (fn () (yield (list 10 20 30))) 2)
        lst (fiber/resume f)]
@@ -609,7 +609,7 @@
 (let* [m1 (arena/checkpoint)
        _ (letrec [loop (fn (i)
                          (when (< i 50)
-                           (cons i (+ i 1))
+                           (pair i (+ i 1))
                            (loop (+ i 1))))]
            (loop 0))
        bytes-round1 (get (arena/stats) :allocated-bytes)
@@ -617,7 +617,7 @@
        m2 (arena/checkpoint)
        _ (letrec [loop (fn (i)
                          (when (< i 50)
-                           (cons i (+ i 1))
+                           (pair i (+ i 1))
                            (loop (+ i 1))))]
            (loop 0))
        bytes-round2 (get (arena/stats) :allocated-bytes)
@@ -670,7 +670,7 @@
 # :root-live-count (which only tracks root slab slots).
 (let* [before-s (arena/stats)
        before-count (get before-s :object-count)
-       _ (cons 1 2)  # allocates one Cons
+       _ (pair 1 2)  # allocates one Cons
        after-s (arena/stats)
        after-count (get after-s :object-count)]
   (assert (> after-count before-count)

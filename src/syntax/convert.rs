@@ -197,7 +197,7 @@ impl Syntax {
             SyntaxKind::String(s)
         } else if value.is_empty_list() {
             SyntaxKind::List(vec![])
-        } else if value.as_cons().is_some() {
+        } else if value.as_pair().is_some() {
             let items = value.list_to_vec().map_err(|e| e.to_string())?;
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()

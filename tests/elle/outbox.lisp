@@ -14,13 +14,13 @@
 
 (def res ((import-file "lib/resource.lisp")))
 
-# ── 1. Yield struct with nested cons ─────────────────────────────
+# ── 1. Yield struct with nested pair ─────────────────────────────
 
 (defn test-yield-nested-struct []
-  "Yield a struct containing nested cons cells. Parent reads correctly."
+  "Yield a struct containing nested pair cells. Parent reads correctly."
   (let [f (fiber/new (fn []
                        (yield {:name "alice"
-                               :scores (cons 90 (cons 85 (cons 92 nil)))
+                               :scores (pair 90 (pair 85 (pair 92 nil)))
                                :meta {:grade "A"}})) |:yield|)]
     (let [result (fiber/resume f)]
       (assert (= (result :name) "alice") "yield-nested: name field")
@@ -42,7 +42,7 @@
   (let [m (res:measure (fn []
                          (let [f (fiber/new (fn []
                                  (each i in (range 1000)
-                                   (yield {:index i :data (cons i nil)})))
+                                   (yield {:index i :data (pair i nil)})))
                                |:yield|)]
                            (each _ in (range 1000)
                              (fiber/resume f)))))]
@@ -118,7 +118,7 @@
     (fn []
       (let [f (fiber/new (fn []
                            (each i in (range 1000)
-                             (yield {:i i :data (cons i nil)}))) |:yield|)]
+                             (yield {:i i :data (pair i nil)}))) |:yield|)]
         (each _ in (range 1000)
           (fiber/resume f))))]
 
@@ -130,11 +130,11 @@
         (each _ in (range 100)
           (fiber/resume f))))]
 
-   ["outbox-yield-cons-chain"
+   ["outbox-yield-pair-chain"
     (fn []
       (let [f (fiber/new (fn []
                            (each i in (range 100)
-                             (yield (cons i (cons (+ i 1) (cons (+ i 2) nil))))))
+                             (yield (pair i (pair (+ i 1) (pair (+ i 2) nil))))))
                          |:yield|)]
         (each _ in (range 100)
           (fiber/resume f))))]])

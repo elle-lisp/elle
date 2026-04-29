@@ -594,7 +594,7 @@ extern "C" fn array_get(val: [u64; 2], idx: usize) -> [u64; 2] {
 
 // ── List → array conversion ───────────────────────────────────────────
 
-/// Convert a proper list (cons chain) to an immutable array.
+/// Convert a proper list (pair chain) to an immutable array.
 /// Returns nil if the value is not a proper list.
 extern "C" fn list_to_array(val: [u64; 2]) -> [u64; 2] {
     let v = unsafe { to_value(val) };

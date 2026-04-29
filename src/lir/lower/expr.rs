@@ -18,8 +18,8 @@ impl<'a> Lowerer<'a> {
             HirKind::Keyword(name) => self.emit_const(LirConst::Keyword(name.clone())),
 
             HirKind::Var(binding) => self.lower_var(binding, &hir.span),
-            HirKind::Let { bindings, body } => self.lower_let(bindings, body),
-            HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body),
+            HirKind::Let { bindings, body } => self.lower_let(bindings, body, hir.id),
+            HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body, hir.id),
             HirKind::Lambda {
                 params,
                 num_required,
@@ -55,7 +55,7 @@ impl<'a> Lowerer<'a> {
             } => self.lower_if(cond, then_branch, else_branch),
 
             HirKind::Begin(exprs) => self.lower_begin(exprs),
-            HirKind::Block { block_id, body, .. } => self.lower_block(block_id, body),
+            HirKind::Block { block_id, body, .. } => self.lower_block(block_id, body, hir.id),
             HirKind::Break { block_id, value } => self.lower_break(block_id, value),
 
             HirKind::Call {
@@ -73,7 +73,7 @@ impl<'a> Lowerer<'a> {
             } => self.lower_destructure_expr(pattern, value, *strict, &hir.span),
 
             HirKind::While { cond, body } => self.lower_while(cond, body),
-            HirKind::Loop { bindings, body } => self.lower_loop(bindings, body),
+            HirKind::Loop { bindings, body } => self.lower_loop(bindings, body, hir.id),
             HirKind::Recur { args } => self.lower_recur(args),
 
             HirKind::And(exprs) => self.lower_and(exprs),
@@ -93,6 +93,8 @@ impl<'a> Lowerer<'a> {
             HirKind::MakeCell { value } => self.lower_make_cell(value),
             HirKind::DerefCell { cell } => self.lower_deref_cell(cell),
             HirKind::SetCell { cell, value } => self.lower_set_cell(cell, value),
+
+            HirKind::Intrinsic { op, args } => self.lower_intrinsic(*op, args),
 
             HirKind::Error => Err(format!(
                 "internal: error poison node in lowerer at {}",
@@ -305,12 +307,17 @@ impl<'a> Lowerer<'a> {
         Ok(last_reg)
     }
 
-    fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
+    fn lower_block(
+        &mut self,
+        block_id: &BlockId,
+        body: &[Hir],
+        hir_id: HirId,
+    ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped = self.can_scope_allocate_block(block_id, body);
+        let scoped = self.region_scope_check(hir_id);
 
         // Record region depth BEFORE emitting RegionEnter so that breaks
         // targeting this block include the block's own region in their
@@ -486,8 +493,16 @@ impl<'a> Lowerer<'a> {
         Ok(result_reg)
     }
 
-    fn lower_loop(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> Result<Reg, String> {
+    fn lower_loop(
+        &mut self,
+        bindings: &[(Binding, Hir)],
+        body: &Hir,
+        _hir_id: HirId,
+    ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
+        // Flip (rotation) requires stricter analysis than scope allocation.
+        // Keep escape analysis for flip until region inference handles
+        // rotation safety (heap values crossing iteration boundaries).
         let flip_eligible = self.can_flip_while_loop(body);
 
         let loop_label = self.fresh_label();
@@ -713,6 +728,248 @@ impl<'a> Lowerer<'a> {
         });
 
         Ok(result_reg)
+    }
+
+    fn lower_intrinsic(
+        &mut self,
+        op: crate::hir::IntrinsicOp,
+        args: &[Hir],
+    ) -> Result<Reg, String> {
+        use crate::hir::IntrinsicOp;
+
+        // Lower all arguments first
+        let mut arg_regs = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_regs.push(self.lower_expr(arg)?);
+        }
+
+        let dst = self.fresh_reg();
+        match op {
+            // Binary arithmetic
+            IntrinsicOp::Add => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Add,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Sub => {
+                if arg_regs.len() == 1 {
+                    self.emit(LirInstr::UnaryOp {
+                        dst,
+                        op: UnaryOp::Neg,
+                        src: arg_regs[0],
+                    });
+                } else {
+                    self.emit(LirInstr::BinOp {
+                        dst,
+                        op: BinOp::Sub,
+                        lhs: arg_regs[0],
+                        rhs: arg_regs[1],
+                    });
+                }
+            }
+            IntrinsicOp::Mul => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Mul,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Div => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Div,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Rem => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Rem,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Mod => {
+                // Floored modulus: ((a % b) + b) % b
+                // The stack-based emitter consumes registers on use, so spill b
+                // to a local slot and reload fresh copies for each operation.
+                let b_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: b_slot,
+                    src: arg_regs[1],
+                });
+                // Step 1: t = a % b (uses original arg_regs, but b was consumed by StoreLocal)
+                let b1 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: b1,
+                    slot: b_slot,
+                });
+                let t = self.fresh_reg();
+                self.emit(LirInstr::BinOp {
+                    dst: t,
+                    op: BinOp::Rem,
+                    lhs: arg_regs[0],
+                    rhs: b1,
+                });
+                // Step 2: t2 = t + b
+                let b2 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: b2,
+                    slot: b_slot,
+                });
+                let t2 = self.fresh_reg();
+                self.emit(LirInstr::BinOp {
+                    dst: t2,
+                    op: BinOp::Add,
+                    lhs: t,
+                    rhs: b2,
+                });
+                // Step 3: result = t2 % b
+                let b3 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: b3,
+                    slot: b_slot,
+                });
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Rem,
+                    lhs: t2,
+                    rhs: b3,
+                });
+            }
+            // Comparisons
+            IntrinsicOp::Eq => {
+                self.emit(LirInstr::Compare {
+                    dst,
+                    op: CmpOp::Eq,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Lt => {
+                self.emit(LirInstr::Compare {
+                    dst,
+                    op: CmpOp::Lt,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Gt => {
+                self.emit(LirInstr::Compare {
+                    dst,
+                    op: CmpOp::Gt,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Le => {
+                self.emit(LirInstr::Compare {
+                    dst,
+                    op: CmpOp::Le,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Ge => {
+                self.emit(LirInstr::Compare {
+                    dst,
+                    op: CmpOp::Ge,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            // Logical
+            IntrinsicOp::Not => {
+                self.emit(LirInstr::UnaryOp {
+                    dst,
+                    op: UnaryOp::Not,
+                    src: arg_regs[0],
+                });
+            }
+            // Conversion
+            IntrinsicOp::Int => {
+                self.emit(LirInstr::Convert {
+                    dst,
+                    op: ConvOp::FloatToInt,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::Float => {
+                self.emit(LirInstr::Convert {
+                    dst,
+                    op: ConvOp::IntToFloat,
+                    src: arg_regs[0],
+                });
+            }
+            // List operations
+            IntrinsicOp::Pair => {
+                self.emit(LirInstr::List {
+                    dst,
+                    head: arg_regs[0],
+                    tail: arg_regs[1],
+                });
+            }
+            IntrinsicOp::First => {
+                self.emit(LirInstr::First {
+                    dst,
+                    pair: arg_regs[0],
+                });
+            }
+            IntrinsicOp::Rest => {
+                self.emit(LirInstr::Rest {
+                    dst,
+                    pair: arg_regs[0],
+                });
+            }
+            // Bitwise
+            IntrinsicOp::BitAnd => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::BitAnd,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::BitOr => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::BitOr,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::BitXor => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::BitXor,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Shl => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Shl,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Shr => {
+                self.emit(LirInstr::BinOp {
+                    dst,
+                    op: BinOp::Shr,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+        }
+        Ok(dst)
     }
 
     fn lower_parameterize(&mut self, bindings: &[(Hir, Hir)], body: &Hir) -> Result<Reg, String> {

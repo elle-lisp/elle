@@ -159,7 +159,7 @@ fn test_signal_letrec_bound_lambda() {
 #[test]
 fn test_signal_polymorphic_local_higher_order() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def my-map (fn (f lst)                (if (empty? lst)                    ()                    (cons (f (first lst)) (my-map f (rest lst))))))            (def gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def my-map (fn (f lst)                (if (empty? lst)                    ()                    (pair (f (first lst)) (my-map f (rest lst))))))            (def gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     // my-map is polymorphic on param 0 (with inherent error).
     // Calling with gen (which yields) resolves to yields + errors.
@@ -333,7 +333,7 @@ fn test_signal_pure_primitives() {
     let errors_calls = [
         "(+ 1 2)", "(- 5 3)", "(* 2 3)", "(/ 10 2)",
         "(< 1 2)", "(> 2 1)", "(= 1 1)",
-        "(cons 1 2)", "(first (list 1 2))", "(rest (list 1 2))",
+        "(pair 1 2)", "(first (list 1 2))", "(rest (list 1 2))",
         "(length (list 1 2 3))", "(not true)",
         "(number? 42)", "(string? \"hello\")",
     ];
@@ -524,7 +524,7 @@ fn test_polymorphic_inference_resolves_yields() {
 #[test]
 fn test_polymorphic_inference_my_map() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def my-map (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (my-map f (rest xs))))))           (my-map + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def my-map (fn (f xs)              (if (empty? xs) (list)                  (pair (f (first xs)) (my-map f (rest xs))))))           (my-map + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     assert_eq!(
         result.hir.signal,
@@ -536,7 +536,7 @@ fn test_polymorphic_inference_my_map() {
 #[test]
 fn test_polymorphic_inference_non_recursive_map() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (list)))))           (apply-to-list + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (pair (f (first xs)) (list)))))           (apply-to-list + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     assert_eq!(
         result.hir.signal,

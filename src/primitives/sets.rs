@@ -433,16 +433,16 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     if v.is_empty_list() {
         return (SIG_OK, Value::set(BTreeSet::new()));
     }
-    if v.as_cons().is_some() {
+    if v.as_pair().is_some() {
         let mut set = BTreeSet::new();
         let mut current = v;
         loop {
             if current.is_empty_list() || current.is_nil() {
                 break;
             }
-            if let Some(cons) = current.as_cons() {
-                set.insert(freeze_value(cons.first));
-                current = cons.rest;
+            if let Some(pair) = current.as_pair() {
+                set.insert(freeze_value(pair.first));
+                current = pair.rest;
             } else {
                 return (
                     SIG_ERROR,

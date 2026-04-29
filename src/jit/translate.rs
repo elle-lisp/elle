@@ -326,23 +326,23 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Cons { dst, head, tail } => {
+            LirInstr::List { dst, head, tail } => {
                 let (ht, hp) = self.use_var_pair(builder, head.0);
                 let (tt, tp) = self.use_var_pair(builder, tail.0);
                 let (rt, rp) =
-                    self.call_helper_value_binary(builder, self.helpers.cons, ht, hp, tt, tp)?;
+                    self.call_helper_value_binary(builder, self.helpers.pair, ht, hp, tt, tp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Car { dst, pair } => {
+            LirInstr::First { dst, pair } => {
                 let (pt, pp) = self.use_var_pair(builder, pair.0);
-                let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.car, pt, pp)?;
+                let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.first, pt, pp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Cdr { dst, pair } => {
+            LirInstr::Rest { dst, pair } => {
                 let (pt, pp) = self.use_var_pair(builder, pair.0);
-                let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.cdr, pt, pp)?;
+                let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.rest, pt, pp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -756,24 +756,24 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, nil_t, zero);
             }
 
-            LirInstr::CarDestructure { dst, src } => {
+            LirInstr::FirstDestructure { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("CarDestructure without vm pointer".to_string())
+                    JitError::InvalidLir("FirstDestructure without vm pointer".to_string())
                 })?;
                 let (rt, rp) =
-                    self.call_helper_value_vm(builder, self.helpers.car_destructure, st, sp, vm)?;
+                    self.call_helper_value_vm(builder, self.helpers.first_destructure, st, sp, vm)?;
                 self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::CdrDestructure { dst, src } => {
+            LirInstr::RestDestructure { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("CdrDestructure without vm pointer".to_string())
+                    JitError::InvalidLir("RestDestructure without vm pointer".to_string())
                 })?;
                 let (rt, rp) =
-                    self.call_helper_value_vm(builder, self.helpers.cdr_destructure, st, sp, vm)?;
+                    self.call_helper_value_vm(builder, self.helpers.rest_destructure, st, sp, vm)?;
                 self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
@@ -917,17 +917,17 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::CarOrNil { dst, src } => {
+            LirInstr::FirstOrNil { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
-                    self.call_helper_value_unary(builder, self.helpers.car_or_nil, st, sp)?;
+                    self.call_helper_value_unary(builder, self.helpers.first_or_nil, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::CdrOrNil { dst, src } => {
+            LirInstr::RestOrNil { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
-                    self.call_helper_value_unary(builder, self.helpers.cdr_or_nil, st, sp)?;
+                    self.call_helper_value_unary(builder, self.helpers.rest_or_nil, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 

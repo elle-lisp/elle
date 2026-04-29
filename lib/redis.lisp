@@ -119,7 +119,7 @@
 (defn redis-auth [& args]
   "AUTH [username] password — authenticate with Redis.
    (redis:auth \"password\") or (redis:auth \"user\" \"password\")."
-  (resp-ok? (apply redis-cmd (cons "AUTH" args))))
+  (resp-ok? (apply redis-cmd (pair "AUTH" args))))
 
 ## ── Manager fiber ─────────────────────────────────────────────────────
 
@@ -194,11 +194,11 @@
 
 (defn redis-mget [& keys]
   "MGET key [key ...] — returns array of values."
-  (apply redis-cmd (cons "MGET" keys)))
+  (apply redis-cmd (pair "MGET" keys)))
 
 (defn redis-mset [& pairs]
   "MSET key value [key value ...] — returns true on OK."
-  (resp-ok? (apply redis-cmd (cons "MSET" pairs))))
+  (resp-ok? (apply redis-cmd (pair "MSET" pairs))))
 
 (defn redis-incr [key]
   "INCR key — returns new integer value."
@@ -236,7 +236,7 @@
 
 (defn redis-del [& keys]
   "DEL key [key ...] — returns count of deleted keys."
-  (apply redis-cmd (cons "DEL" keys)))
+  (apply redis-cmd (pair "DEL" keys)))
 
 (defn redis-exists [key]
   "EXISTS key — returns true if exists."
@@ -346,7 +346,7 @@
   (def @first true)
   (while (or first (not (= cursor "0")))
     (assign first false)
-    (let [[next-cursor items] (apply scan-fn (cons cursor scan-args))]
+    (let [[next-cursor items] (apply scan-fn (pair cursor scan-args))]
       (assign cursor next-cursor)
       (each item in items
         (push acc item))))
@@ -364,7 +364,7 @@
 
 (defn redis-hdel [key & fields]
   "HDEL key field [field ...] — returns count of deleted."
-  (apply redis-cmd (cons "HDEL" (cons key fields))))
+  (apply redis-cmd (pair "HDEL" (pair key fields))))
 
 (defn redis-hexists [key field]
   "HEXISTS key field — returns true if field exists."
@@ -394,11 +394,11 @@
 
 (defn redis-hmset [key & pairs]
   "HMSET key field value [field value ...] — returns true on OK."
-  (resp-ok? (apply redis-cmd (cons "HMSET" (cons key pairs)))))
+  (resp-ok? (apply redis-cmd (pair "HMSET" (pair key pairs)))))
 
 (defn redis-hmget [key & fields]
   "HMGET key field [field ...] — returns array of values."
-  (apply redis-cmd (cons "HMGET" (cons key fields))))
+  (apply redis-cmd (pair "HMGET" (pair key fields))))
 
 (defn redis-hincrby [key field n]
   "HINCRBY key field increment — returns new integer value."
@@ -408,11 +408,11 @@
 
 (defn redis-lpush [key & values]
   "LPUSH key value [value ...] — returns new length."
-  (apply redis-cmd (cons "LPUSH" (cons key values))))
+  (apply redis-cmd (pair "LPUSH" (pair key values))))
 
 (defn redis-rpush [key & values]
   "RPUSH key value [value ...] — returns new length."
-  (apply redis-cmd (cons "RPUSH" (cons key values))))
+  (apply redis-cmd (pair "RPUSH" (pair key values))))
 
 (defn redis-lpop [key]
   "LPOP key — returns element or nil."
@@ -442,11 +442,11 @@
 
 (defn redis-sadd [key & members]
   "SADD key member [member ...] — returns count of new members."
-  (apply redis-cmd (cons "SADD" (cons key members))))
+  (apply redis-cmd (pair "SADD" (pair key members))))
 
 (defn redis-srem [key & members]
   "SREM key member [member ...] — returns count of removed."
-  (apply redis-cmd (cons "SREM" (cons key members))))
+  (apply redis-cmd (pair "SREM" (pair key members))))
 
 (defn redis-sismember [key member]
   "SISMEMBER key member — returns true if member."
@@ -462,15 +462,15 @@
 
 (defn redis-sunion [& keys]
   "SUNION key [key ...] — returns array of union members."
-  (apply redis-cmd (cons "SUNION" keys)))
+  (apply redis-cmd (pair "SUNION" keys)))
 
 (defn redis-sinter [& keys]
   "SINTER key [key ...] — returns array of intersection members."
-  (apply redis-cmd (cons "SINTER" keys)))
+  (apply redis-cmd (pair "SINTER" keys)))
 
 (defn redis-sdiff [& keys]
   "SDIFF key [key ...] — returns array of difference members."
-  (apply redis-cmd (cons "SDIFF" keys)))
+  (apply redis-cmd (pair "SDIFF" keys)))
 
 ## ── Commands — Sorted Set ─────────────────────────────────────────────
 
@@ -496,7 +496,7 @@
 
 (defn redis-zrem [key & members]
   "ZREM key member [member ...] — returns count of removed."
-  (apply redis-cmd (cons "ZREM" (cons key members))))
+  (apply redis-cmd (pair "ZREM" (pair key members))))
 
 (defn redis-zcard [key]
   "ZCARD key — returns count of members."
@@ -574,7 +574,7 @@
 (defn redis-watch [& keys]
   "WATCH key [key ...] — optimistic locking. If any watched key changes
    before EXEC, the transaction aborts (EXEC returns nil)."
-  (resp-ok? (apply redis-cmd (cons "WATCH" keys))))
+  (resp-ok? (apply redis-cmd (pair "WATCH" keys))))
 
 (defn redis-unwatch []
   "UNWATCH — cancel all watched keys."
@@ -624,11 +624,11 @@
 (defn redis-eval [script numkeys & args]
   "EVAL script numkeys [key ...] [arg ...] — execute a Lua script.
    Returns the script's return value."
-  (apply redis-cmd (cons "EVAL" (cons script (cons (string numkeys) args)))))
+  (apply redis-cmd (pair "EVAL" (pair script (pair (string numkeys) args)))))
 
 (defn redis-evalsha [sha numkeys & args]
   "EVALSHA sha1 numkeys [key ...] [arg ...] — execute a cached Lua script."
-  (apply redis-cmd (cons "EVALSHA" (cons sha (cons (string numkeys) args)))))
+  (apply redis-cmd (pair "EVALSHA" (pair sha (pair (string numkeys) args)))))
 
 (defn redis-script-load [script]
   "SCRIPT LOAD script — load a script into cache, returns SHA1."
@@ -637,7 +637,7 @@
 (defn redis-script-exists [& shas]
   "SCRIPT EXISTS sha1 [sha1 ...] — check if scripts are cached.
    Returns array of 0/1 integers."
-  (apply redis-cmd (cons "SCRIPT" (cons "EXISTS" shas))))
+  (apply redis-cmd (pair "SCRIPT" (pair "EXISTS" shas))))
 
 (defn redis-script-flush []
   "SCRIPT FLUSH — clear the script cache."
@@ -647,7 +647,7 @@
 
 (defn redis-subscribe [port & channels]
   "Send SUBSCRIBE command on port. Returns the port (now in sub mode)."
-  (port/write port (apply resp-encode (cons "SUBSCRIBE" channels)))
+  (port/write port (apply resp-encode (pair "SUBSCRIBE" channels)))
   (port/flush port)  # Read the subscription confirmations
   (each ch in channels
     (resp-read port))
@@ -665,7 +665,7 @@
 
 (defn redis-unsubscribe [port & channels]
   "Send UNSUBSCRIBE command on port."
-  (port/write port (apply resp-encode (cons "UNSUBSCRIBE" channels)))
+  (port/write port (apply resp-encode (pair "UNSUBSCRIBE" channels)))
   (port/flush port)  # Read the unsubscription confirmations
   (each ch in channels
     (resp-read port)))
@@ -676,7 +676,7 @@
 
 (defn redis-psubscribe [port & patterns]
   "Send PSUBSCRIBE command on port."
-  (port/write port (apply resp-encode (cons "PSUBSCRIBE" patterns)))
+  (port/write port (apply resp-encode (pair "PSUBSCRIBE" patterns)))
   (port/flush port)
   (each p in patterns
     (resp-read port))
@@ -684,7 +684,7 @@
 
 (defn redis-punsubscribe [port & patterns]
   "Send PUNSUBSCRIBE command on port."
-  (port/write port (apply resp-encode (cons "PUNSUBSCRIBE" patterns)))
+  (port/write port (apply resp-encode (pair "PUNSUBSCRIBE" patterns)))
   (port/flush port)
   (each p in patterns
     (resp-read port)))

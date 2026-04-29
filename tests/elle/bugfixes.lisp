@@ -17,69 +17,69 @@
 
 # let binding inside lambda preserves value
 (begin
-  (def f
+  (def f1
     (fn (x)
       (let [y x]
         y)))
-  (assert (= (f 42) 42) "let binding preserves positive value")
-  (assert (= (f -7) -7) "let binding preserves negative value"))
+  (assert (= (f1 42) 42) "let binding preserves positive value")
+  (assert (= (f1 -7) -7) "let binding preserves negative value"))
 
 # let binding with arithmetic
 (begin
-  (def f
+  (def f2
     (fn (a b)
       (let [x a
             y b]
         (+ x y))))
-  (assert (= (f 10 -3) 7) "let binding with arithmetic"))
+  (assert (= (f2 10 -3) 7) "let binding with arithmetic"))
 
 # recursive function with let inside
 (begin
-  (def f
+  (def f3
     (fn (x)
       (if (= x 0)
         (list)
         (let [y x]
-          (cons y (f (- x 1)))))))
-  (assert (= (length (f 5)) 5) "recursive function with let inside"))
+          (pair y (f3 (- x 1)))))))
+  (assert (= (length (f3 5)) 5) "recursive function with let inside"))
 
 # append inside let inside lambda
 (begin
-  (def f
+  (def f4
     (fn (x)
       (if (= x 0)
         (list)
         (let [y x]
-          (append (list y) (f (- x 1)))))))
-  (assert (= (length (f 5)) 5) "append inside let inside lambda"))
+          (append (list y) (f4 (- x 1)))))))
+  (assert (= (length (f4 5)) 5) "append inside let inside lambda"))
 
 # multiple let bindings
 (begin
-  (def f
+  (def f5
     (fn (a b c)
       (let [x a
             y b
             z c]
         (+ x (+ y z)))))
-  (assert (= (f 1 2 3) 6) "multiple let bindings"))
+  (assert (= (f5 1 2 3) 6) "multiple let bindings"))
 
 # nested let bindings
 (begin
-  (def f
+  (def f6
     (fn (a b)
       (let [x a]
         (let [y b]
           (+ x y)))))
-  (assert (= (f 10 20) 30) "nested let bindings"))
+  (assert (= (f6 10 20) 30) "nested let bindings"))
 
 # let with computation
 (begin
-  (def f
+  (def f7
     (fn (x)
       (let [y (* x 2)
             z (+ x 1)]
         (+ y z))))
-  (assert (= (f 5) 16) "let with computation (y=10, z=6, result=16)"))
+  (assert (= (f7 5) 16) "let with computation (y=10, z=6, result=16)"))
 
 # ============================================================================
 # Bug 2: defn shorthand equivalence
@@ -122,10 +122,10 @@
   (assert (not (string/contains? list-str ". ()"))
           "list display no dot terminator"))
 
-# cons chain display
+# pair chain display
 (begin
-  (def @cons-str (string (cons 1 (cons 2 (cons 3 (list))))))
-  (assert (not (string/contains? cons-str ". ()")) "cons chain display"))
+  (def @pair-str (string (pair 1 (pair 2 (pair 3 (list))))))
+  (assert (not (string/contains? pair-str ". ()")) "pair chain display"))
 
 # list length matches
 (begin
@@ -158,7 +158,7 @@
       (if (= n 0)
         (list)
         (if (check n seen)
-          (append (list n) (foo (- n 1) (cons n seen)))
+          (append (list n) (foo (- n 1) (pair n seen)))
           (foo (- n 1) seen)))))
   (assert (= (length (foo 5 (list 0))) 3)
           "or in recursive predicate (n=5,4,3 safe)"))
@@ -173,7 +173,7 @@
     (if (= x 0)
       (list)
       (let [y x]
-        (cons y (make-list (- x 1))))))
+        (pair y (make-list (- x 1))))))
   (def @result-str (string (make-list 5)))
   (assert (not (string/contains? result-str ". ()")) "defn + let + list display"))
 
@@ -183,7 +183,7 @@
     (if (= n 0)
       (list)
       (let [rest-list (build (- n 1))]
-        (cons n rest-list))))
+        (pair n rest-list))))
   (assert (= (length (build 10)) 10) "defn + recursive + list display"))
 
 # ============================================================================

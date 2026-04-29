@@ -161,10 +161,10 @@ fn bench_vm_execution(c: &mut Criterion) {
     });
 
     // List construction
-    group.bench_function("cons", |b| {
+    group.bench_function("pair", |b| {
         let (mut vm, mut symbols) = setup();
         let result = compile(
-            "(cons 1 (cons 2 (cons 3 nil)))",
+            "(pair 1 (pair 2 (pair 3 nil)))",
             &mut symbols,
             "<benchmark>",
         )

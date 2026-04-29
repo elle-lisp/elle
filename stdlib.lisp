@@ -39,7 +39,7 @@
     (or (pair? coll) (empty? coll))
       (if (empty? coll)
         ()
-        (cons (f (first coll)) (map f (rest coll))))
+        (pair (f (first coll)) (map f (rest coll))))
     true (error {:error :type-error
                  :reason :not-a-sequence
                  :message "not a sequence"})))
@@ -66,7 +66,7 @@
       (if (empty? coll)
         ()
         (if (p (first coll))
-          (cons (first coll) (filter p (rest coll)))
+          (pair (first coll) (filter p (rest coll)))
           (filter p (rest coll))))
     true (error {:error :type-error
                  :reason :not-a-sequence
@@ -199,7 +199,7 @@
                          (letrec [loop (fn (i acc)
                                          (if (>= i (length c))
                                            (reverse acc)
-                                           (loop (+ i 1) (cons (get c i) acc))))]
+                                           (loop (+ i 1) (pair (get c i) acc))))]
                            (loop 0 ()))
                        true (error {:error :type-error
                                     :reason :not-a-sequence
@@ -216,7 +216,7 @@
            zip-lists (fn (lists)
                        (if (any? empty? lists)
                          ()
-                         (cons (map first lists) (zip-lists (map rest lists)))))]
+                         (pair (map first lists) (zip-lists (map rest lists)))))]
     (if (empty? colls)
       ()
       (let* [lists (map to-list colls)
@@ -228,7 +228,7 @@
                      (letrec [loop (fn (i acc)
                                      (if (>= i (length c))
                                        (reverse acc)
-                                       (loop (+ i 1) (cons (get c i) acc))))]
+                                       (loop (+ i 1) (pair (get c i) acc))))]
                        (loop 0 ())))
            flat (fn (lst)
                   (if (empty? lst)
@@ -240,7 +240,7 @@
                         (or (array? x) (array? x))
                           (append (flat (to-list x)) (flat (rest lst)))
                         true
-                          (cons x (flat (rest lst)))))))]
+                          (pair x (flat (rest lst)))))))]
     (cond
       (or (pair? coll) (empty? coll)) (flat coll)
       (array? coll)
@@ -259,7 +259,7 @@
                      (if (empty? lst)
                        ()
                        (if (pred (first lst))
-                         (cons (first lst) (tw-list (rest lst)))
+                         (pair (first lst) (tw-list (rest lst)))
                          ())))]
     (cond
       (or (pair? coll) (empty? coll)) (tw-list coll)
@@ -277,7 +277,7 @@
         (let [lst (tw-list (letrec [loop (fn (i acc)
                                       (if (>= i (length coll))
                                         (reverse acc)
-                                        (loop (+ i 1) (cons (get coll i) acc))))]
+                                        (loop (+ i 1) (pair (get coll i) acc))))]
                              (loop 0 ())))]
           (apply array lst))
       true (error {:error :type-error
@@ -308,7 +308,7 @@
         (let [lst (dw-list (letrec [loop (fn (i acc)
                                       (if (>= i (length coll))
                                         (reverse acc)
-                                        (loop (+ i 1) (cons (get coll i) acc))))]
+                                        (loop (+ i 1) (pair (get coll i) acc))))]
                              (loop 0 ())))]
           (apply array lst))
       true (error {:error :type-error
@@ -324,7 +324,7 @@
                              (dist-list (rest lst))
                              (begin
                                (put seen (first lst) true)
-                               (cons (first lst) (dist-list (rest lst)))))))]
+                               (pair (first lst) (dist-list (rest lst)))))))]
       (cond
         (or (pair? coll) (empty? coll)) (dist-list coll)
         (array? coll)
@@ -339,7 +339,7 @@
                                           (if (>= i (length coll))
                                             (reverse acc)
                                             (loop (+ i 1)
-                                            (cons (get coll i) acc))))]
+                                            (pair (get coll i) acc))))]
                                  (loop 0 ())))]
             (apply array lst))
         true (error {:error :type-error
@@ -368,7 +368,7 @@
                    (letrec [loop (fn (i acc)
                                    (if (>= i (length coll))
                                      (reverse acc)
-                                     (loop (+ i 1) (cons (get coll i) acc))))]
+                                     (loop (+ i 1) (pair (get coll i) acc))))]
                      (loop 0 ()))))
     true (error {:error :type-error
                  :reason :not-a-sequence
@@ -387,7 +387,7 @@
       (letrec [go (fn (i l)
                     (if (empty? l)
                       ()
-                      (cons (f i (first l)) (go (+ i 1) (rest l)))))]
+                      (pair (f i (first l)) (go (+ i 1) (rest l)))))]
         (go 0 coll))
     (array? coll)
       (let [result @[]]
@@ -402,7 +402,7 @@
              (letrec [go (fn (i)
                            (if (>= i (length coll))
                              ()
-                             (cons (f i (get coll i)) (go (+ i 1)))))]
+                             (pair (f i (get coll i)) (go (+ i 1)))))]
                (go 0)))
     true (error {:error :type-error
                  :reason :not-a-sequence
@@ -413,7 +413,7 @@
     (or (pair? coll) (empty? coll))
       (if (or (<= n 0) (empty? coll))
         ()
-        (cons (take n coll) (partition n (drop n coll))))
+        (pair (take n coll) (partition n (drop n coll))))
     (array? coll)
       (let [result @[]]
         (letrec [loop (fn (i)
@@ -434,12 +434,12 @@
                          (letrec [loop (fn (i acc)
                                          (if (>= i (length c))
                                            (reverse acc)
-                                           (loop (+ i 1) (cons (get c i) acc))))]
+                                           (loop (+ i 1) (pair (get c i) acc))))]
                            (loop 0 ())))
                part (fn (lst)
                       (if (or (<= n 0) (empty? lst))
                         ()
-                        (cons (apply array (take n lst)) (part (drop n lst)))))]
+                        (pair (apply array (take n lst)) (part (drop n lst)))))]
         (apply array (part (to-list coll))))
     true (error {:error :type-error
                  :reason :not-a-sequence
@@ -449,7 +449,7 @@
   (letrec [ip-list (fn (lst)
                      (if (or (empty? lst) (empty? (rest lst)))
                        lst
-                       (cons (first lst) (cons sep (ip-list (rest lst))))))]
+                       (pair (first lst) (pair sep (ip-list (rest lst))))))]
     (cond
       (or (pair? coll) (empty? coll)) (ip-list coll)
       (array? coll)
@@ -467,7 +467,7 @@
         (let [lst (ip-list (letrec [loop (fn (i acc)
                                       (if (>= i (length coll))
                                         (reverse acc)
-                                        (loop (+ i 1) (cons (get coll i) acc))))]
+                                        (loop (+ i 1) (pair (get coll i) acc))))]
                              (loop 0 ())))]
           (apply array lst))
       true (error {:error :type-error
@@ -498,7 +498,7 @@
                          (letrec [loop (fn (i acc)
                                          (if (>= i (length c))
                                            (reverse acc)
-                                           (loop (+ i 1) (cons (get c i) acc))))]
+                                           (loop (+ i 1) (pair (get c i) acc))))]
                            (loop 0 ()))
                        true (error {:error :type-error
                                     :reason :not-a-sequence
@@ -517,9 +517,9 @@
                      (empty? a) b
                      (empty? b) a
                      (<= (first (first a)) (first (first b)))
-                       (cons (first a) (merge (rest a) b))
+                       (pair (first a) (merge (rest a) b))
                      true
-                       (cons (first b) (merge a (rest b)))))
+                       (pair (first b) (merge a (rest b)))))
            halve (fn (lst)
                    (let [mid (/ (length lst) 2)]
                      [(take mid lst) (drop mid lst)]))
@@ -543,7 +543,7 @@
                          (letrec [loop (fn (i acc)
                                          (if (>= i (length c))
                                            (reverse acc)
-                                           (loop (+ i 1) (cons (get c i) acc))))]
+                                           (loop (+ i 1) (pair (get c i) acc))))]
                            (loop 0 ()))
                        true (error {:error :type-error
                                     :reason :not-a-sequence
@@ -562,9 +562,9 @@
                            (empty? a) b
                            (empty? b) a
                            (<= (cmp (first a) (first b)) 0)
-                             (cons (first a) (merge-lists (rest a) b))
+                             (pair (first a) (merge-lists (rest a) b))
                            true
-                             (cons (first b) (merge-lists a (rest b)))))
+                             (pair (first b) (merge-lists a (rest b)))))
            halve (fn (lst)
                    (let [mid (/ (length lst) 2)]
                      [(take mid lst) (drop mid lst)]))
@@ -860,12 +860,12 @@
 
 (defn stream/collect [source]
   "Collect all values yielded by source into a list.
-   Builds in reverse using cons then reverses — O(n).
+   Builds in reverse using pair then reverses — O(n).
    Signal: errors only (no user callback)."
   (def @acc ())
   (coro/resume source)
   (while (not (coro/done? source))
-    (assign acc (cons (coro/value source) acc))
+    (assign acc (pair (coro/value source) acc))
     (coro/resume source))
   (reverse acc))
 

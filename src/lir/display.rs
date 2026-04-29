@@ -132,16 +132,16 @@ impl fmt::Display for LirInstr {
             }
 
             // === Data Construction ===
-            LirInstr::Cons { dst, head, tail } => {
-                write!(f, "{} ← cons({}, {})", dst, head, tail)
+            LirInstr::List { dst, head, tail } => {
+                write!(f, "{} ← pair({}, {})", dst, head, tail)
             }
             LirInstr::MakeArrayMut { dst, elements } => {
                 write!(f, "{} ← array(", dst)?;
                 fmt_regs(elements, f)?;
                 f.write_str(")")
             }
-            LirInstr::Car { dst, pair } => write!(f, "{} ← car({})", dst, pair),
-            LirInstr::Cdr { dst, pair } => write!(f, "{} ← cdr({})", dst, pair),
+            LirInstr::First { dst, pair } => write!(f, "{} ← first({})", dst, pair),
+            LirInstr::Rest { dst, pair } => write!(f, "{} ← rest({})", dst, pair),
 
             // === Primitive Operations ===
             LirInstr::BinOp { dst, op, lhs, rhs } => {
@@ -174,8 +174,8 @@ impl fmt::Display for LirInstr {
             LirInstr::StoreCaptureCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
             // === Destructuring ===
-            LirInstr::CarDestructure { dst, src } => write!(f, "{} ← car!({})", dst, src),
-            LirInstr::CdrDestructure { dst, src } => write!(f, "{} ← cdr!({})", dst, src),
+            LirInstr::FirstDestructure { dst, src } => write!(f, "{} ← first!({})", dst, src),
+            LirInstr::RestDestructure { dst, src } => write!(f, "{} ← rest!({})", dst, src),
             LirInstr::ArrayMutRefDestructure { dst, src, index } => {
                 write!(f, "{} ← {}[{}]!", dst, src, index)
             }
@@ -198,8 +198,8 @@ impl fmt::Display for LirInstr {
             }
 
             // === Silent destructuring (parameter context) ===
-            LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
-            LirInstr::CdrOrNil { dst, src } => write!(f, "{} ← cdr?({})", dst, src),
+            LirInstr::FirstOrNil { dst, src } => write!(f, "{} ← first?({})", dst, src),
+            LirInstr::RestOrNil { dst, src } => write!(f, "{} ← rest?({})", dst, src),
             LirInstr::ArrayMutRefOrNil { dst, src, index } => {
                 write!(f, "{} ← {}[{}]?", dst, src, index)
             }

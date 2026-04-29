@@ -9,18 +9,18 @@ use crate::common::eval_reuse;
 use elle::Value;
 use proptest::prelude::*;
 
-/// Extract floats from a cons-list Value (returned in reverse order, so we reverse)
+/// Extract floats from a pair-list Value (returned in reverse order, so we reverse)
 fn extract_float_list(list_val: Value) -> Vec<f64> {
     let mut result = Vec::new();
     let mut current = list_val;
     while !current.is_empty_list() {
-        if let Some(cons) = current.as_cons() {
-            if let Some(t) = cons.first.as_float() {
+        if let Some(pair) = current.as_pair() {
+            if let Some(t) = pair.first.as_float() {
                 result.push(t);
             } else {
                 panic!("Expected float in list");
             }
-            current = cons.rest;
+            current = pair.rest;
         } else {
             break;
         }
@@ -80,7 +80,7 @@ fn stopwatch_samples_are_monotonic() {
         (let [sw (time/stopwatch) @samples (list) @i 0]
           (while (< i 20)
             (begin
-              (assign samples (cons (coro/resume sw) samples))
+              (assign samples (pair (coro/resume sw) samples))
               (assign i (+ i 1))))
           samples)
     "#;

@@ -297,10 +297,138 @@ pub enum HirKind {
         value: Box<Hir>,
     },
 
+    /// Intrinsic operation: a %-prefixed special form that compiles
+    /// directly to bytecode without function call overhead.
+    Intrinsic {
+        op: IntrinsicOp,
+        args: Vec<Hir>,
+    },
+
     /// Poison node — inserted when a recoverable error is accumulated
     /// during analysis. The lowerer should never see this; the pipeline
     /// checks for accumulated errors before lowering.
     Error,
+}
+
+/// Known %-intrinsic operations with fixed type/alloc/escape behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntrinsicOp {
+    // Arithmetic
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Mod,
+    // Comparison
+    Eq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    // Logical
+    Not,
+    // Conversion
+    Int,
+    Float,
+    // Pair operations
+    Pair, // pair constructor: allocates
+    First,
+    Rest,
+    // Bitwise
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+}
+
+impl IntrinsicOp {
+    /// Name as it appears in source code (with % prefix).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Add => "%add",
+            Self::Sub => "%sub",
+            Self::Mul => "%mul",
+            Self::Div => "%div",
+            Self::Rem => "%rem",
+            Self::Mod => "%mod",
+            Self::Eq => "%eq",
+            Self::Lt => "%lt",
+            Self::Gt => "%gt",
+            Self::Le => "%le",
+            Self::Ge => "%ge",
+            Self::Not => "%not",
+            Self::Int => "%int",
+            Self::Float => "%float",
+            Self::Pair => "%pair",
+            Self::First => "%first",
+            Self::Rest => "%rest",
+            Self::BitAnd => "%bit-and",
+            Self::BitOr => "%bit-or",
+            Self::BitXor => "%bit-xor",
+            Self::Shl => "%shl",
+            Self::Shr => "%shr",
+        }
+    }
+
+    /// Look up an intrinsic by its %-prefixed name.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "%add" => Some(Self::Add),
+            "%sub" => Some(Self::Sub),
+            "%mul" => Some(Self::Mul),
+            "%div" => Some(Self::Div),
+            "%rem" => Some(Self::Rem),
+            "%mod" => Some(Self::Mod),
+            "%eq" => Some(Self::Eq),
+            "%lt" => Some(Self::Lt),
+            "%gt" => Some(Self::Gt),
+            "%le" => Some(Self::Le),
+            "%ge" => Some(Self::Ge),
+            "%not" => Some(Self::Not),
+            "%int" => Some(Self::Int),
+            "%float" => Some(Self::Float),
+            "%pair" => Some(Self::Pair),
+            "%first" => Some(Self::First),
+            "%rest" => Some(Self::Rest),
+            "%bit-and" => Some(Self::BitAnd),
+            "%bit-or" => Some(Self::BitOr),
+            "%bit-xor" => Some(Self::BitXor),
+            "%shl" => Some(Self::Shl),
+            "%shr" => Some(Self::Shr),
+            _ => None,
+        }
+    }
+
+    /// Required arity (min, max). Most are fixed; %sub allows 1 or 2.
+    pub fn arity(self) -> (usize, usize) {
+        match self {
+            Self::Not | Self::Int | Self::Float | Self::First | Self::Rest => (1, 1),
+            Self::Sub => (1, 2),
+            Self::Add
+            | Self::Mul
+            | Self::Div
+            | Self::Rem
+            | Self::Mod
+            | Self::Eq
+            | Self::Lt
+            | Self::Gt
+            | Self::Le
+            | Self::Ge
+            | Self::Pair
+            | Self::BitAnd
+            | Self::BitOr
+            | Self::BitXor
+            | Self::Shl
+            | Self::Shr => (2, 2),
+        }
+    }
+
+    /// Does this intrinsic allocate heap memory?
+    pub fn allocates(self) -> bool {
+        matches!(self, Self::Pair)
+    }
 }
 
 impl Hir {
@@ -416,6 +544,11 @@ impl Hir {
                     f(v);
                 }
                 f(body);
+            }
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    f(a);
+                }
             }
         }
     }

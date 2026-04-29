@@ -614,9 +614,9 @@ pub(crate) fn prim_git(args: &[Value]) -> (SignalBits, Value) {
         // Delegate to VM via SIG_QUERY for MlirCache access.
         (
             SIG_QUERY,
-            Value::cons(
+            Value::pair(
                 Value::keyword("git"),
-                Value::cons(args[0], Value::int(wg_size)),
+                Value::pair(args[0], Value::int(wg_size)),
             ),
         )
     }

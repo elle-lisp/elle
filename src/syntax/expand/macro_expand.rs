@@ -23,7 +23,7 @@
 //! per-invocation arena cost constant after the first call.
 //!
 //! Known limitations:
-//! - Macros cannot return improper lists (e.g. `(cons 1 2)`). The
+//! - Macros cannot return improper lists (e.g. `(pair 1 2)`). The
 //!   `from_value()` conversion requires proper lists.
 
 use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};

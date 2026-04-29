@@ -99,8 +99,8 @@ impl Reader {
                                 let result = elements
                                     .into_iter()
                                     .rev()
-                                    .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
-                                return Ok(Value::cons(list_sym, result));
+                                    .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc));
+                                return Ok(Value::pair(list_sym, result));
                             }
                             Some(OwnedToken::Comment(_)) => {
                                 self.advance();
@@ -117,7 +117,7 @@ impl Reader {
                     self.advance();
                     let sb_sym = Value::symbol(symbols.intern("thaw").0);
                     let str_val = Value::string(s.as_str());
-                    Ok(Value::cons(sb_sym, Value::cons(str_val, Value::EMPTY_LIST)))
+                    Ok(Value::pair(sb_sym, Value::pair(str_val, Value::EMPTY_LIST)))
                 } else {
                     let loc = self.current_location();
                     Err(format!(
@@ -131,31 +131,31 @@ impl Reader {
                 self.advance();
                 let val = self.read(symbols)?;
                 let quote_sym = Value::symbol(symbols.intern("quote").0);
-                Ok(Value::cons(quote_sym, Value::cons(val, Value::EMPTY_LIST)))
+                Ok(Value::pair(quote_sym, Value::pair(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Quasiquote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let qq_sym = Value::symbol(symbols.intern("quasiquote").0);
-                Ok(Value::cons(qq_sym, Value::cons(val, Value::EMPTY_LIST)))
+                Ok(Value::pair(qq_sym, Value::pair(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Unquote => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let uq_sym = Value::symbol(symbols.intern("unquote").0);
-                Ok(Value::cons(uq_sym, Value::cons(val, Value::EMPTY_LIST)))
+                Ok(Value::pair(uq_sym, Value::pair(val, Value::EMPTY_LIST)))
             }
             OwnedToken::UnquoteSplicing => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let uqs_sym = Value::symbol(symbols.intern("unquote-splicing").0);
-                Ok(Value::cons(uqs_sym, Value::cons(val, Value::EMPTY_LIST)))
+                Ok(Value::pair(uqs_sym, Value::pair(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Splice => {
                 self.advance();
                 let val = self.read(symbols)?;
                 let splice_sym = Value::symbol(symbols.intern("splice").0);
-                Ok(Value::cons(splice_sym, Value::cons(val, Value::EMPTY_LIST)))
+                Ok(Value::pair(splice_sym, Value::pair(val, Value::EMPTY_LIST)))
             }
             OwnedToken::Integer(n) => {
                 let val = Value::int(*n);
@@ -265,7 +265,7 @@ impl Reader {
                     return Ok(elements
                         .into_iter()
                         .rev()
-                        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc)));
+                        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc)));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -322,8 +322,8 @@ impl Reader {
                     let result = elements
                         .into_iter()
                         .rev()
-                        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
-                    return Ok(Value::cons(struct_sym, result));
+                        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc));
+                    return Ok(Value::pair(struct_sym, result));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
@@ -348,8 +348,8 @@ impl Reader {
                     let result = elements
                         .into_iter()
                         .rev()
-                        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc));
-                    return Ok(Value::cons(table_sym, result));
+                        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc));
+                    return Ok(Value::pair(table_sym, result));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();

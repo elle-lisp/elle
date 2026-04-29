@@ -25,10 +25,10 @@ use std::collections::HashSet;
 pub(crate) enum AccessPath {
     /// The scrutinee itself.
     Root,
-    /// Car (head) of a cons cell at the given path.
-    Car(Box<AccessPath>),
-    /// Cdr (tail) of a cons cell at the given path.
-    Cdr(Box<AccessPath>),
+    /// First (head) of a cons cell at the given path.
+    First(Box<AccessPath>),
+    /// Rest (tail) of a cons cell at the given path.
+    Rest(Box<AccessPath>),
     /// Element at index `i` of an array at the given path.
     Index(Box<AccessPath>, usize),
     /// Slice from index `i` to end of an array at the given path.
@@ -46,8 +46,8 @@ pub(crate) enum AccessPath {
 pub(crate) enum Constructor {
     /// Literal value (int, float, string, keyword, bool).
     Literal(PatternLiteral),
-    /// Cons cell (pair).
-    Cons,
+    /// Pair cell (pair).
+    Pair,
     /// Nil literal.
     Nil,
     /// Empty list `()`.
@@ -82,7 +82,7 @@ impl std::hash::Hash for Constructor {
             | Constructor::ArrayMut(n)
             | Constructor::ArrayMutRest(n) => n.hash(state),
             Constructor::Struct(keys) | Constructor::Table(keys) => keys.hash(state),
-            Constructor::Cons
+            Constructor::Pair
             | Constructor::Nil
             | Constructor::EmptyList
             | Constructor::Set
@@ -96,7 +96,7 @@ impl Constructor {
     pub fn arity(&self) -> usize {
         match self {
             Constructor::Literal(_) | Constructor::Nil | Constructor::EmptyList => 0,
-            Constructor::Cons => 2,
+            Constructor::Pair => 2,
             Constructor::Array(n) | Constructor::ArrayMut(n) => *n,
             // Rest variants include the rest element as an extra sub-pattern.
             Constructor::ArrayRest(n) | Constructor::ArrayMutRest(n) => *n + 1,
@@ -208,7 +208,7 @@ fn is_wildcard(pat: &HirPattern) -> bool {
 /// Extract the constructor from a pattern, if it has one.
 ///
 /// List patterns are decomposed into cons chains: a non-empty list
-/// `(a b c)` is treated as `Cons` at the top level, with the head
+/// `(a b c)` is treated as `Pair` at the top level, with the head
 /// being the first element and the tail being the remaining list.
 /// An empty list `()` maps to `EmptyList`.
 fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
@@ -216,13 +216,13 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
         HirPattern::Wildcard | HirPattern::Var(_) => None,
         HirPattern::Nil => Some(Constructor::Nil),
         HirPattern::Literal(lit) => Some(Constructor::Literal(lit.clone())),
-        HirPattern::Cons { .. } => Some(Constructor::Cons),
+        HirPattern::Pair { .. } => Some(Constructor::Pair),
         HirPattern::List { elements, rest } => {
             if elements.is_empty() && rest.is_none() {
                 Some(Constructor::EmptyList)
             } else {
                 // Non-empty list → cons chain decomposition.
-                Some(Constructor::Cons)
+                Some(Constructor::Pair)
             }
         }
         HirPattern::Tuple { elements, rest } => {
@@ -271,16 +271,16 @@ fn collect_pattern_bindings(
             out.push((*binding, access.clone()));
         }
         HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
-        HirPattern::Cons { head, tail } => {
-            collect_pattern_bindings(head, &AccessPath::Car(Box::new(access.clone())), out);
-            collect_pattern_bindings(tail, &AccessPath::Cdr(Box::new(access.clone())), out);
+        HirPattern::Pair { head, tail } => {
+            collect_pattern_bindings(head, &AccessPath::First(Box::new(access.clone())), out);
+            collect_pattern_bindings(tail, &AccessPath::Rest(Box::new(access.clone())), out);
         }
         HirPattern::List { elements, rest } => {
             // Walk the list spine: car/cdr chain.
             let mut current = access.clone();
             for elem in elements {
-                collect_pattern_bindings(elem, &AccessPath::Car(Box::new(current.clone())), out);
-                current = AccessPath::Cdr(Box::new(current));
+                collect_pattern_bindings(elem, &AccessPath::First(Box::new(current.clone())), out);
+                current = AccessPath::Rest(Box::new(current));
             }
             if let Some(rest_pat) = rest {
                 collect_pattern_bindings(rest_pat, &current, out);
@@ -453,20 +453,20 @@ fn merge_struct_table_constructors(ctors: &mut Vec<Constructor>) {
 /// Extract sub-patterns from a pattern matching a given constructor.
 ///
 /// For wildcards/variables, returns `arity` wildcards.
-/// For list patterns, decomposes into head + tail (cons chain).
+/// For list patterns, decomposes into head + tail (pair chain).
 fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern> {
     match pat {
         HirPattern::Wildcard | HirPattern::Var(_) => {
             vec![HirPattern::Wildcard; ctor.arity()]
         }
-        HirPattern::Cons { head, tail } => {
+        HirPattern::Pair { head, tail } => {
             vec![*head.clone(), *tail.clone()]
         }
         HirPattern::List { elements, rest } => {
             if elements.is_empty() && rest.is_none() {
                 vec![] // EmptyList — arity 0
             } else if !elements.is_empty() {
-                // Cons chain decomposition: head is first element,
+                // Pair chain decomposition: head is first element,
                 // tail is the remaining list pattern.
                 let head = elements[0].clone();
                 let tail = if elements.len() == 1 {
@@ -682,9 +682,9 @@ fn expand_access(col_access: &[AccessPath], col: usize, ctor: &Constructor) -> V
         Constructor::Literal(_) | Constructor::Nil | Constructor::EmptyList => {
             // No sub-patterns, no new access paths.
         }
-        Constructor::Cons => {
-            new_access.push(AccessPath::Car(Box::new(base.clone())));
-            new_access.push(AccessPath::Cdr(Box::new(base.clone())));
+        Constructor::Pair => {
+            new_access.push(AccessPath::First(Box::new(base.clone())));
+            new_access.push(AccessPath::Rest(Box::new(base.clone())));
         }
         Constructor::Array(n) | Constructor::ArrayMut(n) => {
             for i in 0..*n {

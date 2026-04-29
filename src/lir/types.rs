@@ -98,7 +98,7 @@ pub struct LirFunction {
     pub doc: Option<Value>,
     /// Original lambda Syntax node for eval environment reconstruction
     pub syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
-    /// How varargs are collected: List (cons chain) or Struct (immutable struct).
+    /// How varargs are collected: List (pair chain) or Struct (immutable struct).
     /// Only meaningful when arity is AtLeast.
     pub vararg_kind: crate::hir::VarargKind,
     /// Total number of parameter slots (required + optional + rest if present).
@@ -470,13 +470,13 @@ pub enum LirInstr {
 
     // === Data Construction ===
     /// Construct a cons cell
-    Cons { dst: Reg, head: Reg, tail: Reg },
+    List { dst: Reg, head: Reg, tail: Reg },
     /// Construct an array
     MakeArrayMut { dst: Reg, elements: Vec<Reg> },
     /// Get car of cons
-    Car { dst: Reg, pair: Reg },
+    First { dst: Reg, pair: Reg },
     /// Get cdr of cons
-    Cdr { dst: Reg, pair: Reg },
+    Rest { dst: Reg, pair: Reg },
 
     // === Primitive Operations ===
     /// Binary arithmetic
@@ -527,10 +527,10 @@ pub enum LirInstr {
     StoreCaptureCell { cell: Reg, value: Reg },
 
     // === Destructuring ===
-    /// Car for destructuring: signals error if not a cons cell
-    CarDestructure { dst: Reg, src: Reg },
-    /// Cdr for destructuring: signals error if not a cons cell
-    CdrDestructure { dst: Reg, src: Reg },
+    /// First for destructuring: signals error if not a cons cell
+    FirstDestructure { dst: Reg, src: Reg },
+    /// Rest for destructuring: signals error if not a cons cell
+    RestDestructure { dst: Reg, src: Reg },
     /// Array ref for destructuring: signals error if out of bounds or not an array
     ArrayMutRefDestructure { dst: Reg, src: Reg, index: u16 },
     /// Array slice from index: returns a new array from index to end, or empty array
@@ -552,12 +552,12 @@ pub enum LirInstr {
     },
 
     // === Silent destructuring (parameter context: absent optional params → nil) ===
-    /// Car with silent nil: returns nil if not a cons cell.
+    /// First with silent nil: returns nil if not a cons cell.
     /// Used for &opt/(required) parameter destructuring where absent values produce nil.
-    CarOrNil { dst: Reg, src: Reg },
-    /// Cdr with silent empty-list: returns EMPTY_LIST if not a cons cell.
+    FirstOrNil { dst: Reg, src: Reg },
+    /// Rest with silent empty-list: returns EMPTY_LIST if not a cons cell.
     /// Used for &opt/(required) parameter destructuring.
-    CdrOrNil { dst: Reg, src: Reg },
+    RestOrNil { dst: Reg, src: Reg },
     /// Array ref with silent nil: returns nil if out of bounds or not an array.
     /// Used for `&opt`/\[required\] parameter destructuring.
     ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },

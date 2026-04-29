@@ -90,8 +90,8 @@ impl fmt::Display for Value {
             );
         }
 
-        // Cons cell (list)
-        if let Some(_cons) = self.as_cons() {
+        // Pair cell (list)
+        if let Some(_cons) = self.as_pair() {
             return self.fmt_cons(f);
         }
 
@@ -362,8 +362,8 @@ impl fmt::Debug for Value {
                 self.tag, self.payload
             );
         }
-        // Cons cell — use Debug recursively
-        if self.as_cons().is_some() {
+        // Pair cell — use Debug recursively
+        if self.as_pair().is_some() {
             return self.fmt_cons_debug(f);
         }
         // Array
@@ -512,7 +512,7 @@ impl Value {
                 write!(f, " ")?;
             }
             first = false;
-            if let Some(c) = current.as_cons() {
+            if let Some(c) = current.as_pair() {
                 write!(f, "{:?}", c.first)?;
                 current = c.rest;
                 if current.is_heap() && hare.advance(current) {
@@ -546,7 +546,7 @@ impl Value {
             }
             first = false;
 
-            if let Some(c) = current.as_cons() {
+            if let Some(c) = current.as_pair() {
                 write!(f, "{}", c.first)?;
                 current = c.rest;
                 if current.is_heap() && hare.advance(current) {

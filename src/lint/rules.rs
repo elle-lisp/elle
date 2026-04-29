@@ -154,7 +154,7 @@ mod tests {
     fn test_builtin_arity() {
         use crate::value::Arity;
         assert_eq!(builtin_arity("+"), Some(Arity::AtLeast(0)));
-        assert_eq!(builtin_arity("cons"), Some(Arity::Exact(2)));
+        assert_eq!(builtin_arity("pair"), Some(Arity::Exact(2)));
         assert_eq!(builtin_arity("list"), Some(Arity::AtLeast(0)));
         assert_eq!(builtin_arity("undefined"), None);
     }
@@ -190,12 +190,12 @@ mod tests {
         let mut symbols = crate::SymbolTable::new();
         let mut diagnostics = Vec::new();
 
-        let cons = symbols.intern("cons");
-        check_call_arity(cons, 1, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (cons 1)");
+        let pair = symbols.intern("pair");
+        check_call_arity(pair, 1, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (pair 1)");
 
         diagnostics.clear();
-        check_call_arity(cons, 3, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (cons 1 2 3)");
+        check_call_arity(pair, 3, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (pair 1 2 3)");
     }
 }

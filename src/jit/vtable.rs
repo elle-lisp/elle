@@ -54,9 +54,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) le: FuncId,
     pub(crate) gt: FuncId,
     pub(crate) ge: FuncId,
-    pub(crate) cons: FuncId,
-    pub(crate) car: FuncId,
-    pub(crate) cdr: FuncId,
+    pub(crate) pair: FuncId,
+    pub(crate) first: FuncId,
+    pub(crate) rest: FuncId,
     pub(crate) make_array: FuncId,
     pub(crate) is_nil: FuncId,
     pub(crate) is_pair: FuncId,
@@ -66,12 +66,12 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) is_struct_mut: FuncId,
     pub(crate) is_set: FuncId,
     pub(crate) is_set_mut: FuncId,
-    pub(crate) car_or_nil: FuncId,
-    pub(crate) cdr_or_nil: FuncId,
+    pub(crate) first_or_nil: FuncId,
+    pub(crate) rest_or_nil: FuncId,
     pub(crate) array_len: FuncId,
     pub(crate) array_ref_or_nil: FuncId,
-    pub(crate) car_destructure: FuncId,
-    pub(crate) cdr_destructure: FuncId,
+    pub(crate) first_destructure: FuncId,
+    pub(crate) rest_destructure: FuncId,
     pub(crate) array_ref_destructure: FuncId,
     pub(crate) array_slice_from: FuncId,
     pub(crate) struct_get_or_nil: FuncId,
@@ -145,9 +145,9 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     );
 
     // Data structure, lbox, call, and yield helpers
-    builder.symbol("elle_jit_cons", dispatch::elle_jit_cons as *const u8);
-    builder.symbol("elle_jit_car", dispatch::elle_jit_car as *const u8);
-    builder.symbol("elle_jit_cdr", dispatch::elle_jit_cdr as *const u8);
+    builder.symbol("elle_jit_pair", dispatch::elle_jit_pair as *const u8);
+    builder.symbol("elle_jit_first", dispatch::elle_jit_first as *const u8);
+    builder.symbol("elle_jit_rest", dispatch::elle_jit_rest as *const u8);
     builder.symbol(
         "elle_jit_make_array",
         dispatch::elle_jit_make_array as *const u8,
@@ -175,12 +175,12 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_is_set_mut as *const u8,
     );
     builder.symbol(
-        "elle_jit_car_or_nil",
-        dispatch::elle_jit_car_or_nil as *const u8,
+        "elle_jit_first_or_nil",
+        dispatch::elle_jit_first_or_nil as *const u8,
     );
     builder.symbol(
-        "elle_jit_cdr_or_nil",
-        dispatch::elle_jit_cdr_or_nil as *const u8,
+        "elle_jit_rest_or_nil",
+        dispatch::elle_jit_rest_or_nil as *const u8,
     );
     builder.symbol(
         "elle_jit_array_len",
@@ -191,12 +191,12 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_array_ref_or_nil as *const u8,
     );
     builder.symbol(
-        "elle_jit_car_destructure",
-        dispatch::elle_jit_car_destructure as *const u8,
+        "elle_jit_first_destructure",
+        dispatch::elle_jit_first_destructure as *const u8,
     );
     builder.symbol(
-        "elle_jit_cdr_destructure",
-        dispatch::elle_jit_cdr_destructure as *const u8,
+        "elle_jit_rest_destructure",
+        dispatch::elle_jit_rest_destructure as *const u8,
     );
     builder.symbol(
         "elle_jit_array_ref_destructure",
@@ -422,9 +422,9 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         le: declare(module, "elle_jit_le", &value_binary)?,
         gt: declare(module, "elle_jit_gt", &value_binary)?,
         ge: declare(module, "elle_jit_ge", &value_binary)?,
-        cons: declare(module, "elle_jit_cons", &cons_sig)?,
-        car: declare(module, "elle_jit_car", &value_unary)?,
-        cdr: declare(module, "elle_jit_cdr", &value_unary)?,
+        pair: declare(module, "elle_jit_pair", &cons_sig)?,
+        first: declare(module, "elle_jit_first", &value_unary)?,
+        rest: declare(module, "elle_jit_rest", &value_unary)?,
         make_array: declare(module, "elle_jit_make_array", &make_array_sig)?,
         is_nil: declare(module, "elle_jit_is_nil", &value_unary)?,
         is_pair: declare(module, "elle_jit_is_pair", &value_unary)?,
@@ -434,12 +434,12 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         is_struct_mut: declare(module, "elle_jit_is_struct_mut", &value_unary)?,
         is_set: declare(module, "elle_jit_is_set", &value_unary)?,
         is_set_mut: declare(module, "elle_jit_is_set_mut", &value_unary)?,
-        car_or_nil: declare(module, "elle_jit_car_or_nil", &value_unary)?,
-        cdr_or_nil: declare(module, "elle_jit_cdr_or_nil", &value_unary)?,
+        first_or_nil: declare(module, "elle_jit_first_or_nil", &value_unary)?,
+        rest_or_nil: declare(module, "elle_jit_rest_or_nil", &value_unary)?,
         array_len: declare(module, "elle_jit_array_len", &value_unary)?,
         array_ref_or_nil: declare(module, "elle_jit_array_ref_or_nil", &array_ref_or_nil_sig)?,
-        car_destructure: declare(module, "elle_jit_car_destructure", &value_unary_vm)?,
-        cdr_destructure: declare(module, "elle_jit_cdr_destructure", &value_unary_vm)?,
+        first_destructure: declare(module, "elle_jit_first_destructure", &value_unary_vm)?,
+        rest_destructure: declare(module, "elle_jit_rest_destructure", &value_unary_vm)?,
         array_ref_destructure: declare(
             module,
             "elle_jit_array_ref_destructure",

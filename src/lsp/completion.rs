@@ -73,7 +73,7 @@ pub(crate) fn get_completions(
         ("<=", SymbolKind::Builtin, "Less than or equal"),
         (">=", SymbolKind::Builtin, "Greater than or equal"),
         // List operations
-        ("cons", SymbolKind::Builtin, "Construct list"),
+        ("pair", SymbolKind::Builtin, "Construct list"),
         ("first", SymbolKind::Builtin, "Get first element"),
         ("rest", SymbolKind::Builtin, "Get rest of list"),
         ("length", SymbolKind::Builtin, "Get list length"),
@@ -161,13 +161,13 @@ mod tests {
         let symbol_table = crate::SymbolTable::new();
         let docs = HashMap::new();
 
-        let completions = get_completions(0, 0, "cons", &index, &symbol_table, &docs);
+        let completions = get_completions(0, 0, "pair", &index, &symbol_table, &docs);
         assert!(!completions.is_empty());
-        // Should include "cons"
+        // Should include "pair"
         assert!(completions.iter().any(|item| {
             item.get("label")
                 .and_then(|l| l.as_str())
-                .map(|l| l.starts_with("cons"))
+                .map(|l| l.starts_with("pair"))
                 .unwrap_or(false)
         }));
     }

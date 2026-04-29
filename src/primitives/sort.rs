@@ -41,7 +41,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // List — collect, sort, rebuild
-    if args[0].is_cons() {
+    if args[0].is_pair() {
         let vec = match args[0].list_to_vec() {
             Ok(v) => v,
             Err(e) => return (SIG_ERROR, error_val("type-error", format!("sort: {}", e))),

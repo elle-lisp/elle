@@ -9,7 +9,7 @@ use proptest::prelude::*;
 /// Strategy for arbitrary immediate Values (no heap allocation).
 ///
 /// Generates: nil, empty_list, true, false, integers, floats, symbols.
-/// Does NOT generate: strings, cons, arrays, tables, closures, fibers
+/// Does NOT generate: strings, pair, arrays, tables, closures, fibers
 /// (heap types that require special handling or are reference-compared).
 pub fn arb_immediate() -> impl Strategy<Value = Value> {
     prop_oneof![
@@ -36,9 +36,9 @@ pub fn arb_immediate() -> impl Strategy<Value = Value> {
 /// Strategy for arbitrary Values including heap-allocated types.
 ///
 /// Generates everything from `arb_immediate()` plus:
-/// strings, cons cells, arrays (up to depth limit).
+/// strings, pair cells, arrays (up to depth limit).
 ///
-/// Heap values are compared by content (strings, cons, arrays)
+/// Heap values are compared by content (strings, pair, arrays)
 /// not by reference (closures, fibers, native fns).
 pub fn arb_value() -> impl Strategy<Value = Value> {
     arb_value_depth(3)
@@ -70,13 +70,13 @@ fn arb_value_depth(depth: u32) -> BoxedStrategy<Value> {
         prop_oneof![
             // Leaf values (high weight to avoid explosion)
             10 => leaf,
-            // Cons cells
+            // Pair cells
             2 => (inner.clone(), arb_value_depth(depth - 1))
-                .prop_map(|(car, cdr)| Value::cons(car, cdr)),
+                .prop_map(|(first, rest)| Value::pair(first, rest)),
             // Proper lists (0-5 elements)
             2 => prop::collection::vec(arb_value_depth(depth - 1), 0..=5)
                 .prop_map(|elems| {
-                    elems.into_iter().rev().fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc))
+                    elems.into_iter().rev().fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc))
                 }),
             // Arrays (0-5 elements)
             1 => prop::collection::vec(arb_value_depth(depth - 1), 0..=5)

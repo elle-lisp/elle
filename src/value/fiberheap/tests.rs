@@ -1,7 +1,7 @@
 //! Tests for FiberHeap.
 
 use super::*;
-use crate::value::heap::{Cons, HeapObject};
+use crate::value::heap::{HeapObject, Pair};
 
 #[test]
 fn test_fiber_heap_alloc() {
@@ -39,7 +39,7 @@ fn test_fiber_heap_clear_runs_destructors() {
         s: sb,
         traits: Value::NIL,
     });
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
     assert_eq!(heap.len(), 3); // 3 total objects allocated
     heap.clear();
     assert_eq!(heap.len(), 0);
@@ -49,17 +49,17 @@ fn test_fiber_heap_clear_runs_destructors() {
 #[test]
 fn test_fiber_heap_non_drop_types_not_tracked() {
     let mut heap = FiberHeap::new();
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
     // HeapObject::Float is no longer allocated — floats are immediate in 16-byte Value.
     // Use another non-drop type instead.
-    heap.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
+    heap.alloc(HeapObject::Pair(Pair::new(Value::TRUE, Value::EMPTY_LIST)));
     heap.alloc(HeapObject::LBox {
         cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
         traits: Value::NIL,
     });
     // 3 total objects; only the LBox needs Drop tracking. LBox wraps
     // its value in `Rc<RefCell<Value>>` for cross-fiber sharing, so
-    // dropping it must decrement the Rc's strong count. The two Cons
+    // dropping it must decrement the Rc's strong count. The two Pair
     // cells are pure bit-copies and need no Drop.
     assert_eq!(heap.len(), 3);
     assert_eq!(heap.dtor_count(), 1);
@@ -70,7 +70,7 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     // This test exists to document which tags need Drop.
     // If a new HeapTag variant is added, `needs_drop` won't compile
     // until a decision is made.
-    assert!(!needs_drop(HeapTag::Cons));
+    assert!(!needs_drop(HeapTag::Pair));
     assert!(!needs_drop(HeapTag::Float));
     assert!(!needs_drop(HeapTag::NativeFn));
     assert!(!needs_drop(HeapTag::LibHandle));

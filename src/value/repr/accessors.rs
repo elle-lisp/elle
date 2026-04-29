@@ -117,9 +117,9 @@ impl Value {
         self.tag == TAG_STRING
     }
 
-    /// Check if this is a cons cell.
+    /// Check if this is a pair cell.
     #[inline]
-    pub fn is_cons(&self) -> bool {
+    pub fn is_pair(&self) -> bool {
         self.tag == TAG_CONS
     }
 
@@ -255,15 +255,15 @@ impl Value {
         self.tag == TAG_FFI_TYPE
     }
 
-    /// Check if this is a proper list (nil or cons ending in nil).
+    /// Check if this is a proper list (nil or pair ending in nil).
     pub fn is_list(&self) -> bool {
         let mut current = *self;
         loop {
             if current.is_nil() || current.is_empty_list() {
                 return true;
             }
-            if let Some(cons) = current.as_cons() {
-                current = cons.rest;
+            if let Some(pair) = current.as_pair() {
+                current = pair.rest;
             } else {
                 return false;
             }
@@ -320,15 +320,15 @@ impl Value {
         }
     }
 
-    /// Extract as cons if this is a cons cell.
+    /// Extract as pair if this is a pair cell.
     #[inline]
-    pub fn as_cons(&self) -> Option<&crate::value::heap::Cons> {
+    pub fn as_pair(&self) -> Option<&crate::value::heap::Pair> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_cons() {
+        if !self.is_pair() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Cons(c) => Some(c),
+            HeapObject::Pair(c) => Some(c),
             _ => None,
         }
     }
@@ -754,9 +754,9 @@ impl Value {
                     _ => {}
                 }
             }
-            if let Some(cons) = current.as_cons() {
-                result.push(cons.first);
-                current = cons.rest;
+            if let Some(pair) = current.as_pair() {
+                result.push(pair.first);
+                current = pair.rest;
             } else {
                 return Err("Not a proper list");
             }

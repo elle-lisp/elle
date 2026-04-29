@@ -253,7 +253,7 @@ impl VM {
                     self.fiber.call_stack.pop();
                     self.fiber.signal = Some((
                         blocked,
-                        Value::cons(Value::keyword("capability-denied"), Value::keyword("gpu")),
+                        Value::pair(Value::keyword("capability-denied"), Value::keyword("gpu")),
                     ));
                     return None;
                 }

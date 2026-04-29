@@ -55,14 +55,14 @@ pub enum Instruction {
     /// Create closure (const_idx, num_upvalues)
     MakeClosure,
 
-    /// Cons cell construction
-    Cons,
+    /// Pair cell construction
+    Pair,
 
-    /// Car operation
-    Car,
+    /// First operation
+    First,
 
-    /// Cdr operation
-    Cdr,
+    /// Rest operation
+    Rest,
 
     /// Array construction (size)
     MakeArrayMut,
@@ -135,11 +135,11 @@ pub enum Instruction {
     /// Empty list constant
     EmptyList,
 
-    /// Car for destructuring: signals error if not a cons cell.
-    CarDestructure,
+    /// First for destructuring: signals error if not a cons cell.
+    FirstDestructure,
 
-    /// Cdr for destructuring: signals error if not a cons cell.
-    CdrDestructure,
+    /// Rest for destructuring: signals error if not a cons cell.
+    RestDestructure,
 
     /// Array ref for destructuring: signals error if not an array or out of bounds.
     /// Operand: u16 index (immediate)
@@ -166,12 +166,12 @@ pub enum Instruction {
     /// Operand: u16 constant pool index (keyword key)
     StructGetDestructure,
 
-    /// Car with silent nil (for parameter destructuring): returns nil if not a cons cell.
+    /// First with silent nil (for parameter destructuring): returns nil if not a cons cell.
     /// Used by &opt/(required) parameter destructuring where absent values → nil.
-    CarOrNil,
-    /// Cdr with silent empty-list (for parameter destructuring): returns EMPTY_LIST if not a cons.
+    FirstOrNil,
+    /// Rest with silent empty-list (for parameter destructuring): returns EMPTY_LIST if not a pair.
     /// Used by &opt/(required) parameter destructuring.
-    CdrOrNil,
+    RestOrNil,
     /// Array ref with silent nil (for parameter destructuring): returns nil if out of bounds.
     /// Operand: u16 index (immediate)
     ArrayMutRefOrNil,
@@ -630,8 +630,8 @@ mod tests {
             "StructGetDestructure must have a distinct byte value from StructGetOrNil"
         );
         assert_ne!(
-            Instruction::CarDestructure as u8,
-            Instruction::CdrDestructure as u8,
+            Instruction::FirstDestructure as u8,
+            Instruction::RestDestructure as u8,
         );
         assert_ne!(
             Instruction::OutboxEnter as u8,

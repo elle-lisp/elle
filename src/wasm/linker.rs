@@ -584,28 +584,28 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
     let err = |kind: &str, msg: &str| (SIG_ERROR, crate::value::error_val(kind, msg));
 
     match op {
-        x if x == DataOp::Cons as i32 => (SIG_OK, Value::cons(args[0], args[1])),
-        x if x == DataOp::Car as i32 => match args[0].as_cons() {
+        x if x == DataOp::Pair as i32 => (SIG_OK, Value::pair(args[0], args[1])),
+        x if x == DataOp::First as i32 => match args[0].as_pair() {
             Some(c) => (SIG_OK, c.first),
             None => (SIG_OK, Value::NIL),
         },
-        x if x == DataOp::Cdr as i32 => match args[0].as_cons() {
+        x if x == DataOp::Rest as i32 => match args[0].as_pair() {
             Some(c) => (SIG_OK, c.rest),
             None => (SIG_OK, Value::NIL),
         },
-        x if x == DataOp::CarDestructure as i32 => match args[0].as_cons() {
+        x if x == DataOp::FirstDestructure as i32 => match args[0].as_pair() {
             Some(c) => (SIG_OK, c.first),
-            None => err("type-error", "car: not a pair"),
+            None => err("type-error", "first: not a pair"),
         },
-        x if x == DataOp::CdrDestructure as i32 => match args[0].as_cons() {
+        x if x == DataOp::RestDestructure as i32 => match args[0].as_pair() {
             Some(c) => (SIG_OK, c.rest),
-            None => err("type-error", "cdr: not a pair"),
+            None => err("type-error", "rest: not a pair"),
         },
-        x if x == DataOp::CarOrNil as i32 => match args[0].as_cons() {
+        x if x == DataOp::FirstOrNil as i32 => match args[0].as_pair() {
             Some(c) => (SIG_OK, c.first),
             None => (SIG_OK, Value::NIL),
         },
-        x if x == DataOp::CdrOrNil as i32 => match args[0].as_cons() {
+        x if x == DataOp::RestOrNil as i32 => match args[0].as_pair() {
             Some(c) => (SIG_OK, c.rest),
             None => (SIG_OK, Value::EMPTY_LIST),
         },
@@ -695,7 +695,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                     src.borrow().to_vec()
                 } else if let Some(src) = args[1].as_array() {
                     src.to_vec()
-                } else if args[1].as_cons().is_some() || args[1].is_empty_list() {
+                } else if args[1].as_pair().is_some() || args[1].is_empty_list() {
                     match args[1].list_to_vec() {
                         Ok(v) => v,
                         Err(_) => {

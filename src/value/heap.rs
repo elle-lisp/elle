@@ -28,16 +28,16 @@ pub type CifCache = RefCell<Option<libffi::middle::Cif>>;
 #[cfg(not(feature = "ffi"))]
 pub type CifCache = ();
 
-/// Cons cell for list construction.
-pub struct Cons {
+/// Pair cell for list construction.
+pub struct Pair {
     pub first: Value,
     pub rest: Value,
     pub traits: Value,
 }
 
-impl Cons {
+impl Pair {
     pub fn new(first: Value, rest: Value) -> Self {
-        Cons {
+        Pair {
             first,
             rest,
             traits: Value::NIL,
@@ -45,15 +45,15 @@ impl Cons {
     }
 }
 
-impl std::fmt::Debug for Cons {
+impl std::fmt::Debug for Pair {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({:?} . {:?})", self.first, self.rest)
     }
 }
 
-impl Clone for Cons {
+impl Clone for Pair {
     fn clone(&self) -> Self {
-        Cons {
+        Pair {
             first: self.first,
             rest: self.rest,
             traits: self.traits,
@@ -61,16 +61,16 @@ impl Clone for Cons {
     }
 }
 
-impl PartialEq for Cons {
+impl PartialEq for Pair {
     fn eq(&self, other: &Self) -> bool {
         self.first == other.first && self.rest == other.rest
         // traits intentionally excluded
     }
 }
 
-impl Eq for Cons {}
+impl Eq for Pair {}
 
-impl std::hash::Hash for Cons {
+impl std::hash::Hash for Pair {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.first.hash(state);
         self.rest.hash(state);
@@ -78,13 +78,13 @@ impl std::hash::Hash for Cons {
     }
 }
 
-impl PartialOrd for Cons {
+impl PartialOrd for Pair {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Cons {
+impl Ord for Pair {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.first
             .cmp(&other.first)
@@ -99,7 +99,7 @@ impl Ord for Cons {
 #[repr(u8)]
 pub enum HeapTag {
     LString = 0,
-    Cons = 1,
+    Pair = 1,
     LArrayMut = 2,
     LStructMut = 3,
     LStruct = 4,
@@ -138,8 +138,8 @@ pub enum HeapObject {
     /// Immutable string. Bytes stored inline in the arena.
     LString { s: InlineSlice<u8>, traits: Value },
 
-    /// Cons cell (list pair)
-    Cons(Cons),
+    /// Pair cell (list pair)
+    Pair(Pair),
 
     /// Mutable array.
     ///
@@ -344,7 +344,7 @@ impl HeapObject {
     pub fn tag(&self) -> HeapTag {
         match self {
             HeapObject::LString { .. } => HeapTag::LString,
-            HeapObject::Cons(_) => HeapTag::Cons,
+            HeapObject::Pair(_) => HeapTag::Pair,
             HeapObject::LArrayMut { .. } => HeapTag::LArrayMut,
             HeapObject::LStructMut { .. } => HeapTag::LStructMut,
             HeapObject::LStruct { .. } => HeapTag::LStruct,
@@ -388,7 +388,7 @@ impl HeapObject {
             HeapObject::LArrayMut { .. } => TAG_ARRAY_MUT,
             HeapObject::LStruct { .. } => TAG_STRUCT,
             HeapObject::LStructMut { .. } => TAG_STRUCT_MUT,
-            HeapObject::Cons(_) => TAG_CONS,
+            HeapObject::Pair(_) => TAG_CONS,
             HeapObject::Closure { .. } => TAG_CLOSURE,
             HeapObject::LBytes { .. } => TAG_BYTES,
             HeapObject::LBytesMut { .. } => TAG_BYTES_MUT,
@@ -418,7 +418,7 @@ impl HeapObject {
     pub fn type_name(&self) -> &'static str {
         match self {
             HeapObject::LString { .. } => "string",
-            HeapObject::Cons(_) => "list",
+            HeapObject::Pair(_) => "list",
             HeapObject::LArrayMut { .. } => "@array",
             HeapObject::LStructMut { .. } => "@struct",
             HeapObject::LStruct { .. } => "struct",
@@ -452,7 +452,7 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::LString { s, .. } => {
                 write!(f, "\"{}\"", String::from_utf8_lossy(s.as_slice()))
             }
-            HeapObject::Cons(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
+            HeapObject::Pair(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
             HeapObject::LArrayMut { data, .. } => {
                 if let Ok(borrowed) = data.try_borrow() {
                     write!(f, "{:?}", &*borrowed)
@@ -550,14 +550,14 @@ mod tests {
 
     #[test]
     fn test_alloc_permanent_cons() {
-        // Cons has no inner arena allocation, safe for alloc_permanent.
-        let v = alloc_permanent(HeapObject::Cons(Cons::new(Value::NIL, Value::int(1))));
+        // Pair has no inner arena allocation, safe for alloc_permanent.
+        let v = alloc_permanent(HeapObject::Pair(Pair::new(Value::NIL, Value::int(1))));
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::Cons(c) => assert_eq!(c.rest.as_int(), Some(1)),
-                _ => panic!("Expected Cons"),
+                HeapObject::Pair(c) => assert_eq!(c.rest.as_int(), Some(1)),
+                _ => panic!("Expected Pair"),
             }
             drop_heap(v);
         }
@@ -578,7 +578,7 @@ mod tests {
         {
             let _guard = ArenaGuard::new();
             Value::string("guarded");
-            alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+            alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
             let during = heap_arena_len();
             assert_eq!(during, before + 2);
         }
@@ -611,7 +611,7 @@ mod tests {
         let result: Result<(), String> = {
             let _guard = ArenaGuard::new();
             Value::string("will be freed");
-            alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+            alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
             Err("simulated error".to_string())
         };
         assert!(result.is_err());

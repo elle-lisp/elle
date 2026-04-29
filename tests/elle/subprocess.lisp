@@ -139,7 +139,7 @@
 
 # ── subprocess/exec: sequence args ───────────────────────────────────────────
 
-# subprocess/exec accepts cons list args
+# subprocess/exec accepts pair list args
 (assert (= (let [proc (subprocess/exec "echo" (list "hello"))]
              (string (port/read-all (get proc :stdout)))) "hello\n")
         "subprocess/exec: list args work")
@@ -160,7 +160,7 @@
           "subprocess/exec: string args gives type-error"))
 
 # subprocess/exec rejects non-string element in list with type-error
-(let [[ok? err] (protect (subprocess/exec "echo" (cons 42 ())))]
+(let [[ok? err] (protect (subprocess/exec "echo" (pair 42 ())))]
   (assert (not ok?)
           "subprocess/exec: non-string element in list gives type-error")
   (assert (= (get err :error) :type-error)

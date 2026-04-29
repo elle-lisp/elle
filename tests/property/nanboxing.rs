@@ -470,43 +470,43 @@ fn int_not_eq_float_negative() {
 }
 
 // =========================================================================
-// Cons roundtrip
+// Pair roundtrip
 // =========================================================================
 
 #[test]
 fn cons_roundtrip_simple() {
-    let car = Value::int(1);
-    let cdr = Value::int(2);
-    let cons = Value::cons(car, cdr);
-    assert!(cons.is_cons());
-    assert!(cons.is_heap());
-    let c = cons.as_cons().unwrap();
-    assert_eq!(c.first, car);
-    assert_eq!(c.rest, cdr);
+    let first = Value::int(1);
+    let rest = Value::int(2);
+    let pair = Value::pair(first, rest);
+    assert!(pair.is_pair());
+    assert!(pair.is_heap());
+    let c = pair.as_pair().unwrap();
+    assert_eq!(c.first, first);
+    assert_eq!(c.rest, rest);
 }
 
 #[test]
 fn cons_roundtrip_min_max() {
-    let car = Value::int(i64::MIN);
-    let cdr = Value::int(i64::MAX);
-    let cons = Value::cons(car, cdr);
-    assert!(cons.is_cons());
-    assert!(cons.is_heap());
-    let c = cons.as_cons().unwrap();
-    assert_eq!(c.first, car);
-    assert_eq!(c.rest, cdr);
+    let first = Value::int(i64::MIN);
+    let rest = Value::int(i64::MAX);
+    let pair = Value::pair(first, rest);
+    assert!(pair.is_pair());
+    assert!(pair.is_heap());
+    let c = pair.as_pair().unwrap();
+    assert_eq!(c.first, first);
+    assert_eq!(c.rest, rest);
 }
 
 #[test]
 fn cons_roundtrip_zero() {
-    let car = Value::int(0);
-    let cdr = Value::int(0);
-    let cons = Value::cons(car, cdr);
-    assert!(cons.is_cons());
-    assert!(cons.is_heap());
-    let c = cons.as_cons().unwrap();
-    assert_eq!(c.first, car);
-    assert_eq!(c.rest, cdr);
+    let first = Value::int(0);
+    let rest = Value::int(0);
+    let pair = Value::pair(first, rest);
+    assert!(pair.is_pair());
+    assert!(pair.is_heap());
+    let c = pair.as_pair().unwrap();
+    assert_eq!(c.first, first);
+    assert_eq!(c.rest, rest);
 }
 
 // =========================================================================

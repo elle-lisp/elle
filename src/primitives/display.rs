@@ -52,12 +52,12 @@ fn flat_repr(val: Value, depth: usize) -> String {
     }
 
     // Lists
-    if let Some(_cons) = val.as_cons() {
+    if let Some(_cons) = val.as_pair() {
         let mut parts = Vec::new();
         let mut current = val;
-        while let Some(cons) = current.as_cons() {
-            parts.push(flat_repr(cons.first, depth + 1));
-            current = cons.rest;
+        while let Some(pair) = current.as_pair() {
+            parts.push(flat_repr(pair.first, depth + 1));
+            current = pair.rest;
         }
         if !current.is_empty_list() && !current.is_nil() {
             parts.push(format!(". {}", flat_repr(current, depth + 1)));
@@ -152,14 +152,14 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Lists: break with first element on same line as (
-    if let Some(_cons) = val.as_cons() {
+    if let Some(_cons) = val.as_pair() {
         let mut parts = Vec::new();
         let mut current = val;
         let mut first = true;
 
-        while let Some(cons) = current.as_cons() {
+        while let Some(pair) = current.as_pair() {
             let part = pretty_print_impl(
-                cons.first,
+                pair.first,
                 next_indent,
                 DEFAULT_WIDTH - next_indent,
                 depth + 1,
@@ -170,7 +170,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
             } else {
                 parts.push(format!("{}{}", next_indent_str, part));
             }
-            current = cons.rest;
+            current = pair.rest;
         }
 
         if !current.is_empty_list() && !current.is_nil() {
@@ -304,12 +304,12 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Count list elements
-    if let Some(_cons) = val.as_cons() {
+    if let Some(_cons) = val.as_pair() {
         let mut count = 0;
         let mut current = val;
-        while let Some(cons) = current.as_cons() {
+        while let Some(pair) = current.as_pair() {
             count += 1;
-            current = cons.rest;
+            current = pair.rest;
         }
         return (
             SIG_OK,

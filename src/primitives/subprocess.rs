@@ -330,16 +330,16 @@ fn extract_string_sequence(seq: &Value, fn_name: &str) -> Result<Vec<String>, (S
         return Ok(result);
     }
 
-    // Cons list (proper only)
-    if seq.as_cons().is_some() {
+    // Pair list (proper only)
+    if seq.as_pair().is_some() {
         let mut current = *seq;
         loop {
             if current.is_empty_list() {
                 break;
             }
-            match current.as_cons() {
-                Some(cons) => {
-                    match cons.first.with_string(|s| s.to_string()) {
+            match current.as_pair() {
+                Some(pair) => {
+                    match pair.first.with_string(|s| s.to_string()) {
                         Some(s) => result.push(s),
                         None => {
                             return Err((
@@ -349,13 +349,13 @@ fn extract_string_sequence(seq: &Value, fn_name: &str) -> Result<Vec<String>, (S
                                     format!(
                                         "{}: args element must be string, got {}",
                                         fn_name,
-                                        cons.first.type_name()
+                                        pair.first.type_name()
                                     ),
                                 ),
                             ))
                         }
                     }
-                    current = cons.rest;
+                    current = pair.rest;
                 }
                 None => {
                     return Err((
@@ -1046,9 +1046,9 @@ mod tests {
 
     #[test]
     fn test_extract_string_sequence_cons_list() {
-        let list = Value::cons(
+        let list = Value::pair(
             Value::string("hello"),
-            Value::cons(Value::string("world"), Value::EMPTY_LIST),
+            Value::pair(Value::string("world"), Value::EMPTY_LIST),
         );
         let result = extract_string_sequence(&list, "test");
         assert_eq!(result, Ok(vec!["hello".to_string(), "world".to_string()]));
@@ -1076,7 +1076,7 @@ mod tests {
 
     #[test]
     fn test_extract_string_sequence_non_string_element() {
-        let list = Value::cons(Value::int(99), Value::EMPTY_LIST);
+        let list = Value::pair(Value::int(99), Value::EMPTY_LIST);
         let (sig, _) = extract_string_sequence(&list, "test").unwrap_err();
         assert_eq!(sig, SIG_ERROR);
     }
@@ -1094,9 +1094,9 @@ mod tests {
 
     #[test]
     fn test_subprocess_exec_cons_list_args() {
-        let list = Value::cons(
+        let list = Value::pair(
             Value::string("hello"),
-            Value::cons(Value::string("world"), Value::EMPTY_LIST),
+            Value::pair(Value::string("world"), Value::EMPTY_LIST),
         );
         let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), list]);
         assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
@@ -1117,14 +1117,14 @@ mod tests {
 
     #[test]
     fn test_subprocess_exec_args_non_string_element_in_list() {
-        let list = Value::cons(Value::int(99), Value::EMPTY_LIST);
+        let list = Value::pair(Value::int(99), Value::EMPTY_LIST);
         let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), list]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
     fn test_subprocess_exec_improper_list_rejected() {
-        let improper = Value::cons(Value::string("a"), Value::int(1));
+        let improper = Value::pair(Value::string("a"), Value::int(1));
         let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), improper]);
         assert_eq!(sig, SIG_ERROR);
     }

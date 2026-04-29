@@ -16,7 +16,7 @@ pub(crate) fn handle_is_pair(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on IsPair");
-    vm.fiber.stack.push(Value::bool(val.is_cons()));
+    vm.fiber.stack.push(Value::bool(val.is_pair()));
 }
 
 pub(crate) fn handle_is_number(vm: &mut VM) {

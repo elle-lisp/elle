@@ -208,11 +208,11 @@ pub fn list(values: impl IntoIterator<Item = Value>) -> Value {
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
-        .fold(Value::EMPTY_LIST, |acc, v| Value::cons(v, acc))
+        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc))
 }
 
 /// Create a cons cell (convenience function).
 #[inline]
-pub fn cons(car: Value, cdr: Value) -> Value {
-    Value::cons(car, cdr)
+pub fn pair(head: Value, tail: Value) -> Value {
+    Value::pair(head, tail)
 }

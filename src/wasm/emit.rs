@@ -98,13 +98,13 @@ pub(super) const ARGS_BASE: i32 = 256;
 #[repr(i32)]
 #[derive(Clone, Copy)]
 pub(super) enum DataOp {
-    Cons = 0,
-    Car = 1,
-    Cdr = 2,
-    CarDestructure = 3,
-    CdrDestructure = 4,
-    CarOrNil = 5,
-    CdrOrNil = 6,
+    Pair = 0,
+    First = 1,
+    Rest = 2,
+    FirstDestructure = 3,
+    RestDestructure = 4,
+    FirstOrNil = 5,
+    RestOrNil = 6,
     MakeArray = 7,
     MakeCapture = 8,
     LoadCapture = 9,
@@ -124,13 +124,13 @@ pub(super) enum DataOp {
 }
 
 // Re-export as i32 constants for backward compat in instruction.rs
-pub(super) const OP_CONS: i32 = DataOp::Cons as i32;
-pub(super) const OP_CAR: i32 = DataOp::Car as i32;
-pub(super) const OP_CDR: i32 = DataOp::Cdr as i32;
-pub(super) const OP_CAR_DESTRUCTURE: i32 = DataOp::CarDestructure as i32;
-pub(super) const OP_CDR_DESTRUCTURE: i32 = DataOp::CdrDestructure as i32;
-pub(super) const OP_CAR_OR_NIL: i32 = DataOp::CarOrNil as i32;
-pub(super) const OP_CDR_OR_NIL: i32 = DataOp::CdrOrNil as i32;
+pub(super) const OP_CONS: i32 = DataOp::Pair as i32;
+pub(super) const OP_CAR: i32 = DataOp::First as i32;
+pub(super) const OP_CDR: i32 = DataOp::Rest as i32;
+pub(super) const OP_CAR_DESTRUCTURE: i32 = DataOp::FirstDestructure as i32;
+pub(super) const OP_CDR_DESTRUCTURE: i32 = DataOp::RestDestructure as i32;
+pub(super) const OP_CAR_OR_NIL: i32 = DataOp::FirstOrNil as i32;
+pub(super) const OP_CDR_OR_NIL: i32 = DataOp::RestOrNil as i32;
 pub(super) const OP_MAKE_ARRAY: i32 = DataOp::MakeArray as i32;
 pub(super) const OP_MAKE_CAPTURE: i32 = DataOp::MakeCapture as i32;
 pub(super) const OP_LOAD_CAPTURE: i32 = DataOp::LoadCapture as i32;

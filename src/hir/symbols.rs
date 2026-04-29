@@ -282,6 +282,12 @@ impl<'a> HirSymbolExtractor<'a> {
                 self.walk(value, index, symbols);
             }
 
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    self.walk(a, index, symbols);
+                }
+            }
+
             HirKind::Error => {}
         }
     }

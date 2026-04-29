@@ -47,6 +47,14 @@ pub fn compile_to_lir(
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+
+    // Build call classification for region inference
+    let call_class = crate::hir::CallClassification {
+        immediate_primitives: imm_prims.clone(),
+        intrinsic_ops: intrinsics.keys().copied().collect(),
+        ..Default::default()
+    };
+    let region_info = crate::hir::analyze_regions_with(&analysis.hir, &arena, call_class);
     let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
     let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
     let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
@@ -60,7 +68,8 @@ pub fn compile_to_lir(
         .with_non_allocating_accessors(acc_prims.clone())
         .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names);
+        .with_symbol_names(symbol_names)
+        .with_region_info(region_info);
     let result = lowerer.lower(&analysis.hir);
     crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
     result
@@ -101,12 +110,18 @@ pub fn compile(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
 
-    // Phase 3.5: Mark tail calls
+    // Phase 3.5: Mark tail calls + functionalize
     mark_tail_calls(&mut analysis.hir);
+    functionalize(&mut analysis.hir, &mut arena);
 
     // Phase 4: Lower to LIR with intrinsic specialization
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let region_info = crate::hir::analyze_regions_with(
+        &analysis.hir,
+        &arena,
+        crate::lir::intrinsics::build_call_classification(symbols),
+    );
     let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
     let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
     let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
@@ -120,7 +135,8 @@ pub fn compile(
         .with_non_allocating_accessors(acc_prims.clone())
         .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone());
+        .with_symbol_names(symbol_names.clone())
+        .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
@@ -263,6 +279,11 @@ pub fn compile_file_to_lir(
 
     mark_tail_calls(&mut hir);
     functionalize(&mut hir, &mut arena);
+    let region_info = crate::hir::analyze_regions_with(
+        &hir,
+        &arena,
+        crate::lir::intrinsics::build_call_classification(symbols),
+    );
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -279,7 +300,8 @@ pub fn compile_file_to_lir(
         .with_non_allocating_accessors(acc_prims.clone())
         .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names);
+        .with_symbol_names(symbol_names)
+        .with_region_info(region_info);
     let result = lowerer.lower(&hir);
     crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
     result
@@ -455,6 +477,11 @@ fn compile_file_inner(
         compile_file_frontend(source, symbols, source_name)?;
 
     // Lower to LIR
+    let region_info = crate::hir::analyze_regions_with(
+        &hir,
+        &arena,
+        crate::lir::intrinsics::build_call_classification(symbols),
+    );
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
@@ -470,7 +497,8 @@ fn compile_file_inner(
         .with_non_allocating_accessors(acc_prims.clone())
         .with_non_escaping_stdlib(nes_prims.clone())
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names.clone());
+        .with_symbol_names(symbol_names.clone())
+        .with_region_info(region_info);
     let lir_module = lowerer.lower(&hir)?;
 
     // Emit bytecode

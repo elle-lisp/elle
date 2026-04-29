@@ -364,11 +364,11 @@ fn test_destructure_list_basic() {
         "<test>",
     );
     let v = result.unwrap();
-    assert_eq!(v.as_cons().unwrap().first.as_int(), Some(1));
-    let rest1 = v.as_cons().unwrap().rest;
-    assert_eq!(rest1.as_cons().unwrap().first.as_int(), Some(2));
-    let rest2 = rest1.as_cons().unwrap().rest;
-    assert_eq!(rest2.as_cons().unwrap().first.as_int(), Some(3));
+    assert_eq!(v.as_pair().unwrap().first.as_int(), Some(1));
+    let rest1 = v.as_pair().unwrap().rest;
+    assert_eq!(rest1.as_pair().unwrap().first.as_int(), Some(2));
+    let rest2 = rest1.as_pair().unwrap().rest;
+    assert_eq!(rest2.as_pair().unwrap().first.as_int(), Some(3));
 }
 
 #[test]
@@ -741,7 +741,7 @@ fn test_nqueens_functions_are_pure() {
     (if (= col n)
       (list)
       (if (safe? col queens)
-        (let [new-queens (cons col queens)]
+        (let [new-queens (pair col queens)]
           (append (solve-helper n (+ row 1) new-queens)
                   (try-cols-helper n (+ col 1) queens row)))
         (try-cols-helper n (+ col 1) queens row)))))
@@ -999,10 +999,10 @@ fn test_const_in_function_set_error() {
 
 #[test]
 fn test_arity_cons_wrong_args() {
-    // cons requires exactly 2 arguments; passing 1 should be a compile-time arity error
+    // pair requires exactly 2 arguments; passing 1 should be a compile-time arity error
     let mut symbols = SymbolTable::new();
-    let result = compile("(cons 1)", &mut symbols, "<test>");
-    assert!(result.is_err(), "Expected compile error for (cons 1)");
+    let result = compile("(pair 1)", &mut symbols, "<test>");
+    assert!(result.is_err(), "Expected compile error for (pair 1)");
     assert!(result.unwrap_err().contains("arity"));
 }
 
@@ -1020,10 +1020,10 @@ fn test_arity_various_primitives() {
     assert!(result.is_err(), "not with 2 args should fail");
     assert!(result.unwrap_err().contains("arity"));
 
-    // cons expects exactly 2 args, 3 should fail
+    // pair expects exactly 2 args, 3 should fail
     let mut symbols = SymbolTable::new();
-    let result = compile("(cons 1 2 3)", &mut symbols, "<test>");
-    assert!(result.is_err(), "cons with 3 args should fail");
+    let result = compile("(pair 1 2 3)", &mut symbols, "<test>");
+    assert!(result.is_err(), "pair with 3 args should fail");
     assert!(result.unwrap_err().contains("arity"));
 
     // + accepts 0+ args, so (+) should succeed
@@ -1037,10 +1037,10 @@ fn test_arity_user_shadow_disables_check() {
     // When user redefines a primitive, arity checking should NOT apply
     // the primitive's arity to the user's version
     let mut symbols = SymbolTable::new();
-    let result = compile("(begin (var cons 42) (cons 1))", &mut symbols, "<test>");
+    let result = compile("(begin (var pair 42) (pair 1))", &mut symbols, "<test>");
     assert!(
         !result.as_ref().err().is_some_and(|e| e.contains("arity")),
-        "User-shadowed cons should not get primitive arity check, got: {:?}",
+        "User-shadowed pair should not get primitive arity check, got: {:?}",
         result
     );
 }
@@ -1049,18 +1049,18 @@ fn test_arity_user_shadow_disables_check() {
 fn test_arity_in_nested_positions() {
     // Arity checking should work in nested calls, let bodies, and lambda bodies
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ 1 (cons 1))", &mut symbols, "<test>");
-    assert!(result.is_err(), "Nested (cons 1) should fail arity check");
+    let result = compile("(+ 1 (pair 1))", &mut symbols, "<test>");
+    assert!(result.is_err(), "Nested (pair 1) should fail arity check");
     assert!(result.unwrap_err().contains("arity"));
 
     let mut symbols = SymbolTable::new();
-    let result = compile("(let [x 1] (cons x))", &mut symbols, "<test>");
-    assert!(result.is_err(), "(cons x) in let body should fail");
+    let result = compile("(let [x 1] (pair x))", &mut symbols, "<test>");
+    assert!(result.is_err(), "(pair x) in let body should fail");
     assert!(result.unwrap_err().contains("arity"));
 
     let mut symbols = SymbolTable::new();
-    let result = compile("(fn (x) (cons x))", &mut symbols, "<test>");
-    assert!(result.is_err(), "(cons x) in lambda body should fail");
+    let result = compile("(fn (x) (pair x))", &mut symbols, "<test>");
+    assert!(result.is_err(), "(pair x) in lambda body should fail");
     assert!(result.unwrap_err().contains("arity"));
 }
 

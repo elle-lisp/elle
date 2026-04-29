@@ -19,7 +19,7 @@ pub(crate) fn prim_is_nil(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_nil()))
 }
 
-/// Check if value is a pair (cons cell)
+/// Check if value is a pair (pair)
 pub(crate) fn prim_is_pair(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -30,14 +30,14 @@ pub(crate) fn prim_is_pair(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let is_pair = args[0].as_cons().is_some()
+    let is_pair = args[0].as_pair().is_some()
         || args[0].as_syntax().is_some_and(
             |s| matches!(s.kind, crate::syntax::SyntaxKind::List(ref items) if !items.is_empty()),
         );
     (SIG_OK, Value::bool(is_pair))
 }
 
-/// Check if value is a list (empty list or cons cell)
+/// Check if value is a list (empty list or pair)
 pub(crate) fn prim_is_list(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -49,7 +49,7 @@ pub(crate) fn prim_is_list(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     let is_list = args[0].is_empty_list()
-        || args[0].as_cons().is_some()
+        || args[0].as_pair().is_some()
         || args[0]
             .as_syntax()
             .is_some_and(|s| matches!(s.kind, crate::syntax::SyntaxKind::List(_)));
@@ -466,10 +466,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_is_pair,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Check if value is a pair (cons cell).",
+        doc: "Check if value is a pair (pair).",
         params: &["value"],
         category: "predicate",
-        example: "(pair? (cons 1 2)) #=> true\n(pair? 42) #=> false",
+        example: "(pair? (pair 1 2)) #=> true\n(pair? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {
@@ -477,7 +477,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_is_list,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Check if value is a list (empty list or cons cell).",
+        doc: "Check if value is a list (empty list or pair).",
         params: &["value"],
         category: "predicate",
         example: "(list? (list 1 2)) #=> true\n(list? 42) #=> false",

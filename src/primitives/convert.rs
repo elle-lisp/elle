@@ -427,15 +427,15 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
         return (SIG_OK, Value::string(name));
     }
 
-    // Handle heap types (Cons, Array, etc.)
-    if let Some(_cons) = val.as_cons() {
+    // Handle heap types (Pair, Array, etc.)
+    if let Some(_cons) = val.as_pair() {
         let mut items = Vec::new();
         let mut current = val;
         loop {
             if current.is_nil() || current.is_empty_list() {
                 break;
             }
-            if let Some(c) = current.as_cons() {
+            if let Some(c) = current.as_pair() {
                 items.push(c.first);
                 current = c.rest;
             } else {

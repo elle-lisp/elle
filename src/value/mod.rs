@@ -22,10 +22,10 @@ pub mod shared_alloc;
 pub mod types;
 
 // Export the tagged-union Value as the canonical Value type
-pub use repr::{cons, list, Value};
+pub use repr::{list, pair, Value};
 
 // Export heap types
-pub use heap::{Cons, HeapObject, HeapTag};
+pub use heap::{HeapObject, HeapTag, Pair};
 
 // Export arena management
 pub use heap::{ArenaGuard, ArenaMark};

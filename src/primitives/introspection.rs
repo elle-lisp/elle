@@ -32,7 +32,7 @@ pub(crate) fn prim_is_jit(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     // SIG_QUERY to the VM, which checks jit_cache by bytecode pointer.
-    (SIG_QUERY, Value::cons(Value::keyword("jit?"), args[0]))
+    (SIG_QUERY, Value::pair(Value::keyword("jit?"), args[0]))
 }
 
 /// (silent? value) — true if closure is silent (does not suspend: no yield/debug/polymorphic)
@@ -128,8 +128,8 @@ pub(crate) fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         let result = match closure.template.arity {
             Arity::Exact(n) => Value::int(n as i64),
-            Arity::AtLeast(n) => Value::cons(Value::int(n as i64), Value::NIL),
-            Arity::Range(min, max) => Value::cons(Value::int(min as i64), Value::int(max as i64)),
+            Arity::AtLeast(n) => Value::pair(Value::int(n as i64), Value::NIL),
+            Arity::Range(min, max) => Value::pair(Value::int(min as i64), Value::int(max as i64)),
         };
         (SIG_OK, result)
     } else {
@@ -209,7 +209,7 @@ pub(crate) fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
         };
     }
     // String or keyword: look up builtin docs via SIG_QUERY.
-    (SIG_QUERY, Value::cons(Value::keyword("doc"), args[0]))
+    (SIG_QUERY, Value::pair(Value::keyword("doc"), args[0]))
 }
 
 /// (vm/query op arg) — query VM state
@@ -245,7 +245,7 @@ pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_QUERY, Value::cons(args[0], args[1]))
+    (SIG_QUERY, Value::pair(args[0], args[1]))
 }
 
 /// (signals) — return the signal registry as a struct mapping keywords to bit positions
@@ -336,7 +336,7 @@ pub(crate) fn prim_jit_rejections(args: &[Value]) -> (SignalBits, Value) {
     }
     (
         SIG_QUERY,
-        Value::cons(Value::keyword("jit/rejections"), Value::NIL),
+        Value::pair(Value::keyword("jit/rejections"), Value::NIL),
     )
 }
 
@@ -400,9 +400,9 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
     // and SPIR-V caching. The VM handles the query in dispatch_query.
     (
         SIG_QUERY,
-        Value::cons(
+        Value::pair(
             Value::keyword("mlir/compile-spirv"),
-            Value::cons(args[0], Value::int(workgroup_size as i64)),
+            Value::pair(args[0], Value::int(workgroup_size as i64)),
         ),
     )
 }

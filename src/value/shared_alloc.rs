@@ -173,7 +173,7 @@ impl Default for SharedAllocator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::heap::{Cons, HeapObject};
+    use crate::value::heap::{HeapObject, Pair};
 
     /// Allocate an `LString` HeapObject with its bytes inline in `sa`'s arena.
     fn alloc_str(sa: &mut SharedAllocator, text: &str) -> Value {
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_shared_alloc_no_drop_types() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 1);
         assert_eq!(sa.pool.allocs.len(), 1);
     }
@@ -214,7 +214,7 @@ mod tests {
         // objects and the alloc list records every pointer.
         let mut sa = SharedAllocator::new();
         alloc_str(&mut sa, "tracked");
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
         assert_eq!(sa.pool.allocs.len(), 2);
     }
@@ -224,7 +224,7 @@ mod tests {
         let mut sa = SharedAllocator::new();
         alloc_str(&mut sa, "a");
         alloc_str(&mut sa, "b");
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 3);
 
         sa.teardown();
@@ -236,24 +236,24 @@ mod tests {
     #[test]
     fn test_shared_alloc_teardown_reuses_memory() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         alloc_str(&mut sa, "x");
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.pool.live_count(), 3);
         sa.teardown();
         assert_eq!(sa.pool.live_count(), 0);
         assert_eq!(sa.len(), 0);
 
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         alloc_str(&mut sa, "y");
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.pool.live_count(), 3);
         let bytes_round1 = sa.pool.allocated_bytes();
         sa.teardown();
 
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(
             sa.pool.allocated_bytes(),
             bytes_round1,
@@ -268,14 +268,14 @@ mod tests {
         assert!(sa.is_empty());
         assert_eq!(sa.len(), 0);
 
-        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 1);
         assert!(!sa.is_empty());
 
         alloc_str(&mut sa, "x");
         assert_eq!(sa.len(), 2);
 
-        sa.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
+        sa.alloc(HeapObject::Pair(Pair::new(Value::TRUE, Value::EMPTY_LIST)));
         assert_eq!(sa.len(), 3);
     }
 }

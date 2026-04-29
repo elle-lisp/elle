@@ -205,10 +205,10 @@ fn test_greater_than() {
 #[test]
 fn test_cons() {
     let (_vm, mut symbols, meta) = setup();
-    let cons = get_primitive(&meta, &mut symbols, "cons");
+    let pair = get_primitive(&meta, &mut symbols, "pair");
 
-    let result = call_primitive(&cons, &[Value::int(1), Value::int(2)]).unwrap();
-    let cons_cell = result.as_cons().unwrap();
+    let result = call_primitive(&pair, &[Value::int(1), Value::int(2)]).unwrap();
+    let cons_cell = result.as_pair().unwrap();
 
     assert_eq!(cons_cell.first, Value::int(1));
     assert_eq!(cons_cell.rest, Value::int(2));
@@ -1386,7 +1386,7 @@ fn test_memory_usage_primitive() {
 
     // Should return a list
     match result.unwrap() {
-        v if v.is_cons() || v.is_nil() => {
+        v if v.is_pair() || v.is_nil() => {
             // Valid list representation
         }
         _ => panic!("memory-usage should return a list"),
@@ -1963,13 +1963,13 @@ fn test_fiber_self_identity() {
 
 #[test]
 fn test_doc_returns_string_for_known_primitive() {
-    let result = eval_full(r#"(doc "cons")"#).unwrap();
+    let result = eval_full(r#"(doc "pair")"#).unwrap();
     let s = result
         .with_string(|s| s.to_string())
         .expect("doc should return a string");
     assert!(
-        s.contains("cons"),
-        "doc for cons should contain 'cons', got: {}",
+        s.contains("pair"),
+        "doc for pair should contain 'pair', got: {}",
         s
     );
 }

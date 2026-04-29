@@ -1099,7 +1099,7 @@ fn test_jit_float_add() {
 
 #[test]
 fn test_jit_cons() {
-    // fn(x, y) -> cons(x, y)
+    // fn(x, y) -> pair(x, y)
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
@@ -1109,7 +1109,7 @@ fn test_jit_cons() {
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::Cons {
+        LirInstr::List {
             dst: Reg(2),
             head: Reg(0),
             tail: Reg(1),
@@ -1121,15 +1121,15 @@ fn test_jit_cons() {
     func.entry = Label(0);
 
     let result = compile_and_call(&func, &[Value::int(1), Value::int(2)]).unwrap();
-    assert!(result.is_cons());
-    let cons = result.as_cons().unwrap();
-    assert_eq!(cons.first.as_int(), Some(1));
-    assert_eq!(cons.rest.as_int(), Some(2));
+    assert!(result.is_pair());
+    let pair = result.as_pair().unwrap();
+    assert_eq!(pair.first.as_int(), Some(1));
+    assert_eq!(pair.rest.as_int(), Some(2));
 }
 
 #[test]
 fn test_jit_car_cdr() {
-    // fn(pair) -> car(pair) + cdr(pair)
+    // fn(pair) -> first(pair) + rest(pair)
     // Assumes pair is (a . b) where a and b are integers
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 4;
@@ -1139,14 +1139,14 @@ fn test_jit_car_cdr() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::Car {
+        LirInstr::First {
             dst: Reg(1),
             pair: Reg(0),
         },
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::Cdr {
+        LirInstr::Rest {
             dst: Reg(2),
             pair: Reg(0),
         },
@@ -1165,8 +1165,8 @@ fn test_jit_car_cdr() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    // Create a cons cell (10 . 32)
-    let pair = Value::cons(Value::int(10), Value::int(32));
+    // Create a pair cell (10 . 32)
+    let pair = Value::pair(Value::int(10), Value::int(32));
     let result = compile_and_call(&func, &[pair]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
@@ -1192,8 +1192,8 @@ fn test_jit_is_pair() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    // Test with a cons cell
-    let pair = Value::cons(Value::int(1), Value::int(2));
+    // Test with a pair cell
+    let pair = Value::pair(Value::int(1), Value::int(2));
     let result = compile_and_call(&func, &[pair]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 
@@ -1875,13 +1875,13 @@ fn test_jit_mutual_recursion_even_odd() {
     assert!(result.is_ok(), "even-odd failed: {:?}", result);
     // (is-even? 10) = true, (is-odd? 10) = false, (is-even? 11) = false, (is-odd? 11) = true
     let list = result.unwrap();
-    let first = list.as_cons().unwrap();
+    let first = list.as_pair().unwrap();
     assert_eq!(first.first.as_bool(), Some(true)); // (is-even? 10)
-    let rest1 = first.rest.as_cons().unwrap();
+    let rest1 = first.rest.as_pair().unwrap();
     assert_eq!(rest1.first.as_bool(), Some(false)); // (is-odd? 10)
-    let rest2 = rest1.rest.as_cons().unwrap();
+    let rest2 = rest1.rest.as_pair().unwrap();
     assert_eq!(rest2.first.as_bool(), Some(false)); // (is-even? 11)
-    let rest3 = rest2.rest.as_cons().unwrap();
+    let rest3 = rest2.rest.as_pair().unwrap();
     assert_eq!(rest3.first.as_bool(), Some(true)); // (is-odd? 11)
 }
 
@@ -1919,9 +1919,9 @@ fn test_jit_mutual_recursion_deep() {
     let vals: Vec<String> = {
         let mut v = Vec::new();
         let mut cur = list;
-        while let Some(cons) = cur.as_cons() {
-            v.push(cons.first.with_string(|s| s.to_string()).unwrap());
-            cur = cons.rest;
+        while let Some(pair) = cur.as_pair() {
+            v.push(pair.first.with_string(|s| s.to_string()).unwrap());
+            cur = pair.rest;
         }
         v
     };
@@ -1957,7 +1957,7 @@ fn test_jit_mutual_recursion_nqueens_small() {
              (if (= col n)
                (list)
                (if (safe? col queens)
-                 (let [new-queens (cons col queens)]
+                 (let [new-queens (pair col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
                  (try-cols-helper n (+ col 1) queens row)))) solve-helper
@@ -2003,9 +2003,9 @@ fn test_jit_mutual_recursion_three_way() {
     let vals: Vec<String> = {
         let mut v = Vec::new();
         let mut cur = list;
-        while let Some(cons) = cur.as_cons() {
-            v.push(cons.first.with_string(|s| s.to_string()).unwrap());
-            cur = cons.rest;
+        while let Some(pair) = cur.as_pair() {
+            v.push(pair.first.with_string(|s| s.to_string()).unwrap());
+            cur = pair.rest;
         }
         v
     };
@@ -2090,7 +2090,7 @@ fn test_jit_batch_global_mutation_known_limitation() {
 #[test]
 fn test_jit_self_tail_call_with_list_rotation() {
     // Self-recursive function that tail-calls itself with (rest lst).
-    // If JIT rotation frees the list's cons cells, this crashes.
+    // If JIT rotation frees the list's pair cells, this crashes.
     use elle::pipeline::eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
@@ -2163,7 +2163,7 @@ fn test_nqueens_eval_signals_are_silent() {
        (fn (n col queens row)
          (if (= col n) (list)
            (if (safe? col queens)
-             (let [new-queens (cons col queens)]
+             (let [new-queens (pair col queens)]
                (append (solve-helper n (+ row 1) new-queens)
                        (try-cols-helper n (+ col 1) queens row)))
              (try-cols-helper n (+ col 1) queens row)))) solve-helper
@@ -2224,7 +2224,7 @@ fn test_nqueens_letrec_no_jit() {
            (fn (n col queens row)
              (if (= col n) (list)
                (if (safe? col queens)
-                 (let [new-queens (cons col queens)]
+                 (let [new-queens (pair col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
                  (try-cols-helper n (+ col 1) queens row)))) solve-helper
@@ -2319,7 +2319,7 @@ fn test_jit_letrec_nqueens_4queens() {
            (fn (n col queens row)
              (if (= col n) (list)
                (if (safe? col queens)
-                 (let [new-queens (cons col queens)]
+                 (let [new-queens (pair col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
                  (try-cols-helper n (+ col 1) queens row)))) solve-helper
@@ -2360,7 +2360,7 @@ fn test_nqueens_4queens_no_jit() {
            (fn (n col queens row)
              (if (= col n) (list)
                (if (safe? col queens)
-                 (let [new-queens (cons col queens)]
+                 (let [new-queens (pair col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
                  (try-cols-helper n (+ col 1) queens row)))) solve-helper
@@ -2395,7 +2395,7 @@ fn test_jit_letrec_forward_ref_multiarg() {
                (if (<= n 0) (list)
                  (append (g n 1 (list n)) (f (- n 1))))) g (fn (n offset acc)
                (if (<= offset n)
-                 (g n (+ offset 1) (cons offset acc))
+                 (g n (+ offset 1) (pair offset acc))
                  (reverse acc)))]
             (length (f 5)))"#,
         &mut symbols,
@@ -2432,13 +2432,13 @@ fn test_jit_letrec_forward_ref_multiarg() {
 #[test]
 fn test_jit_nested_rotation_base_two_deep() {
     // Outer (`outer-loop`): self-tail-call loop that builds a list via
-    //   cons and passes the growing list to the next iteration.
+    //   pair and passes the growing list to the next iteration.
     // Inner (`inner-loop`): self-tail-call loop that traverses a list.
     //   This triggers `rotate_pools_jit()`, setting `jit_rotation_base`.
     //
     // Without save/restore, the outer's next `rotate_pools_jit()` uses
     // the inner's stale base, which was captured deep inside the call
-    // stack.  Objects the outer allocated after that mark (cons cells)
+    // stack.  Objects the outer allocated after that mark (pair cells)
     // get swept into the swap pool and freed one rotation later.
     use elle::pipeline::eval;
     use elle::primitives::register_primitives;
@@ -2456,7 +2456,7 @@ fn test_jit_nested_rotation_base_two_deep() {
                  (inner-loop (rest lst) (+ acc (first lst))))) outer-loop (fn (n acc-list)
                (if (= n 0)
                  (inner-loop acc-list 0)
-                 (let [new-list (cons n acc-list)]
+                 (let [new-list (pair n acc-list)]
                    (let [_ (inner-loop new-list 0)]
                      (outer-loop (- n 1) new-list)))))]
             (outer-loop 50 (list)))"#,
@@ -2473,7 +2473,7 @@ fn test_jit_nested_rotation_base_two_deep() {
 fn test_jit_nested_rotation_base_three_deep() {
     // Three levels of nested self-tail-call loops:
     //   c → b → a, each with self-tail-call + rotation.
-    // c allocates cons cells; a and b just do integer arithmetic.
+    // c allocates pair cells; a and b just do integer arithmetic.
     // Without save/restore, a's rotation base leaks through b into c.
     use elle::pipeline::eval;
     use elle::primitives::register_primitives;
@@ -2494,7 +2494,7 @@ fn test_jit_nested_rotation_base_three_deep() {
                    (b (- n 1) (+ acc inner-sum))))) c (fn (n result-list)
                (if (= n 0) result-list
                  (let [val (b 5 0)]
-                   (c (- n 1) (cons val result-list)))))]
+                   (c (- n 1) (pair val result-list)))))]
             (let [result (c 20 (list))]
               (list (length result) (first result))))"#,
         &mut symbols,
@@ -2505,10 +2505,10 @@ fn test_jit_nested_rotation_base_three_deep() {
     let val = result.unwrap();
     // c: 20 iterations, each calling b(5,0) = 5×a(10,0) = 5×10 = 50
     // result = (20 50)
-    assert_eq!(val.as_cons().map(|c| c.first.as_int()), Some(Some(20)));
+    assert_eq!(val.as_pair().map(|c| c.first.as_int()), Some(Some(20)));
     assert_eq!(
-        val.as_cons()
-            .and_then(|c| c.rest.as_cons().map(|c2| c2.first.as_int())),
+        val.as_pair()
+            .and_then(|c| c.rest.as_pair().map(|c2| c2.first.as_int())),
         Some(Some(50))
     );
 }

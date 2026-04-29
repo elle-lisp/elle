@@ -24,12 +24,12 @@ pub(crate) fn prim_vm_config(args: &[Value]) -> (SignalBits, Value) {
             // Return full config — SIG_QUERY "vm/config" nil
             (
                 SIG_QUERY,
-                Value::cons(Value::keyword("vm/config"), Value::NIL),
+                Value::pair(Value::keyword("vm/config"), Value::NIL),
             )
         }
         1 => {
             // Return specific field — SIG_QUERY "vm/config" key
-            (SIG_QUERY, Value::cons(Value::keyword("vm/config"), args[0]))
+            (SIG_QUERY, Value::pair(Value::keyword("vm/config"), args[0]))
         }
         _ => (
             SIG_ERROR,
@@ -59,9 +59,9 @@ pub(crate) fn prim_vm_config_set(args: &[Value]) -> (SignalBits, Value) {
     // SIG_QUERY "vm/config-set" (key . value)
     (
         SIG_QUERY,
-        Value::cons(
+        Value::pair(
             Value::keyword("vm/config-set"),
-            Value::cons(args[0], args[1]),
+            Value::pair(args[0], args[1]),
         ),
     )
 }

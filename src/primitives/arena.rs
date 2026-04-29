@@ -38,11 +38,11 @@ pub(crate) fn prim_arena_stats(args: &[Value]) -> (SignalBits, Value) {
     match args.len() {
         0 => (
             SIG_QUERY,
-            Value::cons(Value::keyword("arena/stats"), Value::NIL),
+            Value::pair(Value::keyword("arena/stats"), Value::NIL),
         ),
         1 => (
             SIG_QUERY,
-            Value::cons(Value::keyword("arena/stats"), args[0]),
+            Value::pair(Value::keyword("arena/stats"), args[0]),
         ),
         n => (
             SIG_ERROR,
@@ -265,7 +265,7 @@ pub(crate) fn prim_arena_allocs(args: &[Value]) -> (SignalBits, Value) {
     }
     (
         SIG_QUERY,
-        Value::cons(Value::keyword("arena/allocs"), args[0]),
+        Value::pair(Value::keyword("arena/allocs"), args[0]),
     )
 }
 
@@ -371,7 +371,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Return an opaque checkpoint for the current arena position. Pass to debug/arena-reset only. The return value is an opaque external — do not treat it as an integer. Dangerous: invalidates all Values allocated after the mark.",
         params: &[],
         category: "debug",
-        example: "(let [m (debug/arena-checkpoint)] (cons 1 2) (debug/arena-reset m))",
+        example: "(let [m (debug/arena-checkpoint)] (pair 1 2) (debug/arena-reset m))",
         aliases: &["arena/checkpoint"],
     },
     PrimitiveDef {
@@ -382,7 +382,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Reclaim arena objects allocated after checkpoint mark. Runs destructors for freed objects. Bump memory is not reclaimed. Dangerous: any Value pointing into the freed region is now invalid.",
         params: &["mark"],
         category: "debug",
-        example: "(let [m (debug/arena-checkpoint)] (cons 1 2) (debug/arena-reset m))",
+        example: "(let [m (debug/arena-checkpoint)] (pair 1 2) (debug/arena-reset m))",
         aliases: &["arena/reset"],
     },
     PrimitiveDef {
@@ -393,7 +393,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Run thunk, return (result . net-allocs) where net-allocs is the net heap objects allocated.",
         params: &["thunk"],
         category: "debug",
-        example: "(debug/arena-allocs (fn [] (cons 1 2)))",
+        example: "(debug/arena-allocs (fn [] (pair 1 2)))",
         aliases: &["arena/allocs"],
     },
     PrimitiveDef {

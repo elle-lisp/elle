@@ -172,11 +172,11 @@ fn test_spawned_closure_error_message_format() {
     // Verify that errors from spawned threads have reasonable formatting
     let result = eval_source(
         r#"
-        (join (spawn (fn () (car 42))))
+        (join (spawn (fn () (first 42))))
         "#,
     );
 
-    assert!(result.is_err(), "Expected type error from car");
+    assert!(result.is_err(), "Expected type error from first");
     let error = result.unwrap_err();
 
     // Error should be informative

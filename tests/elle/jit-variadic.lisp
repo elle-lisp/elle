@@ -2,7 +2,7 @@
 
 ## Regression test for #510: JIT must correctly handle variadic functions.
 ##
-## The JIT entry block builds a cons list for the rest parameter from the
+## The JIT entry block builds a pair list for the rest parameter from the
 ## raw args pointer. This test exercises:
 ## - Zero rest args (rest = EMPTY_LIST, not NIL)
 ## - One rest arg
@@ -62,7 +62,7 @@
         "post-JIT: two rest args")
 (assert (= (check-rest-type) (list true 0 true)) "post-JIT: zero rest args")
 
-## Test multiple rest args — verify cons list order
+## Test multiple rest args — verify pair list order
 (defn collect-rest (& args)
   args)
 

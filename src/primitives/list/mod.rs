@@ -21,11 +21,11 @@ pub(crate) fn prim_cons(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("cons: expected 2 arguments, got {}", args.len()),
+                format!("pair: expected 2 arguments, got {}", args.len()),
             ),
         );
     }
-    (SIG_OK, crate::value::cons(args[0], args[1]))
+    (SIG_OK, crate::value::pair(args[0], args[1]))
 }
 
 /// Get the first element of a sequence (list, array, @array, string)
@@ -39,9 +39,9 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    // Cons cell — the common case for lists
-    if let Some(cons) = args[0].as_cons() {
-        return (SIG_OK, cons.first);
+    // Pair cell — the common case for lists
+    if let Some(pair) = args[0].as_pair() {
+        return (SIG_OK, pair.first);
     }
     // Empty list → error
     if args[0].is_empty_list() {
@@ -162,9 +162,9 @@ pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
             "second: sequence has fewer than 2 elements",
         ),
     );
-    // Cons cell — walk to second
-    if let Some(cons) = args[0].as_cons() {
-        if let Some(c2) = cons.rest.as_cons() {
+    // Pair cell — walk to second
+    if let Some(pair) = args[0].as_pair() {
+        if let Some(c2) = pair.rest.as_pair() {
             return (SIG_OK, c2.first);
         }
         return too_short;
@@ -253,9 +253,9 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    // Cons cell — the common case for lists
-    if let Some(cons) = args[0].as_cons() {
-        return (SIG_OK, cons.rest);
+    // Pair cell — the common case for lists
+    if let Some(pair) = args[0].as_pair() {
+        return (SIG_OK, pair.rest);
     }
     // Empty list → empty list
     if args[0].is_empty_list() {
@@ -346,10 +346,10 @@ pub(crate) fn prim_list(args: &[Value]) -> (SignalBits, Value) {
 /// Collect elements of any sequence into a `Vec<Value>`.
 fn collect_elements(val: &Value) -> Result<Vec<Value>, (SignalBits, Value)> {
     // List — walk cons cells
-    if val.is_cons() || val.is_empty_list() {
+    if val.is_pair() || val.is_empty_list() {
         let mut elements = Vec::new();
         let mut cur = *val;
-        while let Some(c) = cur.as_cons() {
+        while let Some(c) = cur.as_pair() {
             elements.push(c.first);
             cur = c.rest;
         }
@@ -443,7 +443,7 @@ pub(crate) fn prim_to_list(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     // Already a list — return as-is
-    if args[0].is_cons() || args[0].is_empty_list() {
+    if args[0].is_pair() || args[0].is_empty_list() {
         return (SIG_OK, args[0]);
     }
     match collect_elements(&args[0]) {
@@ -466,7 +466,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
 
     if args[0].is_nil() || args[0].is_empty_list() {
         (SIG_OK, Value::int(0))
-    } else if args[0].is_cons() {
+    } else if args[0].is_pair() {
         let vec = match args[0].list_to_vec() {
             Ok(v) => v,
             Err(e) => return (SIG_ERROR, error_val("type-error", format!("length: {}", e))),
@@ -628,7 +628,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         }
     } else if args[0].is_empty_list() {
         true
-    } else if args[0].is_cons() {
+    } else if args[0].is_pair() {
         false
     } else if let Some(buf_ref) = args[0].as_string_mut() {
         buf_ref.borrow().is_empty()
@@ -750,14 +750,14 @@ pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
 /// Declarative primitive definitions for list operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "cons",
+        name: "pair",
         func: prim_cons,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Construct a cons cell with car and cdr",
-        params: &["car", "cdr"],
+        doc: "Construct a pair with head and tail",
+        params: &["head", "tail"],
         category: "list",
-        example: "(cons 1 (cons 2 ()))",
+        example: "(pair 1 (pair 2 ()))",
         aliases: &[],
     },
     PrimitiveDef {

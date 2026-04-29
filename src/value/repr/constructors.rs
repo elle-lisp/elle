@@ -108,11 +108,11 @@ impl Value {
 
     /// Create a cons cell.
     #[inline]
-    pub fn cons(car: Value, cdr: Value) -> Self {
-        use crate::value::heap::{alloc, Cons, HeapObject};
-        alloc(HeapObject::Cons(Cons {
-            first: car,
-            rest: cdr,
+    pub fn pair(head: Value, tail: Value) -> Self {
+        use crate::value::heap::{alloc, HeapObject, Pair};
+        alloc(HeapObject::Pair(Pair {
+            first: head,
+            rest: tail,
             traits: Value::NIL,
         }))
     }
