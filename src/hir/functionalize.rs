@@ -4,25 +4,34 @@
 //! (with Loop/Recur and let-chains). This is the foundation for region
 //! inference, type inference, and signal inference.
 //!
-//! The transform walks the HIR with a renaming environment that maps
-//! original mutable bindings to their current SSA version. Each Assign
-//! creates a fresh binding version; While becomes Loop/Recur with the
-//! assigned bindings as loop parameters.
+//! The transform handles two patterns:
+//!
+//! 1. **While + Assign → Loop/Recur:** mutable bindings assigned in a
+//!    while body become loop parameters; assigns become recur arguments.
+//!
+//! 2. **Sequential Assign in Begin → Define of fresh SSA binding:**
+//!    `(assign x val)` in a begin sequence becomes `(define x' val)`,
+//!    renaming subsequent uses of x to x'.
 //!
 //! **CaptureCell boundary:** bindings that are both captured AND mutated
 //! (`needs_capture()`) stay as Assign — they're shared mutable state
 //! across closure boundaries that can't be SSA-converted.
+//!
+//! **Branch boundary:** Assigns inside if/match/cond arms are left as
+//! Assign. Proper phi insertion for conditional mutation requires
+//! continuation context; deferred to region inference (Layer 2).
 
 use super::arena::BindingArena;
 use super::binding::Binding;
 use super::expr::{CallArg, Hir, HirKind};
 use crate::signals::Signal;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 /// Run the functionalize transform on a HIR tree.
 ///
-/// Eliminates Assign (except CaptureCell) and converts While to Loop/Recur.
-/// Modifies the arena to create fresh bindings for SSA versions.
+/// Eliminates Assign (except CaptureCell and in-branch) and converts
+/// While to Loop/Recur. Modifies the arena to create fresh bindings
+/// for SSA versions.
 pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
     let mut ctx = FnCtx {
         arena,
@@ -43,7 +52,6 @@ impl<'a> FnCtx<'a> {
         let name = info.name;
         let scope = info.scope;
         let new_binding = self.arena.alloc(name, scope);
-        // The new version is immutable (SSA — single assignment)
         self.arena.get_mut(new_binding).is_immutable = true;
         new_binding
     }
@@ -54,8 +62,9 @@ impl<'a> FnCtx<'a> {
     }
 
     /// Collect bindings that are Assign'd within a HIR subtree,
-    /// excluding CaptureCell bindings (captured + mutated).
-    fn collect_assigned_bindings(&self, hir: &Hir, out: &mut HashSet<Binding>) {
+    /// excluding CaptureCell bindings. Uses BTreeSet for deterministic
+    /// ordering (reproducible Loop binding order across runs).
+    fn collect_assigned_bindings(&self, hir: &Hir, out: &mut BTreeSet<Binding>) {
         match &hir.kind {
             HirKind::Assign { target, value } => {
                 if !self.arena.get(*target).needs_capture() {
@@ -63,168 +72,41 @@ impl<'a> FnCtx<'a> {
                 }
                 self.collect_assigned_bindings(value, out);
             }
-            HirKind::Lambda { .. } => {
-                // Don't look inside lambdas — they have their own scope
-            }
+            // Don't look inside lambdas — they have their own scope
+            HirKind::Lambda { .. } => {}
             _ => {
-                self.for_each_child(hir, |child| {
+                for_each_child(hir, |child| {
                     self.collect_assigned_bindings(child, out);
                 });
             }
         }
     }
 
-    /// Iterate over the immediate child HIR nodes of a node.
-    fn for_each_child(&self, hir: &Hir, mut f: impl FnMut(&Hir)) {
-        match &hir.kind {
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (_, init) in bindings {
-                    f(init);
-                }
-                f(body);
-            }
-            HirKind::Lambda { body, .. } => f(body),
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                f(cond);
-                f(then_branch);
-                f(else_branch);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    f(e);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    f(e);
-                }
-            }
-            HirKind::Break { value, .. } => f(value),
-            HirKind::Call { func, args, .. } => {
-                f(func);
-                for a in args {
-                    f(&a.expr);
-                }
-            }
-            HirKind::Assign { value, .. } => f(value),
-            HirKind::Define { value, .. } => f(value),
-            HirKind::While { cond, body } => {
-                f(cond);
-                f(body);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (_, init) in bindings {
-                    f(init);
-                }
-                f(body);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    f(a);
-                }
-            }
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    f(e);
-                }
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    f(c);
-                    f(b);
-                }
-                if let Some(eb) = else_branch {
-                    f(eb);
-                }
-            }
-            HirKind::Emit { value, .. } => f(value),
-            HirKind::Match { value, arms } => {
-                f(value);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        f(g);
-                    }
-                    f(body);
-                }
-            }
-            HirKind::Destructure { value, .. } => f(value),
-            HirKind::Eval { expr, env } => {
-                f(expr);
-                f(env);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (_, v) in bindings {
-                    f(v);
-                }
-                f(body);
-            }
-        }
-    }
-
-    /// The main transform. Returns a new HIR tree with Assign eliminated
-    /// and While converted to Loop/Recur.
+    /// The main transform.
     fn transform(&mut self, hir: &Hir) -> Hir {
         let span = hir.span.clone();
         let signal = hir.signal;
 
         match &hir.kind {
-            // Var: apply renaming
             HirKind::Var(b) => Hir::new(HirKind::Var(self.resolve(*b)), span, signal),
 
-            // Assign: convert to let-chain (handled in transform_begin for sequences)
-            // Standalone assign outside begin — wrap in continuation
+            // Standalone Assign outside Begin: leave as Assign but
+            // apply renaming to target. The Begin handler converts
+            // sequential assigns; standalone ones pass through.
             HirKind::Assign { target, value } => {
-                if self.arena.get(*target).needs_capture() {
-                    // CaptureCell: leave as Assign, but transform the value
-                    let new_value = self.transform(value);
-                    Hir::new(
-                        HirKind::Assign {
-                            target: self.resolve(*target),
-                            value: Box::new(new_value),
-                        },
-                        span,
-                        signal,
-                    )
-                } else {
-                    // SSA: create a new version. Since this is a standalone assign
-                    // (not in a Begin), the new version shadows the old one but
-                    // there's no continuation to use it — just return the value.
-                    let new_value = self.transform(value);
-                    let fresh = self.fresh_version(*target);
-                    self.renames.insert(*target, fresh);
-                    Hir::new(
-                        HirKind::Let {
-                            bindings: vec![(fresh, new_value)],
-                            body: Box::new(Hir::silent(HirKind::Nil, span.clone())),
-                        },
-                        span,
-                        signal,
-                    )
-                }
+                let new_value = self.transform(value);
+                Hir::new(
+                    HirKind::Assign {
+                        target: self.resolve(*target),
+                        value: Box::new(new_value),
+                    },
+                    span,
+                    signal,
+                )
             }
 
-            // While: convert to Loop/Recur
             HirKind::While { cond, body } => self.transform_while(cond, body, span, signal),
 
-            // Begin: handle sequential Assigns as let-chains
             HirKind::Begin(exprs) => self.transform_begin(exprs, span, signal),
 
             // Lambda: transform body in a fresh renaming scope
@@ -265,32 +147,25 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // Structural recursion for everything else
+            // No forking/merging for branches — assigns inside if/match/cond
+            // stay as Assign. Phi insertion deferred to Layer 2.
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
                 let new_cond = self.transform(cond);
-                // Fork renaming for branches
-                let saved = self.renames.clone();
                 let new_then = self.transform(then_branch);
-                let then_renames = self.renames.clone();
-                self.renames = saved.clone();
                 let new_else = self.transform(else_branch);
-                let else_renames = self.renames.clone();
-
-                // Merge: for bindings that diverge, create phi let-bindings
-                let result = Hir::new(
+                Hir::new(
                     HirKind::If {
                         cond: Box::new(new_cond),
                         then_branch: Box::new(new_then),
                         else_branch: Box::new(new_else),
                     },
-                    span.clone(),
+                    span,
                     signal,
-                );
-                self.merge_branches(result, &then_renames, &else_renames, &saved, span, signal)
+                )
             }
 
             HirKind::Let { bindings, body } => {
@@ -403,13 +278,13 @@ impl<'a> FnCtx<'a> {
             }
 
             HirKind::And(exprs) => {
-                let new_exprs: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
-                Hir::new(HirKind::And(new_exprs), span, signal)
+                let new: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
+                Hir::new(HirKind::And(new), span, signal)
             }
 
             HirKind::Or(exprs) => {
-                let new_exprs: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
-                Hir::new(HirKind::Or(new_exprs), span, signal)
+                let new: Vec<_> = exprs.iter().map(|e| self.transform(e)).collect();
+                Hir::new(HirKind::Or(new), span, signal)
             }
 
             HirKind::Cond {
@@ -499,7 +374,6 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // Pass-through for leaves and already-functional forms
             HirKind::Loop { bindings, body } => {
                 let new_bindings: Vec<_> = bindings
                     .iter()
@@ -515,12 +389,12 @@ impl<'a> FnCtx<'a> {
                     signal,
                 )
             }
+
             HirKind::Recur { args } => {
                 let new_args: Vec<_> = args.iter().map(|a| self.transform(a)).collect();
                 Hir::new(HirKind::Recur { args: new_args }, span, signal)
             }
 
-            // Leaves
             _ => hir.clone(),
         }
     }
@@ -533,14 +407,13 @@ impl<'a> FnCtx<'a> {
         span: crate::syntax::Span,
         signal: Signal,
     ) -> Hir {
-        // Collect bindings assigned in the loop body
-        let mut assigned = HashSet::new();
+        // Collect bindings assigned in the loop body (deterministic order)
+        let mut assigned = BTreeSet::new();
         self.collect_assigned_bindings(body, &mut assigned);
-        // Also check condition for assigns (rare but possible)
         self.collect_assigned_bindings(cond, &mut assigned);
 
         if assigned.is_empty() {
-            // No mutations — leave as While (infinite loop or condition-only)
+            // No mutations — leave as While
             let new_cond = self.transform(cond);
             let new_body = self.transform(body);
             return Hir::new(
@@ -579,25 +452,38 @@ impl<'a> FnCtx<'a> {
 
         // Transform condition and body with new names
         let new_cond = self.transform(cond);
-        let new_body = self.transform_loop_body(body, &loop_bindings, &span);
+        let transformed_body = self.transform(body);
 
-        // After the loop, the bindings refer to the loop parameter versions
-        // (which the lowerer updates via Recur StoreLocal)
-        // Keep the renamed versions active for code after the loop
-        // But we need to restore and then set the final versions
+        // Append Recur with current values of loop bindings
+        let recur_args: Vec<Hir> = loop_bindings
+            .iter()
+            .map(|&(orig, _)| {
+                let current = self.resolve(orig);
+                Hir::silent(HirKind::Var(current), span.clone())
+            })
+            .collect();
+        let recur_node = Hir::silent(HirKind::Recur { args: recur_args }, span.clone());
+        let body_with_recur = Hir::new(
+            HirKind::Begin(vec![transformed_body, recur_node]),
+            span.clone(),
+            body.signal,
+        );
+
+        // Restore renames, then set loop parameter versions as active
+        // (code after the loop sees the loop parameter bindings)
         self.renames = saved;
         for &(orig, fresh) in &loop_bindings {
             self.renames.insert(orig, fresh);
         }
 
-        // Build: (loop [bindings...] (if cond (begin body (recur ...)) nil))
+        // Build: (loop [bindings...] (if cond (begin body recur) nil))
         Hir::new(
             HirKind::Loop {
                 bindings: init_bindings,
                 body: Box::new(Hir::new(
                     HirKind::If {
                         cond: Box::new(new_cond),
-                        then_branch: Box::new(new_body),
+                        then_branch: Box::new(body_with_recur),
                         else_branch: Box::new(Hir::silent(HirKind::Nil, span.clone())),
                     },
                     span.clone(),
@@ -609,36 +495,8 @@ impl<'a> FnCtx<'a> {
         )
     }
 
-    /// Transform a loop body, replacing Assigns to loop bindings with Recur.
-    fn transform_loop_body(
-        &mut self,
-        body: &Hir,
-        loop_bindings: &[(Binding, Binding)],
-        span: &crate::syntax::Span,
-    ) -> Hir {
-        // Transform the body, then append a Recur with current values
-        let transformed = self.transform(body);
-
-        // Build recur args: current value of each loop binding
-        let recur_args: Vec<Hir> = loop_bindings
-            .iter()
-            .map(|&(orig, _fresh)| {
-                let current = self.resolve(orig);
-                Hir::silent(HirKind::Var(current), span.clone())
-            })
-            .collect();
-
-        let recur_node = Hir::silent(HirKind::Recur { args: recur_args }, span.clone());
-
-        // Wrap: (begin transformed-body recur)
-        Hir::new(
-            HirKind::Begin(vec![transformed, recur_node]),
-            span.clone(),
-            body.signal,
-        )
-    }
-
-    /// Transform a Begin sequence, converting Assigns to let-chains.
+    /// Transform a Begin sequence, converting sequential Assigns to
+    /// Define of fresh SSA bindings.
     fn transform_begin(&mut self, exprs: &[Hir], span: crate::syntax::Span, signal: Signal) -> Hir {
         if exprs.is_empty() {
             return Hir::new(HirKind::Nil, span, signal);
@@ -649,19 +507,18 @@ impl<'a> FnCtx<'a> {
         for expr in exprs {
             match &expr.kind {
                 HirKind::Assign { target, value } if !self.arena.get(*target).needs_capture() => {
-                    // SSA conversion: this assign becomes a let-binding
-                    // wrapping the remainder of the begin sequence.
-                    // But we're iterating, so just transform the value,
-                    // create a fresh version, and update the rename map.
-                    // The actual let-wrapping happens at the end if needed.
+                    // Sequential assign → Define of fresh SSA binding.
+                    // This preserves sequential semantics: the fresh
+                    // binding is allocated and stored, and subsequent
+                    // expressions see the new version via renames.
+                    //
+                    // TODO: proper let-chain wrapping (each Define wraps
+                    // the continuation) would give region inference better
+                    // structural information. For now, Define (slot-based)
+                    // is correct and the lowerer handles it.
                     let new_value = self.transform(value);
                     let fresh = self.fresh_version(*target);
                     self.renames.insert(*target, fresh);
-
-                    // Emit as a let-binding around the rest
-                    // We can't easily wrap the "rest" here in iteration,
-                    // so emit a Define (which the lowerer handles as StoreLocal)
-                    // with the fresh binding. This preserves sequential semantics.
                     result_exprs.push(Hir::new(
                         HirKind::Define {
                             binding: fresh,
@@ -683,31 +540,108 @@ impl<'a> FnCtx<'a> {
             Hir::new(HirKind::Begin(result_exprs), span, signal)
         }
     }
+}
 
-    /// After an If with divergent branches, merge the renaming envs.
-    /// If a binding has different versions in then vs else, we need to
-    /// keep the If result accessible. For now, just pick the most recent
-    /// version (this is conservative — full phi insertion can come later).
-    fn merge_branches(
-        &mut self,
-        if_expr: Hir,
-        then_renames: &HashMap<Binding, Binding>,
-        else_renames: &HashMap<Binding, Binding>,
-        saved: &HashMap<Binding, Binding>,
-        _span: crate::syntax::Span,
-        _signal: Signal,
-    ) -> Hir {
-        // For now: if a binding diverges, pick the else version
-        // (it's the "fall-through" path). Full phi-insertion is
-        // a future refinement.
-        let mut merged = saved.clone();
-        for (k, v) in then_renames {
-            merged.insert(*k, *v);
+/// Iterate over the immediate child HIR nodes of a node.
+fn for_each_child(hir: &Hir, mut f: impl FnMut(&Hir)) {
+    match &hir.kind {
+        HirKind::Nil
+        | HirKind::EmptyList
+        | HirKind::Bool(_)
+        | HirKind::Int(_)
+        | HirKind::Float(_)
+        | HirKind::String(_)
+        | HirKind::Keyword(_)
+        | HirKind::Var(_)
+        | HirKind::Quote(_)
+        | HirKind::Error => {}
+
+        HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+            for (_, init) in bindings {
+                f(init);
+            }
+            f(body);
         }
-        for (k, v) in else_renames {
-            merged.insert(*k, *v);
+        HirKind::Lambda { body, .. } => f(body),
+        HirKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            f(cond);
+            f(then_branch);
+            f(else_branch);
         }
-        self.renames = merged;
-        if_expr
+        HirKind::Begin(exprs) => {
+            for e in exprs {
+                f(e);
+            }
+        }
+        HirKind::Block { body, .. } => {
+            for e in body {
+                f(e);
+            }
+        }
+        HirKind::Break { value, .. } => f(value),
+        HirKind::Call { func, args, .. } => {
+            f(func);
+            for a in args {
+                f(&a.expr);
+            }
+        }
+        HirKind::Assign { value, .. } | HirKind::Define { value, .. } => f(value),
+        HirKind::While { cond, body } => {
+            f(cond);
+            f(body);
+        }
+        HirKind::Loop { bindings, body } => {
+            for (_, init) in bindings {
+                f(init);
+            }
+            f(body);
+        }
+        HirKind::Recur { args } => {
+            for a in args {
+                f(a);
+            }
+        }
+        HirKind::And(exprs) | HirKind::Or(exprs) => {
+            for e in exprs {
+                f(e);
+            }
+        }
+        HirKind::Cond {
+            clauses,
+            else_branch,
+        } => {
+            for (c, b) in clauses {
+                f(c);
+                f(b);
+            }
+            if let Some(eb) = else_branch {
+                f(eb);
+            }
+        }
+        HirKind::Emit { value, .. } => f(value),
+        HirKind::Match { value, arms } => {
+            f(value);
+            for (_, guard, body) in arms {
+                if let Some(g) = guard {
+                    f(g);
+                }
+                f(body);
+            }
+        }
+        HirKind::Destructure { value, .. } => f(value),
+        HirKind::Eval { expr, env } => {
+            f(expr);
+            f(env);
+        }
+        HirKind::Parameterize { bindings, body } => {
+            for (_, v) in bindings {
+                f(v);
+            }
+            f(body);
+        }
     }
 }
