@@ -66,6 +66,10 @@ pub(super) enum PoolOp {
     ReadLine {
         fd: RawFd,
     },
+    /// Read until EOF. Loops internally, accumulating all data.
+    ReadAll {
+        fd: RawFd,
+    },
     /// Blocking read on an inotify/kqueue fd for filesystem watch events.
     WatchRead {
         fd: RawFd,
@@ -127,7 +131,8 @@ impl ThreadPoolBackend {
                         (ret as i32, buf)
                     }
                 }
-                PoolOp::ReadLine { fd } => {
+                PoolOp::ReadLine { fd } | PoolOp::ReadAll { fd } => {
+                    let until_newline = matches!(op, PoolOp::ReadLine { .. });
                     let mut accumulated = Vec::new();
                     let mut chunk = vec![0u8; 4096];
                     loop {
@@ -149,7 +154,7 @@ impl ThreadPoolBackend {
                             break (accumulated.len() as i32, accumulated);
                         }
                         accumulated.extend_from_slice(&chunk[..ret as usize]);
-                        if accumulated.contains(&b'\n') {
+                        if until_newline && accumulated.contains(&b'\n') {
                             break (accumulated.len() as i32, accumulated);
                         }
                     }

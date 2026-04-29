@@ -566,14 +566,11 @@ impl AsyncBackend {
                         let _ = buffer_pool;
                         let pool_op = match &request.op {
                             IoOp::ReadLine => PoolOp::ReadLine { fd },
-                            IoOp::Read { .. } | IoOp::ReadAll => {
-                                let size = match &request.op {
-                                    IoOp::Read { count } => *count - read_buffered,
-                                    IoOp::ReadAll => 4096,
-                                    _ => unreachable!(),
-                                };
-                                PoolOp::Read { fd, size }
-                            }
+                            IoOp::ReadAll => PoolOp::ReadAll { fd },
+                            IoOp::Read { count } => PoolOp::Read {
+                                fd,
+                                size: *count - read_buffered,
+                            },
                             IoOp::Write { data } => {
                                 let bytes = Self::extract_write_bytes(data);
                                 PoolOp::Write { fd, data: bytes }
