@@ -729,23 +729,33 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Lower MakeCell — currently transparent because the lowerer
-    /// already creates cells for needs_capture bindings in lower_let,
-    /// lower_letrec, and lower_define. When the lowerer is simplified
-    /// (Phase 3), this will emit MakeCaptureCell directly.
+    /// Lower MakeCell — currently transparent (just lowers the inner value).
+    ///
+    /// **Double-handling contract:** Both functionalize AND the lowerer handle
+    /// cells. Functionalize inserts explicit MakeCell/DerefCell/SetCell nodes;
+    /// the lowerer's lower_let/lower_letrec/lower_define independently wrap
+    /// needs_capture bindings in cells. The transparent delegation here works
+    /// because both sides agree on which bindings need cells (via
+    /// `needs_capture()`). Phase 3 will remove the lowerer's implicit cell
+    /// creation and make these methods emit real cell instructions.
     pub(super) fn lower_make_cell(&mut self, value: &Hir) -> Result<Reg, String> {
         self.lower_expr(value)
     }
 
-    /// Lower DerefCell — currently transparent because lower_var
-    /// already unwraps cells for needs_capture bindings. When the
-    /// lowerer is simplified (Phase 3), this will emit LoadCaptureCell.
+    /// Lower DerefCell — currently transparent (just lowers the inner cell expr).
+    ///
+    /// See `lower_make_cell` for the double-handling contract. The lowerer's
+    /// `lower_var` already unwraps cells for needs_capture bindings, so
+    /// DerefCell's child (a Var) produces the unwrapped value directly.
     pub(super) fn lower_deref_cell(&mut self, cell: &Hir) -> Result<Reg, String> {
         self.lower_expr(cell)
     }
 
-    /// Lower SetCell — delegates to lower_assign since the lowerer
-    /// already handles cell stores. The cell child must be a Var.
+    /// Lower SetCell — delegates to lower_assign since the lowerer already
+    /// handles cell stores. The cell child must be a Var.
+    ///
+    /// See `lower_make_cell` for the double-handling contract. The lowerer's
+    /// `lower_assign` already stores through cells for needs_capture bindings.
     pub(super) fn lower_set_cell(&mut self, cell: &Hir, value: &Hir) -> Result<Reg, String> {
         if let HirKind::Var(binding) = &cell.kind {
             self.lower_assign(binding, value)

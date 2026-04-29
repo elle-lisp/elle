@@ -98,6 +98,13 @@ impl BindingArena {
         Binding(index)
     }
 
+    /// Allocate a synthetic binding with no source-level identity.
+    /// Used by compiler passes that need temporaries (e.g., phi-insertion
+    /// condition bindings). The name is set to `SymbolId::SYNTHETIC`.
+    pub fn gensym(&mut self) -> Binding {
+        self.alloc(SymbolId::SYNTHETIC, BindingScope::Local)
+    }
+
     /// Read-only access. Available in both analysis and lowering phases.
     pub fn get(&self, binding: Binding) -> &BindingInner {
         &self.bindings[binding.0 as usize]

@@ -1472,10 +1472,9 @@ impl<'a> Lowerer<'a> {
                     .any(|(_, init)| self.body_escapes_heap_values(init))
                     || self.body_escapes_heap_values(body)
             }
-            // Recur: conservatively treat as escaping — args cross
-            // iteration boundaries, which is an escape if any arg is
-            // heap-allocated.
-            HirKind::Recur { .. } => true,
+            // Recur: args cross iteration boundaries. Only escapes if
+            // any arg is heap-allocated (not an immediate/safe value).
+            HirKind::Recur { args } => args.iter().any(|a| !self.result_is_safe(a, &[])),
             // Cell ops: structural recursion
             HirKind::MakeCell { value } => self.body_escapes_heap_values(value),
             HirKind::DerefCell { cell } => self.body_escapes_heap_values(cell),

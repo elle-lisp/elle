@@ -1076,7 +1076,23 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_rest_indices(body, out);
             }
-            _ => {} // Leaves: Var, literals, Quote, Error
+            HirKind::MakeCell { value } => Self::collect_rest_indices(value, out),
+            HirKind::DerefCell { cell } => Self::collect_rest_indices(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_rest_indices(cell, out);
+                Self::collect_rest_indices(value, out);
+            }
+            // Leaves: Var, literals, Quote, Error
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 
@@ -1192,8 +1208,8 @@ impl<'a> Lowerer<'a> {
                 }
                 mask
             }
-            HirKind::While { .. } | HirKind::Loop { .. } | HirKind::Destructure { .. } => 0, // returns nil
-            HirKind::Recur { .. } => 0, // jumps, never returns a value
+            HirKind::While { .. } | HirKind::Loop { .. } => 0, // returns nil
+            HirKind::Recur { .. } => 0,                        // jumps, never returns a value
 
             // Call: map callee's return_params through our args.
             //
@@ -1243,9 +1259,18 @@ impl<'a> Lowerer<'a> {
             // Parameterize: result is body's result
             HirKind::Parameterize { body, .. } => self.compute_return_params(body, params),
 
-            // Assign, Define, Yield, Eval, Break — not return positions
-            // or covered by other analysis.
-            _ => 0,
+            // Cell ops, Assign, Define, Eval, Break, Emit, Destructure
+            // — not return positions or covered by other analysis.
+            HirKind::MakeCell { .. }
+            | HirKind::DerefCell { .. }
+            | HirKind::SetCell { .. }
+            | HirKind::Assign { .. }
+            | HirKind::Define { .. }
+            | HirKind::Emit { .. }
+            | HirKind::Destructure { .. }
+            | HirKind::Eval { .. }
+            | HirKind::Break { .. }
+            | HirKind::Error => 0,
         }
     }
 
@@ -1371,7 +1396,23 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_lambda_defs_with_params(body, out);
             }
-            _ => {} // Leaves: Var, literals, Quote, Error
+            HirKind::MakeCell { value } => Self::collect_lambda_defs_with_params(value, out),
+            HirKind::DerefCell { cell } => Self::collect_lambda_defs_with_params(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_lambda_defs_with_params(cell, out);
+                Self::collect_lambda_defs_with_params(value, out);
+            }
+            // Leaves: Var, literals, Quote, Error
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 
@@ -1438,8 +1479,22 @@ impl<'a> Lowerer<'a> {
             // ALL calls (tail or not): check if callee returns immediate
             HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
 
-            // Heap-allocating: Lambda, String, Quote, etc.
-            _ => false,
+            // Cell ops: MakeCell creates a heap cell, DerefCell/SetCell
+            // may return heap values — conservatively not immediate.
+            HirKind::MakeCell { .. } | HirKind::DerefCell { .. } | HirKind::SetCell { .. } => false,
+
+            // Heap-allocating or unknown: Lambda, String, Quote, etc.
+            HirKind::Lambda { .. }
+            | HirKind::String(_)
+            | HirKind::Quote(_)
+            | HirKind::Assign { .. }
+            | HirKind::Define { .. }
+            | HirKind::Destructure { .. }
+            | HirKind::Emit { .. }
+            | HirKind::Eval { .. }
+            | HirKind::Break { .. }
+            | HirKind::Parameterize { .. }
+            | HirKind::Error => false,
         }
     }
 
@@ -1598,7 +1653,23 @@ impl<'a> Lowerer<'a> {
                 }
                 Self::collect_lambda_defs(body, out);
             }
-            _ => {} // Leaves: Var, literals, Quote, Error
+            HirKind::MakeCell { value } => Self::collect_lambda_defs(value, out),
+            HirKind::DerefCell { cell } => Self::collect_lambda_defs(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_lambda_defs(cell, out);
+                Self::collect_lambda_defs(value, out);
+            }
+            // Leaves: Var, literals, Quote, Error
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 

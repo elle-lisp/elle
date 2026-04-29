@@ -39,7 +39,7 @@ pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
         arena,
         renames: HashMap::new(),
         cell_bindings: BTreeSet::new(),
-        loop_params: BTreeSet::new(),
+        assign_preserved: BTreeSet::new(),
     };
     *hir = ctx.transform(hir);
 }
@@ -50,9 +50,10 @@ struct FnCtx<'a> {
     /// Bindings that have been wrapped in cells (needs_capture).
     /// References to these must go through DerefCell, assigns through SetCell.
     cell_bindings: BTreeSet<Binding>,
-    /// Bindings that are loop parameters — assigns to these should NOT
-    /// be SSA-converted (they're threaded via Recur).
-    loop_params: BTreeSet<Binding>,
+    /// Bindings whose assigns must NOT be SSA-converted. Includes loop
+    /// parameters (threaded via Recur) and outer-scope variables assigned
+    /// inside a loop body (maintained via slot mutation by the lowerer).
+    assign_preserved: BTreeSet<Binding>,
 }
 
 impl<'a> FnCtx<'a> {
@@ -64,6 +65,14 @@ impl<'a> FnCtx<'a> {
         let new_binding = self.arena.alloc(name, scope);
         self.arena.get_mut(new_binding).is_immutable = true;
         new_binding
+    }
+
+    /// Create a fresh synthetic binding with no connection to any real
+    /// source binding. Used for phi-insertion condition temporaries.
+    fn gensym(&mut self) -> Binding {
+        let binding = self.arena.gensym();
+        self.arena.get_mut(binding).is_immutable = true;
+        binding
     }
 
     /// Look up the current SSA version of a binding, following chains.
@@ -206,6 +215,13 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
+            // If does NOT save/restore renames across branches (unlike
+            // Match/Cond). Phi-insertion for If is handled in
+            // transform_begin via transform_if_with_phi, which manages
+            // branch isolation and phi-lets explicitly. Doing
+            // save/restore here would lose the SSA versions created
+            // inside branches, breaking phi-insertion's ability to
+            // read which bindings each branch assigned.
             HirKind::If {
                 cond,
                 then_branch,
@@ -484,7 +500,51 @@ impl<'a> FnCtx<'a> {
                 Hir::new(HirKind::Recur { args: new_args }, span, signal)
             }
 
-            _ => hir.clone(),
+            // Cell ops are produced by this transform; they should not
+            // appear in the input HIR. Handle them structurally for safety.
+            HirKind::MakeCell { value } => {
+                let new_value = self.transform(value);
+                Hir::new(
+                    HirKind::MakeCell {
+                        value: Box::new(new_value),
+                    },
+                    span,
+                    signal,
+                )
+            }
+            HirKind::DerefCell { cell } => {
+                let new_cell = self.transform(cell);
+                Hir::new(
+                    HirKind::DerefCell {
+                        cell: Box::new(new_cell),
+                    },
+                    span,
+                    signal,
+                )
+            }
+            HirKind::SetCell { cell, value } => {
+                let new_cell = self.transform(cell);
+                let new_value = self.transform(value);
+                Hir::new(
+                    HirKind::SetCell {
+                        cell: Box::new(new_cell),
+                        value: Box::new(new_value),
+                    },
+                    span,
+                    signal,
+                )
+            }
+
+            // Leaves: no children to transform
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => hir.clone(),
         }
     }
 
@@ -582,23 +642,23 @@ impl<'a> FnCtx<'a> {
 
         // Inside the loop, rename original bindings to fresh versions.
         // Also mark ALL bindings assigned in the body (including outer
-        // variables) as loop_params to prevent SSA conversion — they
+        // variables) as assign_preserved to prevent SSA conversion — they
         // must stay as Assign for runtime slot mutation.
         let saved = self.renames.clone();
-        let saved_loop_params = self.loop_params.clone();
+        let saved_assign_preserved = self.assign_preserved.clone();
         for &(orig, fresh) in &loop_bindings {
             self.renames.insert(orig, fresh);
-            self.loop_params.insert(fresh);
+            self.assign_preserved.insert(fresh);
         }
         // Collect ALL assigned bindings (before any filtering) and mark
-        // their resolved versions as loop_params too, so outer variables
+        // their resolved versions as assign_preserved too, so outer variables
         // assigned inside the loop body aren't SSA-converted.
         let mut all_body_assigned = BTreeSet::new();
         self.collect_assigned_bindings(body, &mut all_body_assigned);
         self.collect_assigned_bindings(cond, &mut all_body_assigned);
         for b in &all_body_assigned {
             let resolved = self.resolve(*b);
-            self.loop_params.insert(resolved);
+            self.assign_preserved.insert(resolved);
         }
 
         // Transform condition and body with new names
@@ -620,10 +680,10 @@ impl<'a> FnCtx<'a> {
             body.signal,
         );
 
-        // Restore renames and loop_params, then set loop parameter
+        // Restore renames and assign_preserved, then set loop parameter
         // versions as active (code after the loop sees them)
         self.renames = saved;
-        self.loop_params = saved_loop_params;
+        self.assign_preserved = saved_assign_preserved;
         for &(orig, fresh) in &loop_bindings {
             self.renames.insert(orig, fresh);
         }
@@ -674,7 +734,7 @@ impl<'a> FnCtx<'a> {
         if let HirKind::Assign { target, value } = &expr.kind {
             let resolved_target = self.resolve(*target);
             if !self.arena.get(resolved_target).needs_capture()
-                && !self.loop_params.contains(&resolved_target)
+                && !self.assign_preserved.contains(&resolved_target)
             {
                 let new_value = self.transform(value);
                 let fresh = self.fresh_version(resolved_target);
@@ -705,7 +765,7 @@ impl<'a> FnCtx<'a> {
             let all_assigned: BTreeSet<_> = then_assigns
                 .union(&else_assigns)
                 .copied()
-                .filter(|b| !self.loop_params.contains(&self.resolve(*b)))
+                .filter(|b| !self.assign_preserved.contains(&self.resolve(*b)))
                 .collect();
 
             if !all_assigned.is_empty() {
@@ -803,7 +863,7 @@ impl<'a> FnCtx<'a> {
         // Bind the condition to a temporary so that phi-selects don't
         // re-evaluate it (the condition may reference mutable cells that
         // the then-branch modifies).
-        let cond_binding = self.fresh_version(Binding(0)); // gensym
+        let cond_binding = self.gensym();
         let cond_var = Hir::silent(HirKind::Var(cond_binding), cond.span.clone());
 
         // Transform each branch, extracting the final SSA value of

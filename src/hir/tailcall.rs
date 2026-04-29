@@ -367,7 +367,38 @@ mod tests {
             HirKind::Break { value, .. } => {
                 collect_calls(value, calls);
             }
-            _ => {}
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    collect_calls(init, calls);
+                }
+                collect_calls(body, calls);
+            }
+            HirKind::Recur { args } => {
+                for arg in args {
+                    collect_calls(arg, calls);
+                }
+            }
+            HirKind::MakeCell { value } => {
+                collect_calls(value, calls);
+            }
+            HirKind::DerefCell { cell } => {
+                collect_calls(cell, calls);
+            }
+            HirKind::SetCell { cell, value } => {
+                collect_calls(cell, calls);
+                collect_calls(value, calls);
+            }
+            // Leaves: no children to recurse into
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
         }
     }
 
