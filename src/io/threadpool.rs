@@ -155,16 +155,28 @@ impl ThreadPoolBackend {
                     }
                 }
                 PoolOp::Write { fd, data } => {
-                    let ret = unsafe {
-                        libc::write(fd, data.as_ptr() as *const libc::c_void, data.len())
-                    };
-                    if ret < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
-                    } else {
-                        (ret as i32, Vec::new())
+                    let mut total = 0usize;
+                    loop {
+                        let ret = unsafe {
+                            libc::write(
+                                fd,
+                                data[total..].as_ptr() as *const libc::c_void,
+                                data.len() - total,
+                            )
+                        };
+                        if ret < 0 {
+                            if total == 0 {
+                                break (
+                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                                    Vec::new(),
+                                );
+                            }
+                            break (total as i32, Vec::new());
+                        }
+                        total += ret as usize;
+                        if total >= data.len() {
+                            break (total as i32, Vec::new());
+                        }
                     }
                 }
                 PoolOp::Flush { fd } => {
