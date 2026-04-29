@@ -13,6 +13,9 @@ issue-*/
 # Example temp dirs (io.lisp cleanup)
 .elle-test-*
 
+# Build artifacts
+demos/embedding/chost
+
 # OpenCode agents
 .opencode/
 

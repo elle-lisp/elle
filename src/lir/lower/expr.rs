@@ -90,6 +90,10 @@ impl<'a> Lowerer<'a> {
             HirKind::Eval { expr, env } => self.lower_eval(expr, env),
             HirKind::Parameterize { bindings, body } => self.lower_parameterize(bindings, body),
 
+            HirKind::MakeCell { value } => self.lower_make_cell(value),
+            HirKind::DerefCell { cell } => self.lower_deref_cell(cell),
+            HirKind::SetCell { cell, value } => self.lower_set_cell(cell, value),
+
             HirKind::Error => Err(format!(
                 "internal: error poison node in lowerer at {}",
                 hir.span

@@ -245,6 +245,17 @@ impl HirLinter {
                 }
             }
 
+            HirKind::MakeCell { value } => {
+                self.check(value, symbols, arena);
+            }
+            HirKind::DerefCell { cell } => {
+                self.check(cell, symbols, arena);
+            }
+            HirKind::SetCell { cell, value } => {
+                self.check(cell, symbols, arena);
+                self.check(value, symbols, arena);
+            }
+
             HirKind::Quote(_) => {}
 
             HirKind::Error => {}

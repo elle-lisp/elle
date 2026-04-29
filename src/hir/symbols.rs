@@ -271,6 +271,17 @@ impl<'a> HirSymbolExtractor<'a> {
                 self.walk(body, index, symbols);
             }
 
+            HirKind::MakeCell { value } => {
+                self.walk(value, index, symbols);
+            }
+            HirKind::DerefCell { cell } => {
+                self.walk(cell, index, symbols);
+            }
+            HirKind::SetCell { cell, value } => {
+                self.walk(cell, index, symbols);
+                self.walk(value, index, symbols);
+            }
+
             HirKind::Error => {}
         }
     }

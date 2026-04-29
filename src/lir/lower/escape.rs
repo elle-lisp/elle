@@ -670,6 +670,13 @@ impl<'a> Lowerer<'a> {
                 }) || self.walk_for_outward_set(body, scope_bindings)
             }
 
+            HirKind::MakeCell { value } => self.walk_for_outward_set(value, scope_bindings),
+            HirKind::DerefCell { cell } => self.walk_for_outward_set(cell, scope_bindings),
+            HirKind::SetCell { cell, value } => {
+                self.walk_for_outward_set(cell, scope_bindings)
+                    || self.walk_for_outward_set(value, scope_bindings)
+            }
+
             HirKind::Error => false,
         }
     }
@@ -834,6 +841,17 @@ impl<'a> Lowerer<'a> {
                 }) && self.hir_break_values_safe(body, target_id, scope_bindings)
             }
 
+            HirKind::MakeCell { value } => {
+                self.hir_break_values_safe(value, target_id, scope_bindings)
+            }
+            HirKind::DerefCell { cell } => {
+                self.hir_break_values_safe(cell, target_id, scope_bindings)
+            }
+            HirKind::SetCell { cell, value } => {
+                self.hir_break_values_safe(cell, target_id, scope_bindings)
+                    && self.hir_break_values_safe(value, target_id, scope_bindings)
+            }
+
             HirKind::Error => true,
         }
     }
@@ -974,6 +992,13 @@ impl<'a> Lowerer<'a> {
                 }) || Self::walk_for_escaping_break(body, inner_blocks)
             }
 
+            HirKind::MakeCell { value } => Self::walk_for_escaping_break(value, inner_blocks),
+            HirKind::DerefCell { cell } => Self::walk_for_escaping_break(cell, inner_blocks),
+            HirKind::SetCell { cell, value } => {
+                Self::walk_for_escaping_break(cell, inner_blocks)
+                    || Self::walk_for_escaping_break(value, inner_blocks)
+            }
+
             HirKind::Error => false,
         }
     }
@@ -1085,6 +1110,12 @@ impl<'a> Lowerer<'a> {
                     self.all_breaks_have_safe_values(param)
                         && self.all_breaks_have_safe_values(value)
                 }) && self.all_breaks_have_safe_values(body)
+            }
+
+            HirKind::MakeCell { value } => self.all_breaks_have_safe_values(value),
+            HirKind::DerefCell { cell } => self.all_breaks_have_safe_values(cell),
+            HirKind::SetCell { cell, value } => {
+                self.all_breaks_have_safe_values(cell) && self.all_breaks_have_safe_values(value)
             }
 
             HirKind::Error => true,
@@ -1256,6 +1287,12 @@ impl<'a> Lowerer<'a> {
                     Self::hir_references_binding(p, binding)
                         || Self::hir_references_binding(v, binding)
                 }) || Self::hir_references_binding(body, binding)
+            }
+            HirKind::MakeCell { value } => Self::hir_references_binding(value, binding),
+            HirKind::DerefCell { cell } => Self::hir_references_binding(cell, binding),
+            HirKind::SetCell { cell, value } => {
+                Self::hir_references_binding(cell, binding)
+                    || Self::hir_references_binding(value, binding)
             }
         }
     }

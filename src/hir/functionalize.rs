@@ -1,10 +1,11 @@
-//! SSA conversion: eliminate Assign, convert While to Loop/Recur.
+//! SSA conversion: eliminate Assign, convert While to Loop/Recur,
+//! explicit cell ops for CaptureCell bindings.
 //!
 //! Transforms imperative HIR (with While/Assign) into functional HIR
-//! (with Loop/Recur and let-chains). This is the foundation for region
-//! inference, type inference, and signal inference.
+//! (with Loop/Recur, let-chains, and explicit cell operations). This is
+//! the foundation for region inference, type inference, and signal inference.
 //!
-//! The transform handles two patterns:
+//! The transform handles three patterns:
 //!
 //! 1. **While + Assign → Loop/Recur:** mutable bindings assigned in a
 //!    while body become loop parameters; assigns become recur arguments.
@@ -13,9 +14,10 @@
 //!    `(assign x val)` in a begin sequence becomes `(define x' val)`,
 //!    renaming subsequent uses of x to x'.
 //!
-//! **CaptureCell boundary:** bindings that are both captured AND mutated
-//! (`needs_capture()`) stay as Assign — they're shared mutable state
-//! across closure boundaries that can't be SSA-converted.
+//! 3. **CaptureCell bindings → explicit cell ops:** bindings that
+//!    `needs_capture()` get explicit DerefCell (for reads) and SetCell
+//!    (for writes) in the HIR. The binding itself holds a cell; mutation
+//!    goes through set-cell!, reading through deref-cell.
 //!
 //! **Branch boundary:** Assigns inside if/match/cond arms are left as
 //! Assign. Proper phi insertion for conditional mutation requires
@@ -29,13 +31,14 @@ use std::collections::{BTreeSet, HashMap};
 
 /// Run the functionalize transform on a HIR tree.
 ///
-/// Eliminates Assign (except CaptureCell and in-branch) and converts
-/// While to Loop/Recur. Modifies the arena to create fresh bindings
-/// for SSA versions.
+/// Eliminates Assign (except in-branch) and converts While to
+/// Loop/Recur. CaptureCell bindings get explicit DerefCell/SetCell
+/// ops. Modifies the arena to create fresh bindings for SSA versions.
 pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
     let mut ctx = FnCtx {
         arena,
         renames: HashMap::new(),
+        cell_bindings: BTreeSet::new(),
     };
     *hir = ctx.transform(hir);
 }
@@ -43,6 +46,9 @@ pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
 struct FnCtx<'a> {
     arena: &'a mut BindingArena,
     renames: HashMap<Binding, Binding>,
+    /// Bindings that have been wrapped in cells (needs_capture).
+    /// References to these must go through DerefCell, assigns through SetCell.
+    cell_bindings: BTreeSet<Binding>,
 }
 
 impl<'a> FnCtx<'a> {
@@ -88,21 +94,50 @@ impl<'a> FnCtx<'a> {
         let signal = hir.signal;
 
         match &hir.kind {
-            HirKind::Var(b) => Hir::new(HirKind::Var(self.resolve(*b)), span, signal),
+            HirKind::Var(b) => {
+                let resolved = self.resolve(*b);
+                let var_node = Hir::new(HirKind::Var(resolved), span.clone(), signal);
+                if self.cell_bindings.contains(&resolved) {
+                    Hir::new(
+                        HirKind::DerefCell {
+                            cell: Box::new(var_node),
+                        },
+                        span,
+                        signal,
+                    )
+                } else {
+                    var_node
+                }
+            }
 
-            // Standalone Assign outside Begin: leave as Assign but
-            // apply renaming to target. The Begin handler converts
-            // sequential assigns; standalone ones pass through.
+            // Standalone Assign outside Begin: CaptureCell assigns become
+            // SetCell; non-capture assigns pass through (for Begin handler).
             HirKind::Assign { target, value } => {
+                let resolved_target = self.resolve(*target);
                 let new_value = self.transform(value);
-                Hir::new(
-                    HirKind::Assign {
-                        target: self.resolve(*target),
-                        value: Box::new(new_value),
-                    },
-                    span,
-                    signal,
-                )
+                if self.cell_bindings.contains(&resolved_target) {
+                    Hir::new(
+                        HirKind::SetCell {
+                            cell: Box::new(Hir::new(
+                                HirKind::Var(resolved_target),
+                                span.clone(),
+                                signal,
+                            )),
+                            value: Box::new(new_value),
+                        },
+                        span,
+                        signal,
+                    )
+                } else {
+                    Hir::new(
+                        HirKind::Assign {
+                            target: resolved_target,
+                            value: Box::new(new_value),
+                        },
+                        span,
+                        signal,
+                    )
+                }
             }
 
             HirKind::While { cond, body } => self.transform_while(cond, body, span, signal),
@@ -124,9 +159,23 @@ impl<'a> FnCtx<'a> {
                 syntax,
                 assert_numeric,
             } => {
-                let saved = self.renames.clone();
+                let saved_renames = self.renames.clone();
+                let saved_cells = self.cell_bindings.clone();
+                // Mark captured bindings that need cells
+                for cap in captures {
+                    if self.arena.get(cap.binding).needs_capture() {
+                        self.cell_bindings.insert(cap.binding);
+                    }
+                }
+                // Mark mutated parameters as cell bindings
+                for p in params.iter().chain(rest_param.iter()) {
+                    if self.arena.get(*p).needs_capture() {
+                        self.cell_bindings.insert(*p);
+                    }
+                }
                 let new_body = self.transform(body);
-                self.renames = saved;
+                self.renames = saved_renames;
+                self.cell_bindings = saved_cells;
                 Hir::new(
                     HirKind::Lambda {
                         params: params.clone(),
@@ -171,7 +220,13 @@ impl<'a> FnCtx<'a> {
             HirKind::Let { bindings, body } => {
                 let new_bindings: Vec<_> = bindings
                     .iter()
-                    .map(|(b, init)| (*b, self.transform(init)))
+                    .map(|(b, init)| {
+                        let new_init = self.transform(init);
+                        if self.arena.get(*b).needs_capture() {
+                            self.cell_bindings.insert(*b);
+                        }
+                        (*b, new_init)
+                    })
                     .collect();
                 let new_body = self.transform(body);
                 Hir::new(
@@ -185,6 +240,17 @@ impl<'a> FnCtx<'a> {
             }
 
             HirKind::Letrec { bindings, body } => {
+                // Pre-register cell bindings so that forward references
+                // within the letrec body see them as cell-wrapped.
+                // Letrec inits are NOT wrapped in MakeCell — the lowerer
+                // handles two-pass cell init (create cell in pass 1, store
+                // value into existing cell in pass 2) so that forward
+                // references through closures see the shared cell.
+                for (b, _) in bindings {
+                    if self.arena.get(*b).needs_capture() {
+                        self.cell_bindings.insert(*b);
+                    }
+                }
                 let new_bindings: Vec<_> = bindings
                     .iter()
                     .map(|(b, init)| (*b, self.transform(init)))
@@ -226,6 +292,12 @@ impl<'a> FnCtx<'a> {
 
             HirKind::Define { binding, value } => {
                 let new_value = self.transform(value);
+                // Define appears in Begin sequences with pre-allocation
+                // (two-pass: pass 1 creates cell, pass 2 stores value).
+                // Don't wrap in MakeCell — the lowerer handles cell init.
+                if self.arena.get(*binding).needs_capture() {
+                    self.cell_bindings.insert(*binding);
+                }
                 Hir::new(
                     HirKind::Define {
                         binding: *binding,
@@ -749,7 +821,14 @@ fn for_each_child(hir: &Hir, mut f: impl FnMut(&Hir)) {
                 f(&a.expr);
             }
         }
-        HirKind::Assign { value, .. } | HirKind::Define { value, .. } => f(value),
+        HirKind::Assign { value, .. }
+        | HirKind::Define { value, .. }
+        | HirKind::MakeCell { value } => f(value),
+        HirKind::DerefCell { cell } => f(cell),
+        HirKind::SetCell { cell, value } => {
+            f(cell);
+            f(value);
+        }
         HirKind::While { cond, body } => {
             f(cond);
             f(body);

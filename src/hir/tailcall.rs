@@ -214,6 +214,18 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(body, false, tail_blocks);
         }
 
+        // MakeCell/DerefCell/SetCell: children are not in tail position
+        HirKind::MakeCell { value } => {
+            mark(value, false, tail_blocks);
+        }
+        HirKind::DerefCell { cell } => {
+            mark(cell, false, tail_blocks);
+        }
+        HirKind::SetCell { cell, value } => {
+            mark(cell, false, tail_blocks);
+            mark(value, false, tail_blocks);
+        }
+
         // Leaves: nothing to recurse into
         HirKind::Nil
         | HirKind::EmptyList

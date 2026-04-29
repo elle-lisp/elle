@@ -203,6 +203,16 @@ fn collect_fn_signals(
             }
             collect_fn_signals(body, arena, symbols, map);
         }
+        HirKind::MakeCell { value } => {
+            collect_fn_signals(value, arena, symbols, map);
+        }
+        HirKind::DerefCell { cell } => {
+            collect_fn_signals(cell, arena, symbols, map);
+        }
+        HirKind::SetCell { cell, value } => {
+            collect_fn_signals(cell, arena, symbols, map);
+            collect_fn_signals(value, arena, symbols, map);
+        }
         // Leaves: no children to recurse into.
         HirKind::Nil
         | HirKind::EmptyList
@@ -410,6 +420,16 @@ fn collect_call_edges(
                 collect_call_edges(v, arena, symbols, edges, current_fn);
             }
             collect_call_edges(body, arena, symbols, edges, current_fn);
+        }
+        HirKind::MakeCell { value } => {
+            collect_call_edges(value, arena, symbols, edges, current_fn);
+        }
+        HirKind::DerefCell { cell } => {
+            collect_call_edges(cell, arena, symbols, edges, current_fn);
+        }
+        HirKind::SetCell { cell, value } => {
+            collect_call_edges(cell, arena, symbols, edges, current_fn);
+            collect_call_edges(value, arena, symbols, edges, current_fn);
         }
         HirKind::Nil
         | HirKind::EmptyList

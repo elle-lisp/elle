@@ -729,6 +729,31 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Lower MakeCell — currently transparent because the lowerer
+    /// already creates cells for needs_capture bindings in lower_let,
+    /// lower_letrec, and lower_define. When the lowerer is simplified
+    /// (Phase 3), this will emit MakeCaptureCell directly.
+    pub(super) fn lower_make_cell(&mut self, value: &Hir) -> Result<Reg, String> {
+        self.lower_expr(value)
+    }
+
+    /// Lower DerefCell — currently transparent because lower_var
+    /// already unwraps cells for needs_capture bindings. When the
+    /// lowerer is simplified (Phase 3), this will emit LoadCaptureCell.
+    pub(super) fn lower_deref_cell(&mut self, cell: &Hir) -> Result<Reg, String> {
+        self.lower_expr(cell)
+    }
+
+    /// Lower SetCell — delegates to lower_assign since the lowerer
+    /// already handles cell stores. The cell child must be a Var.
+    pub(super) fn lower_set_cell(&mut self, cell: &Hir, value: &Hir) -> Result<Reg, String> {
+        if let HirKind::Var(binding) = &cell.kind {
+            self.lower_assign(binding, value)
+        } else {
+            Err("SetCell: cell must be a Var".to_string())
+        }
+    }
+
     /// Store a value into a binding, consuming it from the stack.
     /// Used by lower_destructure.
     fn lower_bind_value(&mut self, binding: Binding, value_reg: Reg) -> Result<Reg, String> {

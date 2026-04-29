@@ -279,6 +279,24 @@ pub enum HirKind {
         body: Box<Hir>,
     },
 
+    // === Cell operations (explicit CaptureCell) ===
+    /// Wrap a value in a mutable cell (CaptureCell).
+    /// Produced by functionalize for bindings that needs_capture().
+    MakeCell {
+        value: Box<Hir>,
+    },
+
+    /// Read the current value from a cell.
+    DerefCell {
+        cell: Box<Hir>,
+    },
+
+    /// Write a new value to a cell. Returns the written value.
+    SetCell {
+        cell: Box<Hir>,
+        value: Box<Hir>,
+    },
+
     /// Poison node — inserted when a recoverable error is accumulated
     /// during analysis. The lowerer should never see this; the pipeline
     /// checks for accumulated errors before lowering.
