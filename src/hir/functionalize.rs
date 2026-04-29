@@ -586,14 +586,25 @@ impl<'a> FnCtx<'a> {
             })
             .collect();
 
-        // Inside the loop, rename original bindings to fresh versions
+        // Inside the loop, rename original bindings to fresh versions.
+        // Also mark ALL bindings assigned in the body (including outer
+        // variables) as loop_params to prevent SSA conversion — they
+        // must stay as Assign for runtime slot mutation.
         let saved = self.renames.clone();
         let saved_loop_params = self.loop_params.clone();
         for &(orig, fresh) in &loop_bindings {
             self.renames.insert(orig, fresh);
-            // Mark loop parameters so transform_begin_at skips SSA
-            // conversion of assigns to them — they're threaded via Recur.
             self.loop_params.insert(fresh);
+        }
+        // Collect ALL assigned bindings (before any filtering) and mark
+        // their resolved versions as loop_params too, so outer variables
+        // assigned inside the loop body aren't SSA-converted.
+        let mut all_body_assigned = BTreeSet::new();
+        self.collect_assigned_bindings(body, &mut all_body_assigned);
+        self.collect_assigned_bindings(cond, &mut all_body_assigned);
+        for b in &all_body_assigned {
+            let resolved = self.resolve(*b);
+            self.loop_params.insert(resolved);
         }
 
         // Transform condition and body with new names
@@ -713,8 +724,23 @@ impl<'a> FnCtx<'a> {
             }
         }
 
-        // While in a begin: collect sibling defines for scope context
-        if let HirKind::While { cond, body } = &expr.kind {
+        // While in a begin (possibly wrapped in a Block): collect
+        // sibling defines for scope context. The analyzer wraps `while`
+        // in a Block for break support, so we unwrap it here.
+        let while_parts = match &expr.kind {
+            HirKind::While { cond, body } => Some((cond.as_ref(), body.as_ref())),
+            HirKind::Block {
+                body: block_body, ..
+            } if block_body.len() == 1 && matches!(block_body[0].kind, HirKind::While { .. }) => {
+                if let HirKind::While { cond, body } = &block_body[0].kind {
+                    Some((cond.as_ref(), body.as_ref()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some((cond, body)) = while_parts {
             // Collect Define bindings from earlier expressions in this begin
             let mut scope_defines = BTreeSet::new();
             for prior in &exprs[..start] {
@@ -722,8 +748,20 @@ impl<'a> FnCtx<'a> {
                     scope_defines.insert(*binding);
                 }
             }
-            let transformed =
+            let mut transformed =
                 self.transform_while(cond, body, expr.span.clone(), expr.signal, &scope_defines);
+            // Re-wrap in Block if the original While was Block-wrapped
+            if let HirKind::Block { name, block_id, .. } = &expr.kind {
+                transformed = Hir::new(
+                    HirKind::Block {
+                        name: name.clone(),
+                        block_id: *block_id,
+                        body: vec![transformed],
+                    },
+                    expr.span.clone(),
+                    expr.signal,
+                );
+            }
             if start + 1 >= exprs.len() {
                 return transformed;
             }

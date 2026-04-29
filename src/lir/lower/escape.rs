@@ -1460,6 +1460,23 @@ impl<'a> Lowerer<'a> {
                     .any(|(_, v)| self.body_escapes_heap_values(v))
                     || self.body_escapes_heap_values(body)
             }
+            // Loop: recurse into bindings and body (same as Let/While)
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.body_escapes_heap_values(init))
+                    || self.body_escapes_heap_values(body)
+            }
+            // Recur: conservatively treat as escaping — args cross
+            // iteration boundaries, which is an escape if any arg is
+            // heap-allocated.
+            HirKind::Recur { .. } => true,
+            // Cell ops: structural recursion
+            HirKind::MakeCell { value } => self.body_escapes_heap_values(value),
+            HirKind::DerefCell { cell } => self.body_escapes_heap_values(cell),
+            HirKind::SetCell { cell, value } => {
+                self.body_escapes_heap_values(cell) || self.body_escapes_heap_values(value)
+            }
             _ => true,
         }
     }
