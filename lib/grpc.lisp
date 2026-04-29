@@ -24,28 +24,28 @@
     "Wrap protobuf bytes in gRPC length-prefixed frame."
     (let [len (length message-bytes)]
       (concat (bytes 0  # not compressed
-                      (bit/shr len 24) (bit/and (bit/shr len 16) 0xff)
-                     (bit/and (bit/shr len 8) 0xff) (bit/and len 0xff))
+                     (bit/shr len 24)
+                     (bit/and (bit/shr len 16) 255)
+                     (bit/and (bit/shr len 8) 255)
+                     (bit/and len 255))
               message-bytes)))
-
   (defn grpc-decode [frame-bytes]
     "Extract protobuf bytes from gRPC length-prefixed frame.
      Returns the payload bytes, or nil if frame is empty."
     (when (and frame-bytes (>= (length frame-bytes) 5))
       (let [len (bit/or (bit/shl (get frame-bytes 1) 24)
                         (bit/shl (get frame-bytes 2) 16)
-                        (bit/shl (get frame-bytes 3) 8) (get frame-bytes 4))]
+                        (bit/shl (get frame-bytes 3) 8)
+                        (get frame-bytes 4))]
         (when (>= (length frame-bytes) (+ 5 len))
           (slice frame-bytes 5 (+ 5 len))))))
 
   ## ── Connect ────────────────────────────────────────────────────────
 
   (def h2-transport ((import "std/http2/transport")))
-
   (defn grpc-connect [socket-path]
     "Connect to a gRPC server over a Unix socket. Returns an h2 session."
-    (let [transport (h2-transport:tcp
-                      (unix/connect socket-path :sndbuf 2097152))]
+    (let [transport (h2-transport:tcp (unix/connect socket-path :sndbuf 2097152))]
       (http2:connect nil :transport transport)))
 
   ## ── Collect gRPC response from stream ──────────────────────────────
@@ -53,7 +53,6 @@
   (defn find-header [headers name]
     (let [matches (filter (fn [h] (= (h 0) name)) headers)]
       (when (not (empty? matches)) (first matches))))
-
   (defn check-grpc-status [headers]
     "Check grpc-status in headers/trailers. Raises on non-zero status."
     (if-let [pair (find-header headers "grpc-status")]
@@ -61,8 +60,8 @@
               (let [msg (find-header headers "grpc-message")]
                 (error {:error :grpc-error
                         :code (parse-int (pair 1))
-                        :message (if msg (msg 1) "unknown error")}))) nil))
-
+                        :message (if msg (msg 1) "unknown error")})))
+            nil))
   (defn collect-grpc-response [s]
     "Read data + trailers from an h2 stream. Returns raw gRPC frame bytes.
      Raises on grpc-status != 0. Handles both trailers-only and
@@ -98,11 +97,13 @@
   (defn grpc-call [session schema method request-type request-struct]
     "Make a unary gRPC call. Returns raw protobuf bytes of response."
     (let* [body (grpc-encode (protobuf:encode schema request-type request-struct))
-           stream (http2:send-raw session "POST" method :body body
+           stream (http2:send-raw session
+                                  "POST"
+                                  method
+                                  :body body
                                   :headers [["content-type" "application/grpc"]
                                   ["te" "trailers"]])]
       (collect-grpc-response stream)))
-
   (defn
     grpc-call-decode
     [session schema method request-type request-struct response-type]
@@ -123,7 +124,10 @@
      splits on the 5-byte length-prefixed frame headers."
     (def body (grpc-encode (protobuf:encode schema request-type request-struct)))
     (def s
-      (http2:send-raw session "POST" method :body body
+      (http2:send-raw session
+                      "POST"
+                      method
+                      :body body
                       :headers [["content-type" "application/grpc"]
                                 ["te" "trailers"]]))
     (def @buf (bytes))
@@ -133,8 +137,10 @@
     (fn []  ## Try to extract a complete gRPC frame from buf
       (def @result nil)
       (when (>= (length buf) 5)
-        (let [len (bit/or (bit/shl (get buf 1) 24) (bit/shl (get buf 2) 16)
-                          (bit/shl (get buf 3) 8) (get buf 4))
+        (let [len (bit/or (bit/shl (get buf 1) 24)
+                          (bit/shl (get buf 2) 16)
+                          (bit/shl (get buf 3) 8)
+                          (get buf 4))
               frame-end (+ 5 len)]
           (when (>= (length buf) frame-end)
             (let [payload (slice buf 5 frame-end)]
@@ -156,7 +162,8 @@
                 (when (and (nil? result) (>= (length buf) 5))
                   (let [len (bit/or (bit/shl (get buf 1) 24)
                                     (bit/shl (get buf 2) 16)
-                                    (bit/shl (get buf 3) 8) (get buf 4))
+                                    (bit/shl (get buf 3) 8)
+                                    (get buf 4))
                         frame-end (+ 5 len)]
                     (when (>= (length buf) frame-end)
                       (let [payload (slice buf 5 frame-end)]
