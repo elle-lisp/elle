@@ -218,7 +218,9 @@ pub const TRACE_KEYWORDS: &[&str] = &[
 /// Compiler-stage dumps requested from `--dump=<kw>,...`. Unlike `--trace=`
 /// (which enables runtime logging), `--dump=` runs the compiler up to each
 /// requested stage, prints the artifact, and exits without executing.
-pub const DUMP_KEYWORDS: &[&str] = &["ast", "hir", "fhir", "lir", "jit", "cfg", "dfa", "git"];
+pub const DUMP_KEYWORDS: &[&str] = &[
+    "ast", "hir", "fhir", "lir", "jit", "cfg", "dfa", "defuse", "git",
+];
 
 pub mod dump_bits {
     pub const AST: u32 = 1 << 0;
@@ -229,7 +231,8 @@ pub mod dump_bits {
     pub const DFA: u32 = 1 << 5;
     pub const GIT: u32 = 1 << 6;
     pub const FHIR: u32 = 1 << 7;
-    pub const ALL: u32 = (1 << 8) - 1;
+    pub const DEFUSE: u32 = 1 << 8;
+    pub const ALL: u32 = (1 << 9) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -242,6 +245,7 @@ pub mod dump_bits {
             "cfg" => CFG,
             "dfa" => DFA,
             "git" => GIT,
+            "defuse" => DEFUSE,
             _ => 0,
         }
     }

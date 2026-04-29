@@ -25,6 +25,7 @@ fn print_help() {
     println!("                          jit  — JIT eligibility per function");
     println!("                          cfg  — per-function control-flow graph");
     println!("                          dfa  — dataflow / signal inference results");
+    println!("                          defuse — HIR def-use chains, value origin, liveness");
     println!("                          git  — (reserved for SPIR-V output)");
     println!("  --dump=all            Dump every stage");
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
@@ -201,6 +202,17 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
                 e
             })?;
         println!("{}", elle::hir::display::display_hir(&hir, &arena, &names));
+    }
+
+    if cfg.dump.contains("defuse") {
+        println!(";; ── defuse (HIR dataflow) ──────────────────────────────────");
+        let (hir, arena, names) =
+            elle::pipeline::compile_file_to_fhir(contents, symbols, source_name).map_err(|e| {
+                eprintln!("{}", e);
+                e
+            })?;
+        let info = elle::hir::analyze_dataflow(&hir);
+        print!("{}", elle::hir::format_dataflow(&info, &arena, &names));
     }
 
     let needs_pipeline = cfg
