@@ -147,15 +147,15 @@ fn test_string_with_nul() {
 
 #[test]
 fn test_cons_constructor() {
-    let car = Value::int(1);
-    let cdr = Value::int(2);
-    let v = Value::cons(car, cdr);
-    assert!(v.is_cons());
-    if let Some(cons) = v.as_cons() {
-        assert_eq!(cons.first, car);
-        assert_eq!(cons.rest, cdr);
+    let head = Value::int(1);
+    let tail = Value::int(2);
+    let v = Value::pair(head, tail);
+    assert!(v.is_pair());
+    if let Some(pair) = v.as_pair() {
+        assert_eq!(pair.first, head);
+        assert_eq!(pair.rest, tail);
     } else {
-        panic!("Expected cons cell");
+        panic!("Expected pair cell");
     }
 }
 
@@ -217,11 +217,11 @@ fn test_list_function() {
 #[test]
 fn test_is_list() {
     // Proper list
-    let proper_list = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::NIL));
+    let proper_list = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::NIL));
     assert!(proper_list.is_list());
 
     // Not a list (improper list)
-    let improper_list = Value::cons(Value::int(1), Value::int(2));
+    let improper_list = Value::pair(Value::int(1), Value::int(2));
     assert!(!improper_list.is_list());
 
     // Nil is a list
@@ -238,7 +238,7 @@ fn test_type_name() {
     assert_eq!(Value::keyword("test").type_name(), "keyword");
     assert_eq!(Value::string("test").type_name(), "string");
     assert_eq!(
-        Value::cons(Value::NIL, Value::EMPTY_LIST).type_name(),
+        Value::pair(Value::NIL, Value::EMPTY_LIST).type_name(),
         "list"
     );
     assert_eq!(Value::array_mut(vec![]).type_name(), "@array");
@@ -286,7 +286,7 @@ fn test_truthiness_semantics() {
     assert!(Value::keyword("test").is_truthy(), "keyword is truthy");
 
     // Non-empty list is truthy
-    let non_empty_list = Value::cons(Value::int(1), Value::NIL);
+    let non_empty_list = Value::pair(Value::int(1), Value::NIL);
     assert!(non_empty_list.is_truthy(), "non-empty list is truthy");
 
     // Non-empty array is truthy

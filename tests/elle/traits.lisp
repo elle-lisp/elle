@@ -69,9 +69,9 @@
   (assert (= (type-of s) :struct) "type-of returns :struct for traited struct"))
 
 (begin
-  (def lst (with-traits (cons 1 (cons 2 ())) {:tag :list}))
-  (assert (= (first lst) 1) "first sees cons data through traits")
-  (assert (= (type-of lst) :list) "type-of returns :list for traited cons"))
+  (def lst (with-traits (pair 1 (pair 2 ())) {:tag :list}))
+  (assert (= (first lst) 1) "first sees pair data through traits")
+  (assert (= (type-of lst) :list) "type-of returns :list for traited pair"))
 
 (assert (= (type-of (with-traits (fn (x) x) {:T true})) :closure)
         "type-of returns :closure for traited closure")
@@ -262,7 +262,7 @@
           "with-traits works on LSetMut")
 
   # Cons
-  (assert (= (traits (with-traits (cons 1 2) t)) t) "with-traits works on Cons")
+  (assert (= (traits (with-traits (pair 1 2) t)) t) "with-traits works on Cons")
 
   # Closure
   (assert (= (traits (with-traits (fn (x) x) t)) t)

@@ -588,8 +588,8 @@ mod tests {
 
     #[test]
     fn test_eq_heap_values() {
-        let list1 = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::EMPTY_LIST));
-        let list2 = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::EMPTY_LIST));
+        let list1 = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::EMPTY_LIST));
+        let list2 = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::EMPTY_LIST));
 
         assert_eq!(
             elle_jit_eq(list1.tag, list1.payload, list2.tag, list2.payload),
@@ -602,7 +602,7 @@ mod tests {
             "equal lists must not be ne"
         );
 
-        let list3 = Value::cons(Value::int(1), Value::cons(Value::int(3), Value::EMPTY_LIST));
+        let list3 = Value::pair(Value::int(1), Value::pair(Value::int(3), Value::EMPTY_LIST));
         assert_eq!(
             elle_jit_eq(list1.tag, list1.payload, list3.tag, list3.payload),
             JitValue::bool_val(false),

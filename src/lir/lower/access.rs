@@ -26,16 +26,16 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(dst)
             }
-            AccessPath::Car(inner) => {
+            AccessPath::First(inner) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::Car { dst, pair: parent });
+                self.emit(LirInstr::First { dst, pair: parent });
                 Ok(dst)
             }
-            AccessPath::Cdr(inner) => {
+            AccessPath::Rest(inner) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::Cdr { dst, pair: parent });
+                self.emit(LirInstr::Rest { dst, pair: parent });
                 Ok(dst)
             }
             AccessPath::Index(inner, idx) => {

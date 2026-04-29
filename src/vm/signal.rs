@@ -73,9 +73,9 @@ impl VM {
 
         if bits == SIG_QUERY {
             // Mutable queries — handled before dispatch_query (which takes &self).
-            if let Some(cons) = value.as_cons() {
-                if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
-                    let thunk = cons.rest;
+            if let Some(pair) = value.as_pair() {
+                if pair.first.as_keyword_name().as_deref() == Some("arena/allocs") {
+                    let thunk = pair.rest;
                     match self.handle_arena_allocs(thunk) {
                         Ok(val) => {
                             self.fiber.stack.push(val);
@@ -84,8 +84,8 @@ impl VM {
                         Err(bits) => return Some(bits),
                     }
                 }
-                if cons.first.as_keyword_name().as_deref() == Some("vm/config-set") {
-                    let result = self.handle_vm_config_set(cons.rest);
+                if pair.first.as_keyword_name().as_deref() == Some("vm/config-set") {
+                    let result = self.handle_vm_config_set(pair.rest);
                     self.fiber.stack.push(result);
                     return None;
                 }
@@ -171,9 +171,9 @@ impl VM {
 
         if bits == SIG_QUERY {
             // Mutable queries — handled before dispatch_query (which takes &self).
-            if let Some(cons) = value.as_cons() {
-                if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
-                    let thunk = cons.rest;
+            if let Some(pair) = value.as_pair() {
+                if pair.first.as_keyword_name().as_deref() == Some("arena/allocs") {
+                    let thunk = pair.rest;
                     match self.handle_arena_allocs(thunk) {
                         Ok(val) => {
                             self.fiber.signal = Some((SIG_OK, val));
@@ -182,8 +182,8 @@ impl VM {
                         Err(bits) => return bits,
                     }
                 }
-                if cons.first.as_keyword_name().as_deref() == Some("vm/config-set") {
-                    let result = self.handle_vm_config_set(cons.rest);
+                if pair.first.as_keyword_name().as_deref() == Some("vm/config-set") {
+                    let result = self.handle_vm_config_set(pair.rest);
                     self.fiber.signal = Some((SIG_OK, result));
                     return SIG_OK;
                 }
@@ -318,20 +318,20 @@ impl VM {
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
     pub(crate) fn dispatch_query(&mut self, value: Value) -> (SignalBits, Value) {
-        let cons = match value.as_cons() {
+        let pair = match value.as_pair() {
             Some(c) => c,
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("type-error", "SIG_QUERY: expected cons cell".to_string()),
+                    error_val("type-error", "SIG_QUERY: expected pair cell".to_string()),
                 );
             }
         };
 
         // Accept keyword or string as operation identifier.
-        let op_name: String = if let Some(name) = cons.first.as_keyword_name() {
+        let op_name: String = if let Some(name) = pair.first.as_keyword_name() {
             name
-        } else if let Some(s) = cons.first.with_string(|s| s.to_string()) {
+        } else if let Some(s) = pair.first.with_string(|s| s.to_string()) {
             s
         } else {
             return (
@@ -342,7 +342,7 @@ impl VM {
                 ),
             );
         };
-        let arg = cons.rest;
+        let arg = pair.rest;
 
         match op_name.as_str() {
             "call-count" => {
@@ -645,7 +645,7 @@ impl VM {
             #[cfg(feature = "mlir")]
             "mlir/compile-spirv" => {
                 // arg is (closure . workgroup-size)
-                let (closure_val, wg_size): (Value, u32) = match arg.as_cons() {
+                let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
                     Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
                     None => (arg, 256),
                 };
@@ -701,7 +701,7 @@ impl VM {
             #[cfg(feature = "mlir")]
             "git" => {
                 // arg is (closure . workgroup-size)
-                let (closure_val, wg_size): (Value, u32) = match arg.as_cons() {
+                let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
                     Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
                     None => (arg, 256),
                 };
@@ -946,12 +946,12 @@ impl VM {
 
     /// Handle `(vm/config-set key value)` — mutates the VM's RuntimeConfig.
     fn handle_vm_config_set(&mut self, arg: Value) -> Value {
-        let cons = match arg.as_cons() {
+        let pair = match arg.as_pair() {
             Some(c) => c,
             None => return error_val("type-error", "vm/config-set: expected (key . value)"),
         };
-        let key = cons.first;
-        let val = cons.rest;
+        let key = pair.first;
+        let val = pair.rest;
 
         let kw = match key.as_keyword_name() {
             Some(k) => k,
@@ -1122,7 +1122,7 @@ impl VM {
     /// The before/after count snapshots bracket the thunk's execution to
     /// measure net allocations.
     ///
-    /// Returns `Ok(cons(result, net_allocs))` on success, or `Err(bits)` on error/halt.
+    /// Returns `Ok(pair(result, net_allocs))` on success, or `Err(bits)` on error/halt.
     pub(crate) fn handle_arena_allocs(&mut self, thunk: Value) -> Result<Value, SignalBits> {
         let closure = match thunk.as_closure() {
             Some(c) => c.clone(),
@@ -1176,7 +1176,7 @@ impl VM {
         };
 
         let net = (after as i64) - (before as i64);
-        Ok(Value::cons(result, Value::int(net)))
+        Ok(Value::pair(result, Value::int(net)))
     }
 }
 

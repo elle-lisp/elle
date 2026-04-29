@@ -329,6 +329,18 @@ impl DefUseBuilder {
                 ValueOrigin::Immediate
             }
 
+            // Intrinsic: walk args; non-allocating → Immediate, allocating → Allocation
+            HirKind::Intrinsic { op, args } => {
+                for a in args {
+                    self.walk(a);
+                }
+                if op.allocates() {
+                    ValueOrigin::Allocation
+                } else {
+                    ValueOrigin::Immediate
+                }
+            }
+
             HirKind::Error => ValueOrigin::Immediate,
         }
     }

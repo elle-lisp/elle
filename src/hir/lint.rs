@@ -258,6 +258,12 @@ impl HirLinter {
 
             HirKind::Quote(_) => {}
 
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    self.check(a, symbols, arena);
+                }
+            }
+
             HirKind::Error => {}
         }
     }
@@ -329,13 +335,13 @@ mod tests {
     fn test_hir_linter_arity_check() {
         let (mut symbols, mut vm) = setup();
         // cons expects 2 arguments — the analyzer catches this as a hard error
-        let result = analyze("(cons 1)", &mut symbols, &mut vm, "<test>");
+        let result = analyze("(pair 1)", &mut symbols, &mut vm, "<test>");
         match result {
             Err(ref msg) => assert!(
                 msg.contains("arity error"),
                 "expected arity error, got: {msg}"
             ),
-            Ok(_) => panic!("expected arity error for (cons 1)"),
+            Ok(_) => panic!("expected arity error for (pair 1)"),
         }
     }
 

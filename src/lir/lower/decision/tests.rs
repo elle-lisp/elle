@@ -73,7 +73,7 @@ fn test_cons_pattern() {
     let matrix = PatternMatrix {
         rows: vec![
             PatternRow::new(
-                vec![HirPattern::Cons {
+                vec![HirPattern::Pair {
                     head: Box::new(HirPattern::Wildcard),
                     tail: Box::new(HirPattern::Wildcard),
                 }],
@@ -87,7 +87,7 @@ fn test_cons_pattern() {
     match &tree {
         DecisionTree::Switch { cases, default, .. } => {
             assert_eq!(cases.len(), 1);
-            assert_eq!(cases[0].0, Constructor::Cons);
+            assert_eq!(cases[0].0, Constructor::Pair);
             assert!(default.is_some());
         }
         _ => panic!("expected Switch, got {:?}", tree),
@@ -168,12 +168,12 @@ fn test_unreachable_arm_detected() {
 #[test]
 fn test_nested_patterns() {
     // (match x ((1 . _) ...) ((2 . _) ...) (_ ...))
-    // Should produce a Switch on Root (IsPair), then inside the Cons
-    // case, a Switch on Car(Root) for the literal values.
+    // Should produce a Switch on Root (IsPair), then inside the Pair
+    // case, a Switch on First(Root) for the literal values.
     let matrix = PatternMatrix {
         rows: vec![
             PatternRow::new(
-                vec![HirPattern::Cons {
+                vec![HirPattern::Pair {
                     head: Box::new(lit_int(1)),
                     tail: Box::new(HirPattern::Wildcard),
                 }],
@@ -181,7 +181,7 @@ fn test_nested_patterns() {
                 0,
             ),
             PatternRow::new(
-                vec![HirPattern::Cons {
+                vec![HirPattern::Pair {
                     head: Box::new(lit_int(2)),
                     tail: Box::new(HirPattern::Wildcard),
                 }],
@@ -193,7 +193,7 @@ fn test_nested_patterns() {
     };
     let tree = matrix.compile(vec![AccessPath::Root]);
 
-    // Top level: Switch on Root for Cons
+    // Top level: Switch on Root for Pair
     match &tree {
         DecisionTree::Switch {
             access,
@@ -201,18 +201,18 @@ fn test_nested_patterns() {
             default,
         } => {
             assert_eq!(*access, AccessPath::Root);
-            assert_eq!(cases.len(), 1); // One constructor: Cons
-            assert_eq!(cases[0].0, Constructor::Cons);
+            assert_eq!(cases.len(), 1); // One constructor: Pair
+            assert_eq!(cases[0].0, Constructor::Pair);
             assert!(default.is_some());
 
-            // Inside the Cons case: Switch on Car(Root) for literals
+            // Inside the Pair case: Switch on First(Root) for literals
             match &cases[0].1 {
                 DecisionTree::Switch {
                     access,
                     cases: inner_cases,
                     ..
                 } => {
-                    assert_eq!(*access, AccessPath::Car(Box::new(AccessPath::Root)));
+                    assert_eq!(*access, AccessPath::First(Box::new(AccessPath::Root)));
                     assert_eq!(inner_cases.len(), 2);
                     assert_eq!(
                         inner_cases[0].0,
@@ -278,7 +278,7 @@ fn test_empty_list_pattern() {
 #[test]
 fn test_list_pattern_as_cons_chain() {
     // (match x ((a b) ...) (_ ...))
-    // A 2-element list pattern should decompose as Cons at the top level.
+    // A 2-element list pattern should decompose as Pair at the top level.
     use crate::hir::arena::{BindingArena, BindingScope};
     use crate::value::SymbolId;
 
@@ -301,10 +301,10 @@ fn test_list_pattern_as_cons_chain() {
     };
     let tree = matrix.compile(vec![AccessPath::Root]);
 
-    // Top level should be Switch with Cons constructor
+    // Top level should be Switch with Pair constructor
     match &tree {
         DecisionTree::Switch { cases, .. } => {
-            assert_eq!(cases[0].0, Constructor::Cons);
+            assert_eq!(cases[0].0, Constructor::Pair);
         }
         _ => panic!("expected Switch"),
     }
@@ -454,7 +454,7 @@ fn test_constructor_eq_implies_same_hash() {
     let pairs: &[(Constructor, Constructor)] = &[
         (Constructor::Nil, Constructor::Nil),
         (Constructor::EmptyList, Constructor::EmptyList),
-        (Constructor::Cons, Constructor::Cons),
+        (Constructor::Pair, Constructor::Pair),
         (Constructor::Set, Constructor::Set),
         (Constructor::SetMut, Constructor::SetMut),
         (Constructor::Array(3), Constructor::Array(3)),
@@ -506,13 +506,13 @@ fn test_constructor_in_hashset() {
     let mut set = std::collections::HashSet::new();
     set.insert(Constructor::Literal(PatternLiteral::Int(1)));
     set.insert(Constructor::Literal(PatternLiteral::Int(2)));
-    set.insert(Constructor::Cons);
-    set.insert(Constructor::Cons); // duplicate — should not grow the set
+    set.insert(Constructor::Pair);
+    set.insert(Constructor::Pair); // duplicate — should not grow the set
 
     assert_eq!(set.len(), 3);
     assert!(set.contains(&Constructor::Literal(PatternLiteral::Int(1))));
     assert!(set.contains(&Constructor::Literal(PatternLiteral::Int(2))));
-    assert!(set.contains(&Constructor::Cons));
+    assert!(set.contains(&Constructor::Pair));
     assert!(!set.contains(&Constructor::Nil));
 }
 
@@ -528,7 +528,7 @@ fn test_constructor_arity() {
     assert_eq!(Constructor::Literal(PatternLiteral::Int(1)).arity(), 0);
     assert_eq!(Constructor::Nil.arity(), 0);
     assert_eq!(Constructor::EmptyList.arity(), 0);
-    assert_eq!(Constructor::Cons.arity(), 2);
+    assert_eq!(Constructor::Pair.arity(), 2);
     assert_eq!(Constructor::Array(3).arity(), 3);
     assert_eq!(Constructor::ArrayMut(2).arity(), 2);
     assert_eq!(

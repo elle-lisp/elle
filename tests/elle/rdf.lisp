@@ -9,10 +9,10 @@
 (assert (string? prim-triples) "primitives returns a string")
 (assert (> (length prim-triples) 1000) "primitives triples are non-trivial")
 
-# Verify cons appears as a Primitive
+# Verify pair appears as a Primitive
 (assert (string/contains? prim-triples "urn:elle:Primitive")
         "primitives contain Primitive type")
-(assert (string/contains? prim-triples "\"cons\"") "primitives contain cons")
+(assert (string/contains? prim-triples "\"pair\"") "primitives contain pair")
 
 # Verify signal metadata is emitted
 (assert (string/contains? prim-triples "signal-silent")

@@ -359,12 +359,12 @@
 # Cons pattern tests
 # ============================================================================
 
-# match cons pattern
-(assert (= (match (cons 1 2)
+# match pair pattern
+(assert (= (match (pair 1 2)
              (h . t) (+ h t)
-             _ 0) 3) "match cons pattern")
+             _ 0) 3) "match pair pattern")
 
-# match cons not pair
+# match pair not pair
 (assert (= (match 42
              (h . t) "pair"
              _ "nope") "nope") "match non-pair falls through")
@@ -460,7 +460,7 @@
 # ============================================================================
 
 # match improper list pattern
-(assert (= (match (cons 1 (cons 2 3))
+(assert (= (match (pair 1 (pair 2 3))
              (a b . c) (list a b c)
              _ :no) (list 1 2 3)) "match improper list pattern")
 
@@ -471,7 +471,7 @@
         "match improper list pattern longer")
 
 # match improper list pattern exact
-(assert (= (match (cons 1 2)
+(assert (= (match (pair 1 2)
              (a . b) (list a b)
              _ :no) (list 1 2)) "match improper list pattern exact")
 
@@ -500,7 +500,7 @@
              _ :not) :found) "or pattern with keywords")
 
 # or pattern with binding
-(assert (= (match (cons 1 2)
+(assert (= (match (pair 1 2)
              (or (x . _) (_ . x)) x
              _ 0) 1) "or pattern with binding")
 
@@ -522,10 +522,10 @@
              true :yes
              _ :no) :yes) "or pattern with guard")
 
-# or pattern nested in cons
-(assert (= (match (cons 2 :x)
+# or pattern nested in pair
+(assert (= (match (pair 2 :x)
              ((or 1 2) . t) t
-             _ :fail) :x) "or pattern nested in cons")
+             _ :fail) :x) "or pattern nested in pair")
 
 # or pattern two alternatives
 (assert (= (match :y
@@ -562,11 +562,11 @@
              false :never
              x :always) :always) "guard fallthrough")
 
-# guard with cons
-(assert (= (match (cons 1 2)
+# guard with pair
+(assert (= (match (pair 1 2)
              (h . t) when
              (> h 0) (+ h t)
-             _ 0) 3) "guard with cons")
+             _ 0) 3) "guard with pair")
 
 # guard with list
 (assert (= (match (list 1 2 3)
@@ -628,7 +628,7 @@
                _ :no)) :yes) "or pattern guard outer var")
 
 # or pattern binding guard
-(assert (= (match (cons 6 :x)
+(assert (= (match (pair 6 :x)
              (or (a . _) (_ . a)) when
              (> a 5) :big
              _ :small) :big) "or pattern binding guard")
@@ -751,7 +751,7 @@
 (each i (list 1 2 3)
   (assign
     test-result
-    (cons (match i
+    (pair (match i
             1 :one
             2 :two
             3 :three
@@ -769,7 +769,7 @@
              (or true false) :bool) :bool) "decision tree or boolean exhaustive")
 
 # or pattern decision tree shared
-(assert (= (match (cons 1 :x)
+(assert (= (match (pair 1 :x)
              (1 . t) t
              (2 . t) t
              ((or 3 4) . t) t

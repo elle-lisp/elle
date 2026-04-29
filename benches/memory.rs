@@ -72,7 +72,7 @@ fn bench_nqueens() -> stats_alloc::Stats {
                (if (= col n)
                  (list)
                  (if (safe? col queens)
-                   (let [new-queens (cons col queens)]
+                   (let [new-queens (pair col queens)]
                      (append (solve-helper n (+ row 1) new-queens)
                              (try-cols-helper n (+ col 1) queens row)))
                    (try-cols-helper n (+ col 1) queens row)))))
@@ -91,13 +91,13 @@ fn bench_nqueens() -> stats_alloc::Stats {
     )
 }
 
-/// List construction and traversal — measures cons cell allocation.
+/// List construction and traversal — measures pair cell allocation.
 fn bench_list_heavy() -> stats_alloc::Stats {
     measure_eval(
         "(begin
            (def build (fn (n acc)
              (if (= n 0) acc
-               (build (- n 1) (cons n acc)))))
+               (build (- n 1) (pair n acc)))))
            (def sum (fn (lst acc)
              (if (empty? lst) acc
                (sum (rest lst) (+ acc (first lst))))))

@@ -9,18 +9,18 @@ use crate::common::eval_reuse_bare;
 use elle::Value;
 use proptest::prelude::*;
 
-/// Extract floats from a cons-list Value (returned in reverse order, so we reverse)
+/// Extract floats from a pair-list Value (returned in reverse order, so we reverse)
 fn extract_float_list(list_val: Value) -> Vec<f64> {
     let mut result = Vec::new();
     let mut current = list_val;
     while !current.is_empty_list() {
-        if let Some(cons) = current.as_cons() {
-            if let Some(t) = cons.first.as_float() {
+        if let Some(pair) = current.as_pair() {
+            if let Some(t) = pair.first.as_float() {
                 result.push(t);
             } else {
                 panic!("Expected float in list");
             }
-            current = cons.rest;
+            current = pair.rest;
         } else {
             break;
         }
@@ -39,7 +39,7 @@ fn clock_monotonic_never_decreases() {
         (let [@times (list) @i 0]
           (while (< i 100)
             (begin
-              (assign times (cons (clock/monotonic) times))
+              (assign times (pair (clock/monotonic) times))
               (assign i (+ i 1))))
           times)
     "#;
@@ -120,7 +120,7 @@ fn clock_realtime_multiple_reads_are_monotonic() {
         (let [@times (list) @i 0]
           (while (< i 50)
             (begin
-              (assign times (cons (clock/realtime) times))
+              (assign times (pair (clock/realtime) times))
               (assign i (+ i 1))))
           times)
     "#;
@@ -159,11 +159,11 @@ proptest! {
 
         let times_list = result.unwrap();
 
-        let mono_advanced = times_list.as_cons().map(|cons| cons.first);
+        let mono_advanced = times_list.as_pair().map(|pair| pair.first);
         let real_advanced = times_list
-            .as_cons()
-            .and_then(|cons| cons.rest.as_cons())
-            .map(|cons| cons.first);
+            .as_pair()
+            .and_then(|pair| pair.rest.as_pair())
+            .map(|pair| pair.first);
 
         prop_assert_eq!(mono_advanced, Some(Value::bool(true)), "monotonic clock should not go backwards");
         prop_assert_eq!(real_advanced, Some(Value::bool(true)), "realtime clock should not go backwards");

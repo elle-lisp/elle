@@ -237,7 +237,7 @@ pub(crate) fn prim_seq_to_hex(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // List (always immutable in Elle) → immutable string
-    if args[0].is_empty_list() || args[0].is_cons() {
+    if args[0].is_empty_list() || args[0].is_pair() {
         return match args[0].list_to_vec() {
             Ok(elems) => match collect_byte_values(elems) {
                 Ok(bytes) => (SIG_OK, Value::string(bytes_to_hex_string(&bytes))),
@@ -382,7 +382,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // List
-    if args[0].is_empty_list() || args[0].is_cons() {
+    if args[0].is_empty_list() || args[0].is_pair() {
         match args[0].list_to_vec() {
             Ok(elems) => {
                 let clamped_start = resolve_slice_index(raw_start, elems.len());
@@ -392,7 +392,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
                 }
                 let mut result = Value::EMPTY_LIST;
                 for v in elems[clamped_start..clamped_end].iter().rev() {
-                    result = Value::cons(*v, result);
+                    result = Value::pair(*v, result);
                 }
                 return (SIG_OK, result);
             }

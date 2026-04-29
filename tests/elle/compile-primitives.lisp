@@ -31,10 +31,10 @@
 (assert (nil? (find-prim "apply"))
         "apply is not a Rust primitive (it's a macro)")
 
-# cons is a core Rust primitive
-(def cons-prim (find-prim "cons"))
-(assert (not (nil? cons-prim)) "cons primitive exists")
-(assert (= (get cons-prim :category) "list") "cons is in list category")
+# pair is a core Rust primitive
+(def pair-prim (find-prim "pair"))
+(assert (not (nil? pair-prim)) "pair primitive exists")
+(assert (= (get pair-prim :category) "list") "pair is in list category")
 
 # ── Find + (silent arithmetic) ────────────────────────────────────────
 

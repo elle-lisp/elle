@@ -54,7 +54,7 @@
 (defn my-map [f lst]
   (if (empty? lst)
     ()
-    (cons (f (first lst)) (my-map f (rest lst)))))
+    (pair (f (first lst)) (my-map f (rest lst)))))
 ")
 (def a2 (compile/analyze src2))
 (def p3 (portrait:function a2 :my-map))

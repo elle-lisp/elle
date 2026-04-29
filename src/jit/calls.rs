@@ -84,9 +84,9 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
     }
 
     if bits == SIG_QUERY {
-        if let Some(cons) = value.as_cons() {
-            if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
-                let thunk = cons.rest;
+        if let Some(pair) = value.as_pair() {
+            if pair.first.as_keyword_name().as_deref() == Some("arena/allocs") {
+                let thunk = pair.rest;
                 return match vm.handle_arena_allocs(thunk) {
                     Ok(val) => JitValue::from_value(val),
                     Err(_bits) => JitValue::nil(),
@@ -700,11 +700,11 @@ fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, v
     }
 }
 
-/// Collect values into an Elle list (cons chain terminated by EMPTY_LIST).
+/// Collect values into an Elle list (pair chain terminated by EMPTY_LIST).
 fn args_to_list(args: &[Value]) -> Value {
     let mut list = Value::EMPTY_LIST;
     for arg in args.iter().rev() {
-        list = Value::cons(*arg, list);
+        list = Value::pair(*arg, list);
     }
     list
 }

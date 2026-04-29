@@ -189,14 +189,14 @@ impl VM {
                 }
 
                 // Data structures
-                Instruction::Cons => {
-                    data::handle_cons(self);
+                Instruction::Pair => {
+                    data::handle_list(self);
                 }
-                Instruction::Car => {
-                    data::handle_car(self);
+                Instruction::First => {
+                    data::handle_first(self);
                 }
-                Instruction::Cdr => {
-                    data::handle_cdr(self);
+                Instruction::Rest => {
+                    data::handle_rest(self);
                 }
                 Instruction::MakeArrayMut => {
                     data::handle_make_array(self, bc, &mut ip);
@@ -209,10 +209,10 @@ impl VM {
                 }
 
                 // Destructuring
-                Instruction::CarDestructure => {
+                Instruction::FirstDestructure => {
                     data::handle_car_destructure(self);
                 }
-                Instruction::CdrDestructure => {
+                Instruction::RestDestructure => {
                     data::handle_cdr_destructure(self);
                 }
                 Instruction::ArrayMutRefDestructure => {
@@ -232,10 +232,10 @@ impl VM {
                 }
 
                 // Silent destructuring (parameter context: absent optional params → nil)
-                Instruction::CarOrNil => {
+                Instruction::FirstOrNil => {
                     data::handle_car_or_nil(self);
                 }
-                Instruction::CdrOrNil => {
+                Instruction::RestOrNil => {
                     data::handle_cdr_or_nil(self);
                 }
                 Instruction::ArrayMutRefOrNil => {

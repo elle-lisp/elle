@@ -46,7 +46,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         Ok(r)
     } else if value.is_empty_list() {
         Ok("[]".to_string())
-    } else if value.is_cons() {
+    } else if value.is_pair() {
         // Convert list to array
         let vec = value.list_to_vec()?;
         let elements: Result<Vec<String>, String> = vec.iter().map(serialize_value).collect();
@@ -102,7 +102,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         use crate::value::heap::HeapTag;
         match tag {
             HeapTag::LString => Err("String should have been handled above".to_string()),
-            HeapTag::Cons => Err("Cons should have been handled above".to_string()),
+            HeapTag::Pair => Err("Pair should have been handled above".to_string()),
             HeapTag::LArrayMut => Err("Array should have been handled above".to_string()),
             HeapTag::LStructMut => Err("@struct should have been handled above".to_string()),
             HeapTag::LStruct => Err("Struct should have been handled above".to_string()),
@@ -188,7 +188,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         Ok(r)
     } else if value.is_empty_list() {
         Ok("[]".to_string())
-    } else if value.is_cons() {
+    } else if value.is_pair() {
         let vec = value.list_to_vec()?;
         if vec.is_empty() {
             return Ok("[]".to_string());
@@ -281,7 +281,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         use crate::value::heap::HeapTag;
         match tag {
             HeapTag::LString => Err("String should have been handled above".to_string()),
-            HeapTag::Cons => Err("Cons should have been handled above".to_string()),
+            HeapTag::Pair => Err("Pair should have been handled above".to_string()),
             HeapTag::LArrayMut => Err("Array should have been handled above".to_string()),
             HeapTag::LStructMut => Err("@struct should have been handled above".to_string()),
             HeapTag::LStruct => Err("Struct should have been handled above".to_string()),

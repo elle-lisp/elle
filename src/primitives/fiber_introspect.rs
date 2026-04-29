@@ -374,7 +374,7 @@ pub(crate) fn prim_fiber_caps(args: &[Value]) -> (SignalBits, Value) {
         // 0-arg form: query current fiber via SIG_QUERY
         return (
             SIG_QUERY,
-            Value::cons(Value::keyword("fiber/caps"), Value::NIL),
+            Value::pair(Value::keyword("fiber/caps"), Value::NIL),
         );
     }
     if args.len() != 1 {

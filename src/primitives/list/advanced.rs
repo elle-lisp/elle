@@ -58,7 +58,7 @@ pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Lists
-    if args[0].is_cons() || args[0].is_empty_list() {
+    if args[0].is_pair() || args[0].is_empty_list() {
         if args[0].is_empty_list() {
             return (SIG_OK, Value::EMPTY_LIST);
         }
@@ -307,7 +307,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // List (or syntax list — used during macro expansion)
-    if args[0].is_cons() || args[0].is_empty_list() || args[0].as_syntax().is_some() {
+    if args[0].is_pair() || args[0].is_empty_list() || args[0].as_syntax().is_some() {
         // list_to_vec handles both cons lists and syntax lists
         let mut first = match args[0].list_to_vec() {
             Ok(v) => v,
@@ -332,7 +332,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
         // Rebuild as a proper list
         let mut result = Value::EMPTY_LIST;
         for val in first.into_iter().rev() {
-            result = Value::cons(val, result);
+            result = Value::pair(val, result);
         }
         return (SIG_OK, result);
     }
@@ -480,7 +480,7 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // list (cons-based)
-    if args[0].is_cons() || args[0].is_empty_list() {
+    if args[0].is_pair() || args[0].is_empty_list() {
         let mut all_elements = Vec::new();
         for (i, arg) in args.iter().enumerate() {
             match arg.list_to_vec() {
@@ -502,7 +502,7 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
         }
         let mut result = Value::EMPTY_LIST;
         for val in all_elements.into_iter().rev() {
-            result = Value::cons(val, result);
+            result = Value::pair(val, result);
         }
         return (SIG_OK, result);
     }
@@ -744,16 +744,16 @@ pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
         SIG_ERROR,
         error_val("argument-error", "last: empty sequence"),
     );
-    // Cons cell — walk to end
-    if args[0].is_cons() || args[0].is_empty_list() {
+    // Pair cell — walk to end
+    if args[0].is_pair() || args[0].is_empty_list() {
         if args[0].is_empty_list() {
             return empty_err;
         }
         let mut current = args[0];
         let mut last = Value::NIL;
-        while let Some(cons) = current.as_cons() {
-            last = cons.first;
-            current = cons.rest;
+        while let Some(pair) = current.as_pair() {
+            last = pair.first;
+            current = pair.rest;
         }
         return (SIG_OK, last);
     }

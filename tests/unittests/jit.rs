@@ -60,7 +60,7 @@ mod jit_tests {
             (loop 15))"#;
         let result = eval_source(code).unwrap();
         // Should return (false true false true false) for (= 5 10), (< 5 10), etc.
-        assert!(result.is_cons());
+        assert!(result.is_pair());
     }
 
     #[test]
@@ -178,17 +178,17 @@ mod jit_tests {
               (if (= n 0)
                   results
                   (begin
-                     (assign results (cons (fib 10) results))
+                     (assign results (pair (fib 10) results))
                     (collect (- n 1)))))
             (collect 15))"#;
         let result = eval_source(code).unwrap();
         // All results should be fib(10) = 55
         // Verify the list is non-empty and all elements are 55
-        assert!(result.is_cons());
+        assert!(result.is_pair());
         let mut current = result;
-        while let Some(cons) = current.as_cons() {
-            assert_eq!(cons.first, Value::int(55));
-            current = cons.rest;
+        while let Some(pair) = current.as_pair() {
+            assert_eq!(pair.first, Value::int(55));
+            current = pair.rest;
         }
     }
 

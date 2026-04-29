@@ -19,8 +19,8 @@ pub enum HirPattern {
     /// Bind to a variable
     Var(Binding),
 
-    /// Match cons cell and destructure
-    Cons {
+    /// Match a pair (head . tail) and destructure
+    Pair {
         head: Box<HirPattern>,
         tail: Box<HirPattern>,
     },
@@ -141,7 +141,7 @@ impl HirPattern {
     fn collect_bindings(&self, out: &mut PatternBindings) {
         match self {
             HirPattern::Var(binding) => out.add(*binding),
-            HirPattern::Cons { head, tail } => {
+            HirPattern::Pair { head, tail } => {
                 head.collect_bindings(out);
                 tail.collect_bindings(out);
             }
@@ -197,7 +197,7 @@ impl HirPattern {
             HirPattern::Var(binding) => {
                 out.insert(arena.get(*binding).name);
             }
-            HirPattern::Cons { head, tail } => {
+            HirPattern::Pair { head, tail } => {
                 head.collect_binding_names(out, arena);
                 tail.collect_binding_names(out, arena);
             }

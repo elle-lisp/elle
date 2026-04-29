@@ -517,10 +517,12 @@ impl Emitter {
                 self.bytecode.emit_u16(args.len() as u16);
             }
 
-            LirInstr::Cons { dst, head, tail } => {
-                self.ensure_on_top(*tail);
+            LirInstr::List { dst, head, tail } => {
+                // VM pops rest (top) then first (below), calls pair(first, rest).
+                // Push head first (it becomes below = first), then tail (top = rest).
                 self.ensure_on_top(*head);
-                self.bytecode.emit(Instruction::Cons);
+                self.ensure_on_top(*tail);
+                self.bytecode.emit(Instruction::Pair);
                 self.pop();
                 self.pop();
                 self.push_reg(*dst);
@@ -538,30 +540,30 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Car { dst, pair } => {
+            LirInstr::First { dst, pair } => {
                 self.ensure_on_top(*pair);
-                self.bytecode.emit(Instruction::Car);
+                self.bytecode.emit(Instruction::First);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::Cdr { dst, pair } => {
+            LirInstr::Rest { dst, pair } => {
                 self.ensure_on_top(*pair);
-                self.bytecode.emit(Instruction::Cdr);
+                self.bytecode.emit(Instruction::Rest);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::CarDestructure { dst, src } => {
+            LirInstr::FirstDestructure { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CarDestructure);
+                self.bytecode.emit(Instruction::FirstDestructure);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::CdrDestructure { dst, src } => {
+            LirInstr::RestDestructure { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CdrDestructure);
+                self.bytecode.emit(Instruction::RestDestructure);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -640,16 +642,16 @@ impl Emitter {
             }
 
             // Silent destructuring (parameter context: absent optional params → nil)
-            LirInstr::CarOrNil { dst, src } => {
+            LirInstr::FirstOrNil { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CarOrNil);
+                self.bytecode.emit(Instruction::FirstOrNil);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::CdrOrNil { dst, src } => {
+            LirInstr::RestOrNil { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CdrOrNil);
+                self.bytecode.emit(Instruction::RestOrNil);
                 self.pop();
                 self.push_reg(*dst);
             }

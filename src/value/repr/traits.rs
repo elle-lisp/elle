@@ -50,8 +50,8 @@ impl PartialEq for Value {
                     HeapObject::LStringMut { data: b2, .. },
                 ) => *b1.borrow() == *b2.borrow(),
 
-                // Cons cell comparison (Cons::PartialEq ignores traits)
-                (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1 == c2,
+                // Pair cell comparison (Pair::PartialEq ignores traits)
+                (HeapObject::Pair(c1), HeapObject::Pair(c2)) => c1 == c2,
 
                 // Array: immutable × immutable
                 (
@@ -262,8 +262,8 @@ impl Hash for Value {
             match obj {
                 // Structural content types (immutable)
                 HeapObject::LString { s, .. } => s.hash(state),
-                // Cons::hash ignores traits field
-                HeapObject::Cons(c) => c.hash(state),
+                // Pair::hash ignores traits field
+                HeapObject::Pair(c) => c.hash(state),
                 HeapObject::LArray { elements, .. } => elements.hash(state),
                 HeapObject::LBytes { data, .. } => data.hash(state),
                 HeapObject::LStruct { data: entries, .. } => {
@@ -390,7 +390,7 @@ fn type_rank(v: &Value) -> u8 {
     } else if v.is_heap() {
         match unsafe { deref(*v).tag() } {
             HeapTag::LString => 7,
-            HeapTag::Cons => 8,
+            HeapTag::Pair => 8,
             HeapTag::LArray => 9,
             HeapTag::LArrayMut => 10,
             HeapTag::LBytes => 11,
@@ -494,8 +494,8 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
     let b_obj = deref(*b);
 
     match (a_obj, b_obj) {
-        // Cons — (first, rest) lexicographic (Cons::cmp ignores traits)
-        (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1.cmp(c2),
+        // Pair — (first, rest) lexicographic (Pair::cmp ignores traits)
+        (HeapObject::Pair(c1), HeapObject::Pair(c2)) => c1.cmp(c2),
 
         // Array — element-wise lexicographic
         (HeapObject::LArray { elements: t1, .. }, HeapObject::LArray { elements: t2, .. }) => {

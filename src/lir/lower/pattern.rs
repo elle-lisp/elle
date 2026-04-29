@@ -247,7 +247,7 @@ impl<'a> Lowerer<'a> {
 
     /// Emit a constructor test, returning a register holding the boolean result.
     ///
-    /// For simple constructors (literals, Cons, Nil, EmptyList, Struct, Table),
+    /// For simple constructors (literals, Pair, Nil, EmptyList, Struct, Table),
     /// emits a single test instruction. For Tuple and Array, emits a multi-block
     /// type+length check sequence.
     fn emit_constructor_test(&mut self, value_reg: Reg, ctor: &Constructor) -> Result<Reg, String> {
@@ -269,7 +269,7 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(dst)
             }
-            Constructor::Cons => {
+            Constructor::Pair => {
                 let dst = self.fresh_reg();
                 self.emit(LirInstr::IsPair {
                     dst,
@@ -547,7 +547,7 @@ impl<'a> Lowerer<'a> {
                 }
                 Ok(())
             }
-            HirPattern::Cons { head, tail } => {
+            HirPattern::Pair { head, tail } => {
                 // Store value to temp slot before any operations, so we can
                 // reload it after the block boundary.
                 // Inside a lambda, slots need to account for the captures offset.
@@ -597,7 +597,7 @@ impl<'a> Lowerer<'a> {
                 });
 
                 let head_reg = self.fresh_reg();
-                self.emit(LirInstr::Car {
+                self.emit(LirInstr::First {
                     dst: head_reg,
                     pair: reloaded_for_car,
                 });
@@ -613,7 +613,7 @@ impl<'a> Lowerer<'a> {
                 });
 
                 let tail_reg = self.fresh_reg();
-                self.emit(LirInstr::Cdr {
+                self.emit(LirInstr::Rest {
                     dst: tail_reg,
                     pair: reloaded_for_cdr,
                 });
@@ -672,7 +672,7 @@ impl<'a> Lowerer<'a> {
 
                     // Extract head
                     let head_reg = self.fresh_reg();
-                    self.emit(LirInstr::Car {
+                    self.emit(LirInstr::First {
                         dst: head_reg,
                         pair: current_for_car,
                     });
@@ -690,7 +690,7 @@ impl<'a> Lowerer<'a> {
 
                     // Extract tail for next iteration
                     let tail_reg = self.fresh_reg();
-                    self.emit(LirInstr::Cdr {
+                    self.emit(LirInstr::Rest {
                         dst: tail_reg,
                         pair: current_for_cdr,
                     });

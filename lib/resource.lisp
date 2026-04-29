@@ -14,7 +14,7 @@
 ##
 ##   # Run a suite of named scenarios
 ##   (res:suite [["fib-20"  (fn [] (fib 20))]
-##              ["cons-1k" (fn [] (build-list 1000))]])
+##              ["pair-1k" (fn [] (build-list 1000))]])
 
 (fn []
 
@@ -31,7 +31,7 @@
   ## ── Measure ─────────────────────────────────────────────────────────
 
   # Calibrate peak overhead once at load time: the measurement
-  # infrastructure (arena/allocs cons cells, etc.) contributes a fixed
+  # infrastructure (arena/allocs pair cells, etc.) contributes a fixed
   # number of transient peak objects that should be subtracted so
   # reported peak reflects only the thunk.
   (def calibration-base (arena/count))

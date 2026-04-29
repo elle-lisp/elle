@@ -80,7 +80,7 @@ pub extern "C" fn elle_jit_array_extend(
         arr.borrow().to_vec()
     } else if let Some(arr) = source_val.as_array() {
         arr.to_vec()
-    } else if source_val.as_cons().is_some() || source_val.is_empty_list() {
+    } else if source_val.as_pair().is_some() || source_val.is_empty_list() {
         match source_val.list_to_vec() {
             Ok(v) => v,
             Err(_) => {

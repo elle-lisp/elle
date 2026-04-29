@@ -8,8 +8,9 @@ impl<'a> Lowerer<'a> {
         &mut self,
         bindings: &[(Binding, Hir)],
         body: &Hir,
+        hir_id: HirId,
     ) -> Result<Reg, String> {
-        let scoped = self.can_scope_allocate_let(bindings, body);
+        let scoped = self.region_scope_check(hir_id);
         if scoped {
             self.emit_region_enter();
         }
@@ -100,8 +101,9 @@ impl<'a> Lowerer<'a> {
         &mut self,
         bindings: &[(Binding, Hir)],
         body: &Hir,
+        hir_id: HirId,
     ) -> Result<Reg, String> {
-        let scoped = self.can_scope_allocate_letrec(bindings, body);
+        let scoped = self.region_scope_check(hir_id);
         if scoped {
             self.emit_region_enter();
         }
@@ -414,20 +416,20 @@ impl<'a> Lowerer<'a> {
                 for (i, element) in elements.iter().enumerate() {
                     let is_last = i == elements.len() - 1 && !has_rest;
                     if is_last {
-                        // Last fixed element, no rest: just take car
-                        let car = self.fresh_reg();
+                        // Last fixed element, no rest: just take head
+                        let head = self.fresh_reg();
                         if strict {
-                            self.emit(LirInstr::CarDestructure {
-                                dst: car,
+                            self.emit(LirInstr::FirstDestructure {
+                                dst: head,
                                 src: current,
                             });
                         } else {
-                            self.emit(LirInstr::CarOrNil {
-                                dst: car,
+                            self.emit(LirInstr::FirstOrNil {
+                                dst: head,
                                 src: current,
                             });
                         }
-                        self.lower_destructure(element, car, strict)?;
+                        self.lower_destructure(element, head, strict)?;
                     } else {
                         // Store current to temp slot, reload for each extraction
                         self.emit(LirInstr::StoreLocal {
@@ -440,15 +442,15 @@ impl<'a> Lowerer<'a> {
                             dst: load_for_cdr,
                             slot: temp_slot,
                         });
-                        let cdr = self.fresh_reg();
+                        let tail = self.fresh_reg();
                         if strict {
-                            self.emit(LirInstr::CdrDestructure {
-                                dst: cdr,
+                            self.emit(LirInstr::RestDestructure {
+                                dst: tail,
                                 src: load_for_cdr,
                             });
                         } else {
-                            self.emit(LirInstr::CdrOrNil {
-                                dst: cdr,
+                            self.emit(LirInstr::RestOrNil {
+                                dst: tail,
                                 src: load_for_cdr,
                             });
                         }
@@ -458,21 +460,21 @@ impl<'a> Lowerer<'a> {
                             dst: load_for_car,
                             slot: temp_slot,
                         });
-                        let car = self.fresh_reg();
+                        let head = self.fresh_reg();
                         if strict {
-                            self.emit(LirInstr::CarDestructure {
-                                dst: car,
+                            self.emit(LirInstr::FirstDestructure {
+                                dst: head,
                                 src: load_for_car,
                             });
                         } else {
-                            self.emit(LirInstr::CarOrNil {
-                                dst: car,
+                            self.emit(LirInstr::FirstOrNil {
+                                dst: head,
                                 src: load_for_car,
                             });
                         }
 
-                        self.lower_destructure(element, car, strict)?;
-                        current = cdr;
+                        self.lower_destructure(element, head, strict)?;
+                        current = tail;
                     }
                 }
                 // Bind the remaining tail to the rest pattern

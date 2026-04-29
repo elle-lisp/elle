@@ -711,7 +711,7 @@ fn test_same_closure_reference_equality() {
 #[test]
 fn test_closure_with_nested_captured_values() {
     // Closure capturing nested data structures
-    let nested_list = Value::cons(Value::int(1), Value::cons(Value::int(2), Value::NIL));
+    let nested_list = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::NIL));
 
     let env = vec![nested_list];
     let closure = Closure {

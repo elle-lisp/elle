@@ -83,9 +83,9 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             s: *s,
             traits: table,
         })),
-        HeapObject::Cons(cons) => Ok(alloc(HeapObject::Cons(crate::value::heap::Cons {
-            first: cons.first,
-            rest: cons.rest,
+        HeapObject::Pair(pair) => Ok(alloc(HeapObject::Pair(crate::value::heap::Pair {
+            first: pair.first,
+            rest: pair.rest,
             traits: table,
         }))),
         // Mutable collections wrap their backing storage in Rc<RefCell<_>>
@@ -217,8 +217,8 @@ pub(crate) fn prim_traits(args: &[Value]) -> (SignalBits, Value) {
             | HeapObject::External { traits, .. }
             | HeapObject::Parameter { traits, .. }
             | HeapObject::ThreadHandle { traits, .. } => *traits,
-            // Cons is a named struct variant — different access
-            HeapObject::Cons(cons) => cons.traits,
+            // Pair is a named struct variant — different access
+            HeapObject::Pair(pair) => pair.traits,
             // Infrastructure types — no trait field
             _ => Value::NIL,
         }

@@ -213,6 +213,11 @@ fn collect_fn_signals(
             collect_fn_signals(cell, arena, symbols, map);
             collect_fn_signals(value, arena, symbols, map);
         }
+        HirKind::Intrinsic { args, .. } => {
+            for a in args {
+                collect_fn_signals(a, arena, symbols, map);
+            }
+        }
         // Leaves: no children to recurse into.
         HirKind::Nil
         | HirKind::EmptyList
@@ -430,6 +435,11 @@ fn collect_call_edges(
         HirKind::SetCell { cell, value } => {
             collect_call_edges(cell, arena, symbols, edges, current_fn);
             collect_call_edges(value, arena, symbols, edges, current_fn);
+        }
+        HirKind::Intrinsic { args, .. } => {
+            for a in args {
+                collect_call_edges(a, arena, symbols, edges, current_fn);
+            }
         }
         HirKind::Nil
         | HirKind::EmptyList
@@ -2402,7 +2412,7 @@ pub(crate) fn prim_compile_run_on(args: &[Value]) -> (SignalBits, Value) {
     // Forward the entire arg list to the VM dispatcher.
     (
         SIG_QUERY,
-        Value::cons(
+        Value::pair(
             Value::keyword("compile/run-on"),
             crate::value::list(args.to_vec()),
         ),

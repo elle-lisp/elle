@@ -234,11 +234,11 @@ impl Drop for BumpArena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::heap::{Cons, HeapObject};
+    use crate::value::heap::{HeapObject, Pair};
     use crate::value::Value;
 
     fn cons_obj() -> HeapObject {
-        HeapObject::Cons(Cons::new(Value::NIL, Value::NIL))
+        HeapObject::Pair(Pair::new(Value::NIL, Value::NIL))
     }
 
     #[test]
@@ -269,7 +269,7 @@ mod tests {
         let n = 2000usize;
         let mut ptrs = vec![];
         for i in 0u32..(n as u32) {
-            let ptr = arena.alloc(HeapObject::Cons(Cons::new(
+            let ptr = arena.alloc(HeapObject::Pair(Pair::new(
                 Value::int(i as i64),
                 Value::NIL,
             )));
@@ -279,7 +279,7 @@ mod tests {
         for (ptr, expected) in &ptrs {
             let obj = unsafe { &**ptr };
             match obj {
-                HeapObject::Cons(c) => assert_eq!(c.first.as_int().unwrap(), *expected),
+                HeapObject::Pair(c) => assert_eq!(c.first.as_int().unwrap(), *expected),
                 _ => panic!("unexpected variant"),
             }
         }

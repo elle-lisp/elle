@@ -6,7 +6,7 @@
 #
 # Note: arithmetic ops (+, -, etc.) are compiled to specialized bytecode
 # instructions that bypass call_inner. Use non-specialized primitives
-# like `length`, `type-of`, `car` for enforcement tests.
+# like `length`, `type-of`, `first` for enforcement tests.
 
 # ── Phase 1: Infrastructure ───────────────────────────────────────────
 

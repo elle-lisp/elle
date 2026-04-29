@@ -218,10 +218,10 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::Call { dst, .. }
         | LirInstr::SuspendingCall { dst, .. }
         | LirInstr::CallArrayMut { dst, .. }
-        | LirInstr::Cons { dst, .. }
+        | LirInstr::List { dst, .. }
         | LirInstr::MakeArrayMut { dst, .. }
-        | LirInstr::Car { dst, .. }
-        | LirInstr::Cdr { dst, .. }
+        | LirInstr::First { dst, .. }
+        | LirInstr::Rest { dst, .. }
         | LirInstr::BinOp { dst, .. }
         | LirInstr::UnaryOp { dst, .. }
         | LirInstr::Compare { dst, .. }
@@ -236,15 +236,15 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::ArrayMutLen { dst, .. }
         | LirInstr::MakeCaptureCell { dst, .. }
         | LirInstr::LoadCaptureCell { dst, .. }
-        | LirInstr::CarDestructure { dst, .. }
-        | LirInstr::CdrDestructure { dst, .. }
+        | LirInstr::FirstDestructure { dst, .. }
+        | LirInstr::RestDestructure { dst, .. }
         | LirInstr::ArrayMutRefDestructure { dst, .. }
         | LirInstr::ArrayMutSliceFrom { dst, .. }
         | LirInstr::StructGetOrNil { dst, .. }
         | LirInstr::StructGetDestructure { dst, .. }
         | LirInstr::StructRest { dst, .. }
-        | LirInstr::CarOrNil { dst, .. }
-        | LirInstr::CdrOrNil { dst, .. }
+        | LirInstr::FirstOrNil { dst, .. }
+        | LirInstr::RestOrNil { dst, .. }
         | LirInstr::ArrayMutRefOrNil { dst, .. }
         | LirInstr::LoadResumeValue { dst, .. }
         | LirInstr::Eval { dst, .. }
@@ -314,7 +314,7 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             f(*args);
         }
 
-        LirInstr::Cons { head, tail, .. } => {
+        LirInstr::List { head, tail, .. } => {
             f(*head);
             f(*tail);
         }
@@ -323,7 +323,7 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
                 f(*e);
             }
         }
-        LirInstr::Car { pair, .. } | LirInstr::Cdr { pair, .. } => f(*pair),
+        LirInstr::First { pair, .. } | LirInstr::Rest { pair, .. } => f(*pair),
 
         LirInstr::BinOp { lhs, rhs, .. } | LirInstr::Compare { lhs, rhs, .. } => {
             f(*lhs);
@@ -339,15 +339,15 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::IsSet { src, .. }
         | LirInstr::IsSetMut { src, .. }
         | LirInstr::ArrayMutLen { src, .. }
-        | LirInstr::CarDestructure { src, .. }
-        | LirInstr::CdrDestructure { src, .. }
+        | LirInstr::FirstDestructure { src, .. }
+        | LirInstr::RestDestructure { src, .. }
         | LirInstr::ArrayMutRefDestructure { src, .. }
         | LirInstr::ArrayMutSliceFrom { src, .. }
         | LirInstr::StructGetOrNil { src, .. }
         | LirInstr::StructGetDestructure { src, .. }
         | LirInstr::StructRest { src, .. }
-        | LirInstr::CarOrNil { src, .. }
-        | LirInstr::CdrOrNil { src, .. }
+        | LirInstr::FirstOrNil { src, .. }
+        | LirInstr::RestOrNil { src, .. }
         | LirInstr::ArrayMutRefOrNil { src, .. }
         | LirInstr::Convert { src, .. } => f(*src),
 

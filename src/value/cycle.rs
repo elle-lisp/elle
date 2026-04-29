@@ -10,7 +10,7 @@
 //! RAII guards that automatically clean up on scope exit (including
 //! panics and early returns).
 //!
-//! Cons cells use Floyd's tortoise-and-hare algorithm (O(1) space)
+//! Pair cells use Floyd's tortoise-and-hare algorithm (O(1) space)
 //! for cycle detection during list traversal.  This is belt-and-
 //! suspenders: cons cells are immutable and cannot normally form
 //! cycles, but the check costs almost nothing and defends against
@@ -135,7 +135,7 @@ pub fn cmp_enter(ptr_a: usize, ptr_b: usize) -> Option<CmpGuard> {
 }
 
 // ---------------------------------------------------------------------------
-// Cons-cell tortoise-and-hare helper
+// Pair-cell tortoise-and-hare helper
 // ---------------------------------------------------------------------------
 
 use super::Value;
@@ -171,7 +171,7 @@ impl HareState {
 
         // Tortoise moves every other step
         if self.step.is_multiple_of(2) {
-            if let Some(c) = self.slow.as_cons() {
+            if let Some(c) = self.slow.as_pair() {
                 self.slow = c.rest;
             }
         }

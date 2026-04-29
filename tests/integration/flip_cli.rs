@@ -188,7 +188,7 @@ fn flip_on_break_from_while() {
 
 #[test]
 fn flip_on_unsafe_while_no_flip_injected() {
-    // A while loop that pushes heap values (cons cells) to an outer binding
+    // A while loop that pushes heap values (pair cells) to an outer binding
     // must NOT get FlipSwap — the outward set makes it unsafe.
     let (out, _, status) = run(
         &["--flip=on", "--dump=lir"],
@@ -196,7 +196,7 @@ fn flip_on_unsafe_while_no_flip_injected() {
            (def @acc nil) \
            (def @i 0) \
            (while (< i 3) \
-             (assign acc (cons i acc)) \
+             (assign acc (pair i acc)) \
              (assign i (+ i 1))) \
            acc)",
     );

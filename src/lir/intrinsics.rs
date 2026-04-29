@@ -232,8 +232,8 @@ pub(crate) fn build_arg_escaping_primitives(symbols: &SymbolTable) -> FxHashSet<
 const NON_ALLOCATING_ACCESSORS: &[&str] = &[
     "first",
     "rest",
-    "car",
-    "cdr",
+    "first",
+    "rest",
     "get",
     "last",
     "fiber/resume",
@@ -301,6 +301,15 @@ pub(crate) fn build_non_escaping_stdlib(symbols: &SymbolTable) -> FxHashSet<Symb
         }
     }
     set
+}
+
+/// Build call classification data for region inference.
+pub(crate) fn build_call_classification(symbols: &SymbolTable) -> crate::hir::CallClassification {
+    crate::hir::CallClassification {
+        immediate_primitives: build_immediate_primitives(symbols),
+        intrinsic_ops: build_intrinsics(symbols).keys().copied().collect(),
+        ..Default::default()
+    }
 }
 
 /// Build the set of primitive SymbolIds that store heap values externally.

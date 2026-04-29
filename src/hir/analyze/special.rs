@@ -379,7 +379,7 @@ impl<'a> Analyzer<'a> {
                 if items.len() == 3 && items[1].as_symbol() == Some(".") {
                     let head = self.analyze_pattern_inner(&items[0], resolve_var)?;
                     let tail = self.analyze_pattern_inner(&items[2], resolve_var)?;
-                    return Ok(HirPattern::Cons {
+                    return Ok(HirPattern::Pair {
                         head: Box::new(head),
                         tail: Box::new(tail),
                     });

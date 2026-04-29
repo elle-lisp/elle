@@ -226,6 +226,13 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(value, false, tail_blocks);
         }
 
+        // Intrinsic: args are not in tail position
+        HirKind::Intrinsic { args, .. } => {
+            for arg in args {
+                mark(arg, false, tail_blocks);
+            }
+        }
+
         // Leaves: nothing to recurse into
         HirKind::Nil
         | HirKind::EmptyList
@@ -387,6 +394,11 @@ mod tests {
             HirKind::SetCell { cell, value } => {
                 collect_calls(cell, calls);
                 collect_calls(value, calls);
+            }
+            HirKind::Intrinsic { args, .. } => {
+                for arg in args {
+                    collect_calls(arg, calls);
+                }
             }
             // Leaves: no children to recurse into
             HirKind::Nil

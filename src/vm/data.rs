@@ -1,32 +1,32 @@
 use super::core::VM;
-use crate::value::{cons, error_val, sorted_struct_get, TableKey, Value, SIG_ERROR};
+use crate::value::{error_val, pair, sorted_struct_get, TableKey, Value, SIG_ERROR};
 
-pub(crate) fn handle_cons(vm: &mut VM) {
+pub(crate) fn handle_list(vm: &mut VM) {
     let rest = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on Cons");
+        .expect("VM bug: Stack underflow on Pair");
     let first = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on Cons");
-    vm.fiber.stack.push(cons(first, rest));
+        .expect("VM bug: Stack underflow on Pair");
+    vm.fiber.stack.push(pair(first, rest));
 }
 
-pub(crate) fn handle_car(vm: &mut VM) {
+pub(crate) fn handle_first(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on Car");
+        .expect("VM bug: Stack underflow on First");
 
     // car of nil is an error - enforces proper list invariant
     if val.is_nil() {
         vm.fiber.signal = Some((
             SIG_ERROR,
-            error_val("type-error", "car: cannot take car of nil"),
+            error_val("type-error", "first: cannot take first of nil"),
         ));
         vm.fiber.stack.push(Value::NIL);
         return;
@@ -36,39 +36,39 @@ pub(crate) fn handle_car(vm: &mut VM) {
     if val.is_empty_list() {
         vm.fiber.signal = Some((
             SIG_ERROR,
-            error_val("type-error", "car: cannot take car of empty list"),
+            error_val("type-error", "first: cannot take first of empty list"),
         ));
         vm.fiber.stack.push(Value::NIL);
         return;
     }
 
-    // Handle cons cells
-    if let Some(cons) = val.as_cons() {
-        vm.fiber.stack.push(cons.first);
+    // Handle pair cells
+    if let Some(pair) = val.as_pair() {
+        vm.fiber.stack.push(pair.first);
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("car: expected cons cell, got {}", val.type_name()),
+                format!("first: expected pair, got {}", val.type_name()),
             ),
         ));
         vm.fiber.stack.push(Value::NIL);
     }
 }
 
-pub(crate) fn handle_cdr(vm: &mut VM) {
+pub(crate) fn handle_rest(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on Cdr");
+        .expect("VM bug: Stack underflow on Rest");
 
     // cdr of nil is an error - enforces proper list invariant
     if val.is_nil() {
         vm.fiber.signal = Some((
             SIG_ERROR,
-            error_val("type-error", "cdr: cannot take cdr of nil"),
+            error_val("type-error", "rest: cannot take rest of nil"),
         ));
         vm.fiber.stack.push(Value::NIL);
         return;
@@ -78,21 +78,21 @@ pub(crate) fn handle_cdr(vm: &mut VM) {
     if val.is_empty_list() {
         vm.fiber.signal = Some((
             SIG_ERROR,
-            error_val("type-error", "cdr: cannot take cdr of empty list"),
+            error_val("type-error", "rest: cannot take rest of empty list"),
         ));
         vm.fiber.stack.push(Value::NIL);
         return;
     }
 
-    // Handle cons cells
-    if let Some(cons) = val.as_cons() {
-        vm.fiber.stack.push(cons.rest);
+    // Handle pair cells
+    if let Some(pair) = val.as_pair() {
+        vm.fiber.stack.push(pair.rest);
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("cdr: expected cons cell, got {}", val.type_name()),
+                format!("rest: expected pair, got {}", val.type_name()),
             ),
         ));
         vm.fiber.stack.push(Value::NIL);
@@ -214,15 +214,15 @@ pub(crate) fn handle_array_set(vm: &mut VM) {
     vm.fiber.stack.push(val);
 }
 
-/// Car for destructuring: signals error if not a cons cell.
+/// First for destructuring: signals error if not a pair cell.
 pub(crate) fn handle_car_destructure(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on CarDestructure");
-    match val.as_cons() {
-        Some(cons) => vm.fiber.stack.push(cons.first),
+        .expect("VM bug: Stack underflow on FirstDestructure");
+    match val.as_pair() {
+        Some(pair) => vm.fiber.stack.push(pair.first),
         None => {
             vm.fiber.signal = Some((
                 SIG_ERROR,
@@ -236,15 +236,15 @@ pub(crate) fn handle_car_destructure(vm: &mut VM) {
     }
 }
 
-/// Cdr for destructuring: signals error if not a cons cell.
+/// Rest for destructuring: signals error if not a pair cell.
 pub(crate) fn handle_cdr_destructure(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on CdrDestructure");
-    match val.as_cons() {
-        Some(cons) => vm.fiber.stack.push(cons.rest),
+        .expect("VM bug: Stack underflow on RestDestructure");
+    match val.as_pair() {
+        Some(pair) => vm.fiber.stack.push(pair.rest),
         None => {
             vm.fiber.signal = Some((
                 SIG_ERROR,
@@ -526,30 +526,30 @@ pub(crate) fn handle_struct_rest(
     }
 }
 
-/// Car with silent nil (parameter destructuring): returns nil if not a cons cell.
+/// First with silent nil (parameter destructuring): returns nil if not a pair cell.
 /// Used for &opt/(required) parameter destructuring where absent values produce nil.
 pub(crate) fn handle_car_or_nil(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on CarOrNil");
-    match val.as_cons() {
-        Some(cons) => vm.fiber.stack.push(cons.first),
+        .expect("VM bug: Stack underflow on FirstOrNil");
+    match val.as_pair() {
+        Some(pair) => vm.fiber.stack.push(pair.first),
         None => vm.fiber.stack.push(Value::NIL),
     }
 }
 
-/// Cdr with silent empty-list (parameter destructuring): returns EMPTY_LIST if not a cons cell.
+/// Rest with silent empty-list (parameter destructuring): returns EMPTY_LIST if not a pair cell.
 /// Used for &opt/(required) parameter destructuring.
 pub(crate) fn handle_cdr_or_nil(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on CdrOrNil");
-    match val.as_cons() {
-        Some(cons) => vm.fiber.stack.push(cons.rest),
+        .expect("VM bug: Stack underflow on RestOrNil");
+    match val.as_pair() {
+        Some(pair) => vm.fiber.stack.push(pair.rest),
         None => vm.fiber.stack.push(Value::EMPTY_LIST),
     }
 }
@@ -593,7 +593,7 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
         arr.borrow().to_vec()
     } else if let Some(tup) = source.as_array() {
         tup.to_vec()
-    } else if source.as_cons().is_some() || source.is_empty_list() {
+    } else if source.as_pair().is_some() || source.is_empty_list() {
         match source.list_to_vec() {
             Ok(v) => v,
             Err(_) => {

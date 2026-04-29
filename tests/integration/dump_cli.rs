@@ -107,6 +107,27 @@ fn git_stage_emits_per_closure_output() {
 }
 
 #[test]
+fn regions_prints_region_assignments() {
+    let (out, _, status) = dump("regions", "(let [x 1] (+ x 2))");
+    assert!(status.success());
+    assert!(
+        out.contains("── regions"),
+        "missing regions banner:\n{}",
+        out
+    );
+    assert!(
+        out.contains("region assignments"),
+        "missing region assignments section:\n{}",
+        out
+    );
+    assert!(
+        out.contains("region inference stats"),
+        "missing stats:\n{}",
+        out
+    );
+}
+
+#[test]
 fn all_stages_run_in_pipeline_order() {
     let (out, _, status) = dump("all", "(defn f [x] x)");
     assert!(status.success());
@@ -136,7 +157,7 @@ fn unknown_stage_is_rejected() {
     assert!(!status.success(), "expected non-zero exit for bogus stage");
     assert!(
         err.contains("--dump: unknown stage 'bogus'")
-            && err.contains("Valid: ast, hir, fhir, lir, jit, cfg, dfa, defuse, git"),
+            && err.contains("Valid: ast, hir, fhir, lir, jit, cfg, dfa, defuse, regions, git"),
         "expected helpful error listing valid stages, got:\n{}",
         err
     );

@@ -193,25 +193,25 @@ impl WasmEmitter {
             // Flip rotation is VM-only (the WASM backend uses its own
             // GC strategy).
             LirInstr::FlipEnter | LirInstr::FlipSwap | LirInstr::FlipExit => {}
-            LirInstr::Cons { dst, head, tail } => {
+            LirInstr::List { dst, head, tail } => {
                 self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
             }
-            LirInstr::Car { dst, pair } => {
+            LirInstr::First { dst, pair } => {
                 self.emit_data_op1(f, *dst, OP_CAR, *pair);
             }
-            LirInstr::Cdr { dst, pair } => {
+            LirInstr::Rest { dst, pair } => {
                 self.emit_data_op1(f, *dst, OP_CDR, *pair);
             }
-            LirInstr::CarDestructure { dst, src } => {
+            LirInstr::FirstDestructure { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CAR_DESTRUCTURE, *src);
             }
-            LirInstr::CdrDestructure { dst, src } => {
+            LirInstr::RestDestructure { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CDR_DESTRUCTURE, *src);
             }
-            LirInstr::CarOrNil { dst, src } => {
+            LirInstr::FirstOrNil { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CAR_OR_NIL, *src);
             }
-            LirInstr::CdrOrNil { dst, src } => {
+            LirInstr::RestOrNil { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CDR_OR_NIL, *src);
             }
             LirInstr::MakeArrayMut { dst, elements } => {

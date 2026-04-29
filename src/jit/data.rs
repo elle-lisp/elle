@@ -9,32 +9,32 @@ use crate::value::Value;
 
 /// Allocate a cons cell
 #[no_mangle]
-pub extern "C" fn elle_jit_cons(
+pub extern "C" fn elle_jit_pair(
     car_tag: u64,
     car_payload: u64,
     cdr_tag: u64,
     cdr_payload: u64,
 ) -> JitValue {
-    let car = Value {
+    let head = Value {
         tag: car_tag,
         payload: car_payload,
     };
-    let cdr = Value {
+    let tail = Value {
         tag: cdr_tag,
         payload: cdr_payload,
     };
-    JitValue::from_value(Value::cons(car, cdr))
+    JitValue::from_value(Value::pair(head, tail))
 }
 
 /// Extract car from a cons cell
 #[no_mangle]
-pub extern "C" fn elle_jit_car(pair_tag: u64, pair_payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_first(pair_tag: u64, pair_payload: u64) -> JitValue {
     let pair = Value {
         tag: pair_tag,
         payload: pair_payload,
     };
-    match pair.as_cons() {
-        Some(cons) => JitValue::from_value(cons.first),
+    match pair.as_pair() {
+        Some(pair) => JitValue::from_value(pair.first),
         None => {
             eprintln!("JIT type error: expected pair");
             JitValue::nil()
@@ -44,13 +44,13 @@ pub extern "C" fn elle_jit_car(pair_tag: u64, pair_payload: u64) -> JitValue {
 
 /// Extract cdr from a cons cell
 #[no_mangle]
-pub extern "C" fn elle_jit_cdr(pair_tag: u64, pair_payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_rest(pair_tag: u64, pair_payload: u64) -> JitValue {
     let pair = Value {
         tag: pair_tag,
         payload: pair_payload,
     };
-    match pair.as_cons() {
-        Some(cons) => JitValue::from_value(cons.rest),
+    match pair.as_pair() {
+        Some(pair) => JitValue::from_value(pair.rest),
         None => {
             eprintln!("JIT type error: expected pair");
             JitValue::nil()
@@ -71,11 +71,11 @@ pub extern "C" fn elle_jit_make_array(elements: *const Value, count: u64) -> Jit
     JitValue::from_value(Value::array_mut(vec))
 }
 
-/// Check if value is a pair (cons cell)
+/// Check if value is a pair (pair cell)
 #[no_mangle]
 pub extern "C" fn elle_jit_is_pair(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
-    JitValue::bool_val(val.is_cons())
+    JitValue::bool_val(val.is_pair())
 }
 
 /// Check if value is an immutable array
@@ -120,12 +120,12 @@ pub extern "C" fn elle_jit_is_set_mut(tag: u64, payload: u64) -> JitValue {
     JitValue::bool_val(val.is_set_mut())
 }
 
-/// Car for destructuring: returns car if cons, signals error otherwise.
+/// First for destructuring: returns car if cons, signals error otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_car_destructure(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
+pub extern "C" fn elle_jit_first_destructure(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
     let val = Value { tag, payload };
-    match val.as_cons() {
-        Some(cons) => JitValue::from_value(cons.first),
+    match val.as_pair() {
+        Some(pair) => JitValue::from_value(pair.first),
         None => {
             let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
             vm.fiber.signal = Some((
@@ -140,12 +140,12 @@ pub extern "C" fn elle_jit_car_destructure(tag: u64, payload: u64, vm: *mut ()) 
     }
 }
 
-/// Cdr for destructuring: returns cdr if cons, signals error otherwise.
+/// Rest for destructuring: returns cdr if cons, signals error otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_cdr_destructure(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
+pub extern "C" fn elle_jit_rest_destructure(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
     let val = Value { tag, payload };
-    match val.as_cons() {
-        Some(cons) => JitValue::from_value(cons.rest),
+    match val.as_pair() {
+        Some(pair) => JitValue::from_value(pair.rest),
         None => {
             let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
             vm.fiber.signal = Some((
@@ -259,22 +259,22 @@ pub extern "C" fn elle_jit_array_slice_from(
     }
 }
 
-/// Car with silent nil: returns car if cons, NIL otherwise.
+/// First with silent nil: returns car if cons, NIL otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_car_or_nil(tag: u64, payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_first_or_nil(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
-    match val.as_cons() {
-        Some(cons) => JitValue::from_value(cons.first),
+    match val.as_pair() {
+        Some(pair) => JitValue::from_value(pair.first),
         None => JitValue::nil(),
     }
 }
 
-/// Cdr with silent empty-list: returns cdr if cons, EMPTY_LIST otherwise.
+/// Rest with silent empty-list: returns cdr if cons, EMPTY_LIST otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_cdr_or_nil(tag: u64, payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_rest_or_nil(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
-    match val.as_cons() {
-        Some(cons) => JitValue::from_value(cons.rest),
+    match val.as_pair() {
+        Some(pair) => JitValue::from_value(pair.rest),
         None => JitValue::empty_list(),
     }
 }
@@ -412,12 +412,12 @@ mod tests {
 
     #[test]
     fn test_cons_car_cdr() {
-        let car = Value::int(1);
-        let cdr = Value::int(2);
-        let pair = elle_jit_cons(car.tag, car.payload, cdr.tag, cdr.payload).to_value();
+        let head = Value::int(1);
+        let tail = Value::int(2);
+        let pair = elle_jit_pair(head.tag, head.payload, tail.tag, tail.payload).to_value();
 
-        let car_val = elle_jit_car(pair.tag, pair.payload).to_value();
-        let cdr_val = elle_jit_cdr(pair.tag, pair.payload).to_value();
+        let car_val = elle_jit_first(pair.tag, pair.payload).to_value();
+        let cdr_val = elle_jit_rest(pair.tag, pair.payload).to_value();
 
         assert_eq!(car_val.as_int(), Some(1));
         assert_eq!(cdr_val.as_int(), Some(2));
@@ -425,9 +425,9 @@ mod tests {
 
     #[test]
     fn test_is_pair() {
-        let car = Value::int(1);
-        let cdr = Value::int(2);
-        let pair = elle_jit_cons(car.tag, car.payload, cdr.tag, cdr.payload).to_value();
+        let head = Value::int(1);
+        let tail = Value::int(2);
+        let pair = elle_jit_pair(head.tag, head.payload, tail.tag, tail.payload).to_value();
 
         assert_eq!(
             elle_jit_is_pair(pair.tag, pair.payload),

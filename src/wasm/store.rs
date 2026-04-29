@@ -150,7 +150,7 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
                 crate::hir::VarargKind::List => {
                     let mut list = Value::EMPTY_LIST;
                     for v in rest.iter().rev() {
-                        list = Value::cons(*v, list);
+                        list = Value::pair(*v, list);
                     }
                     list
                 }

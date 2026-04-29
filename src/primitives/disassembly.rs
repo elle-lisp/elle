@@ -29,7 +29,7 @@ pub(crate) fn prim_list_primitives(args: &[Value]) -> (SignalBits, Value) {
     let filter = if args.is_empty() { Value::NIL } else { args[0] };
     (
         SIG_QUERY,
-        Value::cons(Value::keyword("list-primitives"), filter),
+        Value::pair(Value::keyword("list-primitives"), filter),
     )
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn prim_primitive_meta(args: &[Value]) -> (SignalBits, Value) {
     }
     (
         SIG_QUERY,
-        Value::cons(Value::keyword("primitive-meta"), args[0]),
+        Value::pair(Value::keyword("primitive-meta"), args[0]),
     )
 }
 
@@ -416,7 +416,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["name"],
         category: "meta",
         example:
-            "(struct-get (vm/primitive-meta \"cons\") \"doc\") #=> \"Construct a cons cell...\"",
+            "(struct-get (vm/primitive-meta \"pair\") \"doc\") #=> \"Construct a pair...\"",
         aliases: &["primitive-meta"],
     },
 ];

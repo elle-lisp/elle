@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// means adding it here with a default; existing tables use
 /// `..PrimitiveDef::DEFAULT`.
 pub struct PrimitiveDef {
-    /// The Elle-facing name (e.g., "math/sin", "cons").
+    /// The Elle-facing name (e.g., "math/sin", "pair").
     pub name: &'static str,
     /// The Rust implementation.
     pub func: PrimFn,

@@ -947,7 +947,7 @@ impl FiberHeap {
         self.rebuild_in_outbox(heap_obj)
     }
 
-    /// Allocate a copy of `obj` into the outbox. For Cons, recursively
+    /// Allocate a copy of `obj` into the outbox. For Pair, recursively
     /// copies sub-values that are in the private pool.
     ///
     /// Panics if no outbox is installed. Callers must check `has_outbox()`
@@ -956,13 +956,13 @@ impl FiberHeap {
     fn rebuild_in_outbox(&mut self, obj: &HeapObject) -> Value {
         let outbox = self.outbox.as_mut().expect("rebuild_in_outbox: no outbox");
         match obj {
-            HeapObject::Cons(c) => {
+            HeapObject::Pair(c) => {
                 let head = c.first;
                 let tail = c.rest;
                 // Drop the borrow on self before recursing.
                 let head = self.deep_copy_to_outbox(head);
                 let tail = self.deep_copy_to_outbox(tail);
-                let new_obj = HeapObject::Cons(crate::value::heap::Cons::new(head, tail));
+                let new_obj = HeapObject::Pair(crate::value::heap::Pair::new(head, tail));
                 self.outbox.as_mut().unwrap().alloc(new_obj)
             }
             HeapObject::LString { s, traits } => {
@@ -1236,7 +1236,7 @@ impl Default for FiberHeap {
 pub(crate) fn needs_drop(tag: HeapTag) -> bool {
     match tag {
         // Copy/scalar innards — no heap allocations
-        HeapTag::Cons => false,
+        HeapTag::Pair => false,
         // LBox and CaptureCell hold Rc<RefCell<Value>> for cross-fiber
         // sharing; dropping them must decrement the Rc strong count.
         HeapTag::LBox => true,

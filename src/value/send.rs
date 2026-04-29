@@ -9,7 +9,7 @@
 //!
 //! The solution: SendValue stores owned copies of heap data, not raw pointers.
 
-use super::heap::{alloc, deref, Cons, HeapObject};
+use super::heap::{alloc, deref, HeapObject, Pair};
 use super::repr::Value;
 use crate::error::LocationMap;
 use crate::hir::VarargKind;
@@ -70,8 +70,8 @@ pub enum SendValue {
     /// Owned string copy
     String(String),
 
-    /// Deep copy of cons cells (with traits)
-    Cons(Box<SendValue>, Box<SendValue>, Box<SendValue>),
+    /// Deep copy of pair cells (with traits)
+    Pair(Box<SendValue>, Box<SendValue>, Box<SendValue>),
 
     /// Deep copy of arrays (with traits)
     Array(Vec<SendValue>, Box<SendValue>),
@@ -190,12 +190,12 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
             std::str::from_utf8_unchecked(s.as_slice()).to_string()
         })),
 
-        // Cons cells - deep copy both first and rest, plus traits
-        HeapObject::Cons(cons) => {
-            let first = from_value_inner(cons.first, ctx)?;
-            let rest = from_value_inner(cons.rest, ctx)?;
-            let traits = from_value_inner(cons.traits, ctx)?;
-            Ok(SendValue::Cons(
+        // Pair cells - deep copy both first and rest, plus traits
+        HeapObject::Pair(pair) => {
+            let first = from_value_inner(pair.first, ctx)?;
+            let rest = from_value_inner(pair.rest, ctx)?;
+            let traits = from_value_inner(pair.traits, ctx)?;
+            Ok(SendValue::Pair(
                 Box::new(first),
                 Box::new(rest),
                 Box::new(traits),
@@ -503,16 +503,16 @@ impl SendValue {
             SendValue::Immediate(v) => v,
             SendValue::Keyword(name) => Value::keyword(&name),
             SendValue::String(s) => Value::string_no_intern(s),
-            SendValue::Cons(first, rest, traits) => {
+            SendValue::Pair(first, rest, traits) => {
                 let first_val = first.into_value();
                 let rest_val = rest.into_value();
                 let traits_val = traits.into_value();
-                let cons = Cons {
+                let pair = Pair {
                     first: first_val,
                     rest: rest_val,
                     traits: traits_val,
                 };
-                alloc(HeapObject::Cons(cons))
+                alloc(HeapObject::Pair(pair))
             }
             SendValue::Array(items, traits) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
@@ -639,7 +639,7 @@ struct DeserContext {
 /// Recursive worker for deserialization. Threads DeserContext through all recursive calls.
 fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
     use crate::value::closure::{Closure, ClosureTemplate};
-    use crate::value::heap::{alloc, Cons, HeapObject};
+    use crate::value::heap::{alloc, HeapObject, Pair};
     use std::cell::RefCell;
     use std::collections::BTreeSet;
     use std::rc::Rc;
@@ -648,11 +648,11 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
         SendValue::Immediate(v) => v,
         SendValue::Keyword(name) => Value::keyword(&name),
         SendValue::String(s) => Value::string_no_intern(s),
-        SendValue::Cons(first, rest, traits) => {
+        SendValue::Pair(first, rest, traits) => {
             let f = into_value_inner(*first, ctx);
             let r = into_value_inner(*rest, ctx);
             let t = into_value_inner(*traits, ctx);
-            alloc(HeapObject::Cons(Cons {
+            alloc(HeapObject::Pair(Pair {
                 first: f,
                 rest: r,
                 traits: t,

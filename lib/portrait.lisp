@@ -21,7 +21,7 @@
     "Convert any collection to a list for string/join."
     (def @result ())
     (each x in coll
-      (assign result (cons x result)))
+      (assign result (pair x result)))
     result)
 
   # ── Phase classification ────────────────────────────────────────────────

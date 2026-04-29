@@ -2,9 +2,9 @@
 
 # N-Queens Problem Solver in Elle
 #
-# Solves N-Queens via recursive backtracking with cons-list board state.
+# Solves N-Queens via recursive backtracking with pair-list board state.
 # All recursion through top-level defn — no closure allocation in the
-# hot path.  The board is a cons list: (cons col queens) to place,
+# hot path.  The board is a pair list: (pair col queens) to place,
 # (rest queens) to backtrack.  This is the natural representation for
 # backtracking search.
 
@@ -26,7 +26,7 @@
     count
     (try-col n (+ col 1) queens row
              (if (safe? col queens)
-               (search n (+ row 1) (cons col queens) count)
+               (search n (+ row 1) (pair col queens) count)
                count))))
 
 (defn search [n row queens count]

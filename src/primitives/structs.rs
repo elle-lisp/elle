@@ -212,8 +212,8 @@ fn deep_freeze_val(val: Value) -> Value {
     }
 
     // cons → deep-freeze car and cdr, rebuild
-    if let Some(c) = val.as_cons() {
-        return Value::cons(deep_freeze_val(c.first), deep_freeze_val(c.rest));
+    if let Some(c) = val.as_pair() {
+        return Value::pair(deep_freeze_val(c.first), deep_freeze_val(c.rest));
     }
 
     // @string → string
@@ -325,7 +325,7 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
                 TableKey::Identity(v) => *v,
             };
             let pair = Value::array(vec![key_val, *value]);
-            result = Value::cons(pair, result);
+            result = Value::pair(pair, result);
         }
         result
     }

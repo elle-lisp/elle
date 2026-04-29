@@ -196,8 +196,8 @@
 (let [[ok? _] (protect ((fn () (encode-fn (fn () 42)))))]
   (assert (not ok?) "encoding a closure is an error"))
 
-## Improper list: (cons 1 2) has non-list cdr
-(let [[ok? _] (protect ((fn () (encode-fn (cons 1 2)))))]
+## Improper list: (pair 1 2) has non-list rest
+(let [[ok? _] (protect ((fn () (encode-fn (pair 1 2)))))]
   (assert (not ok?) "encoding an improper list is an error"))
 
 (let [[ok? err] (protect ((fn () (decode-fn "not bytes"))))]
