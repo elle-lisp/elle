@@ -206,20 +206,14 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // No forking/merging for branches — assigns inside if/match/cond
-            // stay as Assign. Each branch gets independent renames so
-            // while→loop conversions in one branch don't leak into others.
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
                 let new_cond = self.transform(cond);
-                let saved = self.renames.clone();
                 let new_then = self.transform(then_branch);
-                self.renames = saved.clone();
                 let new_else = self.transform(else_branch);
-                self.renames = saved;
                 Hir::new(
                     HirKind::If {
                         cond: Box::new(new_cond),
@@ -806,6 +800,12 @@ impl<'a> FnCtx<'a> {
     ) -> Hir {
         let new_cond = self.transform(cond);
 
+        // Bind the condition to a temporary so that phi-selects don't
+        // re-evaluate it (the condition may reference mutable cells that
+        // the then-branch modifies).
+        let cond_binding = self.fresh_version(Binding(0)); // gensym
+        let cond_var = Hir::silent(HirKind::Var(cond_binding), cond.span.clone());
+
         // Transform each branch, extracting the final SSA value of
         // each assigned binding. Assigns are removed from the branch
         // body; their values are collected for phi construction.
@@ -822,7 +822,7 @@ impl<'a> FnCtx<'a> {
         // Emit the If (with assigns removed from branches)
         let if_expr = Hir::new(
             HirKind::If {
-                cond: Box::new(new_cond.clone()),
+                cond: Box::new(cond_var.clone()),
                 then_branch: Box::new(new_then),
                 else_branch: Box::new(new_else),
             },
@@ -831,7 +831,9 @@ impl<'a> FnCtx<'a> {
         );
 
         // Build phi-lets: for each assigned binding, create
-        // (let [x_fresh (if cond then_val else_val)] ...continuation...)
+        // (let [x_fresh (if cond_var then_val else_val)] ...continuation...)
+        // Using cond_var (not new_cond) ensures the phi tests the same
+        // value as the if, even when branches modify the condition's inputs.
         let phi_bindings: Vec<_> = assigned
             .iter()
             .map(|&orig| {
@@ -856,7 +858,7 @@ impl<'a> FnCtx<'a> {
 
                 let phi_val = Hir::new(
                     HirKind::If {
-                        cond: Box::new(new_cond.clone()),
+                        cond: Box::new(cond_var.clone()),
                         then_branch: Box::new(then_val),
                         else_branch: Box::new(else_val),
                     },
@@ -882,8 +884,16 @@ impl<'a> FnCtx<'a> {
             );
         }
 
-        // Prepend the if expression (for its side effects)
-        Hir::new(HirKind::Begin(vec![if_expr, result]), span, signal)
+        // Wrap in let for the condition binding, then prepend the if
+        let inner = Hir::new(HirKind::Begin(vec![if_expr, result]), span.clone(), signal);
+        Hir::new(
+            HirKind::Let {
+                bindings: vec![(cond_binding, new_cond)],
+                body: Box::new(inner),
+            },
+            span,
+            signal,
+        )
     }
 
     /// Transform a branch body, converting assigns to the target
