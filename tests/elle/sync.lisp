@@ -296,6 +296,46 @@
     (assert (= 6 (length results))
             "9g: all items consumed from multi-producer queue")))
 
+# Queue close: put on closed queue returns nil without blocking
+(let [q (sync:make-queue 3)]
+  (q:put :a)
+  (q:close)
+  (assert (q:closed?) "9h: queue reports closed")
+  (assert (nil? (q:put :b)) "9i: put on closed queue returns nil")
+  # take drains remaining items
+  (assert (= :a (q:take)) "9j: take drains remaining item after close")
+  (assert (nil? (q:take)) "9k: take returns nil when closed and empty"))
+
+# Queue close: unblocks fiber blocked on full-queue put
+(let [q (sync:make-queue 1)
+      result @[nil]]
+  (q:put :fill)  # fill the queue
+  (let [blocked (ev/spawn (fn []
+                             (let [r (q:put :will-not-go)]
+                               (put result 0 :unblocked)
+                               r)))]
+    # Give the fiber time to block
+    (ev/join (ev/spawn (fn [] nil)))
+    (q:close)
+    (ev/join blocked)
+    (assert (= :unblocked (result 0))
+            "9l: close unblocks fiber blocked on full-queue put")))
+
+# Queue close: unblocks fiber blocked on empty-queue take
+(let [q (sync:make-queue 4)
+      result @[nil]]
+  (let [blocked (ev/spawn (fn []
+                             (let [r (q:take)]
+                               (put result 0 :unblocked)
+                               r)))]
+    # Give the fiber time to block
+    (ev/join (ev/spawn (fn [] nil)))
+    (q:close)
+    (let [r (ev/join blocked)]
+      (assert (= :unblocked (result 0))
+              "9m: close unblocks fiber blocked on empty-queue take")
+      (assert (nil? r) "9n: take returns nil when closed and empty"))))
+
 # ============================================================================
 # 10. Monitor
 # ============================================================================

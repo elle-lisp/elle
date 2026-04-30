@@ -183,27 +183,43 @@
 ## ── Blocking queue ───────────────────────────────────────────────────
 
 (defn make-queue [capacity]
-  "Bounded blocking FIFO queue."
+  "Bounded blocking FIFO queue with cancellation via :close."
   (let [lock (make-lock)
         not-full (make-condvar)
         not-empty (make-condvar)
         buf @[]
-        cap capacity]
+        cap capacity
+        @closed false]
     {:put (fn [val]
             (lock:acquire)
-            (while (>= (length buf) cap) (not-full:wait lock))
-            (push buf val)
-            (not-empty:notify)
-            (lock:release)
-            nil)
+            (while (and (not closed) (>= (length buf) cap))
+              (not-full:wait lock))
+            (if closed
+              (begin (lock:release) nil)
+              (begin
+                (push buf val)
+                (not-empty:notify)
+                (lock:release)
+                nil)))
      :take (fn []
              (lock:acquire)
-             (while (= (length buf) 0) (not-empty:wait lock))
-             (let [val (buf 0)]
-               (remove buf 0)
-               (not-full:notify)
-               (lock:release)
-               val))
+             (while (and (not closed) (= (length buf) 0))
+               (not-empty:wait lock))
+             (if (= (length buf) 0)
+               (begin (lock:release) nil)
+               (let [val (buf 0)]
+                 (remove buf 0)
+                 (not-full:notify)
+                 (lock:release)
+                 val)))
+     :close (fn []
+              (lock:acquire)
+              (assign closed true)
+              (not-full:broadcast)
+              (not-empty:broadcast)
+              (lock:release)
+              nil)
+     :closed? (fn [] closed)
      :size (fn [] (length buf))}))
 
 ## ── Monitor ──────────────────────────────────────────────────────────
