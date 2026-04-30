@@ -250,7 +250,29 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::Eval { dst, .. }
         | LirInstr::ArrayMutExtend { dst, .. }
         | LirInstr::ArrayMutPush { dst, .. }
-        | LirInstr::Convert { dst, .. } => f(*dst),
+        | LirInstr::Convert { dst, .. }
+        | LirInstr::IsEmpty { dst, .. }
+        | LirInstr::IsBool { dst, .. }
+        | LirInstr::IsInt { dst, .. }
+        | LirInstr::IsFloat { dst, .. }
+        | LirInstr::IsString { dst, .. }
+        | LirInstr::IsKeyword { dst, .. }
+        | LirInstr::IsSymbolCheck { dst, .. }
+        | LirInstr::IsBytes { dst, .. }
+        | LirInstr::IsBox { dst, .. }
+        | LirInstr::IsClosure { dst, .. }
+        | LirInstr::IsFiber { dst, .. }
+        | LirInstr::TypeOf { dst, .. }
+        | LirInstr::Length { dst, .. }
+        | LirInstr::Get { dst, .. }
+        | LirInstr::Put { dst, .. }
+        | LirInstr::Del { dst, .. }
+        | LirInstr::Has { dst, .. }
+        | LirInstr::Pop { dst, .. }
+        | LirInstr::Freeze { dst, .. }
+        | LirInstr::Thaw { dst, .. }
+        | LirInstr::IntrPush { dst, .. }
+        | LirInstr::Identical { dst, .. } => f(*dst),
 
         LirInstr::StoreLocal { .. }
         | LirInstr::StoreCapture { .. }
@@ -349,7 +371,43 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::FirstOrNil { src, .. }
         | LirInstr::RestOrNil { src, .. }
         | LirInstr::ArrayMutRefOrNil { src, .. }
-        | LirInstr::Convert { src, .. } => f(*src),
+        | LirInstr::Convert { src, .. }
+        | LirInstr::IsEmpty { src, .. }
+        | LirInstr::IsBool { src, .. }
+        | LirInstr::IsInt { src, .. }
+        | LirInstr::IsFloat { src, .. }
+        | LirInstr::IsString { src, .. }
+        | LirInstr::IsKeyword { src, .. }
+        | LirInstr::IsSymbolCheck { src, .. }
+        | LirInstr::IsBytes { src, .. }
+        | LirInstr::IsBox { src, .. }
+        | LirInstr::IsClosure { src, .. }
+        | LirInstr::IsFiber { src, .. }
+        | LirInstr::TypeOf { src, .. }
+        | LirInstr::Length { src, .. }
+        | LirInstr::Pop { src, .. }
+        | LirInstr::Freeze { src, .. }
+        | LirInstr::Thaw { src, .. } => f(*src),
+
+        LirInstr::IntrPush { array, value, .. } => {
+            f(*array);
+            f(*value);
+        }
+        LirInstr::Get { obj, key, .. }
+        | LirInstr::Del { obj, key, .. }
+        | LirInstr::Has { obj, key, .. } => {
+            f(*obj);
+            f(*key);
+        }
+        LirInstr::Put { obj, key, val, .. } => {
+            f(*obj);
+            f(*key);
+            f(*val);
+        }
+        LirInstr::Identical { lhs, rhs, .. } => {
+            f(*lhs);
+            f(*rhs);
+        }
 
         LirInstr::MakeCaptureCell { value, .. } => f(*value),
         LirInstr::LoadCaptureCell { cell, .. } => f(*cell),
