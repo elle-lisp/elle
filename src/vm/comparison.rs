@@ -71,7 +71,31 @@ macro_rules! cmp_handler {
     };
 }
 
-cmp_handler!(handle_lt, "lt", |a: i64, b: i64| a < b, |a: f64, b: f64| a < b, is_lt);
-cmp_handler!(handle_gt, "gt", |a: i64, b: i64| a > b, |a: f64, b: f64| a > b, is_gt);
-cmp_handler!(handle_le, "le", |a: i64, b: i64| a <= b, |a: f64, b: f64| a <= b, is_le);
-cmp_handler!(handle_ge, "ge", |a: i64, b: i64| a >= b, |a: f64, b: f64| a >= b, is_ge);
+cmp_handler!(
+    handle_lt,
+    "lt",
+    |a: i64, b: i64| a < b,
+    |a: f64, b: f64| a < b,
+    is_lt
+);
+cmp_handler!(
+    handle_gt,
+    "gt",
+    |a: i64, b: i64| a > b,
+    |a: f64, b: f64| a > b,
+    is_gt
+);
+cmp_handler!(
+    handle_le,
+    "le",
+    |a: i64, b: i64| a <= b,
+    |a: f64, b: f64| a <= b,
+    is_le
+);
+cmp_handler!(
+    handle_ge,
+    "ge",
+    |a: i64, b: i64| a >= b,
+    |a: f64, b: f64| a >= b,
+    is_ge
+);

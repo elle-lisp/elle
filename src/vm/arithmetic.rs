@@ -137,11 +137,9 @@ pub(crate) fn handle_div(vm: &mut VM) {
 // Bitwise ops
 // ---------------------------------------------------------------------------
 
-int_binop!(handle_bit_and, "BitAnd", "%bit-and", |a: i64, b: i64| a
-    & b);
+int_binop!(handle_bit_and, "BitAnd", "%bit-and", |a: i64, b: i64| a & b);
 int_binop!(handle_bit_or, "BitOr", "%bit-or", |a: i64, b: i64| a | b);
-int_binop!(handle_bit_xor, "BitXor", "%bit-xor", |a: i64, b: i64| a
-    ^ b);
+int_binop!(handle_bit_xor, "BitXor", "%bit-xor", |a: i64, b: i64| a ^ b);
 
 // BitNot is unary
 pub(crate) fn handle_bit_not(vm: &mut VM) {
