@@ -125,10 +125,6 @@
     (error {:error :type-error
             :message (string "<: expected number, string, or keyword, got "
                              (type b))}))
-  (when (not (or (and (number? a) (number? b)) (and (string? a) (string? b))
-                 (and (keyword? a) (keyword? b))))
-    (error {:error :type-error
-            :message (string "<: incomparable types " (type a) " and " (type b))}))
   (if (empty? more) (%lt a b) (and (%lt a b) (apply < b more))))
 
 (defn > [a b & more]
@@ -141,10 +137,6 @@
     (error {:error :type-error
             :message (string ">: expected number, string, or keyword, got "
                              (type b))}))
-  (when (not (or (and (number? a) (number? b)) (and (string? a) (string? b))
-                 (and (keyword? a) (keyword? b))))
-    (error {:error :type-error
-            :message (string ">: incomparable types " (type a) " and " (type b))}))
   (if (empty? more) (%gt a b) (and (%gt a b) (apply > b more))))
 
 (defn <= [a b & more]
@@ -157,10 +149,6 @@
     (error {:error :type-error
             :message (string "<=: expected number, string, or keyword, got "
                              (type b))}))
-  (when (not (or (and (number? a) (number? b)) (and (string? a) (string? b))
-                 (and (keyword? a) (keyword? b))))
-    (error {:error :type-error
-            :message (string "<=: incomparable types " (type a) " and " (type b))}))
   (if (empty? more) (%le a b) (and (%le a b) (apply <= b more))))
 
 (defn >= [a b & more]
@@ -173,10 +161,6 @@
     (error {:error :type-error
             :message (string ">=: expected number, string, or keyword, got "
                              (type b))}))
-  (when (not (or (and (number? a) (number? b)) (and (string? a) (string? b))
-                 (and (keyword? a) (keyword? b))))
-    (error {:error :type-error
-            :message (string ">=: incomparable types " (type a) " and " (type b))}))
   (if (empty? more) (%ge a b) (and (%ge a b) (apply >= b more))))
 
 ## ── Logic and pairs ──────────────────────────────────────────────────
