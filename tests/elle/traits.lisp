@@ -341,8 +341,8 @@
   (assert (not ok?) "traits arity error: two args"))
 
 # Infrastructure types (NativeFn): with-traits should return a type error.
-# NativeFn values are exposed as primitives; `+` is a NativeFn.
-(let [[ok? err] (protect ((fn () (with-traits + {:a 1}))))]
+# NativeFn values are exposed as primitives; `abs` is a NativeFn.
+(let [[ok? err] (protect ((fn () (with-traits abs {:a 1}))))]
   (assert (not ok?) "with-traits rejects NativeFn (infrastructure type)")
   (assert (= (get err :error) :type-error)
           "with-traits rejects NativeFn (infrastructure type)"))

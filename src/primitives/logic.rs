@@ -6,21 +6,6 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use std::collections::BTreeMap;
 
-/// Logical NOT operation
-pub(crate) fn prim_not(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("not: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
-    (SIG_OK, Value::bool(!args[0].is_truthy()))
-}
-
 /// Logical AND operation
 /// (and) => true
 /// (and x) => x
@@ -107,17 +92,6 @@ pub(crate) fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
 
 /// Declarative primitive definitions for logic operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "not",
-        func: prim_not,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Logical NOT operation",
-        params: &["x"],
-        category: "logic",
-        example: "(not true)",
-        aliases: &[],
-    },
     PrimitiveDef {
         name: "and",
         func: prim_and,
