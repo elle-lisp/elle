@@ -7,11 +7,15 @@
 //! ## Quick Start
 //!
 //! ```
-//! use elle::{eval, register_primitives, SymbolTable, VM};
+//! use elle::{eval, init_stdlib, register_primitives, SymbolTable, VM};
+//! use elle::context::{set_symbol_table, set_vm_context};
 //!
 //! let mut vm = VM::new();
 //! let mut symbols = SymbolTable::new();
 //! register_primitives(&mut vm, &mut symbols);
+//! set_vm_context(&mut vm as *mut VM);
+//! set_symbol_table(&mut symbols as *mut SymbolTable);
+//! init_stdlib(&mut vm, &mut symbols);
 //!
 //! let code = "(+ 1 2 3)";
 //! let result = eval(code, &mut symbols, &mut vm, "<example>").unwrap();

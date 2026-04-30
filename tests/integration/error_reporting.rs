@@ -170,7 +170,7 @@ fn test_location_map_populated_for_simple_expression() {
     use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
-    let source = "(+ 1 2)";
+    let source = "(%add 1 2)";
 
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok());
@@ -190,7 +190,7 @@ fn test_location_map_has_correct_line_numbers() {
 
     let mut symbols = SymbolTable::new();
     // Single expression with nested structure
-    let source = "(if true\n  (+ 1 2)\n  (- 3 4))";
+    let source = "(if true\n  (%add 1 2)\n  (%sub 3 4))";
 
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
@@ -218,7 +218,7 @@ fn test_closure_has_location_map() {
     use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
-    let source = "(fn (x) (+ x 1))";
+    let source = "(fn (x) (%add x 1))";
 
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok());
@@ -253,7 +253,7 @@ fn test_vm_uses_location_map_for_stack_trace() {
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     // Compile a simple expression
-    let source = "(+ 1 2)";
+    let source = "(%add 1 2)";
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 

@@ -184,7 +184,7 @@ fn region_emitted_for_block_with_multiple_safe_breaks() {
 fn region_emitted_for_equality_check() {
     // = is in the intrinsics map (BinOp::Eq), so result_is_safe
     // recognises it as returning a bool immediate.
-    assert!(has_region("(let [x 1] (= x 1))"));
+    assert!(has_region("(let [x 1] (%eq x 1))"));
 }
 
 #[test]
@@ -1683,7 +1683,7 @@ fn call_scoped_emits_region_exit_call() {
     // Call-scoped reclamation doesn't fire because inner is not
     // recognized as rotation-safe (DerefCell callee).
     let source = r#"(letrec
-        [inner (fn [x] (if (empty? x) 0 (%add 1 (inner (rest x))))) outer (fn [n] (inner (pair n (list))))]
+        [inner (fn [x] (if (empty? x) 0 (%add 1 (inner (rest x))))) outer (fn [n] (inner (%pair n (list))))]
         nil)
     "#;
     assert!(!closure_bytecode_contains(source, "RegionExitCall"));
@@ -1695,7 +1695,7 @@ fn no_call_scoped_for_non_rotation_safe_callee() {
     // g's call to f should NOT get call-scoped region.
     let source = r#"(let [acc @[]]
         (letrec
-          [f (fn [x] (push acc x) 0) g (fn [n] (f (pair 1 2)))]
+          [f (fn [x] (push acc x) 0) g (fn [n] (f (%pair 1 2)))]
           nil))
     "#;
     assert!(!closure_has_region(source));
@@ -1706,7 +1706,7 @@ fn no_call_scoped_when_callee_returns_heap() {
     // make-pair returns a pair cell (non-immediate).
     // Even though it's rotation-safe, the result would be freed.
     let source = r#"(letrec
-        [make-pair (fn [a b] (pair a b)) use-pair (fn [n] (first (make-pair n (%add n 1))))]
+        [make-pair (fn [a b] (%pair a b)) use-pair (fn [n] (first (make-pair n (%add n 1))))]
         nil)
     "#;
     assert!(!closure_has_region(source));
@@ -1774,7 +1774,7 @@ fn tail_call_with_heap_arg_marks_callee_unsafe() {
     // inner's non-tail self-call (+ 1 (inner (rest x))) should still get
     // call-scoped reclamation because inner itself IS rotation-safe.
     let source = r#"(letrec
-        [inner (fn [x] (if (empty? x) 0 (%add 1 (inner (rest x))))) outer (fn [n] (inner (pair n (list))))]
+        [inner (fn [x] (if (empty? x) 0 (%add 1 (inner (rest x))))) outer (fn [n] (inner (%pair n (list))))]
         nil)
     "#;
 
@@ -1833,7 +1833,7 @@ fn non_tail_call_to_immediate_returning_fn_gets_region() {
     // This confirms callee_result_immediate recognizes f as immediate-returning
     // and can_scope_allocate_call accepts the call.
     let source = r#"(letrec
-        [f (fn [x] (if (empty? x) 0 (%add 1 (f (rest x))))) g (fn [n] (%add (f (pair n (list))) 1))]
+        [f (fn [x] (if (empty? x) 0 (%add 1 (f (rest x))))) g (fn [n] (%add (f (%pair n (list))) 1))]
         nil)"#;
     // empty?/rest/pair/list are unknown calls → force GLOBAL.
     assert!(
@@ -1845,7 +1845,7 @@ fn non_tail_call_to_immediate_returning_fn_gets_region() {
 #[test]
 fn call_scoped_does_not_wrap_intrinsics() {
     // %-intrinsic calls (like %add) are lowered to BinOp, not Call.
-    let source = "(defn f [n] (%add n (length (pair 1 2))))";
+    let source = "(defn f [n] (%add n (length (%pair 1 2))))";
     assert!(!closure_has_region(source));
 }
 
@@ -1867,13 +1867,13 @@ fn call_scoped_nqueens_search_gets_region() {
     // gets RegionEnter/RegionExitCall.
     let source = r#"(letrec
         [search (fn [n row queens count]
-          (if (= row n) (%add count 1)
+          (if (%eq row n) (%add count 1)
             (try-col n 0 queens row count)))
          try-col (fn [n col queens row count]
-          (if (= col n) count
+          (if (%eq col n) count
             (try-col n (%add col 1) queens row
               (if (%lt col row)
-                (search n (%add row 1) (pair col queens) count)
+                (search n (%add row 1) (%pair col queens) count)
                 count))))]
         (search 5 0 (list) 0))
     "#;
@@ -1900,7 +1900,7 @@ fn return_safe_mutual_recursion_enables_rotation_safety() {
           (if (empty? x) count
             (g x count)))
          g (fn [x count]
-          (g x (if true (f (pair 1 x) (%add count 1)) count)))]
+          (g x (if true (f (%pair 1 x) (%add count 1)) count)))]
         (g (list 1 2 3) 0))
     "#;
     // pair/list are unknown calls → force GLOBAL. No call-scoped region.
