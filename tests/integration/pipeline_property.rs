@@ -3,7 +3,7 @@
 // These tests verify semantic correctness by checking mathematical properties
 // hold when code is compiled and executed through the new pipeline.
 
-use crate::common::{eval_reuse, eval_reuse_bare};
+use crate::common::eval_reuse;
 use elle::Value;
 use proptest::prelude::*;
 
@@ -19,8 +19,8 @@ proptest! {
         let expr1 = format!("(+ {} {})", a, b);
         let expr2 = format!("(+ {} {})", b, a);
 
-        let r1 = eval_reuse_bare(&expr1);
-        let r2 = eval_reuse_bare(&expr2);
+        let r1 = eval_reuse(&expr1);
+        let r2 = eval_reuse(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -32,8 +32,8 @@ proptest! {
         let expr1 = format!("(+ (+ {} {}) {})", a, b, c);
         let expr2 = format!("(+ {} (+ {} {}))", a, b, c);
 
-        let r1 = eval_reuse_bare(&expr1);
-        let r2 = eval_reuse_bare(&expr2);
+        let r1 = eval_reuse(&expr1);
+        let r2 = eval_reuse(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -43,7 +43,7 @@ proptest! {
     #[test]
     fn addition_identity(a in -1000i64..1000) {
         let expr = format!("(+ {} 0)", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -54,8 +54,8 @@ proptest! {
         let expr1 = format!("(* {} {})", a, b);
         let expr2 = format!("(* {} {})", b, a);
 
-        let r1 = eval_reuse_bare(&expr1);
-        let r2 = eval_reuse_bare(&expr2);
+        let r1 = eval_reuse(&expr1);
+        let r2 = eval_reuse(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -65,7 +65,7 @@ proptest! {
     #[test]
     fn multiplication_identity(a in -1000i64..1000) {
         let expr = format!("(* {} 1)", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -74,7 +74,7 @@ proptest! {
     #[test]
     fn subtraction_inverse_of_addition(a in -500i64..500, b in -500i64..500) {
         let expr = format!("(- (+ {} {}) {})", a, b, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -83,7 +83,7 @@ proptest! {
     #[test]
     fn division_inverse_of_multiplication(a in -100i64..100, b in 1i64..100) {
         let expr = format!("(/ (* {} {}) {})", a, b, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -100,7 +100,7 @@ proptest! {
     #[test]
     fn equality_reflexive(a in -1000i64..1000) {
         let expr = format!("(= {} {})", a, a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -111,8 +111,8 @@ proptest! {
         let expr1 = format!("(= {} {})", a, b);
         let expr2 = format!("(= {} {})", b, a);
 
-        let r1 = eval_reuse_bare(&expr1);
-        let r2 = eval_reuse_bare(&expr2);
+        let r1 = eval_reuse(&expr1);
+        let r2 = eval_reuse(&expr2);
 
         prop_assert!(r1.is_ok(), "expr1 failed: {:?}", r1);
         prop_assert!(r2.is_ok(), "expr2 failed: {:?}", r2);
@@ -122,7 +122,7 @@ proptest! {
     #[test]
     fn less_than_irreflexive(a in -1000i64..1000) {
         let expr = format!("(< {} {})", a, a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(false));
@@ -134,8 +134,8 @@ proptest! {
             let expr1 = format!("(< {} {})", a, b);
             let expr2 = format!("(< {} {})", b, a);
 
-            let r1 = eval_reuse_bare(&expr1);
-            let r2 = eval_reuse_bare(&expr2);
+            let r1 = eval_reuse(&expr1);
+            let r2 = eval_reuse(&expr2);
 
             prop_assert!(r1.is_ok());
             prop_assert!(r2.is_ok());
@@ -155,7 +155,7 @@ proptest! {
     #[test]
     fn if_true_returns_then(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(if true {} {})", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -164,7 +164,7 @@ proptest! {
     #[test]
     fn if_false_returns_else(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(if false {} {})", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -174,7 +174,7 @@ proptest! {
     fn if_with_computed_condition(a in -100i64..100, b in -100i64..100) {
         // (if (< a b) a b) should return the smaller value
         let expr = format!("(if (< {} {}) {} {})", a, b, a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if a < b { a } else { b };
@@ -188,7 +188,7 @@ proptest! {
             "(if (< {} {}) (if (< {} {}) {} {}) {})",
             a, b, a, c, a, c, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
     }
@@ -204,7 +204,7 @@ proptest! {
     #[test]
     fn let_binds_value(a in -1000i64..1000) {
         let expr = format!("(let [x {}] x)", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -213,7 +213,7 @@ proptest! {
     #[test]
     fn let_shadows_outer(outer in -100i64..100, inner in -100i64..100) {
         let expr = format!("(let [x {}] (let [x {}] x))", outer, inner);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(inner));
@@ -226,7 +226,7 @@ proptest! {
             "(let [x {}] (begin (let [x {}] x) x))",
             outer, inner
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer));
@@ -235,7 +235,7 @@ proptest! {
     #[test]
     fn let_multiple_bindings(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(let [x {} y {}] (+ x y))", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -252,7 +252,7 @@ proptest! {
     #[test]
     fn lambda_identity(a in -1000i64..1000) {
         let expr = format!("((fn (x) x) {})", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -261,7 +261,7 @@ proptest! {
     #[test]
     fn lambda_constant(a in -100i64..100, b in -100i64..100) {
         let expr = format!("((fn (x) {}) {})", b, a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -273,7 +273,7 @@ proptest! {
             "(let [y {}] ((fn (x) (+ x y)) {}))",
             captured, arg
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(arg + captured));
@@ -282,7 +282,7 @@ proptest! {
     #[test]
     fn lambda_multiple_args(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         let expr = format!("((fn (x y z) (+ x (+ y z))) {} {} {})", a, b, c);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + c));
@@ -299,7 +299,7 @@ proptest! {
     #[test]
     fn list_first_returns_first(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(first (list {} {}))", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -309,7 +309,7 @@ proptest! {
     fn list_length_correct(len in 0usize..10) {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let expr = format!("(length (list {}))", elements.join(" "));
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -318,7 +318,7 @@ proptest! {
     #[test]
     fn cons_then_first(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(first (pair {} {}))", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -327,7 +327,7 @@ proptest! {
     #[test]
     fn cons_then_rest(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(rest (pair {} {}))", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -345,7 +345,7 @@ proptest! {
     fn not_involution(b in prop::bool::ANY) {
         let bool_str = if b { "true" } else { "false" };
         let expr = format!("(not (not {}))", bool_str);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(b));
@@ -355,7 +355,7 @@ proptest! {
     fn and_with_false_is_false(b in prop::bool::ANY) {
         let bool_str = if b { "true" } else { "false" };
         let expr = format!("(and {} false)", bool_str);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(false));
@@ -365,7 +365,7 @@ proptest! {
     fn or_with_true_is_true(b in prop::bool::ANY) {
         let bool_str = if b { "true" } else { "false" };
         let expr = format!("(or {} true)", bool_str);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(true));
@@ -380,8 +380,8 @@ proptest! {
         let expr1 = format!("(not (and {} {}))", a_str, b_str);
         let expr2 = format!("(or (not {}) (not {}))", a_str, b_str);
 
-        let r1 = eval_reuse_bare(&expr1);
-        let r2 = eval_reuse_bare(&expr2);
+        let r1 = eval_reuse(&expr1);
+        let r2 = eval_reuse(&expr2);
 
         prop_assert!(r1.is_ok());
         prop_assert!(r2.is_ok());
@@ -399,7 +399,7 @@ proptest! {
     #[test]
     fn match_literal_exact(a in -100i64..100) {
         let expr = format!("(match {} {} \"hit\" _ \"miss\")", a, a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("hit"));
@@ -410,7 +410,7 @@ proptest! {
         // Match against a different literal, should fall to wildcard
         let other = a.wrapping_add(1);
         let expr = format!("(match {} {} \"hit\" _ \"miss\")", a, other);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("miss"));
@@ -419,7 +419,7 @@ proptest! {
     #[test]
     fn match_with_computed_body(a in -50i64..50, b in -50i64..50) {
         let expr = format!("(match {} {} (+ {} {}) _ 0)", a, a, a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -441,7 +441,7 @@ proptest! {
         } else {
             format!("(length @[{}])", elements.join(" "))
         };
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -450,7 +450,7 @@ proptest! {
     #[test]
     fn array_ref_first(a in -100i64..100, b in -100i64..100) {
         let expr = format!("(get @[{} {}] 0)", a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -470,7 +470,7 @@ proptest! {
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
         let expr = format!("(match {} {} \"first\" {} \"second\" {} \"third\" _ \"default\")", a, a, b, c);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("first"));
@@ -482,7 +482,7 @@ proptest! {
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
         let expr = format!("(match {} {} \"first\" {} \"second\" {} \"third\" _ \"default\")", b, a, b, c);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("second"));
@@ -494,7 +494,7 @@ proptest! {
         let b = a.wrapping_add(1);
         let c = a.wrapping_add(2);
         let expr = format!("(match {} {} \"first\" {} \"second\" {} \"third\" _ \"default\")", c, a, b, c);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("third"));
@@ -504,7 +504,7 @@ proptest! {
     fn match_with_arithmetic_in_body(a in -50i64..50, b in -50i64..50) {
         // Match with computation in body (the bug we just fixed)
         let expr = format!("(match {} {} (+ {} {}) _ 0)", a, a, a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -513,7 +513,7 @@ proptest! {
     #[test]
     fn match_nil_pattern(a in -100i64..100) {
         let expr = format!("(match nil nil \"is-nil\" {} \"is-num\" _ \"other\")", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("is-nil"));
@@ -538,7 +538,7 @@ proptest! {
             "(let [@sum 0] (begin (each x (list {}) (assign sum (+ sum x))) sum))",
             list_str
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (1..=len as i64).sum();
@@ -549,7 +549,7 @@ proptest! {
     fn each_empty_list_no_iteration(a in -100i64..100) {
         // Each over empty list should not execute body, return nil
         let expr = format!("(let [@x {}] (begin (each y (list) (assign x 999)) x))", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a)); // x unchanged
@@ -576,7 +576,7 @@ proptest! {
         }
         expr.push(')');
 
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(increments as i64));
     }
@@ -589,7 +589,7 @@ proptest! {
                 (begin (c1) (c1) (c2) (list (c1) (c2))))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         // c1 called 3 times: a+1, a+2, a+3
@@ -610,7 +610,7 @@ proptest! {
                  (begin {})))",
             start, calls
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(start + increments as i64));
@@ -625,7 +625,7 @@ proptest! {
                  (begin (c) (c) (c))))",
             start
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(start + 3));
@@ -647,7 +647,7 @@ proptest! {
                    (+ (c1) (c2)))))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a + 3) + (b + 2)));
@@ -661,7 +661,7 @@ proptest! {
                  (begin (add) (add) x)))",
             outer, delta
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(outer + 2 * delta));
@@ -676,7 +676,7 @@ proptest! {
                  (begin (inc) (inc) (dec) (get))))",
             init
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(init + 1)); // +2 -1 = +1
@@ -692,7 +692,7 @@ proptest! {
                  (begin (outer {}) (outer {}))))",
             a, b, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b + b));
@@ -708,7 +708,7 @@ proptest! {
                  (begin (m) (m) (m))))",
             delta, param
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(param + 3 * delta));
@@ -727,7 +727,7 @@ proptest! {
                  (begin {})))",
             init, calls
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = init + values.iter().sum::<i64>();
@@ -749,7 +749,7 @@ proptest! {
             "(if {} (let [x {}] x) (let [y {}] y))",
             cond_str, a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if cond { a } else { b };
@@ -760,7 +760,7 @@ proptest! {
     fn if_in_lambda_body(cond in prop::bool::ANY, a in -100i64..100, b in -100i64..100) {
         let cond_str = if cond { "true" } else { "false" };
         let expr = format!("((fn () (if {} {} {})))", cond_str, a, b);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if cond { a } else { b };
@@ -773,7 +773,7 @@ proptest! {
             "((fn (x) (match x {} \"a\" {} \"b\" _ \"other\")) {})",
             a, b, a
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::string("a"));
@@ -785,7 +785,7 @@ proptest! {
             "(match {} {} ((fn (x) (+ x {})) {}) _ 0)",
             a, a, b, a
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -802,7 +802,7 @@ proptest! {
     #[test]
     fn begin_returns_last(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         let expr = format!("(begin {} {} {})", a, b, c);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(c));
@@ -815,7 +815,7 @@ proptest! {
             "(let [@x {}] (begin (assign x {}) x))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(b));
@@ -832,7 +832,7 @@ proptest! {
     #[test]
     fn cond_first_true(a in -100i64..100, b in -100i64..100, c in -100i64..100) {
         let expr = format!("(cond true {} true {} {})", a, b, c);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -841,7 +841,7 @@ proptest! {
     #[test]
     fn cond_falls_through_to_else(a in -100i64..100) {
         let expr = format!("(cond false 1 false 2 {})", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a));
@@ -853,7 +853,7 @@ proptest! {
             "(cond (< {} {}) \"less\" (= {} {}) \"equal\" \"greater\")",
             a, threshold, a, threshold
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected = if a < threshold {
@@ -877,7 +877,7 @@ proptest! {
     #[test]
     fn quasiquote_with_unquote(a in -100i64..100) {
         let expr = format!("(let [x {}] `(1 ,x 3))", a);
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         // If quasiquote is supported, check result is a list with x interpolated
         if let Ok(val) = result {
@@ -923,7 +923,7 @@ proptest! {
                ((make-adder {}) {}))",
             n, x
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x + n));
@@ -936,7 +936,7 @@ proptest! {
                ((make-mult {}) {}))",
             n, x
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(x * n));
@@ -954,7 +954,7 @@ proptest! {
                 (composed {}))",
             a
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a * 2) + 1));
@@ -973,7 +973,7 @@ proptest! {
         }
         expr.push(')');
 
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(start + n as i64));
@@ -995,7 +995,7 @@ proptest! {
                ((curry-add {}) {}))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -1016,7 +1016,7 @@ proptest! {
                (fact {}))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (1..=n as i64).product();
@@ -1031,7 +1031,7 @@ proptest! {
                (sum-to {}))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (0..=n as i64).sum();
@@ -1047,7 +1047,7 @@ proptest! {
                (my-length (list {})))",
             list_str
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(len as i64));
@@ -1060,7 +1060,7 @@ proptest! {
                (sum-iter {} 0))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         let expected: i64 = (0..=n as i64).sum();
@@ -1074,7 +1074,7 @@ proptest! {
                (is-even {}))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(n % 2 == 0));
@@ -1095,7 +1095,7 @@ proptest! {
                (+ ((first fns) {}) ((first (rest fns)) {})))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int((a + 1) + (b * 2)));
@@ -1109,7 +1109,7 @@ proptest! {
                ((f {}) {}))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a + b));
@@ -1448,7 +1448,7 @@ proptest! {
                (fold-acc process 0 (list {} {} {})))",
             a, b, c
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "parameter name collision bug: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
@@ -1472,7 +1472,7 @@ proptest! {
                (fold-init process 0 (list {} {} {})))",
             a, b, c
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "fold-init failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(2 * (a + b + c)));
@@ -1495,7 +1495,7 @@ proptest! {
                (((outer {}) {}) 3))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "deeply nested lambdas with locals failed: {:?}", result);
         // outer-local = a * 2
@@ -1517,7 +1517,7 @@ proptest! {
                  (+ (f) x)))",
             outer_val, inner_val
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "local shadows captured variable failed: {:?}", result);
         // f returns inner_val (the shadowing local)
@@ -1543,7 +1543,7 @@ proptest! {
                  (+ (f1 {}) (f2 {}))))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "multiple closures with independent locals failed: {:?}", result);
         // f1 returns a * 2, f2 returns b * 3
@@ -1568,7 +1568,7 @@ proptest! {
                (check))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "letrec mutual recursion in lambda failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::bool(n % 2 == 0));
@@ -1584,7 +1584,7 @@ proptest! {
                (outer {}))",
             b, a
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "nested letrec failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a * b));
@@ -1599,7 +1599,7 @@ proptest! {
                  (double-add {})))",
             outer, n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "letrec with captured outer failed: {:?}", result);
         // double-add(n) = add-base(add-base(n)) = (n + base) + base = n + 2*base
@@ -1618,7 +1618,7 @@ proptest! {
                (compute {}))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "self-recursive with local define failed: {:?}", result);
         let expected: i64 = (1..=n as i64).sum();
@@ -1638,7 +1638,7 @@ proptest! {
                  (begin {} (get))))",
             calls
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "counter in letrec failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(increments as i64));
@@ -1652,7 +1652,7 @@ proptest! {
                (f {}))",
             n
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "three-way mutual letrec failed: {:?}", result);
         let expected = match n % 3 {
@@ -1673,7 +1673,7 @@ proptest! {
                   (apply-twice double {})))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "letrec with higher order failed: {:?}", result);
         // apply-twice add-one a = a + 2
@@ -1692,7 +1692,7 @@ proptest! {
                ((outer {}) {}))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "nested lambda with define failed: {:?}", result);
         prop_assert_eq!(result.unwrap(), Value::int(a * 2 + b));
@@ -1711,7 +1711,7 @@ proptest! {
                (compute))",
             a, b
         );
-        let result = eval_reuse_bare(&expr);
+        let result = eval_reuse(&expr);
 
         prop_assert!(result.is_ok(), "sequential defines failed: {:?}", result);
         let x = a;

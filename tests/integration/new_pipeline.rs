@@ -158,32 +158,16 @@ fn test_lambda_with_body() {
 
 #[test]
 fn test_call_simple() {
-    // Note: Function calls to built-in symbols like + may fail during lowering
-    // because the new pipeline doesn't yet have full integration with built-in symbols.
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ 1 2)", &mut symbols, "<test>");
-    // We accept either success or a specific error about unbound variables
-    // since the new pipeline is still being integrated
-    match result {
-        Ok(_) => {}                                    // Success is fine
-        Err(e) if e.contains("Unbound variable") => {} // Expected during integration
-        Err(e) => panic!("Unexpected error: {}", e),
-    }
+    let result = compile("(%add 1 2)", &mut symbols, "<test>");
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 }
 
 #[test]
 fn test_call_nested() {
-    // Note: Function calls to built-in symbols like + may fail during lowering
-    // because the new pipeline doesn't yet have full integration with built-in symbols.
     let mut symbols = SymbolTable::new();
-    let result = compile("(+ (+ 1 2) 3)", &mut symbols, "<test>");
-    // We accept either success or a specific error about unbound variables
-    // since the new pipeline is still being integrated
-    match result {
-        Ok(_) => {}                                    // Success is fine
-        Err(e) if e.contains("Unbound variable") => {} // Expected during integration
-        Err(e) => panic!("Unexpected error: {}", e),
-    }
+    let result = compile("(%add (%add 1 2) 3)", &mut symbols, "<test>");
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 }
 
 // ============ Loop Tests ============
@@ -263,14 +247,14 @@ fn test_closure_capture() {
 #[test]
 fn test_mutual_recursion_setup() {
     assert!(compiles(
-        "(letrec [f (fn (n) (if (= n 0) 0 (g (- n 1)))) g (fn (n) (f n))] f)"
+        "(letrec [f (fn (n) (if (%eq n 0) 0 (g (%sub n 1)))) g (fn (n) (f n))] f)"
     ));
 }
 
 #[test]
 fn test_nested_lets_and_lambdas() {
     assert!(compiles(
-        "(let [x 1] (let [y 2] (fn (z) (+ x (+ y z)))))"
+        "(let [x 1] (let [y 2] (fn (z) (%add x (%add y z)))))"
     ));
 }
 
@@ -364,24 +348,19 @@ fn test_same_code_same_bytecode() {
 #[test]
 fn test_complex_nested_structure() {
     assert!(compiles(
-        "(let [f (fn (x) (if (> x 0) (+ x 1) 0))] (f 5))"
+        "(let [f (fn (x) (if (%gt x 0) (%add x 1) 0))] (f 5))"
     ));
 }
 
 #[test]
 fn test_deeply_nested_expressions() {
-    // Note: Function calls to built-in symbols like + may fail during lowering
     let mut symbols = SymbolTable::new();
     let result = compile(
-        "(+ (+ (+ (+ (+ (+ (+ (+ (+ (+ 1 2) 3) 4) 5) 6) 7) 8) 9) 10) 11)",
+        "(%add (%add (%add (%add (%add (%add (%add (%add (%add (%add 1 2) 3) 4) 5) 6) 7) 8) 9) 10) 11)",
         &mut symbols,
         "<test>",
     );
-    match result {
-        Ok(_) => {}                                    // Success is fine
-        Err(e) if e.contains("Unbound variable") => {} // Expected during integration
-        Err(e) => panic!("Unexpected error: {}", e),
-    }
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 }
 
 #[test]
@@ -435,14 +414,9 @@ fn test_let_shadowing() {
 
 #[test]
 fn test_let_with_complex_init() {
-    // Note: Function calls to built-in symbols like + may fail during lowering
     let mut symbols = SymbolTable::new();
-    let result = compile("(let [x (+ 1 2)] x)", &mut symbols, "<test>");
-    match result {
-        Ok(_) => {}                                    // Success is fine
-        Err(e) if e.contains("Unbound variable") => {} // Expected during integration
-        Err(e) => panic!("Unexpected error: {}", e),
-    }
+    let result = compile("(let [x (%add 1 2)] x)", &mut symbols, "<test>");
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 }
 
 #[test]
@@ -469,7 +443,7 @@ fn test_lambda_many_params() {
 
 #[test]
 fn test_lambda_with_nested_lambda() {
-    assert!(compiles("(fn (x) (fn (y) (+ x y)))"));
+    assert!(compiles("(fn (x) (fn (y) (%add x y)))"));
 }
 
 // ============ Control Flow Edge Cases ============
