@@ -129,9 +129,11 @@ inputs, produce clear error messages, and handle mixed int/float promotion.
 
 ## Behavior
 
-Intrinsics have **no runtime validation**. Passing the wrong types
-(e.g. `(%add "a" "b")`) produces undefined behavior, not a clean error.
-They never emit signals, so their compile-time signal is always `Silent`.
+Intrinsics perform **no compile-time type checking** and emit no signals
+(their compile-time signal is always `Silent`). At runtime, type errors
+crash the process — `(%add "a" "b")` terminates with a `:type-error`,
+`(%div 1 0)` terminates with `:division-by-zero`. There is no undefined
+behavior; every error is a hard crash.
 
 Arithmetic intrinsics operate on integers and floats. Mixed-type operands
 follow the same promotion rules as the VM's arithmetic instructions
