@@ -69,7 +69,10 @@
     (error {:error :type-error
             :message (string "/: expected number, got " (type x))}))
   (if (empty? args)
-    (%div 1.0 x)
+    (begin
+      (when (%eq x 0)
+        (error {:error :division-by-zero :message "/: division by zero"}))
+      (%div 1.0 x))
     (letrec [go (fn [acc xs]
                   (if (empty? xs)
                     acc
@@ -78,33 +81,84 @@
                         (error {:error :type-error
                                 :message (string "/: expected number, got "
                                 (type b))}))
+                      (when (if (integer? b) (%eq b 0) false)
+                        (error {:error :division-by-zero
+                                :message "/: division by zero"}))
                       (go (%div acc b) (rest xs)))))]
       (go x args))))
 
 (defn rem [a b]
   "Truncated remainder. Result has same sign as dividend."
+  (when (%not (number? a))
+    (error {:error :type-error
+            :message (string "rem: expected number, got " (type a))}))
+  (when (%not (number? b))
+    (error {:error :type-error
+            :message (string "rem: expected number, got " (type b))}))
+  (when (if (integer? b) (%eq b 0) false)
+    (error {:error :division-by-zero :message "rem: division by zero"}))
   (%rem a b))
 
 (defn mod [a b]
   "Euclidean modulo. Result has same sign as divisor."
+  (when (%not (integer? a))
+    (error {:error :type-error
+            :message (string "mod: expected integer, got " (type a))}))
+  (when (%not (integer? b))
+    (error {:error :type-error
+            :message (string "mod: expected integer, got " (type b))}))
+  (when (%eq b 0)
+    (error {:error :division-by-zero :message "mod: division by zero"}))
   (%mod a b))
 
 ## ── Comparison ───────────────────────────────────────────────────────
 
 (defn < [a b & more]
   "Test strictly ascending order. Works on numbers, strings, and keywords."
+  (when (%not (or (number? a) (string? a) (keyword? a)))
+    (error {:error :type-error
+            :message (string "<: expected number, string, or keyword, got "
+                             (type a))}))
+  (when (%not (or (number? b) (string? b) (keyword? b)))
+    (error {:error :type-error
+            :message (string "<: expected number, string, or keyword, got "
+                             (type b))}))
   (if (empty? more) (%lt a b) (and (%lt a b) (apply < b more))))
 
 (defn > [a b & more]
   "Test strictly descending order. Works on numbers, strings, and keywords."
+  (when (%not (or (number? a) (string? a) (keyword? a)))
+    (error {:error :type-error
+            :message (string ">: expected number, string, or keyword, got "
+                             (type a))}))
+  (when (%not (or (number? b) (string? b) (keyword? b)))
+    (error {:error :type-error
+            :message (string ">: expected number, string, or keyword, got "
+                             (type b))}))
   (if (empty? more) (%gt a b) (and (%gt a b) (apply > b more))))
 
 (defn <= [a b & more]
   "Test non-descending order. Works on numbers, strings, and keywords."
+  (when (%not (or (number? a) (string? a) (keyword? a)))
+    (error {:error :type-error
+            :message (string "<=: expected number, string, or keyword, got "
+                             (type a))}))
+  (when (%not (or (number? b) (string? b) (keyword? b)))
+    (error {:error :type-error
+            :message (string "<=: expected number, string, or keyword, got "
+                             (type b))}))
   (if (empty? more) (%le a b) (and (%le a b) (apply <= b more))))
 
 (defn >= [a b & more]
   "Test non-ascending order. Works on numbers, strings, and keywords."
+  (when (%not (or (number? a) (string? a) (keyword? a)))
+    (error {:error :type-error
+            :message (string ">=: expected number, string, or keyword, got "
+                             (type a))}))
+  (when (%not (or (number? b) (string? b) (keyword? b)))
+    (error {:error :type-error
+            :message (string ">=: expected number, string, or keyword, got "
+                             (type b))}))
   (if (empty? more) (%ge a b) (and (%ge a b) (apply >= b more))))
 
 ## ── Logic and pairs ──────────────────────────────────────────────────

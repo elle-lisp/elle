@@ -129,11 +129,17 @@ inputs, produce clear error messages, and handle mixed int/float promotion.
 
 ## Behavior
 
-Intrinsics perform **no compile-time type checking** and emit no signals
-(their compile-time signal is always `Silent`). At runtime, type errors
-crash the process — `(%add "a" "b")` terminates with a `:type-error`,
-`(%div 1 0)` terminates with `:division-by-zero`. There is no undefined
-behavior; every error is a hard crash.
+Intrinsics are **unsafe**. They perform no compile-time type checking
+and emit no signals (compile-time signal is always `Silent`). At runtime,
+passing wrong types causes a **Rust panic** — the entire Elle process
+aborts immediately. The error is not catchable by `try`/`catch`, not
+propagatable through fiber signals, and not recoverable. This is by
+design: `Silent` means silent, and the signal system's soundness depends
+on intrinsics never emitting `:error`.
+
+- `(%add "a" "b")` — **panics**: `%add: type error (string and string)`
+- `(%div 1 0)` — **panics**: `%div: division by zero`
+- `(%lt nil 5)` — **panics**: `%lt: expected number, string, or keyword`
 
 Arithmetic intrinsics operate on integers and floats. Mixed-type operands
 follow the same promotion rules as the VM's arithmetic instructions
@@ -146,9 +152,11 @@ The stdlib wrappers (`+`, `-`, `*`, `/`, `rem`, `mod`, `<`, `>`, `<=`,
 
 1. Validate argument types at runtime
 2. Handle variadic arguments (e.g. `(+ 1 2 3)`)
-3. Emit `:error` on type mismatches
-4. Allocate rest-arg lists for variadic dispatch
+3. Emit `:error` on type mismatches (catchable, propagates through fibers)
+4. Check division by zero before calling `%div`/`%rem`/`%mod`
+5. Allocate rest-arg lists for variadic dispatch
 
 Intrinsics bypass all of this. A function using only intrinsics for
 arithmetic has signal `Silent` and allocates nothing beyond its own
-parameters.
+parameters. **The caller is responsible for ensuring type safety.** If
+the caller cannot guarantee correct types, use the stdlib wrappers.
