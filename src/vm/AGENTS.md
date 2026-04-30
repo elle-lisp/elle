@@ -135,8 +135,11 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    return `()` (not `Result`). VM bugs (stack underflow, bad bytecode) panic
    immediately. Primitives and stdlib wrappers produce catchable errors via
    `fiber.signal = (SIG_ERROR, error_val(kind, msg))`. Intrinsic bytecode
-   ops (Add, Sub, Mul, Div, Lt, etc.) **panic** on type errors — they never
-   set `fiber.signal`. This makes their compile-time `Silent` signal truthful.
+   ops (Add, Sub, Mul, Div, Lt, etc.) are **unchecked** — wrong types produce
+   garbage, not crashes or signals. This matches WASM/SPIR-V semantics and
+   makes their compile-time `Silent` signal truthful. Under `--checked-intrinsics`,
+   the compiler routes %-calls through NativeFn primitives that validate types
+   and panic on mismatch (belt-and-suspenders in `call.rs`).
    See `set_error()` in `call.rs` and `fiber.rs` for the signal-based helper.
 
 ## Key VM fields
@@ -351,8 +354,8 @@ to see parent-established parameter bindings.
 | `parameters.rs` | ~50 | Parameter resolution: `resolve_parameter` helper |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |
 | `closure.rs` | ~100 | MakeClosure |
-| `arithmetic.rs` | ~150 | Add, Sub, Mul, Div, Rem, BitAnd/Or/Xor/Not, Shl, Shr, IntToFloat, FloatToInt. **Panic on type errors** — intrinsics are unsafe, Silent means silent. |
-| `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge. Eq/Ne return false for incomparable types. Lt/Gt/Le/Ge **panic on incomparable types**. |
+| `arithmetic.rs` | ~150 | Add, Sub, Mul, Div, Rem, BitAnd/Or/Xor/Not, Shl, Shr, IntToFloat, FloatToInt. **Unchecked** — wrong types produce garbage (not crashes). Matches WASM/SPIR-V semantics. |
+| `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge. Eq/Ne return false for incomparable types. Lt/Gt/Le/Ge return false for incomparable types (unchecked). |
 | `types.rs` | ~50 | IsNil, IsEmptyList, IsPair, Not |
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector, `handle_struct_rest` |
 | `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |

@@ -909,6 +909,10 @@ impl VM {
                 TableKey::from_value(&Value::keyword("flip")).unwrap(),
                 Value::bool(rc.flip),
             );
+            map.insert(
+                TableKey::from_value(&Value::keyword("checked-intrinsics")).unwrap(),
+                Value::bool(crate::config::get().checked_intrinsics),
+            );
             (SIG_OK, Value::struct_from(map))
         } else if let Some(kw) = arg.as_keyword_name() {
             match kw.as_str() {
@@ -922,6 +926,9 @@ impl VM {
                 }
                 "stats" => (SIG_OK, Value::bool(rc.stats)),
                 "flip" => (SIG_OK, Value::bool(rc.flip)),
+                "checked-intrinsics" => {
+                    (SIG_OK, Value::bool(crate::config::get().checked_intrinsics))
+                }
                 _ => (
                     SIG_ERROR,
                     error_val(

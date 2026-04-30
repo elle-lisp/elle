@@ -7,9 +7,9 @@ use crate::value::Value;
 // ---------------------------------------------------------------------------
 
 /// Binary integer op: pop two ints, apply `$op`, push result.
-/// Panics on type mismatch — intrinsics are unsafe, Silent means silent.
+/// Unchecked — wrong types produce garbage. Matches WASM/SPIR-V semantics.
 macro_rules! int_binop {
-    ($name:ident, $instr:literal, $sym:literal, $op:expr) => {
+    ($name:ident, $instr:literal, $op:expr) => {
         pub(crate) fn $name(vm: &mut VM) {
             let b_val = vm
                 .fiber
@@ -21,27 +21,20 @@ macro_rules! int_binop {
                 .stack
                 .pop()
                 .expect(concat!("VM bug: Stack underflow on ", $instr));
-            let a = a_val.as_int().unwrap_or_else(|| {
-                panic!(
-                    concat!($sym, ": expected integer, got {}"),
-                    a_val.type_name()
-                )
-            });
-            let b = b_val.as_int().unwrap_or_else(|| {
-                panic!(
-                    concat!($sym, ": expected integer, got {}"),
-                    b_val.type_name()
-                )
-            });
+            // SAFETY: intrinsics guarantee integer types at compile time.
+            // Wrong types → garbage (not a crash). This matches WASM I64Add etc.
+            let a = a_val.as_int().unwrap_or(0);
+            let b = b_val.as_int().unwrap_or(0);
             vm.fiber.stack.push(Value::int($op(a, b)));
         }
     };
 }
 
 /// Generic binary op via arithmetic module: pop two values, delegate.
-/// Panics on type mismatch — intrinsics are unsafe, Silent means silent.
+/// Unchecked — wrong types produce garbage. Matches WASM/SPIR-V semantics.
+/// Integer overflow wraps (wrapping_add/sub/mul) to match WASM I64Add etc.
 macro_rules! generic_binop {
-    ($name:ident, $instr:literal, $arith_fn:path) => {
+    ($name:ident, $instr:literal, $arith_fn:path, $int_op:expr) => {
         pub(crate) fn $name(vm: &mut VM) {
             let b = vm
                 .fiber
@@ -53,13 +46,15 @@ macro_rules! generic_binop {
                 .stack
                 .pop()
                 .expect(concat!("VM bug: Stack underflow on ", $instr));
+            // Fast path: both ints → wrapping arithmetic (no checked_add)
+            if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+                vm.fiber.stack.push(Value::int($int_op(x, y)));
+                return;
+            }
             match $arith_fn(&a, &b) {
                 Ok(result) => vm.fiber.stack.push(result),
-                Err(_) => panic!(
-                    concat!("%", $instr, ": type error ({} and {})"),
-                    a.type_name(),
-                    b.type_name()
-                ),
+                // Wrong types → push nil as garbage sentinel.
+                Err(_) => vm.fiber.stack.push(Value::NIL),
             }
         }
     };
@@ -69,9 +64,9 @@ macro_rules! generic_binop {
 // Integer-specialized ops
 // ---------------------------------------------------------------------------
 
-int_binop!(handle_add_int, "AddInt", "%add", |a: i64, b: i64| a + b);
-int_binop!(handle_sub_int, "SubInt", "%sub", |a: i64, b: i64| a - b);
-int_binop!(handle_mul_int, "MulInt", "%mul", |a: i64, b: i64| a * b);
+int_binop!(handle_add_int, "AddInt", |a: i64, b: i64| a + b);
+int_binop!(handle_sub_int, "SubInt", |a: i64, b: i64| a - b);
+int_binop!(handle_mul_int, "MulInt", |a: i64, b: i64| a * b);
 
 // DivInt needs special div-by-zero handling
 pub(crate) fn handle_div_int(vm: &mut VM) {
@@ -85,26 +80,44 @@ pub(crate) fn handle_div_int(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on DivInt");
-    let a = a_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%div: expected integer, got {}", a_val.type_name()));
-    let b = b_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%div: expected integer, got {}", b_val.type_name()));
+    let a = a_val.as_int().unwrap_or(0);
+    let b = b_val.as_int().unwrap_or(1);
+    // Unchecked: div by zero → 0 (garbage, not a crash)
     if b == 0 {
-        panic!("%div: division by zero");
+        vm.fiber.stack.push(Value::int(0));
+    } else {
+        vm.fiber.stack.push(Value::int(a / b));
     }
-    vm.fiber.stack.push(Value::int(a / b));
 }
 
 // ---------------------------------------------------------------------------
 // Generic (mixed int/float) ops
 // ---------------------------------------------------------------------------
 
-generic_binop!(handle_add, "add", arithmetic::add_values);
-generic_binop!(handle_sub, "sub", arithmetic::sub_values);
-generic_binop!(handle_mul, "mul", arithmetic::mul_values);
-generic_binop!(handle_rem, "rem", arithmetic::remainder_values);
+generic_binop!(
+    handle_add,
+    "add",
+    arithmetic::add_values,
+    |x: i64, y: i64| x.wrapping_add(y)
+);
+generic_binop!(
+    handle_sub,
+    "sub",
+    arithmetic::sub_values,
+    |x: i64, y: i64| x.wrapping_sub(y)
+);
+generic_binop!(
+    handle_mul,
+    "mul",
+    arithmetic::mul_values,
+    |x: i64, y: i64| x.wrapping_mul(y)
+);
+generic_binop!(
+    handle_rem,
+    "rem",
+    arithmetic::remainder_values,
+    |x: i64, y: i64| if y == 0 { 0 } else { x.wrapping_rem(y) }
+);
 
 // Div needs the integer div-by-zero pre-check
 pub(crate) fn handle_div(vm: &mut VM) {
@@ -119,17 +132,17 @@ pub(crate) fn handle_div(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on Div");
 
-    // Division by zero: panic for pure integer division.
-    // Float division follows IEEE 754 (returns Inf/-Inf/NaN).
+    // Division by zero: return 0 for integer, IEEE 754 for float.
     if let (Some(_), Some(y)) = (a.as_int(), b.as_int()) {
         if y == 0 {
-            panic!("%div: division by zero");
+            vm.fiber.stack.push(Value::int(0));
+            return;
         }
     }
 
     match arithmetic::div_values(&a, &b) {
         Ok(result) => vm.fiber.stack.push(result),
-        Err(_) => panic!("%div: type error ({} and {})", a.type_name(), b.type_name()),
+        Err(_) => vm.fiber.stack.push(Value::NIL),
     }
 }
 
@@ -137,9 +150,9 @@ pub(crate) fn handle_div(vm: &mut VM) {
 // Bitwise ops
 // ---------------------------------------------------------------------------
 
-int_binop!(handle_bit_and, "BitAnd", "%bit-and", |a: i64, b: i64| a & b);
-int_binop!(handle_bit_or, "BitOr", "%bit-or", |a: i64, b: i64| a | b);
-int_binop!(handle_bit_xor, "BitXor", "%bit-xor", |a: i64, b: i64| a ^ b);
+int_binop!(handle_bit_and, "BitAnd", |a: i64, b: i64| a & b);
+int_binop!(handle_bit_or, "BitOr", |a: i64, b: i64| a | b);
+int_binop!(handle_bit_xor, "BitXor", |a: i64, b: i64| a ^ b);
 
 // BitNot is unary
 pub(crate) fn handle_bit_not(vm: &mut VM) {
@@ -148,9 +161,7 @@ pub(crate) fn handle_bit_not(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on BitNot");
-    let a = a_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%bit-not: expected integer, got {}", a_val.type_name()));
+    let a = a_val.as_int().unwrap_or(0);
     vm.fiber.stack.push(Value::int(!a));
 }
 
@@ -166,12 +177,8 @@ pub(crate) fn handle_shl(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on Shl");
-    let a = a_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%shl: expected integer, got {}", a_val.type_name()));
-    let b = b_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%shl: expected integer, got {}", b_val.type_name()));
+    let a = a_val.as_int().unwrap_or(0);
+    let b = b_val.as_int().unwrap_or(0);
     let shift = b.clamp(0, 63) as u32;
     vm.fiber.stack.push(Value::int(a << shift));
 }
@@ -191,7 +198,8 @@ pub(crate) fn handle_int_to_float(vm: &mut VM) {
     } else if val.as_float().is_some() {
         vm.fiber.stack.push(val); // identity
     } else {
-        panic!("%float: expected number, got {}", val.type_name());
+        // Unchecked: wrong type → push 0.0 as garbage
+        vm.fiber.stack.push(Value::float(0.0));
     }
 }
 
@@ -206,7 +214,8 @@ pub(crate) fn handle_float_to_int(vm: &mut VM) {
     } else if val.as_int().is_some() {
         vm.fiber.stack.push(val); // identity
     } else {
-        panic!("%int: expected number, got {}", val.type_name());
+        // Unchecked: wrong type → push 0 as garbage
+        vm.fiber.stack.push(Value::int(0));
     }
 }
 
@@ -221,12 +230,8 @@ pub(crate) fn handle_shr(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on Shr");
-    let a = a_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%shr: expected integer, got {}", a_val.type_name()));
-    let b = b_val
-        .as_int()
-        .unwrap_or_else(|| panic!("%shr: expected integer, got {}", b_val.type_name()));
+    let a = a_val.as_int().unwrap_or(0);
+    let b = b_val.as_int().unwrap_or(0);
     let shift = b.clamp(0, 63) as u32;
     vm.fiber.stack.push(Value::int(a >> shift));
 }
@@ -312,11 +317,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "%bit-and: expected integer")]
-    fn test_handle_bit_and_type_error() {
+    fn test_handle_bit_and_type_mismatch_produces_garbage() {
+        // With unchecked intrinsics, wrong types produce garbage, not panics
         let mut vm = make_vm();
         vm.fiber.stack.push(Value::int(12));
         vm.fiber.stack.push(Value::float(10.0));
         handle_bit_and(&mut vm);
+        // Should produce some value (garbage), not panic
+        assert!(vm.fiber.stack.pop().is_some());
     }
 }

@@ -6,6 +6,7 @@
 # regression detection.
 
 (def res ((import-file "lib/resource.lisp")))
+(def checked? (vm/config :checked-intrinsics))
 
 # ── Helper definitions ────────────────────────────────────────────
 
@@ -165,46 +166,56 @@
                       (if (= (entry 0) name) (entry 1) (loop (%add i 1))))))]
     (loop 0)))
 
+# Under --checked-intrinsics, escape analysis sees Call instructions for
+# %-intrinsics and sets outward_heap_set=true, disabling scope regions
+# and flip rotation. Allocation bounds are only validated in default mode.
+
 # TCO: net allocs and peak must be small — not proportional to iteration count
 (let [m (find-result "tco-loop-10000")]
-  (assert (%lt (m :allocs) 100)
-          "tco-loop-10000: net allocs must be bounded (swap pool rotation working)")
-  (assert (%lt (m :peak) 10)
-          "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 100)
+            "tco-loop-10000: net allocs must be bounded (swap pool rotation working)")
+    (assert (%lt (m :peak) 10)
+            "tco-loop-10000: peak must be bounded (no per-iteration allocs)")))
 
 # TCO with per-iteration struct + pair: rotation keeps this bounded at
 # function-entry scope. tco-alloc replaces `prev` each iteration; the
 # rotation pool frees the previous iteration's struct (and its inner
 # pair) before the next iteration lives long enough to accumulate.
 (let [m (find-result "tco-alloc-10000")]
-  (assert (%lt (m :allocs) 10) "tco-alloc-10000: allocs bounded by rotation"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 10) "tco-alloc-10000: allocs bounded by rotation")))
 
 # TCO replace: struct replaced each iteration, no sub-expression allocs.
 # Rotation frees the prev struct → allocs and peak bounded.
 (let [m (find-result "tco-replace-10000")]
-  (assert (%lt (m :allocs) 10)
-          "tco-replace-10000: allocs bounded (rotation working)")
-  (assert (%lt (m :peak) 10)
-          "tco-replace-10000: peak bounded (rotation working)"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 10)
+            "tco-replace-10000: allocs bounded (rotation working)")
+    (assert (%lt (m :peak) 10)
+            "tco-replace-10000: peak bounded (rotation working)")))
 
 # TCO mixed: both `prev` and `acc` are replaced each iteration.
 # `acc` aliases via `(pair i acc)` — trampoline rotation considered
 # this unsafe, but function-level flip rotation (now on by default)
 # resets alloc_count at each tail call, keeping net allocs bounded.
 (let [m (find-result "tco-mixed-10000")]
-  (assert (%lt (m :allocs) 100)
-          "tco-mixed-10000: flip rotation keeps allocs bounded"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 100)
+            "tco-mixed-10000: flip rotation keeps allocs bounded")))
 
 # fib: pure arithmetic, no heap objects expected
 (let [m (find-result "fib-15")]
-  (assert (= (m :allocs) 0)
-          "fib-15: pure arithmetic should allocate 0 heap objects"))
+  (when (not checked?)
+    (assert (= (m :allocs) 0)
+            "fib-15: pure arithmetic should allocate 0 heap objects")))
 
 # pair-build-100: tail-recursive build-list gets flip rotation,
 # so net allocs (visible_len delta) is bounded, not 100.
 (let [m (find-result "pair-build-100")]
-  (assert (%lt (m :allocs) 10)
-          "pair-build-100: flip rotation keeps allocs bounded"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 10)
+            "pair-build-100: flip rotation keeps allocs bounded")))
 
 # string-build-100: flip rotation resets alloc_count at each tail call,
 # so net allocs may be 0 despite actual heap activity. Check peak instead.
@@ -217,13 +228,15 @@
 # from both a and b via callable struct syntax before the tail call),
 # so allocs scale with iteration count (~2 per iter = 200 + overhead).
 (let [m (find-result "let-drop-struct")]
-  (assert (%lt (m :allocs) 300)
-          "let-drop-struct: allocs bounded by 2 per iteration"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 300)
+            "let-drop-struct: allocs bounded by 2 per iteration")))
 
 # tco-pair-replace: rotation should keep allocs at minimum
 (let [m (find-result "tco-pair-replace")]
-  (assert (%lt (m :allocs) 10)
-          "tco-pair-replace: allocs bounded (rotation working)"))
+  (when (not checked?)
+    (assert (%lt (m :allocs) 10)
+            "tco-pair-replace: allocs bounded (rotation working)")))
 
 # All measurements should have non-negative allocs
 (each entry in results
