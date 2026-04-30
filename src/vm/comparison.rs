@@ -1,5 +1,5 @@
 use super::core::VM;
-use crate::value::{error_val, Value, SIG_ERROR};
+use crate::value::Value;
 
 pub(crate) fn handle_eq(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
@@ -27,190 +27,51 @@ pub(crate) fn handle_eq(vm: &mut VM) {
     vm.fiber.stack.push(Value::FALSE);
 }
 
-pub(crate) fn handle_lt(vm: &mut VM) {
-    let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Lt");
-    let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Lt");
-    let result = match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
-            if x < y {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            }
-        }
-        _ => match (a.as_number(), b.as_number()) {
-            (Some(x), Some(y)) => {
-                if x < y {
-                    Value::TRUE
-                } else {
-                    Value::FALSE
-                }
-            }
-            _ => {
-                if let Some(ord) = a.compare_str(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_lt()));
-                    return;
-                }
-                if let Some(ord) = a.compare_keyword(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_lt()));
-                    return;
-                }
-                vm.fiber.signal = Some((
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "<: expected number, string, or keyword, got {} and {}",
+/// Comparison helper macro. Panics on incomparable types.
+macro_rules! cmp_handler {
+    ($name:ident, $sym:literal, $int_cmp:expr, $float_cmp:expr, $ord_method:ident) => {
+        pub(crate) fn $name(vm: &mut VM) {
+            let b = vm
+                .fiber
+                .stack
+                .pop()
+                .expect(concat!("VM bug: Stack underflow on ", $sym));
+            let a = vm
+                .fiber
+                .stack
+                .pop()
+                .expect(concat!("VM bug: Stack underflow on ", $sym));
+            let result = match (a.as_int(), b.as_int()) {
+                (Some(x), Some(y)) => Value::bool($int_cmp(x, y)),
+                _ => match (a.as_number(), b.as_number()) {
+                    (Some(x), Some(y)) => Value::bool($float_cmp(x, y)),
+                    _ => {
+                        if let Some(ord) = a.compare_str(&b) {
+                            vm.fiber.stack.push(Value::bool(ord.$ord_method()));
+                            return;
+                        }
+                        if let Some(ord) = a.compare_keyword(&b) {
+                            vm.fiber.stack.push(Value::bool(ord.$ord_method()));
+                            return;
+                        }
+                        panic!(
+                            concat!(
+                                "%",
+                                $sym,
+                                ": expected number, string, or keyword, got {} and {}"
+                            ),
                             a.type_name(),
                             b.type_name()
-                        ),
-                    ),
-                ));
-                vm.fiber.stack.push(Value::NIL);
-                return;
-            }
-        },
+                        );
+                    }
+                },
+            };
+            vm.fiber.stack.push(result);
+        }
     };
-    vm.fiber.stack.push(result);
 }
 
-pub(crate) fn handle_gt(vm: &mut VM) {
-    let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Gt");
-    let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Gt");
-    let result = match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
-            if x > y {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            }
-        }
-        _ => match (a.as_number(), b.as_number()) {
-            (Some(x), Some(y)) => {
-                if x > y {
-                    Value::TRUE
-                } else {
-                    Value::FALSE
-                }
-            }
-            _ => {
-                if let Some(ord) = a.compare_str(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_gt()));
-                    return;
-                }
-                if let Some(ord) = a.compare_keyword(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_gt()));
-                    return;
-                }
-                vm.fiber.signal = Some((
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            ">: expected number, string, or keyword, got {} and {}",
-                            a.type_name(),
-                            b.type_name()
-                        ),
-                    ),
-                ));
-                vm.fiber.stack.push(Value::NIL);
-                return;
-            }
-        },
-    };
-    vm.fiber.stack.push(result);
-}
-
-pub(crate) fn handle_le(vm: &mut VM) {
-    let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Le");
-    let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Le");
-    let result = match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
-            if x <= y {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            }
-        }
-        _ => match (a.as_number(), b.as_number()) {
-            (Some(x), Some(y)) => {
-                if x <= y {
-                    Value::TRUE
-                } else {
-                    Value::FALSE
-                }
-            }
-            _ => {
-                if let Some(ord) = a.compare_str(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_le()));
-                    return;
-                }
-                if let Some(ord) = a.compare_keyword(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_le()));
-                    return;
-                }
-                vm.fiber.signal = Some((
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "<=: expected number, string, or keyword, got {} and {}",
-                            a.type_name(),
-                            b.type_name()
-                        ),
-                    ),
-                ));
-                vm.fiber.stack.push(Value::NIL);
-                return;
-            }
-        },
-    };
-    vm.fiber.stack.push(result);
-}
-
-pub(crate) fn handle_ge(vm: &mut VM) {
-    let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Ge");
-    let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Ge");
-    let result = match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
-            if x >= y {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            }
-        }
-        _ => match (a.as_number(), b.as_number()) {
-            (Some(x), Some(y)) => {
-                if x >= y {
-                    Value::TRUE
-                } else {
-                    Value::FALSE
-                }
-            }
-            _ => {
-                if let Some(ord) = a.compare_str(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_ge()));
-                    return;
-                }
-                if let Some(ord) = a.compare_keyword(&b) {
-                    vm.fiber.stack.push(Value::bool(ord.is_ge()));
-                    return;
-                }
-                vm.fiber.signal = Some((
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            ">=: expected number, string, or keyword, got {} and {}",
-                            a.type_name(),
-                            b.type_name()
-                        ),
-                    ),
-                ));
-                vm.fiber.stack.push(Value::NIL);
-                return;
-            }
-        },
-    };
-    vm.fiber.stack.push(result);
-}
+cmp_handler!(handle_lt, "lt", |a: i64, b: i64| a < b, |a: f64, b: f64| a < b, is_lt);
+cmp_handler!(handle_gt, "gt", |a: i64, b: i64| a > b, |a: f64, b: f64| a > b, is_gt);
+cmp_handler!(handle_le, "le", |a: i64, b: i64| a <= b, |a: f64, b: f64| a <= b, is_le);
+cmp_handler!(handle_ge, "ge", |a: i64, b: i64| a >= b, |a: f64, b: f64| a >= b, is_ge);
