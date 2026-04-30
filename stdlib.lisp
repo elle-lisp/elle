@@ -17,6 +17,106 @@
 ## - Stream ports: port/lines, port/chunks, port/writer
 ## - Subprocess convenience: subprocess/system
 
+## ── Arithmetic ────────────────────────────────────────────────────────
+
+(defn + [& args]
+  "Sum all arguments. Returns 0 for no arguments."
+  (letrec [go (fn [acc xs]
+                (if (empty? xs)
+                  acc
+                  (let [b (first xs)]
+                    (when (%not (number? b))
+                      (error {:error :type-error
+                              :message (string "+: expected number, got "
+                              (type b))}))
+                    (go (%add acc b) (rest xs)))))]
+    (go 0 args)))
+
+(defn - [x & args]
+  "Subtract arguments left-to-right. Single arg negates."
+  (when (%not (number? x))
+    (error {:error :type-error
+            :message (string "-: expected number, got " (type x))}))
+  (if (empty? args)
+    (%sub x)
+    (letrec [go (fn [acc xs]
+                  (if (empty? xs)
+                    acc
+                    (let [b (first xs)]
+                      (when (%not (number? b))
+                        (error {:error :type-error
+                                :message (string "-: expected number, got "
+                                (type b))}))
+                      (go (%sub acc b) (rest xs)))))]
+      (go x args))))
+
+(defn * [& args]
+  "Multiply all arguments. Returns 1 for no arguments."
+  (letrec [go (fn [acc xs]
+                (if (empty? xs)
+                  acc
+                  (let [b (first xs)]
+                    (when (%not (number? b))
+                      (error {:error :type-error
+                              :message (string "*: expected number, got "
+                              (type b))}))
+                    (go (%mul acc b) (rest xs)))))]
+    (go 1 args)))
+
+(defn / [x & args]
+  "Divide arguments left-to-right. Single arg takes reciprocal."
+  (when (%not (number? x))
+    (error {:error :type-error
+            :message (string "/: expected number, got " (type x))}))
+  (if (empty? args)
+    (%div 1.0 x)
+    (letrec [go (fn [acc xs]
+                  (if (empty? xs)
+                    acc
+                    (let [b (first xs)]
+                      (when (%not (number? b))
+                        (error {:error :type-error
+                                :message (string "/: expected number, got "
+                                (type b))}))
+                      (go (%div acc b) (rest xs)))))]
+      (go x args))))
+
+(defn rem [a b]
+  "Truncated remainder. Result has same sign as dividend."
+  (%rem a b))
+
+(defn mod [a b]
+  "Euclidean modulo. Result has same sign as divisor."
+  (%mod a b))
+
+## ── Comparison ───────────────────────────────────────────────────────
+
+(defn < [a b & more]
+  "Test strictly ascending order. Works on numbers, strings, and keywords."
+  (if (empty? more) (%lt a b) (and (%lt a b) (apply < b more))))
+
+(defn > [a b & more]
+  "Test strictly descending order. Works on numbers, strings, and keywords."
+  (if (empty? more) (%gt a b) (and (%gt a b) (apply > b more))))
+
+(defn <= [a b & more]
+  "Test non-descending order. Works on numbers, strings, and keywords."
+  (if (empty? more) (%le a b) (and (%le a b) (apply <= b more))))
+
+(defn >= [a b & more]
+  "Test non-ascending order. Works on numbers, strings, and keywords."
+  (if (empty? more) (%ge a b) (and (%ge a b) (apply >= b more))))
+
+## ── Logic and pairs ──────────────────────────────────────────────────
+
+(defn not [x & more]
+  "Logical NOT. Single arg: (not x). Multiple args: (not a b c) = (and (not a) (not b) (not c))."
+  (if (empty? more) (%not x) (if x false (apply not more))))
+
+(defn pair [a b]
+  "Construct a pair with head and tail."
+  (%pair a b))
+
 ## ── Higher-order functions ──────────────────────────────────────────
 
 (defn map [f coll]
@@ -1670,7 +1770,19 @@
 ## Called by init_stdlib to register stdlib functions as primitives.
 
 (fn []
-  {:map map
+  {:+ +
+   :- -
+   :* *
+   :/ /
+   :rem rem
+   :mod mod
+   :< <
+   :> >
+   :<= <=
+   :>= >=
+   :not not
+   :pair pair
+   :map map
    :filter filter
    :fold fold
    :reduce reduce

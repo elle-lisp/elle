@@ -153,49 +153,44 @@ mod tests {
     #[test]
     fn test_builtin_arity() {
         use crate::value::Arity;
-        assert_eq!(builtin_arity("+"), Some(Arity::AtLeast(0)));
-        assert_eq!(builtin_arity("pair"), Some(Arity::Exact(2)));
+        // +, pair moved to stdlib; test with remaining Rust primitives
+        assert_eq!(builtin_arity("abs"), Some(Arity::Exact(1)));
         assert_eq!(builtin_arity("list"), Some(Arity::AtLeast(0)));
         assert_eq!(builtin_arity("undefined"), None);
     }
 
     #[test]
     fn test_variadic_builtins_no_false_w002() {
-        // (+ 1 2 3), (* 1 2 3 4), (- 10 2 2 2 2) must not produce W002
+        // list is variadic (AtLeast(0)); calling with multiple args must not produce W002
         let mut symbols = crate::SymbolTable::new();
         let mut diagnostics = Vec::new();
 
-        let plus = symbols.intern("+");
-        check_call_arity(plus, 3, &None, &symbols, &mut diagnostics);
-        assert!(diagnostics.is_empty(), "W002 false positive for (+ 1 2 3)");
-
-        let star = symbols.intern("*");
-        check_call_arity(star, 4, &None, &symbols, &mut diagnostics);
+        let list = symbols.intern("list");
+        check_call_arity(list, 3, &None, &symbols, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "W002 false positive for (* 1 2 3 4)"
+            "W002 false positive for (list 1 2 3)"
         );
 
-        let minus = symbols.intern("-");
-        check_call_arity(minus, 5, &None, &symbols, &mut diagnostics);
+        check_call_arity(list, 5, &None, &symbols, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "W002 false positive for (- 10 2 2 2 2)"
+            "W002 false positive for (list 1 2 3 4 5)"
         );
     }
 
     #[test]
     fn test_exact_arity_still_warns() {
-        // cons expects exactly 2 args
+        // abs expects exactly 1 arg
         let mut symbols = crate::SymbolTable::new();
         let mut diagnostics = Vec::new();
 
-        let pair = symbols.intern("pair");
-        check_call_arity(pair, 1, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (pair 1)");
+        let abs = symbols.intern("abs");
+        check_call_arity(abs, 0, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (abs)");
 
         diagnostics.clear();
-        check_call_arity(pair, 3, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (pair 1 2 3)");
+        check_call_arity(abs, 2, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (abs 1 2)");
     }
 }

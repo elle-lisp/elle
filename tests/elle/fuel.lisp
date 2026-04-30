@@ -16,7 +16,7 @@
 # so we can observe :paused status directly without a wrapper.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn (n) (if (< n 100) (loop (+ n 1)) n))]
+                     (letrec [loop (fn (n) (if (%lt n 100) (loop (%add n 1)) n))]
                        (loop 0))) |:fuel|)]
   (fiber/set-fuel f 5)
   (fiber/resume f)
@@ -39,7 +39,7 @@
 
 (let [f (fiber/new (fn []
                      (defn count-calls [n]
-                       (if (= n 0) "done" (count-calls (- n 1))))
+                       (if (= n 0) "done" (count-calls (%sub n 1))))
                      (count-calls 100)) |:fuel|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
@@ -71,7 +71,9 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (< n 10) (loop (+ n 1) (+ acc n)) acc))]
+                                     (if (%lt n 10)
+                                       (loop (%add n 1) (%add acc n))
+                                       acc))]
                        (loop 0 0))) |:fuel|)]
   (fiber/set-fuel f 3)
   (fiber/resume f)
@@ -90,7 +92,9 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (< n 100) (loop (+ n 1) (+ acc n)) acc))]
+                                     (if (%lt n 100)
+                                       (loop (%add n 1) (%add acc n))
+                                       acc))]
                        (loop 0 0))) 0)]
   (fiber/resume f)
   (assert (= (fiber/status f) :dead) "unlimited: fiber completes")
@@ -104,7 +108,7 @@
 # An infinite loop with fuel=0 pauses before executing a single iteration.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn (n) (loop (+ n 1)))]
+                     (letrec [loop (fn (n) (loop (%add n 1)))]
                        (loop 0))) |:fuel|)]
   (fiber/set-fuel f 0)
   (fiber/resume f)
@@ -156,7 +160,7 @@
 # (before decrement), so the stored value at exhaustion is 0.
 
 (let [f (fiber/new (fn []
-                     (letrec [loop (fn (n) (loop (+ n 1)))]
+                     (letrec [loop (fn (n) (loop (%add n 1)))]
                        (loop 0))) |:fuel|)]
   (fiber/set-fuel f 10)
   (assert (= (fiber/fuel f) 10) "fuel-read: reads 10 before resume")
@@ -172,7 +176,9 @@
 
 (let [f (fiber/new (fn []
                      (letrec [loop (fn (n acc)
-                                     (if (< n 50) (loop (+ n 1) (+ acc n)) acc))]
+                                     (if (%lt n 50)
+                                       (loop (%add n 1) (%add acc n))
+                                       acc))]
                        (loop 0 0))) |:fuel|)]
   (fiber/set-fuel f 5)
   (fiber/resume f)
@@ -191,7 +197,7 @@
 # fuel does not affect outer's fuel — outer continues and completes normally.
 
 (let [inner (fiber/new (fn []
-                         (letrec [loop (fn (n) (loop (+ n 1)))]
+                         (letrec [loop (fn (n) (loop (%add n 1)))]
                            (loop 0))) |:fuel|)]
   (let [outer (fiber/new (fn []
                            (fiber/set-fuel inner 3)

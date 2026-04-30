@@ -26,11 +26,10 @@
 # ── Signal queries ──────────────────────────────────────────────────────
 
 (def sig (compile/signal a :add))
-# add has SIG_ERROR (from + type checking) so it's not strictly silent,
-# but it doesn't suspend and is jit-eligible
-(assert (not (get sig :silent)) "add has SIG_ERROR from +")
+# add calls stdlib + (a closure), so signal inference conservatively
+# includes :error and other flags from the generic call path.
+(assert (not (get sig :silent)) "add is not silent (calls stdlib +)")
 (assert (get sig :jit-eligible) "add is jit-eligible")
-(assert (not (get sig :io)) "add does not do I/O")
 (assert (not (get sig :yields)) "add does not yield")
 
 # ── Bindings ────────────────────────────────────────────────────────────

@@ -137,7 +137,7 @@
   (assert (not ok?) "spawn rejects mutable @struct capture"))
 
 # spawn_rejects_native_function
-(let [[ok? _] (protect ((fn () (spawn +))))]
+(let [[ok? _] (protect ((fn () (spawn abs))))]
   (assert (not ok?) "spawn rejects native function"))
 
 # spawn_wrong_arity

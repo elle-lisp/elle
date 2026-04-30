@@ -978,14 +978,16 @@ impl Emitter {
                 // causing wrong DupN offsets in the merge block.
                 self.pop_trailing_orphans();
 
-                // Save stack state for the target block, but only if it hasn't
-                // been processed yet. This is used for control flow merges
-                // (e.g., if/and/or) where multiple blocks jump to the same target.
-                // If the target block has already been processed (because blocks
-                // are sorted by label), we don't overwrite the saved state.
+                // Save stack state for the target block if this is the first
+                // predecessor to jump there. Multiple blocks may jump to the
+                // same target (e.g., break + fallthrough, if/and/or merges).
+                // We keep the FIRST saved state and ignore later ones — the
+                // first predecessor is the reachable path (later predecessors
+                // may be dead code after break with a wrong stack layout).
                 if !self.label_offsets.contains_key(label) {
                     self.yield_stack_state
-                        .insert(*label, (self.stack.clone(), self.reg_to_stack.clone()));
+                        .entry(*label)
+                        .or_insert_with(|| (self.stack.clone(), self.reg_to_stack.clone()));
                 }
 
                 self.bytecode.emit(Instruction::Jump);

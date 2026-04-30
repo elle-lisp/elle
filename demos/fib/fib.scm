@@ -1,6 +1,6 @@
 ; Fibonacci benchmark — naive recursive, fib(30) = 832040
 
-(defn fib (n)
+(define (fib n)
   (if (< n 2) n
     (+ (fib (- n 1)) (fib (- n 2)))))
 
