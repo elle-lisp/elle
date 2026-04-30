@@ -107,7 +107,7 @@ fn flip_on_runs_a_tail_loop_correctly() {
 fn flip_on_injects_at_while_back_edge() {
     let (out, _, status) = run(
         &["--flip=on", "--dump=lir"],
-        "(defn f [] (def @i 0) (while (< i 10) (assign i (+ i 1))))",
+        "(defn f [] (def @i 0) (while (%lt i 10) (assign i (%add i 1))))",
     );
     assert!(status.success(), "compile failed with --flip=on");
     let flip_enter_count = out.matches("flip-enter").count();

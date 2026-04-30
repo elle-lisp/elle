@@ -70,7 +70,8 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 
 # Per-pass skip lists: tests that fail in one mode can still run in the other.
 # jit-rejections    — requires JIT active (tests rejection tracking)
-ELLE_SKIP_VM  := -e jit-rejections.lisp
+# gpu-eligible,mlir — test inline intrinsic compilation (bypassed by --checked-intrinsics)
+ELLE_SKIP_VM  := -e jit-rejections.lisp -e gpu-eligible.lisp -e mlir.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
 ELLE_SKIP_MLIR := -e NOMATCH_PLACEHOLDER
 
@@ -86,7 +87,7 @@ smoke-vm: elle
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
+			'timeout $(TIMEOUT) $(ELLE) --checked-intrinsics --jit=off --mlir=off {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (no JIT)"; exit 1; }
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)

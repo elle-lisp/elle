@@ -126,7 +126,7 @@
 ## (error) => (emit :error nil)
 ## (error value) => (emit :error value)
 (defmacro error (& args)
-  (if (> (length args) 1)
+  (if (%gt (length args) 1)
     (emit :error {:error :arity-error
                   :reason :too-many-args
                   :maximum 1
@@ -213,9 +213,9 @@
          arg-count (length arg-types-val)
          params (let [p @[]]
                   (letrec [gen (fn (i)
-                                 (when (< i arg-count)
+                                 (when (%lt i arg-count)
                                    (push p (gensym))
-                                   (gen (+ i 1))))]
+                                   (gen (%add i 1))))]
                     (gen 0))
                   (apply list p))]
     `(def ,name
@@ -227,7 +227,7 @@
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
-  (let* [has-in (and (not (empty? forms)) (not (empty? (rest forms)))
+  (let* [has-in (and (%not (empty? forms)) (%not (empty? (rest forms)))
                      (= (syntax->datum iter-or-in) 'in))
          iter (if has-in (first forms) iter-or-in)
          body (if has-in (rest forms) forms)]
@@ -244,26 +244,26 @@
            (begin
              (def @idx 0)
              (def @len (length seq))
-             (while (< idx len)
+             (while (%lt idx len)
                (let [,var (get seq idx)]
                  ,;body)
-               (assign idx (+ idx 1))))
+               (assign idx (%add idx 1))))
          (or :set :@set)
            (let [items (set->array seq)]
              (def @idx 0)
              (def @len (length items))
-             (while (< idx len)
+             (while (%lt idx len)
                (let [,var (get items idx)]
                  ,;body)
-               (assign idx (+ idx 1))))
+               (assign idx (%add idx 1))))
          (or :struct :@struct)
            (let [pairs (pairs seq)]
              (def @idx 0)
              (def @len (length pairs))
-             (while (< idx len)
+             (while (%lt idx len)
                (let [,var (get pairs idx)]
                  ,;body)
-               (assign idx (+ idx 1))))
+               (assign idx (%add idx 1))))
          :fiber
            (begin
              (def @v (coro/resume seq))
@@ -341,9 +341,9 @@
          g-i (gensym)]
     `(let [,g-n ,n]
        (var ,g-i 0)
-       (while (< ,g-i ,g-n)
+       (while (%lt ,g-i ,g-n)
          ,;body
-         (assign ,g-i (+ ,g-i 1))))))
+         (assign ,g-i (%add ,g-i 1))))))
 
 ## apply - call function with args spread from final list argument
 ## (apply f args) => (f (splice args))

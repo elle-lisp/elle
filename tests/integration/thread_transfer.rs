@@ -150,7 +150,7 @@ fn test_closure_with_multiple_captures_and_error() {
 #[test]
 fn test_compiled_closure_has_location_map() {
     let mut symbols = SymbolTable::new();
-    let source = "(fn (x) (+ x 1))";
+    let source = "(fn (x) (%add x 1))";
 
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
@@ -290,7 +290,7 @@ fn test_spawned_closure_error_propagation() {
 fn test_location_map_has_valid_line_numbers() {
     let mut symbols = SymbolTable::new();
     // Multi-line source to verify line tracking
-    let source = "(fn (x)\n  (+ x\n     1))";
+    let source = "(fn (x)\n  (%add x\n     1))";
 
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
@@ -338,7 +338,7 @@ proptest! {
     /// for any simple arithmetic expression.
     #[test]
     fn prop_closure_has_location_map(a in -100i64..100, b in -100i64..100) {
-        let source = format!("(fn (x) (+ x {}))", a);
+        let source = format!("(fn (x) (%add x {}))", a);
         let mut symbols = SymbolTable::new();
 
         let result = compile(&source, &mut symbols, "<test>");

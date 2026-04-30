@@ -68,7 +68,7 @@ mod jit_tests {
         // Test modulo and division operations
         let code = r#"(begin
             (defn mod-div-test (x y)
-              (+ (/ x y) (% x y)))
+              (+ (/ x y) (rem x y)))
             (defn loop (n acc)
               (if (= n 1) acc (loop (- n 1) (+ acc (mod-div-test n 2)))))
             (loop 15 0))"#;

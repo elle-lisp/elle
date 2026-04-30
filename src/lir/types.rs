@@ -627,6 +627,64 @@ pub enum LirInstr {
     /// No registers produced or consumed.
     OutboxExit,
 
+    // === Type predicates (intrinsics) ===
+    /// Check if value is the empty list
+    IsEmpty { dst: Reg, src: Reg },
+    /// Check if value is a boolean
+    IsBool { dst: Reg, src: Reg },
+    /// Check if value is an integer
+    IsInt { dst: Reg, src: Reg },
+    /// Check if value is a float
+    IsFloat { dst: Reg, src: Reg },
+    /// Check if value is a string (immutable or mutable)
+    IsString { dst: Reg, src: Reg },
+    /// Check if value is a keyword
+    IsKeyword { dst: Reg, src: Reg },
+    /// Check if value is a symbol
+    IsSymbolCheck { dst: Reg, src: Reg },
+    /// Check if value is bytes (immutable or mutable)
+    IsBytes { dst: Reg, src: Reg },
+    /// Check if value is a box (lbox)
+    IsBox { dst: Reg, src: Reg },
+    /// Check if value is a closure
+    IsClosure { dst: Reg, src: Reg },
+    /// Check if value is a fiber
+    IsFiber { dst: Reg, src: Reg },
+    /// Get type keyword for a value
+    TypeOf { dst: Reg, src: Reg },
+
+    // === Data access (intrinsics) ===
+    /// Polymorphic length
+    Length { dst: Reg, src: Reg },
+    /// Polymorphic get (2 args: collection, key)
+    Get { dst: Reg, obj: Reg, key: Reg },
+    /// Polymorphic put (3 args: collection, key, value)
+    Put {
+        dst: Reg,
+        obj: Reg,
+        key: Reg,
+        val: Reg,
+    },
+    /// Polymorphic del (2 args: collection, key)
+    Del { dst: Reg, obj: Reg, key: Reg },
+    /// Polymorphic has? (2 args: collection, key)
+    Has { dst: Reg, obj: Reg, key: Reg },
+    /// Polymorphic push (2 args: collection, value). Mutates @array in place;
+    /// returns new array for immutable. Distinct from `ArrayMutPush` (splice).
+    IntrPush { dst: Reg, array: Reg, value: Reg },
+    /// @array pop (1 arg, returns popped value)
+    Pop { dst: Reg, src: Reg },
+
+    // === Mutability (intrinsics) ===
+    /// Mutable → immutable copy
+    Freeze { dst: Reg, src: Reg },
+    /// Immutable → mutable copy
+    Thaw { dst: Reg, src: Reg },
+
+    // === Identity (intrinsics) ===
+    /// Bitwise tag+payload equality
+    Identical { dst: Reg, lhs: Reg, rhs: Reg },
+
     // === Explicit rotation (Flip) ===
     /// Push a flip frame (save caller's swap pool; remember heap mark).
     /// No registers produced or consumed.

@@ -124,7 +124,7 @@
     "Convert string to null-terminated 4-byte-padded SPIR-V word array."
     (let* [raw (@bytes s)
            _ (push raw 0)  ## null terminate
-           rem (% (length raw) 4)]
+           rem (rem (length raw) 4)]
       (when (not (= rem 0)) (repeat (- 4 rem) (push raw 0)))
       (map (fn [i]
              (bit/or (raw i) (bit/shift-left (raw (+ i 1)) 8)

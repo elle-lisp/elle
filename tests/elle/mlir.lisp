@@ -12,11 +12,11 @@
 # ── Arithmetic ───────────────────────────────────────────────────────
 
 (defn ml-add [a b]
-  (+ a b))
+  (%add a b))
 (defn ml-mul [a b]
-  (* a b))
+  (%mul a b))
 (defn ml-sub [a b]
-  (- a b))
+  (%sub a b))
 
 # Call past hotness threshold (default 10)
 (repeat 15 (ml-add 1 2))
@@ -32,7 +32,7 @@
 # ── Multi-operation ──────────────────────────────────────────────────
 
 (defn ml-quad [a b c]
-  (+ (* a (+ b c)) c))
+  (%add (%mul a (%add b c)) c))
 
 (repeat 15 (ml-quad 1 2 3))
 (assert (= (ml-quad 2 3 4) 18) "MLIR multi-op: 2*(3+4)+4=18")
@@ -41,7 +41,7 @@
 # ── Control flow ─────────────────────────────────────────────────────
 
 (defn ml-abs [x]
-  (if (> x 0) x (- 0 x)))
+  (if (%gt x 0) x (%sub 0 x)))
 
 (repeat 15 (ml-abs 1))
 (assert (= (ml-abs 42) 42) "MLIR abs positive")
@@ -49,7 +49,7 @@
 (assert (= (ml-abs 0) 0) "MLIR abs zero")
 
 (defn ml-max [a b]
-  (if (> a b) a b))
+  (if (%gt a b) a b))
 
 (repeat 15 (ml-max 1 2))
 (assert (= (ml-max 3 7) 7) "MLIR max")
@@ -57,11 +57,11 @@
 (assert (= (ml-max 4 4) 4) "MLIR max equal")
 
 # ── Non-eligible functions still work ────────────────────────────────
-# These use I/O or captures, so they go through Cranelift or bytecode.
+# These use stdlib + (closure call), so they go through Cranelift or bytecode.
 
 (def outer 100)
 (defn ml-with-capture [x]
-  (+ x outer))
+  (%add x outer))
 (repeat 15 (ml-with-capture 1))
 (assert (= (ml-with-capture 5) 105) "captured var works (not MLIR)")
 
@@ -78,7 +78,7 @@
 # comparisons where the branch condition is always 0 or 1.
 
 (defn ml-clamp [x lo hi]
-  (if (< x lo) lo (if (> x hi) hi x)))
+  (if (%lt x lo) lo (if (%gt x hi) hi x)))
 
 (repeat 15 (ml-clamp 5 0 10))
 (assert (= (ml-clamp -3 0 10) 0) "MLIR clamp below")

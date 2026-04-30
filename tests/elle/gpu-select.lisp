@@ -87,7 +87,7 @@
 (defn gpu-add [a b]
   (silence)
   (muffle :error)
-  (+ a b))
+  (%add a b))
 
 (git gpu-add)
 (def result3 (gpu:map gpu-add [1 2 3 4] [10 20 30 40] :ctx ctx))

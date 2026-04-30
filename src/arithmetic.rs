@@ -98,6 +98,7 @@ pub(crate) fn div_values(a: &Value, b: &Value) -> Result<Value, Value> {
 }
 
 /// Negate a numeric value
+#[allow(dead_code)]
 pub(crate) fn negate_value(a: &Value) -> Result<Value, Value> {
     if let Some(n) = a.as_int() {
         return match n.checked_neg() {
@@ -116,6 +117,7 @@ pub(crate) fn negate_value(a: &Value) -> Result<Value, Value> {
 
 /// Reciprocal of a numeric value (1/x). Integer zero errors;
 /// float zero returns Inf per IEEE 754.
+#[allow(dead_code)]
 pub(crate) fn reciprocal_value(a: &Value) -> Result<Value, Value> {
     if let Some(n) = a.as_int() {
         if n == 0 {
@@ -136,6 +138,7 @@ pub(crate) fn reciprocal_value(a: &Value) -> Result<Value, Value> {
 }
 
 /// Modulo operation (Euclidean modulo - result has same sign as divisor)
+#[allow(dead_code)]
 pub(crate) fn mod_values(a: &Value, b: &Value) -> Result<Value, Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {

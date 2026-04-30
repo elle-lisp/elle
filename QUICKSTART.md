@@ -96,6 +96,7 @@ make smoke                 # run all tests (~30s)
 |------|---------|
 | [plugins](docs/plugins.md) | 29 shipped plugins |
 | [stdlib](docs/stdlib.md) | Standard library and prelude |
+| [intrinsics](docs/intrinsics.md) | %-intrinsics (silent bytecode ops) |
 | [testing](docs/analysis/testing.md) | Test patterns, make smoke/test |
 | [debugging](docs/analysis/debugging.md) | Debugging and introspection |
 | [cookbook](docs/cookbook/index.md) | Recipes for cross-cutting changes |
