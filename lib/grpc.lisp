@@ -176,6 +176,64 @@
             _ (assign done true))))
       result))
 
+  ## ── Bidi streaming RPC ───────────────────────────────────────────
+
+  (defn
+    grpc-call-bidi
+    [session schema method]
+    "Open a bidirectional gRPC stream. Returns {:send fn :end fn :reader fn}."
+    (def [sid s] (http2:open-stream session "POST" method
+                   :headers [["content-type" "application/grpc"]
+                             ["te" "trailers"]]))
+    (def @buf (bytes))
+    (def @done false)
+
+    {:send (fn [msg-type msg-struct]
+             (let [body (grpc-encode (protobuf:encode schema msg-type msg-struct))]
+               (http2:stream-send session sid body)))
+
+     :end  (fn [] (http2:stream-end session sid))
+
+     :reader (fn [resp-type]
+               (def @result nil)
+               (when (>= (length buf) 5)
+                 (let [len (bit/or (bit/shl (get buf 1) 24)
+                                   (bit/shl (get buf 2) 16)
+                                   (bit/shl (get buf 3) 8)
+                                   (get buf 4))
+                       frame-end (+ 5 len)]
+                   (when (>= (length buf) frame-end)
+                     (let [payload (slice buf 5 frame-end)]
+                       (assign buf (slice buf frame-end))
+                       (assign result (protobuf:decode schema resp-type payload))))))
+
+               (while (and (nil? result) (not done))
+                 (let [msg (s:data-queue:take)]
+                   (match msg:type
+                     :headers
+                       (begin
+                         (check-grpc-status msg:headers)
+                         (when msg:end-stream (assign done true)))
+                     :data
+                       (begin
+                         (assign buf (concat buf msg:data))
+                         (when msg:end-stream (assign done true))
+                         (when (and (nil? result) (>= (length buf) 5))
+                           (let [len (bit/or (bit/shl (get buf 1) 24)
+                                             (bit/shl (get buf 2) 16)
+                                             (bit/shl (get buf 3) 8)
+                                             (get buf 4))
+                                 frame-end (+ 5 len)]
+                             (when (>= (length buf) frame-end)
+                               (let [payload (slice buf 5 frame-end)]
+                                 (assign buf (slice buf frame-end))
+                                 (assign result
+                                   (protobuf:decode schema resp-type payload)))))))
+                     :rst (error {:error :grpc-error :reason :stream-reset :code msg:code})
+                     :error (error msg:error)
+                     _ (assign done true))))
+               result)})
+
   ## ── Close ──────────────────────────────────────────────────────────
 
   (defn grpc-close [session]
@@ -188,6 +246,7 @@
    :call grpc-call
    :call-decode grpc-call-decode
    :call-stream grpc-call-stream
+   :call-bidi grpc-call-bidi
    :close grpc-close
    :encode grpc-encode
    :decode grpc-decode})
