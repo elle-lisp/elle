@@ -968,6 +968,360 @@ impl<'a> Lowerer<'a> {
                     rhs: arg_regs[1],
                 });
             }
+            // Bitwise NOT
+            IntrinsicOp::BitNot => {
+                self.emit(LirInstr::UnaryOp {
+                    dst,
+                    op: UnaryOp::BitNot,
+                    src: arg_regs[0],
+                });
+            }
+            // Not-equal comparison
+            IntrinsicOp::Ne => {
+                self.emit(LirInstr::Compare {
+                    dst,
+                    op: CmpOp::Ne,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
+            // Type predicates
+            IntrinsicOp::IsNil => {
+                self.emit(LirInstr::IsNil {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsEmpty => {
+                self.emit(LirInstr::IsEmpty {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsBool => {
+                self.emit(LirInstr::IsBool {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsInt => {
+                self.emit(LirInstr::IsInt {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsFloat => {
+                self.emit(LirInstr::IsFloat {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsString => {
+                self.emit(LirInstr::IsString {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsKeyword => {
+                self.emit(LirInstr::IsKeyword {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsSymbol => {
+                self.emit(LirInstr::IsSymbolCheck {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsPair => {
+                self.emit(LirInstr::IsPair {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsArray => {
+                // %array? checks both immutable and mutable arrays.
+                // Spill the source to a local so both checks can read it
+                // (the stack-based emitter consumes the value on first use).
+                let src_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: src_slot,
+                    src: arg_regs[0],
+                });
+                let src1 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: src1,
+                    slot: src_slot,
+                });
+                let imm = self.fresh_reg();
+                self.emit(LirInstr::IsArray {
+                    dst: imm,
+                    src: src1,
+                });
+                let result_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                let then_label = self.fresh_label();
+                let else_label = self.fresh_label();
+                let merge_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: imm,
+                    then_label,
+                    else_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(then_label);
+                let true_reg = self.emit_const(LirConst::Bool(true))?;
+                self.emit(LirInstr::StoreLocal {
+                    slot: result_slot,
+                    src: true_reg,
+                });
+                self.terminate(Terminator::Jump(merge_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(else_label);
+                let src2 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: src2,
+                    slot: src_slot,
+                });
+                let mut_r = self.fresh_reg();
+                self.emit(LirInstr::IsArrayMut {
+                    dst: mut_r,
+                    src: src2,
+                });
+                self.emit(LirInstr::StoreLocal {
+                    slot: result_slot,
+                    src: mut_r,
+                });
+                self.terminate(Terminator::Jump(merge_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(merge_label);
+                self.emit(LirInstr::LoadLocal {
+                    dst,
+                    slot: result_slot,
+                });
+            }
+            IntrinsicOp::IsStruct => {
+                let src_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: src_slot,
+                    src: arg_regs[0],
+                });
+                let src1 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: src1,
+                    slot: src_slot,
+                });
+                let imm = self.fresh_reg();
+                self.emit(LirInstr::IsStruct {
+                    dst: imm,
+                    src: src1,
+                });
+                let result_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                let then_label = self.fresh_label();
+                let else_label = self.fresh_label();
+                let merge_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: imm,
+                    then_label,
+                    else_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(then_label);
+                let true_reg = self.emit_const(LirConst::Bool(true))?;
+                self.emit(LirInstr::StoreLocal {
+                    slot: result_slot,
+                    src: true_reg,
+                });
+                self.terminate(Terminator::Jump(merge_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(else_label);
+                let src2 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: src2,
+                    slot: src_slot,
+                });
+                let mut_r = self.fresh_reg();
+                self.emit(LirInstr::IsStructMut {
+                    dst: mut_r,
+                    src: src2,
+                });
+                self.emit(LirInstr::StoreLocal {
+                    slot: result_slot,
+                    src: mut_r,
+                });
+                self.terminate(Terminator::Jump(merge_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(merge_label);
+                self.emit(LirInstr::LoadLocal {
+                    dst,
+                    slot: result_slot,
+                });
+            }
+            IntrinsicOp::IsSet => {
+                let src_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: src_slot,
+                    src: arg_regs[0],
+                });
+                let src1 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: src1,
+                    slot: src_slot,
+                });
+                let imm = self.fresh_reg();
+                self.emit(LirInstr::IsSet {
+                    dst: imm,
+                    src: src1,
+                });
+                let result_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                let then_label = self.fresh_label();
+                let else_label = self.fresh_label();
+                let merge_label = self.fresh_label();
+                self.terminate(Terminator::Branch {
+                    cond: imm,
+                    then_label,
+                    else_label,
+                });
+                self.finish_block();
+                self.current_block = BasicBlock::new(then_label);
+                let true_reg = self.emit_const(LirConst::Bool(true))?;
+                self.emit(LirInstr::StoreLocal {
+                    slot: result_slot,
+                    src: true_reg,
+                });
+                self.terminate(Terminator::Jump(merge_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(else_label);
+                let src2 = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: src2,
+                    slot: src_slot,
+                });
+                let mut_r = self.fresh_reg();
+                self.emit(LirInstr::IsSetMut {
+                    dst: mut_r,
+                    src: src2,
+                });
+                self.emit(LirInstr::StoreLocal {
+                    slot: result_slot,
+                    src: mut_r,
+                });
+                self.terminate(Terminator::Jump(merge_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(merge_label);
+                self.emit(LirInstr::LoadLocal {
+                    dst,
+                    slot: result_slot,
+                });
+            }
+            IntrinsicOp::IsBytes => {
+                self.emit(LirInstr::IsBytes {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsBox => {
+                self.emit(LirInstr::IsBox {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsClosure => {
+                self.emit(LirInstr::IsClosure {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::IsFiber => {
+                self.emit(LirInstr::IsFiber {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::TypeOf => {
+                self.emit(LirInstr::TypeOf {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            // Data access
+            IntrinsicOp::Length => {
+                self.emit(LirInstr::Length {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::Get => {
+                self.emit(LirInstr::Get {
+                    dst,
+                    obj: arg_regs[0],
+                    key: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Put => {
+                self.emit(LirInstr::Put {
+                    dst,
+                    obj: arg_regs[0],
+                    key: arg_regs[1],
+                    val: arg_regs[2],
+                });
+            }
+            IntrinsicOp::Del => {
+                self.emit(LirInstr::Del {
+                    dst,
+                    obj: arg_regs[0],
+                    key: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Has => {
+                self.emit(LirInstr::Has {
+                    dst,
+                    obj: arg_regs[0],
+                    key: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Push => {
+                // %push mutates @array in place, returns new array for immutable.
+                // Distinct from ArrayMutPush which is splice infrastructure.
+                self.emit(LirInstr::IntrPush {
+                    dst,
+                    array: arg_regs[0],
+                    value: arg_regs[1],
+                });
+            }
+            IntrinsicOp::Pop => {
+                self.emit(LirInstr::Pop {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            // Mutability
+            IntrinsicOp::Freeze => {
+                self.emit(LirInstr::Freeze {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            IntrinsicOp::Thaw => {
+                self.emit(LirInstr::Thaw {
+                    dst,
+                    src: arg_regs[0],
+                });
+            }
+            // Identity
+            IntrinsicOp::Identical => {
+                self.emit(LirInstr::Identical {
+                    dst,
+                    lhs: arg_regs[0],
+                    rhs: arg_regs[1],
+                });
+            }
         }
         Ok(dst)
     }
