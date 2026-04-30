@@ -27,7 +27,8 @@ pub(crate) fn handle_eq(vm: &mut VM) {
     vm.fiber.stack.push(Value::FALSE);
 }
 
-/// Comparison helper macro. Panics on incomparable types.
+/// Comparison helper macro. Unchecked — incomparable types produce false
+/// (garbage). Matches WASM/SPIR-V semantics: wrong types → garbage, not crash.
 macro_rules! cmp_handler {
     ($name:ident, $sym:literal, $int_cmp:expr, $float_cmp:expr, $ord_method:ident) => {
         pub(crate) fn $name(vm: &mut VM) {
@@ -54,15 +55,8 @@ macro_rules! cmp_handler {
                             vm.fiber.stack.push(Value::bool(ord.$ord_method()));
                             return;
                         }
-                        panic!(
-                            concat!(
-                                "%",
-                                $sym,
-                                ": expected number, string, or keyword, got {} and {}"
-                            ),
-                            a.type_name(),
-                            b.type_name()
-                        );
+                        // Unchecked: incomparable types → false (garbage)
+                        Value::FALSE
                     }
                 },
             };

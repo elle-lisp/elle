@@ -26,6 +26,7 @@ pub mod fibers;
 pub mod fileio;
 pub mod format;
 pub mod formatspec;
+pub mod intrinsics;
 pub mod introspection;
 pub mod io;
 pub mod json;
