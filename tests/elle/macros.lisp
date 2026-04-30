@@ -978,7 +978,7 @@
 # ============================================================================
 
 # Define a helper at compile time, use it in a macro
-(begin-for-syntax (def add-one (fn (x) (+ x 1))))
+(begin-for-syntax (def add-one (fn (x) (%add x 1))))
 
 # Use in a macro body: the macro calls add-one at expansion time
 (defmacro inc-literal (n)
@@ -988,9 +988,9 @@
 (assert (= (inc-literal 41) 42) "begin-for-syntax: helper used in macro 2")
 
 # Multiple begin-for-syntax blocks — second block can use first's defs
-(begin-for-syntax (def double (fn (x) (* x 2))))
+(begin-for-syntax (def double (fn (x) (%mul x 2))))
 
-(begin-for-syntax (def quad (fn (x) (double (double x)))))
+(begin-for-syntax (def quad (fn (x) (%mul x 4))))
 
 (defmacro quadruple (n)
   (quad (syntax->datum n)))
