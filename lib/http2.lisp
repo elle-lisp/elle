@@ -145,6 +145,19 @@
                                        nil)))))
       sess))
 
+  ## ── Client: max concurrent streams check ──────────────────────────────
+
+  (defn check-max-streams [sess]
+    "§6.5.2: MUST NOT exceed peer's SETTINGS_MAX_CONCURRENT_STREAMS."
+    (let [max-streams (get sess:remote-settings :max-concurrent-streams)
+          active (length (keys sess:streams))]
+      (when (>= active max-streams)
+        (error {:error :h2-error
+                :reason :max-concurrent-streams
+                :active active
+                :max max-streams
+                :message "would exceed peer max-concurrent-streams"}))))
+
   ## ── Client: send request ───────────────────────────────────────────────
 
   (defn send-request-frames [sess method path &named body headers]
@@ -158,6 +171,7 @@
               :reason :goaway-received
               :last-stream-id sess:last-stream-id
               :message "peer sent GOAWAY, refusing new streams"}))
+    (check-max-streams sess)
     (let* [sid sess:next-stream-id
            _ (put sess :next-stream-id (+ sid 2))
            s (session:get-stream sess sid)
@@ -168,9 +182,12 @@
            has-body (and body (> (length body) 0))]
       (session:encode-and-send-headers sess sid all-headers (not has-body))
       (stream:transition s :send-headers)
-      (when has-body
-        (let [body-bytes (if (string? body) (bytes body) body)]
-          (session:send-data-with-flow-control sess sid s:flow body-bytes))
+      (if has-body
+        (begin
+          (let [body-bytes (if (string? body) (bytes body) body)]
+            (session:send-data-with-flow-control sess sid s:flow body-bytes))
+          (stream:transition s :send-end-stream))
+        # HEADERS carried END_STREAM — transition now
         (stream:transition s :send-end-stream))
       [sid s]))
 
@@ -246,12 +263,54 @@
   (defn h2-post [url body &named headers]
     (h2-request "POST" url :body body :headers headers))
 
+  ## ── Client: bidi stream primitives ─────────────────────────────────
+
+  (defn h2-open-stream [sess method path &named headers]
+    "Open an h2 stream with HEADERS, no body, no END_STREAM.
+     Returns [stream-id stream]. The stream is half-open (client can still send)."
+    (when sess:closed?
+      (error {:error :h2-error
+              :reason :connection-closed
+              :message "session is closed"}))
+    (when sess:goaway-recvd?
+      (error {:error :h2-error
+              :reason :goaway-received
+              :last-stream-id sess:last-stream-id
+              :message "peer sent GOAWAY, refusing new streams"}))
+    (check-max-streams sess)
+    (let* [sid sess:next-stream-id
+           _ (put sess :next-stream-id (+ sid 2))
+           s (session:get-stream sess sid)
+           authority sess:host
+           pseudo [[":method" method] [":path" path]
+                   [":scheme" (or sess:scheme "http")] [":authority" authority]]
+           all-headers (if (nil? headers) pseudo (concat pseudo headers))]
+      (session:encode-and-send-headers sess sid all-headers false)
+      (stream:transition s :send-headers)
+      [sid s]))
+
+  (defn h2-stream-send [sess sid data]
+    "Send a DATA frame on an open stream without ending it."
+    (let [s (get sess:streams sid)]
+      (session:send-data-with-flow-control sess sid s:flow data :end-stream false)))
+
+  (defn h2-stream-end [sess sid]
+    "Send an empty DATA frame with END_STREAM to half-close the client side."
+    (let [s (get sess:streams sid)
+          [ft fl si pl] (frame:make-data-frame sid (bytes) true)]
+      (sess:write-queue:put [ft fl si pl])
+      (stream:transition s :send-end-stream)))
+
   ## ── Client: close ──────────────────────────────────────────────────────
 
   (defn h2-close [sess]
     "Close an HTTP/2 session gracefully."
     (when (not sess:closed?)
       (put sess :closed? true)
+      # Close all stream data-queues so reader unblocks from any full-queue wait
+      (each sid in (keys sess:streams)
+        (when-let [s (get sess:streams sid)]
+          (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
       (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
@@ -338,7 +397,11 @@
    :connect h2-connect
    :send h2-send
    :send-raw h2-send-raw
+   :open-stream h2-open-stream
+   :stream-send h2-stream-send
+   :stream-end h2-stream-end
    :close h2-close
    :serve server:serve
+   :serve-streaming server:serve-streaming
    :parse-url parse-url
    :test run-tests})
