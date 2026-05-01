@@ -33,20 +33,22 @@ impl<'a> Lowerer<'a> {
                 doc,
                 syntax,
                 assert_numeric,
-            } => self.lower_lambda_expr(
-                params,
-                *num_required,
-                rest_param.as_ref(),
-                vararg_kind,
-                captures,
-                body,
-                *num_locals,
-                inferred_signals,
-                param_bounds,
-                *doc,
-                syntax.clone(),
-                *assert_numeric,
-            ),
+            } => {
+                let info = super::lambda::LambdaInfo {
+                    params,
+                    num_required: *num_required,
+                    rest_param: rest_param.as_ref(),
+                    vararg_kind,
+                    captures,
+                    body,
+                    _num_locals: *num_locals,
+                    inferred_signal: inferred_signals,
+                    param_bounds,
+                    doc: *doc,
+                    syntax: syntax.clone(),
+                };
+                self.lower_lambda_expr(&info, *assert_numeric)
+            }
 
             HirKind::If {
                 cond,
