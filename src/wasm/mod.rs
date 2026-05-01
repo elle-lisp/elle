@@ -30,6 +30,7 @@ pub mod handle;
 pub mod host;
 mod instruction;
 pub mod lazy;
+mod liveness;
 pub mod linker;
 pub mod regalloc;
 pub mod resume;

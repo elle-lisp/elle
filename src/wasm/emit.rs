@@ -195,6 +195,8 @@ pub(super) struct WasmEmitter {
     pub module_closures: Option<Vec<LirFunction>>,
     /// Closures to emit as stubs (pre-compiled as standalone Modules).
     pub stubbed_closures: std::collections::HashSet<ClosureId>,
+    /// Per-suspend-point live register sets for sparse spilling.
+    pub spill_live_map: super::liveness::SpillLiveMap,
 }
 
 impl WasmEmitter {
@@ -224,6 +226,7 @@ impl WasmEmitter {
             known_int: std::collections::HashSet::new(),
             module_closures: None,
             stubbed_closures: std::collections::HashSet::new(),
+            spill_live_map: HashMap::new(),
         }
     }
 
@@ -613,6 +616,18 @@ impl WasmEmitter {
 
             self.pre_scan_resume_states(func);
             self.next_resume_state = 1;
+
+            // Compute per-suspend-point liveness for sparse spilling.
+            if crate::config::get().wasm_sparse_spill {
+                self.spill_live_map = super::liveness::compute_spill_liveness(
+                    func,
+                    &self.label_to_idx,
+                    &self.reg_to_slot,
+                    n,
+                );
+            } else {
+                self.spill_live_map.clear();
+            }
 
             if crate::config::get().debug_wasm {
                 eprintln!(
