@@ -90,7 +90,14 @@ impl WasmEmitter {
                                 .get(&(src_block_idx, abs_idx))
                                 .copied()
                                 .unwrap_or(0);
-                            self.emit_call_suspending(f, *call_dst, *fn_reg, args, resume_state);
+                            self.emit_call_suspending(
+                                f,
+                                *call_dst,
+                                *fn_reg,
+                                args,
+                                resume_state,
+                                (src_block_idx, abs_idx),
+                            );
                             continue;
                         }
                         LirInstr::CallArrayMut {
@@ -109,6 +116,7 @@ impl WasmEmitter {
                                 *fn_reg,
                                 *args,
                                 resume_state,
+                                (src_block_idx, abs_idx),
                             );
                             continue;
                         }
@@ -167,7 +175,14 @@ impl WasmEmitter {
                             .get(&(block_idx, instr_idx))
                             .copied()
                             .unwrap_or(0);
-                        self.emit_call_suspending(f, *dst, *fn_reg, args, resume_state);
+                        self.emit_call_suspending(
+                            f,
+                            *dst,
+                            *fn_reg,
+                            args,
+                            resume_state,
+                            (block_idx, instr_idx),
+                        );
                         continue;
                     }
                     LirInstr::CallArrayMut {
@@ -180,7 +195,14 @@ impl WasmEmitter {
                             .get(&(block_idx, instr_idx))
                             .copied()
                             .unwrap_or(0);
-                        self.emit_call_array_suspending(f, *dst, *fn_reg, *args, resume_state);
+                        self.emit_call_array_suspending(
+                            f,
+                            *dst,
+                            *fn_reg,
+                            *args,
+                            resume_state,
+                            (block_idx, instr_idx),
+                        );
                         continue;
                     }
                     _ => {}
@@ -242,7 +264,8 @@ impl WasmEmitter {
                             s
                         });
                     let total_saved = self.num_regs + self.num_stack_locals;
-                    self.emit_spill_all(f);
+                    let spill_key = (lir_block_idx.unwrap_or(0), usize::MAX);
+                    self.emit_spill(f, spill_key);
                     f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(*value)));
                     f.instruction(&Instruction::I32Const(resume_state as i32));

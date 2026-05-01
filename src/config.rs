@@ -538,6 +538,11 @@ pub struct Config {
     /// Chunk user expressions into sub-thunks (experimental).
     pub wasm_chunk: bool,
 
+    /// Sparse spill: only spill live registers at suspend points.
+    /// Reduces code size from O(total_regs * suspend_points) to
+    /// O(live_regs * suspend_points). On by default.
+    pub wasm_sparse_spill: bool,
+
     /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
     /// lowered functions (Phase 4b). On by default — escape-analysis
     /// gates injection so only safe loops get flip. Disable via
@@ -577,6 +582,7 @@ impl Default for Config {
             wasm_dump: false,
             wasm_lir: false,
             wasm_chunk: false,
+            wasm_sparse_spill: true,
             flip_instructions: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
@@ -794,6 +800,7 @@ impl Config {
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,
+                "--wasm-no-sparse-spill" => config.wasm_sparse_spill = false,
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {

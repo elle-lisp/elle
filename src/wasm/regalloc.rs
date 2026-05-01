@@ -207,7 +207,7 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
 
 // --- Helpers: extract defs and uses from instructions ---
 
-fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
+pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
     match instr {
         LirInstr::Const { dst, .. }
         | LirInstr::ValueConst { dst, .. }
@@ -271,7 +271,7 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
     }
 }
 
-fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
+pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
     match instr {
         LirInstr::Const { .. } | LirInstr::ValueConst { .. } => {}
         LirInstr::LoadCapture { .. }
@@ -386,7 +386,7 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
     }
 }
 
-fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
+pub fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
     match term {
         Terminator::Return(reg) => f(*reg),
         Terminator::Branch { cond, .. } => f(*cond),

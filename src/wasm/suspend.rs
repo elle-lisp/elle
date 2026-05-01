@@ -12,6 +12,7 @@ use super::emit::*;
 impl WasmEmitter {
     /// Emit a function call in a suspending function.
     /// Like emit_call, but checks for SIG_YIELD before the general signal return.
+    /// `spill_key` identifies this suspend point for liveness-aware spilling.
     pub(super) fn emit_call_suspending(
         &self,
         f: &mut Function,
@@ -19,6 +20,7 @@ impl WasmEmitter {
         func: Reg,
         args: &[Reg],
         resume_state: u32,
+        spill_key: (usize, usize),
     ) {
         for (i, arg) in args.iter().enumerate() {
             self.write_val_to_mem(f, *arg, i);
@@ -44,7 +46,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::If(BlockType::Empty));
         {
             let total_saved = self.num_regs + self.num_stack_locals;
-            self.emit_spill_all(f);
+            self.emit_spill(f, spill_key);
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
             f.instruction(&Instruction::I32Const(resume_state as i32));
@@ -87,6 +89,7 @@ impl WasmEmitter {
         func: Reg,
         args_array: Reg,
         resume_state: u32,
+        spill_key: (usize, usize),
     ) {
         self.write_val_to_mem(f, func, 0);
         self.write_val_to_mem(f, args_array, 1);
@@ -109,7 +112,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::If(BlockType::Empty));
         {
             let total_saved = self.num_regs + self.num_stack_locals;
-            self.emit_spill_all(f);
+            self.emit_spill(f, spill_key);
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
             f.instruction(&Instruction::I32Const(resume_state as i32));
@@ -141,6 +144,59 @@ impl WasmEmitter {
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::Return);
         f.instruction(&Instruction::End);
+    }
+
+    /// Spill registers: if sparse spill is enabled and a live set is available
+    /// for this suspend point, only spill live register slots. Stack locals
+    /// are always spilled (they represent mutable bindings).
+    pub(super) fn emit_spill(&self, f: &mut Function, spill_key: (usize, usize)) {
+        if let Some(live_set) = self.spill_live_map.get(&spill_key) {
+            self.emit_spill_live(f, live_set);
+        } else {
+            self.emit_spill_all(f);
+        }
+    }
+
+    /// Spill only live register slots + all stack locals.
+    fn emit_spill_live(&self, f: &mut Function, live_slots: &std::collections::HashSet<u32>) {
+        for i in 0..self.num_regs {
+            if !live_slots.contains(&i) {
+                continue;
+            }
+            let offset = (i * 16) as u64;
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.tag_phys(i)));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset,
+                align: 3,
+                memory_index: 0,
+            }));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.pay_phys(i)));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset: offset + 8,
+                align: 3,
+                memory_index: 0,
+            }));
+        }
+        // Stack locals are always spilled — they represent mutable bindings.
+        for i in 0..self.num_stack_locals {
+            let offset = ((self.num_regs + i) * 16) as u64;
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.local_slot_tag(i as u16)));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset,
+                align: 3,
+                memory_index: 0,
+            }));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.local_slot_pay(i as u16)));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset: offset + 8,
+                align: 3,
+                memory_index: 0,
+            }));
+        }
     }
 
     /// Spill all registers + local slots to linear memory at ARGS_BASE.

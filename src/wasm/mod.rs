@@ -31,6 +31,7 @@ pub mod host;
 mod instruction;
 pub mod lazy;
 pub mod linker;
+mod liveness;
 pub mod regalloc;
 pub mod resume;
 pub mod store;
