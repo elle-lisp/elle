@@ -942,6 +942,7 @@ impl<'a> FnCtx<'a> {
             .collect();
 
         // Transform the continuation with the phi bindings active
+        let has_continuation = start + 1 < exprs.len();
         let mut result = self.transform_begin_at(exprs, start + 1, span.clone(), signal);
 
         // Wrap: if_expr; (let [phis...] continuation)
@@ -956,16 +957,49 @@ impl<'a> FnCtx<'a> {
             );
         }
 
-        // Wrap in let for the condition binding, then prepend the if
-        let inner = Hir::new(HirKind::Begin(vec![if_expr, result]), span.clone(), signal);
-        Hir::new(
-            HirKind::Let {
-                bindings: vec![(cond_binding, new_cond)],
-                body: Box::new(inner),
-            },
-            span,
-            signal,
-        )
+        if has_continuation {
+            // Wrap in let for the condition binding, then prepend the if
+            let inner = Hir::new(HirKind::Begin(vec![if_expr, result]), span.clone(), signal);
+            Hir::new(
+                HirKind::Let {
+                    bindings: vec![(cond_binding, new_cond)],
+                    body: Box::new(inner),
+                },
+                span,
+                signal,
+            )
+        } else {
+            // The if is the last expression in the begin. The phi-lets
+            // wrap a nil continuation, so (begin if_expr phi_lets) would
+            // evaluate to nil. Capture the if's value in a temp, nest the
+            // phi-lets inside the temp's body, and return the temp.
+            let result_binding = self.gensym();
+            let result_var = Hir::silent(HirKind::Var(result_binding), span.clone());
+            // (let [cond_binding new_cond]
+            //   (let [result_binding if_expr]
+            //     (let [phi1 ...]
+            //       (let [phi2 ...]
+            //         result_var))))
+            Hir::new(
+                HirKind::Let {
+                    bindings: vec![(cond_binding, new_cond)],
+                    body: Box::new(Hir::new(
+                        HirKind::Let {
+                            bindings: vec![(result_binding, if_expr)],
+                            body: Box::new(Hir::new(
+                                HirKind::Begin(vec![result, result_var]),
+                                span.clone(),
+                                signal,
+                            )),
+                        },
+                        span.clone(),
+                        signal,
+                    )),
+                },
+                span,
+                signal,
+            )
+        }
     }
 
     /// Transform a branch body, converting assigns to the target
@@ -992,5 +1026,105 @@ impl<'a> FnCtx<'a> {
             })
             .collect();
         (transformed, versions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::context::{set_symbol_table, set_vm_context};
+    use crate::pipeline::eval_all;
+    use crate::primitives::register_primitives;
+    use crate::symbol::SymbolTable;
+    use crate::value::Value;
+    use crate::vm::VM;
+
+    fn eval_bare(source: &str) -> Result<Value, String> {
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        register_primitives(&mut vm, &mut symbols);
+        eval_all(source, &mut symbols, &mut vm, "<test>")
+    }
+
+    fn eval_with_stdlib(source: &str) -> Result<Value, String> {
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        register_primitives(&mut vm, &mut symbols);
+        set_vm_context(&mut vm as *mut VM);
+        set_symbol_table(&mut symbols as *mut SymbolTable);
+        crate::init_stdlib(&mut vm, &mut symbols);
+        let result = eval_all(source, &mut symbols, &mut vm, "<test>");
+        set_vm_context(std::ptr::null_mut());
+        result
+    }
+
+    #[test]
+    fn if_result_preserved_with_phi_merge_last_in_begin() {
+        // When an `if` containing assigns is the last expression in a begin,
+        // the phi-lets must not discard the if's result value.
+        let result = eval_bare(
+            r#"(do
+                    (var x 0)
+                    (if true
+                        (do (assign x 1) "yes")
+                        (do (assign x 2) "no")))"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::string("yes"));
+    }
+
+    #[test]
+    fn if_result_preserved_with_phi_merge_else_branch() {
+        // Same as above but the else branch is taken.
+        let result = eval_bare(
+            r#"(do
+                    (var x 0)
+                    (if false
+                        (do (assign x 1) "yes")
+                        (do (assign x 2) "no")))"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::string("no"));
+    }
+
+    #[test]
+    fn if_result_preserved_with_each_loop() {
+        // The original bug: `each` expands to a match with mutable defines
+        // inside branches, triggering phi insertion that discards the
+        // if's return value.
+        let result = eval_with_stdlib(
+            r#"(do
+                    (defn f [x]
+                      (let [[a b] ["." x]]
+                        (if (= b "")
+                          @[]
+                          (let [acc @[]]
+                            (each i in (list 1 2 3) (push acc i))
+                            acc))))
+                    (f "hello"))"#,
+        )
+        .unwrap();
+        // @[] creates a mutable array — use as_array_mut
+        let arr = result.as_array_mut().expect("expected mutable array");
+        let arr = arr.borrow();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0], Value::int(1));
+        assert_eq!(arr[1], Value::int(2));
+        assert_eq!(arr[2], Value::int(3));
+    }
+
+    #[test]
+    fn if_phi_merge_with_continuation_still_works() {
+        // When the if is NOT the last expression, the phi-lets should
+        // still correctly merge the assigned value for downstream use.
+        let result = eval_bare(
+            r#"(do
+                    (var x 0)
+                    (if true
+                        (assign x 42)
+                        (assign x 99))
+                    x)"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::int(42));
     }
 }
