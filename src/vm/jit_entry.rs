@@ -209,10 +209,9 @@ impl VM {
             if !squelch_mask.is_empty() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
                 let squelched = sig.intersection(squelch_mask);
                 if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
+                    let squelched_str = crate::signals::registry::with_registry(|reg| {
+                        reg.format_signal_bits(squelched)
+                    });
                     let err = crate::value::error_val(
                         "signal-violation",
                         format!("squelch: signal {} caught at boundary", squelched_str),
@@ -252,11 +251,9 @@ impl VM {
                     if !tail_squelch.is_empty() {
                         let squelched = eb.intersection(tail_squelch);
                         if !squelched.is_empty() {
-                            let squelched_str = {
-                                let registry =
-                                    crate::signals::registry::global_registry().lock().unwrap();
-                                registry.format_signal_bits(squelched)
-                            };
+                            let squelched_str = crate::signals::registry::with_registry(|reg| {
+                                reg.format_signal_bits(squelched)
+                            });
                             let err = crate::value::error_val(
                                 "signal-violation",
                                 format!("squelch: signal {} caught at boundary", squelched_str),

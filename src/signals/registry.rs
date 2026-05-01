@@ -184,6 +184,23 @@ pub fn global_registry() -> &'static Mutex<SignalRegistry> {
     SIGNAL_REGISTRY.get_or_init(|| Mutex::new(SignalRegistry::with_builtins()))
 }
 
+/// Execute a closure with shared access to the global signal registry.
+///
+/// Recovers from mutex poisoning (which can occur if a thread panics while
+/// holding the lock) by accessing the inner value regardless. This prevents
+/// a single panic from permanently disabling signal registry access across
+/// the entire process.
+///
+/// All read operations on the registry should use this function instead of
+/// `global_registry().lock().unwrap()`.
+pub fn with_registry<F, R>(f: F) -> R
+where
+    F: FnOnce(&SignalRegistry) -> R,
+{
+    let guard = global_registry().lock().unwrap_or_else(|e| e.into_inner());
+    f(&*guard)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

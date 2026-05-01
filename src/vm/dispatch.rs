@@ -595,10 +595,13 @@ impl VM {
                         let signal_bits = closure.signal().bits;
                         let excess = signal_bits.subtract(allowed_bits);
                         if !excess.is_empty() {
-                            let registry =
-                                crate::signals::registry::global_registry().lock().unwrap();
-                            let excess_str = registry.format_signal_bits(excess);
-                            let allowed_str = registry.format_signal_bits(allowed_bits);
+                            let (excess_str, allowed_str) =
+                                crate::signals::registry::with_registry(|reg| {
+                                    (
+                                        reg.format_signal_bits(excess),
+                                        reg.format_signal_bits(allowed_bits),
+                                    )
+                                });
                             let err = crate::value::error_val(
                                 "signal-violation",
                                 format!(

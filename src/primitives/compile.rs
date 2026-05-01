@@ -16,7 +16,7 @@ use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::pipeline::analyze_file;
 use crate::primitives::def::PrimitiveDef;
 use crate::rewrite::edit::{apply_edits, Edit};
-use crate::signals::registry::global_registry;
+use crate::signals::registry::with_registry;
 use crate::signals::Signal;
 use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};
 use crate::value::error_val;
@@ -834,16 +834,18 @@ fn find_matching_paren(source: &str, start: usize) -> Option<usize> {
 // ── Value conversion helpers ───────────────────────────────────────────
 
 fn signal_to_value(sig: &Signal) -> Value {
-    let registry = global_registry().lock().unwrap();
     let mut fields = BTreeMap::new();
 
     // :bits as keyword set
-    let mut bit_set = BTreeSet::new();
-    for entry in registry.entries() {
-        if sig.bits.has_bit(entry.bit_position) {
-            bit_set.insert(Value::keyword(&entry.name));
+    let bit_set = with_registry(|reg| {
+        let mut bit_set = BTreeSet::new();
+        for entry in reg.entries() {
+            if sig.bits.has_bit(entry.bit_position) {
+                bit_set.insert(Value::keyword(&entry.name));
+            }
         }
-    }
+        bit_set
+    });
     fields.insert(kw("bits"), Value::set(bit_set));
 
     // :propagates as integer set
@@ -1186,39 +1188,39 @@ pub(crate) fn prim_compile_query_signal(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let registry = global_registry().lock().unwrap();
-
-    let matches: Vec<Value> = handle
-        .signal_map
-        .iter()
-        .filter(|(_, sig)| match query.as_str() {
-            "silent" => sig.bits.is_empty() && sig.propagates == 0,
-            "jit-eligible" => !sig.may_suspend(),
-            "yields" => sig.may_suspend(),
-            other => {
-                // Look up as a signal name.
-                if let Some(bit_pos) = registry.lookup(other) {
-                    sig.bits.has_bit(bit_pos)
-                } else {
-                    false
-                }
-            }
-        })
-        .map(|(name, _)| {
-            let mut fields = BTreeMap::new();
-            fields.insert(kw("name"), Value::string(&**name));
-            // Find line from symbol index.
-            for def in handle.symbol_index.definitions.values() {
-                if def.name == *name {
-                    if let Some(loc) = &def.location {
-                        fields.insert(kw("line"), Value::int(loc.line as i64));
+    let matches: Vec<Value> = with_registry(|reg| {
+        handle
+            .signal_map
+            .iter()
+            .filter(|(_, sig)| match query.as_str() {
+                "silent" => sig.bits.is_empty() && sig.propagates == 0,
+                "jit-eligible" => !sig.may_suspend(),
+                "yields" => sig.may_suspend(),
+                other => {
+                    // Look up as a signal name.
+                    if let Some(bit_pos) = reg.lookup(other) {
+                        sig.bits.has_bit(bit_pos)
+                    } else {
+                        false
                     }
-                    break;
                 }
-            }
-            Value::struct_from(fields)
-        })
-        .collect();
+            })
+            .map(|(name, _)| {
+                let mut fields = BTreeMap::new();
+                fields.insert(kw("name"), Value::string(&**name));
+                // Find line from symbol index.
+                for def in handle.symbol_index.definitions.values() {
+                    if def.name == *name {
+                        if let Some(loc) = &def.location {
+                            fields.insert(kw("line"), Value::int(loc.line as i64));
+                        }
+                        break;
+                    }
+                }
+                Value::struct_from(fields)
+            })
+            .collect()
+    });
 
     (SIG_OK, Value::array(matches))
 }
@@ -2270,8 +2272,7 @@ fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let registry = global_registry().lock().unwrap();
-    let bit = match registry.lookup(&signal_kind) {
+    let bit = match with_registry(|reg| reg.lookup(&signal_kind)) {
         Some(b) => b,
         None => match signal_kind.as_str() {
             "error" => 0,
@@ -2286,7 +2287,6 @@ fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
             }
         },
     };
-    drop(registry);
 
     if !sig.bits.has_bit(bit) && sig.propagates & (1 << bit) == 0 {
         return (

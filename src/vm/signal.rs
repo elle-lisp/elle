@@ -272,8 +272,8 @@ impl VM {
         use crate::value::heap::TableKey;
         use std::collections::BTreeMap;
 
-        let registry = crate::signals::registry::global_registry().lock().unwrap();
-        let denied_keywords = registry.bits_to_keywords(blocked);
+        let denied_keywords =
+            crate::signals::registry::with_registry(|reg| reg.bits_to_keywords(blocked));
 
         let mut fields = BTreeMap::new();
         fields.insert(
@@ -386,8 +386,8 @@ impl VM {
             "fiber/self" => (SIG_OK, self.current_fiber_value.unwrap_or(Value::NIL)),
             "fiber/caps" => {
                 let caps = crate::signals::CAP_MASK.subtract(self.fiber.withheld);
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
-                let keywords = registry.bits_to_keywords(caps);
+                let keywords =
+                    crate::signals::registry::with_registry(|reg| reg.bits_to_keywords(caps));
                 (SIG_OK, Value::set(keywords.into_iter().collect()))
             }
             "list-primitives" => {

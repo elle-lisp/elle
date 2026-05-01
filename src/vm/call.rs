@@ -375,11 +375,12 @@ impl VM {
             {
                 let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
                 let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
-                let reg = crate::signals::registry::global_registry().lock().unwrap();
+                let sig_str =
+                    crate::signals::registry::with_registry(|reg| reg.format_signal_bits(sig_bits));
                 eprintln!("panic: silence violation in '{}'", name);
                 eprintln!("  A (silence)'d function signaled at runtime.");
                 eprintln!("  silence asserts purity — any signal is a programmer bug.");
-                eprintln!("  signal: {}", reg.format_signal_bits(sig_bits));
+                eprintln!("  signal: {}", sig_str);
                 eprintln!("  value:  {}", sig_val);
                 if let Some(loc) = self.error_loc.as_ref() {
                     eprintln!("  at {}", loc);
@@ -407,10 +408,9 @@ impl VM {
             {
                 let squelched = bits.intersection(closure_squelch_mask);
                 if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
+                    let squelched_str = crate::signals::registry::with_registry(|reg| {
+                        reg.format_signal_bits(squelched)
+                    });
                     let err = crate::value::error_val(
                         "signal-violation",
                         format!("squelch: signal {} caught at boundary", squelched_str),

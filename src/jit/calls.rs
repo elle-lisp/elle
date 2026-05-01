@@ -272,11 +272,9 @@ pub extern "C" fn elle_jit_call(
                     if !closure_squelch_mask.is_empty() {
                         let squelched = sig.intersection(closure_squelch_mask);
                         if !squelched.is_empty() {
-                            let squelched_str = {
-                                let registry =
-                                    crate::signals::registry::global_registry().lock().unwrap();
-                                registry.format_signal_bits(squelched)
-                            };
+                            let squelched_str = crate::signals::registry::with_registry(|reg| {
+                                reg.format_signal_bits(squelched)
+                            });
                             let err = error_val(
                                 "signal-violation",
                                 format!("squelch: signal {} caught at boundary", squelched_str),
@@ -338,10 +336,9 @@ pub extern "C" fn elle_jit_call(
         {
             let squelched = bits.intersection(closure_squelch_mask);
             if !squelched.is_empty() {
-                let squelched_str = {
-                    let registry = crate::signals::registry::global_registry().lock().unwrap();
-                    registry.format_signal_bits(squelched)
-                };
+                let squelched_str = crate::signals::registry::with_registry(|reg| {
+                    reg.format_signal_bits(squelched)
+                });
                 let err = error_val(
                     "signal-violation",
                     format!("squelch: signal {} caught at boundary", squelched_str),

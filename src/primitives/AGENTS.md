@@ -424,7 +424,7 @@ converts them to `:error` with kind `"signal-violation"`.
 **Implementation details:**
 - Validates first argument is a closure via `as_closure()`
 - Validates remaining arguments are keywords via `as_keyword_name()`
-- Looks up each keyword in the global signal registry via `registry::global_registry().lock().unwrap().lookup()`
+- Looks up each keyword in the global signal registry via `registry::with_registry(|reg| reg.lookup())`
 - ORs bits into a combined mask
 - Creates new closure with `squelch_mask = closure.squelch_mask | new_bits`
 - Returns the new closure as a Value
