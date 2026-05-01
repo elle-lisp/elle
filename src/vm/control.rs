@@ -37,11 +37,15 @@ pub(crate) fn handle_return(vm: &mut VM) -> Value {
         .pop()
         .expect("VM bug: Stack underflow on return");
 
-    // Unwrap CaptureCell (internal cells for mutable captures).
-    // User code should never see a CaptureCell — it's an implementation detail.
-    // LBox (user-facing box) must NOT be unwrapped here.
-    if let Some(cell_ref) = value.as_capture_cell() {
-        *cell_ref.borrow()
+    // Unwrap Cell (internal cells for mutable captures)
+    // User code should never see a Cell - it's an implementation detail
+    if let Some(_cell_ptr) = value.as_heap_ptr() {
+        if let Some(cell_val) = value.as_lbox() {
+            let inner = cell_val.borrow();
+            *inner
+        } else {
+            value
+        }
     } else {
         value
     }

@@ -543,7 +543,7 @@
 
 # test_let_destructure_tuple
 (let [{:error a :message b} (make-error-struct)]
-  (assert (= b "/: division by zero") "let destructure tuple: message"))
+  (assert (= b "division by zero") "let destructure tuple: message"))
 
 # test_let_destructure_tuple_first
 (let [{:error a :message b} (make-error-struct)]
@@ -622,7 +622,7 @@
 (begin
   (def {:error a7 :message b7} (make-error-struct))
   (assert (= a7 :division-by-zero) "def array basic: kind")
-  (assert (= b7 "/: division by zero") "def array basic: message"))
+  (assert (= b7 "division by zero") "def array basic: message"))
 
 # ============================================================
 # &opt optional parameters

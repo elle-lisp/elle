@@ -424,13 +424,7 @@ impl<'a> Analyzer<'a> {
                         }
                         _ => {
                             // %-intrinsic recognition: %name (not bare %)
-                            // When --checked-intrinsics is active, skip inline
-                            // recognition — fall through to analyze_call so the
-                            // call compiles as Call to the registered NativeFn.
-                            if name.starts_with('%')
-                                && name.len() > 1
-                                && !crate::config::get().checked_intrinsics
-                            {
+                            if name.starts_with('%') && name.len() > 1 {
                                 return self.analyze_intrinsic(name, &items[1..], span);
                             }
                         }

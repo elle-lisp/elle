@@ -194,11 +194,57 @@ impl<'a> Lowerer<'a> {
 
         let sym = bi.name;
 
+        // Special case: `-` with 1 arg is negation
+        if args.len() == 1 {
+            if let Some(IntrinsicOp::Binary(BinOp::Sub)) = self.intrinsics.get(&sym) {
+                let src = self.lower_expr(args[0])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::UnaryOp {
+                    dst,
+                    op: UnaryOp::Neg,
+                    src,
+                });
+                return Ok(Some(dst));
+            }
+        }
+
         let Some(&intrinsic) = self.intrinsics.get(&sym) else {
             return Ok(None);
         };
 
         match intrinsic {
+            IntrinsicOp::Binary(op) => {
+                if args.len() != 2 {
+                    return Ok(None); // Variadic — fall through to generic call
+                }
+                let lhs = self.lower_expr(args[0])?;
+                let rhs = self.lower_expr(args[1])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::BinOp { dst, op, lhs, rhs });
+                Ok(Some(dst))
+            }
+            IntrinsicOp::Compare(op) => {
+                if args.len() != 2 {
+                    // 0-1 args: fall through to generic call for arity error.
+                    // 3+ args: fall through to generic call — the primitive
+                    // handles chained comparison with short-circuit.
+                    return Ok(None);
+                }
+                let lhs = self.lower_expr(args[0])?;
+                let rhs = self.lower_expr(args[1])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::Compare { dst, op, lhs, rhs });
+                Ok(Some(dst))
+            }
+            IntrinsicOp::Unary(op) => {
+                if args.len() != 1 {
+                    return Ok(None);
+                }
+                let src = self.lower_expr(args[0])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::UnaryOp { dst, op, src });
+                Ok(Some(dst))
+            }
             IntrinsicOp::Conversion(op) => {
                 if args.len() != 1 {
                     return Ok(None); // 2-arg (integer str radix) falls through to Call

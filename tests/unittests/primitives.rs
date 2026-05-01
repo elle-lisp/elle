@@ -8,8 +8,6 @@ use elle::symbol::SymbolTable;
 use elle::value::{list, Closure, ClosureTemplate, Value};
 use elle::vm::VM;
 
-use crate::common::eval_source;
-
 fn setup() -> (VM, SymbolTable, PrimitiveMeta) {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
@@ -38,20 +36,32 @@ fn call_primitive(prim: &Value, args: &[Value]) -> Result<Value, LError> {
     }
 }
 
-// Arithmetic tests (+ - * / are now stdlib functions, tested via eval_source)
+// Arithmetic tests
 #[test]
 fn test_addition() {
+    let (_vm, mut symbols, meta) = setup();
+    let add = get_primitive(&meta, &mut symbols, "+");
+
     // No args
-    assert_eq!(eval_source("(+)").unwrap(), Value::int(0));
+    assert_eq!(call_primitive(&add, &[]).unwrap(), Value::int(0));
 
     // Single arg
-    assert_eq!(eval_source("(+ 5)").unwrap(), Value::int(5));
+    assert_eq!(
+        call_primitive(&add, &[Value::int(5)]).unwrap(),
+        Value::int(5)
+    );
 
     // Multiple args
-    assert_eq!(eval_source("(+ 1 2 3)").unwrap(), Value::int(6));
+    assert_eq!(
+        call_primitive(&add, &[Value::int(1), Value::int(2), Value::int(3)]).unwrap(),
+        Value::int(6)
+    );
 
     // Mixed int/float
-    if let Some(f) = eval_source("(+ 1 2.5)").unwrap().as_float() {
+    if let Some(f) = call_primitive(&add, &[Value::int(1), Value::float(2.5)])
+        .unwrap()
+        .as_float()
+    {
         assert!((f - 3.5).abs() < 1e-10)
     } else {
         panic!("Expected float");
@@ -60,38 +70,68 @@ fn test_addition() {
 
 #[test]
 fn test_subtraction() {
+    let (_vm, mut symbols, meta) = setup();
+    let sub = get_primitive(&meta, &mut symbols, "-");
+
     // Negate
-    assert_eq!(eval_source("(- 5)").unwrap(), Value::int(-5));
+    assert_eq!(
+        call_primitive(&sub, &[Value::int(5)]).unwrap(),
+        Value::int(-5)
+    );
 
     // Subtract
-    assert_eq!(eval_source("(- 10 3)").unwrap(), Value::int(7));
+    assert_eq!(
+        call_primitive(&sub, &[Value::int(10), Value::int(3)]).unwrap(),
+        Value::int(7)
+    );
 
     // Multiple args
-    assert_eq!(eval_source("(- 100 25 25)").unwrap(), Value::int(50));
+    assert_eq!(
+        call_primitive(&sub, &[Value::int(100), Value::int(25), Value::int(25)]).unwrap(),
+        Value::int(50)
+    );
 }
 
 #[test]
 fn test_multiplication() {
+    let (_vm, mut symbols, meta) = setup();
+    let mul = get_primitive(&meta, &mut symbols, "*");
+
     // Identity
-    assert_eq!(eval_source("(*)").unwrap(), Value::int(1));
+    assert_eq!(call_primitive(&mul, &[]).unwrap(), Value::int(1));
 
     // Multiply
-    assert_eq!(eval_source("(* 2 3 4)").unwrap(), Value::int(24));
+    assert_eq!(
+        call_primitive(&mul, &[Value::int(2), Value::int(3), Value::int(4)]).unwrap(),
+        Value::int(24)
+    );
 
     // Zero
-    assert_eq!(eval_source("(* 5 0)").unwrap(), Value::int(0));
+    assert_eq!(
+        call_primitive(&mul, &[Value::int(5), Value::int(0)]).unwrap(),
+        Value::int(0)
+    );
 }
 
 #[test]
 fn test_division() {
+    let (_vm, mut symbols, meta) = setup();
+    let div = get_primitive(&meta, &mut symbols, "/");
+
     // Division
-    assert_eq!(eval_source("(/ 10 2)").unwrap(), Value::int(5));
+    assert_eq!(
+        call_primitive(&div, &[Value::int(10), Value::int(2)]).unwrap(),
+        Value::int(5)
+    );
 
     // Integer division
-    assert_eq!(eval_source("(/ 7 2)").unwrap(), Value::int(3));
+    assert_eq!(
+        call_primitive(&div, &[Value::int(7), Value::int(2)]).unwrap(),
+        Value::int(3)
+    );
 
     // Division by zero
-    assert!(eval_source("(/ 10 0)").is_err());
+    assert!(call_primitive(&div, &[Value::int(10), Value::int(0)]).is_err());
 }
 
 // Comparison tests
@@ -126,21 +166,48 @@ fn test_equality() {
 
 #[test]
 fn test_less_than() {
-    assert_eq!(eval_source("(< 3 5)").unwrap(), Value::bool(true));
-    assert_eq!(eval_source("(< 5 5)").unwrap(), Value::bool(false));
-    assert_eq!(eval_source("(< 7 5)").unwrap(), Value::bool(false));
+    let (_vm, mut symbols, meta) = setup();
+    let lt = get_primitive(&meta, &mut symbols, "<");
+
+    assert_eq!(
+        call_primitive(&lt, &[Value::int(3), Value::int(5)]).unwrap(),
+        Value::bool(true)
+    );
+
+    assert_eq!(
+        call_primitive(&lt, &[Value::int(5), Value::int(5)]).unwrap(),
+        Value::bool(false)
+    );
+
+    assert_eq!(
+        call_primitive(&lt, &[Value::int(7), Value::int(5)]).unwrap(),
+        Value::bool(false)
+    );
 }
 
 #[test]
 fn test_greater_than() {
-    assert_eq!(eval_source("(> 7 5)").unwrap(), Value::bool(true));
-    assert_eq!(eval_source("(> 5 5)").unwrap(), Value::bool(false));
+    let (_vm, mut symbols, meta) = setup();
+    let gt = get_primitive(&meta, &mut symbols, ">");
+
+    assert_eq!(
+        call_primitive(&gt, &[Value::int(7), Value::int(5)]).unwrap(),
+        Value::bool(true)
+    );
+
+    assert_eq!(
+        call_primitive(&gt, &[Value::int(5), Value::int(5)]).unwrap(),
+        Value::bool(false)
+    );
 }
 
 // List operation tests
 #[test]
 fn test_cons() {
-    let result = eval_source("(pair 1 2)").unwrap();
+    let (_vm, mut symbols, meta) = setup();
+    let pair = get_primitive(&meta, &mut symbols, "pair");
+
+    let result = call_primitive(&pair, &[Value::int(1), Value::int(2)]).unwrap();
     let cons_cell = result.as_pair().unwrap();
 
     assert_eq!(cons_cell.first, Value::int(1));
@@ -254,28 +321,52 @@ fn test_symbol_predicate() {
     );
 }
 
-// Logic tests (not is now a stdlib function)
+// Logic tests
 #[test]
 fn test_not() {
-    assert_eq!(eval_source("(not false)").unwrap(), Value::bool(true));
-    assert_eq!(eval_source("(not true)").unwrap(), Value::bool(false));
-    assert_eq!(eval_source("(not nil)").unwrap(), Value::bool(true)); // nil is falsy
+    let (_vm, mut symbols, meta) = setup();
+    let not = get_primitive(&meta, &mut symbols, "not");
+
+    assert_eq!(
+        call_primitive(&not, &[Value::bool(false)]).unwrap(),
+        Value::bool(true)
+    );
+
+    assert_eq!(
+        call_primitive(&not, &[Value::bool(true)]).unwrap(),
+        Value::bool(false)
+    );
+
+    assert_eq!(
+        call_primitive(&not, &[Value::NIL]).unwrap(),
+        Value::bool(true) // nil is falsy
+    );
+
     // Truthy values
-    assert_eq!(eval_source("(not 0)").unwrap(), Value::bool(false));
+    assert_eq!(
+        call_primitive(&not, &[Value::int(0)]).unwrap(),
+        Value::bool(false)
+    );
 }
 
-// Error handling tests (+ < are now stdlib functions)
+// Error handling tests
 #[test]
 fn test_arithmetic_type_errors() {
+    let (_vm, mut symbols, meta) = setup();
+    let add = get_primitive(&meta, &mut symbols, "+");
+
     // Adding non-numbers
-    assert!(eval_source("(+ nil)").is_err());
-    assert!(eval_source("(+ true)").is_err());
+    assert!(call_primitive(&add, &[Value::NIL]).is_err());
+    assert!(call_primitive(&add, &[Value::bool(true)]).is_err());
 }
 
 #[test]
 fn test_comparison_type_errors() {
+    let (_vm, mut symbols, meta) = setup();
+    let lt = get_primitive(&meta, &mut symbols, "<");
+
     // Comparing non-numbers
-    assert!(eval_source("(< nil 5)").is_err());
+    assert!(call_primitive(&lt, &[Value::NIL, Value::int(5)]).is_err());
 }
 
 #[test]
@@ -1659,7 +1750,7 @@ fn test_disjit_returns_array_for_pure_closure() {
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _signals = register_primitives(&mut vm2, &mut symbols2);
-    let result = pipeline_eval("(fn (x) x)", &mut symbols2, &mut vm2, "<test>").unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
     let disasm = call_primitive(&disjit, &[result]).unwrap();
     let vec = disasm
@@ -1696,7 +1787,7 @@ fn test_disbit_returns_array_for_pure_closure() {
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _signals = register_primitives(&mut vm2, &mut symbols2);
-    let result = pipeline_eval("(fn (x) x)", &mut symbols2, &mut vm2, "<test>").unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
     let ir = call_primitive(&disbit, &[result]).unwrap();
     if !ir.is_nil() {
@@ -1930,13 +2021,13 @@ fn test_doc_bare_symbol_special_form() {
 
 #[test]
 fn test_doc_bare_symbol_primitive() {
-    let result = eval_full("(doc list)").unwrap();
+    let result = eval_full("(doc +)").unwrap();
     let s = result
         .with_string(|s| s.to_string())
         .expect("doc should return a string");
     assert!(
-        s.contains("list"),
-        "doc for list via bare symbol should contain 'list', got: {}",
+        s.contains("+"),
+        "doc for + via bare symbol should contain '+', got: {}",
         s
     );
 }
@@ -2012,19 +2103,19 @@ fn test_fn_predicate() {
 
 #[test]
 fn test_native_fn_predicate() {
-    assert_eq!(run("(native-fn? list)"), "true");
+    assert_eq!(run("(native-fn? +)"), "true");
     assert_eq!(run("(native-fn? (fn [x] x))"), "false");
     assert_eq!(run("(native-fn? 42)"), "false");
 }
 
 #[test]
 fn test_native_fn_aliases() {
-    assert_eq!(run("(native? list)"), "true");
-    assert_eq!(run("(primitive? list)"), "true");
+    assert_eq!(run("(native? +)"), "true");
+    assert_eq!(run("(primitive? +)"), "true");
     assert_eq!(run("(native? (fn [x] x))"), "false");
 }
 
 #[test]
 fn test_type_of_native_fn() {
-    assert_eq!(run("(type-of list)"), ":native-fn");
+    assert_eq!(run("(type-of +)"), ":native-fn");
 }

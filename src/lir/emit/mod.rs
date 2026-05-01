@@ -947,155 +947,6 @@ impl Emitter {
                 // No stack effect
             }
 
-            // === New type predicates ===
-            LirInstr::IsEmpty { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsEmptyList);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsBool { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBool);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsInt { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsInt);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsFloat { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsFloat);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsString { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsString);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsKeyword { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsKeyword);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsSymbolCheck { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSymbol);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsBytes { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBytes);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsBox { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBox);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsClosure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsClosure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::IsFiber { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsFiber);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::TypeOf { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::TypeOf);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // === Data access ===
-            LirInstr::Length { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::Length);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::Get { dst, obj, key } => {
-                self.ensure_binary_on_top(*obj, *key);
-                self.bytecode.emit(Instruction::IntrGet);
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::Put { dst, obj, key, val } => {
-                self.ensure_on_top(*obj);
-                self.ensure_on_top(*key);
-                self.ensure_on_top(*val);
-                self.bytecode.emit(Instruction::IntrPut);
-                self.pop(); // val
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::Del { dst, obj, key } => {
-                self.ensure_binary_on_top(*obj, *key);
-                self.bytecode.emit(Instruction::IntrDel);
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::Has { dst, obj, key } => {
-                self.ensure_binary_on_top(*obj, *key);
-                self.bytecode.emit(Instruction::IntrHas);
-                self.pop(); // key
-                self.pop(); // obj
-                self.push_reg(*dst);
-            }
-            LirInstr::IntrPush { dst, array, value } => {
-                self.ensure_binary_on_top(*array, *value);
-                self.bytecode.emit(Instruction::IntrPush);
-                self.pop(); // value
-                self.pop(); // array
-                self.push_reg(*dst);
-            }
-            LirInstr::Pop { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrPop);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // === Mutability ===
-            LirInstr::Freeze { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrFreeze);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            LirInstr::Thaw { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrThaw);
-                self.pop();
-                self.push_reg(*dst);
-            }
-
-            // === Identity ===
-            LirInstr::Identical { dst, lhs, rhs } => {
-                self.ensure_binary_on_top(*lhs, *rhs);
-                self.bytecode.emit(Instruction::Identical);
-                self.pop(); // rhs
-                self.pop(); // lhs
-                self.push_reg(*dst);
-            }
-
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::CheckSignalBound);
@@ -1127,16 +978,14 @@ impl Emitter {
                 // causing wrong DupN offsets in the merge block.
                 self.pop_trailing_orphans();
 
-                // Save stack state for the target block if this is the first
-                // predecessor to jump there. Multiple blocks may jump to the
-                // same target (e.g., break + fallthrough, if/and/or merges).
-                // We keep the FIRST saved state and ignore later ones — the
-                // first predecessor is the reachable path (later predecessors
-                // may be dead code after break with a wrong stack layout).
+                // Save stack state for the target block, but only if it hasn't
+                // been processed yet. This is used for control flow merges
+                // (e.g., if/and/or) where multiple blocks jump to the same target.
+                // If the target block has already been processed (because blocks
+                // are sorted by label), we don't overwrite the saved state.
                 if !self.label_offsets.contains_key(label) {
                     self.yield_stack_state
-                        .entry(*label)
-                        .or_insert_with(|| (self.stack.clone(), self.reg_to_stack.clone()));
+                        .insert(*label, (self.stack.clone(), self.reg_to_stack.clone()));
                 }
 
                 self.bytecode.emit(Instruction::Jump);

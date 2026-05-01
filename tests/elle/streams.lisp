@@ -73,9 +73,8 @@
         "stream/map: empty source yields empty")
 
 # stream/filter: keeps matching values
-(assert (= (stream/collect (stream/filter (fn [x] (= (rem x 2) 0))
-                           (make-range 6))) (list 0 2 4))
-        "stream/filter: keeps even values")
+(assert (= (stream/collect (stream/filter (fn [x] (= (% x 2) 0)) (make-range 6)))
+           (list 0 2 4)) "stream/filter: keeps even values")
 
 # stream/filter: rejects all
 (assert (= (stream/collect (stream/filter (fn [x] false) (make-range 3))) ())
@@ -147,7 +146,7 @@
 # stream/pipe: chained transforms
 (assert (= (stream/collect (stream/pipe (make-range 10)
                                         (partial stream/filter
-                                        (fn [x] (= (rem x 2) 0)))
+                                        (fn [x] (= (% x 2) 0)))
                                         (partial stream/take 3))) (list 0 2 4))
         "stream/pipe: filter then take")
 

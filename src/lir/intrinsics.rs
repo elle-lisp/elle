@@ -9,7 +9,7 @@
 //! bool, nil, keyword, symbol). Used by escape analysis (`result_is_safe`)
 //! to accept calls to these primitives in scope-allocated let bodies.
 
-use super::types::ConvOp;
+use super::types::{BinOp, CmpOp, ConvOp, UnaryOp};
 use crate::symbol::SymbolTable;
 use crate::value::SymbolId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -17,6 +17,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// A known intrinsic operation that can be compiled to specialized instructions.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum IntrinsicOp {
+    Binary(BinOp),
+    Compare(CmpOp),
+    Unary(UnaryOp),
     Conversion(ConvOp),
 }
 
@@ -33,6 +36,26 @@ pub(crate) fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, Int
             map.insert(id, op);
         }
     };
+
+    // Binary arithmetic
+    add("+", IntrinsicOp::Binary(BinOp::Add));
+    add("-", IntrinsicOp::Binary(BinOp::Sub));
+    add("*", IntrinsicOp::Binary(BinOp::Mul));
+    add("/", IntrinsicOp::Binary(BinOp::Div));
+    // `rem` uses truncated remainder, matching BinOp::Rem / Instruction::Rem.
+    // `%` is Euclidean modulo (different for negative numbers) — not mapped.
+    add("rem", IntrinsicOp::Binary(BinOp::Rem));
+
+    // Comparisons
+    add("=", IntrinsicOp::Compare(CmpOp::Eq));
+    add("<", IntrinsicOp::Compare(CmpOp::Lt));
+    add(">", IntrinsicOp::Compare(CmpOp::Gt));
+    add("<=", IntrinsicOp::Compare(CmpOp::Le));
+    add(">=", IntrinsicOp::Compare(CmpOp::Ge));
+
+    // Unary
+    // `-` with 1 arg is handled as a special case in try_lower_intrinsic.
+    add("not", IntrinsicOp::Unary(UnaryOp::Not));
 
     // Conversion (1-arg calls lower to Convert; 2-arg integer/int falls through to Call)
     add("float", IntrinsicOp::Conversion(ConvOp::IntToFloat));

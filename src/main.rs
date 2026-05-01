@@ -38,8 +38,6 @@ fn print_help() {
     println!("                          emit, jit, io, gc, import, macro, wasm,");
     println!("                          capture, arena, escape, bytecode");
     println!("  --trace=all           Trace everything");
-    println!("  --checked-intrinsics  Route %-intrinsics through type-checked NativeFn");
-    println!("                          (implies --jit=off --mlir=off)");
     println!("  --stats               Print compilation stats on exit");
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");

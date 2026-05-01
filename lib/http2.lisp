@@ -186,7 +186,8 @@
         (begin
           (let [body-bytes (if (string? body) (bytes body) body)]
             (session:send-data-with-flow-control sess sid s:flow body-bytes))
-          (stream:transition s :send-end-stream))  # HEADERS carried END_STREAM — transition now
+          (stream:transition s :send-end-stream))
+        # HEADERS carried END_STREAM — transition now
         (stream:transition s :send-end-stream))
       [sid s]))
 
@@ -291,8 +292,7 @@
   (defn h2-stream-send [sess sid data]
     "Send a DATA frame on an open stream without ending it."
     (let [s (get sess:streams sid)]
-      (session:send-data-with-flow-control sess sid s:flow data
-      :end-stream false)))
+      (session:send-data-with-flow-control sess sid s:flow data :end-stream false)))
 
   (defn h2-stream-end [sess sid]
     "Send an empty DATA frame with END_STREAM to half-close the client side."
@@ -306,9 +306,11 @@
   (defn h2-close [sess]
     "Close an HTTP/2 session gracefully."
     (when (not sess:closed?)
-      (put sess :closed? true)  # Close all stream data-queues so reader unblocks from any full-queue wait
+      (put sess :closed? true)
+      # Close all stream data-queues so reader unblocks from any full-queue wait
       (each sid in (keys sess:streams)
-        (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
+        (when-let [s (get sess:streams sid)]
+          (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
       (when sess:writer-fiber (ev/join-protected sess:writer-fiber))

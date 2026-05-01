@@ -262,52 +262,6 @@ pub enum Instruction {
     IntToFloat,
     /// Convert float → int (truncation). Pops value, pushes int. Identity on ints.
     FloatToInt,
-
-    // === New intrinsic opcodes ===
-    /// Not-equal comparison
-    Ne,
-    /// Bitwise complement
-    BitNotIntr,
-    /// Type check: is value a boolean?
-    IsBool,
-    /// Type check: is value an integer?
-    IsInt,
-    /// Type check: is value a float?
-    IsFloat,
-    /// Type check: is value a string (immutable or mutable)?
-    IsString,
-    /// Type check: is value a keyword?
-    IsKeyword,
-    /// Type check: is value bytes (immutable or mutable)?
-    IsBytes,
-    /// Type check: is value a box?
-    IsBox,
-    /// Type check: is value a closure?
-    IsClosure,
-    /// Type check: is value a fiber?
-    IsFiber,
-    /// Get type keyword for a value
-    TypeOf,
-    /// Polymorphic length
-    Length,
-    /// Polymorphic get (pops key, pops collection, pushes result)
-    IntrGet,
-    /// Polymorphic put (pops value, pops key, pops collection, pushes result)
-    IntrPut,
-    /// Polymorphic del (pops key, pops collection, pushes result)
-    IntrDel,
-    /// Polymorphic has? (pops key, pops collection, pushes bool)
-    IntrHas,
-    /// Polymorphic push (pops value, pops collection, pushes result)
-    IntrPush,
-    /// @array pop (pops @array, pushes popped value)
-    IntrPop,
-    /// Mutable → immutable copy
-    IntrFreeze,
-    /// Immutable → mutable copy
-    IntrThaw,
-    /// Bitwise tag+payload equality (pops b, pops a, pushes bool)
-    Identical,
 }
 
 /// Compiled bytecode with constants

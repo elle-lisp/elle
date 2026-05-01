@@ -113,7 +113,7 @@ fn test_immutable_assert_fails() {
 
 #[test]
 fn test_numeric_assert_passes_for_pure_arithmetic() {
-    let result = eval_source("(defn f [x y] (numeric!) (%add x y)) (f 3 4)").unwrap();
+    let result = eval_source("(defn f [x y] (numeric!) (+ x y)) (f 3 4)").unwrap();
     assert_eq!(result, Value::int(7));
 }
 

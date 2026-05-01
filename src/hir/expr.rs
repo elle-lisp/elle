@@ -339,42 +339,8 @@ pub enum IntrinsicOp {
     BitAnd,
     BitOr,
     BitXor,
-    BitNot,
     Shl,
     Shr,
-    // Comparison (missing)
-    Ne,
-    // Type predicates
-    IsNil,
-    IsEmpty,
-    IsBool,
-    IsInt,
-    IsFloat,
-    IsString,
-    IsKeyword,
-    IsSymbol,
-    IsPair,
-    IsArray,
-    IsStruct,
-    IsSet,
-    IsBytes,
-    IsBox,
-    IsClosure,
-    IsFiber,
-    TypeOf,
-    // Data access
-    Length,
-    Get,
-    Put,
-    Del,
-    Has,
-    Push,
-    Pop,
-    // Mutability
-    Freeze,
-    Thaw,
-    // Identity
-    Identical,
 }
 
 impl IntrinsicOp {
@@ -401,37 +367,8 @@ impl IntrinsicOp {
             Self::BitAnd => "%bit-and",
             Self::BitOr => "%bit-or",
             Self::BitXor => "%bit-xor",
-            Self::BitNot => "%bit-not",
             Self::Shl => "%shl",
             Self::Shr => "%shr",
-            Self::Ne => "%ne",
-            Self::IsNil => "%nil?",
-            Self::IsEmpty => "%empty?",
-            Self::IsBool => "%bool?",
-            Self::IsInt => "%int?",
-            Self::IsFloat => "%float?",
-            Self::IsString => "%string?",
-            Self::IsKeyword => "%keyword?",
-            Self::IsSymbol => "%symbol?",
-            Self::IsPair => "%pair?",
-            Self::IsArray => "%array?",
-            Self::IsStruct => "%struct?",
-            Self::IsSet => "%set?",
-            Self::IsBytes => "%bytes?",
-            Self::IsBox => "%box?",
-            Self::IsClosure => "%closure?",
-            Self::IsFiber => "%fiber?",
-            Self::TypeOf => "%type-of",
-            Self::Length => "%length",
-            Self::Get => "%get",
-            Self::Put => "%put",
-            Self::Del => "%del",
-            Self::Has => "%has?",
-            Self::Push => "%push",
-            Self::Pop => "%pop",
-            Self::Freeze => "%freeze",
-            Self::Thaw => "%thaw",
-            Self::Identical => "%identical?",
         }
     }
 
@@ -458,37 +395,8 @@ impl IntrinsicOp {
             "%bit-and" => Some(Self::BitAnd),
             "%bit-or" => Some(Self::BitOr),
             "%bit-xor" => Some(Self::BitXor),
-            "%bit-not" => Some(Self::BitNot),
             "%shl" => Some(Self::Shl),
             "%shr" => Some(Self::Shr),
-            "%ne" => Some(Self::Ne),
-            "%nil?" => Some(Self::IsNil),
-            "%empty?" => Some(Self::IsEmpty),
-            "%bool?" => Some(Self::IsBool),
-            "%int?" => Some(Self::IsInt),
-            "%float?" => Some(Self::IsFloat),
-            "%string?" => Some(Self::IsString),
-            "%keyword?" => Some(Self::IsKeyword),
-            "%symbol?" => Some(Self::IsSymbol),
-            "%pair?" => Some(Self::IsPair),
-            "%array?" => Some(Self::IsArray),
-            "%struct?" => Some(Self::IsStruct),
-            "%set?" => Some(Self::IsSet),
-            "%bytes?" => Some(Self::IsBytes),
-            "%box?" => Some(Self::IsBox),
-            "%closure?" => Some(Self::IsClosure),
-            "%fiber?" => Some(Self::IsFiber),
-            "%type-of" => Some(Self::TypeOf),
-            "%length" => Some(Self::Length),
-            "%get" => Some(Self::Get),
-            "%put" => Some(Self::Put),
-            "%del" => Some(Self::Del),
-            "%has?" => Some(Self::Has),
-            "%push" => Some(Self::Push),
-            "%pop" => Some(Self::Pop),
-            "%freeze" => Some(Self::Freeze),
-            "%thaw" => Some(Self::Thaw),
-            "%identical?" => Some(Self::Identical),
             _ => None,
         }
     }
@@ -496,33 +404,7 @@ impl IntrinsicOp {
     /// Required arity (min, max). Most are fixed; %sub allows 1 or 2.
     pub fn arity(self) -> (usize, usize) {
         match self {
-            Self::Not
-            | Self::Int
-            | Self::Float
-            | Self::First
-            | Self::Rest
-            | Self::BitNot
-            | Self::IsNil
-            | Self::IsEmpty
-            | Self::IsBool
-            | Self::IsInt
-            | Self::IsFloat
-            | Self::IsString
-            | Self::IsKeyword
-            | Self::IsSymbol
-            | Self::IsPair
-            | Self::IsArray
-            | Self::IsStruct
-            | Self::IsSet
-            | Self::IsBytes
-            | Self::IsBox
-            | Self::IsClosure
-            | Self::IsFiber
-            | Self::TypeOf
-            | Self::Length
-            | Self::Pop
-            | Self::Freeze
-            | Self::Thaw => (1, 1),
+            Self::Not | Self::Int | Self::Float | Self::First | Self::Rest => (1, 1),
             Self::Sub => (1, 2),
             Self::Add
             | Self::Mul
@@ -530,7 +412,6 @@ impl IntrinsicOp {
             | Self::Rem
             | Self::Mod
             | Self::Eq
-            | Self::Ne
             | Self::Lt
             | Self::Gt
             | Self::Le
@@ -540,29 +421,13 @@ impl IntrinsicOp {
             | Self::BitOr
             | Self::BitXor
             | Self::Shl
-            | Self::Shr
-            | Self::Get
-            | Self::Del
-            | Self::Has
-            | Self::Push
-            | Self::Identical => (2, 2),
-            Self::Put => (3, 3),
+            | Self::Shr => (2, 2),
         }
     }
 
     /// Does this intrinsic allocate heap memory?
     pub fn allocates(self) -> bool {
-        matches!(
-            self,
-            Self::Pair
-                | Self::Freeze
-                | Self::Thaw
-                | Self::Put
-                | Self::Del
-                | Self::TypeOf
-                | Self::Length
-                | Self::Get
-        )
+        matches!(self, Self::Pair)
     }
 }
 

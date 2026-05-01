@@ -14,6 +14,20 @@ pub(crate) use advanced::{
     prim_append, prim_butlast, prim_concat, prim_drop, prim_last, prim_reverse, prim_take,
 };
 
+/// Construct a cons cell
+pub(crate) fn prim_cons(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("pair: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, crate::value::pair(args[0], args[1]))
+}
+
 /// Get the first element of a sequence (list, array, @array, string)
 pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -735,6 +749,17 @@ pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
 
 /// Declarative primitive definitions for list operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "pair",
+        func: prim_cons,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Construct a pair with head and tail",
+        params: &["head", "tail"],
+        category: "list",
+        example: "(pair 1 (pair 2 ()))",
+        aliases: &[],
+    },
     PrimitiveDef {
         name: "first",
         func: prim_first,

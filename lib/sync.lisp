@@ -192,11 +192,10 @@
         @closed false]
     {:put (fn [val]
             (lock:acquire)
-            (while (and (not closed) (>= (length buf) cap)) (not-full:wait lock))
+            (while (and (not closed) (>= (length buf) cap))
+              (not-full:wait lock))
             (if closed
-              (begin
-                (lock:release)
-                nil)
+              (begin (lock:release) nil)
               (begin
                 (push buf val)
                 (not-empty:notify)
@@ -204,11 +203,10 @@
                 nil)))
      :take (fn []
              (lock:acquire)
-             (while (and (not closed) (= (length buf) 0)) (not-empty:wait lock))
+             (while (and (not closed) (= (length buf) 0))
+               (not-empty:wait lock))
              (if (= (length buf) 0)
-               (begin
-                 (lock:release)
-                 nil)
+               (begin (lock:release) nil)
                (let [val (buf 0)]
                  (remove buf 0)
                  (not-full:notify)

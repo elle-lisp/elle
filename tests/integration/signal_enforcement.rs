@@ -105,7 +105,7 @@ fn test_signal_nested_propagation() {
 fn test_signal_pure_call() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (def f (fn (x) (%add x 1))) (f 42))",
+        "(begin (def f (fn (x) (+ x 1))) (f 42))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -113,8 +113,8 @@ fn test_signal_pure_call() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::silent(),
-        "Calling a silent intrinsic function propagates the silent signal"
+        Signal::errors(),
+        "Calling an error-capable function propagates the error signal"
     );
 }
 
@@ -159,7 +159,7 @@ fn test_signal_letrec_bound_lambda() {
 #[test]
 fn test_signal_polymorphic_local_higher_order() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def my-map (fn (f lst)                (if (empty? lst)                    ()                    (%pair (f (first lst)) (my-map f (rest lst))))))            (def gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def my-map (fn (f lst)                (if (empty? lst)                    ()                    (pair (f (first lst)) (my-map f (rest lst))))))            (def gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     // my-map is polymorphic on param 0 (with inherent error).
     // Calling with gen (which yields) resolves to yields + errors.
@@ -190,7 +190,7 @@ fn test_signal_polymorphic_with_pure_arg() {
     // Unknown global → Signal::unknown()
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(map (fn (x) (%add x 1)) (list 1 2 3))",
+        "(map (fn (x) (+ x 1)) (list 1 2 3))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -331,8 +331,10 @@ fn test_signal_pure_primitives() {
     let (mut symbols, mut vm) = setup();
 
     let errors_calls = [
-        "(first (list 1 2))", "(rest (list 1 2))",
-        "(length (list 1 2 3))",
+        "(+ 1 2)", "(- 5 3)", "(* 2 3)", "(/ 10 2)",
+        "(< 1 2)", "(> 2 1)", "(= 1 1)",
+        "(pair 1 2)", "(first (list 1 2))", "(rest (list 1 2))",
+        "(length (list 1 2 3))", "(not true)",
         "(number? 42)", "(string? \"hello\")",
     ];
 
@@ -342,23 +344,6 @@ fn test_signal_pure_primitives() {
             result.hir.signal,
             Signal::errors(),
             "Primitive call '{}' should have errors signal (type/arity checks)",
-            call
-        );
-    }
-
-    // %-intrinsics are silent (no type/arity error path)
-    let silent_intrinsic_calls = [
-        "(%add 1 2)", "(%sub 5 3)", "(%mul 2 3)", "(%div 10 2)",
-        "(%lt 1 2)", "(%gt 2 1)", "(%eq 1 1)",
-        "(%pair 1 2)", "(%not true)",
-    ];
-
-    for call in silent_intrinsic_calls {
-        let result = analyze(call, &mut symbols, &mut vm, "<test>").unwrap();
-        assert_eq!(
-            result.hir.signal,
-            Signal::silent(),
-            "Intrinsic call '{}' should be silent",
             call
         );
     }
@@ -395,7 +380,7 @@ fn test_lambda_body_signal_yields() {
 fn test_lambda_body_signal_nested_yield() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (begin (%add x 1) (yield x) (%add x 2)))",
+        "(fn (x) (begin (+ x 1) (yield x) (+ x 2)))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -403,7 +388,7 @@ fn test_lambda_body_signal_nested_yield() {
     .unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.signal, Signal::yields());
+        assert_eq!(body.signal, Signal::yields_errors());
     } else {
         panic!("Expected Lambda");
     }
@@ -506,7 +491,7 @@ fn test_polymorphic_inference_single_param() {
 fn test_polymorphic_inference_resolves_pure() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (def apply-fn (fn (f x) (f x))) (apply-fn length 42))",
+        "(begin (def apply-fn (fn (f x) (f x))) (apply-fn + 42))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -539,7 +524,7 @@ fn test_polymorphic_inference_resolves_yields() {
 #[test]
 fn test_polymorphic_inference_my_map() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def my-map (fn (f xs)              (if (empty? xs) (list)                  (%pair (f (first xs)) (my-map f (rest xs))))))           (my-map length (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def my-map (fn (f xs)              (if (empty? xs) (list)                  (pair (f (first xs)) (my-map f (rest xs))))))           (my-map + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     assert_eq!(
         result.hir.signal,
@@ -551,7 +536,7 @@ fn test_polymorphic_inference_my_map() {
 #[test]
 fn test_polymorphic_inference_non_recursive_map() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (%pair (f (first xs)) (list)))))           (apply-to-list length (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (pair (f (first xs)) (list)))))           (apply-to-list + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     assert_eq!(
         result.hir.signal,
@@ -627,7 +612,7 @@ fn test_polymorphic_inference_two_params() {
 fn test_polymorphic_inference_two_params_resolves_pure() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(begin (def apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both length number? 5))",
+        "(begin (def apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both + * 5))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -643,7 +628,7 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
 #[test]
 fn test_polymorphic_inference_two_params_resolves_yields() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze(        r#"(begin            (def gen (fn () (yield 1)))           (def apply-both (fn (f g x) (begin (f x) (g x))))            (apply-both gen number? 5))"#,        &mut symbols, &mut vm, "<test>")
+    let result = analyze(        r#"(begin            (def gen (fn () (yield 1)))           (def apply-both (fn (f g x) (begin (f x) (g x))))            (apply-both gen * 5))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     assert_eq!(
         result.hir.signal,

@@ -157,7 +157,7 @@
           len (length data)]
       (def @i 0)
       (while (< i len)
-        (put result i (bit/xor (get data i) (get mask-key (rem i 4))))
+        (put result i (bit/xor (get data i) (get mask-key (% i 4))))
         (assign i (inc i)))
       (freeze result)))
 
@@ -467,7 +467,7 @@
       (assert (= byte1 5) "text frame: payload len 5")
       (assert (= (slice frame 2) payload) "text frame: payload matches"))
 
-    (let* [payload (apply bytes (map (fn [i] (rem i 256)) (range 200)))
+    (let* [payload (apply bytes (map (fn [i] (% i 256)) (range 200)))
            frame (encode-frame OP-BINARY payload)
            byte1 (get frame 1)]
       (assert (= (bit/and byte1 0x7F) 126)

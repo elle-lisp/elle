@@ -121,17 +121,6 @@ pub(super) enum DataOp {
     StructRest = 20,
     IntToFloat = 21,
     FloatToInt = 22,
-    IntrTypeOf = 23,
-    IntrLength = 24,
-    IntrGetOp = 25,
-    IntrPutOp = 26,
-    IntrDelOp = 27,
-    IntrHasOp = 28,
-    IntrPopOp = 29,
-    IntrFreezeOp = 30,
-    IntrThawOp = 31,
-    IntrIdenticalOp = 32,
-    IntrPushOp = 33,
 }
 
 // Re-export as i32 constants for backward compat in instruction.rs
@@ -157,17 +146,6 @@ pub(super) const OP_ARRAY_REF_OR_NIL: i32 = DataOp::ArrayRefOrNil as i32;
 pub(super) const OP_STRUCT_REST: i32 = DataOp::StructRest as i32;
 pub(super) const OP_INT_TO_FLOAT: i32 = DataOp::IntToFloat as i32;
 pub(super) const OP_FLOAT_TO_INT: i32 = DataOp::FloatToInt as i32;
-pub(super) const OP_TYPE_OF: i32 = DataOp::IntrTypeOf as i32;
-pub(super) const OP_LENGTH: i32 = DataOp::IntrLength as i32;
-pub(super) const OP_INTR_GET: i32 = DataOp::IntrGetOp as i32;
-pub(super) const OP_INTR_PUT: i32 = DataOp::IntrPutOp as i32;
-pub(super) const OP_INTR_DEL: i32 = DataOp::IntrDelOp as i32;
-pub(super) const OP_INTR_HAS: i32 = DataOp::IntrHasOp as i32;
-pub(super) const OP_INTR_POP: i32 = DataOp::IntrPopOp as i32;
-pub(super) const OP_INTR_FREEZE: i32 = DataOp::IntrFreezeOp as i32;
-pub(super) const OP_INTR_THAW: i32 = DataOp::IntrThawOp as i32;
-pub(super) const OP_INTR_IDENTICAL: i32 = DataOp::IntrIdenticalOp as i32;
-pub(super) const OP_INTR_PUSH: i32 = DataOp::IntrPushOp as i32;
 
 /// Info about a resume state, used to generate the resume prologue.
 pub(super) struct ResumeStateInfo {
