@@ -1225,7 +1225,7 @@ mod tests {
 
         // Error path returns None
         assert!(result.is_none());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert!(sig.contains(SIG_ERROR));
         // NIL pushed (error convention)
         assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
@@ -1244,7 +1244,7 @@ mod tests {
             vm.handle_primitive_signal(bits, Value::int(1), &bc, &consts, &env, &mut ip, &loc);
 
         assert_eq!(result, Some(SIG_DEBUG));
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_DEBUG);
     }
 
@@ -1260,7 +1260,7 @@ mod tests {
         // Should return the full composed bits
         assert!(result.contains(SIG_ERROR));
         assert!(result.contains(SIG_IO));
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_IO));
     }
@@ -1273,7 +1273,7 @@ mod tests {
         let result = vm.handle_primitive_signal_tail(bits, Value::int(42));
 
         assert_eq!(result, SIG_YIELD | SIG_IO);
-        let (sig, val) = vm.fiber.signal.take().unwrap();
+        let (sig, val) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_YIELD | SIG_IO);
         assert_eq!(val, Value::int(42));
     }
@@ -1285,7 +1285,7 @@ mod tests {
         let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5));
 
         assert_eq!(result, SIG_OK);
-        let (sig, val) = vm.fiber.signal.take().unwrap();
+        let (sig, val) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_OK);
         assert_eq!(val, Value::int(5));
     }
@@ -1298,7 +1298,7 @@ mod tests {
         let result = vm.handle_primitive_signal_tail(bits, Value::string("err"));
 
         assert!(result.contains(SIG_ERROR));
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert!(sig.contains(SIG_ERROR));
     }
 }

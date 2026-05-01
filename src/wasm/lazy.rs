@@ -443,7 +443,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                         );
                         let bits = exec.bits;
                         if bits.is_ok() || bits == crate::value::SIG_HALT {
-                            let (_, val) = vm_ref.fiber.signal.take().unwrap();
+                            let (_, val) = vm_ref.fiber.take_signal();
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
                             (tag, payload, 0)
                         } else {

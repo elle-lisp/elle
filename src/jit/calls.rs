@@ -577,7 +577,7 @@ pub extern "C" fn elle_jit_make_closure(
 /// YIELD_SENTINEL), and errors (signal already set, returns JitValue::nil()).
 fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
     if bits.is_ok() || bits == SIG_HALT {
-        let (_, val) = vm.fiber.signal.take().unwrap();
+        let (_, val) = vm.fiber.take_signal();
         JitValue::from_value(val)
     } else if bits.contains(SIG_ERROR) {
         // SIG_ERROR — signal already set on fiber
@@ -870,7 +870,7 @@ mod tests {
         let err = Value::string("boom");
         let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_ERROR);
     }
 
@@ -880,7 +880,7 @@ mod tests {
         let bits = SIG_ERROR | SIG_IO;
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("io-error"));
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_IO));
     }
@@ -890,7 +890,7 @@ mod tests {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1));
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, val) = vm.fiber.signal.take().unwrap();
+        let (sig, val) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_YIELD);
         assert_eq!(val.as_int(), Some(1));
     }
@@ -901,7 +901,7 @@ mod tests {
         let bits = SIG_YIELD | SIG_IO;
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99));
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, val) = vm.fiber.signal.take().unwrap();
+        let (sig, val) = vm.fiber.take_signal();
         assert_eq!(sig, bits);
         assert_eq!(val.as_int(), Some(99));
     }
@@ -911,7 +911,7 @@ mod tests {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_HALT, Value::int(0));
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_HALT);
     }
 
@@ -921,7 +921,7 @@ mod tests {
         vm.fiber.signal = Some((SIG_DEBUG, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, SIG_DEBUG, Value::NIL);
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert_eq!(sig, SIG_DEBUG);
     }
 
@@ -932,7 +932,7 @@ mod tests {
         vm.fiber.signal = Some((user_bit, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL);
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert_eq!(sig, user_bit);
     }
 
@@ -943,7 +943,7 @@ mod tests {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("terminal"));
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        let (sig, _) = vm.fiber.take_signal();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_TERMINAL));
     }

@@ -523,6 +523,23 @@ impl Fiber {
             withheld: SignalBits::EMPTY,
         }
     }
+
+    /// Take the current signal, panicking with a diagnostic message if absent.
+    ///
+    /// The signal should always be `Some` at call sites — it is set before
+    /// the dispatch loop returns, and consumed immediately by the caller.
+    /// If the invariant is violated, the panic message includes fiber status,
+    /// call depth, and stack size for post-mortem diagnosis.
+    pub fn take_signal(&mut self) -> (SignalBits, Value) {
+        self.signal.take().unwrap_or_else(|| {
+            panic!(
+                "take_signal: signal is None (status={:?}, call_depth={}, stack_len={})",
+                self.status,
+                self.call_depth,
+                self.stack.len(),
+            )
+        })
+    }
 }
 
 impl std::fmt::Debug for Fiber {

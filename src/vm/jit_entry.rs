@@ -237,7 +237,7 @@ impl VM {
                 );
                 let eb = exec_result.bits;
                 if eb.is_ok() || eb == SIG_HALT {
-                    let (_, val) = self.fiber.signal.take().unwrap();
+                    let (_, val) = self.fiber.take_signal();
                     self.fiber.stack.push(val);
                     return None;
                 } else if eb.contains(SIG_ERROR) {

@@ -299,7 +299,7 @@ impl VM {
                             // Use unwrap_or_default() so this works whether the JIT callee
                             // populated fiber.suspended or not (tail-call-to-native path).
                             {
-                                let (_, value) = self.fiber.signal.take().unwrap();
+                                let (_, value) = self.fiber.take_signal();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                                 let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
                                     bytecode: bytecode.clone(),
@@ -373,7 +373,7 @@ impl VM {
                 && closure.template.signal.propagates == 0
                 && self.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_ok())
             {
-                let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
+                let (sig_bits, sig_val) = self.fiber.take_signal();
                 let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
                 let sig_str =
                     crate::signals::registry::with_registry(|reg| reg.format_signal_bits(sig_bits));
@@ -423,7 +423,7 @@ impl VM {
                 }
             }
             if bits.is_ok() {
-                let (_, value) = self.fiber.signal.take().unwrap();
+                let (_, value) = self.fiber.take_signal();
                 self.fiber.stack.push(value);
                 self.fiber.call_stack.pop();
             } else if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
@@ -436,7 +436,7 @@ impl VM {
                 // (TCO), so fiber.suspended may be None here — use unwrap_or_default()
                 // to cover both cases.
                 {
-                    let (_, value) = self.fiber.signal.take().unwrap();
+                    let (_, value) = self.fiber.take_signal();
 
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                     if self
@@ -698,7 +698,7 @@ impl VM {
     ) -> Result<Value, String> {
         // Arity check — sets fiber.signal on mismatch.
         if !self.check_arity(&closure.template.arity, args.len()) {
-            let (_, err) = self.fiber.signal.take().unwrap();
+            let (_, err) = self.fiber.take_signal();
             return Err(self.format_error_with_location(err));
         }
 
@@ -706,7 +706,7 @@ impl VM {
         let new_env = match self.build_closure_env(closure, args) {
             Some(env) => env,
             None => {
-                let (_, err) = self.fiber.signal.take().unwrap();
+                let (_, err) = self.fiber.take_signal();
                 return Err(self.format_error_with_location(err));
             }
         };
@@ -721,7 +721,7 @@ impl VM {
 
         let bits = result.bits;
         if bits.is_ok() || bits == crate::value::SIG_HALT {
-            let (_, value) = self.fiber.signal.take().unwrap();
+            let (_, value) = self.fiber.take_signal();
             Ok(value)
         } else if bits.contains(crate::value::SIG_ERROR) {
             let (_, err) = self
