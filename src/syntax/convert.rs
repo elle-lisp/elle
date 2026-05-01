@@ -101,9 +101,9 @@ impl Syntax {
                 crate::value::list(values)
             }
             SyntaxKind::StructMut(items) => {
-                // Convert to (table k1 v1 k2 v2 ...) list
-                let table_sym = symbols.intern("table");
-                let mut values = vec![Value::symbol(table_sym.0)];
+                // Convert to (@struct k1 v1 k2 v2 ...) list
+                let struct_mut_sym = symbols.intern("@struct");
+                let mut values = vec![Value::symbol(struct_mut_sym.0)];
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
             }
@@ -243,6 +243,7 @@ impl Syntax {
 mod tests {
     use super::*;
     use crate::symbol::SymbolTable;
+    use crate::value::SymbolId;
 
     fn test_span() -> Span {
         Span::synthetic()
@@ -454,6 +455,71 @@ mod tests {
         // Should be a plain symbol, not a syntax object
         assert!(value.as_symbol().is_some());
         assert!(!value.is_syntax());
+    }
+
+    #[test]
+    fn test_to_value_struct_mut_desugars_to_at_struct() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(
+            SyntaxKind::StructMut(vec![
+                Syntax::new(SyntaxKind::Keyword("k".to_string()), test_span()),
+                Syntax::new(SyntaxKind::Int(1), test_span()),
+            ]),
+            test_span(),
+        );
+        let value = syntax.to_value(&mut symbols);
+
+        let items = value
+            .list_to_vec()
+            .expect("to_value StructMut should produce a list");
+        assert_eq!(
+            items.len(),
+            3,
+            "expected (@struct :k 1), got {} elements",
+            items.len()
+        );
+
+        let sym_raw = items[0]
+            .as_symbol()
+            .expect("first element should be a symbol");
+        let name = symbols
+            .name(SymbolId(sym_raw))
+            .expect("symbol should be interned");
+        assert_eq!(
+            name, "@struct",
+            "StructMut must desugar to @struct, not table"
+        );
+    }
+
+    #[test]
+    fn test_to_value_struct_desugars_to_struct() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(
+            SyntaxKind::Struct(vec![
+                Syntax::new(SyntaxKind::Keyword("k".to_string()), test_span()),
+                Syntax::new(SyntaxKind::Int(1), test_span()),
+            ]),
+            test_span(),
+        );
+        let value = syntax.to_value(&mut symbols);
+
+        let items = value
+            .list_to_vec()
+            .expect("to_value Struct should produce a list");
+        assert_eq!(
+            items.len(),
+            3,
+            "expected (struct :k 1), got {} elements",
+            items.len()
+        );
+
+        let sym_raw = items[0]
+            .as_symbol()
+            .expect("first element should be a symbol");
+        let name = symbols
+            .name(SymbolId(sym_raw))
+            .expect("symbol should be interned");
+        assert_eq!(name, "struct", "Struct must desugar to struct");
     }
 
     #[test]
