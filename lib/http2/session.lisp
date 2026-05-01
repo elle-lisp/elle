@@ -55,7 +55,8 @@
       :settings-ack-latch nil
       :pending-conn-wu 0
       :wu-threshold (/ INITIAL-WINDOW 2)
-      :expecting-continuation-sid nil})
+      :expecting-continuation-sid nil
+})
 
   ## ── Writer fiber ───────────────────────────────────────────────────────
 
@@ -313,6 +314,8 @@
                 flags f:flags
                 sid f:stream-id
                 payload f:payload]
+
+            ## §6.2/6.10: HEADERS/CONTINUATION contiguity enforcement
             (when sess:expecting-continuation-sid
               (unless (and (= ftype C:type-continuation)
                            (= sid sess:expecting-continuation-sid))
@@ -321,7 +324,8 @@
 
             (cond  ## ── SETTINGS ──
               (= ftype C:type-settings)
-                (begin  # §6.5: SETTINGS on non-zero stream → PROTOCOL_ERROR
+                (begin
+                  # §6.5: SETTINGS on non-zero stream → PROTOCOL_ERROR
                   (when (not (= sid 0))
                     (send-goaway sess 0 C:err-protocol-error)
                     (break nil))
@@ -333,10 +337,12 @@
 
               ## ── PING ──
               (= ftype C:type-ping)
-                (begin  # §6.7: PING on non-zero stream → PROTOCOL_ERROR
+                (begin
+                  # §6.7: PING on non-zero stream → PROTOCOL_ERROR
                   (when (not (= sid 0))
                     (send-goaway sess 0 C:err-protocol-error)
-                    (break nil))  # §6.7: PING payload MUST be 8 octets
+                    (break nil))
+                  # §6.7: PING payload MUST be 8 octets
                   (when (not (= (length payload) 8))
                     (send-goaway sess 0 C:err-frame-size-error)
                     (break nil))
@@ -347,7 +353,8 @@
 
               ## ── GOAWAY ──
               (= ftype C:type-goaway)
-                (begin  # §6.8: GOAWAY on non-zero stream → PROTOCOL_ERROR
+                (begin
+                  # §6.8: GOAWAY on non-zero stream → PROTOCOL_ERROR
                   (when (not (= sid 0))
                     (send-goaway sess 0 C:err-protocol-error)
                     (break nil))
@@ -370,7 +377,8 @@
 
               ## ── RST_STREAM ──
               (= ftype C:type-rst-stream)
-                (begin  # §6.4: RST_STREAM on stream 0 → PROTOCOL_ERROR
+                (begin
+                  # §6.4: RST_STREAM on stream 0 → PROTOCOL_ERROR
                   (when (= sid 0)
                     (send-goaway sess 0 C:err-protocol-error)
                     (break nil))
@@ -378,14 +386,16 @@
                             (stream:transition s :recv-rst)
                             (let [err-code (frame:read-u32 payload 0)]
                               (put s :error-code err-code)
-                              (s:data-queue:put {:type :rst :code err-code}))  # Flush pending stream WU before removing
+                              (s:data-queue:put {:type :rst :code err-code}))
+                            # Flush pending stream WU before removing
                             (when (> (or s:pending-stream-wu 0) 0)
                               (send-window-update sess sid s:pending-stream-wu))
                             (del sess:streams sid)))
 
               ## ── HEADERS ──
               (= ftype C:type-headers)
-                (begin  # §6.2: HEADERS on stream 0 → PROTOCOL_ERROR
+                (begin
+                  # §6.2: HEADERS on stream 0 → PROTOCOL_ERROR
                   (when (= sid 0)
                     (send-goaway sess 0 C:err-protocol-error)
                     (break nil))
@@ -396,7 +406,8 @@
                       (let [headers (hpack:decode sess:hpack-decoder payload)
                             end? (has-flag? flags C:flag-end-stream)]
                         (on-headers sess s sid headers end?))
-                      (begin  # §6.2: track continuation expectation
+                      (begin
+                        # §6.2: track continuation expectation
                         (put sess :expecting-continuation-sid sid)
                         (when (has-flag? flags C:flag-end-stream)
                           (stream:transition s :recv-end-stream))
@@ -406,10 +417,12 @@
 
               ## ── CONTINUATION ──
               (= ftype C:type-continuation)
-                (begin  # §6.10: CONTINUATION on stream 0 → PROTOCOL_ERROR
+                (begin
+                  # §6.10: CONTINUATION on stream 0 → PROTOCOL_ERROR
                   (when (= sid 0)
                     (send-goaway sess 0 C:err-protocol-error)
-                    (break nil))  # §6.10: CONTINUATION without pending HEADERS → PROTOCOL_ERROR
+                    (break nil))
+                  # §6.10: CONTINUATION without pending HEADERS → PROTOCOL_ERROR
                   (unless sess:expecting-continuation-sid
                     (send-goaway sess 0 C:err-protocol-error)
                     (break nil))
@@ -427,49 +440,55 @@
 
               ## ── DATA ──
               (= ftype C:type-data)
-                (begin  # §6.1: DATA on stream 0 → PROTOCOL_ERROR
+                (begin
+                  # §6.1: DATA on stream 0 → PROTOCOL_ERROR
                   (when (= sid 0)
                     (send-goaway sess 0 C:err-protocol-error)
                     (break nil))
                   (let [payload (strip-padding payload flags)]
                     (let [len (length payload)]
                       (when (> len 0)
-                        (put sess :pending-conn-wu (+ sess:pending-conn-wu len))))
-                    (when-let [s (get sess:streams sid)]  # §5.1: DATA on half-closed(remote) or closed → stream error
+                        (put sess :pending-conn-wu
+                             (+ sess:pending-conn-wu len))))
+                    (when-let [s (get sess:streams sid)]
+                              # §5.1: DATA on half-closed(remote) or closed → stream error
                               (when (or (= s:state :half-closed-remote)
                                         (= s:state :closed))
                                 (send-rst-stream sess sid C:err-stream-closed))
                               (let [end? (has-flag? flags C:flag-end-stream)
                                     len (length payload)]
+                                # Accumulate + flush WU BEFORE data-queue:put
+                                # (put may block when queue full; WU must not
+                                # be deferred or the sender's window starves)
                                 (when (> len 0)
-                                  (put s
-                                       :pending-stream-wu (+ (or s:pending-stream-wu
-                                       0) len)))
+                                  (put s :pending-stream-wu
+                                       (+ (or s:pending-stream-wu 0) len)))
                                 (when (>= sess:pending-conn-wu sess:wu-threshold)
-                                  (send-window-update sess 0
-                                  sess:pending-conn-wu)
+                                  (send-window-update sess 0 sess:pending-conn-wu)
                                   (put sess :pending-conn-wu 0))
                                 (when (>= (or s:pending-stream-wu 0)
-                                  sess:wu-threshold)
-                                  (send-window-update sess sid
-                                  s:pending-stream-wu)
+                                          sess:wu-threshold)
+                                  (send-window-update sess sid s:pending-stream-wu)
                                   (put s :pending-stream-wu 0))
-                                (when end?  # Flush remaining WU before closing stream
+                                (when end?
+                                  # Flush remaining WU before closing stream
                                   (when (> sess:pending-conn-wu 0)
                                     (send-window-update sess 0
-                                    sess:pending-conn-wu)
+                                                        sess:pending-conn-wu)
                                     (put sess :pending-conn-wu 0))
                                   (when (> (or s:pending-stream-wu 0) 0)
                                     (send-window-update sess sid
-                                    s:pending-stream-wu)
-                                    (put s :pending-stream-wu 0)))  # Deliver data (may block on full queue —
+                                                        s:pending-stream-wu)
+                                    (put s :pending-stream-wu 0)))
+                                # Deliver data (may block on full queue —
                                 # but WU is already enqueued above)
                                 (s:data-queue:put {:type :data
                                 :data payload
                                 :end-stream end?})
                                 (when sess:closed? (break nil))
                                 (when end?
-                                  (stream:transition s :recv-end-stream)  # Only remove stream when fully closed
+                                  (stream:transition s :recv-end-stream)
+                                  # Only remove stream when fully closed
                                   # (both sides done). Half-closed-remote
                                   # means our side still needs to send +
                                   # receive WU for flow control.
@@ -481,7 +500,8 @@
               C:err-refused-stream)
 
               ## ── Unknown — ignore ──
-              true nil))))  # Ensure writer always gets shutdown signal after loop exit
+              true nil))))
+      # Ensure writer always gets shutdown signal after loop exit
       (sess:write-queue:put :shutdown)))
 
   ## ── Tests ──────────────────────────────────────────────────────────────

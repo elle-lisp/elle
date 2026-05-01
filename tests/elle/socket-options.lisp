@@ -129,8 +129,13 @@
 (let [listener (tcp/listen "127.0.0.1" 0)
       port (tcp-port listener)]
   (tcp-echo-server listener)
-  (let [conn (tcp/connect "127.0.0.1" port :sndbuf 1048576 :rcvbuf 524288
-                          :nodelay true :keepalive true :timeout 5000)]
+  (let [conn (tcp/connect "127.0.0.1"
+                          port
+                          :sndbuf 1048576
+                          :rcvbuf 524288
+                          :nodelay true
+                          :keepalive true
+                          :timeout 5000)]
     (port/write conn "all-four-options")
     (let [resp (string (port/read conn 1024))]
       (assert (= resp "all-four-options") "tcp all four options combined"))

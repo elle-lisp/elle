@@ -250,42 +250,6 @@ impl fmt::Display for LirInstr {
             LirInstr::PopParamFrame => f.write_str("pop-param-frame"),
             LirInstr::IsSet { dst, src } => write!(f, "{} = is-set {}", dst, src),
             LirInstr::IsSetMut { dst, src } => write!(f, "{} = is-set-mut {}", dst, src),
-
-            // New type predicates
-            LirInstr::IsEmpty { dst, src } => write!(f, "{} ← empty?({})", dst, src),
-            LirInstr::IsBool { dst, src } => write!(f, "{} ← bool?({})", dst, src),
-            LirInstr::IsInt { dst, src } => write!(f, "{} ← int?({})", dst, src),
-            LirInstr::IsFloat { dst, src } => write!(f, "{} ← float?({})", dst, src),
-            LirInstr::IsString { dst, src } => write!(f, "{} ← string?({})", dst, src),
-            LirInstr::IsKeyword { dst, src } => write!(f, "{} ← keyword?({})", dst, src),
-            LirInstr::IsSymbolCheck { dst, src } => write!(f, "{} ← symbol?({})", dst, src),
-            LirInstr::IsBytes { dst, src } => write!(f, "{} ← bytes?({})", dst, src),
-            LirInstr::IsBox { dst, src } => write!(f, "{} ← box?({})", dst, src),
-            LirInstr::IsClosure { dst, src } => write!(f, "{} ← closure?({})", dst, src),
-            LirInstr::IsFiber { dst, src } => write!(f, "{} ← fiber?({})", dst, src),
-            LirInstr::TypeOf { dst, src } => write!(f, "{} ← type-of({})", dst, src),
-
-            // Data access
-            LirInstr::Length { dst, src } => write!(f, "{} ← length({})", dst, src),
-            LirInstr::Get { dst, obj, key } => write!(f, "{} ← get({}, {})", dst, obj, key),
-            LirInstr::Put { dst, obj, key, val } => {
-                write!(f, "{} ← put({}, {}, {})", dst, obj, key, val)
-            }
-            LirInstr::Del { dst, obj, key } => write!(f, "{} ← del({}, {})", dst, obj, key),
-            LirInstr::Has { dst, obj, key } => write!(f, "{} ← has?({}, {})", dst, obj, key),
-            LirInstr::IntrPush { dst, array, value } => {
-                write!(f, "{} ← push({}, {})", dst, array, value)
-            }
-            LirInstr::Pop { dst, src } => write!(f, "{} ← pop({})", dst, src),
-
-            // Mutability
-            LirInstr::Freeze { dst, src } => write!(f, "{} ← freeze({})", dst, src),
-            LirInstr::Thaw { dst, src } => write!(f, "{} ← thaw({})", dst, src),
-
-            // Identity
-            LirInstr::Identical { dst, lhs, rhs } => {
-                write!(f, "{} ← identical?({}, {})", dst, lhs, rhs)
-            }
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 write!(f, "check-signal-bound {} allowed={}", src, allowed_bits)
             }

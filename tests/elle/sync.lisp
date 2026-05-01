@@ -301,7 +301,8 @@
   (q:put :a)
   (q:close)
   (assert (q:closed?) "9h: queue reports closed")
-  (assert (nil? (q:put :b)) "9i: put on closed queue returns nil")  # take drains remaining items
+  (assert (nil? (q:put :b)) "9i: put on closed queue returns nil")
+  # take drains remaining items
   (assert (= :a (q:take)) "9j: take drains remaining item after close")
   (assert (nil? (q:take)) "9k: take returns nil when closed and empty"))
 
@@ -310,9 +311,10 @@
       result @[nil]]
   (q:put :fill)  # fill the queue
   (let [blocked (ev/spawn (fn []
-                            (let [r (q:put :will-not-go)]
-                              (put result 0 :unblocked)
-                              r)))]
+                             (let [r (q:put :will-not-go)]
+                               (put result 0 :unblocked)
+                               r)))]
+    # Give the fiber time to block
     (ev/join (ev/spawn (fn [] nil)))
     (q:close)
     (ev/join blocked)
@@ -323,9 +325,10 @@
 (let [q (sync:make-queue 4)
       result @[nil]]
   (let [blocked (ev/spawn (fn []
-                            (let [r (q:take)]
-                              (put result 0 :unblocked)
-                              r)))]
+                             (let [r (q:take)]
+                               (put result 0 :unblocked)
+                               r)))]
+    # Give the fiber time to block
     (ev/join (ev/spawn (fn [] nil)))
     (q:close)
     (let [r (ev/join blocked)]

@@ -38,6 +38,7 @@ use std::collections::HashSet;
 use super::Lowerer;
 use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
 use crate::lir::intrinsics::IntrinsicOp;
+use crate::lir::types::BinOp;
 
 impl<'a> Lowerer<'a> {
     /// Check if the result of a HIR expression is provably an immediate
@@ -443,9 +444,14 @@ impl<'a> Lowerer<'a> {
 
         let sym = bi.name;
 
-        // Check intrinsics map (Conversion with correct arity).
+        // Check intrinsics map (BinOp, CmpOp, UnaryOp with correct arity).
+        // Special case: `-` with 1 arg is negation (UnaryOp::Neg), which
+        // returns an immediate, mirroring try_lower_intrinsic's special case.
         if let Some(op) = self.intrinsics.get(&sym) {
             return match op {
+                IntrinsicOp::Binary(BinOp::Sub) => args.len() == 2 || args.len() == 1,
+                IntrinsicOp::Binary(_) | IntrinsicOp::Compare(_) => args.len() == 2,
+                IntrinsicOp::Unary(_) => args.len() == 1,
                 IntrinsicOp::Conversion(_) => args.len() == 1,
             };
         }

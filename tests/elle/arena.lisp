@@ -608,17 +608,17 @@
 # (slab reuses freed slots). Use arena/stats :allocated-bytes for comparison.
 (let* [m1 (arena/checkpoint)
        _ (letrec [loop (fn (i)
-                         (when (%lt i 50)
-                           (%pair i (%add i 1))
-                           (loop (%add i 1))))]
+                         (when (< i 50)
+                           (pair i (+ i 1))
+                           (loop (+ i 1))))]
            (loop 0))
        bytes-round1 (get (arena/stats) :allocated-bytes)
        _ (arena/reset m1)
        m2 (arena/checkpoint)
        _ (letrec [loop (fn (i)
-                         (when (%lt i 50)
-                           (%pair i (%add i 1))
-                           (loop (%add i 1))))]
+                         (when (< i 50)
+                           (pair i (+ i 1))
+                           (loop (+ i 1))))]
            (loop 0))
        bytes-round2 (get (arena/stats) :allocated-bytes)
        _ (arena/reset m2)]

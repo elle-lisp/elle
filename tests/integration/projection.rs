@@ -64,8 +64,8 @@ fn test_projection_struct_literal() {
     // A file returning {:add add :double double} where both are pure
     // should produce a projection mapping :add and :double to errors-only.
     let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
+(defn add [x y] (+ x y))
+(defn double [x] (* x 2))
 {:add add :double double}
 "#;
     let (mut symbols, mut vm) = setup();
@@ -100,8 +100,8 @@ fn test_projection_lambda_returning_struct() {
     // A file returning (fn [] {:add add :double double}) should produce
     // the same projection as a direct struct literal.
     let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
+(defn add [x y] (+ x y))
+(defn double [x] (* x 2))
 (fn [] {:add add :double double})
 "#;
     let (mut symbols, mut vm) = setup();
@@ -161,8 +161,8 @@ safe
 fn test_projection_bytecode_field() {
     // compile_file should populate signal_projection on the bytecode.
     let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
+(defn add [x y] (+ x y))
+(defn double [x] (* x 2))
 {:add add :double double}
 "#;
     let mut symbols = SymbolTable::new();
@@ -192,7 +192,7 @@ fn test_projection_bytecode_field() {
 #[test]
 fn test_projection_non_struct_returns_none() {
     // A file returning a plain value (not a struct) should have no projection.
-    let source = "(%add 1 2)";
+    let source = "(+ 1 2)";
     let mut symbols = SymbolTable::new();
     let result = elle::pipeline::compile_file(source, &mut symbols, "<test>").unwrap();
     assert!(

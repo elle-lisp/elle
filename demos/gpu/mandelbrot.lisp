@@ -31,7 +31,7 @@
 
 (def cx
   (map (fn [i]
-         (let [px (rem i WIDTH)]
+         (let [px (% i WIDTH)]
            (float (+ X-MIN (* (float px) dx))))) (range N)))
 
 (def cy

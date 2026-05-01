@@ -5,7 +5,7 @@
 // - Realtime clocks return plausible Unix timestamps
 // - Both clocks advance together
 
-use crate::common::eval_reuse;
+use crate::common::eval_reuse_bare;
 use elle::Value;
 use proptest::prelude::*;
 
@@ -44,7 +44,7 @@ fn clock_monotonic_never_decreases() {
           times)
     "#;
 
-    let result = eval_reuse(expr);
+    let result = eval_reuse_bare(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let times = extract_float_list(result.unwrap());
@@ -65,7 +65,7 @@ proptest! {
     #[test]
     fn clock_monotonic_is_non_negative(_seed in 0u32..50) {
         let expr = "(clock/monotonic)";
-        let result = eval_reuse(expr);
+        let result = eval_reuse_bare(expr);
 
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
         let val = result.unwrap();
@@ -91,7 +91,7 @@ proptest! {
     fn clock_realtime_is_plausible(_seed in 0u32..50) {
         // Past Nov 2023 (1_700_000_000) and before ~2049 (2_500_000_000)
         let expr = "(clock/realtime)";
-        let result = eval_reuse(expr);
+        let result = eval_reuse_bare(expr);
 
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
         let val = result.unwrap();
@@ -125,7 +125,7 @@ fn clock_realtime_multiple_reads_are_monotonic() {
           times)
     "#;
 
-    let result = eval_reuse(expr);
+    let result = eval_reuse_bare(expr);
     assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
     let times = extract_float_list(result.unwrap());
@@ -154,7 +154,7 @@ proptest! {
               (list (>= mono2 mono1) (>= real2 real1)))
         "#;
 
-        let result = eval_reuse(expr);
+        let result = eval_reuse_bare(expr);
         prop_assert!(result.is_ok(), "Failed to evaluate: {:?}", result);
 
         let times_list = result.unwrap();

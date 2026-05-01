@@ -54,7 +54,7 @@
     (assert (= decoded payload) "roundtrip small payload")))
 
 (defn test-roundtrip-multibyte-length []
-  (let* [payload (apply bytes (map (fn [i] (rem i 256)) (range 300)))
+  (let* [payload (apply bytes (map (fn [i] (% i 256)) (range 300)))
          frame (grpc:encode payload)
          decoded (grpc:decode frame)]
     (assert (= (length frame) (+ 5 300)) "multi-byte: frame length")
@@ -118,7 +118,7 @@
 
       ## Large payload
       (= path "/test.Svc/Large")
-        (let [big (apply bytes (map (fn [i] (rem i 256)) (range 2000)))]
+        (let [big (apply bytes (map (fn [i] (% i 256)) (range 2000)))]
           {:status 200
            :headers {:content-type "application/grpc"}
            :body (grpc:encode big)
@@ -194,7 +194,7 @@
 
 (defn test-large-payload []
   "Unary RPC with payload > 1KB."
-  (let [expected (apply bytes (map (fn [i] (rem i 256)) (range 2000)))]
+  (let [expected (apply bytes (map (fn [i] (% i 256)) (range 2000)))]
     (with-server grpc-handler
                  (fn [sess]
                    (let [raw (grpc:call sess nil "/test.Svc/Large" "test.Req" {})]

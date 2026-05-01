@@ -5,6 +5,126 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
+/// Variadic addition: (+ 1 2 3) -> 6, (+) -> 0
+pub(crate) fn prim_add(args: &[Value]) -> (SignalBits, Value) {
+    // Check that all args are numbers first
+    for arg in args {
+        if !arg.is_number() {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("+: expected number, got {}", arg.type_name()),
+                ),
+            );
+        }
+    }
+
+    if args.is_empty() {
+        return (SIG_OK, Value::int(0)); // Identity element for addition
+    }
+
+    let mut result = args[0];
+    for arg in &args[1..] {
+        match arithmetic::add_values(&result, arg) {
+            Ok(val) => result = val,
+            Err(err_val) => return (SIG_ERROR, err_val),
+        }
+    }
+    (SIG_OK, result)
+}
+
+/// Variadic subtraction: (- 10 3 2) -> 5, (- 5) -> -5
+pub(crate) fn prim_sub(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "-: expected at least 1 argument, got 0"),
+        );
+    }
+
+    if args.len() == 1 {
+        return match arithmetic::negate_value(&args[0]) {
+            Ok(val) => (SIG_OK, val),
+            Err(err_val) => (SIG_ERROR, err_val),
+        };
+    }
+
+    let mut result = args[0];
+    for arg in &args[1..] {
+        match arithmetic::sub_values(&result, arg) {
+            Ok(val) => result = val,
+            Err(err_val) => return (SIG_ERROR, err_val),
+        }
+    }
+    (SIG_OK, result)
+}
+
+/// Variadic multiplication: (* 2 3 4) -> 24, (*) -> 1
+pub(crate) fn prim_mul(args: &[Value]) -> (SignalBits, Value) {
+    // Check that all args are numbers first
+    for arg in args {
+        if !arg.is_number() {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("*: expected number, got {}", arg.type_name()),
+                ),
+            );
+        }
+    }
+
+    if args.is_empty() {
+        return (SIG_OK, Value::int(1)); // Identity element for multiplication
+    }
+
+    let mut result = args[0];
+    for arg in &args[1..] {
+        match arithmetic::mul_values(&result, arg) {
+            Ok(val) => result = val,
+            Err(err_val) => return (SIG_ERROR, err_val),
+        }
+    }
+    (SIG_OK, result)
+}
+
+pub(crate) fn prim_mod(args: &[Value]) -> (SignalBits, Value) {
+    // Euclidean modulo: result always has same sign as divisor (b)
+    // Example: (mod -17 5) => 3 (because -17 = -4*5 + 3)
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("mod: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    match arithmetic::mod_values(&args[0], &args[1]) {
+        Ok(val) => (SIG_OK, val),
+        Err(err_val) => (SIG_ERROR, err_val),
+    }
+}
+
+pub(crate) fn prim_rem(args: &[Value]) -> (SignalBits, Value) {
+    // Truncated division remainder: result has same sign as dividend (a)
+    // Example: (rem -17 5) => -2 (because -17 = -3*5 + -2)
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("rem: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    match arithmetic::remainder_values(&args[0], &args[1]) {
+        Ok(val) => (SIG_OK, val),
+        Err(err_val) => (SIG_ERROR, err_val),
+    }
+}
+
 pub(crate) fn prim_abs(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -31,6 +151,7 @@ pub(crate) fn prim_min(args: &[Value]) -> (SignalBits, Value) {
 
     let mut min = args[0];
     for arg in &args[1..] {
+        // Check if arg is a number
         if !arg.is_number() {
             return (
                 SIG_ERROR,
@@ -55,6 +176,7 @@ pub(crate) fn prim_max(args: &[Value]) -> (SignalBits, Value) {
 
     let mut max = args[0];
     for arg in &args[1..] {
+        // Check if arg is a number
         if !arg.is_number() {
             return (
                 SIG_ERROR,
@@ -115,7 +237,119 @@ pub(crate) fn prim_odd(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+pub(crate) fn prim_div_vm(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "/: expected at least 1 argument, got 0"),
+        );
+    }
+
+    if args.len() == 1 {
+        return match arithmetic::reciprocal_value(&args[0]) {
+            Ok(val) => (SIG_OK, val),
+            Err(err_val) => (SIG_ERROR, err_val),
+        };
+    }
+
+    let mut result = args[0];
+    for arg in &args[1..] {
+        // Division by zero: error only for pure integer division.
+        // Float division follows IEEE 754 (returns Inf/-Inf/NaN).
+        if let (Some(_), Some(y)) = (result.as_int(), arg.as_int()) {
+            if y == 0 {
+                return (SIG_ERROR, error_val("division-by-zero", "division by zero"));
+            }
+        }
+
+        match arithmetic::div_values(&result, arg) {
+            Ok(val) => result = val,
+            Err(err_val) => {
+                return (SIG_ERROR, err_val);
+            }
+        }
+    }
+    (SIG_OK, result)
+}
+
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
+    PrimitiveDef {
+        name: "+",
+        func: prim_add,
+        signal: Signal::errors(),
+        arity: Arity::AtLeast(0),
+        doc: "Sum all arguments. Returns 0 for no arguments.",
+        params: &["xs"],
+        category: "arithmetic",
+        example: "(+) #=> 0\n(+ 1 2 3) #=> 6",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "-",
+        func: prim_sub,
+        signal: Signal::errors(),
+        arity: Arity::AtLeast(1),
+        doc: "Subtract arguments left-to-right. Single arg negates.",
+        params: &["x", "ys"],
+        category: "arithmetic",
+        example: "(- 10 3 2) #=> 5\n(- 5) #=> -5",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "*",
+        func: prim_mul,
+        signal: Signal::errors(),
+        arity: Arity::AtLeast(0),
+        doc: "Multiply all arguments. Returns 1 for no arguments.",
+        params: &["xs"],
+        category: "arithmetic",
+        example: "(*) #=> 1\n(* 2 3 4) #=> 24",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "/",
+        func: prim_div_vm,
+        signal: Signal::errors(),
+        arity: Arity::AtLeast(1),
+        doc: "Divide arguments left-to-right. Single arg takes reciprocal.",
+        params: &["x", "ys"],
+        category: "arithmetic",
+        example: "(/ 10 2) #=> 5\n(/ 2) #=> 0.5",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "mod",
+        func: prim_mod,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Euclidean modulo. Result has same sign as divisor.",
+        params: &["a", "b"],
+        category: "arithmetic",
+        example: "(mod 17 5) #=> 2\n(mod -17 5) #=> 3",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "%",
+        func: prim_rem,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Truncated remainder. Result has same sign as dividend.",
+        params: &["a", "b"],
+        category: "arithmetic",
+        example: "(% 17 5) #=> 2\n(% -17 5) #=> -2",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "rem",
+        func: prim_rem,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Truncated remainder. Result has same sign as dividend.",
+        params: &["a", "b"],
+        category: "arithmetic",
+        example: "(rem 17 5) #=> 2\n(rem -17 5) #=> -2",
+        aliases: &[],
+    },
     PrimitiveDef {
         name: "abs",
         func: prim_abs,

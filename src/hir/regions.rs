@@ -1147,7 +1147,7 @@ mod tests {
         // Verify Loop region via the real pipeline.
         // Use string allocation inside loop to ensure allocs exist.
         let mut symbols = SymbolTable::new();
-        let source = "(def @s \"\")\n(def @i 0)\n(while (%lt i 10) (begin (assign s \"x\") (assign i (%add i 1))))";
+        let source = "(def @s \"\")\n(def @i 0)\n(while (< i 10) (begin (assign s \"x\") (assign i (+ i 1))))";
         let (hir, arena, _names) =
             crate::pipeline::compile_file_to_fhir(source, &mut symbols, "<test>").expect("compile");
         let info = analyze_regions(&hir, &arena);

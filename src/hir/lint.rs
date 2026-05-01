@@ -334,14 +334,14 @@ mod tests {
     #[test]
     fn test_hir_linter_arity_check() {
         let (mut symbols, mut vm) = setup();
-        // abs expects 1 argument — the analyzer catches this as a hard error
-        let result = analyze("(abs 1 2)", &mut symbols, &mut vm, "<test>");
+        // cons expects 2 arguments — the analyzer catches this as a hard error
+        let result = analyze("(pair 1)", &mut symbols, &mut vm, "<test>");
         match result {
             Err(ref msg) => assert!(
                 msg.contains("arity error"),
                 "expected arity error, got: {msg}"
             ),
-            Ok(_) => panic!("expected arity error for (abs 1 2)"),
+            Ok(_) => panic!("expected arity error for (pair 1)"),
         }
     }
 

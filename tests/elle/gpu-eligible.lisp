@@ -4,19 +4,18 @@
 # Tests the fn/gpu-eligible? predicate which checks signal and structural
 # properties of closures for GPU compilation candidacy.
 
-# ── Eligible: pure %-intrinsic arithmetic ─────────────────────
-(assert (fn/gpu-eligible? (fn [a b] (%add a b))) "%add is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [x] (%mul x x))) "%mul is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [x] (%sub 0 x))) "%sub negate is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [a b] (%lt a b))) "%lt is gpu-eligible")  # stdlib arithmetic (+ * - <) goes through Call, not gpu-eligible
-(assert (not (fn/gpu-eligible? (fn [a b] (+ a b))))
-        "stdlib + is not gpu-eligible")  # bit/and is not an intrinsic (goes through Call), so not gpu-eligible
+# ── Eligible: pure arithmetic ──────────────────────────────────
+(assert (fn/gpu-eligible? (fn [a b] (+ a b))) "add is gpu-eligible")
+(assert (fn/gpu-eligible? (fn [x] (* x x))) "square is gpu-eligible")
+(assert (fn/gpu-eligible? (fn [x] (- 0 x))) "negate is gpu-eligible")
+(assert (fn/gpu-eligible? (fn [a b] (< a b))) "compare is gpu-eligible")
+# bit/and is not an intrinsic (goes through Call), so not gpu-eligible
 (assert (not (fn/gpu-eligible? (fn [x] (bit/and x 0xFF))))
         "bit/and call is not gpu-eligible")
 (assert (fn/gpu-eligible? (fn [] 42)) "constant is gpu-eligible")
 
 # ── Eligible: control flow ─────────────────────────────────────
-(assert (fn/gpu-eligible? (fn [x] (if (%gt x 0) x (%sub 0 x))))
+(assert (fn/gpu-eligible? (fn [x] (if (> x 0) x (- 0 x))))
         "if-then-else is gpu-eligible")
 
 # ── Not eligible: calls other functions ────────────────────────
@@ -27,7 +26,7 @@
 
 # ── Eligible: immutable capture is constant-propagated ─────────
 (def outer 10)
-(assert (fn/gpu-eligible? (fn [x] (%add x outer)))
+(assert (fn/gpu-eligible? (fn [x] (+ x outer)))
         "immutable capture is gpu-eligible (constant-propagated)")
 
 # ── Not eligible: variadic ─────────────────────────────────────
@@ -37,7 +36,7 @@
 # ── Not eligible: mutable captures ─────────────────────────────
 (assert (not (fn/gpu-eligible? (let [@counter 0]
                                  (fn []
-                                   (assign counter (%add counter 1))
+                                   (assign counter (+ counter 1))
                                    counter))))
         "mutable capture is not gpu-eligible")
 
@@ -59,7 +58,7 @@
 (assert (fn/errors? (fn [x] (error "boom")))
         "error-only function must report errors")
 (assert (fn/errors? (fn [a b] (+ a b)))
-        "stdlib + function has SIG_ERROR (type errors from closure call)")
+        "arithmetic function has SIG_ERROR (type errors)")
 (assert (not (fn/errors? (fn [x] x))) "identity function does not error")
 
 (println "All GPU eligibility tests passed")

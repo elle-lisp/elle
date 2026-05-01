@@ -106,29 +106,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) region_exit: FuncId,
     pub(crate) region_exit_call: FuncId,
     pub(crate) rotate_pools: FuncId,
-    // New intrinsic helpers
-    pub(crate) is_empty: FuncId,
-    pub(crate) is_bool: FuncId,
-    pub(crate) is_int: FuncId,
-    pub(crate) is_float: FuncId,
-    pub(crate) is_string: FuncId,
-    pub(crate) is_keyword: FuncId,
-    pub(crate) is_symbol_check: FuncId,
-    pub(crate) is_bytes: FuncId,
-    pub(crate) is_box: FuncId,
-    pub(crate) is_closure: FuncId,
-    pub(crate) is_fiber: FuncId,
-    pub(crate) type_of: FuncId,
-    pub(crate) length: FuncId,
-    pub(crate) get: FuncId,
-    pub(crate) put: FuncId,
-    pub(crate) del: FuncId,
-    pub(crate) has: FuncId,
-    pub(crate) intr_push: FuncId,
-    pub(crate) pop: FuncId,
-    pub(crate) freeze: FuncId,
-    pub(crate) thaw: FuncId,
-    pub(crate) identical: FuncId,
 }
 
 /// Register all `elle_jit_*` symbols with the JITBuilder.
@@ -339,44 +316,6 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
-    // New intrinsic helpers
-    builder.symbol("elle_jit_is_empty", runtime::elle_jit_is_empty as *const u8);
-    builder.symbol("elle_jit_is_bool", runtime::elle_jit_is_bool as *const u8);
-    builder.symbol("elle_jit_is_int", runtime::elle_jit_is_int as *const u8);
-    builder.symbol("elle_jit_is_float", runtime::elle_jit_is_float as *const u8);
-    builder.symbol(
-        "elle_jit_is_string",
-        runtime::elle_jit_is_string as *const u8,
-    );
-    builder.symbol(
-        "elle_jit_is_keyword",
-        runtime::elle_jit_is_keyword as *const u8,
-    );
-    builder.symbol(
-        "elle_jit_is_symbol_check",
-        runtime::elle_jit_is_symbol_check as *const u8,
-    );
-    builder.symbol("elle_jit_is_bytes", runtime::elle_jit_is_bytes as *const u8);
-    builder.symbol("elle_jit_is_box", runtime::elle_jit_is_box as *const u8);
-    builder.symbol(
-        "elle_jit_is_closure",
-        runtime::elle_jit_is_closure as *const u8,
-    );
-    builder.symbol("elle_jit_is_fiber", runtime::elle_jit_is_fiber as *const u8);
-    builder.symbol("elle_jit_type_of", runtime::elle_jit_type_of as *const u8);
-    builder.symbol("elle_jit_length", runtime::elle_jit_length as *const u8);
-    builder.symbol("elle_jit_get", runtime::elle_jit_get as *const u8);
-    builder.symbol("elle_jit_put", runtime::elle_jit_put as *const u8);
-    builder.symbol("elle_jit_del", runtime::elle_jit_del as *const u8);
-    builder.symbol("elle_jit_has", runtime::elle_jit_has as *const u8);
-    builder.symbol("elle_jit_push", runtime::elle_jit_push as *const u8);
-    builder.symbol("elle_jit_pop", runtime::elle_jit_pop as *const u8);
-    builder.symbol("elle_jit_freeze", runtime::elle_jit_freeze as *const u8);
-    builder.symbol("elle_jit_thaw", runtime::elle_jit_thaw as *const u8);
-    builder.symbol(
-        "elle_jit_identical",
-        runtime::elle_jit_identical as *const u8,
-    );
 }
 
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
@@ -545,32 +484,5 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
         region_exit_call: declare(module, "elle_jit_region_exit_call", &void_to_value)?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
-        // New intrinsic helpers
-        is_empty: declare(module, "elle_jit_is_empty", &value_unary)?,
-        is_bool: declare(module, "elle_jit_is_bool", &value_unary)?,
-        is_int: declare(module, "elle_jit_is_int", &value_unary)?,
-        is_float: declare(module, "elle_jit_is_float", &value_unary)?,
-        is_string: declare(module, "elle_jit_is_string", &value_unary)?,
-        is_keyword: declare(module, "elle_jit_is_keyword", &value_unary)?,
-        is_symbol_check: declare(module, "elle_jit_is_symbol_check", &value_unary)?,
-        is_bytes: declare(module, "elle_jit_is_bytes", &value_unary)?,
-        is_box: declare(module, "elle_jit_is_box", &value_unary)?,
-        is_closure: declare(module, "elle_jit_is_closure", &value_unary)?,
-        is_fiber: declare(module, "elle_jit_is_fiber", &value_unary)?,
-        type_of: declare(module, "elle_jit_type_of", &value_unary)?,
-        length: declare(module, "elle_jit_length", &value_unary)?,
-        get: declare(module, "elle_jit_get", &value_binary)?,
-        put: declare(
-            module,
-            "elle_jit_put",
-            &make_sig(module, &[I64, I64, I64, I64, I64, I64], &[I64, I64]),
-        )?,
-        del: declare(module, "elle_jit_del", &value_binary)?,
-        has: declare(module, "elle_jit_has", &value_binary)?,
-        intr_push: declare(module, "elle_jit_push", &value_binary)?,
-        pop: declare(module, "elle_jit_pop", &value_unary)?,
-        freeze: declare(module, "elle_jit_freeze", &value_unary)?,
-        thaw: declare(module, "elle_jit_thaw", &value_unary)?,
-        identical: declare(module, "elle_jit_identical", &value_binary)?,
     })
 }
