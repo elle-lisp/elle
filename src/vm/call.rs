@@ -8,7 +8,6 @@
 //!
 //! Environment building (closure env population, parameter binding) lives in `env.rs`.
 
-use crate::error::LocationMap;
 use crate::primitives::access::resolve_index;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
@@ -23,6 +22,7 @@ use crate::value::{
 use std::rc::Rc;
 
 use super::core::VM;
+use super::FrameContext;
 
 /// Helper: set an error signal on the fiber.
 fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
@@ -40,15 +40,11 @@ impl VM {
     /// or `None` if the dispatch loop should continue.
     pub(super) fn handle_call(
         &mut self,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        ip: &mut usize,
+        frame: &mut FrameContext,
         instr_ip: usize,
-        location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
-        let bc: &[u8] = bytecode;
-        let arg_count = self.read_u16(bc, ip) as usize;
+        let bc: &[u8] = frame.bytecode;
+        let arg_count = self.read_u16(bc, frame.ip) as usize;
         let func = self
             .fiber
             .stack
@@ -66,16 +62,7 @@ impl VM {
         }
         args.reverse();
 
-        self.call_inner(
-            func,
-            args,
-            bytecode,
-            constants,
-            closure_env,
-            ip,
-            instr_ip,
-            location_map,
-        )
+        self.call_inner(func, args, frame, instr_ip)
     }
 
     /// Handle the CallArrayMut instruction.
@@ -88,12 +75,8 @@ impl VM {
     /// Stack: \[func, args_array\] → \[result\]
     pub(super) fn handle_call_array(
         &mut self,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        ip: &mut usize,
+        frame: &mut FrameContext,
         instr_ip: usize,
-        location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
         let args_val = self
             .fiber
@@ -124,33 +107,19 @@ impl VM {
             return None;
         };
 
-        self.call_inner(
-            func,
-            args,
-            bytecode,
-            constants,
-            closure_env,
-            ip,
-            instr_ip,
-            location_map,
-        )
+        self.call_inner(func, args, frame, instr_ip)
     }
 
     /// Shared Call/CallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions, executes closures with environment setup,
     /// handles yield-through-calls and JIT compilation.
-    #[allow(clippy::too_many_arguments)]
     fn call_inner(
         &mut self,
         func: Value,
         args: Vec<Value>,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        ip: &mut usize,
+        frame: &mut FrameContext,
         instr_ip: usize,
-        location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             etrace!(
@@ -167,16 +136,7 @@ impl VM {
                 .intersection(self.fiber.withheld)
                 .intersection(crate::signals::CAP_MASK);
             if !blocked.is_empty() {
-                return self.handle_capability_denial(
-                    def,
-                    blocked,
-                    &args,
-                    bytecode,
-                    constants,
-                    closure_env,
-                    ip,
-                    location_map,
-                );
+                return self.handle_capability_denial(def, blocked, &args, frame);
             }
             let (bits, value) =
                 if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
@@ -184,15 +144,7 @@ impl VM {
                 } else {
                     (def.func)(args.as_slice())
                 };
-            return self.handle_primitive_signal(
-                bits,
-                value,
-                bytecode,
-                constants,
-                closure_env,
-                ip,
-                location_map,
-            );
+            return self.handle_primitive_signal(bits, value, frame);
         }
 
         if let Some((id, default)) = func.as_parameter() {
@@ -230,7 +182,7 @@ impl VM {
                     .unwrap_or_else(|| Rc::from("<anonymous>")),
                 ip: instr_ip,
                 frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
-                location_map: location_map.clone(),
+                location_map: frame.location_map.clone(),
             });
 
             // Validate argument count
@@ -302,12 +254,12 @@ impl VM {
                                 let (_, value) = self.fiber.take_signal();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                                 let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                                    bytecode: bytecode.clone(),
-                                    constants: constants.clone(),
-                                    env: closure_env.clone(),
-                                    ip: *ip,
+                                    bytecode: frame.bytecode.clone(),
+                                    constants: frame.constants.clone(),
+                                    env: frame.closure_env.clone(),
+                                    ip: *frame.ip,
                                     stack: caller_stack,
-                                    location_map: location_map.clone(),
+                                    location_map: frame.location_map.clone(),
                                     // Caller frame: on resume, the callee's return value
                                     // flows as current_value and must be pushed as the
                                     // Call instruction's result.
@@ -446,8 +398,8 @@ impl VM {
                     {
                         eprintln!(
                             "[call_inner suspend] ip={} bc_len={} stack_depth={}",
-                            *ip,
-                            bytecode.len(),
+                            *frame.ip,
+                            frame.bytecode.len(),
                             caller_stack.len(),
                         );
                         for (si, sv) in caller_stack.iter().enumerate() {
@@ -455,12 +407,12 @@ impl VM {
                         }
                     }
                     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                        bytecode: bytecode.clone(),
-                        constants: constants.clone(),
-                        env: closure_env.clone(),
-                        ip: *ip,
+                        bytecode: frame.bytecode.clone(),
+                        constants: frame.constants.clone(),
+                        env: frame.closure_env.clone(),
+                        ip: *frame.ip,
                         stack: caller_stack,
-                        location_map: location_map.clone(),
+                        location_map: frame.location_map.clone(),
                         push_resume_value: true,
                     });
 
@@ -471,7 +423,7 @@ impl VM {
                     {
                         eprintln!(
                             "[call_inner] suspend: bits={} ip={} bc_len={} inner_frames={} env_len={}",
-                            bits, *ip, bytecode.len(), frames.len(), closure_env.len(),
+                            bits, *frame.ip, frame.bytecode.len(), frames.len(), frame.closure_env.len(),
                         );
                     }
                     frames.push(caller_frame);

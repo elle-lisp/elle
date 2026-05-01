@@ -26,7 +26,6 @@ use crate::value::{
     BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT,
     SIG_OK, SIG_SWITCH, SIG_TERMINAL,
 };
-use std::rc::Rc;
 
 use super::core::VM;
 
@@ -172,11 +171,7 @@ impl VM {
     pub(super) fn handle_fiber_resume_signal(
         &mut self,
         fiber_value: Value,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        ip: &mut usize,
-        location_map: &Rc<crate::error::LocationMap>,
+        frame: &mut super::FrameContext,
     ) -> Option<SignalBits> {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
@@ -230,12 +225,12 @@ impl VM {
                     };
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                        bytecode: bytecode.clone(),
-                        constants: constants.clone(),
-                        env: closure_env.clone(),
-                        ip: *ip,
+                        bytecode: frame.bytecode.clone(),
+                        constants: frame.constants.clone(),
+                        env: frame.closure_env.clone(),
+                        ip: *frame.ip,
                         stack: caller_stack,
-                        location_map: location_map.clone(),
+                        location_map: frame.location_map.clone(),
                         push_resume_value: true,
                     });
                     self.fiber.suspended = Some(vec![fiber_resume_frame, caller_frame]);
@@ -701,14 +696,7 @@ impl VM {
     /// Injects an error and resumes the fiber. The result is handled
     /// identically to fiber/resume — the child's actual outcome (dead,
     /// error, paused) determines what the parent sees. No status stomp.
-    pub(super) fn handle_fiber_abort_signal(
-        &mut self,
-        fiber_value: Value,
-        _bytecode: &Rc<Vec<u8>>,
-        _constants: &Rc<Vec<Value>>,
-        _closure_env: &Rc<Vec<Value>>,
-        _ip: &mut usize,
-    ) -> Option<SignalBits> {
+    pub(super) fn handle_fiber_abort_signal(&mut self, fiber_value: Value) -> Option<SignalBits> {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {

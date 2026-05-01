@@ -10,7 +10,6 @@ use crate::value::{
     BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK,
     SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
 };
-use std::rc::Rc;
 
 use super::core::VM;
 
@@ -19,16 +18,11 @@ impl VM {
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to
     /// return from the dispatch loop (for yields/signals).
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_primitive_signal(
         &mut self,
         bits: SignalBits,
         value: Value,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        ip: &mut usize,
-        location_map: &Rc<crate::error::LocationMap>,
+        frame: &mut super::FrameContext,
     ) -> Option<SignalBits> {
         // Dispatch uses exact equality for VM-internal signals (which are
         // produced by specific primitives with known bit patterns) and
@@ -53,14 +47,7 @@ impl VM {
         // --- VM-internal signals (exact match — never composed) ---
 
         if bits == SIG_RESUME {
-            return self.handle_fiber_resume_signal(
-                value,
-                bytecode,
-                constants,
-                closure_env,
-                ip,
-                location_map,
-            );
+            return self.handle_fiber_resume_signal(value, frame);
         }
 
         if bits == SIG_PROPAGATE {
@@ -68,7 +55,7 @@ impl VM {
         }
 
         if bits == SIG_ABORT && value.as_fiber().is_some() {
-            return self.handle_fiber_abort_signal(value, bytecode, constants, closure_env, ip);
+            return self.handle_fiber_abort_signal(value);
         }
 
         if bits == SIG_QUERY {
@@ -120,20 +107,20 @@ impl VM {
         // are suspension signals — save the stack into a SuspendedFrame so
         // call.rs can build the caller frame chain on resume.
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
-            bytecode: bytecode.clone(),
-            constants: constants.clone(),
-            env: closure_env.clone(),
-            ip: *ip,
+        let suspended_frame = SuspendedFrame::Bytecode(BytecodeFrame {
+            bytecode: frame.bytecode.clone(),
+            constants: frame.constants.clone(),
+            env: frame.closure_env.clone(),
+            ip: *frame.ip,
             stack: saved_stack,
-            location_map: location_map.clone(),
+            location_map: frame.location_map.clone(),
             // Caller frame for a suspending primitive: on resume, the primitive's
             // eventual return value flows as current_value and must be pushed as
             // the result of the Call instruction.
             push_resume_value: true,
         });
         self.fiber.signal = Some((bits, value));
-        self.fiber.suspended = Some(vec![frame]);
+        self.fiber.suspended = Some(vec![suspended_frame]);
         Some(bits)
     }
 
@@ -218,33 +205,28 @@ impl VM {
     /// The fiber tried to call a primitive whose signal bits overlap with
     /// the fiber's `withheld` capabilities. Instead of running the primitive,
     /// emit a signal with the blocked bits and a denial payload struct.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_capability_denial(
         &mut self,
         def: &'static crate::primitives::def::PrimitiveDef,
         blocked: SignalBits,
         args: &[Value],
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        ip: &mut usize,
-        location_map: &Rc<crate::error::LocationMap>,
+        frame: &mut super::FrameContext,
     ) -> Option<SignalBits> {
         let payload = Self::build_denial_payload(def, blocked, args);
 
         // Save the stack and build a suspended frame (same as suspending signals)
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
-            bytecode: bytecode.clone(),
-            constants: constants.clone(),
-            env: closure_env.clone(),
-            ip: *ip,
+        let suspended_frame = SuspendedFrame::Bytecode(BytecodeFrame {
+            bytecode: frame.bytecode.clone(),
+            constants: frame.constants.clone(),
+            env: frame.closure_env.clone(),
+            ip: *frame.ip,
             stack: saved_stack,
-            location_map: location_map.clone(),
+            location_map: frame.location_map.clone(),
             push_resume_value: true,
         });
         self.fiber.signal = Some((blocked, payload));
-        self.fiber.suspended = Some(vec![frame]);
+        self.fiber.suspended = Some(vec![suspended_frame]);
         Some(blocked)
     }
 
@@ -1208,6 +1190,7 @@ mod tests {
 
     #[test]
     fn composed_error_io_treated_as_error() {
+        use super::FrameContext;
         let mut vm = VM::new();
         let (bc, consts, env, loc) = test_fixtures();
         let mut ip = 0usize;
@@ -1216,11 +1199,13 @@ mod tests {
         let result = vm.handle_primitive_signal(
             bits,
             Value::string("boom"),
-            &bc,
-            &consts,
-            &env,
-            &mut ip,
-            &loc,
+            &mut FrameContext {
+                bytecode: &bc,
+                constants: &consts,
+                closure_env: &env,
+                ip: &mut ip,
+                location_map: &loc,
+            },
         );
 
         // Error path returns None
@@ -1235,13 +1220,23 @@ mod tests {
 
     #[test]
     fn unknown_signal_propagates() {
+        use super::FrameContext;
         let mut vm = VM::new();
         let (bc, consts, env, loc) = test_fixtures();
         let mut ip = 0usize;
         let bits = SIG_DEBUG; // not handled by any specific branch
 
-        let result =
-            vm.handle_primitive_signal(bits, Value::int(1), &bc, &consts, &env, &mut ip, &loc);
+        let result = vm.handle_primitive_signal(
+            bits,
+            Value::int(1),
+            &mut FrameContext {
+                bytecode: &bc,
+                constants: &consts,
+                closure_env: &env,
+                ip: &mut ip,
+                location_map: &loc,
+            },
+        );
 
         assert_eq!(result, Some(SIG_DEBUG));
         let (sig, _) = vm.fiber.take_signal();

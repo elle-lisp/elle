@@ -11,6 +11,7 @@ use crate::value::{
 use std::rc::Rc;
 
 use super::core::VM;
+use super::FrameContext;
 use super::{
     arithmetic, capture, closure, comparison, control, data, literals, stack, types, variables,
 };
@@ -166,12 +167,14 @@ impl VM {
                 Instruction::Call => {
                     check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_call(
-                        bytecode,
-                        constants,
-                        closure_env,
-                        &mut ip,
+                        &mut FrameContext {
+                            bytecode,
+                            constants,
+                            closure_env,
+                            ip: &mut ip,
+                            location_map,
+                        },
                         instr_ip,
-                        location_map,
                     ) {
                         return (bits, ip);
                     }
@@ -407,12 +410,14 @@ impl VM {
                 Instruction::CallArrayMut => {
                     check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_call_array(
-                        bytecode,
-                        constants,
-                        closure_env,
-                        &mut ip,
+                        &mut FrameContext {
+                            bytecode,
+                            constants,
+                            closure_env,
+                            ip: &mut ip,
+                            location_map,
+                        },
                         instr_ip,
-                        location_map,
                     ) {
                         return (bits, ip);
                     }
