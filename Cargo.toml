@@ -35,16 +35,16 @@ path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 
 # JIT compilation (optional, enable with --features jit; on by default)
-cranelift-codegen = { version = "0.130", optional = true }
-cranelift-frontend = { version = "0.130", optional = true }
-cranelift-module = { version = "0.130", optional = true }
-cranelift-jit = { version = "0.130", optional = true }
-cranelift-native = { version = "0.130", optional = true }
+cranelift-codegen = { version = "0.131", optional = true }
+cranelift-frontend = { version = "0.131", optional = true }
+cranelift-module = { version = "0.131", optional = true }
+cranelift-jit = { version = "0.131", optional = true }
+cranelift-native = { version = "0.131", optional = true }
 target-lexicon = { version = "0.13", optional = true }
 
 # WASM backend (optional, enable with --features wasm)
-wasmtime = { version = "43", features = ["incremental-cache"], optional = true }
-wasm-encoder = { version = "0.245", optional = true }
+wasmtime = { version = "44", features = ["incremental-cache"], optional = true }
+wasm-encoder = { version = "0.246", optional = true }
 
 # MLIR backend (optional, requires LLVM 22 + MLIR)
 melior = { version = "0.27", optional = true }
@@ -66,9 +66,6 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 strip = "symbols"
-
-[patch.crates-io]
-wasmparser = { path = "patches/wasmparser" }
 
 [profile.profiling]
 inherits = "release"
