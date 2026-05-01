@@ -26,6 +26,7 @@ fn print_help() {
     println!("                          cfg  — per-function control-flow graph");
     println!("                          dfa  — dataflow / signal inference results");
     println!("                          defuse — HIR def-use chains, value origin, liveness");
+    println!("                          regions — Tofte-Talpin region inference results");
     println!("                          git  — (reserved for SPIR-V output)");
     println!("  --dump=all            Dump every stage");
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
