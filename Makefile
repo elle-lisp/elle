@@ -7,10 +7,12 @@
 
 ifdef GITHUB_ACTIONS
   JOBS          ?= 4
+  WASM_JOBS     ?= 2
   ELLE          ?= ./target/release/elle
   CARGO_PROFILE := --release
 else
   JOBS          ?= 16
+  WASM_JOBS     ?= 4
   ELLE          ?= ./target/debug/elle
   CARGO_PROFILE :=
 endif
@@ -129,7 +131,7 @@ smoke-wasm: elle-wasm
 	@echo "=== elle scripts (WASM) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(WASM_JOBS) --halt now,fail=1 --tag \
 			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass (full)"; exit 1; }
 
