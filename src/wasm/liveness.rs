@@ -149,10 +149,7 @@ pub fn compute_spill_liveness(
 
     for (bi, block) in func.blocks.iter().enumerate() {
         // Check for Emit terminator
-        if matches!(
-            &block.terminator.terminator,
-            Terminator::Emit { .. }
-        ) {
+        if matches!(&block.terminator.terminator, Terminator::Emit { .. }) {
             // Live at yield = live_out of this block
             result.insert((bi, usize::MAX), live_out[bi].clone());
         }
@@ -202,8 +199,7 @@ pub fn compute_spill_liveness(
             // Also include the dst of this call itself — it's live after
             // the call (the resume will write it, and subsequent code uses it).
             match &si.instr {
-                LirInstr::SuspendingCall { dst, .. }
-                | LirInstr::CallArrayMut { dst, .. } => {
+                LirInstr::SuspendingCall { dst, .. } | LirInstr::CallArrayMut { dst, .. } => {
                     if let Some(&slot) = reg_to_slot.get(dst) {
                         if slot < num_phys_slots {
                             live.insert(slot);

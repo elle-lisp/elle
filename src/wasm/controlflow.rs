@@ -91,7 +91,11 @@ impl WasmEmitter {
                                 .copied()
                                 .unwrap_or(0);
                             self.emit_call_suspending(
-                                f, *call_dst, *fn_reg, args, resume_state,
+                                f,
+                                *call_dst,
+                                *fn_reg,
+                                args,
+                                resume_state,
                                 (src_block_idx, abs_idx),
                             );
                             continue;
@@ -172,7 +176,11 @@ impl WasmEmitter {
                             .copied()
                             .unwrap_or(0);
                         self.emit_call_suspending(
-                            f, *dst, *fn_reg, args, resume_state,
+                            f,
+                            *dst,
+                            *fn_reg,
+                            args,
+                            resume_state,
                             (block_idx, instr_idx),
                         );
                         continue;
@@ -188,7 +196,11 @@ impl WasmEmitter {
                             .copied()
                             .unwrap_or(0);
                         self.emit_call_array_suspending(
-                            f, *dst, *fn_reg, *args, resume_state,
+                            f,
+                            *dst,
+                            *fn_reg,
+                            *args,
+                            resume_state,
                             (block_idx, instr_idx),
                         );
                         continue;
