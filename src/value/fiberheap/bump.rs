@@ -9,41 +9,122 @@
 //! is unsupported. Memory is reclaimed only by `release_to(mark)` (scope exit)
 //! or `clear()` (teardown). Tail-call rotation is handled by the outer layer.
 //!
+//! # OS-level memory return
+//!
+//! Pages are backed by `mmap` (POSIX) rather than the process heap. When
+//! `release_to` or `clear` truncates pages, the OS reclaims the physical
+//! memory immediately via `munmap`. Pages past the high-water mark never
+//! linger in allocator caches. The single page retained by `clear()` gets
+//! `madvise(MADV_DONTNEED)` so the kernel drops its physical frames while
+//! keeping the virtual mapping for fast reuse.
+//!
 //! # Pointer stability
 //!
-//! Each page is `Box<[MaybeUninit<u8>; PAGE_SIZE]>` — heap-allocated and
-//! fixed-address. The outer `Vec<Box<...>>` stores page pointers; when the
-//! Vec grows, only the pointer array reallocates, not the pages themselves.
+//! Each page is an `mmap`'d region at a fixed virtual address. The outer
+//! `Vec<MmapPage>` stores page metadata; when the Vec grows, only the
+//! metadata array reallocates, not the pages themselves.
 
-use std::mem::{align_of, size_of, MaybeUninit};
+use std::mem::align_of;
 
-use crate::value::heap::HeapObject;
-
-/// Bytes per page. 64KB is large enough for typical working sets and
-/// bounded so oversize allocations use fallback pages.
+/// Bytes per standard page. 64KB is large enough for typical working sets
+/// and bounded so oversize allocations use fallback pages.
 const PAGE_SIZE: usize = 64 * 1024;
+
+// ── mmap page abstraction ────────────────────────────────────────────
+
+/// A single page of virtual memory obtained from the OS via `mmap`.
+///
+/// `munmap` on `Drop` returns the memory to the OS immediately — it does
+/// not go through the process allocator (mimalloc), so there is no caching
+/// layer hoarding the pages.
+struct MmapPage {
+    ptr: *mut u8,
+    len: usize,
+}
+
+impl MmapPage {
+    /// Allocate `len` bytes of zero-initialized page-aligned memory.
+    ///
+    /// Returns `None` if `mmap` fails (out of virtual address space).
+    fn new(len: usize) -> Option<Self> {
+        let ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if ptr == libc::MAP_FAILED {
+            None
+        } else {
+            Some(MmapPage {
+                ptr: ptr as *mut u8,
+                len,
+            })
+        }
+    }
+
+    /// Advise the kernel that the page's physical frames are no longer
+    /// needed. The virtual mapping stays alive (no re-mmap cost on reuse)
+    /// but the kernel reclaims the physical memory. Next access triggers
+    /// a zero-page fault (MAP_ANONYMOUS guarantees zero-fill).
+    fn discard_contents(&self) {
+        unsafe {
+            libc::madvise(self.ptr as *mut libc::c_void, self.len, libc::MADV_DONTNEED);
+        }
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.ptr
+    }
+
+    fn as_ptr(&self) -> *const u8 {
+        self.ptr
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl Drop for MmapPage {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.ptr as *mut libc::c_void, self.len);
+        }
+    }
+}
+
+// SAFETY: MmapPage owns its virtual memory exclusively; the raw pointer
+// is never shared across threads. BumpArena is used within a single
+// FiberHeap, which is thread-local.
+unsafe impl Send for MmapPage {}
+
+// ── BumpMark ──────────────────────────────────────────────────────────
 
 /// Opaque position snapshot within a `BumpArena`.
 #[derive(Clone, Copy)]
 pub(crate) struct BumpMark {
     page: usize,
     offset: usize,
-    alloc_count: usize,
 }
 
-/// Byte-level bump arena.
+// ── BumpArena ─────────────────────────────────────────────────────────
+
+/// Byte-level bump arena backed by OS pages.
 ///
 /// Invariant: `current_page` is always a valid index into `pages`
 /// (or `pages` is empty and both page/offset are 0).
 pub(crate) struct BumpArena {
-    /// Owned pages of raw bytes.
-    pages: Vec<Box<[MaybeUninit<u8>]>>,
+    /// Owned mmap'd pages.
+    pages: Vec<MmapPage>,
     /// Current page index. 0 when pages is empty.
     current_page: usize,
     /// Next byte offset within the current page.
     offset: usize,
-    /// Running count of `alloc()` calls for `HeapObject` (not slice allocs).
-    alloc_count: usize,
 }
 
 impl BumpArena {
@@ -52,21 +133,20 @@ impl BumpArena {
             pages: Vec::new(),
             current_page: 0,
             offset: 0,
-            alloc_count: 0,
         }
     }
 
     /// Raw byte allocation with alignment.
     ///
     /// Advances to a new page if the current page lacks space.
-    /// Returns a pointer to uninitialized bytes.
+    /// Returns a pointer to zero-initialized bytes.
     ///
     /// Allocations larger than `PAGE_SIZE` get a dedicated oversized
     /// page of exactly `size` bytes. Subsequent allocations resume in
     /// a fresh standard-sized page — the oversized page is not reused.
     pub fn alloc_raw(&mut self, size: usize, align: usize) -> *mut u8 {
         if self.pages.is_empty() {
-            self.add_page();
+            self.add_page(PAGE_SIZE);
             self.current_page = 0;
             self.offset = 0;
         }
@@ -75,10 +155,9 @@ impl BumpArena {
         // bytes. Bypasses the standard page to avoid a buffer overflow
         // from `offset += size` running past PAGE_SIZE.
         if size > PAGE_SIZE {
-            self.add_oversized_page(size);
+            self.add_page(size);
             self.current_page = self.pages.len() - 1;
-            let page = &mut self.pages[self.current_page];
-            let ptr = page.as_mut_ptr() as *mut u8;
+            let ptr = self.pages[self.current_page].as_mut_ptr();
             // Mark this page as fully consumed so the next alloc
             // advances to a new standard page.
             self.offset = self.pages[self.current_page].len();
@@ -91,32 +170,15 @@ impl BumpArena {
             // Not enough space in current page — advance.
             self.current_page += 1;
             if self.current_page >= self.pages.len() {
-                self.add_page();
+                self.add_page(PAGE_SIZE);
             }
             self.offset = 0;
-            // Re-align within the new page (always 0, which is page-aligned
-            // since pages are at least 8-byte aligned via Box allocation).
         } else {
             self.offset = aligned;
         }
 
-        let page = &mut self.pages[self.current_page];
-        let ptr = unsafe { page.as_mut_ptr().add(self.offset) as *mut u8 };
+        let ptr = unsafe { self.pages[self.current_page].as_mut_ptr().add(self.offset) };
         self.offset += size;
-        ptr
-    }
-
-    /// Allocate a `HeapObject` into the arena, return a pointer.
-    ///
-    /// The pointer remains valid until `release_to()` truncates past it
-    /// or `clear()` is called.
-    pub fn alloc(&mut self, obj: HeapObject) -> *mut HeapObject {
-        let ptr =
-            self.alloc_raw(size_of::<HeapObject>(), align_of::<HeapObject>()) as *mut HeapObject;
-        unsafe {
-            std::ptr::write(ptr, obj);
-        }
-        self.alloc_count += 1;
         ptr
     }
 
@@ -142,40 +204,53 @@ impl BumpArena {
         BumpMark {
             page: self.current_page,
             offset: self.offset,
-            alloc_count: self.alloc_count,
         }
     }
 
     /// Reset the arena to the mark, freeing later pages.
+    ///
+    /// Pages past the mark are `munmap`'d — the OS reclaims their physical
+    /// memory immediately. No allocator caching, no RSS hoarding.
     ///
     /// # Safety
     /// The caller is responsible for running destructors on any objects
     /// allocated after the mark before calling this — the arena does not
     /// track which objects need Drop.
     pub fn release_to(&mut self, mark: BumpMark) {
-        // Drop pages after the mark's page.
-        if !self.pages.is_empty() {
-            self.pages.truncate(mark.page + 1);
-        }
+        // Drop (munmap) pages after the mark's page.
+        self.pages.truncate(mark.page + 1);
         self.current_page = mark.page;
         self.offset = mark.offset;
-        self.alloc_count = mark.alloc_count;
     }
 
     /// Reset the arena entirely, keeping one page for reuse.
     ///
+    /// The retained page gets `madvise(MADV_DONTNEED)` so the kernel
+    /// drops its physical frames while preserving the virtual mapping.
+    /// Subsequent allocations fault in fresh zero pages on demand.
+    ///
     /// # Safety
     /// The caller is responsible for running destructors on all live objects.
     pub fn clear(&mut self) {
+        if self.pages.is_empty() {
+            self.current_page = 0;
+            self.offset = 0;
+            return;
+        }
+        // Discard all pages except the first. munmap returns them to the OS.
         self.pages.truncate(1);
+        // Tell the kernel we don't need the remaining page's contents.
+        // Physical frames are reclaimed; virtual mapping stays alive.
+        self.pages[0].discard_contents();
         self.current_page = 0;
         self.offset = 0;
-        self.alloc_count = 0;
     }
 
-    /// Total bytes allocated (across all pages).
+    /// Total bytes committed across all pages.
+    ///
+    /// Accurate for both standard (64KB) and oversized pages.
     pub fn allocated_bytes(&self) -> usize {
-        self.pages.len() * PAGE_SIZE
+        self.pages.iter().map(|p| p.len()).sum()
     }
 
     /// Check if a pointer falls within any of this arena's pages.
@@ -185,7 +260,7 @@ impl BumpArena {
         let addr = ptr as usize;
         for page in &self.pages {
             let base = page.as_ptr() as usize;
-            let end = base + PAGE_SIZE;
+            let end = base + page.len();
             if addr >= base && addr < end {
                 return true;
             }
@@ -193,27 +268,8 @@ impl BumpArena {
         false
     }
 
-    /// Running `HeapObject` allocation count (never decremented; rotation metrics).
-    #[allow(dead_code)]
-    pub fn alloc_count(&self) -> usize {
-        self.alloc_count
-    }
-
-    fn add_page(&mut self) {
-        let page: Box<[MaybeUninit<u8>]> = std::iter::repeat_with(MaybeUninit::uninit)
-            .take(PAGE_SIZE)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        self.pages.push(page);
-    }
-
-    /// Push a dedicated oversized page sized exactly for one allocation.
-    /// Used when a single allocation exceeds PAGE_SIZE.
-    fn add_oversized_page(&mut self, size: usize) {
-        let page: Box<[MaybeUninit<u8>]> = std::iter::repeat_with(MaybeUninit::uninit)
-            .take(size)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+    fn add_page(&mut self, size: usize) {
+        let page = MmapPage::new(size).expect("bump arena: mmap failed");
         self.pages.push(page);
     }
 }
@@ -226,7 +282,7 @@ impl Default for BumpArena {
 
 impl Drop for BumpArena {
     fn drop(&mut self) {
-        // MaybeUninit slots do not call HeapObject::drop.
+        // MmapPage::drop calls munmap for each page.
         // Caller must have run dtors before dropping the arena.
     }
 }
@@ -234,95 +290,7 @@ impl Drop for BumpArena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::heap::{HeapObject, Pair};
     use crate::value::Value;
-
-    fn cons_obj() -> HeapObject {
-        HeapObject::Pair(Pair::new(Value::NIL, Value::NIL))
-    }
-
-    #[test]
-    fn test_alloc_basic() {
-        let mut arena = BumpArena::new();
-        let ptr = arena.alloc(cons_obj());
-        assert!(!ptr.is_null());
-        assert_eq!(arena.alloc_count(), 1);
-    }
-
-    #[test]
-    fn test_alloc_multiple_distinct() {
-        let mut arena = BumpArena::new();
-        let mut ptrs = vec![];
-        for _ in 0..5 {
-            ptrs.push(arena.alloc(cons_obj()));
-        }
-        assert_eq!(arena.alloc_count(), 5);
-        let unique: std::collections::HashSet<usize> = ptrs.iter().map(|p| *p as usize).collect();
-        assert_eq!(unique.len(), 5);
-    }
-
-    #[test]
-    fn test_pointer_stability_across_pages() {
-        let mut arena = BumpArena::new();
-        // Enough HeapObjects to force page growth (HeapObject is ~72 bytes,
-        // so 1000+ allocations span multiple 64KB pages).
-        let n = 2000usize;
-        let mut ptrs = vec![];
-        for i in 0u32..(n as u32) {
-            let ptr = arena.alloc(HeapObject::Pair(Pair::new(
-                Value::int(i as i64),
-                Value::NIL,
-            )));
-            ptrs.push((ptr, i as i64));
-        }
-        assert_eq!(arena.alloc_count(), n);
-        for (ptr, expected) in &ptrs {
-            let obj = unsafe { &**ptr };
-            match obj {
-                HeapObject::Pair(c) => assert_eq!(c.first.as_int().unwrap(), *expected),
-                _ => panic!("unexpected variant"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_mark_and_release() {
-        let mut arena = BumpArena::new();
-        arena.alloc(cons_obj());
-        arena.alloc(cons_obj());
-        let mark = arena.mark();
-        for _ in 0..3000 {
-            arena.alloc(cons_obj());
-        }
-        assert!(arena.alloc_count() > 2);
-        assert!(arena.pages.len() > 1);
-        arena.release_to(mark);
-        assert_eq!(arena.alloc_count(), 2);
-        assert_eq!(arena.pages.len(), 1);
-    }
-
-    #[test]
-    fn test_clear_keeps_one_page() {
-        let mut arena = BumpArena::new();
-        for _ in 0..3000 {
-            arena.alloc(cons_obj());
-        }
-        assert!(arena.pages.len() >= 3);
-        arena.clear();
-        assert_eq!(arena.alloc_count(), 0);
-        assert_eq!(arena.pages.len(), 1);
-        let p = arena.alloc(cons_obj());
-        assert!(!p.is_null());
-    }
-
-    #[test]
-    fn test_owns() {
-        let mut arena = BumpArena::new();
-        let ptr = arena.alloc(cons_obj()) as *const ();
-        assert!(arena.owns(ptr));
-        let x: i64 = 42;
-        assert!(!arena.owns(&x as *const _ as *const ()));
-    }
 
     #[test]
     fn test_alloc_slice_basic() {
@@ -350,5 +318,66 @@ mod tests {
         let empty: &[u8] = &[];
         let ptr = arena.alloc_slice(empty);
         assert!(!ptr.is_null());
+    }
+
+    #[test]
+    fn test_mark_and_release() {
+        let mut arena = BumpArena::new();
+        let data = [1u8; 256];
+        arena.alloc_slice(&data);
+        arena.alloc_slice(&data);
+        let mark = arena.mark();
+        // Force page growth: 3000 × 256 bytes ≈ 750KB > one 64KB page.
+        for _ in 0..3000 {
+            arena.alloc_slice(&data);
+        }
+        assert!(arena.pages.len() > 1);
+        arena.release_to(mark);
+        assert_eq!(arena.pages.len(), 1);
+    }
+
+    #[test]
+    fn test_clear_keeps_one_page() {
+        let mut arena = BumpArena::new();
+        let data = [1u8; 64];
+        for _ in 0..3000 {
+            arena.alloc_slice(&data);
+        }
+        assert!(arena.pages.len() >= 3);
+        arena.clear();
+        assert_eq!(arena.pages.len(), 1);
+        let p = arena.alloc_slice(&[42u8]);
+        assert!(!p.is_null());
+    }
+
+    #[test]
+    fn test_owns() {
+        let mut arena = BumpArena::new();
+        let ptr = arena.alloc_slice(&[1u8, 2, 3]) as *const ();
+        assert!(arena.owns(ptr));
+        let x: i64 = 42;
+        assert!(!arena.owns(&x as *const _ as *const ()));
+    }
+
+    #[test]
+    fn test_allocated_bytes_accurate_for_oversized() {
+        let mut arena = BumpArena::new();
+        // One standard page.
+        arena.alloc_slice(&[1u8]);
+        let standard_bytes = arena.allocated_bytes();
+        assert_eq!(standard_bytes, PAGE_SIZE);
+
+        // One oversized allocation larger than PAGE_SIZE.
+        let big_size = PAGE_SIZE * 2;
+        let big_data: Vec<u8> = vec![0xAB; big_size];
+        let ptr = arena.alloc_slice(&big_data);
+        assert!(!ptr.is_null());
+
+        let total = arena.allocated_bytes();
+        assert_eq!(
+            total,
+            PAGE_SIZE + big_size,
+            "allocated_bytes should be sum of page sizes, not count * PAGE_SIZE"
+        );
     }
 }

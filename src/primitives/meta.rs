@@ -167,10 +167,7 @@ pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
 
 /// Extract a syntax object from args\[0\], or return a type-error.
 /// `prim_name` is the function name for the error message.
-fn require_syntax(
-    args: &[Value],
-    prim_name: &'static str,
-) -> Result<std::rc::Rc<Syntax>, (SignalBits, Value)> {
+fn require_syntax(args: &[Value], prim_name: &'static str) -> Result<Syntax, (SignalBits, Value)> {
     if args.len() != 1 {
         return Err((
             SIG_ERROR,

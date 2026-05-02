@@ -301,9 +301,8 @@ impl Value {
     #[inline]
     pub fn syntax(s: crate::syntax::Syntax) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        use std::rc::Rc;
         alloc(HeapObject::Syntax {
-            syntax: Rc::new(s),
+            syntax: Box::new(s),
             traits: Value::NIL,
         })
     }

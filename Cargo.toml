@@ -17,7 +17,6 @@ authors = ["Andy Davidoff"]
 
 [dependencies]
 bumpalo = "3"
-mimalloc = "0.1"
 rustc-hash = "2.0"
 smallvec = "1.11"
 libloading = "0.8"

@@ -124,7 +124,11 @@ pub fn heap_arena_mark() -> ArenaMark {
     })
 }
 
-/// Release all arena allocations back to the mark, running destructors.
+/// Release arena allocations back to the mark without deallocating slab slots.
+///
+/// This is the ArenaGuard path — a manual mark/release that bypasses
+/// Tofte-Talpin region analysis. Only runs destructors and truncates
+/// tracking; slab slots survive until teardown or RegionExit.
 pub fn heap_arena_release(mark: ArenaMark) {
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     let heap_ptr = if !heap_ptr.is_null() {
@@ -132,7 +136,7 @@ pub fn heap_arena_release(mark: ArenaMark) {
     } else {
         crate::value::fiberheap::ensure_and_install_root_heap()
     };
-    unsafe { (*heap_ptr).release(mark) };
+    unsafe { (*heap_ptr).release_no_dealloc(mark) };
 }
 
 /// Current number of live objects in the thread-local (root) heap.

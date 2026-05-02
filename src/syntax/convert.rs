@@ -167,7 +167,7 @@ impl Syntax {
         // argument symbols (from unquote) get the intro scope on top
         // of their existing scopes, enabling proper hygiene resolution.
         if let Some(syntax_rc) = value.as_syntax() {
-            let mut s = syntax_rc.as_ref().clone();
+            let mut s = syntax_rc.clone();
             // Mark scope_exempt so the intro scope isn't added to
             // call-site identifiers that survived the Value round-trip.
             // Template symbols from quasiquote also come through here

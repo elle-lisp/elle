@@ -241,7 +241,12 @@ pub enum HeapObject {
     /// during macro expansion. This is the only HeapObject variant that
     /// references compile-time types — an intentional coupling required
     /// for first-class syntax objects in hygienic macros.
-    Syntax { syntax: Rc<Syntax>, traits: Value },
+    ///
+    /// Uses `Box<Syntax>` rather than `Rc<Syntax>` because the tree is
+    /// always cloned on extraction — `Rc` would add indirection without
+    /// sharing benefits, and creates a dangling-pointer hazard when the
+    /// slab slot is recycled.
+    Syntax { syntax: Box<Syntax>, traits: Value },
 
     /// Reified FFI function signature with optional cached CIF.
     /// The CIF is lazily prepared on first use and reused thereafter.
