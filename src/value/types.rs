@@ -160,9 +160,7 @@ impl TableKey {
             TableKey::Symbol(sid) => Value::symbol(sid.0),
             TableKey::String(s) => Value::string(s.as_str()),
             TableKey::Keyword(s) => Value::keyword(s.as_str()),
-            TableKey::Array(keys) => {
-                Value::array(keys.iter().map(|k| k.to_value()).collect())
-            }
+            TableKey::Array(keys) => Value::array(keys.iter().map(|k| k.to_value()).collect()),
             TableKey::Identity(v) => *v,
         }
     }
@@ -278,7 +276,9 @@ impl fmt::Display for TableKey {
             TableKey::Array(keys) => {
                 write!(f, "[")?;
                 for (i, k) in keys.iter().enumerate() {
-                    if i > 0 { write!(f, " ")?; }
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
                     write!(f, "{}", k)?;
                 }
                 write!(f, "]")
@@ -311,7 +311,9 @@ impl fmt::Debug for TableKey {
             TableKey::Array(keys) => {
                 write!(f, "[")?;
                 for (i, k) in keys.iter().enumerate() {
-                    if i > 0 { write!(f, " ")?; }
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
                     write!(f, "{:?}", k)?;
                 }
                 write!(f, "]")

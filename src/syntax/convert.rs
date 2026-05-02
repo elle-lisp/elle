@@ -46,7 +46,8 @@ fn table_key_to_syntax(
         TableKey::String(s) => SyntaxKind::String(s.clone()),
         TableKey::Keyword(s) => SyntaxKind::Keyword(s.clone()),
         TableKey::Array(keys) => {
-            let elements: Result<Vec<_>, _> = keys.iter()
+            let elements: Result<Vec<_>, _> = keys
+                .iter()
                 .map(|k| table_key_to_syntax(k, symbols, span))
                 .collect();
             return Ok(Syntax::new(SyntaxKind::Array(elements?), span.clone()));
