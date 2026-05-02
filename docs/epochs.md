@@ -128,8 +128,11 @@ To make a breaking change to Elle:
 1. Bump `CURRENT_EPOCH` in `src/epoch/rules.rs`.
 2. Add a `Migration` entry to the `MIGRATIONS` array with the new epoch number,
    a summary, and the rules describing the change.
-3. Add tests in `src/epoch/transform.rs` and `src/rewrite/run.rs`.
-4. Run `make smoke` to verify the full test suite still passes.
+3. Update `(elle/epoch N)` in `stdlib.lisp` to the new epoch. The WASM backend
+   strips stdlib's epoch tag and concatenates the body as-is — it does not run
+   migration on stdlib, so stdlib must already use current-epoch syntax.
+4. Add tests in `src/epoch/transform.rs` and `src/rewrite/run.rs`.
+5. Run `make smoke` to verify the full test suite still passes.
 
 Example:
 
@@ -257,3 +260,25 @@ eliminate the need for cell indirection when captured by closures.
 
 `elle rewrite` handles the `var → def @` migration. Mutable `let` and
 parameter bindings require manual `@` annotation, guided by compile errors.
+
+### Epoch 9 — flat cond/match clauses
+
+`cond` and `match` clauses switch from parenthesized groups to flat pairs:
+
+| Old (epoch ≤ 8) | New (epoch 9) |
+|-----------------|---------------|
+| `(cond (test1 body1) (test2 body2))` | `(cond test1 body1 test2 body2)` |
+| `(match val (pat1 body1) (pat2 body2))` | `(match val pat1 body1 pat2 body2)` |
+
+Multi-body arms are wrapped in `(begin ...)`. The `(else body)` form in
+`cond` becomes a trailing default expression.
+
+### Epoch 10 — cons→pair, car→first, cdr→rest
+
+Classic Lisp pair操作 names are replaced with descriptive alternatives:
+
+| Old (epoch ≤ 9) | New (epoch 10) |
+|-----------------|----------------|
+| `cons` | `pair` |
+| `car` | `first` |
+| `cdr` | `rest` |

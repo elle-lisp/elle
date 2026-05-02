@@ -219,12 +219,14 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         } else {
             ("", body_spliced.as_str())
         };
-        let epoch_tag = format!("(elle/epoch {})", crate::epoch::CURRENT_EPOCH);
-        let (stdlib_body, stripped_epoch) = STDLIB
-            .strip_prefix(&format!("{}\n", epoch_tag))
-            .or_else(|| STDLIB.strip_prefix(&format!("{}\r\n", epoch_tag)))
-            .map(|s| (s, true))
-            .unwrap_or((STDLIB, false));
+        // Strip any (elle/epoch N) from stdlib, not just the current epoch.
+        // Avoids a footgun where bumping CURRENT_EPOCH breaks --wasm=full.
+        let (stdlib_body, stripped_epoch) = if STDLIB.starts_with("(elle/epoch") {
+            let rest = STDLIB.split_once('\n').map(|(_, r)| r).unwrap_or("");
+            (rest, true)
+        } else {
+            (STDLIB, false)
+        };
         if stripped_epoch {
             stdlib_form_count = stdlib_form_count.saturating_sub(1);
         }

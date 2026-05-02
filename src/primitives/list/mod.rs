@@ -758,7 +758,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["head", "tail"],
         category: "list",
         example: "(pair 1 (pair 2 ()))",
-        aliases: &[],
+        aliases: &["cons"],
     },
     PrimitiveDef {
         name: "first",
