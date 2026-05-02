@@ -339,9 +339,13 @@ pub(super) fn call_wasm_closure(
         .get_export("__elle_table")
         .and_then(|e| e.into_table())
         .expect("call_wasm_closure: no table");
-    let func_ref = table
-        .get(&mut *caller, wasm_idx as u64)
-        .expect("call_wasm_closure: table index out of bounds");
+    let table_size = table.size(&*caller);
+    let func_ref = table.get(&mut *caller, wasm_idx as u64).unwrap_or_else(|| {
+        panic!(
+            "call_wasm_closure: table index {} out of bounds (table size {})",
+            wasm_idx, table_size
+        )
+    });
     let func = func_ref
         .unwrap_func()
         .expect("call_wasm_closure: table entry is not a function");

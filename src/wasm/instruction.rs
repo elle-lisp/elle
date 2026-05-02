@@ -442,11 +442,10 @@ impl WasmEmitter {
             .get(&closure_id)
             .copied()
             .expect("MakeClosure: ClosureId not found in table map");
-        let nested = self
+        let nested = &self
             .module_closures
             .as_ref()
-            .expect("MakeClosure: no module_closures context")[closure_id.0 as usize]
-            .clone();
+            .expect("MakeClosure: no module_closures context")[closure_id.0 as usize];
 
         for (i, cap) in captures.iter().enumerate() {
             self.write_val_to_mem(f, *cap, i);
