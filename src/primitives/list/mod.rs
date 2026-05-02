@@ -736,17 +736,6 @@ pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
 /// Declarative primitive definitions for list operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "pair",
-        func: prim_cons,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Construct a pair with head and tail",
-        params: &["head", "tail"],
-        category: "list",
-        example: "(pair 1 (pair 2 ()))",
-        aliases: &["cons"],
-    },
-    PrimitiveDef {
         name: "first",
         func: prim_first,
         signal: Signal::errors(),
