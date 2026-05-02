@@ -25,20 +25,20 @@ fn region_emitted_for_literal_result() {
 
 #[test]
 fn region_emitted_for_intrinsic_add() {
-    // Body is (+ a b) → intrinsic BinOp::Add with 2 args → result is immediate
-    assert!(has_region("(let [a 1 b 2] (+ a b))"));
+    // %add is a %-intrinsic that returns an immediate
+    assert!(has_region("(let [a 1 b 2] (%add a b))"));
 }
 
 #[test]
 fn region_emitted_for_intrinsic_compare() {
-    // Body is (< a b) → intrinsic CmpOp::Lt → result is bool
-    assert!(has_region("(let [a 1 b 2] (< a b))"));
+    // %lt is a %-intrinsic that returns a bool
+    assert!(has_region("(let [a 1 b 2] (%lt a b))"));
 }
 
 #[test]
 fn region_emitted_for_intrinsic_not() {
-    // Body is (not true) → intrinsic UnaryOp::Not → result is bool
-    assert!(has_region("(let [a true] (not a))"));
+    // %not is a %-intrinsic that returns a bool
+    assert!(has_region("(let [a true] (%not a))"));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn region_emitted_for_letrec_with_safe_body() {
     // Note: recursive functions capture their own binding (fib captures fib),
     // so letrec with recursive lambdas does NOT qualify.
     // A letrec with non-capturing bindings does qualify.
-    assert!(has_region("(letrec [x 1 y 2] (+ x y))"));
+    assert!(has_region("(letrec [x 1 y 2] (%add x y))"));
 }
 
 #[test]
@@ -95,9 +95,9 @@ fn region_emitted_for_block_literal_body() {
 
 #[test]
 fn region_emitted_for_nested_arithmetic() {
-    // (+ (+ a b) (- c d)) → both are intrinsic calls → safe
+    // (%add (%add a b) (%sub c d)) → both are %-intrinsic calls → safe
     assert!(has_region(
-        "(let [a 1 b 2 c 3 d 4] (+ (+ a b) (- c d)))"
+        "(let [a 1 b 2 c 3 d 4] (%add (%add a b) (%sub c d)))"
     ));
 }
 
@@ -184,15 +184,15 @@ fn region_emitted_for_block_with_multiple_safe_breaks() {
 fn region_emitted_for_equality_check() {
     // = is in the intrinsics map (BinOp::Eq), so result_is_safe
     // recognises it as returning a bool immediate.
-    assert!(has_region("(let [x 1] (= x 1))"));
+    assert!(has_region("(let [x 1] (%eq x 1))"));
 }
 
 #[test]
 fn region_emitted_for_unary_minus() {
-    // (- x) with 1 arg is negation (UnaryOp::Neg), returns int or float.
-    // `-` maps to Binary(BinOp::Sub) in intrinsics, but try_lower_intrinsic
+    // (%sub x) with 1 arg is negation (UnaryOp::Neg), returns int or float.
+    // %sub maps to Binary(BinOp::Sub) in intrinsics, try_lower_intrinsic
     // special-cases 1-arg as negation. result_is_safe must match.
-    assert!(has_region("(let [x 42] (- x))"));
+    assert!(has_region("(let [x 42] (%sub x))"));
 }
 
 // ── Positive: Var in result position (Tier 3) ──────────────────────
@@ -207,7 +207,7 @@ fn region_emitted_when_returning_outer_binding() {
 fn region_emitted_when_returning_outer_in_branches() {
     // (list ...) is an unknown call → forces inner let scope to GLOBAL.
     assert!(!has_region(
-        "(let [x 1] (let [y (list 1 2 3)] (if (empty? y) x (+ x 1))))"
+        "(let [x 1] (let [y (list 1 2 3)] (if (empty? y) x (%add x 1))))"
     ));
 }
 
@@ -252,8 +252,8 @@ fn region_emitted_for_let_with_break_to_inner_block() {
 
 #[test]
 fn region_emitted_for_nested_let_intrinsic_result() {
-    // Inner let's result is (+ x y) — intrinsic → immediate.
-    assert!(has_region("(let [x 1] (let [y 2] (+ x y)))"));
+    // Inner let's result is (%add x y) — %-intrinsic → immediate.
+    assert!(has_region("(let [x 1] (let [y 2] (%add x y)))"));
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn region_emitted_for_nested_block_with_immediate_result() {
 fn region_emitted_for_deeply_nested_lets() {
     // Three levels deep, final result is a literal.
     assert!(has_region(
-        "(let [x 1] (let [y 2] (let [z 3] (+ x (+ y z)))))"
+        "(let [x 1] (let [y 2] (let [z 3] (%add x (%add y z)))))"
     ));
 }
 
@@ -294,9 +294,9 @@ fn region_emitted_for_match_with_bool_arms() {
 
 #[test]
 fn region_emitted_for_match_with_intrinsic_arms() {
-    // Match arms return intrinsic calls → safe
+    // Match arms return %-intrinsic calls → safe
     assert!(has_region(
-        "(let [x 1 y 2] (match x 0 (+ y 1) _ (- y 1)))"
+        "(let [x 1 y 2] (match x 0 (%add y 1) _ (%sub y 1)))"
     ));
 }
 
@@ -537,9 +537,9 @@ fn no_region_when_if_branch_unsafe() {
 
 #[test]
 fn region_for_variadic_immediate_primitive() {
-    // (+ 1 2 3) → generic call, but + always returns an immediate.
+    // (%add (%add 1 2) 3) → nested %-intrinsic calls → result is immediate.
     // Region inference correctly classifies it as immediate-returning.
-    assert!(has_region("(let [a 1] (+ 1 2 3))"));
+    assert!(has_region("(let [a 1] (%add (%add 1 2) 3))"));
 }
 
 #[test]
@@ -566,7 +566,7 @@ fn region_for_let_with_while_break() {
     // Tier 7: while desugars to an implicit block named "while".
     // `(break :while 0)` targets the inner while-block, not the let.
     assert!(has_region(
-        "(let [n 10] (while (> n 0) (if (= n 5) (break :while 0)) n) n)"
+        "(let [n 10] (while (%gt n 0) (if (= n 5) (break :while 0)) n) n)"
     ));
 }
 
@@ -634,7 +634,7 @@ fn no_region_for_block_with_heap_set() {
 #[test]
 fn no_region_fn_body() {
     // Function bodies never get region instructions
-    assert!(!has_region("(fn (x) (+ x 1))"));
+    assert!(!has_region("(fn (x) (%add x 1))"));
 }
 
 #[test]
@@ -742,7 +742,7 @@ fn no_region_when_cond_clause_body_unsafe() {
 fn region_emitted_for_cond_without_else() {
     // cond with no else clause: missing else produces nil (safe).
     // All clause bodies are safe ints → scope allocation should work.
-    assert!(has_region("(let [x 1] (cond (< x 0) 1 (> x 0) 2))"));
+    assert!(has_region("(let [x 1] (cond (%lt x 0) 1 (%gt x 0) 2))"));
 }
 
 #[test]
@@ -762,17 +762,17 @@ fn no_region_for_inner_let_with_outward_set() {
 fn no_region_when_intrinsic_has_spliced_args() {
     // Spliced args to an intrinsic cause a CallArrayMut (not intrinsic lowering),
     // so the result type is unknown → unsafe.
-    assert!(!has_region("(let [a @[1 2]] (+ ;a))"));
+    assert!(!has_region("(let [a @[1.0 2.0]] (int ;a))"));
 }
 
 // ── Tier 8: outward-set refinement ──────────────────────────────────
 
 #[test]
 fn region_emitted_for_outward_set_with_immediate_value() {
-    // (assign counter (+ counter 1)) sets an outer binding, but the value
-    // is an intrinsic call returning an immediate. Tier 8: harmless.
+    // (assign counter (%add counter 1)) sets an outer binding, but the value
+    // is a %-intrinsic call returning an immediate. Tier 8: harmless.
     assert!(has_region(
-        "(begin (var counter 0) (let [temp (list 1 2 3)] (assign counter (+ counter 1)) (length temp)))"
+        "(begin (var counter 0) (let [temp (list 1 2 3)] (assign counter (%add counter 1)) (length temp)))"
     ));
 }
 
@@ -806,7 +806,7 @@ fn region_emitted_for_inner_let_set_to_inner_binding() {
     // Inner let sets its own binding — not outward for the inner let.
     // Tier 8: inner bindings are extended into scope_bindings.
     assert!(has_region(
-        "(let [x 1] (let [@y 2] (assign y (+ y 1)) (+ x y)))"
+        "(let [x 1] (let [@y 2] (assign y (%add y 1)) (%add x y)))"
     ));
 }
 
@@ -1330,11 +1330,11 @@ fn no_region_for_let_star_with_heap_init() {
 
 #[test]
 fn nested_let_star_regions_for_safe_body() {
-    // Inner let: body is (+ x y) — intrinsic call, result is immediate.
+    // Inner let: body is (%add x y) — %-intrinsic call, result is immediate.
     // No captures, pure body → inner let qualifies for scope allocation.
     // Outer let: body is the inner let — Tier 4 recurses into its body,
-    // finds (+ x y) is safe, so outer let ALSO scope-allocates.
-    let source = "(let* [x 1] (let* [y 2] (+ x y)))";
+    // finds (%add x y) is safe, so outer let ALSO scope-allocates.
+    let source = "(let* [x 1] (let* [y 2] (%add x y)))";
     let enters = count_in_bytecode(source, "RegionEnter");
     let exits = count_in_bytecode(source, "RegionExit");
     assert_eq!(enters, 2, "both lets should emit RegionEnter");
@@ -1354,7 +1354,7 @@ fn no_region_for_fn_body() {
     // The function itself is a closure in the constant pool, so we check
     // that the top-level bytecode does NOT contain RegionEnter
     // (the fn expression compiles to MakeClosure, not region instructions)
-    assert!(!has_region("(fn (x) (+ x 1))"));
+    assert!(!has_region("(fn (x) (%add x 1))"));
 }
 
 #[test]
@@ -1384,7 +1384,7 @@ fn region_for_let_with_tail_call_body() {
     // concat is an unknown call → forces scope to GLOBAL in region inference.
     // Tail-call relaxation (A1) not yet in region inference.
     assert!(!closure_has_region(
-        "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (- n 1))))"
+        "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (%sub n 1))))"
     ));
 }
 
@@ -1394,7 +1394,7 @@ fn region_for_let_with_tail_call_in_if() {
     assert!(!closure_has_region(
         "(defn loop (n)
            (let [s (concat \"x\" \"y\")]
-             (if (<= n 0) (loop 0) (loop (- n 1)))))"
+             (if (%le n 0) (loop 0) (loop (%sub n 1)))))"
     ));
 }
 
@@ -1438,7 +1438,7 @@ fn correct_scope_callee_not_freed_before_tail_call() {
 fn region_for_let_with_tail_call_passing_non_scope_arg() {
     // concat is an unknown call → forces scope to GLOBAL.
     assert!(!closure_has_region(
-        "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (- n 1))))"
+        "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (%sub n 1))))"
     ));
 }
 
@@ -1448,7 +1448,7 @@ fn region_for_let_with_tail_call_passing_non_scope_arg() {
 fn region_for_let_with_suspending_tail_call() {
     // concat is an unknown call → forces scope to GLOBAL.
     assert!(!closure_has_region(
-        "(defn process (n) (let [s (concat \"x\" \"y\")] (process (- n 1))))"
+        "(defn process (n) (let [s (concat \"x\" \"y\")] (process (%sub n 1))))"
     ));
 }
 
@@ -1467,7 +1467,7 @@ fn rotation_safe_for_pure_recursive_functions() {
     // analysis (can_scope_allocate_call), which still runs for calls.
     // With region inference replacing scope decisions, rotation_safe
     // marking may not fire since the let/letrec scopes aren't analyzed.
-    let source = r#"(defn f (n) (if (<= n 0) n (f (- n 1))))"#;
+    let source = r#"(defn f (n) (if (%le n 0) n (f (%sub n 1))))"#;
     let mut symbols = SymbolTable::new();
     let compiled = compile(source, &mut symbols, "<test>").expect("compile");
     let closure = compiled.bytecode.constants.iter()
@@ -1480,7 +1480,7 @@ fn rotation_safe_for_pure_recursive_functions() {
 
 #[test]
 fn rotation_unsafe_for_push_in_body() {
-    let source = r#"(defn f (n) (if (<= n 0) n (begin (push @[] 1) (f (- n 1)))))"#;
+    let source = r#"(defn f (n) (if (%le n 0) n (begin (push @[] 1) (f (%sub n 1)))))"#;
     let mut symbols = SymbolTable::new();
     let compiled = compile(source, &mut symbols, "<test>").expect("compile");
     let closure = compiled.bytecode.constants.iter()
@@ -1493,7 +1493,7 @@ fn rotation_unsafe_for_push_in_body() {
 fn rotation_safe_for_mutual_recursion() {
     // Mutual recursion between pure functions — both should be rotation-safe.
     let source = r#"(letrec
-        [even-f (fn (n) (if (<= n 0) true (odd-f (- n 1)))) odd-f (fn (n) (if (<= n 0) false (even-f (- n 1))))]
+        [even-f (fn (n) (if (%le n 0) true (odd-f (%sub n 1)))) odd-f (fn (n) (if (%le n 0) false (even-f (%sub n 1))))]
         nil)"#;
     let mut symbols = SymbolTable::new();
     let compiled = compile(source, &mut symbols, "<test>").expect("compile");
@@ -1518,7 +1518,7 @@ fn no_region_for_let_with_suspending_before_tail_call() {
         "(defn f (port)
            (let [a 1 b 2 c 3 d 4 e 5 f 6 g 7 h 8 i 9 j 10 k 11 l 12 m 13 n 14 o 15 p 16]
              (port/write port \"x\")
-             (+ a b c d e f g h i j k l m n o p)))"
+             (%add a (%add b (%add c (%add d (%add e (%add f (%add g (%add h (%add i (%add j (%add k (%add l (%add m (%add n (%add o p)))))))))))))))))"
     ));
 }
 
@@ -1528,7 +1528,7 @@ fn no_region_for_let_with_suspending_before_tail_call() {
 fn region_for_let_with_non_primitive_tail_call() {
     // concat is an unknown call → forces scope to GLOBAL.
     assert!(!closure_has_region(
-        "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (- n 1))))"
+        "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (%sub n 1))))"
     ));
 }
 
@@ -1537,7 +1537,7 @@ fn no_region_for_let_with_non_primitive_non_tail_call() {
     // Non-primitive callee NOT in tail position. Conservatively rejected
     // by walk_for_outward_set: may store scope-allocated values externally.
     assert!(!closure_has_region(
-        "(defn f (n) (let [s (concat \"x\" \"y\")] (let [r (f n)] (+ r 1))))"
+        "(defn f (n) (let [s (concat \"x\" \"y\")] (let [r (f n)] (%add r 1))))"
     ));
 }
 
@@ -1546,7 +1546,7 @@ fn no_region_for_let_with_non_primitive_non_tail_call() {
 #[test]
 fn region_exit_before_tail_call() {
     // concat is an unknown call → scope is GLOBAL, no RegionEnter/Exit.
-    let source = "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (- n 1))))";
+    let source = "(defn loop (n) (let [s (concat \"x\" \"y\")] (loop (%sub n 1))))";
     assert!(!closure_has_region(source));
 }
 
@@ -1554,7 +1554,7 @@ fn region_exit_before_tail_call() {
 fn nested_let_tail_call_emits_multiple_exits() {
     // After functionalize, the self-recursive call goes through DerefCell,
     // which region inference treats as an unknown call → forces GLOBAL.
-    let source = "(defn loop (n) (let [a 1] (let [b 2] (loop (- n 1)))))";
+    let source = "(defn loop (n) (let [a 1] (let [b 2] (loop (%sub n 1)))))";
     let enters = count_in_closure_bytecode(source, "RegionEnter");
     assert_eq!(enters, 0, "self-recursive call forces GLOBAL — no RegionEnter");
 }
@@ -1562,7 +1562,7 @@ fn nested_let_tail_call_emits_multiple_exits() {
 #[test]
 fn nested_let_with_heap_inits_outer_only() {
     // concat and number->string are unknown calls → force scope to GLOBAL.
-    let source = "(defn loop (n) (let [a (concat \"a\" (number->string n))] (let [b (concat \"b\" (number->string n))] (loop (- n 1)))))";
+    let source = "(defn loop (n) (let [a (concat \"a\" (number->string n))] (let [b (concat \"b\" (number->string n))] (loop (%sub n 1)))))";
     let enters = count_in_closure_bytecode(source, "RegionEnter");
     assert_eq!(enters, 0, "unknown calls force GLOBAL — no RegionEnter");
 }
@@ -1571,7 +1571,7 @@ fn nested_let_with_heap_inits_outer_only() {
 fn if_branches_both_get_region_exits() {
     // concat is an unknown call → scope is GLOBAL, no RegionEnter/Exit.
     let source =
-        "(defn loop (n) (let [s (concat \"x\" \"y\")] (if (<= n 0) (loop 0) (loop (- n 1)))))";
+        "(defn loop (n) (let [s (concat \"x\" \"y\")] (if (%le n 0) (loop 0) (loop (%sub n 1)))))";
     let exits = count_in_closure_bytecode(source, "RegionExit");
     assert_eq!(exits, 0, "unknown calls force GLOBAL — no RegionExit");
 }
@@ -1582,7 +1582,7 @@ fn if_branches_both_get_region_exits() {
 fn lambda_in_let_body_does_not_inherit_pending_exits() {
     // Lambda allocation is an unknown call → forces scope to GLOBAL.
     let source =
-        "(defn f (n) (let [g (fn () 42)] (f (- n 1))))";
+        "(defn f (n) (let [g (fn () 42)] (f (%sub n 1))))";
     assert!(!closure_has_region(source));
 }
 
@@ -1683,7 +1683,7 @@ fn call_scoped_emits_region_exit_call() {
     // Call-scoped reclamation doesn't fire because inner is not
     // recognized as rotation-safe (DerefCell callee).
     let source = r#"(letrec
-        [inner (fn [x] (if (empty? x) 0 (+ 1 (inner (rest x))))) outer (fn [n] (inner (pair n (list))))]
+        [inner (fn [x] (if (empty? x) 0 (%add 1 (inner (rest x))))) outer (fn [n] (inner (%pair n (list))))]
         nil)
     "#;
     assert!(!closure_bytecode_contains(source, "RegionExitCall"));
@@ -1695,7 +1695,7 @@ fn no_call_scoped_for_non_rotation_safe_callee() {
     // g's call to f should NOT get call-scoped region.
     let source = r#"(let [acc @[]]
         (letrec
-          [f (fn [x] (push acc x) 0) g (fn [n] (f (pair 1 2)))]
+          [f (fn [x] (push acc x) 0) g (fn [n] (f (%pair 1 2)))]
           nil))
     "#;
     assert!(!closure_has_region(source));
@@ -1706,7 +1706,7 @@ fn no_call_scoped_when_callee_returns_heap() {
     // make-pair returns a pair cell (non-immediate).
     // Even though it's rotation-safe, the result would be freed.
     let source = r#"(letrec
-        [make-pair (fn [a b] (pair a b)) use-pair (fn [n] (first (make-pair n (+ n 1))))]
+        [make-pair (fn [a b] (%pair a b)) use-pair (fn [n] (first (make-pair n (%add n 1))))]
         nil)
     "#;
     assert!(!closure_has_region(source));
@@ -1716,7 +1716,7 @@ fn no_call_scoped_when_callee_returns_heap() {
 fn no_call_scoped_when_all_args_immediate() {
     // All arguments are immediates — no heap allocation to reclaim.
     let source = r#"(letrec
-        [add3 (fn [a b c] (+ a (+ b c))) f (fn [n] (add3 n 1 2))]
+        [add3 (fn [a b c] (%add a (%add b c))) f (fn [n] (add3 n 1 2))]
         nil)
     "#;
     assert!(!closure_has_region(source));
@@ -1737,7 +1737,7 @@ fn call_scoped_correct_nqueens_pattern() {
                   (search n (+ row 1) (pair col queens) count))))]
             (search 5 0 (list) 0))
         "#).unwrap(),
-        Value::int(3125)
+        Value::int(3125)  // eval_source — uses stdlib + and pair
     );
 }
 
@@ -1746,7 +1746,7 @@ fn call_scoped_mutual_recursion_result_immediate() {
     // Mutual recursion where both functions return immediates.
     // Compilation succeeds (fixpoint converges).
     let source = r#"(letrec
-        [even-count (fn [n] (if (<= n 0) 0 (odd-count (- n 1)))) odd-count (fn [n] (if (<= n 0) 0 (+ 1 (even-count (- n 1)))))]
+        [even-count (fn [n] (if (%le n 0) 0 (odd-count (%sub n 1)))) odd-count (fn [n] (if (%le n 0) 0 (%add 1 (even-count (%sub n 1)))))]
         nil)
     "#;
     let mut symbols = SymbolTable::new();
@@ -1757,7 +1757,7 @@ fn call_scoped_mutual_recursion_result_immediate() {
 #[test]
 fn no_call_scoped_for_tail_call() {
     // Tail calls are handled by rotation, not call-scoped regions.
-    let source = "(defn loop [n] (if (<= n 0) 0 (loop (- n 1))))";
+    let source = "(defn loop [n] (if (%le n 0) 0 (loop (%sub n 1))))";
     assert!(!closure_has_region(source));
 }
 
@@ -1774,11 +1774,11 @@ fn tail_call_with_heap_arg_marks_callee_unsafe() {
     // inner's non-tail self-call (+ 1 (inner (rest x))) should still get
     // call-scoped reclamation because inner itself IS rotation-safe.
     let source = r#"(letrec
-        [inner (fn [x] (if (empty? x) 0 (+ 1 (inner (rest x))))) outer (fn [n] (inner (pair n (list))))]
+        [inner (fn [x] (if (empty? x) 0 (%add 1 (inner (rest x))))) outer (fn [n] (inner (%pair n (list))))]
         nil)
     "#;
 
-    // inner is rotation-safe: its body returns 0 or (+ 1 ...), both immediate.
+    // inner is rotation-safe: its body returns 0 or (%add 1 ...), both immediate.
     // inner's non-tail self-call should get call-scoped reclamation.
     // outer's tail call to inner should NOT (tail calls never do).
     // The original call_scoped_emits_region_exit_call test already checks
@@ -1801,21 +1801,21 @@ fn tail_call_with_heap_arg_marks_callee_unsafe() {
 
 #[test]
 fn self_recursive_with_primitive_tail_call_is_rotation_safe() {
-    // f calls itself non-tail inside (+ 1 (f (rest x))).
-    // The + call is in tail position and receives (f (rest x)) as an arg.
-    // f always returns an integer (0 or result of +).
+    // f calls itself non-tail inside (%add 1 (f (rest x))).
+    // The %add call is in tail position and receives (f (rest x)) as an arg.
+    // f always returns an integer (0 or result of %add).
     //
-    // body_escapes_heap_values sees the tail call to + and checks
+    // body_escapes_heap_values sees the tail call to %add and checks
     // result_is_safe on each arg. (f (rest x)) is a user-function call;
     // result_is_safe returns false for user calls. If body_escapes
     // uses result_is_safe, f is marked not-rotation-safe, and the
     // non-tail self-call loses its call-scoped region.
     //
     // The correct behavior: f IS rotation-safe because it returns
-    // immediates and doesn't escape heap values. The tail call to +
+    // immediates and doesn't escape heap values. The tail call to %add
     // passes an integer (f's return value), not a heap-allocated object.
     let source = r#"(letrec
-        [f (fn [x] (if (empty? x) 0 (+ 1 (f (rest x)))))]
+        [f (fn [x] (if (empty? x) 0 (%add 1 (f (rest x)))))]
         nil)"#;
     // empty?/rest are unknown calls → force GLOBAL. No call-scoped region.
     assert!(
@@ -1833,7 +1833,7 @@ fn non_tail_call_to_immediate_returning_fn_gets_region() {
     // This confirms callee_result_immediate recognizes f as immediate-returning
     // and can_scope_allocate_call accepts the call.
     let source = r#"(letrec
-        [f (fn [x] (if (empty? x) 0 (+ 1 (f (rest x))))) g (fn [n] (+ (f (pair n (list))) 1))]
+        [f (fn [x] (if (empty? x) 0 (%add 1 (f (rest x))))) g (fn [n] (%add (f (%pair n (list))) 1))]
         nil)"#;
     // empty?/rest/pair/list are unknown calls → force GLOBAL.
     assert!(
@@ -1844,8 +1844,8 @@ fn non_tail_call_to_immediate_returning_fn_gets_region() {
 
 #[test]
 fn call_scoped_does_not_wrap_intrinsics() {
-    // Intrinsic calls (like +) are lowered to BinOp, not Call.
-    let source = "(defn f [n] (+ n (length (pair 1 2))))";
+    // %-intrinsic calls (like %add) are lowered to BinOp, not Call.
+    let source = "(defn f [n] (%add n (length (%pair 1 2))))";
     assert!(!closure_has_region(source));
 }
 
@@ -1867,13 +1867,13 @@ fn call_scoped_nqueens_search_gets_region() {
     // gets RegionEnter/RegionExitCall.
     let source = r#"(letrec
         [search (fn [n row queens count]
-          (if (= row n) (+ count 1)
+          (if (%eq row n) (%add count 1)
             (try-col n 0 queens row count)))
          try-col (fn [n col queens row count]
-          (if (= col n) count
-            (try-col n (+ col 1) queens row
-              (if (< col row)
-                (search n (+ row 1) (pair col queens) count)
+          (if (%eq col n) count
+            (try-col n (%add col 1) queens row
+              (if (%lt col row)
+                (search n (%add row 1) (%pair col queens) count)
                 count))))]
         (search 5 0 (list) 0))
     "#;
@@ -1900,7 +1900,7 @@ fn return_safe_mutual_recursion_enables_rotation_safety() {
           (if (empty? x) count
             (g x count)))
          g (fn [x count]
-          (g x (if true (f (pair 1 x) (+ count 1)) count)))]
+          (g x (if true (f (%pair 1 x) (%add count 1)) count)))]
         (g (list 1 2 3) 0))
     "#;
     // pair/list are unknown calls → force GLOBAL. No call-scoped region.

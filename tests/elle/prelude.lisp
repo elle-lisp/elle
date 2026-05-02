@@ -66,7 +66,7 @@
 # Destructured error — message
 (assert (= (try
              (/ 1 0)
-             (catch {:error kind :message msg} msg)) "division by zero")
+             (catch {:error kind :message msg} msg)) "/: division by zero")
         "try destructured error message")
 
 # ============================================================================

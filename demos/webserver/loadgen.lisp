@@ -41,7 +41,7 @@
 (defn distribute [total n]
   "Split total into n roughly-equal chunks."
   (let* [base (/ total n)
-         extra (% total n)
+         extra (rem total n)
          result @[]]
     (def @i 0)
     (while (< i n)

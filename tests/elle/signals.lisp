@@ -43,15 +43,16 @@
     (fn (f x y)
       (silence f)
       (f x y)))
-  (assert (= (apply-inert + 42 1) 43) "silence runtime: silent function passes"))
+  (assert (= (apply-inert (fn [x y] (%add x y)) 42 1) 43)
+          "silence runtime: silent function passes"))
 
 # silence with non-closure (primitive) passes at runtime
 (begin
   (def apply-inert2
-    (fn (f x y)
+    (fn (f x)
       (silence f)
-      (f x y)))
-  (assert (= (apply-inert2 + 42 1) 43) "silence runtime: non-closure passes"))
+      (f x)))
+  (assert (= (apply-inert2 abs -43) 43) "silence runtime: non-closure passes"))
 
 # squelch with keyword passes for silent closure (open-world: silent closure has no :rt_c5a)
 # Direct invocation: (squelch f :rt_c5a) returns a squelched closure; calling it with
@@ -67,7 +68,7 @@
     (fn (f x y)
       (silence f)
       (f x y)))
-  (def @g +)
+  (def @g (fn [x y] (%add x y)))
   (assert (= (apply-inert3 g 42 1) 43) "silence runtime: dynamic silent passes"))
 
 # ============================================================================
@@ -132,7 +133,7 @@
 # squelch runtime: calling squelch on a non-closure (primitive) is a type error
 # (The new squelch primitive requires a closure; use the primitive directly for non-closures)
 (begin
-  (def [ok-prim? _] (protect (squelch + :yield)))
+  (def [ok-prim? _] (protect (squelch abs :yield)))
   (assert (not ok-prim?) "squelch runtime: non-closure produces type error"))
 
 # squelch runtime: a silent closure passes squelch

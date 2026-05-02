@@ -43,7 +43,7 @@ fn test_file_single_def() {
 fn test_file_multiple_defs() {
     // Multiple defs, last expression is the return value.
     assert_eq!(
-        eval_file_source("(def x 42) (def y (+ x 1)) y").unwrap(),
+        eval_file_source_with_stdlib("(def x 42) (def y (+ x 1)) y").unwrap(),
         Value::int(43)
     );
 }
@@ -104,15 +104,16 @@ fn test_file_var_mutability() {
 fn test_file_var_set_from_later_expression() {
     // var can be assigned from a later bare expression.
     assert_eq!(
-        eval_file_source("(var count 0) (assign count (+ count 1)) count").unwrap(),
+        eval_file_source_with_stdlib("(var count 0) (assign count (+ count 1)) count").unwrap(),
         Value::int(1)
     );
 }
 
 #[test]
 fn test_file_primitive_immutability() {
-    // Primitives are immutable — (assign + 42) should fail.
-    let result = compile_file_source("(assign + 42)");
+    // Primitives are immutable — (assign list 42) should fail.
+    // Note: + moved to stdlib; use a primitive that remains (list).
+    let result = compile_file_source("(assign list 42)");
     assert!(
         result.is_err(),
         "expected compile error for assign on primitive"
@@ -143,14 +144,14 @@ fn test_file_empty() {
 #[test]
 fn test_file_single_bare_expression() {
     // A single bare expression is the return value.
-    assert_eq!(eval_file_source("(+ 1 2)").unwrap(), Value::int(3));
+    assert_eq!(eval_file_source_with_stdlib("(+ 1 2)").unwrap(), Value::int(3));
 }
 
 #[test]
 fn test_file_destructuring_def() {
     // Destructuring def at file level.
     assert_eq!(
-        eval_file_source("(def (a b) (list 10 20)) (+ a b)").unwrap(),
+        eval_file_source_with_stdlib("(def (a b) (list 10 20)) (+ a b)").unwrap(),
         Value::int(30)
     );
 }
@@ -158,7 +159,7 @@ fn test_file_destructuring_def() {
 #[test]
 fn test_file_primitives_accessible() {
     // Primitives like + are accessible as lexical bindings.
-    assert_eq!(eval_file_source("(+ 1 2 3)").unwrap(), Value::int(6));
+    assert_eq!(eval_file_source_with_stdlib("(+ 1 2 3)").unwrap(), Value::int(6));
 }
 
 #[test]
@@ -170,7 +171,7 @@ fn test_file_last_def_is_return() {
 #[test]
 fn test_file_compile_produces_single_result() {
     // compile_file returns a single CompileResult, not a Vec.
-    let result = compile_file_source("(def x 1) (def y 2) (+ x y)");
+    let result = compile_file_source("(def x 1) (def y 2) (%add x y)");
     assert!(result.is_ok());
 }
 
@@ -209,9 +210,9 @@ fn eval_file_source_with_stdlib(input: &str) -> Result<Value, String> {
 #[test]
 fn test_eval_file_returns_last_expression() {
     // eval_file returns the value of the last expression in the file.
-    assert_eq!(eval_file_source("(+ 1 2)").unwrap(), Value::int(3));
+    assert_eq!(eval_file_source_with_stdlib("(+ 1 2)").unwrap(), Value::int(3));
     assert_eq!(
-        eval_file_source("(def x 10) (def y 20) (+ x y)").unwrap(),
+        eval_file_source_with_stdlib("(def x 10) (def y 20) (+ x y)").unwrap(),
         Value::int(30)
     );
 }
@@ -546,8 +547,8 @@ fn test_mutual_recursion_silent_stays_silent() {
     // The fixpoint must not incorrectly promote silent to Yields.
     let result = eval_file_source(
         r#"
-        (def even? (fn [n] (if (= n 0) true (odd? (- n 1)))))
-        (def odd? (fn [n] (if (= n 0) false (even? (- n 1)))))
+        (def even? (fn [n] (if (%eq n 0) true (odd? (%sub n 1)))))
+        (def odd? (fn [n] (if (%eq n 0) false (even? (%sub n 1)))))
         (list (silent? even?) (silent? odd?))
         "#,
     );

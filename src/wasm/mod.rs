@@ -281,6 +281,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let mut stubbed = std::collections::HashSet::new();
 
     if crate::config::get().cache.is_some() {
+        let mut all_ok = true;
         for (i, closure_func) in lir_module.closures.iter().enumerate() {
             if let Some(standalone) = emit::emit_single_closure(closure_func, Some(&lir_module)) {
                 if let Ok(module) = compile_or_cache_module(&engine, &standalone.wasm_bytes) {
@@ -289,8 +290,21 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
                         const_pool: standalone.const_pool,
                     });
                     stubbed.insert(crate::lir::ClosureId(i as u32));
+                } else {
+                    all_ok = false;
+                    break;
                 }
+            } else {
+                all_ok = false;
+                break;
             }
+        }
+        // If any closure failed to precache, fall back to full-module
+        // dispatch for all closures. Partial precaching causes table
+        // index mismatches when a precached closure calls a non-precached one.
+        if !all_ok {
+            precached.iter_mut().for_each(|p| *p = None);
+            stubbed.clear();
         }
     }
 

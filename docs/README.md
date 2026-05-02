@@ -40,10 +40,14 @@ full pipeline and [`../src/reader/mod.rs`](../src/reader/mod.rs)'s
 
 Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 
-`syntax` `types` `bindings` `destructuring` `destructuring-advanced`
-`functions` `named-args` `arrays` `structs` `sets` `strings` `bytes`
-`control` `loops` `match` `errors` `concurrency` `threads` `coroutines`
-`parameters` `traits` `io` `lua` `epochs`
+[syntax](syntax.md) [types](types.md) [bindings](bindings.md)
+[destructuring](destructuring.md) [destructuring-advanced](destructuring-advanced.md)
+[functions](functions.md) [named-args](named-args.md) [arrays](arrays.md)
+[structs](structs.md) [sets](sets.md) [strings](strings.md) [bytes](bytes.md)
+[control](control.md) [loops](loops.md) [match](match.md) [errors](errors.md)
+[concurrency](concurrency.md) [threads](threads.md) [coroutines](coroutines.md)
+[parameters](parameters.md) [traits](traits.md) [io](io.md) [lua](lua.md)
+[epochs](epochs.md) [intrinsics](intrinsics.md)
 
 ## Design Documents
 

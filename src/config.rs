@@ -543,6 +543,11 @@ pub struct Config {
     /// O(live_regs * suspend_points). On by default.
     pub wasm_sparse_spill: bool,
 
+    /// Route %-intrinsic calls through registered NativeFn primitives
+    /// with runtime type validation instead of inlining to unchecked
+    /// BinOp/CmpOp/etc. Implies jit=off, mlir=off.
+    pub checked_intrinsics: bool,
+
     /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
     /// lowered functions (Phase 4b). On by default — escape-analysis
     /// gates injection so only safe loops get flip. Disable via
@@ -583,6 +588,7 @@ impl Default for Config {
             wasm_lir: false,
             wasm_chunk: false,
             wasm_sparse_spill: true,
+            checked_intrinsics: false,
             flip_instructions: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
@@ -801,6 +807,11 @@ impl Config {
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,
                 "--wasm-no-sparse-spill" => config.wasm_sparse_spill = false,
+                "--checked-intrinsics" => {
+                    config.checked_intrinsics = true;
+                    config.jit = 0;
+                    config.mlir = 0;
+                }
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {
@@ -821,6 +832,20 @@ impl Config {
         // They'll be handled specially in main
         for expr in eval_exprs.into_iter().rev() {
             remaining.insert(0, format!("--eval:{}", expr));
+        }
+
+        // --checked-intrinsics requires JIT and MLIR off
+        if config.checked_intrinsics && config.jit > 0 {
+            return Err(
+                "--checked-intrinsics is incompatible with --jit (JIT would bypass type checks)"
+                    .to_string(),
+            );
+        }
+        if config.checked_intrinsics && config.mlir > 0 {
+            return Err(
+                "--checked-intrinsics is incompatible with --mlir (MLIR would bypass type checks)"
+                    .to_string(),
+            );
         }
 
         Ok((config, remaining))

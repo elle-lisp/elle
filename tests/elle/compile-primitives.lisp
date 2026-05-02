@@ -31,19 +31,15 @@
 (assert (nil? (find-prim "apply"))
         "apply is not a Rust primitive (it's a macro)")
 
-# pair is a core Rust primitive
-(def pair-prim (find-prim "pair"))
-(assert (not (nil? pair-prim)) "pair primitive exists")
-(assert (= (get pair-prim :category) "list") "pair is in list category")
+# pair and + are stdlib functions (not Rust primitives)
+(assert (nil? (find-prim "pair")) "pair is stdlib, not a Rust primitive")
+(assert (nil? (find-prim "+")) "+ is stdlib, not a Rust primitive")
 
-# ── Find + (silent arithmetic) ────────────────────────────────────────
-
-(def plus-prim (find-prim "+"))
-(assert (not (nil? plus-prim)) "+ primitive exists")
-(def plus-sig (get plus-prim :signal))
-(assert (not (get plus-sig :silent)) "+ is not silent (errors on type mismatch)")
-(assert (get plus-sig :jit-eligible) "+ is jit-eligible")
-(assert (not (get plus-sig :io)) "+ has no io")
+# abs is a core Rust primitive (kept in arithmetic.rs)
+(def abs-prim (find-prim "abs"))
+(assert (not (nil? abs-prim)) "abs primitive exists")
+(assert (= (get abs-prim :category) "arithmetic")
+        "abs is in arithmetic category")
 
 # ── Find port/write (yields, io) ──────────────────────────────────────
 
