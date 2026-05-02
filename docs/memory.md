@@ -1,109 +1,261 @@
 # Memory
 
 Elle has no garbage collector. Memory is managed deterministically through
-per-fiber bump arenas, escape-analysis-driven scope reclamation, and
-zero-copy inter-fiber sharing. These three mechanisms are derived from the
-same static analysis that drives the signal system — signal inference tells
-the runtime which fibers yield and which are silent, and that distinction
-determines how memory is allocated, shared, and reclaimed.
+per-fiber tracked pools, compiler-directed scope reclamation, and tail-call
+pool rotation. These mechanisms are derived from the same static analysis that
+drives signal inference — the compiler knows at every allocation site whether
+the value can escape its scope, whether the containing function is a tail call,
+and whether the fiber will yield.
+
+## How to write leak-free code
+
+Most Elle code is naturally leak-free. The three rules:
+
+### 1. Don't assign heap values to outer mutable bindings in a loop
+
+```lisp
+# BAD: struct escapes to outer @var — linear growth
+(def @last nil)
+(def @i 0)
+(while (< i 100)
+  (assign last {:x i})
+  (assign i (+ i 1)))
+# each iteration's struct stays alive — the old value of last is never freed
+
+# GOOD: let-bind the struct — scope reclamation frees it
+(def @i 0)
+(while (< i 100)
+  (let [x {:x i}]
+    x)
+  (assign i (+ i 1)))
+# the struct is reclaimed at each iteration's scope exit
+```
+
+```lisp
+# BAD: strings accumulate via concat to outer @var
+(def @s "")
+(def @i 0)
+(while (< i 100)
+  (assign s (concat s "x"))
+  (assign i (+ i 1)))
+
+# BAD: push stores heap structs into outer mutable array
+(def @acc [])
+(def @i 0)
+(while (< i 100)
+  (push acc {:x i})
+  (assign i (+ i 1)))
+
+# BAD: put stores heap strings into outer mutable struct
+(def @s {:x 0})
+(def @i 0)
+(while (< i 100)
+  (put s :x (string "v" i))
+  (assign i (+ i 1)))
+```
+
+These patterns are inherently leaky — the value genuinely escapes the scope
+and must stay alive because something still references it. Fixing them requires
+drop-on-overwrite semantics (not yet implemented).
+
+### 2. Prefer tail calls for loops with heap allocation
+
+```lisp
+# Tail-recursive loop: trampoline rotation keeps memory bounded
+(defn process-all (n)
+  (if (= n 0)
+    :done
+    (begin
+      {:x n}                       # heap allocation
+      (process-all (- n 1)))))     # tail call — rotation frees {:x n}
+
+(process-all 10000)
+# memory stays bounded despite 10000 struct allocations
+```
+
+The same works for strings, mutual tail recursion, and any allocation that
+doesn't outlive the iteration:
+
+```lisp
+# Mutual tail recursion — also bounded
+(defn ping (n)
+  (if (= n 0) :done
+    (begin (string "ping " n) (pong (- n 1)))))
+
+(defn pong (n)
+  (if (= n 0) :done
+    (begin (string "pong " n) (ping (- n 1)))))
+
+(ping 10000)
+```
+
+### 3. Yielding fibers use flip rotation
+
+Fibers that yield mid-loop cannot use scope reclamation (the fiber suspends
+before `RegionExit` fires). Instead, `FlipSwap` at the loop back-edge rotates
+pools each iteration:
+
+```lisp
+# Yielding fiber — flip rotation keeps memory bounded
+(defn yield-items (n)
+  (fiber/new (fn []
+    (def @i 0)
+    (while (< i n)
+      (yield (string "item-" i))    # heap allocation + yield
+      (assign i (+ i 1))))
+  |:yield|))
+
+(def f (yield-items 10000))
+(while (not= (fiber/status f) :dead)
+  (fiber/resume f))
+# memory stays bounded despite 10000 string allocations across yields
+```
+
+## What is automatically reclaimed
+
+### Scope reclamation
+
+The compiler performs escape analysis on every `let`, `letrec`, and `while`
+body. When it can prove that no allocated value escapes — no captures, no
+suspension, result is immediate, no outward mutation — it emits
+`RegionEnter`/`RegionExit` bytecodes. `RegionExit` runs destructors and
+reclaims pool slots for objects allocated within the scope.
+
+```lisp
+# let-bound struct is reclaimed at scope exit
+(let [x {:a 1 :b 2}]
+  (get x :a))                         # => 1
+# x's struct is freed here
+
+# discarded struct in while body — scope reclaims each iteration
+(def @i 0)
+(while (< i 1000)
+  {:x i :y (+ i 1)}                   # struct allocated and discarded
+  (assign i (+ i 1)))
+# net allocs: ~0 (bounded by scope reclamation)
+```
+
+The escape analysis is conservative but handles common patterns:
+- Discarded expressions (structs, strings, cons cells)
+- `let`-bound values not captured by closures
+- Closures created and called within the same scope
+- `fiber/new` + `fiber/resume` within the same scope
+- `protect` expressions
+- `map`, `filter`, `each` over known-safe collections
+
+### Tail-call rotation
+
+Self-tail-calls in the trampoline get implicit pool rotation. On each tail-call
+iteration, the previous iteration's allocations are moved to a swap pool and
+freed on the next rotation (one-iteration lag ensures argument values remain
+valid). This bounds memory at the working-set size, not the iteration count.
+
+### Flip rotation
+
+`while` loops inside yielding fibers get explicit `FlipEnter`/`FlipSwap`/
+`FlipExit` bytecodes. Each `FlipSwap` at the back-edge rotates generations,
+keeping memory bounded even when scope reclamation is blocked by yield
+suspension.
+
+### Fiber death
+
+When a fiber completes or errors, its `FiberHeap` runs all destructors and
+drops all arena pages. The fiber's entire memory footprint disappears — no
+traversal, no mark phase, no sweep. A server loop spawning one fiber per
+request reclaims all per-request memory at fiber death.
 
 ## How it works
 
 Every `Value` is a 16-byte tagged union. Immediates (integers, keywords,
-booleans, nil) fit inline — no allocation. Heap types (strings, arrays,
-structs, closures, fibers) store a pointer to a `HeapObject` in a bump
-arena owned by the fiber.
+booleans, nil, floats) fit inline — no allocation. Heap types (strings, arrays,
+structs, closures, fibers, cons cells) store a pointer to a `HeapObject` in a
+tracked pool owned by the fiber.
 
 ### Per-fiber heaps
 
-Each fiber owns a `FiberHeap` containing a `SlabPool` — a bump arena
-with destructor tracking. The bump arena allocates sequentially into
-64KB pages. There is no per-slot free list; memory is reclaimed only at
-scope boundaries or fiber death.
+Each fiber owns a `FiberHeap` containing a `SlabPool` — a bump arena with
+destructor tracking and position-based mark/release. The bump arena allocates
+sequentially into 64KB pages. Individual slot deallocation is a no-op; memory
+is reclaimed only at scope boundaries (via mark/release) or fiber death (via
+teardown).
 
-When a fiber completes, its `FiberHeap` runs all destructors and drops
-all arena pages. The fiber's entire memory footprint disappears — no
-traversal, no mark phase, no sweep. A server loop spawning one fiber per
-request reclaims all per-request memory at fiber death.
+When a fiber completes, its `FiberHeap` runs all destructors, tears down all
+owned shared allocators and outboxes, and resets the arena (keeping one page
+for reuse).
 
 ### Bump arena
 
 The `BumpArena` is a byte-level sequential allocator:
 
-- **Pages**: `Vec<Box<[MaybeUninit<u8>; 64KB]>>` — pointer-stable
+- **Pages**: `Vec<Box<[MaybeUninit<u8>]>>` — pointer-stable
 - **Allocation**: bump a byte offset within the current page
 - **Oversized**: allocations >64KB get dedicated pages
-- **No individual deallocation**: `dealloc_slot()` is a no-op
-- **Reclamation**: `release_to(mark)` truncates pages and resets offset;
-  `clear()` on fiber death resets entirely (keeps first page for reuse)
+- **No individual deallocation**: memory is reclaimed by `release_to(mark)` or
+  `clear()` on fiber death
+- **Pointer stability**: `Value` payloads are raw pointers into arena pages;
+  pages never move once allocated
 
-This gives cache-friendly sequential allocation, zero fragmentation, and
-deterministic bulk reclamation.
+### SlabPool
 
-### Scope reclamation
+`SlabPool` wraps the bump arena with allocation tracking:
 
-The lowerer performs escape analysis on every `let`, `letrec`, and `block`
-scope. When it can prove that no allocated value escapes — no captures, no
-suspension, result is immediate, no outward mutation — it emits
-`RegionEnter` / `RegionExit` bytecodes that reclaim heap objects at scope
-exit rather than waiting for fiber death.
+- `allocs: Vec<*mut HeapObject>` — every allocation in order (for mark/release
+  and rotation)
+- `dtors: Vec<*mut HeapObject>` — objects that need `Drop` (closures, fibers,
+  mutable types with `Rc<RefCell<...>>`)
+- `alloc_count` — running total for `arena/count` introspection
 
-`RegionEnter` pushes an `ArenaMark` recording the arena's page/offset and
-destructor count. `RegionExit` pops the mark, runs destructors for objects
-allocated since the mark, and rewinds the arena to the mark position. This
-is transparent to user code.
+`release(mark)` runs destructors, truncates tracking vecs, and resets the arena
+to the mark position. `teardown()` does a full reset.
 
-### Zero-copy inter-fiber sharing
+### Scope marks
 
-When a fiber yields a value to its parent, that value must survive the
-child's death. Copying is expensive and breaks identity. Instead, the
-runtime uses signal inference to solve this at the allocation level.
+`RegionEnter` pushes an `ArenaMark` recording the pool's position and destructor
+count. `RegionExit` pops the mark, runs destructors for objects allocated since
+the mark, and rewinds the pool. This is transparent to user code — it's
+entirely compiler-directed.
 
-The compiler knows at fiber-creation time whether a fiber can yield
-(its signal includes `SIG_YIELD`). For yielding fibers, the runtime
-installs a `SharedAllocator` owned by the parent's `FiberHeap`. While the
-child executes, **all** of its allocations route to this shared arena — not
-selectively, not per-scope. The parent reads yielded values directly from
-shared memory: zero copy, zero serialization.
+### Inter-fiber value exchange
 
-For silent fibers (no yields), the shared allocator is never installed.
-The fiber allocates exclusively into its own private arena with no
-indirection overhead.
+When a fiber yields a value to its parent, that value must survive the child's
+death. Two mechanisms handle this, chosen at fiber creation time based on signal
+inference:
 
-### Outbox
+**Shared allocator routing** (yielding fibers): The child fiber routes all
+allocations to a `SharedAllocator` owned by the parent's `FiberHeap`. The
+parent reads yielded values directly — zero copy, zero serialization.
 
-For yield-safe allocation, the runtime uses an outbox mechanism:
+**Outbox mechanism** (newer path): The parent installs an outbox `SlabPool`
+before child execution. Between `OutboxEnter`/`OutboxExit` bytecodes,
+allocations go to the outbox. At yield time, values in the private pool are
+deep-copied to the outbox; values already in the outbox are returned directly.
+Previous outboxes are preserved so the parent can read values from earlier
+yields. All outboxes are freed in bulk on fiber death.
 
-- Parent installs an outbox (`Box<SlabPool>`) before child execution
-- Child allocates between `OutboxEnter`/`OutboxExit` bytecodes into the
-  outbox arena
-- At yield time, parent reads the outbox and stores it
-- On fiber death, all outboxes are freed in bulk
-
-This ensures yielded values don't reference the child's private heap.
+**Silent fibers** (no yields): neither mechanism is needed. The fiber allocates
+exclusively into its own private pool with no indirection overhead.
 
 ### Ownership topology
 
 ```text
 root fiber
-├── private arena        ← root's own allocations (BumpArena pages)
-├── shared allocator     ← child A's allocations (yielded values live here)
+├── private pool            ← root's own allocations (SlabPool → BumpArena pages)
+├── shared allocator        ← child A's allocations (yielded values live here)
 │   └── child A
-│       ├── private arena  ← idle (child yields, so everything routes to parent)
-│       ├── outbox         ← yield-bound allocations
-│       └── shared alloc   ← grandchild's allocations
+│       ├── private pool    ← idle (child yields; allocations route to parent)
+│       └── shared alloc    ← grandchild's allocations
 │           └── grandchild
 │               └── ...
 └── (child B: silent)
-    └── private arena    ← child B's own allocations (no sharing needed)
+    └── private pool        ← child B's own allocations (no sharing needed)
 ```
 
-- **Silent fibers** use their private arena exclusively. Scope marks
-  reclaim short-lived objects. `clear()` on death reclaims everything.
-- **Yielding fibers** route all allocations to the parent's shared arena.
-  Their private arena is idle.
-- **Parent fibers** own shared allocators in `owned_shared`. The shared
-  allocator has its own bump arena and destructor tracking.
+- **Silent fibers** use their private pool exclusively. Scope marks reclaim
+  short-lived objects. Teardown on death reclaims everything.
+- **Yielding fibers** route allocations to the parent's shared allocator (or
+  outbox). Their private pool is essentially idle.
+- **Parent fibers** own shared allocators in `owned_shared` and outboxes in
+  `old_outboxes`. Both are torn down on `clear()`.
 
 ## Why this works without a GC
 
@@ -120,21 +272,99 @@ The memory model exploits two properties that the compiler guarantees:
    These scopes get `RegionEnter`/`RegionExit` instrumentation for free.
 
 Together, these give deterministic memory management with no GC pauses, no
-write barriers, no card tables, and no stop-the-world collection. Memory
-is reclaimed at three granularities: scope exit, fiber death, and shared
-allocator teardown — all in bounded time.
+write barriers, no card tables, and no stop-the-world collection. Memory is
+reclaimed at four granularities: scope exit, tail-call rotation, flip
+rotation, and fiber death — all in bounded time.
 
 ## Introspection
 
 ```lisp
-# current object count
-(arena/count)              # => integer
+# current object count (local + shared)
+(arena/count)               # => integer
 
-# detailed stats
-(def stats (arena/stats))
-stats:object-count         # total live objects
-stats:allocated-bytes      # bytes committed by arena pages
+# bytes committed by arena pages
+(arena/bytes)               # => integer
+
+# peak object count since last reset
+(arena/peak)                # => integer
+
+# net allocations from a thunk
+(def result (arena/allocs (fn [] (pair 1 2))))
+(first result)              # => (1 2)
+(rest result)               # => 1
+
+# detailed stats (returns a struct via vm/query)
+(arena/stats)
+# => {:object-count N :peak-count N :allocated-bytes N
+#     :object-limit nil :scope-depth N :dtor-count N
+#     :root-live-count N :root-alloc-count N :shared-count N
+#     :active-allocator nil :scope-enter-count N :scope-dtor-count N}
+
+# allocation limits (dangerous — for debugging only)
+(arena/set-object-limit 10000)  # => previous limit or nil
+(arena/object-limit)            # => 10000
+(arena/set-object-limit nil)    # => 10000 (restore unlimited)
+
+# manual checkpoint/reset (dangerous — invalidates live Values)
+(def m (arena/checkpoint))
+(pair 1 2)
+(arena/reset m)
+# the cons cell is now invalid — do not reference it
 ```
 
-`arena/count` operates directly on thread-local state with zero
-allocation overhead.
+`arena/count` and `arena/bytes` operate directly on thread-local state with
+zero allocation overhead. `arena/stats` uses a query signal so the VM can
+snapshot heap state consistently.
+
+## Measuring your code
+
+The `arena/allocs` primitive measures net heap allocations from any expression:
+
+```lisp
+(def result (arena/allocs (fn [] (string "hello" " " "world"))))
+(first result)              # => "hello world"
+(rest result)               # => 1 (one string allocation)
+```
+
+For loop patterns, measure at two scales to detect linear leaks:
+
+```lisp
+(defn measure-loop [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (< i n)
+    {:x i}
+    (assign i (+ i 1)))
+  (- (arena/count) before))
+
+(def d100 (measure-loop 100))
+(def d10k (measure-loop 10000))
+
+# bounded: d100 and d10k are both small, d10k is not 100x d100
+(println "d100=" d100 " d10k=" d10k)
+```
+
+## Known leak patterns
+
+These patterns leak linearly and cannot be fixed without drop-on-overwrite
+semantics or reference counting:
+
+| Pattern | Why it leaks |
+|---------|-------------|
+| `(assign var (struct ...))` in a loop | Old value referenced by `var` |
+| `(assign s (concat s "x"))` in a loop | Old string referenced by `s` |
+| `(push arr (struct ...))` in a loop | Struct stored in growing array |
+| `(put s :key (string ...))` in a loop | Old string stored in struct |
+
+These are inherent — the value genuinely escapes its scope. If you must
+accumulate, be aware that the accumulated data lives until the containing
+fiber dies.
+
+---
+
+## See also
+
+- [impl/values.md](impl/values.md) — value representation and heap types
+- [signals/](signals/) — signal inference (drives scope reclamation and
+  shared-allocator routing)
+- [types.md](types.md) — user-facing type system

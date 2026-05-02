@@ -271,12 +271,12 @@ heap as the thread-local allocation target. All `Value::cons()`, `Value::closure
 etc. calls during child execution route to the child's `FiberHeap`. On swap-back,
 the parent's heap (always non-null after issue-525) is restored.
 
-`FiberHeap` uses a chunk-based slab allocator (`RootSlab`) for root-context
+`FiberHeap` uses a bump arena (`BumpArena`) wrapped in `SlabPool` for all
 allocations. Destructor tracking ensures `HeapObject` variants with inner heap
-allocations (`Vec`, `Rc`, `BTreeMap`, `Box<str>`) have their `Drop` impls
-called on `release()` and `clear()`. `release()` returns freed slots to the
-slab free list for reuse. Scope allocations still use `bumpalo::Bump` (freed
-atomically on `RegionExit`).
+allocations (`Vec`, `Rc`, `BTreeMap`) have their `Drop` impls called on
+`release()` and `clear()`. `release()` runs destructors and rewinds the arena
+to the scope-entry position. Individual slot deallocation is a no-op; memory
+is reclaimed only by scope release or fiber death.
 
 The root fiber uses the persistent `ROOT_HEAP` thread-local (a leaked `Box<FiberHeap>`
 created by `ensure_root_heap()`). The heap outlives any individual VM, so Values
