@@ -199,12 +199,11 @@ The slab manages HeapObject slots:
 
 Slot recycling via the free list is the target mechanism for drop-on-overwrite
 (assign frees the old slot) and scope reclamation (RegionExit frees batches).
-The slab infrastructure is in place but individual `dealloc_slot` is currently
-gated — it must only fire from paths proven safe by Tofte-Talpin region
-analysis (RegionExit), not from rotation paths where non-dtor objects may
-still be referenced by surviving closures or mutable containers. Until the
-rotation audit is complete, slot recycling is deferred and memory is reclaimed
-only on fiber death (teardown).
+`dealloc_slot` is currently gated — scope eligibility for while/loop forms
+needs to be routed through the region inference system before enabling it.
+Rotation paths use `dealloc_slot_deferred()` (no-op) until Phase 2A enables
+rotation slot recycling. Until then, memory is reclaimed only on fiber death
+(teardown).
 
 ### Bump arena
 

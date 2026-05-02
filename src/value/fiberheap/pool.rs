@@ -155,24 +155,42 @@ impl SlabPool {
         self.allocated_bytes()
     }
 
-    /// Return a slab slot to the free list.
+    /// Return a slab slot to the free list for reuse by a future allocation.
     ///
-    /// Currently a no-op: slot recycling via the free list is deferred until
-    /// the rotation logic (`rotate_pools`, `flip_swap`, `flip_exit`) is audited
-    /// to ensure no live values survive across the one-iteration lag. The
-    /// slab infrastructure is in place; the free-list writes corrupt
-    /// HeapObject tags on objects that are still referenced.
-    ///
-    /// Memory is still reclaimed on fiber death (teardown/clear), which is
-    /// where the mmap-backed pages return to the OS. Slot recycling within
-    /// a fiber's lifetime is the next step.
+    /// Called by RegionExit paths (`FiberHeap::release`,
+    /// `pop_call_scope_marks_and_release`) which are gated by Tofte-Talpin
+    /// escape analysis — the analysis proves no live values reference these
+    /// slots before the call.
     ///
     /// # Safety
-    /// When enabled, the caller must have already called `drop_in_place(ptr)`
-    /// if needed. `ptr` must have been returned by a prior `alloc()` on this pool.
+    /// The caller must have already called `drop_in_place(ptr)` if the object
+    /// needs Drop. `ptr` must have been returned by a prior `alloc()` on this
+    /// pool and must not have been deallocated since. No live `Value` may
+    /// reference this slot after this call.
     #[inline]
-    pub unsafe fn dealloc_slot(&mut self, _ptr: *mut HeapObject) {
-        // TODO: Enable `self.slab.dealloc(ptr)` after rotation audit.
+    #[allow(dead_code)] // Used by release() once scope eligibility is fully wired
+    pub unsafe fn dealloc_slot(&mut self, ptr: *mut HeapObject) {
+        self.slab.dealloc(ptr);
+    }
+
+    /// Deferred slot deallocation for rotation paths.
+    ///
+    /// Rotation (`rotate_pools`, `flip_swap`, `flip_exit`) moves objects to a
+    /// swap pool and frees them one iteration later. The one-iteration lag
+    /// is intended to keep argument values alive, but the temporal partitioning
+    /// is incorrect: some objects allocated after the rotation mark survive
+    /// across iterations (returned values, closures, mutable bindings).
+    ///
+    /// Until the rotation partitioning is fixed (Phase 2A), slot deallocation
+    /// in rotation paths remains disabled. Slots are reclaimed only on fiber
+    /// death (teardown/clear), which is where the mmap-backed pages return to
+    /// the OS.
+    ///
+    /// # Safety
+    /// Same contract as `dealloc_slot`. Currently a no-op.
+    #[inline]
+    pub unsafe fn dealloc_slot_deferred(&mut self, _ptr: *mut HeapObject) {
+        // TODO: Enable `self.slab.dealloc(ptr)` after rotation partitioning fix.
     }
 
     /// Check if a pointer falls within this pool's slab chunks or arena pages.

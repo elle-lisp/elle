@@ -205,7 +205,9 @@ Function bodies never get region instructions.
 3. Body result is provably a immediate (`result_is_safe`)
 4. Body contains no dangerous `set` to bindings outside the scope
    (`body_contains_dangerous_outward_set`) — Tier 8: an outward set is
-   dangerous only if the assigned value is not provably immediate
+   dangerous only if the assigned value is not provably immediate.
+   This check covers both `Assign` and `SetCell` (the functionalization
+   pass converts mutable outward bindings to cell operations).
 5. Body contains no escaping `break` (`body_contains_escaping_break`) —
    Tier 7: breaks targeting blocks inside the scope are safe (they don't
    exit the scope's region); only breaks targeting outer blocks are dangerous
@@ -296,7 +298,7 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 | `types.rs` | 270 | `LirFunction`, `LirInstr`, `Reg`, `Label`, etc. |
 | `intrinsics.rs` | ~120 | `IntrinsicOp` enum, intrinsics map, `IMMEDIATE_PRIMITIVES` whitelist, `build_immediate_primitives()` |
 | `lower/mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
-| `lower/escape.rs` | ~693 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break`, `all_break_values_safe`, `all_breaks_have_safe_values` |
+| `lower/escape.rs` | ~710 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set` (handles `Assign` and `SetCell`), `body_contains_escaping_break`, `all_break_values_safe`, `all_breaks_have_safe_values` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lower/lambda.rs` | ~250 | fn lowering, closure capture, lbox wrapping |

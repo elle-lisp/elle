@@ -114,7 +114,7 @@ impl SharedAllocator {
                 unsafe { std::ptr::drop_in_place(old.dtors[i]) };
             }
             for &ptr in old.allocs.iter().rev() {
-                unsafe { self.pool.dealloc_slot(ptr) };
+                unsafe { self.pool.dealloc_slot_deferred(ptr) };
             }
         }
 

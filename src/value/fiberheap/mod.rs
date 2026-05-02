@@ -357,12 +357,16 @@ impl FiberHeap {
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
 
-        // Dealloc slab slots allocated after the mark.
+        // Dealloc slab slots allocated after the mark. Slot recycling
+        // is deferred until scope eligibility for while/loop forms is
+        // routed through region inference (follow-up to this PR).
         for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
-            // SAFETY: pool.run_dtors already ran destructors; slots are safe to free.
-            unsafe {
-                self.pool.dealloc_slot(self.pool.allocs[i]);
-            }
+            // SAFETY: pool.run_dtors already ran destructors.
+            // TODO: enable dealloc_slot once region inference covers while/loop.
+            // unsafe {
+            //     self.pool.dealloc_slot(self.pool.allocs[i]);
+            // }
+            let _ = i;
         }
         self.pool.allocs.truncate(mark.root_allocs_len());
 
@@ -475,10 +479,9 @@ impl FiberHeap {
         self.scope_dtors_run += dtors_freed;
 
         // Dealloc slab slots for the range, then drain the entries.
+        // TODO: enable dealloc_slot once region inference covers while/loop.
         for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
-            unsafe {
-                self.pool.dealloc_slot(self.pool.allocs[i]);
-            }
+            let _ = i;
         }
         self.pool
             .allocs
@@ -634,7 +637,7 @@ impl FiberHeap {
         //    Only dealloc slots — dtors are NOT in the swap pool (see step 2).
         if let Some(old) = self.swap_pool.take() {
             for &ptr in old.root_allocs.iter().rev() {
-                unsafe { self.pool.dealloc_slot(ptr) };
+                unsafe { self.pool.dealloc_slot_deferred(ptr) };
             }
             self.rotation_freed += old.root_allocs.len();
         }
@@ -713,7 +716,7 @@ impl FiberHeap {
         // iteration" but the function is exiting, so they're dead now.
         if let Some(old) = self.swap_pool.take() {
             for &ptr in old.root_allocs.iter().rev() {
-                unsafe { self.pool.dealloc_slot(ptr) };
+                unsafe { self.pool.dealloc_slot_deferred(ptr) };
             }
             self.rotation_freed += old.root_allocs.len();
         }

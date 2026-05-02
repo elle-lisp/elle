@@ -684,6 +684,24 @@ impl<'a> Lowerer<'a> {
             HirKind::MakeCell { value } => self.walk_for_outward_set(value, scope_bindings),
             HirKind::DerefCell { cell } => self.walk_for_outward_set(cell, scope_bindings),
             HirKind::SetCell { cell, value } => {
+                // SetCell writes a value to a CaptureCell/LBox. If the cell
+                // references a binding outside the scope and the value is
+                // heap-allocated, this is a dangerous outward set — the cell
+                // survives RegionExit but the value doesn't.
+                let target_in_scope = match &cell.kind {
+                    HirKind::Var(target) => scope_bindings.iter().any(|(b, _)| b == target),
+                    HirKind::DerefCell { cell: inner } => match &inner.kind {
+                        HirKind::Var(target) => scope_bindings.iter().any(|(b, _)| b == target),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !target_in_scope
+                    && !self.result_is_safe(value, scope_bindings)
+                    && !self.value_is_non_allocating_accessor(value)
+                {
+                    return true;
+                }
                 self.walk_for_outward_set(cell, scope_bindings)
                     || self.walk_for_outward_set(value, scope_bindings)
             }
@@ -1672,8 +1690,12 @@ impl<'a> Lowerer<'a> {
     /// Suspension is NOT a rejection condition. The runtime's
     /// `rotate_pools` returns early when `shared_alloc` is non-null,
     /// so FlipSwap on shared-alloc fibers is a safe no-op.
-    pub(super) fn can_flip_while_loop(&self, body: &Hir) -> bool {
-        if self.body_contains_dangerous_outward_set(body, &[]) {
+    pub(super) fn can_flip_while_loop(
+        &self,
+        body: &Hir,
+        loop_bindings: &[(Binding, &Hir)],
+    ) -> bool {
+        if self.body_contains_dangerous_outward_set(body, loop_bindings) {
             return false;
         }
         if !self.all_breaks_have_safe_values(body) {
