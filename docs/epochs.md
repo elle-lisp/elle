@@ -128,8 +128,11 @@ To make a breaking change to Elle:
 1. Bump `CURRENT_EPOCH` in `src/epoch/rules.rs`.
 2. Add a `Migration` entry to the `MIGRATIONS` array with the new epoch number,
    a summary, and the rules describing the change.
-3. Add tests in `src/epoch/transform.rs` and `src/rewrite/run.rs`.
-4. Run `make smoke` to verify the full test suite still passes.
+3. Update `(elle/epoch N)` in `stdlib.lisp` to the new epoch. The WASM backend
+   strips stdlib's epoch tag and concatenates the body as-is — it does not run
+   migration on stdlib, so stdlib must already use current-epoch syntax.
+4. Add tests in `src/epoch/transform.rs` and `src/rewrite/run.rs`.
+5. Run `make smoke` to verify the full test suite still passes.
 
 Example:
 
