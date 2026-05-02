@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 9;
+pub const CURRENT_EPOCH: u64 = 10;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -236,6 +236,15 @@ static MIGRATIONS: &[Migration] = &[
             },
         ],
     },
+    Migration {
+        epoch: 10,
+        summary: "cons→pair, car→first, cdr→rest",
+        rules: &[
+            MigrationRule::Rename { old: "cons", new: "pair" },
+            MigrationRule::Rename { old: "car", new: "first" },
+            MigrationRule::Rename { old: "cdr", new: "rest" },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -375,7 +384,11 @@ mod tests {
         // epoch 5: string-contains?→has?, string/contains?→has?
         assert_eq!(renames.get("string-contains?"), Some(&"has?"));
         assert_eq!(renames.get("string/contains?"), Some(&"has?"));
-        assert_eq!(renames.len(), 10);
+        // epoch 10: cons→pair, car→first, cdr→rest
+        assert_eq!(renames.get("cons"), Some(&"pair"));
+        assert_eq!(renames.get("car"), Some(&"first"));
+        assert_eq!(renames.get("cdr"), Some(&"rest"));
+        assert_eq!(renames.len(), 13);
     }
 
     #[test]

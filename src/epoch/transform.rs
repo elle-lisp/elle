@@ -686,4 +686,27 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_epoch_10_cons_car_cdr_renames() {
+        // Epoch 10 renames: cons→pair, car→first, cdr→rest
+        let mut forms = vec![list(vec![
+            sym("def"),
+            sym("x"),
+            list(vec![
+                sym("cons"),
+                int(1),
+                list(vec![sym("cons"), int(2), sym("nil")]),
+            ]),
+        ])];
+        let count = migrate(&mut forms, 9, 10).unwrap();
+        assert!(count >= 2);
+        // (def x (pair 1 (pair 2 nil)))
+        if let SyntaxKind::List(items) = &forms[0].kind {
+            // body of def
+            if let SyntaxKind::List(pair_call) = &items[2].kind {
+                assert_eq!(pair_call[0].as_symbol(), Some("pair"));
+            }
+        }
+    }
 }
