@@ -101,6 +101,10 @@ pub enum TableKey {
     Symbol(SymbolId),
     String(String),
     Keyword(String),
+    /// Immutable array key. All elements must themselves be valid TableKeys.
+    /// Mutable arrays are rejected — mutation after insertion would break
+    /// the hash invariant.
+    Array(Vec<TableKey>),
     /// Identity-compared key for reference types (fiber, closure, external).
     ///
     /// **Invariant**: Only constructed via `from_value()`. The stored `Value`
@@ -132,6 +136,12 @@ impl TableKey {
             Some(TableKey::Keyword(name))
         } else if let Some(s) = val.with_string(|s| s.to_string()) {
             Some(TableKey::String(s))
+        } else if let Some(arr) = val.as_array() {
+            let mut keys = Vec::with_capacity(arr.len());
+            for elem in arr {
+                keys.push(TableKey::from_value(elem)?);
+            }
+            Some(TableKey::Array(keys))
         } else if val.is_fiber() || val.is_closure() || val.heap_tag() == Some(HeapTag::External) {
             Some(TableKey::Identity(*val))
         } else {
@@ -150,6 +160,7 @@ impl TableKey {
             TableKey::Symbol(sid) => Value::symbol(sid.0),
             TableKey::String(s) => Value::string(s.as_str()),
             TableKey::Keyword(s) => Value::keyword(s.as_str()),
+            TableKey::Array(keys) => Value::array(keys.iter().map(|k| k.to_value()).collect()),
             TableKey::Identity(v) => *v,
         }
     }
@@ -160,7 +171,11 @@ impl TableKey {
     /// Value-based keys (nil, bool, int, symbol, string, keyword) are always
     /// sendable.
     pub fn is_sendable(&self) -> bool {
-        !matches!(self, TableKey::Identity(_))
+        match self {
+            TableKey::Identity(_) => false,
+            TableKey::Array(keys) => keys.iter().all(|k| k.is_sendable()),
+            _ => true,
+        }
     }
 
     fn discriminant_index(&self) -> u8 {
@@ -171,7 +186,8 @@ impl TableKey {
             TableKey::Symbol(_) => 3,
             TableKey::String(_) => 4,
             TableKey::Keyword(_) => 5,
-            TableKey::Identity(_) => 6,
+            TableKey::Array(_) => 6,
+            TableKey::Identity(_) => 7,
         }
     }
 }
@@ -186,6 +202,7 @@ impl std::hash::Hash for TableKey {
             TableKey::Symbol(id) => id.hash(state),
             TableKey::String(s) => s.hash(state),
             TableKey::Keyword(s) => s.hash(state),
+            TableKey::Array(keys) => keys.hash(state),
             // Delegate to Value's Hash. For Fiber/ThreadHandle/External
             // that encodes a stable Rc/Arc-backed identity rather than
             // the slot pointer, so outbox relocation on fiber yield
@@ -204,6 +221,7 @@ impl PartialEq for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
             (TableKey::String(a), TableKey::String(b)) => a == b,
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
+            (TableKey::Array(a), TableKey::Array(b)) => a == b,
             // Delegate to Value's PartialEq (stable identity for Fiber
             // and friends — see Hash impl above).
             (TableKey::Identity(a), TableKey::Identity(b)) => a == b,
@@ -223,7 +241,7 @@ impl PartialOrd for TableKey {
 impl Ord for TableKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Variant ordering follows enum declaration order (same as derive).
-        // Discriminant index: Nil=0, Bool=1, Int=2, Symbol=3, String=4, Keyword=5, Identity=6
+        // Discriminant index: Nil=0, Bool=1, Int=2, Symbol=3, String=4, Keyword=5, Array=6, Identity=7
         let self_disc = self.discriminant_index();
         let other_disc = other.discriminant_index();
         match self_disc.cmp(&other_disc) {
@@ -237,6 +255,7 @@ impl Ord for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
             (TableKey::String(a), TableKey::String(b)) => a.cmp(b),
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
+            (TableKey::Array(a), TableKey::Array(b)) => a.cmp(b),
             // Delegate to Value's Ord. Stable identity for Fiber and
             // friends — see Hash impl above.
             (TableKey::Identity(a), TableKey::Identity(b)) => a.cmp(b),
@@ -254,6 +273,16 @@ impl fmt::Display for TableKey {
             TableKey::Symbol(id) => write!(f, "{:?}", id),
             TableKey::String(s) => write!(f, "\"{}\"", s),
             TableKey::Keyword(s) => write!(f, ":{}", s),
+            TableKey::Array(keys) => {
+                write!(f, "[")?;
+                for (i, k) in keys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", k)?;
+                }
+                write!(f, "]")
+            }
             TableKey::Identity(v) => write!(f, "{}", v),
         }
     }
@@ -279,6 +308,16 @@ impl fmt::Debug for TableKey {
             }
             TableKey::String(s) => write!(f, "\"{}\"", s),
             TableKey::Keyword(s) => write!(f, ":{}", s),
+            TableKey::Array(keys) => {
+                write!(f, "[")?;
+                for (i, k) in keys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{:?}", k)?;
+                }
+                write!(f, "]")
+            }
             TableKey::Identity(v) => write!(f, "{:?}", v),
         }
     }

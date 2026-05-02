@@ -322,6 +322,7 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
                 TableKey::Symbol(sym) => Value::symbol(sym.0),
                 TableKey::String(s) => Value::string(s.as_str()),
                 TableKey::Keyword(kw) => Value::keyword(kw.as_str()),
+                TableKey::Array(keys) => Value::array(keys.iter().map(|k| k.to_value()).collect()),
                 TableKey::Identity(v) => *v,
             };
             let pair = Value::array(vec![key_val, *value]);
