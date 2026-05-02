@@ -44,6 +44,7 @@ pub fn compile_to_lir(
 
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
@@ -110,9 +111,10 @@ pub fn compile(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
 
-    // Phase 3.5: Mark tail calls + functionalize
+    // Phase 3.5: Mark tail calls + functionalize + type inference
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
     // Phase 4: Lower to LIR with intrinsic specialization
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
@@ -279,6 +281,8 @@ pub fn compile_file_to_lir(
 
     mark_tail_calls(&mut hir);
     functionalize(&mut hir, &mut arena);
+    crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
+
     let region_info = crate::hir::analyze_regions_with(
         &hir,
         &arena,
@@ -421,6 +425,7 @@ fn compile_file_frontend(
 
     mark_tail_calls(&mut hir);
     functionalize(&mut hir, &mut arena);
+    crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
     Ok((hir, arena, expander, prim_values, signal_projection))
 }

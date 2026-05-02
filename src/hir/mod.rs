@@ -24,6 +24,8 @@ pub mod region;
 mod regions;
 pub mod symbols;
 pub mod tailcall;
+pub mod typeinfer;
+pub mod types;
 
 pub use analyze::{AnalysisResult, Analyzer, FileForm};
 pub use arena::{BindingArena, BindingInner, BindingScope};
