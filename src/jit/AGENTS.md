@@ -481,3 +481,24 @@ the operand stack.
    - Inline type checks for arithmetic fast paths
    - JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
    - Benchmarks and profiling
+
+### Open task: Flip* bytecodes
+
+The JIT currently skips all Flip* bytecodes (`FlipEnter`, `FlipSwap`,
+`FlipExit`). These are emitted for `while`/`loop` forms where the body
+passes `can_flip_while_loop()` (no dangerous outward set, all break
+values safe). In the interpreter, they implement rotation-based
+reclamation. In JIT code, they are no-ops — the JIT side-exit path
+doesn't need rotation because yielding functions fall back to the
+interpreter.
+
+To enable rotation in JIT-compiled silent loops, `translate.rs` needs
+implementations for:
+- `FlipEnter` — push flip frame
+- `FlipSwap` — rotate pools (call `rotate_pools` helper)
+- `FlipExit` — pop flip frame and release
+
+The helpers exist in `fiberheap/routing.rs` and `fiberheap/mod.rs`.
+The JIT just needs to emit calls to them at the right points, mirroring
+`RegionEnter`/`RegionExit` handling in `dispatch.rs`. This is blocked on
+Phase 2A (rotation slot deallocation) being enabled first.

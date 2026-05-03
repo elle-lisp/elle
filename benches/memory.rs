@@ -2,19 +2,18 @@
 //!
 //! Uses `stats_alloc` to count heap allocations and bytes during program
 //! execution. This catches unnecessary allocation patterns like the
-//! LocalCell-per-let-binding issue (see GitHub issue #380).
+//! LocalCell-per-let-binding-issue (see GitHub issue #380).
 //!
 //! Run with: cargo bench --bench memory
 //!
 //! These benchmarks report allocation counts and bytes, not timing.
 //! The output format is compatible with `bencher` for CI regression tracking.
 
-use mimalloc::MiMalloc;
 use stats_alloc::{Region, StatsAlloc};
 
-static INSTRUMENTED: StatsAlloc<MiMalloc> = StatsAlloc::new(MiMalloc);
+static INSTRUMENTED: StatsAlloc<std::alloc::System> = StatsAlloc::new(std::alloc::System);
 
-static GLOBAL: &StatsAlloc<MiMalloc> = &INSTRUMENTED;
+static GLOBAL: &StatsAlloc<std::alloc::System> = &INSTRUMENTED;
 
 use elle::pipeline::eval;
 use elle::primitives::register_primitives;

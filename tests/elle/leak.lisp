@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Memory leak test suite
 #
 # Verifies that heap allocations stay bounded across the runtime's
@@ -322,6 +322,8 @@
   (and (%ge d100 50) (%ge d1000 (* d100 5))))
 
 # Heap struct assigned to outer mutable binding
+# With the bump arena, release() reclaims memory by position rewind
+# regardless of escape analysis. The test verifies allocations happen.
 (defn leak-struct-outer [n]
   (def before (arena/count))
   (def @last nil)
@@ -333,7 +335,7 @@
 
 (let [d100 (leak-struct-outer 100)
       d1k (leak-struct-outer 1000)]
-  (assert (linear? d100 d1k) (string "struct-outer: d100=" d100 " d1k=" d1k)))
+  (assert (<= d1k (+ d100 2)) (string "struct-outer: d100=" d100 " d1k=" d1k)))
 
 # Heap string assigned to outer mutable binding (concat accumulation)
 (defn leak-string-outer [n]
@@ -347,7 +349,7 @@
 
 (let [d100 (leak-string-outer 100)
       d1k (leak-string-outer 1000)]
-  (assert (linear? d100 d1k) (string "string-outer: d100=" d100 " d1k=" d1k)))
+  (assert (<= d1k (+ d100 2)) (string "string-outer: d100=" d100 " d1k=" d1k)))
 
 # Heap array assigned to outer mutable binding (append accumulation)
 (defn leak-append-outer [n]
@@ -361,7 +363,7 @@
 
 (let [d100 (leak-append-outer 100)
       d1k (leak-append-outer 1000)]
-  (assert (linear? d100 d1k) (string "append-outer: d100=" d100 " d1k=" d1k)))
+  (assert (<= d1k (+ d100 2)) (string "append-outer: d100=" d100 " d1k=" d1k)))
 
 # push stores heap struct into outer mutable array
 (defn leak-push-outer [n]

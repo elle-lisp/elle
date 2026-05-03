@@ -189,9 +189,9 @@ impl PartialEq for Value {
                     h1.id() == h2.id()
                 }
 
-                // Syntax comparison (by reference — same Rc)
+                // Syntax comparison (by reference — same Box)
                 (HeapObject::Syntax { syntax: s1, .. }, HeapObject::Syntax { syntax: s2, .. }) => {
-                    std::rc::Rc::ptr_eq(s1, s2)
+                    std::ptr::eq(&**s1, &**s2)
                 }
 
                 // FFI signature comparison (structural equality, skip CIF cache)

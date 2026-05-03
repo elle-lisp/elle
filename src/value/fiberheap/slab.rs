@@ -4,42 +4,98 @@
 //! a `*mut HeapObject` returned by `alloc()` remains valid until the
 //! slot is freed by `dealloc()` or `clear()`.
 //!
+//! # OS-level memory return
+//!
+//! Chunks are backed by `mmap` rather than the process heap. When
+//! `clear()` or `dealloc()` empties a chunk, its pages are returned to
+//! the OS via `munmap`. This bypasses any allocator caching — RSS tracks
+//! actual live memory.
+//!
 //! # Pointer stability guarantee
 //!
-//! Each chunk is a `Box<[MaybeUninit<HeapObject>]>` — heap-allocated,
-//! fixed-address. The outer `Vec<Box<...>>` stores Box pointers; when
-//! the Vec grows, only the pointer array reallocates, not the chunks.
+//! Each chunk is an `mmap`'d region at a fixed virtual address. The outer
+//! `Vec<Chunk>` stores chunk metadata; when the Vec grows, only the
+//! metadata array reallocates, not the chunks themselves.
 //!
 //! # Free list storage
 //!
 //! The free list link (`Option<u32>` flat index) is stored inside the dead
 //! slot's bytes. A `HeapObject` slot is at least 48 bytes; a `u32` is 4.
 //! The link is written directly into the `MaybeUninit<HeapObject>` bytes.
-//! The flat index is `chunk_index * chunk_size + offset_within_chunk`.
+//! The flat index is `chunk_index * CHUNK_SIZE + offset_within_chunk`.
 
 use std::mem::{size_of, MaybeUninit};
 
 use crate::value::heap::HeapObject;
 
 /// Number of `HeapObject` slots per chunk.
-// Used in tests and will be used by Chunk 2 wiring.
-#[allow(dead_code)]
 const CHUNK_SIZE: usize = 256;
 
-#[allow(dead_code)]
-pub(crate) struct RootSlab {
-    chunks: Vec<Box<[MaybeUninit<HeapObject>]>>,
+/// Bytes per chunk: must hold CHUNK_SIZE HeapObject slots.
+const CHUNK_BYTES: usize = CHUNK_SIZE * size_of::<HeapObject>();
+
+/// An mmap-backed chunk of `CHUNK_SIZE` HeapObject slots.
+struct Chunk {
+    ptr: *mut MaybeUninit<HeapObject>,
+}
+
+impl Chunk {
+    fn new() -> Option<Self> {
+        let ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                CHUNK_BYTES,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if ptr == libc::MAP_FAILED {
+            None
+        } else {
+            Some(Chunk {
+                ptr: ptr as *mut MaybeUninit<HeapObject>,
+            })
+        }
+    }
+
+    fn slot(&mut self, idx: usize) -> *mut MaybeUninit<HeapObject> {
+        unsafe { self.ptr.add(idx) }
+    }
+
+    fn base(&self) -> *const u8 {
+        self.ptr as *const u8
+    }
+
+    fn end(&self) -> *const u8 {
+        unsafe { self.base().add(CHUNK_BYTES) }
+    }
+}
+
+impl Drop for Chunk {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.ptr as *mut libc::c_void, CHUNK_BYTES);
+        }
+    }
+}
+
+// SAFETY: Chunk owns its mmap'd memory exclusively.
+unsafe impl Send for Chunk {}
+
+pub(crate) struct Slab {
+    chunks: Vec<Chunk>,
     /// Head of the intrusive free list, as a flat slot index.
     free_head: Option<u32>,
-    /// Next slot index to use in the last chunk (bump cursor within last chunk).
+    /// Next slot index to use in the last chunk (bump cursor).
     bump_cursor: usize,
     live_count: usize,
 }
 
-#[allow(dead_code)]
-impl RootSlab {
+impl Slab {
     pub fn new() -> Self {
-        RootSlab {
+        Slab {
             chunks: Vec::new(),
             free_head: None,
             bump_cursor: 0,
@@ -52,26 +108,20 @@ impl RootSlab {
     /// The returned pointer is stable until `dealloc()` or `clear()` is called.
     pub fn alloc(&mut self, obj: HeapObject) -> *mut HeapObject {
         let ptr = if let Some(flat) = self.free_head {
-            // Reuse a freed slot: read the next-link from its bytes,
-            // then overwrite with the new object.
             let (chunk_idx, slot_idx) = self.split_flat(flat as usize);
-            let slot = &mut self.chunks[chunk_idx][slot_idx];
-            // Read the free-list next link before overwriting.
-            let next: Option<u32> = unsafe { std::ptr::read(slot.as_ptr() as *const Option<u32>) };
+            let slot = self.chunks[chunk_idx].slot(slot_idx);
+            let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
-            unsafe { std::ptr::write(slot.as_mut_ptr(), obj) };
-            slot.as_mut_ptr()
+            unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
+            slot as *mut HeapObject
         } else {
-            // Bump path: use the next slot in the last chunk.
             if self.chunks.is_empty() || self.bump_cursor >= CHUNK_SIZE {
                 self.add_chunk();
             }
-            let chunk = self.chunks.last_mut().unwrap();
-            let slot = &mut chunk[self.bump_cursor];
-            unsafe { std::ptr::write(slot.as_mut_ptr(), obj) };
-            let ptr = slot.as_mut_ptr();
+            let slot = self.chunks.last_mut().unwrap().slot(self.bump_cursor);
+            unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
             self.bump_cursor += 1;
-            ptr
+            slot as *mut HeapObject
         };
         self.live_count += 1;
         ptr
@@ -85,18 +135,17 @@ impl RootSlab {
     /// and must not have been deallocated since.
     pub fn dealloc(&mut self, ptr: *mut HeapObject) {
         let flat = self.ptr_to_flat(ptr);
-        // Write the current free_head into the dead slot's bytes as the
-        // next-link in the intrusive free list.
         let (chunk_idx, slot_idx) = self.split_flat(flat);
-        let slot = &mut self.chunks[chunk_idx][slot_idx];
+        let slot = self.chunks[chunk_idx].slot(slot_idx);
         unsafe {
-            std::ptr::write(slot.as_mut_ptr() as *mut Option<u32>, self.free_head);
+            std::ptr::write(slot as *mut Option<u32>, self.free_head);
         }
         self.free_head = Some(flat as u32);
         self.live_count -= 1;
     }
 
-    /// Reset the slab: discard free list, keep first chunk, drop rest.
+    /// Reset the slab: discard free list, keep first chunk, drop (munmap) the rest.
+    /// The retained chunk gets `madvise(MADV_DONTNEED)` to release physical frames.
     ///
     /// Does NOT run destructors. The caller is responsible for running
     /// `drop_in_place` on all live objects before calling `clear()`.
@@ -105,16 +154,20 @@ impl RootSlab {
         self.bump_cursor = 0;
         self.live_count = 0;
         self.chunks.truncate(1);
+        if let Some(chunk) = self.chunks.first() {
+            unsafe {
+                libc::madvise(
+                    chunk.ptr as *mut libc::c_void,
+                    CHUNK_BYTES,
+                    libc::MADV_DONTNEED,
+                );
+            }
+        }
     }
 
     /// Total backing bytes committed across all chunks.
     pub fn allocated_bytes(&self) -> usize {
-        self.chunks.len() * CHUNK_SIZE * size_of::<HeapObject>()
-    }
-
-    /// Synonym for `allocated_bytes` (used by `FiberHeap::capacity()`).
-    pub fn capacity_bytes(&self) -> usize {
-        self.allocated_bytes()
+        self.chunks.len() * CHUNK_BYTES
     }
 
     /// Number of slots currently occupied (live allocations).
@@ -124,13 +177,13 @@ impl RootSlab {
 
     /// Check if a pointer falls within any of this slab's chunks.
     ///
-    /// O(chunks), but chunks are few (typically 1-2). Used by the outbox
+    /// O(chunks), but chunks are few (typically 1-3). Used by the outbox
     /// safety net to detect pointers into the private heap at yield time.
     pub fn owns(&self, ptr: *const ()) -> bool {
         let addr = ptr as usize;
         for chunk in &self.chunks {
-            let base = chunk.as_ptr() as usize;
-            let end = base + CHUNK_SIZE * size_of::<HeapObject>();
+            let base = chunk.base() as usize;
+            let end = chunk.end() as usize;
             if addr >= base && addr < end {
                 return true;
             }
@@ -141,10 +194,7 @@ impl RootSlab {
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {
-        let chunk: Box<[MaybeUninit<HeapObject>]> = std::iter::repeat_with(MaybeUninit::uninit)
-            .take(CHUNK_SIZE)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+        let chunk = Chunk::new().expect("slab: mmap chunk failed");
         self.chunks.push(chunk);
         self.bump_cursor = 0;
     }
@@ -156,33 +206,36 @@ impl RootSlab {
 
     /// Convert a `*mut HeapObject` back to its flat slot index.
     ///
-    /// Iterates all chunks and uses pointer arithmetic to locate the slot.
-    /// Called only on the dealloc path, so O(chunks) is acceptable.
-    ///
     /// # Panics
     /// Panics if `ptr` does not point into any chunk (would indicate a bug).
     fn ptr_to_flat(&self, ptr: *mut HeapObject) -> usize {
         let addr = ptr as usize;
         for (chunk_idx, chunk) in self.chunks.iter().enumerate() {
-            let base = chunk.as_ptr() as usize;
-            let end = base + CHUNK_SIZE * size_of::<HeapObject>();
+            let base = chunk.base() as usize;
+            let end = chunk.end() as usize;
             if addr >= base && addr < end {
                 let offset = (addr - base) / size_of::<HeapObject>();
                 return chunk_idx * CHUNK_SIZE + offset;
             }
         }
         panic!(
-            "RootSlab::dealloc: pointer {:p} not found in any chunk (use-after-free or foreign pointer)",
+            "Slab::dealloc: pointer {:p} not found in any chunk (use-after-free or foreign pointer)",
             ptr
         );
     }
 }
 
-impl Drop for RootSlab {
+impl Default for Slab {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for Slab {
     fn drop(&mut self) {
         // MaybeUninit slots do not call HeapObject::drop.
         // The caller is responsible for running dtors before dropping the slab.
-        // The Vec<Box<...>> and the Box slices themselves are freed here.
+        // Chunk::drop calls munmap for each chunk.
     }
 }
 
@@ -198,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_slab_alloc_basic() {
-        let mut slab = RootSlab::new();
+        let mut slab = Slab::new();
         let ptr = slab.alloc(cons_obj());
         assert!(!ptr.is_null());
         assert_eq!(slab.live_count(), 1);
@@ -206,13 +259,12 @@ mod tests {
 
     #[test]
     fn test_slab_alloc_multiple() {
-        let mut slab = RootSlab::new();
+        let mut slab = Slab::new();
         let mut ptrs = vec![];
         for _ in 0..5 {
             ptrs.push(slab.alloc(cons_obj()));
         }
         assert_eq!(slab.live_count(), 5);
-        // All pointers must be non-null and distinct.
         for ptr in &ptrs {
             assert!(!ptr.is_null());
         }
@@ -222,12 +274,10 @@ mod tests {
 
     #[test]
     fn test_slab_dealloc_returns_to_free_list() {
-        let mut slab = RootSlab::new();
+        let mut slab = Slab::new();
         let ptr1 = slab.alloc(cons_obj());
-        // Caller runs drop_in_place before dealloc (Pair needs no drop, but follow the contract).
         slab.dealloc(ptr1);
         assert_eq!(slab.live_count(), 0);
-        // Next alloc should reuse the same slot.
         let ptr2 = slab.alloc(cons_obj());
         assert_eq!(slab.live_count(), 1);
         assert_eq!(ptr1, ptr2, "slot must be reused after dealloc");
@@ -235,9 +285,7 @@ mod tests {
 
     #[test]
     fn test_slab_pointer_stability() {
-        let mut slab = RootSlab::new();
-        // Allocate 300 objects (forcing chunk growth beyond 256).
-        // Use Pair cells with distinguishable integer payloads.
+        let mut slab = Slab::new();
         let mut ptrs = vec![];
         for i in 0u32..300 {
             let ptr = slab.alloc(HeapObject::Pair(Pair::new(
@@ -247,17 +295,11 @@ mod tests {
             ptrs.push((ptr, i as i64));
         }
         assert_eq!(slab.live_count(), 300);
-        // Verify each pointer still holds its original value after chunk growth.
         for (ptr, expected) in &ptrs {
             let obj = unsafe { &**ptr };
             match obj {
                 HeapObject::Pair(c) => {
-                    assert_eq!(
-                        c.first.as_int().unwrap(),
-                        *expected,
-                        "pointer stability violated at {:p}",
-                        ptr
-                    )
+                    assert_eq!(c.first.as_int().unwrap(), *expected)
                 }
                 _ => panic!("unexpected variant"),
             }
@@ -266,14 +308,13 @@ mod tests {
 
     #[test]
     fn test_slab_clear_resets() {
-        let mut slab = RootSlab::new();
+        let mut slab = Slab::new();
         slab.alloc(cons_obj());
         slab.alloc(cons_obj());
         slab.alloc(cons_obj());
         assert_eq!(slab.live_count(), 3);
         slab.clear();
         assert_eq!(slab.live_count(), 0);
-        // Allocations work after clear.
         let p1 = slab.alloc(cons_obj());
         let p2 = slab.alloc(cons_obj());
         assert_eq!(slab.live_count(), 2);
@@ -282,17 +323,22 @@ mod tests {
 
     #[test]
     fn test_slab_allocated_bytes() {
-        let mut slab = RootSlab::new();
+        let mut slab = Slab::new();
         assert_eq!(slab.allocated_bytes(), 0, "no bytes before first alloc");
-        slab.alloc(cons_obj()); // triggers first chunk
-        assert!(
-            slab.allocated_bytes() >= std::mem::size_of::<HeapObject>(),
-            "at least one slot worth of bytes after first alloc"
-        );
-        // Exactly one chunk.
+        slab.alloc(cons_obj());
         assert_eq!(
             slab.allocated_bytes(),
-            CHUNK_SIZE * std::mem::size_of::<HeapObject>()
+            CHUNK_BYTES,
+            "one full chunk after first alloc"
         );
+    }
+
+    #[test]
+    fn test_slab_owns() {
+        let mut slab = Slab::new();
+        let ptr = slab.alloc(cons_obj()) as *const ();
+        assert!(slab.owns(ptr));
+        let x: i64 = 42;
+        assert!(!slab.owns(&x as *const _ as *const ()));
     }
 }

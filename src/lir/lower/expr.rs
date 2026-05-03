@@ -428,7 +428,7 @@ impl<'a> Lowerer<'a> {
 
     fn lower_while(&mut self, cond: &Hir, body: &Hir) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let flip_eligible = self.can_flip_while_loop(body);
+        let flip_eligible = self.can_flip_while_loop(body, &[]);
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
@@ -503,7 +503,10 @@ impl<'a> Lowerer<'a> {
         // Flip (rotation) requires stricter analysis than scope allocation.
         // Keep escape analysis for flip until region inference handles
         // rotation safety (heap values crossing iteration boundaries).
-        let flip_eligible = self.can_flip_while_loop(body);
+        // Pass loop bindings as scope_bindings so assigns to loop parameters
+        // aren't treated as dangerous outward sets.
+        let loop_scope: Vec<(Binding, &Hir)> = bindings.iter().map(|(b, h)| (*b, h)).collect();
+        let flip_eligible = self.can_flip_while_loop(body, &loop_scope);
 
         let loop_label = self.fresh_label();
         let done_label = self.fresh_label();

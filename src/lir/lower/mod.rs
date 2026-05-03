@@ -849,32 +849,13 @@ impl<'a> Lowerer<'a> {
         }
 
         // Condition 2: callee's return value won't alias a freed arg.
-        // With the two-mark protocol, RegionExitCall only frees
-        // [mark1..mark2] (arg temporaries). The callee's return value
-        // is above mark2 and always survives. The danger: the callee
-        // returns a heap-allocated argument identity-unchanged, and
-        // that argument was created in [mark1..mark2].
-        //
-        // Check: for each arg position i in the callee's return_params,
-        // if arg i is heap-allocating (!result_is_safe), reject.
-        //
-        // Variadic handling: a callee with `&opt`/`&named`/`&keys`/
-        // `&args` collapses every call-site arg at position >= rest_index
-        // into a single rest param at `rest_index`. When that rest param
-        // flows to the return (bit `rest_index` of `callee_rp`), all
-        // collapsing args effectively flow too. Without this mapping,
-        // `(defn request [&keys opts] opts)` with `opts` returned looked
-        // like "no bits set for args 0..N-1" and the caller wrongly
-        // scope-freed heap args that the callee had re-embedded in its
-        // `opts` struct.
         let callee_rp = self
             .callee_return_params
             .get(binding)
             .copied()
-            .unwrap_or(!0); // unknown callee: assume all params returned
+            .unwrap_or(!0);
         let rest_index = self.callee_rest_index.get(binding).copied();
         for (i, arg) in args.iter().enumerate() {
-            // Map the call-site arg position to the callee's param slot.
             let param_slot = match rest_index {
                 Some(r) if i >= r => r,
                 _ => i,
@@ -888,22 +869,16 @@ impl<'a> Lowerer<'a> {
         }
 
         // Condition 3: callee doesn't escape heap values.
-        // This subsumes the suspension check: a rotation-safe function
-        // never yields/stores a non-immediate to external structures,
-        // so values allocated in the caller's region cannot escape even
-        // if the callee suspends.
-        if !self
+        let rotation_safe = self
             .callee_rotation_safe
             .get(binding)
             .copied()
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+        if !rotation_safe {
             return false;
         }
 
         // Condition 4: argument evaluation must not suspend.
-        // The callee's execution is covered by rotation-safety, but arg
-        // expressions run in the caller's context before the call.
         if args.iter().any(|a| a.expr.signal.may_suspend()) {
             return false;
         }

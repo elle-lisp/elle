@@ -555,7 +555,7 @@ impl Value {
 
     /// Extract as syntax if this is a syntax object.
     #[inline]
-    pub fn as_syntax(&self) -> Option<&std::rc::Rc<crate::syntax::Syntax>> {
+    pub fn as_syntax(&self) -> Option<&crate::syntax::Syntax> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_syntax() {
             return None;

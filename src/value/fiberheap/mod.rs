@@ -67,9 +67,7 @@ pub struct RotationBase {
 }
 
 pub(crate) mod bump;
-mod slab;
-#[allow(unused_imports)]
-pub(crate) use slab::RootSlab;
+pub(crate) mod slab;
 
 pub(crate) mod pool;
 use pool::SlabPool;
@@ -99,7 +97,7 @@ pub(crate) struct CustomAllocState {
 
 /// Previous tail-call iteration's allocations, preserved for one rotation.
 ///
-/// Objects remain in the parent `FiberHeap`'s `root_slab`; the `SwapPool`
+/// Objects remain in the parent `FiberHeap`'s slab; the `SwapPool`
 /// tracks which slots and destructors belong to the previous iteration so
 /// they can be freed at the next rotation. The one-iteration lag ensures
 /// that argument values from the previous iteration (which may reference
@@ -349,22 +347,26 @@ impl FiberHeap {
         )
     }
 
-    /// Run destructors for objects allocated after the mark, then truncate
-    /// the destructor list. For custom-allocated objects, also calls dealloc
-    /// to return memory to the user's allocator. For root-slab objects, returns
-    /// slots to the slab free list.
+    /// Release allocations back to a mark: run destructors, dealloc slab
+    /// slots to the free list, and truncate tracking vecs.
+    ///
+    /// Called by `pop_scope_mark_and_release()` (RegionExit), which is
+    /// gated by Tofte-Talpin region analysis — only scopes where no
+    /// values escape get this call.
     pub fn release(&mut self, mark: ArenaMark) {
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
 
-        // Dealloc root-slab slots allocated after the mark.
-        // Index loop avoids borrowing self.pool immutably (for the slice)
-        // and mutably (for dealloc_slot) at the same time.
+        // Dealloc slab slots allocated after the mark. Slot recycling
+        // is deferred until scope eligibility for while/loop forms is
+        // routed through region inference (follow-up to this PR).
         for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
-            // SAFETY: pool.run_dtors already ran destructors; slots are safe to free.
-            unsafe {
-                self.pool.dealloc_slot(self.pool.allocs[i]);
-            }
+            // SAFETY: pool.run_dtors already ran destructors.
+            // TODO: enable dealloc_slot once region inference covers while/loop.
+            // unsafe {
+            //     self.pool.dealloc_slot(self.pool.allocs[i]);
+            // }
+            let _ = i;
         }
         self.pool.allocs.truncate(mark.root_allocs_len());
 
@@ -379,15 +381,31 @@ impl FiberHeap {
 
         self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();
+    }
 
-        // NOTE: Bump arena release is disabled for scope marks (RegionEnter/
-        // RegionExit). The bump arena doesn't track which values are still
-        // referenced; releasing pages can free strings/arrays that are still
-        // live in outer bindings. Bump pages are only freed on full arena
-        // reset (clear/teardown).
-        // if let Some(bump_mark) = mark.bump_mark() {
-        //     self.pool.release_bump(bump_mark);
-        // }
+    /// Release without deallocating slab slots.
+    ///
+    /// Called by `ArenaGuard::drop()` via `heap_arena_release()`. The
+    /// ArenaGuard is a manual mark/release that does NOT go through
+    /// Tofte-Talpin region analysis — it cannot prove which slab slots
+    /// are dead. Only runs destructors and truncates tracking vecs.
+    /// Slab slots are reclaimed later by teardown or RegionExit.
+    pub fn release_no_dealloc(&mut self, mark: ArenaMark) {
+        self.pool.run_dtors(mark.dtor_len());
+        self.pool.dtors.truncate(mark.dtor_len());
+        self.pool.allocs.truncate(mark.root_allocs_len());
+
+        // Dealloc custom-allocated objects from the exiting scope.
+        if let Some(state) = self.custom_alloc_stack.last_mut() {
+            let start = mark.custom_ptrs_len();
+            for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
+                state.allocator.inner.dealloc(ptr, size, align);
+            }
+            state.custom_ptrs.truncate(start);
+        }
+
+        self.pool.alloc_count = mark.position();
+        self.shared_alloc_count = mark.shared_alloc_count();
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
@@ -461,10 +479,9 @@ impl FiberHeap {
         self.scope_dtors_run += dtors_freed;
 
         // Dealloc slab slots for the range, then drain the entries.
+        // TODO: enable dealloc_slot once region inference covers while/loop.
         for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
-            unsafe {
-                self.pool.dealloc_slot(self.pool.allocs[i]);
-            }
+            let _ = i;
         }
         self.pool
             .allocs
@@ -620,7 +637,7 @@ impl FiberHeap {
         //    Only dealloc slots — dtors are NOT in the swap pool (see step 2).
         if let Some(old) = self.swap_pool.take() {
             for &ptr in old.root_allocs.iter().rev() {
-                unsafe { self.pool.dealloc_slot(ptr) };
+                unsafe { self.pool.dealloc_slot_deferred(ptr) };
             }
             self.rotation_freed += old.root_allocs.len();
         }
@@ -699,7 +716,7 @@ impl FiberHeap {
         // iteration" but the function is exiting, so they're dead now.
         if let Some(old) = self.swap_pool.take() {
             for &ptr in old.root_allocs.iter().rev() {
-                unsafe { self.pool.dealloc_slot(ptr) };
+                unsafe { self.pool.dealloc_slot_deferred(ptr) };
             }
             self.rotation_freed += old.root_allocs.len();
         }
@@ -1136,12 +1153,12 @@ impl FiberHeap {
     /// Also tears down all owned shared allocators and nulls the
     /// shared_alloc pointer.
     pub fn clear(&mut self) {
-        // Run swap pool dtors first (their objects live in root_slab).
+        // Run swap pool dtors first (their objects live in the slab).
         if let Some(old) = self.swap_pool.take() {
             for i in (0..old.dtors.len()).rev() {
                 unsafe { std::ptr::drop_in_place(old.dtors[i]) };
             }
-            // Slab slots freed by root_slab.clear() below.
+            // Slab slots freed by slab.clear() below.
         }
 
         // Tear down owned shared allocators.
@@ -1193,7 +1210,7 @@ impl FiberHeap {
 
 impl Drop for FiberHeap {
     fn drop(&mut self) {
-        // Run swap pool dtors first (their objects live in root_slab).
+        // Run swap pool dtors first (their objects live in the slab).
         if let Some(old) = self.swap_pool.take() {
             for i in (0..old.dtors.len()).rev() {
                 unsafe { std::ptr::drop_in_place(old.dtors[i]) };

@@ -463,3 +463,193 @@ fn flip_noop_without_frame() {
     heap.flip_exit();
     assert_eq!(heap.flip_depth(), 0);
 }
+
+// ── Region slot recycling tests ──────────────────────────────────────
+//
+// These tests verify that RegionExit returns slab slots to the free list.
+// They are #[ignore] until scope eligibility for while/loop is routed
+// through region inference (follow-up branch).
+
+#[test]
+#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
+fn region_exit_returns_slots_to_free_list() {
+    // RegionExit must return slab slots to the free list so subsequent
+    // allocations reuse them. This is the Phase 1 enabling condition:
+    // escape-analysis-gated scope reclamation can safely deallocate
+    // because the analysis proves no values escape the scope.
+    let mut heap = FiberHeap::new();
+
+    // Allocate 3 objects outside any scope (these are "base" objects).
+    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+    let base_live = heap.root_live();
+    assert_eq!(base_live, 3);
+
+    // Enter a scope, allocate 4 objects, exit scope.
+    heap.push_scope_mark();
+    let v1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    let v2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+    let v3 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(3), Value::NIL)));
+    let v4 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(4), Value::NIL)));
+    assert_eq!(heap.root_live(), base_live + 4);
+
+    // RegionExit runs dtors (none for Pair) and returns slab slots.
+    heap.pop_scope_mark_and_release();
+    assert_eq!(
+        heap.root_live(),
+        base_live,
+        "RegionExit must return scoped slots to the free list"
+    );
+
+    // The scope-exit Values are now dangling — do not dereference them.
+    // But new allocations should reuse those freed slots.
+    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(10), Value::NIL)));
+    let n2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(20), Value::NIL)));
+
+    // Verify slot reuse: the new pointers should match the freed ones.
+    // (The free list is LIFO, so we expect reverse order.)
+    let freed_ptrs: [usize; 4] = [
+        v1.as_heap_ptr().unwrap() as usize,
+        v2.as_heap_ptr().unwrap() as usize,
+        v3.as_heap_ptr().unwrap() as usize,
+        v4.as_heap_ptr().unwrap() as usize,
+    ];
+    let new_ptr1 = n1.as_heap_ptr().unwrap() as usize;
+    let new_ptr2 = n2.as_heap_ptr().unwrap() as usize;
+    assert!(
+        freed_ptrs.contains(&new_ptr1),
+        "new allocation must reuse a freed slot"
+    );
+    assert!(
+        freed_ptrs.contains(&new_ptr2),
+        "new allocation must reuse a freed slot"
+    );
+
+    assert_eq!(heap.root_live(), base_live + 2);
+}
+
+#[test]
+#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
+fn region_exit_reclaims_dtor_objects() {
+    // RegionExit must run destructors AND return slots for objects that
+    // need Drop (LString, Closure, etc.). Verifies that dtor ordering
+    // is correct (dtors run before slot dealloc).
+    let mut heap = FiberHeap::new();
+
+    let s = heap.alloc_inline_slice::<u8>(b"scoped-string");
+    heap.alloc(HeapObject::LString {
+        s,
+        traits: Value::NIL,
+    });
+    assert_eq!(heap.dtor_count(), 1);
+
+    heap.push_scope_mark();
+    let s1 = heap.alloc_inline_slice::<u8>(b"a");
+    heap.alloc(HeapObject::LString {
+        s: s1,
+        traits: Value::NIL,
+    });
+    let s2 = heap.alloc_inline_slice::<u8>(b"b");
+    heap.alloc(HeapObject::LString {
+        s: s2,
+        traits: Value::NIL,
+    });
+    assert_eq!(heap.dtor_count(), 3);
+    let live_before = heap.root_live();
+
+    heap.pop_scope_mark_and_release();
+
+    assert_eq!(
+        heap.dtor_count(),
+        1,
+        "RegionExit must run and truncate scoped dtors"
+    );
+    assert_eq!(
+        heap.root_live(),
+        live_before - 2,
+        "RegionExit must return 2 scoped slots to the free list"
+    );
+}
+
+#[test]
+#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
+fn region_exit_call_returns_middle_range() {
+    // RegionExitCall pops two marks and frees only the range between
+    // them (arg temporaries). Objects before mark1 and after mark2
+    // are preserved. Slots in the middle are returned to the free list.
+    let mut heap = FiberHeap::new();
+
+    // Pre-region objects
+    heap.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+    let pre_live = heap.root_live();
+
+    // mark1: region start
+    heap.push_scope_mark();
+
+    // Arg temporaries (these get freed)
+    let t1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    let t2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+    let temp_live = heap.root_live();
+
+    // mark2: barrier after args
+    heap.push_scope_mark();
+
+    // Callee's allocations (preserved)
+    heap.alloc(HeapObject::Pair(Pair::new(Value::int(3), Value::NIL)));
+    assert_eq!(heap.root_live(), temp_live + 1);
+
+    heap.pop_call_scope_marks_and_release();
+
+    // Only the 2 arg temporaries were freed
+    assert_eq!(
+        heap.root_live(),
+        pre_live + 1,
+        "RegionExitCall must free exactly the middle range"
+    );
+
+    // New allocation should reuse one of the freed temporary slots
+    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(99), Value::NIL)));
+    let temp_ptrs: [usize; 2] = [
+        t1.as_heap_ptr().unwrap() as usize,
+        t2.as_heap_ptr().unwrap() as usize,
+    ];
+    assert!(
+        temp_ptrs.contains(&(n1.as_heap_ptr().unwrap() as usize)),
+        "new allocation must reuse a freed temporary slot"
+    );
+}
+
+#[test]
+#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
+fn region_exit_nested_scopes_dealloc_innermost_first() {
+    // Nested RegionEnter/RegionExit must dealloc innermost scope's slots
+    // first, then outer scope's. The free list is LIFO, so inner slots
+    // are reused first.
+    let mut heap = FiberHeap::new();
+
+    heap.push_scope_mark();
+    let inner1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    heap.push_scope_mark();
+    let inner2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+    assert_eq!(heap.root_live(), 2);
+
+    // Exit inner scope — only inner2's slot is freed
+    heap.pop_scope_mark_and_release();
+    assert_eq!(heap.root_live(), 1);
+
+    // Exit outer scope — inner1's slot is freed
+    heap.pop_scope_mark_and_release();
+    assert_eq!(heap.root_live(), 0);
+
+    // Both slots should be reused
+    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(10), Value::NIL)));
+    let freed_ptrs: [usize; 2] = [
+        inner1.as_heap_ptr().unwrap() as usize,
+        inner2.as_heap_ptr().unwrap() as usize,
+    ];
+    assert!(
+        freed_ptrs.contains(&(n1.as_heap_ptr().unwrap() as usize)),
+        "new allocation must reuse a freed slot"
+    );
+}

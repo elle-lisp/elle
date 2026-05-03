@@ -36,8 +36,10 @@
 //! - Symbol interning for O(1) symbol comparison
 //! - SmallVec optimization to avoid heap allocation
 
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+// No custom global allocator. Arena pages use mmap directly (bypassing
+// the global allocator entirely), and the remaining allocations (tracking
+// vecs, mutable collections, Rc boxes) are moderate-throughput enough
+// that the system allocator is sufficient.
 
 #[macro_use]
 pub mod trace;

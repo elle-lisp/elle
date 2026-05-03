@@ -178,7 +178,7 @@ impl fmt::Display for Value {
 
         // Syntax object
         if let Some(s) = self.as_syntax() {
-            return write!(f, "#<syntax:{}>", s.as_ref());
+            return write!(f, "#<syntax:{}>", s);
         }
 
         // Parameter

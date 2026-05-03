@@ -115,11 +115,13 @@ pools each iteration:
 
 ### Scope reclamation
 
-The compiler performs escape analysis on every `let`, `letrec`, and `while`
-body. When it can prove that no allocated value escapes — no captures, no
-suspension, result is immediate, no outward mutation — it emits
-`RegionEnter`/`RegionExit` bytecodes. `RegionExit` runs destructors and
-reclaims pool slots for objects allocated within the scope.
+The compiler performs Tofte-Talpin region inference and escape analysis on
+every `let`, `letrec`, and `while` body. Region inference assigns each
+allocation to a lexical scope; escape analysis proves which scopes cannot leak
+values (no captures, no suspension, result is immediate, no outward mutation).
+Scopes that pass both checks get `RegionEnter`/`RegionExit` bytecodes.
+`RegionExit` runs destructors and reclaims pool slots for objects allocated
+within the scope.
 
 ```lisp
 # let-bound struct is reclaimed at scope exit
@@ -173,40 +175,61 @@ tracked pool owned by the fiber.
 
 ### Per-fiber heaps
 
-Each fiber owns a `FiberHeap` containing a `SlabPool` — a bump arena with
-destructor tracking and position-based mark/release. The bump arena allocates
-sequentially into 64KB pages. Individual slot deallocation is a no-op; memory
-is reclaimed only at scope boundaries (via mark/release) or fiber death (via
-teardown).
+Each fiber owns a `FiberHeap` containing a `SlabPool` — a slab allocator for
+HeapObjects plus a bump arena for inline slice data, both backed by `mmap`
+pages. The slab allocates fixed-size HeapObject slots from 18KB chunks (256
+slots each). The bump arena allocates variable-size data (string bytes, array
+elements) sequentially into 64KB pages. Both use `munmap` to return pages to
+the OS on fiber death — no process-allocator caching, no RSS hoarding.
 
 When a fiber completes, its `FiberHeap` runs all destructors, tears down all
-owned shared allocators and outboxes, and resets the arena (keeping one page
-for reuse).
+owned shared allocators and outboxes, and returns all mmap'd pages to the OS.
+
+### Slab allocator
+
+The slab manages HeapObject slots:
+
+- **Chunks**: `mmap`'d regions of 256 HeapObject slots (~18KB each)
+- **Allocation**: check free list first, then bump cursor within last chunk
+- **Deallocation**: write intrusive `Option<u32>` free-list link into the
+  dead slot's bytes, return to free list for reuse
+- **Pointer stability**: chunk addresses never move; `Value` payloads are
+  raw pointers into chunk slots
+- **OS return**: `munmap` on `Drop` returns chunk pages immediately
+
+Slot recycling via the free list is the target mechanism for drop-on-overwrite
+(assign frees the old slot) and scope reclamation (RegionExit frees batches).
+`dealloc_slot` is currently gated — scope eligibility for while/loop forms
+needs to be routed through the region inference system before enabling it.
+Rotation paths use `dealloc_slot_deferred()` (no-op) until Phase 2A enables
+rotation slot recycling. Until then, memory is reclaimed only on fiber death
+(teardown).
 
 ### Bump arena
 
-The `BumpArena` is a byte-level sequential allocator:
+The bump arena manages variable-size inline data (string bytes, array
+elements):
 
-- **Pages**: `Vec<Box<[MaybeUninit<u8>]>>` — pointer-stable
+- **Pages**: `mmap`'d 64KB regions — pointer-stable, never moved
 - **Allocation**: bump a byte offset within the current page
 - **Oversized**: allocations >64KB get dedicated pages
-- **No individual deallocation**: memory is reclaimed by `release_to(mark)` or
-  `clear()` on fiber death
-- **Pointer stability**: `Value` payloads are raw pointers into arena pages;
-  pages never move once allocated
+- **No individual deallocation**: memory is reclaimed by `release_to(mark)`
+  or `clear()` on fiber death
+- **OS return**: `munmap` drops pages; `madvise(MADV_DONTNEED)` on the
+  retained page releases physical frames while keeping the virtual mapping
 
 ### SlabPool
 
-`SlabPool` wraps the bump arena with allocation tracking:
+`SlabPool` owns both the slab and the bump arena, plus allocation tracking:
 
-- `allocs: Vec<*mut HeapObject>` — every allocation in order (for mark/release
-  and rotation)
-- `dtors: Vec<*mut HeapObject>` — objects that need `Drop` (closures, fibers,
-  mutable types with `Rc<RefCell<...>>`)
+- `allocs: Vec<*mut HeapObject>` — every allocation in order (for rotation
+  and scope release)
+- `dtors: Vec<*mut HeapObject>` — objects that need `Drop` (closures,
+  fibers, mutable types with `Rc<RefCell<...>>`)
 - `alloc_count` — running total for `arena/count` introspection
 
-`release(mark)` runs destructors, truncates tracking vecs, and resets the arena
-to the mark position. `teardown()` does a full reset.
+`alloc(obj)` routes to the slab. `alloc_inline_slice(items)` routes to the
+bump arena. `teardown()` clears both.
 
 ### Scope marks
 
@@ -267,9 +290,10 @@ The memory model exploits two properties that the compiler guarantees:
    the decision point for shared-allocator routing — no runtime heuristics,
    no profiling, no fallback.
 
-2. **Escape analysis determines scope reclamation.** The compiler's capture
-   analysis and suspension tracking prove which scopes cannot leak values.
-   These scopes get `RegionEnter`/`RegionExit` instrumentation for free.
+2. **Tofte-Talpin region inference determines scope reclamation.** Region
+   inference assigns each allocation to a lexical scope; escape analysis
+   proves which scopes cannot leak values. These scopes get
+   `RegionEnter`/`RegionExit` instrumentation for free.
 
 Together, these give deterministic memory management with no GC pauses, no
 write barriers, no card tables, and no stop-the-world collection. Memory is
