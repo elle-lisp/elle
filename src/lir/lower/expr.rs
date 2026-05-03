@@ -332,7 +332,6 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.push(BlockLowerContext {
             block_id: *block_id,
-            result_reg,
             result_slot: block_result_slot,
             exit_label,
             region_depth_at_entry: depth_before,

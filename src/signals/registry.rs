@@ -198,7 +198,7 @@ where
     F: FnOnce(&SignalRegistry) -> R,
 {
     let guard = global_registry().lock().unwrap_or_else(|e| e.into_inner());
-    f(&*guard)
+    f(&guard)
 }
 
 #[cfg(test)]

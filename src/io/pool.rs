@@ -12,13 +12,11 @@ pub(crate) struct BufferHandle(usize);
 ///
 /// Invariant: a buffer is either in `buffers[i] = Some(vec)` (allocated)
 /// or its slot is in `free` (available for reuse). Never both.
-#[allow(dead_code)]
 pub(crate) struct BufferPool {
     buffers: Vec<Option<Vec<u8>>>,
     free: Vec<usize>,
 }
 
-#[allow(dead_code)]
 impl BufferPool {
     pub(crate) fn new() -> Self {
         BufferPool {

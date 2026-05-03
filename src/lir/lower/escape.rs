@@ -33,8 +33,6 @@
 //! body's result, if heap-allocated inside the scope, gets freed before
 //! the caller uses it.
 
-use std::collections::HashSet;
-
 use super::Lowerer;
 use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
 use crate::lir::intrinsics::IntrinsicOp;
@@ -899,159 +897,6 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Check if a single HIR expression contains a `Break` that escapes.
-    ///
-    /// A break "escapes" if it targets a block NOT defined within the
-    /// expression. Used by `can_scope_allocate_let`: if the let body
-    /// contains an escaping break, the break jumps past the let's
-    /// `RegionExit`, so scope allocation is unsafe.
-    ///
-    /// Breaks targeting blocks defined INSIDE the expression are safe —
-    /// they stay within the scope's region.
-    ///
-    /// Recursion rules:
-    /// - Does NOT recurse into `Lambda` bodies (break can't cross fn boundaries).
-    /// - DOES recurse into nested `Block` bodies, registering their `BlockId`
-    ///   so that inner breaks targeting them are recognized as safe.
-    #[allow(dead_code)]
-    pub(super) fn hir_contains_escaping_break(hir: &Hir) -> bool {
-        let mut inner_blocks = HashSet::new();
-        Self::walk_for_escaping_break(hir, &mut inner_blocks)
-    }
-
-    fn walk_for_escaping_break(hir: &Hir, inner_blocks: &mut HashSet<BlockId>) -> bool {
-        match &hir.kind {
-            HirKind::Break { block_id, .. } => {
-                // Safe if targeting a block inside the scope
-                !inner_blocks.contains(block_id)
-            }
-
-            // Do NOT recurse into lambda bodies
-            HirKind::Lambda { .. } => false,
-
-            // Register inner block's ID before recursing into its body.
-            HirKind::Block { block_id, body, .. } => {
-                inner_blocks.insert(*block_id);
-                body.iter()
-                    .any(|e| Self::walk_for_escaping_break(e, inner_blocks))
-            }
-
-            // Terminals
-            HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::Bool(_)
-            | HirKind::Nil
-            | HirKind::Keyword(_)
-            | HirKind::EmptyList
-            | HirKind::String(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_) => false,
-
-            // Recurse into sub-expressions
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                Self::walk_for_escaping_break(cond, inner_blocks)
-                    || Self::walk_for_escaping_break(then_branch, inner_blocks)
-                    || Self::walk_for_escaping_break(else_branch, inner_blocks)
-            }
-
-            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
-                .iter()
-                .any(|e| Self::walk_for_escaping_break(e, inner_blocks)),
-
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                clauses.iter().any(|(c, b)| {
-                    Self::walk_for_escaping_break(c, inner_blocks)
-                        || Self::walk_for_escaping_break(b, inner_blocks)
-                }) || else_branch
-                    .as_deref()
-                    .is_some_and(|b| Self::walk_for_escaping_break(b, inner_blocks))
-            }
-
-            HirKind::Call { func, args, .. } => {
-                Self::walk_for_escaping_break(func, inner_blocks)
-                    || args
-                        .iter()
-                        .any(|a| Self::walk_for_escaping_break(&a.expr, inner_blocks))
-            }
-
-            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
-                Self::walk_for_escaping_break(value, inner_blocks)
-            }
-
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                bindings
-                    .iter()
-                    .any(|(_, init)| Self::walk_for_escaping_break(init, inner_blocks))
-                    || Self::walk_for_escaping_break(body, inner_blocks)
-            }
-
-            HirKind::While { cond, body } => {
-                Self::walk_for_escaping_break(cond, inner_blocks)
-                    || Self::walk_for_escaping_break(body, inner_blocks)
-            }
-
-            HirKind::Loop { bindings, body } => {
-                bindings
-                    .iter()
-                    .any(|(_, init)| Self::walk_for_escaping_break(init, inner_blocks))
-                    || Self::walk_for_escaping_break(body, inner_blocks)
-            }
-
-            HirKind::Recur { args } => args
-                .iter()
-                .any(|a| Self::walk_for_escaping_break(a, inner_blocks)),
-
-            HirKind::Match { value, arms } => {
-                Self::walk_for_escaping_break(value, inner_blocks)
-                    || arms.iter().any(|(_, guard, body)| {
-                        guard
-                            .as_ref()
-                            .is_some_and(|g| Self::walk_for_escaping_break(g, inner_blocks))
-                            || Self::walk_for_escaping_break(body, inner_blocks)
-                    })
-            }
-
-            HirKind::Emit { value: expr, .. } => Self::walk_for_escaping_break(expr, inner_blocks),
-
-            HirKind::Destructure { value, .. } => {
-                Self::walk_for_escaping_break(value, inner_blocks)
-            }
-
-            HirKind::Eval { expr, env } => {
-                Self::walk_for_escaping_break(expr, inner_blocks)
-                    || Self::walk_for_escaping_break(env, inner_blocks)
-            }
-
-            HirKind::Parameterize { bindings, body } => {
-                bindings.iter().any(|(param, value)| {
-                    Self::walk_for_escaping_break(param, inner_blocks)
-                        || Self::walk_for_escaping_break(value, inner_blocks)
-                }) || Self::walk_for_escaping_break(body, inner_blocks)
-            }
-
-            HirKind::MakeCell { value } => Self::walk_for_escaping_break(value, inner_blocks),
-            HirKind::DerefCell { cell } => Self::walk_for_escaping_break(cell, inner_blocks),
-            HirKind::SetCell { cell, value } => {
-                Self::walk_for_escaping_break(cell, inner_blocks)
-                    || Self::walk_for_escaping_break(value, inner_blocks)
-            }
-
-            // Intrinsics contain no breaks; walk args.
-            HirKind::Intrinsic { args, .. } => args
-                .iter()
-                .any(|a| Self::walk_for_escaping_break(a, inner_blocks)),
-
-            HirKind::Error => false,
-        }
-    }
-
     /// Check that every `Break` node reachable from this HIR expression
     /// has a value that is provably an immediate.
     ///
@@ -1174,19 +1019,6 @@ impl<'a> Lowerer<'a> {
 
             HirKind::Error => true,
         }
-    }
-
-    /// Check if a HIR body (slice) contains a `Break` that escapes the scope.
-    ///
-    /// A break targeting a block INSIDE the body is safe — it stays within the
-    /// scope's region and RegionExit still fires on the normal exit path.
-    /// Only breaks targeting blocks OUTSIDE the body are dangerous (they jump
-    /// past the scope's RegionExit).
-    #[allow(dead_code)]
-    pub(super) fn body_contains_escaping_break(body: &[Hir]) -> bool {
-        let mut inner_blocks = HashSet::new();
-        body.iter()
-            .any(|e| Self::walk_for_escaping_break(e, &mut inner_blocks))
     }
 }
 

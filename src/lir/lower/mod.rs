@@ -231,11 +231,9 @@ struct LoopLowerContext {
 }
 
 /// Tracks an active block during lowering so `break` can find its
-/// result register and exit label.
+/// exit label.
 struct BlockLowerContext {
     block_id: BlockId,
-    #[allow(dead_code)]
-    result_reg: Reg,
     result_slot: u16,
     exit_label: Label,
     /// The `region_depth` at the time this block was entered.
@@ -454,15 +452,6 @@ impl<'a> Lowerer<'a> {
         matches!(
             self.region_info.scope_kind.get(&hir_id),
             Some(RegionKind::Scope)
-        )
-    }
-
-    /// Check region inference for a loop node.
-    #[allow(dead_code)]
-    fn region_loop_check(&self, hir_id: HirId) -> bool {
-        matches!(
-            self.region_info.scope_kind.get(&hir_id),
-            Some(RegionKind::Loop | RegionKind::Scope)
         )
     }
 
@@ -685,165 +674,6 @@ impl<'a> Lowerer<'a> {
     // See `escape.rs` for helper functions (`result_is_safe`,
     // `body_contains_dangerous_outward_set`, `body_contains_escaping_break`,
     // `all_break_values_safe`, `all_breaks_have_safe_values`).
-
-    /// Determine if a `let` scope's allocations can be safely released
-    /// at scope exit via `RegionEnter`/`RegionExit`.
-    ///
-    /// Performs escape analysis on the let body to check if all bindings
-    /// and intermediate values allocated within the scope can be freed
-    /// when the scope exits. This enables the lowerer to emit `RegionEnter`
-    /// and `RegionExit` instructions for automatic cleanup.
-    ///
-    /// Returns `true` when ALL six conditions hold:
-    /// 1. No binding is captured by a nested lambda (captured values escape)
-    /// 2. Body cannot suspend (yield/debug/polymorphic signals prevent cleanup)
-    /// 3. Body result is provably an immediate (not heap-allocated)
-    /// 4. Body contains no dangerous outward `set` (set to outer binding
-    ///    with a value that could be heap-allocated inside the scope)
-    /// 5. All breaks in body carry safe immediate values
-    /// 6. Body contains no `break` targeting outer blocks (break carries
-    ///    a value past RegionExit, causing use-after-free)
-    ///
-    /// Increments `scope_stats.scopes_analyzed` and updates rejection counters
-    /// for each failed condition (short-circuits on first failure).
-    #[allow(dead_code)]
-    fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
-        self.scope_stats.scopes_analyzed += 1;
-        // Condition 1: no captures
-        if bindings.iter().any(|(b, _)| self.arena.get(*b).is_captured) {
-            self.scope_stats.rejected_captured += 1;
-            return false;
-        }
-
-        // Condition 2: no suspension in body or binding inits.
-        // Binding init expressions are evaluated inside the region, so
-        // allocations made by callees during a binding init are freed by
-        // RegionExit. If a binding init suspends, the caller's body may
-        // later create heap objects that escape via side effects (e.g. put
-        // to an external mutable struct), and RegionExit would free them
-        // while they're still referenced externally.
-        //
-        // Exception: when the body is a PURE tail call (no preceding
-        // expressions that could suspend), the tail call's signal doesn't
-        // matter — RegionExit fires before the tail call executes.
-        // But if the body has non-tail sub-expressions that may suspend
-        // (e.g. `(begin (port/write p x) (tail-call))`), those expressions
-        // run within the scope and suspension is still dangerous.
-        let body_suspends = if Self::body_is_tail_call(body) {
-            Self::non_tail_subexprs_may_suspend(body)
-        } else {
-            body.signal.may_suspend()
-        };
-        if body_suspends || bindings.iter().any(|(_, init)| init.signal.may_suspend()) {
-            self.scope_stats.rejected_suspends += 1;
-            return false;
-        }
-
-        // Build scope binding refs once — used by conditions 3 and 4
-        let scope_binding_refs: Vec<(Binding, &Hir)> =
-            bindings.iter().map(|(b, init)| (*b, init)).collect();
-
-        // Condition 3: result is immediate
-        if !self.result_is_safe(body, &scope_binding_refs) {
-            self.scope_stats.rejected_unsafe_result += 1;
-            return false;
-        }
-
-        // Condition 3b: tail call callee must not be scope-bound.
-        // RegionExit fires before tail calls, so if the callee is a
-        // closure allocated inside the scope, its slot is freed before
-        // the tail call reads it.
-        if Self::tail_call_callee_is_scope_bound(body, &scope_binding_refs) {
-            self.scope_stats.rejected_unsafe_result += 1;
-            return false;
-        }
-
-        // Condition 4: no dangerous outward mutation
-        if self.body_contains_dangerous_outward_set(body, &scope_binding_refs) {
-            self.scope_stats.rejected_outward_set += 1;
-            return false;
-        }
-
-        // Condition 5: all breaks carry safe immediate values.
-        if !self.all_breaks_have_safe_values(body) {
-            self.scope_stats.rejected_break += 1;
-            return false;
-        }
-
-        // Condition 6: no escaping break.
-        if Self::hir_contains_escaping_break(body) {
-            self.scope_stats.rejected_break += 1;
-            return false;
-        }
-
-        self.scope_stats.scopes_qualified += 1;
-        true
-    }
-
-    /// Determine if a `letrec` scope's allocations can be safely released.
-    /// Identical analysis to `let` — letrec's mutual recursion and two-phase
-    /// initialization don't change the escape conditions.
-    #[allow(dead_code)]
-    fn can_scope_allocate_letrec(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
-        self.can_scope_allocate_let(bindings, body)
-    }
-
-    /// Determine if a `block` scope's allocations can be safely released.
-    ///
-    /// Blocks don't introduce bindings but bracket a scope of allocations.
-    /// Conditions:
-    /// 1. No expression in body can suspend
-    /// 2. Body result is provably immediate
-    /// 3. All break values targeting this block are safe immediates
-    /// 4. No `set!` to non-local bindings (blocks have no own bindings)
-    #[allow(dead_code)]
-    fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
-        self.scope_stats.scopes_analyzed += 1;
-        // Condition 1: no suspension
-        if body.iter().any(|e| e.signal.may_suspend()) {
-            self.scope_stats.rejected_suspends += 1;
-            return false;
-        }
-
-        // Collect Define bindings from the block body. Although blocks
-        // don't introduce let-style bindings, they can contain def/var
-        // statements that create bindings whose values are heap-allocated
-        // inside the scope. These must be tracked so result_is_safe
-        // doesn't treat them as pre-scope outer bindings.
-        let scope_bindings: Vec<(Binding, &Hir)> = body
-            .iter()
-            .filter_map(|e| match &e.kind {
-                HirKind::Define { binding, value } => Some((*binding, value.as_ref())),
-                _ => None,
-            })
-            .collect();
-
-        // B2: result is immediate (empty body → nil → safe)
-        if let Some(last) = body.last() {
-            if !self.result_is_safe(last, &scope_bindings) {
-                self.scope_stats.rejected_unsafe_result += 1;
-                return false;
-            }
-        }
-
-        // Condition 3: all break values targeting this block are safe immediates.
-        if !self.all_break_values_safe(body, *block_id, &scope_bindings) {
-            self.scope_stats.rejected_break += 1;
-            return false;
-        }
-
-        // Condition 4: no dangerous outward mutation
-        if body
-            .iter()
-            .any(|e| self.body_contains_dangerous_outward_set(e, &scope_bindings))
-        {
-            self.scope_stats.rejected_outward_set += 1;
-            return false;
-        }
-
-        self.scope_stats.scopes_qualified += 1;
-        true
-    }
 
     /// Determine if a non-tail call's temporaries can be freed after the
     /// call returns via `RegionEnter`/`RegionExit` around the call.
@@ -1804,67 +1634,6 @@ impl<'a> Lowerer<'a> {
                 .iter()
                 .any(|(_, _, body)| Self::tail_call_callee_is_scope_bound(body, scope_bindings)),
             _ => false,
-        }
-    }
-
-    /// Check if non-tail sub-expressions within a tail-call body may suspend.
-    ///
-    /// When `body_is_tail_call` returns true, the tail call's own signal
-    /// is irrelevant (RegionExit fires before it). But preceding expressions
-    /// in the body (e.g. side effects before the tail call in a `begin`)
-    /// still execute within the scope and their suspension is dangerous.
-    ///
-    /// Returns true if any non-tail sub-expression may suspend.
-    #[allow(dead_code)]
-    fn non_tail_subexprs_may_suspend(hir: &Hir) -> bool {
-        match &hir.kind {
-            // A bare tail call has no preceding expressions.
-            HirKind::Call { is_tail: true, .. } => false,
-            // If/Cond: the condition runs before branches.
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                cond.signal.may_suspend()
-                    || Self::non_tail_subexprs_may_suspend(then_branch)
-                    || Self::non_tail_subexprs_may_suspend(else_branch)
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                clauses
-                    .iter()
-                    .any(|(c, b)| c.signal.may_suspend() || Self::non_tail_subexprs_may_suspend(b))
-                    || else_branch
-                        .as_ref()
-                        .is_some_and(|b| Self::non_tail_subexprs_may_suspend(b))
-            }
-            // Begin: all expressions except the last are non-tail.
-            HirKind::Begin(exprs) => {
-                let non_tail = &exprs[..exprs.len().saturating_sub(1)];
-                non_tail.iter().any(|e| e.signal.may_suspend())
-                    || exprs
-                        .last()
-                        .is_some_and(Self::non_tail_subexprs_may_suspend)
-            }
-            // Let/Letrec: init expressions are non-tail; recurse into body.
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                bindings.iter().any(|(_, init)| init.signal.may_suspend())
-                    || Self::non_tail_subexprs_may_suspend(body)
-            }
-            // Match: the scrutinee is non-tail; recurse into arm bodies.
-            HirKind::Match { value, arms } => {
-                value.signal.may_suspend()
-                    || arms
-                        .iter()
-                        .any(|(_, _, body)| Self::non_tail_subexprs_may_suspend(body))
-            }
-            // Anything else that body_is_tail_call returned true for:
-            // conservatively say it may suspend.
-            _ => true,
         }
     }
 }

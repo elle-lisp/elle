@@ -29,7 +29,6 @@ pub const YIELD_SENTINEL: JitValue = YIELD_SENTINEL_JV;
 /// Stored in `JitCode.yield_points`, indexed by yield point index.
 /// Read by `elle_jit_yield` runtime helper (Chunk 2).
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct YieldPointMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
@@ -45,7 +44,6 @@ pub(crate) struct YieldPointMeta {
 /// Stored in `JitCode.call_sites`, indexed by call site index.
 /// Read by `elle_jit_yield_through_call` runtime helper.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct CallSiteMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
