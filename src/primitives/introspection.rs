@@ -259,12 +259,14 @@ pub(crate) fn prim_signals(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let reg = crate::signals::registry::global_registry().lock().unwrap();
-    let mut map = std::collections::BTreeMap::new();
-    for entry in reg.entries() {
-        let key = crate::value::TableKey::from_value(&Value::keyword(&entry.name)).unwrap();
-        map.insert(key, Value::int(entry.bit_position as i64));
-    }
+    let map = crate::signals::registry::with_registry(|reg| {
+        let mut map = std::collections::BTreeMap::new();
+        for entry in reg.entries() {
+            let key = crate::value::TableKey::from_value(&Value::keyword(&entry.name)).unwrap();
+            map.insert(key, Value::int(entry.bit_position as i64));
+        }
+        map
+    });
     (SIG_OK, Value::struct_from(map))
 }
 

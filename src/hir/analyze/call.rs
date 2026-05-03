@@ -57,21 +57,22 @@ impl<'a> Analyzer<'a> {
                         propagates: 0,
                     },
                     HirKind::Keyword(kw) => {
-                        let reg = crate::signals::registry::global_registry().lock().unwrap();
-                        if let Some(bit_pos) = reg.lookup(kw) {
-                            // User signals are emitted via the yield mechanism.
-                            // Include SIG_YIELD so may_suspend() returns true,
-                            // enabling correct signal inference for the enclosing lambda.
-                            // Also include the specific user signal bit for accurate
-                            // squelch checking at the static type level.
-                            Signal {
-                                bits: crate::value::fiber::SignalBits::from_bit(bit_pos)
-                                    .union(crate::signals::SIG_YIELD),
-                                propagates: 0,
+                        crate::signals::registry::with_registry(|reg| {
+                            if let Some(bit_pos) = reg.lookup(kw) {
+                                // User signals are emitted via the yield mechanism.
+                                // Include SIG_YIELD so may_suspend() returns true,
+                                // enabling correct signal inference for the enclosing lambda.
+                                // Also include the specific user signal bit for accurate
+                                // squelch checking at the static type level.
+                                Signal {
+                                    bits: crate::value::fiber::SignalBits::from_bit(bit_pos)
+                                        .union(crate::signals::SIG_YIELD),
+                                    propagates: 0,
+                                }
+                            } else {
+                                raw_callee_signal
                             }
-                        } else {
-                            raw_callee_signal
-                        }
+                        })
                     }
                     _ => raw_callee_signal,
                 }
@@ -434,10 +435,9 @@ impl<'a> Analyzer<'a> {
     fn resolve_squelch_mask(&self, arg: &Hir) -> Option<crate::value::fiber::SignalBits> {
         use crate::value::fiber::SignalBits;
         match &arg.kind {
-            HirKind::Keyword(kw) => {
-                let reg = crate::signals::registry::global_registry().lock().unwrap();
+            HirKind::Keyword(kw) => crate::signals::registry::with_registry(|reg| {
                 reg.lookup(kw).map(SignalBits::from_bit)
-            }
+            }),
             // Set literal: Call to the `set` primitive with keyword args
             HirKind::Call { func, args, .. } => {
                 if let HirKind::Var(binding) = &func.kind {
@@ -445,16 +445,17 @@ impl<'a> Analyzer<'a> {
                     if name != "set" {
                         return None;
                     }
-                    let reg = crate::signals::registry::global_registry().lock().unwrap();
-                    let mut mask = SignalBits::EMPTY;
-                    for call_arg in args {
-                        if let HirKind::Keyword(kw) = &call_arg.expr.kind {
-                            mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
-                        } else {
-                            return None;
+                    crate::signals::registry::with_registry(|reg| {
+                        let mut mask = SignalBits::EMPTY;
+                        for call_arg in args {
+                            if let HirKind::Keyword(kw) = &call_arg.expr.kind {
+                                mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
+                            } else {
+                                return None;
+                            }
                         }
-                    }
-                    Some(mask)
+                        Some(mask)
+                    })
                 } else {
                     None
                 }

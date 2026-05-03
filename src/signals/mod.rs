@@ -487,10 +487,9 @@ mod tests {
 
     #[test]
     fn test_exec_keyword_registered() {
-        use crate::signals::registry::global_registry;
+        use crate::signals::registry::with_registry;
         // The :exec keyword must be registered and map to SIG_EXEC.
-        let reg = global_registry().lock().unwrap();
-        let bit_pos = reg.lookup("exec").expect(":exec must be registered");
+        let bit_pos = with_registry(|reg| reg.lookup("exec")).expect(":exec must be registered");
         // lookup returns the bit position (11), not the bitmask; verify both.
         assert_eq!(bit_pos, 11);
         assert_eq!(SignalBits::from_bit(bit_pos), SIG_EXEC);
@@ -508,9 +507,8 @@ mod tests {
 
     #[test]
     fn test_fuel_keyword_registered() {
-        use crate::signals::registry::global_registry;
-        let reg = global_registry().lock().unwrap();
-        let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
+        use crate::signals::registry::with_registry;
+        let bit_pos = with_registry(|reg| reg.lookup("fuel")).expect(":fuel must be registered");
         assert_eq!(bit_pos, 12);
         assert_eq!(SignalBits::from_bit(bit_pos), SIG_FUEL);
     }

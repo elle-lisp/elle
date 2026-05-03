@@ -223,21 +223,19 @@ impl<'a> Analyzer<'a> {
 
         match &syntax.kind {
             SyntaxKind::Keyword(name) => {
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
-                match registry.to_signal_bits(name) {
+                crate::signals::registry::with_registry(|reg| match reg.to_signal_bits(name) {
                     Some(bits) => Ok(bits),
                     None => Err(format!(
                         "{}: emit: unknown signal keyword :{}",
                         syntax.span, name
                     )),
-                }
+                })
             }
-            SyntaxKind::Set(elements) => {
-                let registry = crate::signals::registry::global_registry().lock().unwrap();
+            SyntaxKind::Set(elements) => crate::signals::registry::with_registry(|reg| {
                 let mut bits = SignalBits::EMPTY;
                 for elem in elements {
                     match &elem.kind {
-                        SyntaxKind::Keyword(name) => match registry.to_signal_bits(name) {
+                        SyntaxKind::Keyword(name) => match reg.to_signal_bits(name) {
                             Some(b) => bits |= b,
                             None => {
                                 return Err(format!(
@@ -255,7 +253,7 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 Ok(bits)
-            }
+            }),
             _ => Err(format!(
                 "{}: emit: first argument must be a signal keyword or keyword set, got {:?}",
                 syntax.span, syntax.kind

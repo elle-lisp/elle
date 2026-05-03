@@ -616,7 +616,7 @@ impl VM {
                     );
 
                     if exec.bits.is_ok() {
-                        let (_, v) = self.fiber.signal.take().unwrap();
+                        let (_, v) = self.fiber.take_signal();
                         if self
                             .runtime_config
                             .has_trace_bit(crate::config::trace_bits::FIBER)

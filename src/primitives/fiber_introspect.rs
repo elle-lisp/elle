@@ -401,8 +401,7 @@ pub(crate) fn prim_fiber_caps(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let caps = handle.with(|fiber| crate::signals::CAP_MASK.subtract(fiber.withheld));
-    let registry = crate::signals::registry::global_registry().lock().unwrap();
-    let keywords = registry.bits_to_keywords(caps);
+    let keywords = crate::signals::registry::with_registry(|reg| reg.bits_to_keywords(caps));
     (SIG_OK, Value::set(keywords.into_iter().collect()))
 }
 

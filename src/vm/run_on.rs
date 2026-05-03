@@ -93,10 +93,9 @@ impl VM {
         {
             let squelched = bits.intersection(squelch_mask);
             if !squelched.is_empty() {
-                let squelched_str = {
-                    let registry = crate::signals::registry::global_registry().lock().unwrap();
-                    registry.format_signal_bits(squelched)
-                };
+                let squelched_str = crate::signals::registry::with_registry(|reg| {
+                    reg.format_signal_bits(squelched)
+                });
                 self.fiber.suspended = None;
                 self.fiber.signal = None;
                 return (
@@ -263,10 +262,9 @@ impl VM {
                 };
                 let squelched = yield_bits.intersection(squelch_mask);
                 if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
+                    let squelched_str = crate::signals::registry::with_registry(|reg| {
+                        reg.format_signal_bits(squelched)
+                    });
                     self.fiber.suspended = None;
                     return (
                         SIG_ERROR,
@@ -308,10 +306,9 @@ impl VM {
             {
                 let squelched = bits.intersection(squelch_mask);
                 if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
+                    let squelched_str = crate::signals::registry::with_registry(|reg| {
+                        reg.format_signal_bits(squelched)
+                    });
                     self.fiber.suspended = None;
                     return (
                         SIG_ERROR,

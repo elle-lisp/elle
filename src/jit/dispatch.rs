@@ -330,11 +330,13 @@ pub extern "C" fn elle_jit_check_signal_bound(
         let signal_bits = closure.signal().bits;
         let excess = signal_bits.subtract(allowed);
         if !excess.is_empty() {
+            let (excess_str, allowed_str) = crate::signals::registry::with_registry(|reg| {
+                (
+                    reg.format_signal_bits(excess),
+                    reg.format_signal_bits(allowed),
+                )
+            });
             let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
-            let registry = crate::signals::registry::global_registry().lock().unwrap();
-            let excess_str = registry.format_signal_bits(excess);
-            let allowed_str = registry.format_signal_bits(allowed);
-            drop(registry);
             vm_ref.fiber.signal = Some((
                 SIG_ERROR,
                 error_val(

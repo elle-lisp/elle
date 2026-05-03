@@ -214,7 +214,6 @@ pub enum IoOp {
     },
     /// Run an arbitrary closure on a background thread.
     /// Returns bytes on success, error on failure.
-    #[allow(dead_code)]
     Task(TaskFn),
     /// Resolve a hostname to IP addresses via getaddrinfo(3).
     /// Portless — always dispatched to the thread pool.

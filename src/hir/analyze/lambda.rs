@@ -259,11 +259,11 @@ impl<'a> Analyzer<'a> {
 
         // Check silent! assertion (before ceiling/muffle adjustments)
         if self.current_silence_assert && (inferred_signals != Signal::silent()) {
-            let reg = registry::global_registry().lock().unwrap();
+            let bits_str =
+                registry::with_registry(|reg| reg.format_signal_bits(inferred_signals.bits));
             return Err(format!(
                 "{}: silent! assertion failed: function may emit {}",
-                span,
-                reg.format_signal_bits(inferred_signals.bits),
+                span, bits_str,
             ));
         }
 
@@ -303,12 +303,15 @@ impl<'a> Analyzer<'a> {
             let effective_ceiling = ceiling.bits | muffle_bits;
             let excess = inferred_signals.bits.subtract(effective_ceiling);
             if !excess.is_empty() {
-                let reg = registry::global_registry().lock().unwrap();
+                let (ceiling_str, excess_str) = registry::with_registry(|reg| {
+                    (
+                        reg.format_signal_bits(ceiling.bits),
+                        reg.format_signal_bits(excess),
+                    )
+                });
                 return Err(format!(
                     "{}: function restricted to {} but body may emit {}",
-                    span,
-                    reg.format_signal_bits(ceiling.bits),
-                    reg.format_signal_bits(excess),
+                    span, ceiling_str, excess_str,
                 ));
             }
             if ceiling.propagates == 0 && inferred_signals.propagates != 0 {

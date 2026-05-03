@@ -154,7 +154,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
 ///
 /// Used by rotation-safety analysis: a tail-call loop containing calls
 /// to any of these with a heap argument is not safe for pool rotation.
-#[allow(dead_code)]
 const MUTATING_PRIMITIVES: &[&str] = &["push", "put", "del", "pop", "fiber/resume", "assign"];
 
 /// Build the set of primitive SymbolIds known to return immediates.
@@ -293,7 +292,6 @@ pub(crate) fn build_call_classification(symbols: &SymbolTable) -> crate::hir::Ca
 }
 
 /// Build the set of primitive SymbolIds that store heap values externally.
-#[allow(dead_code)]
 pub(crate) fn build_mutating_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
     let mut set = FxHashSet::default();
     for &name in MUTATING_PRIMITIVES {
