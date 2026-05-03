@@ -105,6 +105,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) region_enter: FuncId,
     pub(crate) region_exit: FuncId,
     pub(crate) region_exit_call: FuncId,
+    pub(crate) region_rotate: FuncId,
+    pub(crate) region_rotate_dealloc: FuncId,
     pub(crate) rotate_pools: FuncId,
     // New intrinsic helpers
     pub(crate) is_empty: FuncId,
@@ -336,6 +338,14 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_region_exit_call as *const u8,
     );
     builder.symbol(
+        "elle_jit_region_rotate",
+        dispatch::elle_jit_region_rotate as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_region_rotate_dealloc",
+        dispatch::elle_jit_region_rotate_dealloc as *const u8,
+    );
+    builder.symbol(
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
@@ -544,6 +554,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         region_enter: declare(module, "elle_jit_region_enter", &void_to_value)?,
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
         region_exit_call: declare(module, "elle_jit_region_exit_call", &void_to_value)?,
+        region_rotate: declare(module, "elle_jit_region_rotate", &void_to_value)?,
+        region_rotate_dealloc: declare(module, "elle_jit_region_rotate_dealloc", &void_to_value)?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
         // New intrinsic helpers
         is_empty: declare(module, "elle_jit_is_empty", &value_unary)?,

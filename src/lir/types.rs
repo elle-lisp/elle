@@ -599,6 +599,10 @@ pub enum LirInstr {
     /// objects between the two marks (arg temporaries), leaving the
     /// callee's allocations intact.
     RegionExitCall,
+    /// Rotate loop scope marks (soft — no slot deallocation).
+    RegionRotate,
+    /// Rotate loop scope marks (hard — with slot deallocation).
+    RegionRotateDealloc,
 
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.

@@ -907,6 +907,13 @@ impl Emitter {
                 // No stack effect
             }
 
+            LirInstr::RegionRotate => {
+                self.bytecode.emit(Instruction::RegionRotate);
+            }
+            LirInstr::RegionRotateDealloc => {
+                self.bytecode.emit(Instruction::RegionRotateDealloc);
+            }
+
             LirInstr::OutboxEnter => {
                 self.bytecode.emit(Instruction::OutboxEnter);
                 // No stack effect

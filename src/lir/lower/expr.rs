@@ -72,7 +72,7 @@ impl<'a> Lowerer<'a> {
                 strict,
             } => self.lower_destructure_expr(pattern, value, *strict, &hir.span),
 
-            HirKind::While { cond, body } => self.lower_while(cond, body),
+            HirKind::While { cond, body } => self.lower_while(cond, body, hir.id),
             HirKind::Loop { bindings, body } => self.lower_loop(bindings, body, hir.id),
             HirKind::Recur { args } => self.lower_recur(args),
 
@@ -426,9 +426,12 @@ impl<'a> Lowerer<'a> {
         Ok(self.fresh_reg())
     }
 
-    fn lower_while(&mut self, cond: &Hir, body: &Hir) -> Result<Reg, String> {
+    fn lower_while(&mut self, cond: &Hir, body: &Hir, _hir_id: HirId) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let flip_eligible = self.can_flip_while_loop(body, &[]);
+        // All flip-eligible loops get double-buffered scope marks.
+        let scope_eligible = flip_eligible;
+        let dealloc_eligible = scope_eligible && self.can_dealloc_in_loop(body, &[]);
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
@@ -436,6 +439,12 @@ impl<'a> Lowerer<'a> {
 
         // The entry block is the current block before we jump to cond.
         let entry_label = self.current_block.label;
+
+        // Double-buffered scope marks: push prev (guard) + curr before loop.
+        if scope_eligible {
+            self.emit_region_enter(); // prev (guard mark)
+            self.emit_region_enter(); // curr (first iteration)
+        }
 
         // Jump to condition check
         self.terminate(Terminator::Jump(cond_label));
@@ -455,17 +464,17 @@ impl<'a> Lowerer<'a> {
         if flip_eligible {
             self.flip_depth += 1;
         }
-        let scope_eligible = flip_eligible; // same escape-analysis gate
         self.current_block = BasicBlock::new(body_label);
-
-        if scope_eligible {
-            self.emit_region_enter(); // per-iteration scope mark
-        }
 
         let _body_reg = self.lower_expr(body)?;
 
+        // Back-edge: rotate scope marks (free prev iteration, start new curr)
         if scope_eligible {
-            self.emit_region_exit(); // release iteration allocs
+            if dealloc_eligible {
+                self.emit_region_rotate_dealloc();
+            } else {
+                self.emit_region_rotate();
+            }
         }
 
         // The back-edge block is whatever block we're in after lowering
@@ -484,8 +493,12 @@ impl<'a> Lowerer<'a> {
                 .push((entry_label, back_edge_label, done_label));
         }
 
-        // Done block — emit nil result here so it's tracked in this block
+        // Done block — release both scope marks (curr + prev)
         self.current_block = BasicBlock::new(done_label);
+        if scope_eligible {
+            self.emit_region_exit(); // curr
+            self.emit_region_exit(); // prev
+        }
         self.emit(LirInstr::Const {
             dst: result_reg,
             value: LirConst::Nil,
@@ -500,13 +513,11 @@ impl<'a> Lowerer<'a> {
         _hir_id: HirId,
     ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        // Flip (rotation) requires stricter analysis than scope allocation.
-        // Keep escape analysis for flip until region inference handles
-        // rotation safety (heap values crossing iteration boundaries).
-        // Pass loop bindings as scope_bindings so assigns to loop parameters
-        // aren't treated as dangerous outward sets.
         let loop_scope: Vec<(Binding, &Hir)> = bindings.iter().map(|(b, h)| (*b, h)).collect();
         let flip_eligible = self.can_flip_while_loop(body, &loop_scope);
+        // All flip-eligible loops get double-buffered scope marks.
+        let scope_eligible = flip_eligible;
+        let dealloc_eligible = scope_eligible && self.can_dealloc_in_loop(body, &loop_scope);
 
         let loop_label = self.fresh_label();
         let done_label = self.fresh_label();
@@ -525,6 +536,12 @@ impl<'a> Lowerer<'a> {
             binding_slots.push(slot);
         }
 
+        // Double-buffered scope marks: push prev (guard) + curr before loop.
+        if scope_eligible {
+            self.emit_region_enter(); // prev (guard mark)
+            self.emit_region_enter(); // curr (first iteration)
+        }
+
         // Jump to loop header
         self.terminate(Terminator::Jump(loop_label));
         self.finish_block();
@@ -533,16 +550,10 @@ impl<'a> Lowerer<'a> {
         if flip_eligible {
             self.flip_depth += 1;
         }
-        let scope_eligible = flip_eligible;
         self.current_block = BasicBlock::new(loop_label);
 
-        if scope_eligible {
-            self.emit_region_enter();
-        }
-
-        // Save depth counters — Recur emits RegionExit which decrements
-        // region_depth in the back-edge path, but that path jumps to the
-        // loop header. The normal exit path needs the original depths.
+        // Save depth counters — Recur emits RegionRotate which doesn't
+        // change region_depth, but the normal exit path needs original depths.
         let saved_region_depth = self.region_depth;
         let saved_flip_depth = self.flip_depth;
 
@@ -551,6 +562,7 @@ impl<'a> Lowerer<'a> {
             loop_label,
             binding_slots: binding_slots.clone(),
             scope_eligible,
+            dealloc_eligible,
         });
 
         let body_reg = self.lower_expr(body)?;
@@ -562,8 +574,6 @@ impl<'a> Lowerer<'a> {
         self.flip_depth = saved_flip_depth;
 
         // If we reach here (no Recur), body_reg is the loop result.
-        // Store to a slot so it's accessible from the done block
-        // (same pattern as lower_if).
         let result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         self.emit(LirInstr::StoreLocal {
@@ -571,8 +581,10 @@ impl<'a> Lowerer<'a> {
             src: body_reg,
         });
 
+        // Release both scope marks (curr + prev)
         if scope_eligible {
-            self.emit_region_exit();
+            self.emit_region_exit(); // curr
+            self.emit_region_exit(); // prev
         }
 
         let back_edge_label = self.current_block.label;
@@ -604,6 +616,7 @@ impl<'a> Lowerer<'a> {
         let loop_label = ctx.loop_label;
         let binding_slots = ctx.binding_slots.clone();
         let scope_eligible = ctx.scope_eligible;
+        let dealloc_eligible = ctx.dealloc_eligible;
 
         if args.len() != binding_slots.len() {
             return Err(format!(
@@ -619,14 +632,21 @@ impl<'a> Lowerer<'a> {
             arg_regs.push(self.lower_expr(arg)?);
         }
 
-        // Release iteration allocs before the back-edge jump
-        if scope_eligible {
-            self.emit_region_exit();
-        }
-
-        // Store new values to loop binding slots
+        // Store new values to loop binding slots BEFORE rotating scope marks.
+        // With double-buffered marks, RegionRotate frees the PREVIOUS
+        // iteration's allocs, not the current one — so recur arg values
+        // survive the rotation even if they reference current-iteration allocs.
         for (reg, &slot) in arg_regs.iter().zip(&binding_slots) {
             self.emit(LirInstr::StoreLocal { slot, src: *reg });
+        }
+
+        // Rotate scope marks: free prev iteration, start new curr
+        if scope_eligible {
+            if dealloc_eligible {
+                self.emit_region_rotate_dealloc();
+            } else {
+                self.emit_region_rotate();
+            }
         }
 
         // Jump back to loop header

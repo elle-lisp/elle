@@ -173,6 +173,22 @@ pub fn region_exit_call() {
     }
 }
 
+/// Rotate loop scope marks on the current FiberHeap (`RegionRotate`).
+pub fn region_rotate() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).rotate_scope_marks() };
+    }
+}
+
+/// Rotate loop scope marks with dealloc (`RegionRotateDealloc`).
+pub fn region_rotate_dealloc() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).rotate_scope_marks_dealloc() };
+    }
+}
+
 /// Push a flip frame on the current FiberHeap (`FlipEnter`).
 pub fn flip_enter() {
     let ptr = current_heap_ptr();

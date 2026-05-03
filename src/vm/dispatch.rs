@@ -435,6 +435,12 @@ impl VM {
                 Instruction::RegionExitCall => {
                     crate::value::fiberheap::region_exit_call();
                 }
+                Instruction::RegionRotate => {
+                    crate::value::fiberheap::region_rotate();
+                }
+                Instruction::RegionRotateDealloc => {
+                    crate::value::fiberheap::region_rotate_dealloc();
+                }
 
                 // Outbox routing: toggle allocation target for yield-bound values.
                 Instruction::OutboxEnter => {

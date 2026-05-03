@@ -471,7 +471,6 @@ fn flip_noop_without_frame() {
 // through region inference (follow-up branch).
 
 #[test]
-#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
 fn region_exit_returns_slots_to_free_list() {
     // RegionExit must return slab slots to the free list so subsequent
     // allocations reuse them. This is the Phase 1 enabling condition:
@@ -530,7 +529,6 @@ fn region_exit_returns_slots_to_free_list() {
 }
 
 #[test]
-#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
 fn region_exit_reclaims_dtor_objects() {
     // RegionExit must run destructors AND return slots for objects that
     // need Drop (LString, Closure, etc.). Verifies that dtor ordering
@@ -573,7 +571,6 @@ fn region_exit_reclaims_dtor_objects() {
 }
 
 #[test]
-#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
 fn region_exit_call_returns_middle_range() {
     // RegionExitCall pops two marks and frees only the range between
     // them (arg temporaries). Objects before mark1 and after mark2
@@ -621,7 +618,6 @@ fn region_exit_call_returns_middle_range() {
 }
 
 #[test]
-#[ignore = "dealloc_slot disabled until scope eligibility uses region inference"]
 fn region_exit_nested_scopes_dealloc_innermost_first() {
     // Nested RegionEnter/RegionExit must dealloc innermost scope's slots
     // first, then outer scope's. The free list is LIFO, so inner slots

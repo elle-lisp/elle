@@ -168,7 +168,6 @@ impl SlabPool {
     /// pool and must not have been deallocated since. No live `Value` may
     /// reference this slot after this call.
     #[inline]
-    #[allow(dead_code)] // Used by release() once scope eligibility is fully wired
     pub unsafe fn dealloc_slot(&mut self, ptr: *mut HeapObject) {
         self.slab.dealloc(ptr);
     }
