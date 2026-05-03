@@ -583,11 +583,15 @@ impl<'a> Lowerer<'a> {
                     if !callee_is_safe {
                         if self.callee_is_arg_escaping_primitive(func) {
                             // Arg-escaping primitives (push, put) insert a
-                            // value into a collection. If any arg is
-                            // heap-allocated and scope-local, the scope would
-                            // free it while the collection still references it.
+                            // value into a collection. Only the VALUE args
+                            // matter: if a value arg is heap-allocated and
+                            // scope-local, the scope would free it while the
+                            // collection still references it. The target
+                            // collection (arg 0) is skipped — a scope-local
+                            // target is reclaimed along with its contents.
                             if args
                                 .iter()
+                                .skip(1)
                                 .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
                             {
                                 return true;

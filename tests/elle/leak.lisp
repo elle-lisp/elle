@@ -22,6 +22,10 @@
   "True if both deltas are under limit and 10000 is not 100x 100."
   (and (%lt d100 limit) (%lt d10k limit) (or (= d100 0) (%lt d10k (* d100 10)))))
 
+(defn linear? [d100 d1000]
+  "True if growth is roughly linear (d1000 ≥ 5x d100)."
+  (and (%ge d100 50) (%ge d1000 (* d100 5))))
+
 # ── Tier 0: scope reclamation in while loops ─────────────────────
 # Let-bound structs inside a while body are reclaimed by region-exit.
 
@@ -312,14 +316,589 @@
   (assert (or checked? (bounded? d100 d10k 10))
           (string "t0c concat-yield: d100=" d100 " d10k=" d10k)))
 
+# ── Tier 5: fiber lifecycle ─────────────────────────────────────
+# Child fiber allocations live on a separate heap (arena/count measures
+# the calling fiber's heap). Scope marks reclaim the FiberHandle slot
+# on each iteration, triggering Drop on the child fiber and its heap.
+
+# 5a: one-shot fiber — create, resume (completes), discard
+(defn t5-one-shot [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [f (fiber/new (fn [] i) 1)]
+      (fiber/resume f))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t5-one-shot 100)
+      d2k (t5-one-shot 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t5 one-shot: d100=" d100 " d2k=" d2k)))
+
+# 5b: child allocates a string, parent uses the result
+(defn t5-alloc-return [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [f (fiber/new (fn [] (string "val-" i)) 1)
+          result (fiber/resume f)]
+      (assert (string? result)))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t5-alloc-return 100)
+      d2k (t5-alloc-return 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t5 alloc-return: d100=" d100 " d2k=" d2k)))
+
+# 5c: fiber inside a fiber body
+(defn t5-nested [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [f (fiber/new (fn []
+                         (let [g (fiber/new (fn [] i) 1)]
+                           (fiber/resume g))) 1)]
+      (fiber/resume f))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t5-nested 100)
+      d2k (t5-nested 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t5 nested: d100=" d100 " d2k=" d2k)))
+
+# 5d: create fiber, resume K times, discard
+(defn t5-multi-resume [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [f (fiber/new (fn []
+                         (yield 1)
+                         (yield 2)
+                         3) |:yield|)]
+      (fiber/resume f)
+      (fiber/resume f)
+      (fiber/resume f))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t5-multi-resume 100)
+      d2k (t5-multi-resume 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t5 multi-resume: d100=" d100 " d2k=" d2k)))
+
+# 5e: protect in a loop (creates fiber internally)
+(defn t5-protect [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [[ok v] (protect (+ 1 2))]
+      v)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t5-protect 100)
+      d2k (t5-protect 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t5 protect: d100=" d100 " d2k=" d2k)))
+
+# ── Tier 6: collection HOFs in loops ──────────────────────────
+# Higher-order stdlib functions that allocate intermediate structures.
+# All should be bounded: results are discarded at scope exit.
+
+# 6a: reduce
+(defn t6-reduce [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (reduce + 0 [1 2 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-reduce 100)
+      d2k (t6-reduce 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 reduce: d100=" d100 " d2k=" d2k)))
+
+# 6b: fold
+(defn t6-fold [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (fold (fn [a x] (+ a x)) 0 [1 2 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-fold 100)
+      d2k (t6-fold 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 fold: d100=" d100 " d2k=" d2k)))
+
+# 6c: zip
+(defn t6-zip [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (zip [1 2] [3 4])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-zip 100)
+      d2k (t6-zip 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 zip: d100=" d100 " d2k=" d2k)))
+
+# 6e: sort
+(defn t6-sort [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (sort [3 1 2])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-sort 100)
+      d2k (t6-sort 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 sort: d100=" d100 " d2k=" d2k)))
+
+# 6f: reverse
+(defn t6-reverse [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (reverse [1 2 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-reverse 100)
+      d2k (t6-reverse 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 reverse: d100=" d100 " d2k=" d2k)))
+
+# 6g: distinct
+(defn t6-distinct [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (distinct [1 2 1 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-distinct 100)
+      d2k (t6-distinct 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 distinct: d100=" d100 " d2k=" d2k)))
+
+# 6h: take and drop (operate on lists)
+(defn t6-take-drop [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (take 2 (list 1 2 3))
+    (drop 1 (list 1 2 3))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-take-drop 100)
+      d2k (t6-take-drop 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 take-drop: d100=" d100 " d2k=" d2k)))
+
+# 6i: group-by
+(defn t6-group-by [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (group-by odd? [1 2 3 4])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-group-by 100)
+      d2k (t6-group-by 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 group-by: d100=" d100 " d2k=" d2k)))
+
+# 6j: frequencies
+(defn t6-frequencies [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (frequencies [1 2 1 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t6-frequencies 100)
+      d2k (t6-frequencies 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t6 frequencies: d100=" d100 " d2k=" d2k)))
+
+# ── Tier 7: collection conversions and slicing ────────────────
+
+# 7a: ->array
+(defn t7-to-array [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (->array (list 1 2 3))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t7-to-array 100)
+      d2k (t7-to-array 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t7 ->array: d100=" d100 " d2k=" d2k)))
+
+# 7b: ->list
+(defn t7-to-list [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (->list [1 2 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t7-to-list 100)
+      d2k (t7-to-list 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t7 ->list: d100=" d100 " d2k=" d2k)))
+
+# 7c: freeze mutable array
+(defn t7-freeze [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (freeze @[1 2 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t7-freeze 100)
+      d2k (t7-freeze 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t7 freeze: d100=" d100 " d2k=" d2k)))
+
+# 7d: slice
+(defn t7-slice [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (slice [1 2 3 4] 1 3)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t7-slice 100)
+      d2k (t7-slice 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t7 slice: d100=" d100 " d2k=" d2k)))
+
+# 7e: keys and values
+(defn t7-keys-values [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (keys {:a 1 :b 2})
+    (values {:a 1 :b 2})
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t7-keys-values 100)
+      d2k (t7-keys-values 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t7 keys-values: d100=" d100 " d2k=" d2k)))
+
+# 7f: merge
+(defn t7-merge [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (merge {:a 1} {:b 2})
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t7-merge 100)
+      d2k (t7-merge 2000)]
+  (assert (or checked? (bounded? d100 d2k 30))
+          (string "t7 merge: d100=" d100 " d2k=" d2k)))
+
+# ── Tier 8: string operations in loops ────────────────────────
+
+# 8a: string interpolation
+(defn t8-string-interp [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string "x=" i " y=" (%add i 1))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-string-interp 100)
+      d2k (t8-string-interp 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 string-interp: d100=" d100 " d2k=" d2k)))
+
+# 8b: concat chain
+(defn t8-concat [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (concat "a" "b" "c")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-concat 100)
+      d2k (t8-concat 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 concat: d100=" d100 " d2k=" d2k)))
+
+# 8c: string/split
+(defn t8-split [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string/split "a,b,c" ",")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-split 100)
+      d2k (t8-split 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 split: d100=" d100 " d2k=" d2k)))
+
+# 8d: string/join
+(defn t8-join [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string/join ["a" "b" "c"] ",")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-join 100)
+      d2k (t8-join 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 join: d100=" d100 " d2k=" d2k)))
+
+# 8e: string/trim
+(defn t8-trim [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string/trim "  x  ")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-trim 100)
+      d2k (t8-trim 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 trim: d100=" d100 " d2k=" d2k)))
+
+# 8f: string/replace
+(defn t8-replace [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string/replace "hello" "l" "r")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-replace 100)
+      d2k (t8-replace 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 replace: d100=" d100 " d2k=" d2k)))
+
+# 8g: number->string
+(defn t8-num-to-str [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (number->string i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-num-to-str 100)
+      d2k (t8-num-to-str 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 num->str: d100=" d100 " d2k=" d2k)))
+
+# 8h: read
+(defn t8-read [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (read "42")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t8-read 100)
+      d2k (t8-read 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t8 read: d100=" d100 " d2k=" d2k)))
+
+# ── Tier 9: struct patterns in loops ──────────────────────────
+
+# 9a: struct literal discarded
+(defn t9-struct-lit [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    {:x i :y (%add i 1)}
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t9-struct-lit 100)
+      d2k (t9-struct-lit 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t9 struct-lit: d100=" d100 " d2k=" d2k)))
+
+# 9b: struct field access (no alloc escape)
+(defn t9-struct-get [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [s {:x 1}]
+      s:x)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t9-struct-get 100)
+      d2k (t9-struct-get 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t9 struct-get: d100=" d100 " d2k=" d2k)))
+
+# 9c: mutable struct created and discarded (put with immediate value)
+(defn t9-struct-put [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [s @{:x 0}]
+      (put s :x i))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t9-struct-put 100)
+      d2k (t9-struct-put 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t9 struct-put: d100=" d100 " d2k=" d2k)))
+
+# 9e: struct match — pattern matching on struct, no escape
+(defn t9-struct-match [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (match {:type :a :v i}
+      {:type :a :v v} v
+      _ 0)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t9-struct-match 100)
+      d2k (t9-struct-match 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t9 struct-match: d100=" d100 " d2k=" d2k)))
+
+# ── Tier 10: combined patterns (realistic code) ──────────────
+
+(defn helper-f [x]
+  (string "v" x))
+(defn helper-g [x]
+  {:val x})
+(defn helper-h [x]
+  (+ x 1))
+
+# 10a: nested function calls, each allocating
+(defn t10-call-chain [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (helper-f (helper-g (helper-h i)))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t10-call-chain 100)
+      d2k (t10-call-chain 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t10 call-chain: d100=" d100 " d2k=" d2k)))
+
+# 10b: let chain
+(defn t10-let-chain [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [a (helper-h i)]
+      (let [b (helper-g a)]
+        b))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t10-let-chain 100)
+      d2k (t10-let-chain 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t10 let-chain: d100=" d100 " d2k=" d2k)))
+
+# 10c: each over array with string alloc per element
+(defn t10-each-array [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (each x in [1 2 3]
+      (string "v" x))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t10-each-array 100)
+      d2k (t10-each-array 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t10 each-array: d100=" d100 " d2k=" d2k)))
+
+# 10e: push into accumulator (genuine linear escape)
+(defn t10-push-accum [n]
+  (def before (arena/count))
+  (def @acc [])
+  (def @i 0)
+  (while (%lt i n)
+    (push acc (map (fn [x] (%add x 1)) [1 2 3]))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t10-push-accum 100)
+      d1k (t10-push-accum 1000)]
+  (assert (linear? d100 d1k) (string "t10 push-accum: d100=" d100 " d1k=" d1k)))
+
+# 10f: format-string in a loop (println is async I/O; test formatting only)
+(defn t10-format [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string "iter " i " of " n)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t10-format 100)
+      d2k (t10-format 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t10 format: d100=" d100 " d2k=" d2k)))
+
+# 10g: pipeline — split → map → filter → join
+(defn t10-pipeline [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (string/join (filter (fn [x] (not= x ""))
+                         (map string/trim (string/split "a , b , c" ","))) ",")
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t10-pipeline 100)
+      d2k (t10-pipeline 2000)]
+  (assert (or checked? (bounded? d100 d2k 10))
+          (string "t10 pipeline: d100=" d100 " d2k=" d2k)))
+
 # ── Known leaks: inherent ────────────────────────────────────────
 # These genuinely escape heap values to outer bindings or collections.
 # The scope cannot free them because the outer reference survives.
 # Fixing requires drop-on-overwrite or reference counting.
-
-(defn linear? [d100 d1000]
-  "True if growth is roughly linear (d1000 ≥ 5x d100)."
-  (and (%ge d100 50) (%ge d1000 (* d100 5))))
 
 # Heap struct assigned to outer mutable binding
 # With the bump arena, release() reclaims memory by position rewind

@@ -267,6 +267,9 @@ const NON_ESCAPING_STDLIB: &[&str] = &[
     "product",
     "min-by",
     "max-by",
+    "merge",
+    "->array",
+    "->list",
 ];
 
 /// Build the set of stdlib SymbolIds known to not escape heap values.
