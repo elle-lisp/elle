@@ -376,6 +376,20 @@ pub extern "C" fn elle_jit_region_exit_call() -> JitValue {
     JitValue::nil()
 }
 
+/// Rotate loop scope marks: pop current, release previous, push current
+/// as new previous, push fresh mark as new current.
+#[no_mangle]
+pub extern "C" fn elle_jit_region_rotate() -> JitValue {
+    crate::value::fiberheap::region_rotate();
+    JitValue::nil()
+}
+
+#[no_mangle]
+pub extern "C" fn elle_jit_region_rotate_dealloc() -> JitValue {
+    crate::value::fiberheap::region_rotate_dealloc();
+    JitValue::nil()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

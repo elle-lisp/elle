@@ -1703,4 +1703,153 @@ impl<'a> Lowerer<'a> {
         }
         true
     }
+
+    /// Check if dealloc_slot is safe within RegionRotate for a loop body.
+    ///
+    /// Double-buffered scope marks delay freeing by one iteration, so
+    /// recur arg values survive the rotation. But if a loop param is
+    /// assigned a heap value that REFERENCES the previous param value
+    /// (e.g., `(pair val acc)` where cdr → old acc), freeing iteration
+    /// N-1 corrupts iteration N's cons chain.
+    ///
+    /// Returns false when a loop param is assigned a non-safe value whose
+    /// arguments include another loop param — indicating a reference chain
+    /// across iterations.
+    pub(super) fn can_dealloc_in_loop(
+        &self,
+        body: &Hir,
+        loop_bindings: &[(Binding, &Hir)],
+    ) -> bool {
+        !self.loop_param_chains(body, loop_bindings)
+    }
+
+    /// Check if a loop param is assigned a value that chains across iterations.
+    ///
+    /// True when: `(assign loop_param (call ... other_loop_param ...))` — the
+    /// call's result may contain a reference to the old param value.
+    fn loop_param_chains(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
+        match &hir.kind {
+            HirKind::Assign { target, value } => {
+                let is_loop_param = scope_bindings.iter().any(|(b, _)| b == target);
+                if is_loop_param
+                    && !self.result_is_safe(value, scope_bindings)
+                    && Self::expr_references_loop_param(value, scope_bindings)
+                {
+                    return true;
+                }
+                self.loop_param_chains(value, scope_bindings)
+            }
+            HirKind::Lambda { .. } | HirKind::Loop { .. } => false,
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.loop_param_chains(cond, scope_bindings)
+                    || self.loop_param_chains(then_branch, scope_bindings)
+                    || self.loop_param_chains(else_branch, scope_bindings)
+            }
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .any(|e| self.loop_param_chains(e, scope_bindings)),
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.loop_param_chains(init, scope_bindings))
+                    || self.loop_param_chains(body, scope_bindings)
+            }
+            HirKind::Call { func, args, .. } => {
+                self.loop_param_chains(func, scope_bindings)
+                    || args
+                        .iter()
+                        .any(|a| self.loop_param_chains(&a.expr, scope_bindings))
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    self.loop_param_chains(c, scope_bindings)
+                        || self.loop_param_chains(b, scope_bindings)
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| self.loop_param_chains(b, scope_bindings))
+            }
+            HirKind::Match { value, arms } => {
+                self.loop_param_chains(value, scope_bindings)
+                    || arms.iter().any(|(_, guard, body)| {
+                        guard
+                            .as_ref()
+                            .is_some_and(|g| self.loop_param_chains(g, scope_bindings))
+                            || self.loop_param_chains(body, scope_bindings)
+                    })
+            }
+            HirKind::Block { body, .. } => body
+                .iter()
+                .any(|e| self.loop_param_chains(e, scope_bindings)),
+            HirKind::While { cond, body } => {
+                self.loop_param_chains(cond, scope_bindings)
+                    || self.loop_param_chains(body, scope_bindings)
+            }
+            HirKind::SetCell { cell, value } => {
+                self.loop_param_chains(cell, scope_bindings)
+                    || self.loop_param_chains(value, scope_bindings)
+            }
+            HirKind::MakeCell { value }
+            | HirKind::DerefCell { cell: value }
+            | HirKind::Define { value, .. }
+            | HirKind::Break { value, .. }
+            | HirKind::Emit { value, .. } => self.loop_param_chains(value, scope_bindings),
+            HirKind::Recur { args } => args
+                .iter()
+                .any(|a| self.loop_param_chains(a, scope_bindings)),
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| self.loop_param_chains(a, scope_bindings)),
+            HirKind::Eval { expr, env } => {
+                self.loop_param_chains(expr, scope_bindings)
+                    || self.loop_param_chains(env, scope_bindings)
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings.iter().any(|(k, v)| {
+                    self.loop_param_chains(k, scope_bindings)
+                        || self.loop_param_chains(v, scope_bindings)
+                }) || self.loop_param_chains(body, scope_bindings)
+            }
+            HirKind::Destructure { value, .. } => self.loop_param_chains(value, scope_bindings),
+            _ => false,
+        }
+    }
+
+    /// Check if an expression directly references a loop parameter Var.
+    fn expr_references_loop_param(hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
+        match &hir.kind {
+            HirKind::Var(b) => scope_bindings.iter().any(|(sb, _)| sb == b),
+            HirKind::Call { func, args, .. } => {
+                Self::expr_references_loop_param(func, scope_bindings)
+                    || args
+                        .iter()
+                        .any(|a| Self::expr_references_loop_param(&a.expr, scope_bindings))
+            }
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| Self::expr_references_loop_param(a, scope_bindings)),
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::expr_references_loop_param(cond, scope_bindings)
+                    || Self::expr_references_loop_param(then_branch, scope_bindings)
+                    || Self::expr_references_loop_param(else_branch, scope_bindings)
+            }
+            HirKind::Begin(exprs) => exprs
+                .iter()
+                .any(|e| Self::expr_references_loop_param(e, scope_bindings)),
+            HirKind::DerefCell { cell } => Self::expr_references_loop_param(cell, scope_bindings),
+            // Don't recurse into lambdas
+            HirKind::Lambda { .. } => false,
+            _ => false,
+        }
+    }
 }

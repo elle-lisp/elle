@@ -79,6 +79,21 @@ impl SharedAllocator {
         self.pool.release(&mark.slab);
     }
 
+    /// Double-buffered scope mark rotation for loop scope marks.
+    /// Same logic as FiberHeap::rotate_scope_marks but on the shared pool.
+    pub fn rotate_marks(&mut self) {
+        if self.marks.len() < 2 {
+            return;
+        }
+        let curr = self.marks.pop().unwrap();
+        let prev = self.marks.pop().unwrap();
+        self.pool.release(&prev.slab);
+        self.marks.push(curr);
+        self.marks.push(SharedMark {
+            slab: self.pool.mark(),
+        });
+    }
+
     /// Capture the current pool position for rotation.
     #[allow(dead_code)]
     pub(crate) fn rotation_mark(&self) -> SlabMark {

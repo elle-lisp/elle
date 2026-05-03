@@ -10,7 +10,13 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         hir_id: HirId,
     ) -> Result<Reg, String> {
-        let scoped = self.region_scope_check(hir_id);
+        // Region inference says scope is reclaimable, but tail calls to
+        // scope-bound callees are unsafe: RegionExit frees the callee's
+        // slot before the tail call executes.
+        let scope_refs: Vec<(Binding, &Hir)> =
+            bindings.iter().map(|(b, init)| (*b, init)).collect();
+        let scoped = self.region_scope_check(hir_id)
+            && !Self::tail_call_callee_is_scope_bound(body, &scope_refs);
         if scoped {
             self.emit_region_enter();
         }
@@ -103,7 +109,10 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         hir_id: HirId,
     ) -> Result<Reg, String> {
-        let scoped = self.region_scope_check(hir_id);
+        let scope_refs: Vec<(Binding, &Hir)> =
+            bindings.iter().map(|(b, init)| (*b, init)).collect();
+        let scoped = self.region_scope_check(hir_id)
+            && !Self::tail_call_callee_is_scope_bound(body, &scope_refs);
         if scoped {
             self.emit_region_enter();
         }

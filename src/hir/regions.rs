@@ -315,10 +315,16 @@ impl RegionInference {
                 }
             }
 
-            // Loop: introduce loop region
+            // Loop: introduce loop region (gated on suspension)
             HirKind::Loop { bindings, body } => {
-                let loop_region = self.fresh_region(self.current_region, RegionKind::Loop);
-                self.scope_region.insert(hir.id, loop_region);
+                let may_suspend = hir.signal.may_suspend();
+                let loop_region = if may_suspend {
+                    self.current_region
+                } else {
+                    let r = self.fresh_region(self.current_region, RegionKind::Loop);
+                    self.scope_region.insert(hir.id, r);
+                    r
+                };
 
                 // Inits are evaluated in the ENCLOSING region
                 for (b, init) in bindings {
@@ -575,10 +581,22 @@ impl RegionInference {
                 self.walk(body)
             }
 
-            // While: should be eliminated by functionalize, but handle
+            // While: normally eliminated by functionalize, but handle
+            // with a scope region for correctness (same gate as Let).
             HirKind::While { cond, body } => {
-                self.walk(cond);
-                self.walk(body);
+                let may_suspend = hir.signal.may_suspend();
+                if !may_suspend {
+                    let r = self.fresh_region(self.current_region, RegionKind::Scope);
+                    self.scope_region.insert(hir.id, r);
+                    let saved = self.current_region;
+                    self.current_region = r;
+                    self.walk(cond);
+                    self.walk(body);
+                    self.current_region = saved;
+                } else {
+                    self.walk(cond);
+                    self.walk(body);
+                }
                 None
             }
 
@@ -714,15 +732,33 @@ impl RegionInference {
                     }
                 }
                 RegionKind::Loop => {
-                    let has_loop_allocs = alloc_region
-                        .values()
-                        .any(|r| *r == *region || self.tree.is_ancestor(*region, *r));
-                    if has_loop_allocs {
-                        stats.scopes_loop += 1;
-                        RegionKind::Loop
+                    // Same escape check as Scope: if any alloc physically
+                    // inside this loop was widened past it, it's not safe
+                    // to reclaim per-iteration.
+                    let any_escaped = self.alloc_var.values().any(|&var_id| {
+                        let initial = self.var_initial_region[var_id as usize];
+                        let solved = self.var_regions[var_id as usize];
+                        let inside = initial == *region || self.tree.is_ancestor(*region, initial);
+                        if !inside {
+                            return false;
+                        }
+                        let stayed = solved == *region || self.tree.is_ancestor(*region, solved);
+                        !stayed
+                    });
+                    if any_escaped {
+                        stats.scopes_global += 1;
+                        RegionKind::Global
                     } else {
-                        stats.scopes_scope += 1;
-                        RegionKind::Scope
+                        let has_loop_allocs = alloc_region
+                            .values()
+                            .any(|r| *r == *region || self.tree.is_ancestor(*region, *r));
+                        if has_loop_allocs {
+                            stats.scopes_loop += 1;
+                            RegionKind::Loop
+                        } else {
+                            stats.scopes_scope += 1;
+                            RegionKind::Scope
+                        }
                     }
                 }
                 RegionKind::Function => {
@@ -1481,6 +1517,48 @@ mod tests {
         assert!(
             find_scope_kind(&info, RegionKind::Global) >= 1,
             "let with non-immediate user call should be Global"
+        );
+    }
+
+    // ── While scope region tests ─────────────────────────────────
+
+    #[test]
+    fn while_immediate_body_gets_scope() {
+        // A while loop whose body is silent (no suspension, no escaping allocs)
+        // should get a Scope region for per-iteration deallocation.
+        let (_, _, info) = analyze("(def @n 0) (while (%lt n 10) (assign n (%add n 1)))");
+        assert!(
+            find_scope_kind(&info, RegionKind::Scope) >= 1,
+            "while with immediate body should produce Scope region, got scope_kinds: {:?}",
+            info.scope_kind
+        );
+    }
+
+    #[test]
+    fn while_with_alloc_body_gets_scope_or_global() {
+        // A while loop whose body allocates (unknown call) → the scope
+        // should be Global because the call may escape values.
+        let (_, _, info) =
+            analyze("(def @n 0) (while (%lt n 10) (begin (f n) (assign n (%add n 1))))");
+        // f is an unknown call → allocation escapes → Global
+        assert!(
+            info.stats.regions_created >= 2,
+            "while with unknown call should create regions"
+        );
+    }
+
+    #[test]
+    fn loop_suspending_body_no_loop_region() {
+        // A loop whose body suspends AND allocates should NOT get a Loop
+        // region — suspension means we can't safely reclaim per-iteration.
+        // (f i) is an unknown call that allocates; (emit :yield) suspends.
+        let (_, _, info) = analyze("(loop [i 0] (begin (emit :yield (f i)) (recur (%add i 1))))");
+        // The Loop HIR node must not produce a Loop region when it suspends.
+        assert_eq!(
+            find_scope_kind(&info, RegionKind::Loop),
+            0,
+            "suspending loop must not get Loop region, got scope_kinds: {:?}",
+            info.scope_kind
         );
     }
 }

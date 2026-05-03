@@ -1092,6 +1092,20 @@ impl<'a> FunctionTranslator<'a> {
                 let call = builder.ins().call(func_ref, &[]);
                 let _ = builder.inst_results(call);
             }
+            LirInstr::RegionRotate => {
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.region_rotate, builder.func);
+                let call = builder.ins().call(func_ref, &[]);
+                let _ = builder.inst_results(call);
+            }
+            LirInstr::RegionRotateDealloc => {
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.region_rotate_dealloc, builder.func);
+                let call = builder.ins().call(func_ref, &[]);
+                let _ = builder.inst_results(call);
+            }
 
             LirInstr::PushParamFrame { pairs } => {
                 let vm = self.vm_ptr.ok_or_else(|| {

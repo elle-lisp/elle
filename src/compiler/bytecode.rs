@@ -207,6 +207,16 @@ pub enum Instruction {
     /// frees only the range between them (arg temporaries).
     RegionExitCall,
 
+    /// Rotate loop scope marks (soft — no slot deallocation).
+    /// Resets alloc_count, runs dtors, truncates tracking vecs.
+    /// Used when loop params may chain across iterations.
+    RegionRotate,
+
+    /// Rotate loop scope marks (hard — with slot deallocation).
+    /// Same as RegionRotate but returns slab slots to the free list.
+    /// Used when no loop param references previous iteration's allocs.
+    RegionRotateDealloc,
+
     /// Push a parameter frame onto the fiber's param_frames stack.
     /// Operand: u8 count (number of (param, value) pairs on the stack).
     /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
@@ -551,6 +561,8 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::RegionEnter
             | Instruction::RegionExit
             | Instruction::RegionExitCall
+            | Instruction::RegionRotate
+            | Instruction::RegionRotateDealloc
             | Instruction::OutboxEnter
             | Instruction::OutboxExit
             | Instruction::FlipEnter

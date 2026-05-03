@@ -357,16 +357,15 @@ impl FiberHeap {
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
 
-        // Dealloc slab slots allocated after the mark. Slot recycling
-        // is deferred until scope eligibility for while/loop forms is
-        // routed through region inference (follow-up to this PR).
+        // Dealloc slab slots allocated after the mark, returning them
+        // to the free list for reuse. Scope eligibility is gated by
+        // Tofte-Talpin region inference (suspension + escape analysis).
         for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
-            // SAFETY: pool.run_dtors already ran destructors.
-            // TODO: enable dealloc_slot once region inference covers while/loop.
-            // unsafe {
-            //     self.pool.dealloc_slot(self.pool.allocs[i]);
-            // }
-            let _ = i;
+            // SAFETY: pool.run_dtors already ran destructors; scope
+            // eligibility proves no live values reference these slots.
+            unsafe {
+                self.pool.dealloc_slot(self.pool.allocs[i]);
+            }
         }
         self.pool.allocs.truncate(mark.root_allocs_len());
 
@@ -450,6 +449,64 @@ impl FiberHeap {
         self.scope_dtors_run += dtors_before - self.pool.dtors.len();
     }
 
+    /// Rotate loop scope marks for double-buffered deallocation.
+    ///
+    /// The scope mark stack has two marks: [prev, curr]. This operation:
+    /// 1. Pops curr (saves it)
+    /// 2. Pops prev and releases (frees the iteration-before-last's allocs)
+    /// 3. Pushes saved curr as new prev
+    /// 4. Pushes a fresh mark as new curr
+    ///
+    /// This ensures that values from the PREVIOUS iteration survive into
+    /// the CURRENT iteration (recur args, loop params), and only the
+    /// iteration-before-last's allocs are freed.
+    pub fn rotate_scope_marks(&mut self) {
+        if self.scope_marks.len() < 2 {
+            return; // guard: no-op if marks are missing
+        }
+        if !self.shared_alloc.is_null() {
+            unsafe { &mut *self.shared_alloc }.rotate_marks();
+        }
+        let curr = self.scope_marks.pop().unwrap();
+        let dtors_before = self.pool.dtors.len();
+        let prev = self
+            .scope_marks
+            .pop()
+            .expect("RegionRotate: missing previous scope mark");
+        // Use release_no_dealloc: run dtors and reset alloc_count, but
+        // don't free slab slots. Loop iteration values may chain across
+        // generations (cons lists, etc.), making slot freeing unsafe.
+        // Let-scope RegionExit still uses release() with dealloc.
+        self.release_no_dealloc(prev);
+        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
+        self.scope_marks.push(curr);
+        self.scope_marks.push(self.mark());
+        self.scope_enters += 1;
+    }
+
+    /// Like `rotate_scope_marks` but also deallocates slab slots.
+    /// Only safe when no loop param's value references a previous
+    /// iteration's alloc (no cons-chain pattern).
+    pub fn rotate_scope_marks_dealloc(&mut self) {
+        if self.scope_marks.len() < 2 {
+            return;
+        }
+        if !self.shared_alloc.is_null() {
+            unsafe { &mut *self.shared_alloc }.rotate_marks();
+        }
+        let curr = self.scope_marks.pop().unwrap();
+        let dtors_before = self.pool.dtors.len();
+        let prev = self
+            .scope_marks
+            .pop()
+            .expect("RegionRotateDealloc: missing previous scope mark");
+        self.release(prev);
+        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
+        self.scope_marks.push(curr);
+        self.scope_marks.push(self.mark());
+        self.scope_enters += 1;
+    }
+
     /// Pop two scope marks and release only the range between them.
     ///
     /// Used by `RegionExitCall`: mark2 (top) is the barrier pushed
@@ -479,9 +536,11 @@ impl FiberHeap {
         self.scope_dtors_run += dtors_freed;
 
         // Dealloc slab slots for the range, then drain the entries.
-        // TODO: enable dealloc_slot once region inference covers while/loop.
         for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
-            let _ = i;
+            // SAFETY: dtors already ran for this range above.
+            unsafe {
+                self.pool.dealloc_slot(self.pool.allocs[i]);
+            }
         }
         self.pool
             .allocs

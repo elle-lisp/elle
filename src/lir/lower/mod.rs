@@ -226,6 +226,8 @@ struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
     scope_eligible: bool,
+    /// Whether RegionRotate should also dealloc slab slots.
+    dealloc_eligible: bool,
 }
 
 /// Tracks an active block during lowering so `break` can find its
@@ -650,6 +652,17 @@ impl<'a> Lowerer<'a> {
         self.region_depth -= 1;
     }
 
+    /// Emit `RegionRotate` for double-buffered loop scope rotation.
+    /// Does not change region_depth — the mark count stays the same
+    /// (pop prev + push new = net zero change from the 2-mark state).
+    fn emit_region_rotate(&mut self) {
+        self.emit(LirInstr::RegionRotate);
+    }
+
+    fn emit_region_rotate_dealloc(&mut self) {
+        self.emit(LirInstr::RegionRotateDealloc);
+    }
+
     /// Discard an unused value by storing it to a scratch slot.
     /// The emitter's auto-pop after StoreLocal cleans up the value
     /// from the operand stack. The scratch slot is lazily allocated
@@ -732,6 +745,15 @@ impl<'a> Lowerer<'a> {
 
         // Condition 3: result is immediate
         if !self.result_is_safe(body, &scope_binding_refs) {
+            self.scope_stats.rejected_unsafe_result += 1;
+            return false;
+        }
+
+        // Condition 3b: tail call callee must not be scope-bound.
+        // RegionExit fires before tail calls, so if the callee is a
+        // closure allocated inside the scope, its slot is freed before
+        // the tail call reads it.
+        if Self::tail_call_callee_is_scope_bound(body, &scope_binding_refs) {
             self.scope_stats.rejected_unsafe_result += 1;
             return false;
         }
@@ -1728,6 +1750,59 @@ impl<'a> Lowerer<'a> {
             HirKind::Match { arms, .. } => arms
                 .iter()
                 .all(|(_, _, body)| Self::body_is_tail_call(body)),
+            _ => false,
+        }
+    }
+
+    /// Check if the body's tail call callee is a scope-bound binding.
+    /// If so, RegionExit before the tail call would free the callee's slot.
+    fn tail_call_callee_is_scope_bound(hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
+        match &hir.kind {
+            HirKind::Call {
+                is_tail: true,
+                func,
+                ..
+            } => {
+                if let HirKind::Var(b) = &func.kind {
+                    scope_bindings.iter().any(|(sb, _)| sb == b)
+                } else if let HirKind::DerefCell { cell } = &func.kind {
+                    if let HirKind::Var(b) = &cell.kind {
+                        scope_bindings.iter().any(|(sb, _)| sb == b)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::tail_call_callee_is_scope_bound(then_branch, scope_bindings)
+                    || Self::tail_call_callee_is_scope_bound(else_branch, scope_bindings)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_some_and(|e| Self::tail_call_callee_is_scope_bound(e, scope_bindings)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                Self::tail_call_callee_is_scope_bound(body, scope_bindings)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .any(|(_, body)| Self::tail_call_callee_is_scope_bound(body, scope_bindings))
+                    || else_branch
+                        .as_ref()
+                        .is_some_and(|b| Self::tail_call_callee_is_scope_bound(b, scope_bindings))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .any(|(_, _, body)| Self::tail_call_callee_is_scope_bound(body, scope_bindings)),
             _ => false,
         }
     }
