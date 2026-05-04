@@ -118,27 +118,27 @@ fn region_emitted_for_empty_predicate() {
 
 #[test]
 fn region_emitted_for_type_predicate() {
-    // string? returns bool → immediate, but stdlib call has SIG_ERROR
-    // → may_suspend() blocks scope allocation. Needs type-aware narrowing.
-    assert!(!has_region(r#"(let [x "hello"] (string? x))"#));
+    // string? returns bool → immediate. Type-aware signal narrowing
+    // strips SIG_ERROR (type predicates never error).
+    assert!(has_region(r#"(let [x "hello"] (string? x))"#));
 }
 
 #[test]
 fn region_emitted_for_type_of() {
-    // type returns keyword → immediate, but stdlib call has SIG_ERROR
-    assert!(!has_region("(let [x 42] (type x))"));
+    // type returns keyword → immediate. Signal narrowed to silent.
+    assert!(has_region("(let [x 42] (type x))"));
 }
 
 #[test]
 fn region_emitted_for_abs() {
-    // abs returns immediate, but stdlib call has SIG_ERROR
-    assert!(!has_region("(let [x -5] (abs x))"));
+    // abs returns immediate. arg is Int ⊑ Number → signal narrowed.
+    assert!(has_region("(let [x -5] (abs x))"));
 }
 
 #[test]
 fn region_emitted_for_floor() {
-    // floor returns immediate, but stdlib call has SIG_ERROR
-    assert!(!has_region("(let [x 3.7] (floor x))"));
+    // floor returns immediate. arg is Float ⊑ Number → signal narrowed.
+    assert!(has_region("(let [x 3.7] (floor x))"));
 }
 
 #[test]
@@ -149,8 +149,9 @@ fn region_emitted_for_has_key() {
 
 #[test]
 fn region_emitted_for_string_contains() {
-    // string/contains? returns bool → immediate, but stdlib SIG_ERROR
-    assert!(!has_region(
+    // string/contains? returns bool → immediate. Both args are String
+    // → signal narrowed to silent.
+    assert!(has_region(
         r#"(let [s "hello world"] (string/contains? s "world"))"#
     ));
 }

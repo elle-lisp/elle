@@ -6,6 +6,9 @@
 //! 3. Rewrites stdlib arithmetic/comparison calls to intrinsics when
 //!    argument types prove ⊑ Number
 //! 4. Updates signals for rewritten nodes (intrinsics are silent)
+//! 5. Narrows signals on primitive calls with provably typed args
+//!    (delegates to `narrow.rs`)
+//! 6. Re-propagates signals bottom-up after narrowing
 //!
 //! The pass iterates to a fixed point: type refinements enable rewrites,
 //! which change signals, which enable further refinements.
@@ -91,6 +94,7 @@ pub fn infer_and_rewrite(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTa
     let symbol_names = symbols.all_names();
     let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
     let mut hir_types: HashMap<HirId, TyId> = HashMap::new();
+    let mut binding_min_length: HashMap<Binding, usize> = HashMap::new();
 
     // Collect parameter info for lambdas: which bindings are params of which lambda
     let mut lambda_params: HashMap<Binding, Vec<Binding>> = HashMap::new();
@@ -109,6 +113,8 @@ pub fn infer_and_rewrite(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTa
             &mut hir_types,
             &lambda_params,
             &mut lambda_body_type,
+            &symbol_names,
+            &mut binding_min_length,
         );
 
         // Rewrite stdlib calls to intrinsics where types prove it's safe
@@ -126,6 +132,19 @@ pub fn infer_and_rewrite(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTa
             break;
         }
     }
+
+    // Signal narrowing: strip SIG_ERROR from calls with provably typed args
+    super::narrow::narrow_signals(
+        hir,
+        &interner,
+        arena,
+        &symbol_names,
+        &hir_types,
+        &binding_min_length,
+    );
+
+    // Signal re-propagation: recompute parent signals bottom-up
+    super::narrow::repropagate_signals(hir);
 
     TypeInfo { hir_types }
 }
@@ -153,6 +172,7 @@ fn collect_lambda_info(
 }
 
 /// Forward type inference pass. Returns true if any types changed.
+#[allow(clippy::too_many_arguments)]
 fn infer_types(
     hir: &Hir,
     interner: &TypeInterner,
@@ -161,6 +181,8 @@ fn infer_types(
     hir_types: &mut HashMap<HirId, TyId>,
     lambda_params: &HashMap<Binding, Vec<Binding>>,
     lambda_body_type: &mut HashMap<Binding, TyId>,
+    symbol_names: &HashMap<u32, String>,
+    binding_min_length: &mut HashMap<Binding, usize>,
 ) -> bool {
     let ty = infer_node(
         hir,
@@ -170,12 +192,15 @@ fn infer_types(
         hir_types,
         lambda_params,
         lambda_body_type,
+        symbol_names,
+        binding_min_length,
     );
     let old = hir_types.insert(hir.id, ty);
     old != Some(ty)
 }
 
 /// Infer the type of a single HIR node.
+#[allow(clippy::too_many_arguments)]
 fn infer_node(
     hir: &Hir,
     interner: &TypeInterner,
@@ -184,7 +209,25 @@ fn infer_node(
     hir_types: &mut HashMap<HirId, TyId>,
     lambda_params: &HashMap<Binding, Vec<Binding>>,
     lambda_body_type: &mut HashMap<Binding, TyId>,
+    symbol_names: &HashMap<u32, String>,
+    binding_min_length: &mut HashMap<Binding, usize>,
 ) -> TyId {
+    macro_rules! recurse {
+        ($e:expr) => {
+            infer_node(
+                $e,
+                interner,
+                arena,
+                binding_types,
+                hir_types,
+                lambda_params,
+                lambda_body_type,
+                symbol_names,
+                binding_min_length,
+            )
+        };
+    }
+
     match &hir.kind {
         // Literals
         HirKind::Nil => TypeInterner::NIL,
@@ -203,17 +246,8 @@ fn infer_node(
 
         // Intrinsic operations — known return types
         HirKind::Intrinsic { op, args } => {
-            // Recurse into args first
             for arg in args {
-                let ty = infer_node(
-                    arg,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                let ty = recurse!(arg);
                 hir_types.insert(arg.id, ty);
             }
             intrinsic_return_type(*op, args, interner, hir_types)
@@ -222,15 +256,7 @@ fn infer_node(
         // Let/Letrec — seed binding types from init values
         HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
             for (binding, init) in bindings {
-                let ty = infer_node(
-                    init,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                let ty = recurse!(init);
                 hir_types.insert(init.id, ty);
                 // For lambda bindings, track their body's return type
                 if let HirKind::Lambda { body: lam_body, .. } = &init.kind {
@@ -251,33 +277,22 @@ fn infer_node(
                         .unwrap_or(TypeInterner::BOTTOM);
                     let joined = interner.join(old, ty);
                     binding_types.insert(*binding, joined);
+                    // Track min_length for array constructor bindings
+                    if ty == TypeInterner::MUTABLE_ARRAY || ty == TypeInterner::ARRAY {
+                        if let Some(len) = unwrap_to_call(init) {
+                            binding_min_length.insert(*binding, len);
+                        }
+                    }
                 }
             }
-            let body_ty = infer_node(
-                body,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let body_ty = recurse!(body);
             hir_types.insert(body.id, body_ty);
             body_ty
         }
 
         // Lambda — infer body type and track return type
         HirKind::Lambda { body, .. } => {
-            // Recurse into body
-            let body_ty = infer_node(
-                body,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let body_ty = recurse!(body);
             hir_types.insert(body.id, body_ty);
             // We return Top for the lambda value itself — it's a closure
             TypeInterner::TOP
@@ -289,15 +304,7 @@ fn infer_node(
             then_branch,
             else_branch,
         } => {
-            let _cond_ty = infer_node(
-                cond,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let _cond_ty = recurse!(cond);
             hir_types.insert(cond.id, _cond_ty);
 
             // Type guard narrowing: if cond is a type predicate call,
@@ -316,15 +323,7 @@ fn infer_node(
                 saved_types = Vec::new();
             }
 
-            let then_ty = infer_node(
-                then_branch,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let then_ty = recurse!(then_branch);
             hir_types.insert(then_branch.id, then_ty);
 
             // Restore type environment for else branch
@@ -339,15 +338,7 @@ fn infer_node(
                 }
             }
 
-            let else_ty = infer_node(
-                else_branch,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let else_ty = recurse!(else_branch);
             hir_types.insert(else_branch.id, else_ty);
 
             interner.join(then_ty, else_ty)
@@ -355,29 +346,13 @@ fn infer_node(
 
         // Call — forward arg types to callee params; result = callee return type
         HirKind::Call { func, args, .. } => {
-            let _func_ty = infer_node(
-                func,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let _func_ty = recurse!(func);
             hir_types.insert(func.id, _func_ty);
 
             let arg_types: Vec<TyId> = args
                 .iter()
                 .map(|a| {
-                    let ty = infer_node(
-                        &a.expr,
-                        interner,
-                        arena,
-                        binding_types,
-                        hir_types,
-                        lambda_params,
-                        lambda_body_type,
-                    );
+                    let ty = recurse!(&a.expr);
                     hir_types.insert(a.expr.id, ty);
                     ty
                 })
@@ -414,6 +389,15 @@ fn infer_node(
                         .unwrap_or(TypeInterner::BOTTOM);
                     return ret_ty;
                 }
+
+                // Primitive return type inference for unresolved callees
+                let callee_sym = arena.get(callee_binding).name;
+                if let Some(name) = symbol_names.get(&callee_sym.0) {
+                    let prim_ty = primitive_return_type(name, &arg_types, interner);
+                    if prim_ty != TypeInterner::TOP {
+                        return prim_ty;
+                    }
+                }
             }
 
             TypeInterner::TOP
@@ -423,15 +407,7 @@ fn infer_node(
         HirKind::Begin(exprs) => {
             let mut ty = TypeInterner::NIL;
             for expr in exprs {
-                ty = infer_node(
-                    expr,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                ty = recurse!(expr);
                 hir_types.insert(expr.id, ty);
             }
             ty
@@ -439,15 +415,7 @@ fn infer_node(
         HirKind::Block { body, .. } => {
             let mut ty = TypeInterner::NIL;
             for expr in body {
-                ty = infer_node(
-                    expr,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                ty = recurse!(expr);
                 hir_types.insert(expr.id, ty);
             }
             ty
@@ -456,15 +424,7 @@ fn infer_node(
         // And/Or — conservative: Top
         HirKind::And(_) | HirKind::Or(_) => {
             hir.for_each_child(|child| {
-                let ty = infer_node(
-                    child,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                let ty = recurse!(child);
                 hir_types.insert(child.id, ty);
             });
             TypeInterner::TOP
@@ -473,15 +433,7 @@ fn infer_node(
         // Loop — recurse into body
         HirKind::Loop { bindings, body } => {
             for (binding, init) in bindings {
-                let ty = infer_node(
-                    init,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                let ty = recurse!(init);
                 hir_types.insert(init.id, ty);
                 let old = binding_types
                     .get(binding)
@@ -489,15 +441,7 @@ fn infer_node(
                     .unwrap_or(TypeInterner::BOTTOM);
                 binding_types.insert(*binding, interner.join(old, ty));
             }
-            let body_ty = infer_node(
-                body,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let body_ty = recurse!(body);
             hir_types.insert(body.id, body_ty);
             body_ty
         }
@@ -508,51 +452,61 @@ fn infer_node(
             binding: target,
             value,
         } => {
-            let ty = infer_node(
-                value,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let ty = recurse!(value);
             hir_types.insert(value.id, ty);
             let old = binding_types
                 .get(target)
                 .copied()
                 .unwrap_or(TypeInterner::BOTTOM);
             binding_types.insert(*target, interner.join(old, ty));
+            // Track min_length for array constructor bindings
+            if ty == TypeInterner::MUTABLE_ARRAY || ty == TypeInterner::ARRAY {
+                if let Some(call) = unwrap_to_call(value) {
+                    binding_min_length.insert(*target, call);
+                }
+            }
             ty
         }
 
-        // MakeCell/DerefCell/SetCell — pass through
+        // MakeCell — propagate inner value type
+        HirKind::MakeCell { value } => {
+            let ty = recurse!(value);
+            hir_types.insert(value.id, ty);
+            ty
+        }
+
+        // DerefCell — return binding type if cell is Var(b)
         HirKind::DerefCell { cell } => {
-            let ty = infer_node(
-                cell,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-            );
+            let ty = recurse!(cell);
             hir_types.insert(cell.id, ty);
-            TypeInterner::TOP
+            if let HirKind::Var(b) = &cell.kind {
+                binding_types.get(b).copied().unwrap_or(TypeInterner::TOP)
+            } else {
+                TypeInterner::TOP
+            }
+        }
+
+        // SetCell — widen binding type
+        HirKind::SetCell { cell, value } => {
+            let cell_ty = recurse!(cell);
+            hir_types.insert(cell.id, cell_ty);
+            let val_ty = recurse!(value);
+            hir_types.insert(value.id, val_ty);
+            // Widen the binding's type with the new value
+            if let HirKind::Var(b) = &cell.kind {
+                let old = binding_types
+                    .get(b)
+                    .copied()
+                    .unwrap_or(TypeInterner::BOTTOM);
+                binding_types.insert(*b, interner.join(old, val_ty));
+            }
+            val_ty
         }
 
         // Everything else — recurse and return Top
         _ => {
             hir.for_each_child(|child| {
-                let ty = infer_node(
-                    child,
-                    interner,
-                    arena,
-                    binding_types,
-                    hir_types,
-                    lambda_params,
-                    lambda_body_type,
-                );
+                let ty = recurse!(child);
                 hir_types.insert(child.id, ty);
             });
             TypeInterner::TOP
@@ -562,7 +516,7 @@ fn infer_node(
 
 /// Extract the binding from a callee expression.
 /// Handles both `Var(b)` and `DerefCell { Var(b) }` (letrec recursive calls).
-fn unwrap_callee_binding(func: &Hir) -> Option<Binding> {
+pub(super) fn unwrap_callee_binding(func: &Hir) -> Option<Binding> {
     match &func.kind {
         HirKind::Var(b) => Some(*b),
         HirKind::DerefCell { cell } => {
@@ -573,6 +527,55 @@ fn unwrap_callee_binding(func: &Hir) -> Option<Binding> {
             }
         }
         _ => None,
+    }
+}
+
+/// Extract arg count from a Call expression, unwrapping MakeCell if needed.
+/// Returns Some(arg_count) for array/struct constructor calls.
+fn unwrap_to_call(hir: &Hir) -> Option<usize> {
+    match &hir.kind {
+        HirKind::Call { args, .. } => Some(args.len()),
+        HirKind::MakeCell { value } => unwrap_to_call(value),
+        _ => None,
+    }
+}
+
+/// Known return types for primitive (stdlib) function calls.
+fn primitive_return_type(name: &str, arg_types: &[TyId], interner: &TypeInterner) -> TyId {
+    match name {
+        "array" => TypeInterner::ARRAY,
+        "@array" => TypeInterner::MUTABLE_ARRAY,
+        "struct" => TypeInterner::STRUCT,
+        "@struct" => TypeInterner::MUTABLE_STRUCT,
+        "string" => TypeInterner::STRING,
+        "push" => {
+            // push returns arg0 type (MutableArray passthrough)
+            arg_types.first().copied().unwrap_or(TypeInterner::TOP)
+        }
+        "put" => {
+            // put returns arg0 type (passthrough)
+            arg_types.first().copied().unwrap_or(TypeInterner::TOP)
+        }
+        "abs" | "floor" | "ceil" | "round" => TypeInterner::NUMBER,
+        "length" => TypeInterner::INT,
+        "type" => TypeInterner::KEYWORD,
+        "has?" | "empty?" | "contains?" => TypeInterner::BOOL,
+        "string?" | "int?" | "integer?" | "float?" | "number?" | "nil?" | "boolean?"
+        | "keyword?" | "symbol?" | "pair?" | "list?" | "array?" | "struct?" | "bytes?"
+        | "even?" | "odd?" | "closure?" | "fiber?" | "box?" | "ptr?" | "pointer?" => {
+            TypeInterner::BOOL
+        }
+        "string/contains?"
+        | "string-contains?"
+        | "string/starts-with?"
+        | "string-starts-with?"
+        | "string/ends-with?"
+        | "string-ends-with?" => TypeInterner::BOOL,
+        "number->string" => TypeInterner::STRING,
+        _ => {
+            let _ = (arg_types, interner);
+            TypeInterner::TOP
+        }
     }
 }
 
@@ -776,136 +779,16 @@ fn rewrite_children(
     hir_types: &HashMap<HirId, TyId>,
 ) -> bool {
     let mut changed = false;
-    macro_rules! rw {
-        ($e:expr) => {
-            changed |= rewrite_calls(
-                $e,
-                interner,
-                arena,
-                rewrite_table,
-                symbol_names,
-                binding_types,
-                hir_types,
-            );
-        };
-    }
-
-    match &mut hir.kind {
-        HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-            for (_, init) in bindings.iter_mut() {
-                rw!(init);
-            }
-            rw!(body);
-        }
-        HirKind::Lambda { body, .. } => {
-            rw!(body);
-        }
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            rw!(cond);
-            rw!(then_branch);
-            rw!(else_branch);
-        }
-        HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
-            for expr in exprs.iter_mut() {
-                rw!(expr);
-            }
-        }
-        HirKind::Block { body, .. } => {
-            for expr in body.iter_mut() {
-                rw!(expr);
-            }
-        }
-        HirKind::Call { func, args, .. } => {
-            rw!(func);
-            for arg in args.iter_mut() {
-                rw!(&mut arg.expr);
-            }
-        }
-        HirKind::Assign { value, .. }
-        | HirKind::Define { value, .. }
-        | HirKind::MakeCell { value }
-        | HirKind::Break { value, .. } => {
-            rw!(value);
-        }
-        HirKind::DerefCell { cell } => {
-            rw!(cell);
-        }
-        HirKind::SetCell { cell, value } => {
-            rw!(cell);
-            rw!(value);
-        }
-        HirKind::While { cond, body } => {
-            rw!(cond);
-            rw!(body);
-        }
-        HirKind::Loop { bindings, body } => {
-            for (_, init) in bindings.iter_mut() {
-                rw!(init);
-            }
-            rw!(body);
-        }
-        HirKind::Recur { args } => {
-            for arg in args.iter_mut() {
-                rw!(arg);
-            }
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses.iter_mut() {
-                rw!(c);
-                rw!(b);
-            }
-            if let Some(eb) = else_branch {
-                rw!(eb);
-            }
-        }
-        HirKind::Emit { value, .. } => {
-            rw!(value);
-        }
-        HirKind::Match { value, arms } => {
-            rw!(value);
-            for (_, guard, body) in arms.iter_mut() {
-                if let Some(g) = guard {
-                    rw!(g);
-                }
-                rw!(body);
-            }
-        }
-        HirKind::Destructure { value, .. } => {
-            rw!(value);
-        }
-        HirKind::Eval { expr, env } => {
-            rw!(expr);
-            rw!(env);
-        }
-        HirKind::Parameterize { bindings, body } => {
-            for (_, v) in bindings.iter_mut() {
-                rw!(v);
-            }
-            rw!(body);
-        }
-        HirKind::Intrinsic { args, .. } => {
-            for arg in args.iter_mut() {
-                rw!(arg);
-            }
-        }
-        HirKind::Nil
-        | HirKind::EmptyList
-        | HirKind::Bool(_)
-        | HirKind::Int(_)
-        | HirKind::Float(_)
-        | HirKind::String(_)
-        | HirKind::Keyword(_)
-        | HirKind::Var(_)
-        | HirKind::Quote(_)
-        | HirKind::Error => {}
-    }
-
+    hir.for_each_child_mut(|child| {
+        changed |= rewrite_calls(
+            child,
+            interner,
+            arena,
+            rewrite_table,
+            symbol_names,
+            binding_types,
+            hir_types,
+        );
+    });
     changed
 }
