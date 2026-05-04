@@ -14,18 +14,6 @@ use std::collections::BTreeMap;
 /// Returns a sorted list of strings. With no arguments, returns all names.
 /// With a category keyword or string, filters by category (e.g., :math, :"special form").
 pub(crate) fn prim_list_primitives(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() > 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "vm/list-primitives: expected 0-1 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let filter = if args.is_empty() { Value::NIL } else { args[0] };
     (
         SIG_QUERY,
@@ -38,15 +26,6 @@ pub(crate) fn prim_list_primitives(args: &[Value]) -> (SignalBits, Value) {
 /// Returns a struct with keys: "name", "doc", "params", "category", "example", "arity", "signal".
 /// Returns nil if the primitive is not found.
 pub(crate) fn prim_primitive_meta(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("vm/primitive-meta: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_QUERY,
         Value::pair(Value::keyword("primitive-meta"), args[0]),
@@ -55,15 +34,6 @@ pub(crate) fn prim_primitive_meta(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fn/disasm closure) — disassemble bytecode as array of strings
 pub(crate) fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("disbit: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         let mut lines = crate::compiler::disassemble_lines(&closure.template.bytecode);
         for (i, c) in closure.template.constants.iter().enumerate() {
@@ -86,15 +56,6 @@ pub(crate) fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fn/disasm-jit closure) — return Cranelift IR as array of strings, or nil
 pub(crate) fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("disjit: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     #[cfg(feature = "jit")]
     if let Some(closure) = args[0].as_closure() {
         let lir = match &closure.template.lir_function {
@@ -328,15 +289,6 @@ fn flow_from_closure(closure: &crate::value::heap::Closure) -> (SignalBits, Valu
 /// Returns nil if the closure has no LIR (e.g., native function or LIR discarded).
 /// Errors if argument is not a closure or fiber, or if the fiber is currently executing.
 pub(crate) fn prim_fn_flow(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fn/flow: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         flow_from_closure(closure)
     } else if let Some(handle) = args[0].as_fiber() {

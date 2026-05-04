@@ -9,16 +9,6 @@ use crate::value::{error_val, list, Value};
 /// Prints a value with debug information
 /// (debug-print value)
 pub(crate) fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("debug-print: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     eprintln!("[DEBUG] {:?}", args[0]);
     (SIG_OK, args[0])
 }
@@ -30,16 +20,6 @@ pub(crate) fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
 /// name via the thread-local symbol table (same access pattern as
 /// string).
 pub(crate) fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("trace: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     if args[0]
         .with_string(|s| {
             eprintln!("[TRACE] {}: {:?}", s, args[1]);

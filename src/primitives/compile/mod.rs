@@ -937,15 +937,6 @@ pub(super) fn get_handle<'a>(
     args: &'a [Value],
     name: &str,
 ) -> Result<&'a AnalysisHandle, (SignalBits, Value)> {
-    if args.is_empty() {
-        return Err((
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("{}: expected at least 1 argument, got 0", name),
-            ),
-        ));
-    }
     match args[0].as_external::<AnalysisHandle>() {
         Some(h) => Ok(h),
         None => Err((
@@ -968,20 +959,6 @@ pub(super) fn resolve_name(
     idx: usize,
     prim_name: &str,
 ) -> Result<String, (SignalBits, Value)> {
-    if args.len() <= idx {
-        return Err((
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "{}: expected {} arguments, got {}",
-                    prim_name,
-                    idx + 1,
-                    args.len()
-                ),
-            ),
-        ));
-    }
     // Accept keyword or string.
     if let Some(name) = args[idx].as_keyword_name() {
         return Ok(name.to_string());

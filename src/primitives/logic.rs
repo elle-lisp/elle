@@ -3,7 +3,7 @@ use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 use std::collections::BTreeMap;
 
 /// Logical AND operation
@@ -62,16 +62,6 @@ pub(crate) fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
 /// (assert value) => value if truthy, else signal error
 /// (assert value message) => value if truthy, else signal error with message
 pub(crate) fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("assert: expected 1-2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let value = args[0];
     let message = if args.len() == 2 { args[1] } else { Value::NIL };
 

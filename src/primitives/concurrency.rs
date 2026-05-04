@@ -36,8 +36,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
             .expect("bug: SendBundle root was not a closure")
             .clone();
 
-        // Set location map for error reporting in the spawned thread.
-        vm.set_location_map((*closure.template.location_map).clone());
+        // Location map is carried on the closure template, not the VM.
 
         // Build execution environment: captured values + NIL slots for locals.
         // Use num_params directly (not derived from arity.min()) — they differ for
@@ -95,16 +94,6 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 ///
 /// For JIT-compiled closures, falls back to the source closure for thread-safe execution.
 pub(crate) fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("spawn: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(closure) = args[0].as_closure() {
         match spawn_closure_impl(closure) {
             Ok(val) => (SIG_OK, val),
@@ -135,16 +124,6 @@ pub(crate) fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
 /// Blocks until the spawned thread completes and returns the actual Value result.
 /// If the thread produced an error, that error is propagated.
 pub(crate) fn prim_join(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("join: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(handle) = args[0].as_thread_handle() {
         // Wait for the result to be available
         // We need to poll since we can't block indefinitely in a primitive

@@ -35,16 +35,6 @@ fn coerce_to_int(val: &Value, name: &str) -> Result<i64, (SignalBits, Value)> {
 
 /// Bitwise AND: fold all arguments with &
 pub(crate) fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bit/and: expected at least 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let mut result = match coerce_to_int(&args[0], "bit/and") {
         Ok(n) => n,
         Err(e) => return e,
@@ -62,16 +52,6 @@ pub(crate) fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
 
 /// Bitwise OR: fold all arguments with |
 pub(crate) fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bit/or: expected at least 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let mut result = match coerce_to_int(&args[0], "bit/or") {
         Ok(n) => n,
         Err(e) => return e,
@@ -89,16 +69,6 @@ pub(crate) fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
 
 /// Bitwise XOR: fold all arguments with ^
 pub(crate) fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bit/xor: expected at least 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let mut result = match coerce_to_int(&args[0], "bit/xor") {
         Ok(n) => n,
         Err(e) => return e,
@@ -116,16 +86,6 @@ pub(crate) fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
 
 /// Bitwise NOT: apply ! to single integer argument
 pub(crate) fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bit/not: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     match coerce_to_int(&args[0], "bit/not") {
         Ok(n) => (SIG_OK, Value::int(!n)),
         Err(e) => e,
@@ -134,16 +94,6 @@ pub(crate) fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
 
 /// Left shift: shift first argument left by second argument (clamped to 0-63)
 pub(crate) fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bit/shift-left: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let value = match coerce_to_int(&args[0], "bit/shift-left") {
         Ok(v) => v,
         Err(e) => return e,
@@ -182,16 +132,6 @@ pub(crate) fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
 
 /// Arithmetic right shift: shift first argument right by second argument (clamped to 0-63)
 pub(crate) fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bit/shift-right: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let value = match coerce_to_int(&args[0], "bit/shift-right") {
         Ok(v) => v,
         Err(e) => return e,

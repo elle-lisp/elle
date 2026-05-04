@@ -41,6 +41,23 @@ impl<'a> Lowerer<'a> {
                 self.emit_region_enter(); // mark2: barrier before Call
             }
 
+            // Determine if the compiler verified arity for this call.
+            // True when the callee is a primitive binding that hasn't been
+            // shadowed or mutated (the analyzer would have errored on arity
+            // mismatch, so if compilation succeeded the arity is correct).
+            let arity_checked = if let HirKind::Var(binding) = &func.kind {
+                let bi = self.arena.get(*binding);
+                bi.is_primitive
+                    && bi.is_immutable
+                    && !bi.is_mutated
+                    && self
+                        .immutable_values
+                        .get(binding)
+                        .is_some_and(|v| v.is_native_fn())
+            } else {
+                false
+            };
+
             if is_tail {
                 // Emit pending RegionExits before TailCall — the scope's
                 // allocations must be freed before the frame is replaced.
@@ -55,6 +72,7 @@ impl<'a> Lowerer<'a> {
                 self.emit(LirInstr::TailCall {
                     func: func_reg,
                     args: arg_regs,
+                    arity_checked,
                 });
                 Ok(self.fresh_reg())
             } else {
@@ -66,12 +84,14 @@ impl<'a> Lowerer<'a> {
                         dst,
                         func: func_reg,
                         args: arg_regs,
+                        arity_checked,
                     });
                 } else {
                     self.emit(LirInstr::Call {
                         dst,
                         func: func_reg,
                         args: arg_regs,
+                        arity_checked,
                     });
                 }
                 if call_scoped {

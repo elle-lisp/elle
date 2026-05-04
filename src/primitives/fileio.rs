@@ -9,15 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Read entire file as a string
 pub(crate) fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("slurp: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::read_to_string(path) {
@@ -45,16 +36,6 @@ pub(crate) fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
 
 /// Write string content to a file (overwrites if exists)
 pub(crate) fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("spit: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -94,16 +75,6 @@ pub(crate) fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
 
 /// Append string content to a file
 pub(crate) fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("append-file: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -160,15 +131,6 @@ pub(crate) fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
 
 /// Delete a file
 pub(crate) fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("delete-file: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::remove_file(path) {
@@ -196,15 +158,6 @@ pub(crate) fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
 
 /// Delete a directory (must be empty)
 pub(crate) fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("delete-directory: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::remove_dir(path) {
@@ -235,15 +188,6 @@ pub(crate) fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
 
 /// Create a directory
 pub(crate) fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("create-directory: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::create_dir(path) {
@@ -274,18 +218,6 @@ pub(crate) fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
 
 /// Create a directory and all parent directories
 pub(crate) fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "create-directory-all: expected 1 argument, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::create_dir_all(path) {
@@ -316,16 +248,6 @@ pub(crate) fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
 
 /// Rename a file
 pub(crate) fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("rename-file: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let old_path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -365,16 +287,6 @@ pub(crate) fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
 
 /// Copy a file
 pub(crate) fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("copy-file: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let src = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -414,15 +326,6 @@ pub(crate) fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get file size in bytes
 pub(crate) fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("file-size: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::metadata(path) {
@@ -529,15 +432,6 @@ fn stat_impl(
     name: &str,
     metadata_fn: fn(&str) -> std::io::Result<std::fs::Metadata>,
 ) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("{}: expected 1 argument, got {}", name, args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match metadata_fn(path) {
@@ -579,15 +473,6 @@ pub(crate) fn prim_file_lstat(args: &[Value]) -> (SignalBits, Value) {
 
 /// List directory contents
 pub(crate) fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("list-directory: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -640,15 +525,6 @@ pub(crate) fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
 
 /// Read lines from a file and return as a list of strings
 pub(crate) fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("read-lines: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         args[0]
             .with_string(|path| match std::fs::read_to_string(path) {

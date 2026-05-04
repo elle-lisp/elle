@@ -160,13 +160,17 @@ impl WasmEmitter {
                 f.instruction(&Instruction::Drop);
                 f.instruction(&Instruction::Drop);
             }
-            LirInstr::Call { dst, func, args } => {
+            LirInstr::Call {
+                dst, func, args, ..
+            } => {
                 self.emit_call(f, *dst, *func, args);
             }
-            LirInstr::SuspendingCall { dst, func, args } => {
+            LirInstr::SuspendingCall {
+                dst, func, args, ..
+            } => {
                 self.emit_call(f, *dst, *func, args);
             }
-            LirInstr::TailCall { func, args } => {
+            LirInstr::TailCall { func, args, .. } => {
                 if !self.is_closure {
                     let dst = Reg(0);
                     self.emit_call(f, dst, *func, args);

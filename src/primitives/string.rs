@@ -40,15 +40,6 @@ fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, 
 
 /// Convert string or buffer to uppercase
 pub(crate) fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-upcase: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let (s, is_buffer) = match as_text(&args[0], "string-upcase") {
         Ok(v) => v,
         Err(e) => return e,
@@ -63,15 +54,6 @@ pub(crate) fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
 
 /// Convert string or buffer to lowercase
 pub(crate) fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-downcase: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let (s, is_buffer) = match as_text(&args[0], "string-downcase") {
         Ok(v) => v,
         Err(e) => return e,
@@ -86,16 +68,6 @@ pub(crate) fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
 
 /// Find the grapheme index of a substring, with optional start offset
 pub(crate) fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string/find: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let (haystack, _is_buffer) = match as_text(&args[0], "string/find") {
         Ok(v) => v,
         Err(e) => return e,
@@ -163,16 +135,6 @@ pub(crate) fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
 
 /// Split string or @string on delimiter, returning an array
 pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-split: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let (s, _is_buffer) = match as_text(&args[0], "string-split") {
         Ok(v) => v,
         Err(e) => return e,
@@ -207,16 +169,6 @@ pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
 
 /// Replace all occurrences of old with new in a string or buffer
 pub(crate) fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-replace: expected 3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let (s, is_buffer) = match as_text(&args[0], "string-replace") {
         Ok(v) => v,
         Err(e) => return e,
@@ -272,16 +224,6 @@ pub(crate) fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
 
 /// Trim leading and trailing whitespace from a string or buffer
 pub(crate) fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-trim: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let (s, is_buffer) = match as_text(&args[0], "string-trim") {
         Ok(v) => v,
         Err(e) => return e,
@@ -296,16 +238,6 @@ pub(crate) fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if string or buffer contains substring
 pub(crate) fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-contains?: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let (haystack, _is_buffer) = match as_text(&args[0], "string-contains?") {
         Ok(v) => v,
         Err(e) => return e,
@@ -338,19 +270,6 @@ pub(crate) fn prim_string_contains(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if string or buffer starts with prefix
 pub(crate) fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "string-starts-with?: expected 2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-
     let (s, _is_buffer) = match as_text(&args[0], "string-starts-with?") {
         Ok(v) => v,
         Err(e) => return e,
@@ -383,19 +302,6 @@ pub(crate) fn prim_string_starts_with(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if string or buffer ends with suffix
 pub(crate) fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "string-ends-with?: expected 2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-
     let (s, _is_buffer) = match as_text(&args[0], "string-ends-with?") {
         Ok(v) => v,
         Err(e) => return e,
@@ -428,16 +334,6 @@ pub(crate) fn prim_string_ends_with(args: &[Value]) -> (SignalBits, Value) {
 
 /// Join sequence of strings with separator
 pub(crate) fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string-join: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let seq = &args[0];
     let separator = if let Some(s) = args[1].with_string(|s| s.to_string()) {
         s
@@ -499,15 +395,6 @@ pub(crate) fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
 /// Unreserved characters (A-Z, a-z, 0-9, '-', '.', '_', '~') pass through.
 /// All others are percent-encoded as %XX with uppercase hex.
 pub(crate) fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("uri-encode: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if args[0].is_string() {
         return args[0]
             .with_string(|s| {
@@ -582,15 +469,6 @@ pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
 
 /// Return the UTF-8 byte length of a string (not grapheme count).
 pub(crate) fn prim_string_size_of(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string/size-of: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(byte_len) = args[0].with_string(|s| s.len()) {
         return (SIG_OK, Value::int(byte_len as i64));
     }
@@ -611,15 +489,6 @@ pub(crate) fn prim_string_size_of(args: &[Value]) -> (SignalBits, Value) {
 
 /// Repeat a string N times
 pub(crate) fn prim_string_repeat(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string/repeat: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let s = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {

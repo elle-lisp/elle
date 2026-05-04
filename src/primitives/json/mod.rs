@@ -28,16 +28,6 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if args.is_empty() || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                "json/parse: expected 1 or 3 arguments".to_string(),
-            ),
-        );
-    }
-
     let json_str = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -77,16 +67,6 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
 
 /// Serialize an Elle value to compact JSON
 pub(crate) fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                "json-serialize: expected 1 argument".to_string(),
-            ),
-        );
-    }
-
     let json_str = match serialize_value(&args[0]) {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, error_val("parse-error", e)),
@@ -96,16 +76,6 @@ pub(crate) fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
 
 /// Serialize an Elle value to pretty-printed JSON with 2-space indentation
 pub(crate) fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                "json-serialize-pretty: expected 1 argument".to_string(),
-            ),
-        );
-    }
-
     let json_str = match serialize_value_pretty(&args[0], 0) {
         Ok(s) => s,
         Err(e) => return (SIG_ERROR, error_val("parse-error", e)),
@@ -542,16 +512,6 @@ mod tests {
     fn test_json_parse_wrong_type() {
         // json-parse requires a string argument
         let (bits, _) = prim_json_parse(&[Value::int(42)]);
-        assert_eq!(bits, crate::value::fiber::SIG_ERROR);
-    }
-
-    #[test]
-    fn test_json_serialize_wrong_arity() {
-        // json-serialize requires exactly 1 argument
-        let (bits, _) = prim_json_serialize(&[]);
-        assert_eq!(bits, crate::value::fiber::SIG_ERROR);
-
-        let (bits, _) = prim_json_serialize(&[Value::int(1), Value::int(2)]);
         assert_eq!(bits, crate::value::fiber::SIG_ERROR);
     }
 

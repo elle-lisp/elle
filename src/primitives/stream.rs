@@ -29,18 +29,6 @@ fn extract_port_value(value: &Value, prim_name: &str) -> Result<Value, (SignalBi
 
 /// (port/read-line port [:timeout ms]) → string | nil
 fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "port/read-line: expected at least 1 argument, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let port = match extract_port_value(&args[0], "port/read-line") {
         Ok(p) => p,
         Err(e) => return e,
@@ -57,18 +45,6 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
 
 /// (port/read port n [:timeout ms]) → bytes | nil
 fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "port/read: expected at least 2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let port = match extract_port_value(&args[0], "port/read") {
         Ok(p) => p,
         Err(e) => return e,
@@ -110,18 +86,6 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
 
 /// (port/read-all port [:timeout ms]) → string | bytes
 fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "port/read-all: expected at least 1 argument, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let port = match extract_port_value(&args[0], "port/read-all") {
         Ok(p) => p,
         Err(e) => return e,
@@ -138,18 +102,6 @@ fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
 
 /// (port/write port data [:timeout ms]) → int
 fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "port/write: expected at least 2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let port = match extract_port_value(&args[0], "port/write") {
         Ok(p) => p,
         Err(e) => return e,
@@ -175,18 +127,6 @@ fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
 
 /// (port/flush port [:timeout ms]) → nil
 fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "port/flush: expected at least 1 argument, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let port = match extract_port_value(&args[0], "port/flush") {
         Ok(p) => p,
         Err(e) => return e,

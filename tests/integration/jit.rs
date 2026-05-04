@@ -698,6 +698,7 @@ fn test_jit_call_compiles() {
             dst: Reg(1),
             func: Reg(0),
             args: vec![],
+            arity_checked: false,
         },
         span(),
     ));
@@ -1345,6 +1346,7 @@ fn test_jit_tail_call_compiles() {
         LirInstr::TailCall {
             func: Reg(0),
             args: vec![],
+            arity_checked: false,
         },
         span(),
     ));

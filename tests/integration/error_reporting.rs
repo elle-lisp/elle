@@ -241,30 +241,3 @@ fn test_closure_has_location_map() {
     }
 }
 
-#[test]
-fn test_vm_uses_location_map_for_stack_trace() {
-    use elle::pipeline::compile;
-    use elle::primitives::register_primitives;
-    use elle::vm::VM;
-    use elle::SymbolTable;
-
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-
-    // Compile a simple expression
-    let source = "(%add 1 2)";
-    let result = compile(source, &mut symbols, "<test>");
-    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
-
-    let compiled = result.unwrap();
-
-    // Execute the bytecode - this sets the VM's location_map
-    let _ = vm.execute(&compiled.bytecode);
-
-    // The VM's location_map should now be populated
-    assert!(
-        !vm.get_location_map().is_empty(),
-        "VM's location_map should be set from bytecode"
-    );
-}

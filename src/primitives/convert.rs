@@ -8,15 +8,6 @@ use crate::value::{error_val, error_val_extra, Value};
 /// Numeric-only integer conversion. Accepts int (identity) or float (truncation).
 /// String/keyword parsing is handled by `parse-int`.
 pub(crate) fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("integer: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(n) = args[0].as_int() {
         return (SIG_OK, Value::int(n));
     }
@@ -34,16 +25,6 @@ pub(crate) fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
 
 /// Parse a string or keyword to integer, with optional radix (2–36).
 pub(crate) fn prim_parse_int(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("parse-int: expected 1-2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let radix: Option<u32> = if args.len() == 2 {
         match args[1].as_int() {
             Some(r) if (2..=36).contains(&r) => Some(r as u32),
@@ -109,15 +90,6 @@ fn parse_int(s: &str, radix: Option<u32>) -> (SignalBits, Value) {
 /// Numeric-only float conversion. Accepts int (→ f64) or float (identity).
 /// String/keyword parsing is handled by `parse-float`.
 pub(crate) fn prim_to_float(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("float: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(n) = args[0].as_int() {
         return (SIG_OK, Value::float(n as f64));
     }
@@ -135,15 +107,6 @@ pub(crate) fn prim_to_float(args: &[Value]) -> (SignalBits, Value) {
 
 /// Parse a string or keyword to float.
 pub(crate) fn prim_parse_float(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("parse-float: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(result) = args[0].with_string(parse_float) {
         return result;
     }
@@ -182,16 +145,6 @@ fn parse_float(s: &str) -> (SignalBits, Value) {
 /// 2 args: `(number->string n radix)` — convert integer `n` to string in the
 ///   given base. Float with radix → type-error.
 pub(crate) fn prim_number_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("number->string: expected 1-2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     if args.len() == 1 {
         // 1-arg: integer or float, decimal
         if let Some(n) = args[0].as_int() {

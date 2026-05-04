@@ -37,16 +37,6 @@ use crate::value::{error_val, Value};
 ///
 /// Must only be called via the `with-allocator` macro. See module doc.
 fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("allocator/install: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     // Extract Rc<AllocatorBox> from the ExternalObject.
     // The ExternalObject.data is Rc<dyn Any>. We need to get Rc<AllocatorBox>.
     // value.as_external::<AllocatorBox>() gives &AllocatorBox (a ref into the Rc).
@@ -94,20 +84,7 @@ fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
 /// # Safety
 ///
 /// Must only be called via the `with-allocator` macro. See module doc.
-fn prim_uninstall_allocator(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "allocator/uninstall: expected 0 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-
+fn prim_uninstall_allocator(_args: &[Value]) -> (SignalBits, Value) {
     match with_current_heap_mut(|heap| heap.pop_custom_allocator()) {
         Some(true) => (SIG_OK, Value::NIL),
         Some(false) => (

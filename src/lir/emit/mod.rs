@@ -433,7 +433,18 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Call { dst, func, args } | LirInstr::SuspendingCall { dst, func, args } => {
+            LirInstr::Call {
+                dst,
+                func,
+                args,
+                arity_checked,
+            }
+            | LirInstr::SuspendingCall {
+                dst,
+                func,
+                args,
+                arity_checked,
+            } => {
                 // Call expects: [arg1, arg2, ..., argN, func] on stack
                 // Check if values are already in the correct positions at the top of the stack
                 let total_values = args.len() + 1; // args + func
@@ -462,7 +473,11 @@ impl Emitter {
                     self.ensure_on_top(*func);
                 }
 
-                self.bytecode.emit(Instruction::Call);
+                if *arity_checked {
+                    self.bytecode.emit(Instruction::CallChecked);
+                } else {
+                    self.bytecode.emit(Instruction::Call);
+                }
                 self.bytecode.emit_u16(args.len() as u16);
                 let call_resume_ip = self.bytecode.current_pos();
 
@@ -488,7 +503,11 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::TailCall { func, args } => {
+            LirInstr::TailCall {
+                func,
+                args,
+                arity_checked,
+            } => {
                 // Check if values are already in the correct positions at the top of the stack
                 let total_values = args.len() + 1; // args + func
                 let stack_len = self.stack.len();
@@ -513,7 +532,11 @@ impl Emitter {
                     }
                     self.ensure_on_top(*func);
                 }
-                self.bytecode.emit(Instruction::TailCall);
+                if *arity_checked {
+                    self.bytecode.emit(Instruction::TailCallChecked);
+                } else {
+                    self.bytecode.emit(Instruction::TailCall);
+                }
                 self.bytecode.emit_u16(args.len() as u16);
             }
 

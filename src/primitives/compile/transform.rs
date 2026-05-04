@@ -109,12 +109,6 @@ pub(super) fn prim_compile_extract(args: &[Value]) -> (SignalBits, Value) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "compile/extract: expected 2 arguments"),
-        );
-    }
     let opts = match args[1].as_struct() {
         Some(f) => f,
         None => {
@@ -289,12 +283,6 @@ pub(super) fn prim_compile_parallelize(args: &[Value]) -> (SignalBits, Value) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "compile/parallelize: expected 2 arguments"),
-        );
-    }
     let fn_names: Vec<String> = match args[1].as_array() {
         Some(arr) => {
             let mut names = Vec::new();
@@ -536,18 +524,6 @@ pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
 /// the VM's `dispatch_compile_run_on` handler does the actual work because it
 /// needs `&mut VM` access for the JIT cache, MLIR cache, and call machinery.
 pub(super) fn prim_compile_run_on(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "compile/run-on: expected at least 2 arguments (tier closure & args), got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     // Cheap front-end validation — full type checks happen in the dispatch handler.
     if args[0].as_keyword_name().is_none() {
         return (

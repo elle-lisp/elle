@@ -19,19 +19,6 @@ use super::{
 
 /// `(compile/analyze source [opts])` → analysis handle
 pub(super) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "compile/analyze: expected 1-2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-
     let source = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
         None => {

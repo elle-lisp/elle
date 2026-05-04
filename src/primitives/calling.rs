@@ -7,12 +7,6 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/call: expected at least 2 arguments"),
-        );
-    }
     if args[0].is_nil() {
         return (
             SIG_ERROR,

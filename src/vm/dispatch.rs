@@ -172,13 +172,34 @@ impl VM {
                         &mut ip,
                         instr_ip,
                         location_map,
+                        false,
+                    ) {
+                        return (bits, ip);
+                    }
+                }
+                Instruction::CallChecked => {
+                    check_fuel!(self, instr_ip);
+                    if let Some(bits) = self.handle_call(
+                        bytecode,
+                        constants,
+                        closure_env,
+                        &mut ip,
+                        instr_ip,
+                        location_map,
+                        true,
                     ) {
                         return (bits, ip);
                     }
                 }
                 Instruction::TailCall => {
                     check_fuel!(self, instr_ip);
-                    if let Some(bits) = self.handle_tail_call(&mut ip, bc) {
+                    if let Some(bits) = self.handle_tail_call(&mut ip, bc, false) {
+                        return (bits, ip);
+                    }
+                }
+                Instruction::TailCallChecked => {
+                    check_fuel!(self, instr_ip);
+                    if let Some(bits) = self.handle_tail_call(&mut ip, bc, true) {
                         return (bits, ip);
                     }
                 }
@@ -413,13 +434,14 @@ impl VM {
                         &mut ip,
                         instr_ip,
                         location_map,
+                        false,
                     ) {
                         return (bits, ip);
                     }
                 }
                 Instruction::TailCallArrayMut => {
                     check_fuel!(self, instr_ip);
-                    if let Some(bits) = self.handle_tail_call_array(&mut ip, bc) {
+                    if let Some(bits) = self.handle_tail_call_array(&mut ip, bc, false) {
                         return (bits, ip);
                     }
                 }

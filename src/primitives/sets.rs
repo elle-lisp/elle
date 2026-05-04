@@ -71,15 +71,6 @@ pub(crate) fn prim_at_set(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns true for both immutable and mutable sets. Use (type-of x) to distinguish.
 pub(crate) fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("set?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].is_set() || args[0].is_set_mut()),
@@ -94,16 +85,6 @@ pub(crate) fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
 /// For sets: returns true if the value is a member of the set.
 /// For strings: returns true if the string contains the substring.
 pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("contains?: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // Set membership check
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
@@ -200,15 +181,6 @@ pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
 /// For immutable sets, returns a new set with the element added.
 /// For mutable sets, modifies in place and returns the set.
 pub(crate) fn prim_add(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("add: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
         let mut new_set: BTreeSet<Value> = s.iter().copied().collect();
@@ -238,15 +210,6 @@ pub(crate) fn prim_add(args: &[Value]) -> (SignalBits, Value) {
 /// For immutable sets, returns a new set with the element removed.
 /// For mutable sets, modifies in place and returns the set.
 pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("del: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
         let mut new_set: BTreeSet<Value> = s.iter().copied().collect();
@@ -276,15 +239,6 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing all elements from both sets.
 pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("union: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
         let sa: BTreeSet<Value> = a.iter().copied().collect();
         let sb: BTreeSet<Value> = b.iter().copied().collect();
@@ -311,15 +265,6 @@ pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing only elements present in both sets.
 pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("intersection: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
         let sa: BTreeSet<Value> = a.iter().copied().collect();
         let sb: BTreeSet<Value> = b.iter().copied().collect();
@@ -347,15 +292,6 @@ pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing elements in set1 but not in set2.
 pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("difference: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
         let sa: BTreeSet<Value> = a.iter().copied().collect();
         let sb: BTreeSet<Value> = b.iter().copied().collect();
@@ -381,15 +317,6 @@ pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Immutable set → array, mutable set → @array. Elements in sorted order.
 pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("set->array: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(s) = args[0].as_set() {
         let items: Vec<Value> = s.to_vec();
         (SIG_OK, Value::array(items))
@@ -418,15 +345,6 @@ pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
 /// Mutable inputs (@array, @string, @bytes, @set) → mutable set.
 /// Mutable values are frozen on insertion.
 pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("seq->set: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let v = args[0];
 
     // List (immutable) → immutable set

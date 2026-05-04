@@ -142,16 +142,6 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
 
 /// Import a module file
 pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("import: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let spec = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -307,10 +297,9 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         // Save/restore the caller's stack. import executes the
         // module's bytecode on the same VM, which would overwrite the
         // caller's local variable slots without this protection.
-        vm.location_map = result.bytecode.location_map.clone();
         let bc_rc = std::rc::Rc::new(result.bytecode.instructions);
         let consts_rc = std::rc::Rc::new(result.bytecode.constants);
-        let location_map_rc = std::rc::Rc::new(vm.location_map.clone());
+        let location_map_rc = std::rc::Rc::new(result.bytecode.location_map);
         let empty_env = std::rc::Rc::new(vec![]);
 
         let exec_result =

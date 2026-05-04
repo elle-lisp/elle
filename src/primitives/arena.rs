@@ -11,16 +11,7 @@ use crate::value::{error_val, Value};
 /// Return current heap object count.
 ///
 /// Operates directly on thread-local state (no SIG_QUERY).
-pub(crate) fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/count: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_arena_count(_args: &[Value]) -> (SignalBits, Value) {
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let count = unsafe { (*heap_ptr).visible_len() };
@@ -35,22 +26,16 @@ pub(crate) fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
 /// :dtor-count, :root-live-count, :root-alloc-count, :shared-count, :active-allocator,
 /// :scope-enter-count, :scope-dtor-count.
 pub(crate) fn prim_arena_stats(args: &[Value]) -> (SignalBits, Value) {
-    match args.len() {
-        0 => (
+    if args.is_empty() {
+        (
             SIG_QUERY,
             Value::pair(Value::keyword("arena/stats"), Value::NIL),
-        ),
-        1 => (
+        )
+    } else {
+        (
             SIG_QUERY,
             Value::pair(Value::keyword("arena/stats"), args[0]),
-        ),
-        n => (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/stats: expected 0 or 1 arguments, got {n}"),
-            ),
-        ),
+        )
     }
 }
 
@@ -63,18 +48,6 @@ pub(crate) fn prim_arena_stats(args: &[Value]) -> (SignalBits, Value) {
 /// cons cells for the query message — those allocations would themselves be
 /// subject to the limit, creating a chicken-and-egg problem.
 pub(crate) fn prim_arena_set_object_limit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "arena/set-object-limit: expected 1 argument, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let limit = if args[0].is_nil() {
         None
     } else if let Some(n) = args[0].as_int() {
@@ -115,19 +88,7 @@ pub(crate) fn prim_arena_set_object_limit(args: &[Value]) -> (SignalBits, Value)
 /// Get current object limit on the current FiberHeap. Returns int or nil (unlimited).
 ///
 /// Operates directly on thread-local state (no SIG_QUERY).
-pub(crate) fn prim_arena_object_limit(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "arena/object-limit: expected 0 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
+pub(crate) fn prim_arena_object_limit(_args: &[Value]) -> (SignalBits, Value) {
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let limit = unsafe { (*heap_ptr).object_limit() };
@@ -143,16 +104,7 @@ pub(crate) fn prim_arena_object_limit(args: &[Value]) -> (SignalBits, Value) {
 /// Return bytes consumed by the current FiberHeap.
 ///
 /// Operates directly on thread-local state (no SIG_QUERY).
-pub(crate) fn prim_arena_bytes(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/bytes: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_arena_bytes(_args: &[Value]) -> (SignalBits, Value) {
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let bytes = unsafe { (*heap_ptr).allocated_bytes() };
@@ -166,16 +118,7 @@ pub(crate) fn prim_arena_bytes(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Dangerous: any Value allocated after this mark becomes invalid after
 /// arena/reset with this mark.
-pub(crate) fn prim_arena_checkpoint(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/checkpoint: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_arena_checkpoint(_args: &[Value]) -> (SignalBits, Value) {
     let mark = crate::value::heap::heap_arena_mark();
     // Wrap in External so the mark survives across VM state without
     // being mistaken for an integer.
@@ -191,15 +134,6 @@ pub(crate) fn prim_arena_checkpoint(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Dangerous: any Value pointing into the freed region is now invalid.
 pub(crate) fn prim_arena_reset(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/reset: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Extract the ArenaMark from the External wrapper.
     let mark: &crate::value::ArenaMark = match args[0].as_external::<crate::value::ArenaMark>() {
         Some(m) => m,
@@ -254,15 +188,6 @@ pub(crate) fn prim_arena_reset(args: &[Value]) -> (SignalBits, Value) {
 /// specially: it snapshots the heap count, calls the thunk, snapshots
 /// again, and returns a cons of (result . net-allocs).
 pub(crate) fn prim_arena_allocs(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/allocs: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_QUERY,
         Value::pair(Value::keyword("arena/allocs"), args[0]),
@@ -270,16 +195,7 @@ pub(crate) fn prim_arena_allocs(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (arena/peak) — return peak object count (high-water mark)
-pub(crate) fn prim_arena_peak(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/peak: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_arena_peak(_args: &[Value]) -> (SignalBits, Value) {
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let peak = unsafe { (*heap_ptr).peak_alloc_count() };
@@ -287,16 +203,7 @@ pub(crate) fn prim_arena_peak(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (arena/reset-peak) — reset peak to current count, return previous peak
-pub(crate) fn prim_arena_reset_peak(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/reset-peak: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_arena_reset_peak(_args: &[Value]) -> (SignalBits, Value) {
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let prev = unsafe { (*heap_ptr).reset_peak() };

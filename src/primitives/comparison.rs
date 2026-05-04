@@ -1,9 +1,9 @@
 //! Comparison primitives
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -13,15 +13,6 @@ use std::hash::{Hash, Hasher};
 /// Otherwise, uses structural equality (PartialEq).
 /// Chained: (= a b c) means all pairs are equal.
 pub(crate) fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("=: expected at least 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     for i in 0..args.len() - 1 {
         // Fast path: bitwise identical (covers same-type immediates)
         if args[i] == args[i + 1] {
@@ -52,15 +43,6 @@ pub(crate) fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
 /// Inequality comparison — negation of `=`.
 /// Numeric-aware: (not= 1 1.0) is false. Accepts exactly 2 arguments.
 pub(crate) fn prim_not_eq(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("not=: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     // Fast path: bitwise identical
     if args[0] == args[1] {
         return (SIG_OK, Value::FALSE);
@@ -79,15 +61,6 @@ pub(crate) fn prim_not_eq(args: &[Value]) -> (SignalBits, Value) {
 /// Strict identity comparison — bitwise/structural equality with no coercion.
 /// This is what `=` used to be: (identical? 1 1.0) is false.
 pub(crate) fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("identical?: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         if args[0] == args[1] {
@@ -107,15 +80,6 @@ pub(crate) fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
 /// values, callers that assumed compare is pure would silently misbehave.
 /// Declaring errors() keeps the contract honest.
 pub(crate) fn prim_compare(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("compare: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let result: i64 = match args[0].cmp(&args[1]) {
         Ordering::Less => -1,
         Ordering::Equal => 0,

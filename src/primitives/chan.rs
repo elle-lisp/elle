@@ -99,44 +99,34 @@ fn extract_receiver<'a>(
 ///
 /// Returns `[sender receiver]` as an array.
 fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
-    let (tx, rx) = match args.len() {
-        0 => crossbeam_channel::unbounded(),
-        1 => {
-            let cap = match args[0].as_int() {
-                Some(n) if n >= 0 => n as usize,
-                Some(n) => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "value-error",
-                            format!("chan: capacity must be non-negative, got {}", n),
+    let (tx, rx) = if args.is_empty() {
+        crossbeam_channel::unbounded()
+    } else {
+        let cap = match args[0].as_int() {
+            Some(n) if n >= 0 => n as usize,
+            Some(n) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        format!("chan: capacity must be non-negative, got {}", n),
+                    ),
+                );
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "chan: expected integer for capacity, got {}",
+                            args[0].type_name()
                         ),
-                    );
-                }
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!(
-                                "chan: expected integer for capacity, got {}",
-                                args[0].type_name()
-                            ),
-                        ),
-                    );
-                }
-            };
-            crossbeam_channel::bounded(cap)
-        }
-        n => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "arity-error",
-                    format!("chan: expected 0 or 1 arguments, got {}", n),
-                ),
-            );
-        }
+                    ),
+                );
+            }
+        };
+        crossbeam_channel::bounded(cap)
     };
 
     let sender = Value::external("chan/sender", ChanSender(RefCell::new(Some(tx))));
@@ -148,16 +138,6 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns `[:ok]`, `[:full]`, or `[:disconnected]`.
 fn prim_chan_send(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("chan/send: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let sender = match extract_sender(&args[0], "chan/send") {
         Ok(s) => s,
         Err(e) => return e,
@@ -182,16 +162,6 @@ fn prim_chan_send(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns `[:ok msg]`, `[:empty]`, or `[:disconnected]`.
 fn prim_chan_recv(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("chan/recv: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let receiver = match extract_receiver(&args[0], "chan/recv") {
         Ok(r) => r,
         Err(e) => return e,
@@ -214,16 +184,6 @@ fn prim_chan_recv(args: &[Value]) -> (SignalBits, Value) {
 
 /// `(chan/clone sender)` — clone the sender half.
 fn prim_chan_clone(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("chan/clone: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let sender = match extract_sender(&args[0], "chan/clone") {
         Ok(s) => s,
         Err(e) => return e,
@@ -249,16 +209,6 @@ fn prim_chan_clone(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Drops the inner `Sender`, disconnecting the channel from this end.
 fn prim_chan_close(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("chan/close: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let sender = match extract_sender(&args[0], "chan/close") {
         Ok(s) => s,
         Err(e) => return e,
@@ -272,16 +222,6 @@ fn prim_chan_close(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Drops the inner `Receiver`, disconnecting the channel from this end.
 fn prim_chan_close_recv(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("chan/close-recv: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let receiver = match extract_receiver(&args[0], "chan/close-recv") {
         Ok(r) => r,
         Err(e) => return e,
@@ -296,16 +236,6 @@ fn prim_chan_close_recv(args: &[Value]) -> (SignalBits, Value) {
 /// Blocks until one receiver has a message. Returns `[index msg]`.
 /// With timeout, returns `[:timeout]` if no message arrives in time.
 fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("chan/select: expected 1 or 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // Extract the array of receivers.
     let receivers_cell = match args[0].as_array_mut() {
         Some(arr) => arr,

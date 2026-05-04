@@ -184,19 +184,6 @@ pub(crate) fn resolve_signal_bits(
 /// The child's `withheld` is the union of the explicit deny bits and the
 /// parent's withheld (propagated at resume time by the VM).
 pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "fiber/new: expected at least 2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-
     let closure = match args[0].as_closure() {
         Some(c) => std::rc::Rc::new(c.clone()),
         None => {
@@ -317,16 +304,6 @@ pub(crate) fn prim_fiber_resume(args: &[Value]) -> (SignalBits, Value) {
 /// returned directly — the VM's dispatch loop stores them in fiber.signal
 /// and suspends the fiber.
 pub(crate) fn prim_emit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("emit: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let bits = match resolve_signal_bits(&args[0], "emit") {
         Ok(bits) => bits,
         Err(err) => return err,
@@ -342,16 +319,6 @@ pub(crate) fn prim_emit(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns the fiber's lifecycle status as a keyword.
 pub(crate) fn prim_fiber_status(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/status: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -374,16 +341,6 @@ pub(crate) fn prim_fiber_status(args: &[Value]) -> (SignalBits, Value) {
 /// Returns the signal payload from the fiber's last signal or return value.
 /// Returns nil if the fiber has no signal.
 pub(crate) fn prim_fiber_value(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/value: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -406,16 +363,6 @@ pub(crate) fn prim_fiber_value(args: &[Value]) -> (SignalBits, Value) {
 /// Set the instruction budget on a fiber. `n` must be a non-negative integer.
 /// A fuel of 0 means the very next fuel checkpoint emits `:fuel`.
 pub(crate) fn prim_fiber_set_fuel(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/set-fuel: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -466,16 +413,6 @@ pub(crate) fn prim_fiber_set_fuel(args: &[Value]) -> (SignalBits, Value) {
 /// Read the remaining instruction budget. Returns an integer if fuel is set,
 /// or `nil` if the fiber has unlimited fuel (the default).
 pub(crate) fn prim_fiber_fuel(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/fuel: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -503,16 +440,6 @@ pub(crate) fn prim_fiber_fuel(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Remove the instruction budget, restoring unlimited execution.
 pub(crate) fn prim_fiber_clear_fuel(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/clear-fuel: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -705,12 +632,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fiber_new_wrong_arity() {
-        let (sig, _) = prim_fiber_new(&[make_test_closure()]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
     fn test_fiber_resume_returns_sig_resume() {
         let closure = make_test_closure();
         let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
@@ -778,12 +699,6 @@ mod tests {
         let (sig, val) = prim_emit(&[bits, value]);
         assert_eq!(sig, SIG_YIELD);
         assert_eq!(val, Value::int(42));
-    }
-
-    #[test]
-    fn test_fiber_signal_wrong_arity() {
-        let (sig, _) = prim_emit(&[Value::int(0)]);
-        assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
@@ -897,14 +812,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fiber_set_fuel_wrong_arity() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_set_fuel(&[fiber_val]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
     fn test_fiber_set_fuel_not_a_fiber() {
         let (sig, _) = prim_fiber_set_fuel(&[Value::int(42), Value::int(100)]);
         assert_eq!(sig, SIG_ERROR);
@@ -948,12 +855,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fiber_fuel_wrong_arity() {
-        let (sig, _) = prim_fiber_fuel(&[]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
     fn test_fiber_fuel_not_a_fiber() {
         let (sig, _) = prim_fiber_fuel(&[Value::int(42)]);
         assert_eq!(sig, SIG_ERROR);
@@ -982,12 +883,6 @@ mod tests {
         fiber_val.as_fiber().unwrap().with(|fiber| {
             assert_eq!(fiber.fuel, None);
         });
-    }
-
-    #[test]
-    fn test_fiber_clear_fuel_wrong_arity() {
-        let (sig, _) = prim_fiber_clear_fuel(&[]);
-        assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]

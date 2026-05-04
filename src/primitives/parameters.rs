@@ -2,37 +2,19 @@
 
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 /// Create a new parameter with a default value.
 /// (parameter default) → parameter
 pub(crate) fn prim_make_parameter(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("parameter: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::parameter(args[0]))
 }
 
 /// Check if a value is a parameter.
 /// (parameter? value) → boolean
 pub(crate) fn prim_is_parameter(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("parameter?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_parameter()))
 }
 

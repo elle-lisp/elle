@@ -5,16 +5,6 @@ use unicode_segmentation::UnicodeSegmentation;
 
 /// Take the first n elements of a list
 pub(crate) fn prim_take(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("take: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let count = match args[0].as_int() {
         Some(n) if n < 0 => {
             return (
@@ -47,16 +37,6 @@ pub(crate) fn prim_take(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get all elements of a sequence except the last
 pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("butlast: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     // Lists
     if args[0].is_pair() || args[0].is_empty_list() {
         if args[0].is_empty_list() {
@@ -157,16 +137,6 @@ pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
 /// For strings: returns new string
 /// `(append collection1 collection2)`
 pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("append: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // @string (mutable) — accepts string or @string as second arg
     if let Some(buf_ref) = args[0].as_string_mut() {
         if let Some(other_buf) = args[1].as_string_mut() {
@@ -680,15 +650,6 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
 
 /// Reverse a sequence (list, array, @array, string)
 pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("reverse: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Array — return new array
     if let Some(arr) = args[0].as_array_mut() {
         let mut vec = arr.borrow().to_vec();
@@ -730,16 +691,6 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get the last element of a sequence
 pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("last: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let empty_err = (
         SIG_ERROR,
         error_val("argument-error", "last: empty sequence"),
@@ -823,16 +774,6 @@ pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
 
 /// Drop the first n elements of a list
 pub(crate) fn prim_drop(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("drop: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let count = match args[0].as_int() {
         Some(n) if n < 0 => {
             return (

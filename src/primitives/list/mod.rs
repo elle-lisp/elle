@@ -16,15 +16,6 @@ pub(crate) use advanced::{
 
 /// Get the first element of a sequence (list, array, @array, string)
 pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("first: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Pair cell — the common case for lists
     if let Some(pair) = args[0].as_pair() {
         return (SIG_OK, pair.first);
@@ -132,15 +123,6 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get the second element of a sequence
 pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("second: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let too_short = (
         SIG_ERROR,
         error_val(
@@ -230,15 +212,6 @@ pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get the rest of a sequence (list, array, @array, string, @string, bytes, @bytes)
 pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("rest: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Pair cell — the common case for lists
     if let Some(pair) = args[0].as_pair() {
         return (SIG_OK, pair.rest);
@@ -398,15 +371,6 @@ fn collect_elements(val: &Value) -> Result<Vec<Value>, (SignalBits, Value)> {
 
 /// Convert any sequence to an immutable array.
 pub(crate) fn prim_to_array(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("->array: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Already an immutable array — return as-is
     if args[0].as_array().is_some() {
         return (SIG_OK, args[0]);
@@ -419,15 +383,6 @@ pub(crate) fn prim_to_array(args: &[Value]) -> (SignalBits, Value) {
 
 /// Convert any sequence to a list.
 pub(crate) fn prim_to_list(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("->list: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Already a list — return as-is
     if args[0].is_pair() || args[0].is_empty_list() {
         return (SIG_OK, args[0]);
@@ -440,16 +395,6 @@ pub(crate) fn prim_to_list(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get the length of a collection (universal for all container types)
 pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("length: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if args[0].is_nil() || args[0].is_empty_list() {
         (SIG_OK, Value::int(0))
     } else if args[0].is_pair() {
@@ -575,16 +520,6 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if a collection is empty (O(1) operation for most types)
 pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("empty?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     // nil is not a container - error if passed
     if args[0].is_nil() {
         return (
@@ -711,15 +646,6 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if a collection is non-empty (negation of empty?)
 pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("nonempty?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let (sig, val) = prim_empty(args);
     if sig != SIG_OK {
         // Re-wrap errors with nonempty? name

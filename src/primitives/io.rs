@@ -12,15 +12,6 @@ use crate::value::{error_val, Value};
 
 /// (io-request? value) → boolean
 fn prim_is_io_request(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io-request?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].external_type_name() == Some("io-request")),
@@ -29,15 +20,6 @@ fn prim_is_io_request(args: &[Value]) -> (SignalBits, Value) {
 
 /// (io-backend? value) → boolean
 fn prim_is_io_backend(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io-backend?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].external_type_name() == Some("io-backend")),
@@ -46,15 +28,6 @@ fn prim_is_io_backend(args: &[Value]) -> (SignalBits, Value) {
 
 /// (io/backend kind) → backend
 fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io/backend: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match args[0].as_keyword_name().as_deref() {
         Some("async") => match AsyncBackend::new() {
             Ok(backend) => {
@@ -89,15 +62,6 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
 
 /// (io/submit backend request) → submission-id
 fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io/submit: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
@@ -133,15 +97,6 @@ fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
 
 /// (io/reap backend) → array-of-completion-structs
 fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io/reap: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
@@ -161,15 +116,6 @@ fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
 
 /// (io/wait backend timeout-ms) → array-of-completion-structs
 fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io/wait: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
@@ -208,15 +154,6 @@ fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
 
 /// (io/cancel backend submission-id) → nil
 fn prim_io_cancel(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io/cancel: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
@@ -258,16 +195,6 @@ fn prim_ev_sleep(args: &[Value]) -> (SignalBits, Value) {
     use crate::io::request::IoOp;
     use std::time::Duration;
 
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ev/sleep: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let duration = if let Some(n) = args[0].as_int() {
         if n < 0 {
             return (
@@ -307,16 +234,6 @@ fn prim_ev_sleep(args: &[Value]) -> (SignalBits, Value) {
 /// Returns revents mask as int, or 0 on timeout.
 fn prim_ev_poll_fd(args: &[Value]) -> (SignalBits, Value) {
     use std::time::Duration;
-
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ev/poll-fd: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
 
     let fd = match args[0].as_int() {
         Some(n) if n >= 0 => n as std::os::unix::io::RawFd,

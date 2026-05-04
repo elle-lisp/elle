@@ -325,7 +325,7 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
                 f(*a);
             }
         }
-        LirInstr::TailCall { func, args } => {
+        LirInstr::TailCall { func, args, .. } => {
             f(*func);
             for a in args {
                 f(*a);

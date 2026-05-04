@@ -177,16 +177,6 @@ where
 /// Integer input: big-endian, minimal bytes, no leading zero bytes except
 /// that 0 itself produces "00".  Negative integers → value-error.
 pub(crate) fn prim_seq_to_hex(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("seq->hex: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     // Immutable bytes → immutable string
     if let Some(b) = args[0].as_bytes() {
         return (SIG_OK, Value::string(bytes_to_hex_string(b)));
@@ -274,15 +264,6 @@ pub(crate) fn prim_seq_to_hex(args: &[Value]) -> (SignalBits, Value) {
 /// Supports: bytes, @bytes, array, @array, list, string, @string.
 /// Indices are 0-based, clamped to length. start >= end returns empty.
 pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("slice: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
     use crate::primitives::access::resolve_slice_index;
 
     let raw_start = match args[1].as_int() {

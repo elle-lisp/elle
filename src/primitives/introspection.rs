@@ -8,44 +8,17 @@ use crate::value::{error_val, Value};
 
 /// (closure? value) — true if value is a bytecode closure
 pub(crate) fn prim_is_closure(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("closure?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].as_closure().is_some()))
 }
 
 /// (jit? value) — true if closure has JIT-compiled code
 pub(crate) fn prim_is_jit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("jit?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // SIG_QUERY to the VM, which checks jit_cache by bytecode pointer.
     (SIG_QUERY, Value::pair(Value::keyword("jit?"), args[0]))
 }
 
 /// (silent? value) — true if closure is silent (does not suspend: no yield/debug/polymorphic)
 pub(crate) fn prim_is_silent(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("silent?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::bool(!closure.signal().may_suspend()))
     } else {
@@ -55,15 +28,6 @@ pub(crate) fn prim_is_silent(args: &[Value]) -> (SignalBits, Value) {
 
 /// (mutates-params? value) — true if closure mutates any parameters
 pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("mutates-params?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         (
             SIG_OK,
@@ -76,15 +40,6 @@ pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fn/gpu-eligible? value) — true if closure is eligible for GPU compilation
 pub(crate) fn prim_gpu_eligible(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fn/gpu-eligible?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         let eligible = match &closure.template.lir_function {
             Some(lir) => lir.is_gpu_eligible(),
@@ -98,15 +53,6 @@ pub(crate) fn prim_gpu_eligible(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fn/errors? value) — true if closure may error
 pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fn/errors?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::bool(closure.template.signal.may_error()))
     } else {
@@ -116,15 +62,6 @@ pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
 
 /// (arity value) — closure arity as int, pair, or nil
 pub(crate) fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arity: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         let result = match closure.template.arity {
             Arity::Exact(n) => Value::int(n as i64),
@@ -139,15 +76,6 @@ pub(crate) fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
 
 /// (captures value) — number of captured variables, or nil
 pub(crate) fn prim_captures(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("captures: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::int(closure.env.len() as i64))
     } else {
@@ -157,15 +85,6 @@ pub(crate) fn prim_captures(args: &[Value]) -> (SignalBits, Value) {
 
 /// (bytecode-size value) — size of bytecode in bytes, or nil
 pub(crate) fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bytecode-size: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::int(closure.template.bytecode.len() as i64))
     } else {
@@ -187,15 +106,6 @@ pub(crate) fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
 /// primitives and special forms are rewritten to `(doc "name")` string lookup.
 /// Passing an explicit string `(doc "stdlib-fn")` will NOT find stdlib docs.
 pub(crate) fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("doc: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Closure: extract docstring directly — no VM query needed.
     if let Some(closure) = args[0].as_closure() {
         return if let Some(doc) = closure.template.doc {
@@ -224,15 +134,6 @@ pub(crate) fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
 /// - "global?" symbol → bool
 /// - "fiber/self" _ → fiber or nil
 pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("vm/query: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     if !args[0].is_string() && args[0].as_keyword_name().is_none() {
         return (
             SIG_ERROR,
@@ -249,16 +150,7 @@ pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (signals) — return the signal registry as a struct mapping keywords to bit positions
-pub(crate) fn prim_signals(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("signals: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_signals(_args: &[Value]) -> (SignalBits, Value) {
     let reg = crate::signals::registry::global_registry().lock().unwrap();
     let mut map = std::collections::BTreeMap::new();
     for entry in reg.entries() {
@@ -272,15 +164,6 @@ pub(crate) fn prim_signals(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Creates a content-addressed keyword from the string name.
 pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("keyword: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(kw) = args[0].with_string(Value::keyword) {
         (SIG_OK, kw)
     } else {
@@ -301,19 +184,7 @@ pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
 /// Used by regression tests to assert the ClosureRef LIR-transfer fix
 /// is actually firing on real spawn patterns. See
 /// `src/lir/types.rs::convert_value_consts_for_send`.
-pub(crate) fn prim_closure_value_const_count(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "lir/closure-value-const-count: expected 0 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
+pub(crate) fn prim_closure_value_const_count(_args: &[Value]) -> (SignalBits, Value) {
     (
         SIG_OK,
         Value::int(crate::lir::closure_value_const_count() as i64),
@@ -324,16 +195,7 @@ pub(crate) fn prim_closure_value_const_count(args: &[Value]) -> (SignalBits, Val
 ///
 /// Returns a list of structs, each with :name, :reason, and :calls keys.
 /// Sorted by call count ascending (coldest first).
-pub(crate) fn prim_jit_rejections(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("jit/rejections: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+pub(crate) fn prim_jit_rejections(_args: &[Value]) -> (SignalBits, Value) {
     (
         SIG_QUERY,
         Value::pair(Value::keyword("jit/rejections"), Value::NIL),

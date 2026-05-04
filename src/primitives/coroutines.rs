@@ -25,16 +25,6 @@ use crate::value::{error_val, Value};
 ///
 /// Creates a fiber with SIG_YIELD mask from a closure.
 pub(crate) fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro/new: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(c) = args[0].as_closure() {
         let fiber = Fiber::new(std::rc::Rc::new(c.clone()), SIG_YIELD);
         (SIG_OK, Value::fiber(fiber))
@@ -55,16 +45,6 @@ pub(crate) fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
 /// :new → :created, :alive → :running, :dead → :done,
 /// :suspended and :error unchanged.
 pub(crate) fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro/status: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -95,16 +75,6 @@ pub(crate) fn prim_coroutine_status(args: &[Value]) -> (SignalBits, Value) {
 
 /// (coro/done? co) → bool
 pub(crate) fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro/done?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -132,16 +102,6 @@ pub(crate) fn prim_coroutine_done(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns the signal payload from the fiber's last signal.
 pub(crate) fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro/value: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -166,16 +126,6 @@ pub(crate) fn prim_coroutine_value(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns true if the value is a fiber (coroutines are fibers).
 pub(crate) fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coroutine?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     (SIG_OK, Value::bool(args[0].is_fiber()))
 }
 
@@ -184,16 +134,6 @@ pub(crate) fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Resume a fiber. Returns SIG_RESUME for the VM to handle.
 pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro/resume: expected 1-2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -241,16 +181,6 @@ pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Identity — fibers are iterable.
 pub(crate) fn prim_coroutine_to_iterator(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("coro/>iterator: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if args[0].is_fiber() {
         (SIG_OK, args[0])
     } else {

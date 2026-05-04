@@ -97,67 +97,6 @@ pub(crate) fn div_values(a: &Value, b: &Value) -> Result<Value, Value> {
     }
 }
 
-/// Negate a numeric value
-#[allow(dead_code)]
-pub(crate) fn negate_value(a: &Value) -> Result<Value, Value> {
-    if let Some(n) = a.as_int() {
-        return match n.checked_neg() {
-            Some(r) => Ok(Value::int(r)),
-            None => Err(error_val("overflow", "negate: integer overflow")),
-        };
-    }
-    match a.as_float() {
-        Some(f) => Ok(Value::float(-f)),
-        None => Err(error_val(
-            "type-error",
-            format!("negate: expected number, got {}", a.type_name()),
-        )),
-    }
-}
-
-/// Reciprocal of a numeric value (1/x). Integer zero errors;
-/// float zero returns Inf per IEEE 754.
-#[allow(dead_code)]
-pub(crate) fn reciprocal_value(a: &Value) -> Result<Value, Value> {
-    if let Some(n) = a.as_int() {
-        if n == 0 {
-            return Err(error_val(
-                "division-by-zero",
-                "reciprocal: division by zero",
-            ));
-        }
-        return Ok(Value::float(1.0 / n as f64));
-    }
-    match a.as_float() {
-        Some(f) => Ok(Value::float(1.0 / f)),
-        None => Err(error_val(
-            "type-error",
-            format!("reciprocal: expected number, got {}", a.type_name()),
-        )),
-    }
-}
-
-/// Modulo operation (Euclidean modulo - result has same sign as divisor)
-#[allow(dead_code)]
-pub(crate) fn mod_values(a: &Value, b: &Value) -> Result<Value, Value> {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
-            if y == 0 {
-                return Err(error_val("division-by-zero", "mod: division by zero"));
-            }
-            Ok(Value::int(x.rem_euclid(y)))
-        }
-        _ => Err(error_val(
-            "type-error",
-            format!(
-                "mod: expected integer, got {} and {}",
-                a.type_name(),
-                b.type_name()
-            ),
-        )),
-    }
-}
-
 /// Remainder operation (truncated division - result has same sign as dividend)
 pub(crate) fn remainder_values(a: &Value, b: &Value) -> Result<Value, Value> {
     match (a.as_int(), a.as_float(), b.as_int(), b.as_float()) {
@@ -257,22 +196,9 @@ mod tests {
     }
 
     #[test]
-    fn test_mod_values() {
-        let a = Value::int(17);
-        let b = Value::int(5);
-        assert_eq!(mod_values(&a, &b).unwrap(), Value::int(2));
-    }
-
-    #[test]
     fn test_abs_value() {
         let a = Value::int(-5);
         assert_eq!(abs_value(&a).unwrap(), Value::int(5));
-    }
-
-    #[test]
-    fn test_negate_value() {
-        let a = Value::int(5);
-        assert_eq!(negate_value(&a).unwrap(), Value::int(-5));
     }
 
     #[test]

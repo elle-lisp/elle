@@ -38,6 +38,7 @@ impl VM {
     ///
     /// Returns `Some(SignalBits)` if execution should return immediately,
     /// or `None` if the dispatch loop should continue.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_call(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
@@ -46,6 +47,7 @@ impl VM {
         ip: &mut usize,
         instr_ip: usize,
         location_map: &Rc<LocationMap>,
+        checked: bool,
     ) -> Option<SignalBits> {
         let bc: &[u8] = bytecode;
         let arg_count = self.read_u16(bc, ip) as usize;
@@ -75,6 +77,7 @@ impl VM {
             ip,
             instr_ip,
             location_map,
+            checked,
         )
     }
 
@@ -86,6 +89,7 @@ impl VM {
     /// calls the function with those args.
     ///
     /// Stack: \[func, args_array\] → \[result\]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_call_array(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
@@ -94,6 +98,7 @@ impl VM {
         ip: &mut usize,
         instr_ip: usize,
         location_map: &Rc<LocationMap>,
+        checked: bool,
     ) -> Option<SignalBits> {
         let args_val = self
             .fiber
@@ -133,6 +138,7 @@ impl VM {
             ip,
             instr_ip,
             location_map,
+            checked,
         )
     }
 
@@ -141,6 +147,9 @@ impl VM {
     /// Dispatches native functions, executes closures with environment setup,
     /// handles yield-through-calls and JIT compilation.
     #[allow(clippy::too_many_arguments)]
+    ///
+    /// When `checked` is true, the compiler verified arity at compile time
+    /// and the runtime skips the arity check for primitives and closures.
     fn call_inner(
         &mut self,
         func: Value,
@@ -151,6 +160,7 @@ impl VM {
         ip: &mut usize,
         instr_ip: usize,
         location_map: &Rc<LocationMap>,
+        checked: bool,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             etrace!(
@@ -177,6 +187,20 @@ impl VM {
                     ip,
                     location_map,
                 );
+            }
+            if !checked && !def.arity.matches(args.len()) {
+                set_error(
+                    &mut self.fiber,
+                    "arity-error",
+                    format!(
+                        "{}: expected {} argument(s), got {}",
+                        def.name,
+                        def.arity,
+                        args.len()
+                    ),
+                );
+                self.fiber.stack.push(Value::NIL);
+                return None;
             }
             let (bits, value) =
                 if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
@@ -233,8 +257,8 @@ impl VM {
                 location_map: location_map.clone(),
             });
 
-            // Validate argument count
-            if !self.check_arity(&closure.template.arity, args.len()) {
+            // Validate argument count (skip if compiler verified)
+            if !checked && !self.check_arity(&closure.template.arity, args.len()) {
                 self.fiber.call_depth -= 1;
                 self.fiber.call_stack.pop();
                 self.fiber.stack.push(Value::NIL);
@@ -524,6 +548,7 @@ impl VM {
         &mut self,
         ip: &mut usize,
         bytecode: &[u8],
+        checked: bool,
     ) -> Option<SignalBits> {
         let arg_count = self.read_u16(bytecode, ip) as usize;
         let func = self
@@ -543,7 +568,7 @@ impl VM {
         }
         args.reverse();
 
-        self.tail_call_inner(func, args)
+        self.tail_call_inner(func, args, checked)
     }
 
     /// Handle the TailCallArrayMut instruction.
@@ -554,6 +579,7 @@ impl VM {
         &mut self,
         ip: &mut usize,
         bytecode: &[u8],
+        checked: bool,
     ) -> Option<SignalBits> {
         // Suppress unused warnings — these params match the dispatch signature
         let _ = (ip, bytecode);
@@ -586,14 +612,22 @@ impl VM {
             return Some(SIG_ERROR);
         };
 
-        self.tail_call_inner(func, args)
+        self.tail_call_inner(func, args, checked)
     }
 
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions via tail signal handler, sets up pending
     /// tail call for closures with environment building.
-    fn tail_call_inner(&mut self, func: Value, args: Vec<Value>) -> Option<SignalBits> {
+    ///
+    /// When `checked` is true, the compiler verified arity at compile time
+    /// and the runtime skips the arity check for primitives and closures.
+    fn tail_call_inner(
+        &mut self,
+        func: Value,
+        args: Vec<Value>,
+        checked: bool,
+    ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             let blocked = def
                 .signal
@@ -602,6 +636,19 @@ impl VM {
                 .intersection(crate::signals::CAP_MASK);
             if !blocked.is_empty() {
                 return Some(self.handle_capability_denial_tail(def, blocked, &args));
+            }
+            if !checked && !def.arity.matches(args.len()) {
+                set_error(
+                    &mut self.fiber,
+                    "arity-error",
+                    format!(
+                        "{}: expected {} argument(s), got {}",
+                        def.name,
+                        def.arity,
+                        args.len()
+                    ),
+                );
+                return Some(SIG_ERROR);
             }
             let (bits, value) =
                 if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
@@ -627,8 +674,8 @@ impl VM {
         }
 
         if let Some(closure) = func.as_closure() {
-            // Validate argument count
-            if !self.check_arity(&closure.template.arity, args.len()) {
+            // Validate argument count (skip if compiler verified)
+            if !checked && !self.check_arity(&closure.template.arity, args.len()) {
                 // check_arity sets fiber.signal to (SIG_ERROR, ...)
                 return Some(SIG_ERROR);
             }

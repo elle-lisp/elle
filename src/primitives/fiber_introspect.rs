@@ -23,16 +23,6 @@ use crate::value::{error_val, Value};
 /// Returns the signal bits from the fiber's last signal.
 /// Returns 0 if the fiber has no signal.
 pub(crate) fn prim_fiber_bits(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/bits: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -54,16 +44,6 @@ pub(crate) fn prim_fiber_bits(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns the fiber's signal mask.
 pub(crate) fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/mask: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -85,16 +65,6 @@ pub(crate) fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Type predicate: returns true if the value is a fiber.
 pub(crate) fn prim_is_fiber(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     (SIG_OK, Value::bool(args[0].is_fiber()))
 }
 
@@ -103,16 +73,6 @@ pub(crate) fn prim_is_fiber(args: &[Value]) -> (SignalBits, Value) {
 /// Returns the parent fiber, or nil if the fiber has no parent
 /// (or the parent has been dropped).
 pub(crate) fn prim_fiber_parent(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/parent: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -134,16 +94,6 @@ pub(crate) fn prim_fiber_parent(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns the most recently resumed child fiber, or nil if none.
 pub(crate) fn prim_fiber_child(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/child: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -169,16 +119,6 @@ pub(crate) fn prim_fiber_child(args: &[Value]) -> (SignalBits, Value) {
 /// Returns SIG_PROPAGATE — the VM sets parent.child = fiber and propagates
 /// the fiber's signal upward.
 pub(crate) fn prim_fiber_propagate(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/propagate: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -222,16 +162,6 @@ pub(crate) fn prim_fiber_propagate(args: &[Value]) -> (SignalBits, Value) {
 /// fiber), returns SIG_ERROR | SIG_TERMINAL which terminates the dispatch
 /// loop without unwinding.
 pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/cancel: expected 1-2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -297,16 +227,6 @@ pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
 /// Only works on :paused fibers (must have something to unwind).
 /// Returns SIG_ABORT — the VM handles the fiber swap and execution.
 pub(crate) fn prim_fiber_abort(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/abort: expected 1-2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
@@ -377,16 +297,6 @@ pub(crate) fn prim_fiber_caps(args: &[Value]) -> (SignalBits, Value) {
             Value::pair(Value::keyword("fiber/caps"), Value::NIL),
         );
     }
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fiber/caps: expected 0-1 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let handle = match args[0].as_fiber() {
         Some(h) => h,
         None => {
