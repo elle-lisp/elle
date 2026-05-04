@@ -6,7 +6,7 @@
 .DEFAULT_GOAL := all
 
 ifdef GITHUB_ACTIONS
-  JOBS          ?= 4
+  JOBS          ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
   WASM_JOBS     ?= 2
   ELLE          ?= ./target/release/elle
   CARGO_PROFILE := --release

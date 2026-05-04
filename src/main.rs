@@ -630,24 +630,24 @@ fn main() {
             eval_exprs.push(expr.to_string());
         } else if arg == "-" && files.is_empty() && eval_exprs.is_empty() {
             read_stdin = true;
-            vm.source_arg = "-".to_string();
-            vm.user_args = remaining_args[i + 1..].to_vec();
+            vm.runtime_config.source_arg = "-".to_string();
+            vm.runtime_config.user_args = remaining_args[i + 1..].to_vec();
             break;
         } else if arg == "--" {
-            vm.user_args = remaining_args[i + 1..].to_vec();
+            vm.runtime_config.user_args = remaining_args[i + 1..].to_vec();
             break;
         } else if files.is_empty() && eval_exprs.is_empty() {
-            vm.source_arg = arg.clone();
+            vm.runtime_config.source_arg = arg.clone();
             files.push(arg.clone());
             // Everything after the first file arg goes to user_args
-            vm.user_args = remaining_args[i + 1..].to_vec();
+            vm.runtime_config.user_args = remaining_args[i + 1..].to_vec();
             break;
         }
     }
     if eval_exprs.is_empty() && files.is_empty() && !read_stdin {
         // REPL mode: vm.source_arg stays "" and vm.user_args stays empty.
     } else if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
-        vm.source_arg = "<eval>".to_string();
+        vm.runtime_config.source_arg = "<eval>".to_string();
     }
 
     if read_stdin {

@@ -1201,6 +1201,8 @@ fn test_eval_with_closure_in_evald_code() {
 fn test_eval_result_in_computation() {
     // eval's return value used in a larger expression
     let (mut symbols, mut vm) = setup_with_stdlib();
+    set_symbol_table(&mut symbols as *mut SymbolTable);
+    elle::context::set_vm_context(&mut vm as *mut VM);
     let result = eval("(+ 1 (eval '2))", &mut symbols, &mut vm, "<test>");
     clear_symbol_table();
     assert_eq!(result.unwrap(), Value::int(3));

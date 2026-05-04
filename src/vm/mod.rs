@@ -119,7 +119,7 @@ impl VM {
                 &current_location_map,
             );
             bits = b;
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(tail) = self.pending.take_tail_call() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
@@ -167,9 +167,9 @@ impl VM {
     /// and resume the caller with the result. Returns the new signal bits.
     fn handle_sig_switch(&mut self) -> SignalBits {
         let pending = self
-            .pending_fiber_resume
-            .take()
-            .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
+            .pending
+            .take_fiber_resume()
+            .expect("VM bug: SIG_SWITCH without pending fiber resume");
         let caller_frames = self.fiber.suspended.take().unwrap_or_default();
         self.fiber.signal.take();
         if self
@@ -204,7 +204,6 @@ impl VM {
 
         if caught {
             self.fiber.child = None;
-            self.fiber.child_value = None;
             self.resume_suspended(caller_frames, result_value)
         } else {
             self.fiber.signal = Some((result_bits, result_value));

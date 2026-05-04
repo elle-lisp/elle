@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Mutability regression tests
 #
 # Guards against assign-in-dead-branch executing unconditionally.
@@ -84,3 +84,87 @@
 (def @n 0)
 (if true (if false (assign n 1) (assign n 2)) (assign n 3))
 (assert (= n 2) "nested if assign correct branch")
+
+# ── Immutable binding errors (migrated from Rust) ────────────
+
+# Let bindings are immutable by default; assign should fail
+(let [[ok? _] (protect (eval '(let [x 5]
+                                (assign x 10)
+                                x)))]
+  (assert (not ok?) "assign to immutable let should fail"))
+
+# @x opts in to mutability
+(let [@x 5]
+  (assign x 10)
+  (assert (= x 10) "mutable let with @ works"))
+
+# def is immutable by default
+(let [[ok? _] (protect (eval '(begin
+                                (def x 5)
+                                (assign x 10))))]
+  (assert (not ok?) "assign to immutable def should fail"))
+
+# var @x is mutable
+(var @vx 5)
+(assign vx 10)
+(assert (= vx 10) "mutable def with @ works")
+
+# Lambda params are immutable by default
+(let [[ok? _] (protect (eval '(begin
+                                (defn f [x]
+                                  (assign x 10)
+                                  x)
+                                (f 5))))]
+  (assert (not ok?) "assign to immutable param should fail"))
+
+# @param opts in to mutability
+(defn mut-param [@x]
+  (assign x 10)
+  x)
+(assert (= (mut-param 5) 10) "mutable param with @ works")
+
+# ── silent! assertion ─────────────────────────────────────────
+
+(defn silent-fn [x]
+  (silent!)
+  x)
+(assert (= (silent-fn 5) 5) "silent! passes for silent fn")
+
+(let [[ok? _] (protect (eval '(defn yf [x]
+                               (silent!)
+                               (emit :yield x))))]
+  (assert (not ok?) "silent! fails for yielding fn"))
+
+(let [[ok? _] (protect (eval '(silent!)))]
+  (assert (not ok?) "silent! outside fn body fails"))
+
+# ── immutable! assertion ──────────────────────────────────────
+
+(defn check-immutable [@x]
+  (immutable! x)
+  x)
+(assert (= (check-immutable 5) 5) "immutable! passes for non-assigned binding")
+
+(let [[ok? _] (protect (eval '(defn fi [@x]
+                               (immutable! x)
+                               (assign x 10)
+                               x)))]
+  (assert (not ok?) "immutable! fails when binding is assigned"))
+
+# ── numeric! assertion ────────────────────────────────────────
+# Note: numeric! tests require non-checked intrinsics mode.
+# Guarded with vm/config to skip under --checked-intrinsics.
+
+(when (not (get (vm/config) :checked-intrinsics))
+  (eval '(begin
+           (defn numeric-fn [x y]
+             (numeric!)
+             (%add x y))
+           (assert (= (numeric-fn 3 4) 7) "numeric! passes for pure arithmetic")))
+  (let [[ok? _] (protect (eval '(begin
+                                  (defn helper [x]
+                                    x)
+                                  (defn nf [x]
+                                    (numeric!)
+                                    (helper x)))))]
+    (assert (not ok?) "numeric! fails for non-GPU-eligible fn")))

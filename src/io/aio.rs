@@ -1542,7 +1542,6 @@ impl AsyncBackendInner {
                 // Discard buffered bytes — kernel offset and logical position diverge otherwise.
                 if let Some(state) = self.fd_states.get_mut(port_key) {
                     state.buffer.clear();
-                    state.status = crate::io::types::FdStatus::Open;
                 }
                 port.with_fd(|fd| {
                     let raw = fd.as_raw_fd();
