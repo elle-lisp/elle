@@ -66,16 +66,28 @@ pub struct AnalysisResult {
     pub errors: Vec<LError>,
 }
 
-/// Tracks the sources of Yields signals within a lambda body.
-/// Used to infer Polymorphic signals for higher-order functions.
-#[derive(Debug, Clone, Default)]
+/// Tracks signal sources within a lambda body, separating inherent
+/// signals (emitted directly or by non-parameter callees) from
+/// parameter-dependent signals (polymorphic propagation).
+#[derive(Debug, Clone)]
 struct SignalSources {
-    /// Parameters whose calls contribute Yields signals
+    /// Parameters whose calls contribute signals.
     param_calls: HashSet<Binding>,
-    /// Whether there's a direct yield (not from calling a parameter)
-    has_direct_yield: bool,
-    /// Whether there's a Yields from a non-parameter source (known yielding function, etc.)
-    has_non_param_yield: bool,
+    /// Bits from direct `emit` forms (error, yield, io, etc.).
+    direct_bits: crate::value::fiber::SignalBits,
+    /// Bits from calls to non-parameter callees whose signals
+    /// are statically known (not polymorphic, not parameter calls).
+    non_param_bits: crate::value::fiber::SignalBits,
+}
+
+impl Default for SignalSources {
+    fn default() -> Self {
+        SignalSources {
+            param_calls: HashSet::new(),
+            direct_bits: crate::value::fiber::SignalBits::EMPTY,
+            non_param_bits: crate::value::fiber::SignalBits::EMPTY,
+        }
+    }
 }
 
 /// A binding with its scope set for hygienic resolution.

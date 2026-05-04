@@ -30,28 +30,12 @@ pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
-use crate::error::LocationMap;
 use crate::pipeline::lookup_stdlib_value;
 use crate::symbol::SymbolTable;
 use crate::value::{
     error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH, SIG_YIELD,
 };
 use std::rc::Rc;
-
-/// The current bytecode execution frame context.
-///
-/// Groups the five parameters that every call-dispatch method needs:
-/// the executing closure's bytecode, constants, environment, instruction
-/// pointer, and source location map. Passed by `&mut` reference through
-/// `handle_call` → `call_inner` → `handle_primitive_signal` /
-/// `handle_capability_denial`.
-pub struct FrameContext<'a> {
-    pub bytecode: &'a Rc<Vec<u8>>,
-    pub constants: &'a Rc<Vec<Value>>,
-    pub closure_env: &'a Rc<Vec<Value>>,
-    pub ip: &'a mut usize,
-    pub location_map: &'a Rc<LocationMap>,
-}
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
@@ -119,7 +103,7 @@ impl VM {
                 &current_location_map,
             );
             bits = b;
-            if let Some(tail) = self.pending.take_tail_call() {
+            if let Some(tail) = self.pending_tail_call.take() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
@@ -144,7 +128,7 @@ impl VM {
         // Signal handling loop — handles SIG_SWITCH iteratively.
         loop {
             if bits.is_ok() || bits == SIG_HALT {
-                let (_, value) = self.fiber.take_signal();
+                let (_, value) = self.fiber.signal.take().unwrap();
                 return Ok(value);
             } else if bits.contains(SIG_ERROR) {
                 let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
@@ -167,9 +151,9 @@ impl VM {
     /// and resume the caller with the result. Returns the new signal bits.
     fn handle_sig_switch(&mut self) -> SignalBits {
         let pending = self
-            .pending
-            .take_fiber_resume()
-            .expect("VM bug: SIG_SWITCH without pending fiber resume");
+            .pending_fiber_resume
+            .take()
+            .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
         let caller_frames = self.fiber.suspended.take().unwrap_or_default();
         self.fiber.signal.take();
         if self
@@ -204,6 +188,7 @@ impl VM {
 
         if caught {
             self.fiber.child = None;
+            self.fiber.child_value = None;
             self.resume_suspended(caller_frames, result_value)
         } else {
             self.fiber.signal = Some((result_bits, result_value));

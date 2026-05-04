@@ -135,9 +135,10 @@ impl VM {
                     && bits != SIG_SWITCH
                     && !squelched.is_empty()
                 {
-                    let squelched_str = crate::signals::registry::with_registry(|reg| {
-                        reg.format_signal_bits(squelched)
-                    });
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(squelched)
+                    };
                     let err = crate::value::error_val(
                         "signal-violation",
                         format!("squelch: signal {} caught at boundary", squelched_str),
@@ -171,7 +172,7 @@ impl VM {
                 };
             }
 
-            if let Some(tail) = self.pending.take_tail_call() {
+            if let Some(tail) = self.pending_tail_call.take() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
@@ -252,9 +253,10 @@ impl VM {
                     && bits != SIG_SWITCH
                     && !squelched.is_empty()
                 {
-                    let squelched_str = crate::signals::registry::with_registry(|reg| {
-                        reg.format_signal_bits(squelched)
-                    });
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(squelched)
+                    };
                     let err = crate::value::error_val(
                         "signal-violation",
                         format!("squelch: signal {} caught at boundary", squelched_str),
@@ -290,7 +292,7 @@ impl VM {
                 };
             }
 
-            if let Some(tail) = self.pending.take_tail_call() {
+            if let Some(tail) = self.pending_tail_call.take() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
@@ -361,7 +363,7 @@ impl VM {
                 &current_location_map,
             );
 
-            if let Some(tail) = self.pending.take_tail_call() {
+            if let Some(tail) = self.pending_tail_call.take() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));

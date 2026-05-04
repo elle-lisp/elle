@@ -346,7 +346,9 @@ fibers block on their data queue waiting for response frames.
 
 ```bash
 elle --home=. tests/elle/http2.lisp
-elle --home=. tests/http2/all.lisp
+elle --home=. tests/h2-server.lisp
+elle --home=. tests/h2-same-scheduler.lisp
+elle --home=. tests/h2-flow-control.lisp
 ```
 
 ---

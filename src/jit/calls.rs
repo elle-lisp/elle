@@ -29,6 +29,7 @@ pub const YIELD_SENTINEL: JitValue = YIELD_SENTINEL_JV;
 /// Stored in `JitCode.yield_points`, indexed by yield point index.
 /// Read by `elle_jit_yield` runtime helper (Chunk 2).
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct YieldPointMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
@@ -44,6 +45,7 @@ pub(crate) struct YieldPointMeta {
 /// Stored in `JitCode.call_sites`, indexed by call site index.
 /// Read by `elle_jit_yield_through_call` runtime helper.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct CallSiteMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
@@ -270,9 +272,11 @@ pub extern "C" fn elle_jit_call(
                     if !closure_squelch_mask.is_empty() {
                         let squelched = sig.intersection(closure_squelch_mask);
                         if !squelched.is_empty() {
-                            let squelched_str = crate::signals::registry::with_registry(|reg| {
-                                reg.format_signal_bits(squelched)
-                            });
+                            let squelched_str = {
+                                let registry =
+                                    crate::signals::registry::global_registry().lock().unwrap();
+                                registry.format_signal_bits(squelched)
+                            };
                             let err = error_val(
                                 "signal-violation",
                                 format!("squelch: signal {} caught at boundary", squelched_str),
@@ -288,7 +292,7 @@ pub extern "C" fn elle_jit_call(
 
             // Handle tail call sentinel
             if result == TAIL_CALL_SENTINEL {
-                if let Some(tail) = vm.pending.take_tail_call() {
+                if let Some(tail) = vm.pending_tail_call.take() {
                     let exec_result = vm.execute_bytecode_saving_stack(
                         &tail.bytecode,
                         &tail.constants,
@@ -334,9 +338,10 @@ pub extern "C" fn elle_jit_call(
         {
             let squelched = bits.intersection(closure_squelch_mask);
             if !squelched.is_empty() {
-                let squelched_str = crate::signals::registry::with_registry(|reg| {
-                    reg.format_signal_bits(squelched)
-                });
+                let squelched_str = {
+                    let registry = crate::signals::registry::global_registry().lock().unwrap();
+                    registry.format_signal_bits(squelched)
+                };
                 let err = error_val(
                     "signal-violation",
                     format!("squelch: signal {} caught at boundary", squelched_str),
@@ -388,7 +393,7 @@ pub extern "C" fn elle_jit_resolve_tail_call(
         return result;
     }
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    if let Some(tail) = vm.pending.take_tail_call() {
+    if let Some(tail) = vm.pending_tail_call.take() {
         let exec_result = vm.execute_bytecode_saving_stack(
             &tail.bytecode,
             &tail.constants,
@@ -575,7 +580,7 @@ pub extern "C" fn elle_jit_make_closure(
 /// YIELD_SENTINEL), and errors (signal already set, returns JitValue::nil()).
 fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
     if bits.is_ok() || bits == SIG_HALT {
-        let (_, val) = vm.fiber.take_signal();
+        let (_, val) = vm.fiber.signal.take().unwrap();
         JitValue::from_value(val)
     } else if bits.contains(SIG_ERROR) {
         // SIG_ERROR — signal already set on fiber
@@ -645,7 +650,7 @@ pub extern "C" fn elle_jit_tail_call(
             .collect();
 
         let new_env = build_closure_env_for_jit(closure, &args);
-        vm.pending = crate::vm::core::PendingAction::TailCall(crate::vm::core::TailCallInfo {
+        vm.pending_tail_call = Some(crate::vm::core::TailCallInfo {
             bytecode: closure.template.bytecode.clone(),
             constants: closure.template.constants.clone(),
             env: new_env,
@@ -868,7 +873,7 @@ mod tests {
         let err = Value::string("boom");
         let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_ERROR);
     }
 
@@ -878,7 +883,7 @@ mod tests {
         let bits = SIG_ERROR | SIG_IO;
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("io-error"));
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_IO));
     }
@@ -888,7 +893,7 @@ mod tests {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1));
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, val) = vm.fiber.take_signal();
+        let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_YIELD);
         assert_eq!(val.as_int(), Some(1));
     }
@@ -899,7 +904,7 @@ mod tests {
         let bits = SIG_YIELD | SIG_IO;
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99));
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, val) = vm.fiber.take_signal();
+        let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, bits);
         assert_eq!(val.as_int(), Some(99));
     }
@@ -909,7 +914,7 @@ mod tests {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_HALT, Value::int(0));
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_HALT);
     }
 
@@ -919,7 +924,7 @@ mod tests {
         vm.fiber.signal = Some((SIG_DEBUG, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, SIG_DEBUG, Value::NIL);
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_DEBUG);
     }
 
@@ -930,7 +935,7 @@ mod tests {
         vm.fiber.signal = Some((user_bit, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL);
         assert_eq!(result, YIELD_SENTINEL);
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, user_bit);
     }
 
@@ -941,7 +946,7 @@ mod tests {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("terminal"));
         assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_TERMINAL));
     }

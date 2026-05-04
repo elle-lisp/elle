@@ -30,16 +30,72 @@ fn resolve_keyword_slice(
     elems: &[Value],
     context: &str,
 ) -> Result<SignalBits, (SignalBits, Value)> {
-    crate::signals::registry::with_registry(|reg| {
+    let reg = crate::signals::registry::global_registry().lock().unwrap();
+    let mut bits = SignalBits::EMPTY;
+    for elem in elems {
+        let name = elem.as_keyword_name().ok_or_else(|| {
+            (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "{}: array elements must be keywords, got {}",
+                        context,
+                        elem.type_name()
+                    ),
+                ),
+            )
+        })?;
+        let b = reg.to_signal_bits(&name).ok_or_else(|| {
+            (
+                SIG_ERROR,
+                error_val(
+                    "signal-error",
+                    format!("{}: unknown signal keyword :{}", context, name),
+                ),
+            )
+        })?;
+        bits = bits.union(b);
+    }
+    Ok(bits)
+}
+
+pub(crate) fn resolve_signal_bits(
+    val: &Value,
+    context: &str,
+) -> Result<SignalBits, (SignalBits, Value)> {
+    // 1. Integer passthrough (existing behavior)
+    if let Some(i) = val.as_int() {
+        return Ok(SignalBits::from_i64(i));
+    }
+
+    // 2. Single keyword
+    if let Some(name) = val.as_keyword_name() {
+        let reg = crate::signals::registry::global_registry().lock().unwrap();
+        return match reg.to_signal_bits(&name) {
+            Some(bits) => Ok(bits),
+            None => Err((
+                SIG_ERROR,
+                error_val(
+                    "signal-error",
+                    format!("{}: unknown signal keyword :{}", context, name),
+                ),
+            )),
+        };
+    }
+
+    // 3. Set of keywords
+    if let Some(set) = val.as_set() {
+        let reg = crate::signals::registry::global_registry().lock().unwrap();
         let mut bits = SignalBits::EMPTY;
-        for elem in elems {
+        for elem in set.iter() {
             let name = elem.as_keyword_name().ok_or_else(|| {
                 (
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            "{}: array elements must be keywords, got {}",
+                            "{}: set elements must be keywords, got {}",
                             context,
                             elem.type_name()
                         ),
@@ -57,64 +113,7 @@ fn resolve_keyword_slice(
             })?;
             bits = bits.union(b);
         }
-        Ok(bits)
-    })
-}
-
-pub(crate) fn resolve_signal_bits(
-    val: &Value,
-    context: &str,
-) -> Result<SignalBits, (SignalBits, Value)> {
-    // 1. Integer passthrough (existing behavior)
-    if let Some(i) = val.as_int() {
-        return Ok(SignalBits::from_i64(i));
-    }
-
-    // 2. Single keyword
-    if let Some(name) = val.as_keyword_name() {
-        return crate::signals::registry::with_registry(|reg| match reg.to_signal_bits(&name) {
-            Some(bits) => Ok(bits),
-            None => Err((
-                SIG_ERROR,
-                error_val(
-                    "signal-error",
-                    format!("{}: unknown signal keyword :{}", context, name),
-                ),
-            )),
-        });
-    }
-
-    // 3. Set of keywords
-    if let Some(set) = val.as_set() {
-        return crate::signals::registry::with_registry(|reg| {
-            let mut bits = SignalBits::EMPTY;
-            for elem in set.iter() {
-                let name = elem.as_keyword_name().ok_or_else(|| {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!(
-                                "{}: set elements must be keywords, got {}",
-                                context,
-                                elem.type_name()
-                            ),
-                        ),
-                    )
-                })?;
-                let b = reg.to_signal_bits(&name).ok_or_else(|| {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "signal-error",
-                            format!("{}: unknown signal keyword :{}", context, name),
-                        ),
-                    )
-                })?;
-                bits = bits.union(b);
-            }
-            Ok(bits)
-        });
+        return Ok(bits);
     }
 
     // 4. Array of keywords (immutable [...])
@@ -130,37 +129,36 @@ pub(crate) fn resolve_signal_bits(
 
     // 6. List of keywords (pair chain)
     if val.as_pair().is_some() {
-        return crate::signals::registry::with_registry(|reg| {
-            let mut bits = SignalBits::EMPTY;
-            let mut current = *val;
-            while let Some(pair) = current.as_pair() {
-                let name = pair.first.as_keyword_name().ok_or_else(|| {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!(
-                                "{}: list elements must be keywords, got {}",
-                                context,
-                                pair.first.type_name()
-                            ),
+        let reg = crate::signals::registry::global_registry().lock().unwrap();
+        let mut bits = SignalBits::EMPTY;
+        let mut current = *val;
+        while let Some(pair) = current.as_pair() {
+            let name = pair.first.as_keyword_name().ok_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "{}: list elements must be keywords, got {}",
+                            context,
+                            pair.first.type_name()
                         ),
-                    )
-                })?;
-                let b = reg.to_signal_bits(&name).ok_or_else(|| {
-                    (
-                        SIG_ERROR,
-                        error_val(
-                            "signal-error",
-                            format!("{}: unknown signal keyword :{}", context, name),
-                        ),
-                    )
-                })?;
-                bits = bits.union(b);
-                current = pair.rest;
-            }
-            Ok(bits)
-        });
+                    ),
+                )
+            })?;
+            let b = reg.to_signal_bits(&name).ok_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "signal-error",
+                        format!("{}: unknown signal keyword :{}", context, name),
+                    ),
+                )
+            })?;
+            bits = bits.union(b);
+            current = pair.rest;
+        }
+        return Ok(bits);
     }
 
     // 7. None of the above

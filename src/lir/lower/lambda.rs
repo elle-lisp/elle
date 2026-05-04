@@ -2,36 +2,29 @@
 
 use super::*;
 use crate::hir::{CaptureInfo, ParamBound};
-
-/// Lambda definition metadata passed to `lower_lambda_expr` / `lower_lambda_body`.
-///
-/// Groups the 11 parameters that describe a lambda's signature, captures, body,
-/// and metadata into a single struct. Created once at the call site in
-/// `lower_expr` and threaded through to `lower_lambda_body`.
-pub(super) struct LambdaInfo<'a> {
-    pub params: &'a [Binding],
-    pub num_required: usize,
-    pub rest_param: Option<&'a Binding>,
-    pub vararg_kind: &'a crate::hir::VarargKind,
-    pub captures: &'a [CaptureInfo],
-    pub body: &'a Hir,
-    pub _num_locals: u16,
-    pub inferred_signal: &'a crate::signals::Signal,
-    pub param_bounds: &'a [ParamBound],
-    pub doc: Option<crate::value::Value>,
-    pub syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
-}
+use crate::value::Arity;
 
 impl<'a> Lowerer<'a> {
     /// Lower a lambda expression (creates closure with captures)
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn lower_lambda_expr(
         &mut self,
-        info: &LambdaInfo,
+        params: &[Binding],
+        num_required: usize,
+        rest_param: Option<&Binding>,
+        vararg_kind: &crate::hir::VarargKind,
+        captures: &[CaptureInfo],
+        body: &Hir,
+        num_locals: u16,
+        inferred_signal: &crate::signals::Signal,
+        param_bounds: &[ParamBound],
+        doc: Option<crate::value::Value>,
+        syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
         assert_numeric: bool,
     ) -> Result<Reg, String> {
         // Collect capture registers
         let mut capture_regs = Vec::new();
-        for cap in info.captures {
+        for cap in captures {
             use crate::hir::CaptureKind;
 
             let reg = self.fresh_reg();
@@ -105,7 +98,19 @@ impl<'a> Lowerer<'a> {
         self.closures.push(LirFunction::new(Arity::Exact(0))); // placeholder
 
         // Lower the lambda body — children get higher IDs
-        let mut nested_lir = self.lower_lambda_body(info)?;
+        let mut nested_lir = self.lower_lambda_body(
+            params,
+            num_required,
+            rest_param,
+            vararg_kind,
+            captures,
+            body,
+            num_locals,
+            *inferred_signal,
+            param_bounds,
+            doc,
+            syntax,
+        )?;
         nested_lir.closure_id = Some(closure_id);
 
         // Check numeric! assertion after lowering
@@ -127,13 +132,23 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lower a lambda body to a separate LirFunction
-    fn lower_lambda_body(&mut self, info: &LambdaInfo) -> Result<LirFunction, String> {
+    #[allow(clippy::too_many_arguments)]
+    fn lower_lambda_body(
+        &mut self,
+        params: &[Binding],
+        num_required: usize,
+        rest_param: Option<&Binding>,
+        vararg_kind: &crate::hir::VarargKind,
+        captures: &[CaptureInfo],
+        body: &Hir,
+        _num_locals: u16,
+        inferred_signal: crate::signals::Signal,
+        param_bounds: &[ParamBound],
+        doc: Option<crate::value::Value>,
+        syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
+    ) -> Result<LirFunction, String> {
         // Compute arity
-        let arity = Arity::for_lambda(
-            info.rest_param.is_some(),
-            info.num_required,
-            info.params.len(),
-        );
+        let arity = Arity::for_lambda(rest_param.is_some(), num_required, params.len());
 
         // Save state
         let saved_func = std::mem::replace(&mut self.current_func, LirFunction::new(arity));
@@ -148,6 +163,7 @@ impl<'a> Lowerer<'a> {
         let saved_discard_slot = self.discard_slot;
         let saved_pending_region_exits = self.pending_region_exits;
         let saved_region_depth = self.region_depth;
+        let saved_region_refcounted_stack = std::mem::take(&mut self.region_refcounted_stack);
         let saved_flip_depth = self.flip_depth;
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
@@ -162,18 +178,18 @@ impl<'a> Lowerer<'a> {
         // will increment it as they're allocated.
         // LBox params go into the env (not counted in num_locals for stack frame).
         self.current_func.num_locals = 0;
-        self.current_func.num_captures = info.captures.len() as u16;
+        self.current_func.num_captures = captures.len() as u16;
         self.in_lambda = true;
-        self.num_captures = info.captures.len() as u16;
+        self.num_captures = captures.len() as u16;
         self.num_local_params = 0;
         self.discard_slot = None;
         self.pending_region_exits = 0;
         self.region_depth = 0;
         self.flip_depth = 0;
-        self.current_func.doc = info.doc;
-        self.current_func.syntax = info.syntax.clone();
-        self.current_func.vararg_kind = info.vararg_kind.clone();
-        self.current_func.num_params = info.params.len();
+        self.current_func.doc = doc;
+        self.current_func.syntax = syntax;
+        self.current_func.vararg_kind = vararg_kind.clone();
+        self.current_func.num_params = params.len();
 
         // In a closure, the environment is laid out as:
         // [captured_vars..., parameters..., locally_defined_cells...]
@@ -182,7 +198,7 @@ impl<'a> Lowerer<'a> {
         // - Parameters are at indices [num_captures, num_captures + num_params)
 
         // Bind captured variables to upvalue indices
-        for (i, cap) in info.captures.iter().enumerate() {
+        for (i, cap) in captures.iter().enumerate() {
             self.binding_to_slot.insert(cap.binding, i as u16);
             self.upvalue_bindings.insert(cap.binding);
         }
@@ -191,7 +207,7 @@ impl<'a> Lowerer<'a> {
         // LBox params → upvalues in the env (LoadCapture/StoreCapture).
         // Non-LBox params → locals (LoadLocal/StoreLocal), copied from env at entry.
         let mut capture_params_mask: u64 = 0;
-        for (i, param) in info.params.iter().enumerate() {
+        for (i, param) in params.iter().enumerate() {
             let needs_capture = self.arena.get(*param).needs_capture();
 
             if needs_capture {
@@ -217,7 +233,7 @@ impl<'a> Lowerer<'a> {
         // Copy non-LBox params from env into their local slots.
         // The VM/host populates the env as [captures..., params...].
         // Non-LBox params are at env index (num_captures + i).
-        for (i, param) in info.params.iter().enumerate() {
+        for (i, param) in params.iter().enumerate() {
             let needs_capture = self.arena.get(*param).needs_capture();
             if !needs_capture {
                 let env_idx = self.num_captures + i as u16;
@@ -239,7 +255,7 @@ impl<'a> Lowerer<'a> {
         self.current_function_params = saved_function_params.clone();
 
         // Emit signal bound checks for each bounded parameter
-        for pb in info.param_bounds {
+        for pb in param_bounds {
             if let Some(&slot) = self.binding_to_slot.get(&pb.binding) {
                 let src = self.fresh_reg();
                 let is_upvalue = self.upvalue_bindings.contains(&pb.binding);
@@ -259,23 +275,23 @@ impl<'a> Lowerer<'a> {
         }
 
         // Lower body
-        let result_reg = self.lower_expr(info.body)?;
+        let result_reg = self.lower_expr(body)?;
         self.terminate(Terminator::Return(result_reg));
         self.finish_block();
 
         self.current_func.entry = Label(0);
         self.current_func.num_regs = self.next_reg;
         // Propagate inferred signal to LIR function
-        self.current_func.signal = *info.inferred_signal;
+        self.current_func.signal = inferred_signal;
 
         // Compute escape analysis flags for fiber shared-alloc decisions.
         // current_function_binding/params are already set (restored before
         // body lowering above), so body_escapes_heap_values can detect
         // self-tail-calls with per-parameter analysis.
-        self.current_func.result_is_immediate = self.result_is_safe(info.body, &[]);
+        self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
         self.current_func.has_outward_heap_set =
-            self.body_contains_dangerous_outward_set(info.body, &[]);
-        self.current_func.rotation_safe = !self.body_escapes_heap_values(info.body);
+            self.body_contains_dangerous_outward_set(body, &[]);
+        self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
         // Clear function context — will be restored to parent's state below.
         self.current_function_binding = None;
         self.current_function_params = None;
@@ -294,6 +310,7 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = saved_discard_slot;
         self.pending_region_exits = saved_pending_region_exits;
         self.region_depth = saved_region_depth;
+        self.region_refcounted_stack = saved_region_refcounted_stack;
         self.flip_depth = saved_flip_depth;
 
         Ok(func)

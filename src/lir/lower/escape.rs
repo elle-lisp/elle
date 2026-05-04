@@ -33,6 +33,8 @@
 //! body's result, if heap-allocated inside the scope, gets freed before
 //! the caller uses it.
 
+use std::collections::HashSet;
+
 use super::Lowerer;
 use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
 use crate::lir::intrinsics::IntrinsicOp;
@@ -75,13 +77,14 @@ impl<'a> Lowerer<'a> {
         trust_return_safe: bool,
     ) -> bool {
         match &hir.kind {
-            // Literals: all immediates
+            // Literals and quotes: all immediates (constant pool)
             HirKind::Int(_)
             | HirKind::Float(_)
             | HirKind::Bool(_)
             | HirKind::Nil
             | HirKind::Keyword(_)
-            | HirKind::EmptyList => true,
+            | HirKind::EmptyList
+            | HirKind::Quote(_) => true,
 
             // Var: safe if binding is from outside the scope (value was
             // allocated before RegionEnter) or if the binding is in-scope
@@ -897,6 +900,159 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Check if a single HIR expression contains a `Break` that escapes.
+    ///
+    /// A break "escapes" if it targets a block NOT defined within the
+    /// expression. Used by `can_scope_allocate_let`: if the let body
+    /// contains an escaping break, the break jumps past the let's
+    /// `RegionExit`, so scope allocation is unsafe.
+    ///
+    /// Breaks targeting blocks defined INSIDE the expression are safe —
+    /// they stay within the scope's region.
+    ///
+    /// Recursion rules:
+    /// - Does NOT recurse into `Lambda` bodies (break can't cross fn boundaries).
+    /// - DOES recurse into nested `Block` bodies, registering their `BlockId`
+    ///   so that inner breaks targeting them are recognized as safe.
+    #[allow(dead_code)]
+    pub(super) fn hir_contains_escaping_break(hir: &Hir) -> bool {
+        let mut inner_blocks = HashSet::new();
+        Self::walk_for_escaping_break(hir, &mut inner_blocks)
+    }
+
+    fn walk_for_escaping_break(hir: &Hir, inner_blocks: &mut HashSet<BlockId>) -> bool {
+        match &hir.kind {
+            HirKind::Break { block_id, .. } => {
+                // Safe if targeting a block inside the scope
+                !inner_blocks.contains(block_id)
+            }
+
+            // Do NOT recurse into lambda bodies
+            HirKind::Lambda { .. } => false,
+
+            // Register inner block's ID before recursing into its body.
+            HirKind::Block { block_id, body, .. } => {
+                inner_blocks.insert(*block_id);
+                body.iter()
+                    .any(|e| Self::walk_for_escaping_break(e, inner_blocks))
+            }
+
+            // Terminals
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_) => false,
+
+            // Recurse into sub-expressions
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::walk_for_escaping_break(cond, inner_blocks)
+                    || Self::walk_for_escaping_break(then_branch, inner_blocks)
+                    || Self::walk_for_escaping_break(else_branch, inner_blocks)
+            }
+
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .any(|e| Self::walk_for_escaping_break(e, inner_blocks)),
+
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    Self::walk_for_escaping_break(c, inner_blocks)
+                        || Self::walk_for_escaping_break(b, inner_blocks)
+                }) || else_branch
+                    .as_deref()
+                    .is_some_and(|b| Self::walk_for_escaping_break(b, inner_blocks))
+            }
+
+            HirKind::Call { func, args, .. } => {
+                Self::walk_for_escaping_break(func, inner_blocks)
+                    || args
+                        .iter()
+                        .any(|a| Self::walk_for_escaping_break(&a.expr, inner_blocks))
+            }
+
+            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
+                Self::walk_for_escaping_break(value, inner_blocks)
+            }
+
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| Self::walk_for_escaping_break(init, inner_blocks))
+                    || Self::walk_for_escaping_break(body, inner_blocks)
+            }
+
+            HirKind::While { cond, body } => {
+                Self::walk_for_escaping_break(cond, inner_blocks)
+                    || Self::walk_for_escaping_break(body, inner_blocks)
+            }
+
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| Self::walk_for_escaping_break(init, inner_blocks))
+                    || Self::walk_for_escaping_break(body, inner_blocks)
+            }
+
+            HirKind::Recur { args } => args
+                .iter()
+                .any(|a| Self::walk_for_escaping_break(a, inner_blocks)),
+
+            HirKind::Match { value, arms } => {
+                Self::walk_for_escaping_break(value, inner_blocks)
+                    || arms.iter().any(|(_, guard, body)| {
+                        guard
+                            .as_ref()
+                            .is_some_and(|g| Self::walk_for_escaping_break(g, inner_blocks))
+                            || Self::walk_for_escaping_break(body, inner_blocks)
+                    })
+            }
+
+            HirKind::Emit { value: expr, .. } => Self::walk_for_escaping_break(expr, inner_blocks),
+
+            HirKind::Destructure { value, .. } => {
+                Self::walk_for_escaping_break(value, inner_blocks)
+            }
+
+            HirKind::Eval { expr, env } => {
+                Self::walk_for_escaping_break(expr, inner_blocks)
+                    || Self::walk_for_escaping_break(env, inner_blocks)
+            }
+
+            HirKind::Parameterize { bindings, body } => {
+                bindings.iter().any(|(param, value)| {
+                    Self::walk_for_escaping_break(param, inner_blocks)
+                        || Self::walk_for_escaping_break(value, inner_blocks)
+                }) || Self::walk_for_escaping_break(body, inner_blocks)
+            }
+
+            HirKind::MakeCell { value } => Self::walk_for_escaping_break(value, inner_blocks),
+            HirKind::DerefCell { cell } => Self::walk_for_escaping_break(cell, inner_blocks),
+            HirKind::SetCell { cell, value } => {
+                Self::walk_for_escaping_break(cell, inner_blocks)
+                    || Self::walk_for_escaping_break(value, inner_blocks)
+            }
+
+            // Intrinsics contain no breaks; walk args.
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| Self::walk_for_escaping_break(a, inner_blocks)),
+
+            HirKind::Error => false,
+        }
+    }
+
     /// Check that every `Break` node reachable from this HIR expression
     /// has a value that is provably an immediate.
     ///
@@ -1019,6 +1175,19 @@ impl<'a> Lowerer<'a> {
 
             HirKind::Error => true,
         }
+    }
+
+    /// Check if a HIR body (slice) contains a `Break` that escapes the scope.
+    ///
+    /// A break targeting a block INSIDE the body is safe — it stays within the
+    /// scope's region and RegionExit still fires on the normal exit path.
+    /// Only breaks targeting blocks OUTSIDE the body are dangerous (they jump
+    /// past the scope's RegionExit).
+    #[allow(dead_code)]
+    pub(super) fn body_contains_escaping_break(body: &[Hir]) -> bool {
+        let mut inner_blocks = HashSet::new();
+        body.iter()
+            .any(|e| Self::walk_for_escaping_break(e, &mut inner_blocks))
     }
 }
 
@@ -1538,6 +1707,146 @@ impl<'a> Lowerer<'a> {
             return false;
         }
         true
+    }
+
+    /// Like `can_flip_while_loop` but relaxed for deferred refcounting.
+    ///
+    /// With refcounting, outward mutations via put/push to mutable
+    /// collections are safe: the old value gets decref'd and the new
+    /// value gets incref'd, so pinned values survive scope exit.
+    ///
+    /// Eligible when:
+    /// - Break values are safe (same as flip)
+    /// - No dangerous outward assigns (not refcounted)
+    /// - The ONLY reason `can_flip_while_loop` rejected is arg-escaping
+    ///   primitives (put/push), not other unsafe patterns
+    pub(super) fn can_flip_while_loop_refcounted(
+        &self,
+        body: &Hir,
+        loop_bindings: &[(Binding, &Hir)],
+    ) -> bool {
+        // Loop body must not suspend: suspended fibers hold references to
+        // loop-scope objects on their stack. Refcounted rotation at the
+        // back-edge would free those objects (rc=0, not in any collection),
+        // causing use-after-free when the fiber resumes.
+        if body.signal.may_suspend() {
+            return false;
+        }
+        if !self.all_breaks_have_safe_values(body) {
+            return false;
+        }
+        // The body must not have dangerous outward assigns.
+        if self.body_contains_dangerous_outward_assign(body, loop_bindings) {
+            return false;
+        }
+        // The body MUST have an arg-escaping primitive (put/push) that
+        // blocked flip eligibility — otherwise flip would have accepted.
+        // This prevents enabling refcounted scope marks for patterns
+        // we haven't analyzed.
+        self.body_has_arg_escaping_call(body, loop_bindings)
+    }
+
+    /// Check if the body contains at least one call to an arg-escaping
+    /// primitive (put/push) with a non-safe value arg directed at an
+    /// outer collection. This is the specific pattern refcounting fixes.
+    fn body_has_arg_escaping_call(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
+        match &hir.kind {
+            HirKind::Lambda { .. } => false,
+            HirKind::Call {
+                func,
+                args,
+                is_tail,
+            } => {
+                if !*is_tail
+                    && self.callee_is_arg_escaping_primitive(func)
+                    && args
+                        .iter()
+                        .skip(1)
+                        .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                {
+                    return true;
+                }
+                // Recurse into subexpressions
+                let mut found = false;
+                hir.for_each_child(|child| {
+                    if !found && self.body_has_arg_escaping_call(child, scope_bindings) {
+                        found = true;
+                    }
+                });
+                found
+            }
+            _ => {
+                let mut found = false;
+                hir.for_each_child(|child| {
+                    if !found && self.body_has_arg_escaping_call(child, scope_bindings) {
+                        found = true;
+                    }
+                });
+                found
+            }
+        }
+    }
+
+    /// Like `body_contains_dangerous_outward_set` but only checks for
+    /// `assign` to outer bindings, not calls to arg-escaping primitives
+    /// (put/push). Those are handled by refcounting.
+    fn body_contains_dangerous_outward_assign(
+        &self,
+        hir: &Hir,
+        scope_bindings: &[(Binding, &Hir)],
+    ) -> bool {
+        match &hir.kind {
+            HirKind::Assign { target, value } => {
+                let in_scope = scope_bindings.iter().any(|(b, _)| b == target);
+                if !in_scope
+                    && !self.result_is_safe(value, scope_bindings)
+                    && !self.value_is_non_allocating_accessor(value)
+                {
+                    return true;
+                }
+                self.body_contains_dangerous_outward_assign(value, scope_bindings)
+            }
+            HirKind::SetCell { cell, value } => {
+                // SetCell is the functionalized form of Assign. Check if the
+                // cell target is outside scope — same logic as Assign.
+                let target_in_scope = match &cell.kind {
+                    HirKind::Var(target) => scope_bindings.iter().any(|(b, _)| b == target),
+                    HirKind::DerefCell { cell: inner } => match &inner.kind {
+                        HirKind::Var(target) => scope_bindings.iter().any(|(b, _)| b == target),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !target_in_scope
+                    && !self.result_is_safe(value, scope_bindings)
+                    && !self.value_is_non_allocating_accessor(value)
+                {
+                    return true;
+                }
+                self.body_contains_dangerous_outward_assign(cell, scope_bindings)
+                    || self.body_contains_dangerous_outward_assign(value, scope_bindings)
+            }
+            HirKind::Lambda { .. } => false,
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_) => false,
+            _ => {
+                // Recurse into all children
+                let mut found = false;
+                hir.for_each_child(|child| {
+                    if !found && self.body_contains_dangerous_outward_assign(child, scope_bindings)
+                    {
+                        found = true;
+                    }
+                });
+                found
+            }
+        }
     }
 
     /// Check if dealloc_slot is safe within RegionRotate for a loop body.

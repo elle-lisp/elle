@@ -57,22 +57,21 @@ impl<'a> Analyzer<'a> {
                         propagates: 0,
                     },
                     HirKind::Keyword(kw) => {
-                        crate::signals::registry::with_registry(|reg| {
-                            if let Some(bit_pos) = reg.lookup(kw) {
-                                // User signals are emitted via the yield mechanism.
-                                // Include SIG_YIELD so may_suspend() returns true,
-                                // enabling correct signal inference for the enclosing lambda.
-                                // Also include the specific user signal bit for accurate
-                                // squelch checking at the static type level.
-                                Signal {
-                                    bits: crate::value::fiber::SignalBits::from_bit(bit_pos)
-                                        .union(crate::signals::SIG_YIELD),
-                                    propagates: 0,
-                                }
-                            } else {
-                                raw_callee_signal
+                        let reg = crate::signals::registry::global_registry().lock().unwrap();
+                        if let Some(bit_pos) = reg.lookup(kw) {
+                            // User signals are emitted via the yield mechanism.
+                            // Include SIG_YIELD so may_suspend() returns true,
+                            // enabling correct signal inference for the enclosing lambda.
+                            // Also include the specific user signal bit for accurate
+                            // squelch checking at the static type level.
+                            Signal {
+                                bits: crate::value::fiber::SignalBits::from_bit(bit_pos)
+                                    .union(crate::signals::SIG_YIELD),
+                                propagates: 0,
                             }
-                        })
+                        } else {
+                            raw_callee_signal
+                        }
                     }
                     _ => raw_callee_signal,
                 }
@@ -309,12 +308,12 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Case 3: Suspension from a non-parameter source
-        // Only mark as non-param yield if the resolved signal may suspend
+        // Case 3: Signal from a non-parameter callee — inherent to this function.
         let resolved_signal = self.resolve_polymorphic_signal(raw_signal, args);
-        if resolved_signal.may_suspend() {
-            self.current_signal_sources.has_non_param_yield = true;
-        }
+        self.current_signal_sources.non_param_bits = self
+            .current_signal_sources
+            .non_param_bits
+            .union(resolved_signal.bits);
     }
 
     /// Resolve a polymorphic signal by examining the arguments at the specified indices.
@@ -367,60 +366,41 @@ impl<'a> Analyzer<'a> {
     /// This enables polymorphic signal inference: if the only sources of
     /// suspension are calling parameters, we infer Polymorphic over them.
     pub(crate) fn compute_inferred_signal(&self, body: &Hir, params: &[Binding]) -> Signal {
-        // If body is completely silent, lambda is silent
+        // Silent body → silent function.
         if body.signal.bits.is_empty() && body.signal.propagates == 0 {
             return Signal::silent();
         }
 
-        // If body has signal bits but doesn't suspend (e.g. error-only),
-        // preserve the bits without polymorphic inference
-        if !body.signal.may_suspend() {
-            return Signal {
-                bits: body.signal.bits,
-                propagates: 0,
-            };
-        }
+        // Inherent bits: from direct emits and non-parameter callees.
+        let inherent = self
+            .current_signal_sources
+            .direct_bits
+            .union(self.current_signal_sources.non_param_bits);
 
-        // Non-suspension bits from the body (error, ffi, etc.) are always
-        // preserved — they don't depend on parameter polymorphism.
-        let non_suspension_bits = body
-            .signal
-            .bits
-            .subtract(crate::signals::SIG_YIELD)
-            .subtract(crate::signals::SIG_DEBUG);
-
-        // If there's a direct yield or non-parameter yield, it's Yields
-        // plus whatever non-suspension bits the body has.
-        if self.current_signal_sources.has_direct_yield
-            || self.current_signal_sources.has_non_param_yield
-        {
-            return Signal {
-                bits: crate::signals::SIG_YIELD.union(non_suspension_bits),
-                propagates: 0,
-            };
-        }
-
-        // If param_calls is empty but body suspends, fall back to body's signal
+        // If no parameter calls contribute signals, the function's
+        // signal is fully determined by its inherent bits.
         if self.current_signal_sources.param_calls.is_empty() {
-            return body.signal;
+            return Signal {
+                bits: inherent,
+                propagates: 0,
+            };
         }
 
-        // All suspension comes from parameter calls - infer Polymorphic over them.
-        // silence-bounded parameters contribute their bound's bits directly (not polymorphic).
+        // Build polymorphic propagation from parameter calls.
+        // Silence-bounded parameters contribute their bound's bits
+        // to inherent (not polymorphic).
         let mut propagates: u32 = 0;
         let mut bound_bits = crate::value::fiber::SignalBits::EMPTY;
         for binding_id in &self.current_signal_sources.param_calls {
             if let Some(bound) = self.current_param_bounds.get(binding_id) {
-                // Silence: contribute bound's bits directly (not polymorphic)
                 bound_bits = bound_bits.union(bound.bits);
             } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
-                // Unbounded: polymorphic propagation
                 propagates |= 1 << idx;
             }
         }
 
         Signal {
-            bits: bound_bits.union(non_suspension_bits),
+            bits: inherent.union(bound_bits),
             propagates,
         }
     }
@@ -435,9 +415,10 @@ impl<'a> Analyzer<'a> {
     fn resolve_squelch_mask(&self, arg: &Hir) -> Option<crate::value::fiber::SignalBits> {
         use crate::value::fiber::SignalBits;
         match &arg.kind {
-            HirKind::Keyword(kw) => crate::signals::registry::with_registry(|reg| {
+            HirKind::Keyword(kw) => {
+                let reg = crate::signals::registry::global_registry().lock().unwrap();
                 reg.lookup(kw).map(SignalBits::from_bit)
-            }),
+            }
             // Set literal: Call to the `set` primitive with keyword args
             HirKind::Call { func, args, .. } => {
                 if let HirKind::Var(binding) = &func.kind {
@@ -445,17 +426,16 @@ impl<'a> Analyzer<'a> {
                     if name != "set" {
                         return None;
                     }
-                    crate::signals::registry::with_registry(|reg| {
-                        let mut mask = SignalBits::EMPTY;
-                        for call_arg in args {
-                            if let HirKind::Keyword(kw) = &call_arg.expr.kind {
-                                mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
-                            } else {
-                                return None;
-                            }
+                    let reg = crate::signals::registry::global_registry().lock().unwrap();
+                    let mut mask = SignalBits::EMPTY;
+                    for call_arg in args {
+                        if let HirKind::Keyword(kw) = &call_arg.expr.kind {
+                            mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
+                        } else {
+                            return None;
                         }
-                        Some(mask)
-                    })
+                    }
+                    Some(mask)
                 } else {
                     None
                 }

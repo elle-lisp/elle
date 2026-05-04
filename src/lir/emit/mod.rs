@@ -913,6 +913,12 @@ impl Emitter {
             LirInstr::RegionRotateDealloc => {
                 self.bytecode.emit(Instruction::RegionRotateDealloc);
             }
+            LirInstr::RegionRotateRefcounted => {
+                self.bytecode.emit(Instruction::RegionRotateRefcounted);
+            }
+            LirInstr::RegionExitRefcounted => {
+                self.bytecode.emit(Instruction::RegionExitRefcounted);
+            }
 
             LirInstr::OutboxEnter => {
                 self.bytecode.emit(Instruction::OutboxEnter);

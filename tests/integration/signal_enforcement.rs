@@ -7,12 +7,12 @@
 // - Silent functions remain silent
 // - assign invalidates signal tracking
 // - Unknown callees use Signal::unknown() (sound conservative)
-// - Parameter calls use Signal::yields_errors() (may yield + inherent error)
+// - Parameter calls are purely polymorphic (no inherent error)
 
 use elle::hir::HirKind;
 use elle::pipeline::analyze;
 use elle::primitives::register_primitives;
-use elle::signals::{Signal, SIG_ERROR};
+use elle::signals::{Signal, SIG_OK, SIG_YIELD};
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
 
@@ -175,12 +175,12 @@ fn test_signal_polymorphic_direct_call() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def apply-fn (fn (f x) (f x)))            (apply-fn (fn (x) (yield x)) 42))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // apply-fn is polymorphic(0) with inherent error.
-    // Called with a yielding lambda → yields + errors.
+    // apply-fn is polymorphic(0) with no inherent bits.
+    // Called with a yielding lambda → just yields.
     assert_eq!(
         result.hir.signal,
-        Signal::yields_errors(),
-        "Higher-order function with yielding arg resolves to yields+errors"
+        Signal::yields(),
+        "Higher-order function with yielding arg resolves to yields"
     );
 }
 
@@ -488,11 +488,11 @@ fn test_polymorphic_inference_single_param() {
             inferred_signals, ..
         } = &value.kind
         {
-            // Polymorphic on param 0 with inherent SIG_ERROR (calling unknown can error)
+            // Purely polymorphic on param 0 — no inherent error from parameter calls
             assert_eq!(
                 *inferred_signals,
-                Signal::polymorphic_errors(0),
-                "apply-fn should have Polymorphic(0) + errors signal"
+                Signal::polymorphic(0),
+                "apply-fn should have Polymorphic(0) signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -531,8 +531,8 @@ fn test_polymorphic_inference_resolves_yields() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields_errors(),
-        "Calling polymorphic function with yielding arg should be Yields+Errors"
+        Signal::yields(),
+        "Calling polymorphic function with yielding arg should be Yields"
     );
 }
 
@@ -562,7 +562,8 @@ fn test_polymorphic_inference_non_recursive_map() {
 
 #[test]
 fn test_polymorphic_inference_direct_yield_prevents() {
-    // A function that both calls a parameter AND yields directly is Yields+Errors
+    // A function that both calls a parameter AND yields directly:
+    // inherent SIG_YIELD from (yield 99), polymorphic on param 0 from (f x).
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def bad (fn (f x) (begin (yield 99) (f x))))",
@@ -579,8 +580,11 @@ fn test_polymorphic_inference_direct_yield_prevents() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::yields_errors(),
-                "Function with direct yield + param call should be Yields+Errors"
+                Signal {
+                    bits: SIG_YIELD,
+                    propagates: 1,
+                },
+                "Function with direct yield + param call should be Yields + Polymorphic(0)"
             );
         } else {
             panic!("Expected Lambda");
@@ -606,14 +610,14 @@ fn test_polymorphic_inference_two_params() {
             inferred_signals, ..
         } = &value.kind
         {
-            // Polymorphic on params 0 and 1, with inherent SIG_ERROR
+            // Purely polymorphic on params 0 and 1 — no inherent error
             assert_eq!(
                 *inferred_signals,
                 Signal {
-                    bits: SIG_ERROR,
+                    bits: SIG_OK,
                     propagates: 0b11,
                 },
-                "Function calling two params should propagate params 0 and 1 + error"
+                "Function calling two params should propagate params 0 and 1"
             );
         } else {
             panic!("Expected Lambda");
@@ -670,8 +674,8 @@ fn test_polymorphic_inference_second_param() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::polymorphic_errors(1),
-                "apply-second should have Polymorphic(1) + errors signal"
+                Signal::polymorphic(1),
+                "apply-second should have Polymorphic(1) signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -684,7 +688,7 @@ fn test_polymorphic_inference_second_param() {
 #[test]
 fn test_polymorphic_inference_with_known_yielding_call() {
     // Function that calls a parameter AND a known yielding function.
-    // The known yielding call makes it non-polymorphic (has_non_param_yield = true)
+    // Inherent SIG_YIELD from calling gen, polymorphic on param 0 from (f x).
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def gen (fn () (yield 1))) (def bad (fn (f x) (begin (gen) (f x)))))",
@@ -704,8 +708,11 @@ fn test_polymorphic_inference_with_known_yielding_call() {
             {
                 assert_eq!(
                     *inferred_signals,
-                    Signal::yields_errors(),
-                    "Function with known yielding call + param call should be Yields+Errors"
+                    Signal {
+                        bits: SIG_YIELD,
+                        propagates: 1,
+                    },
+                    "Function with known yielding call + param call should be Yields + Polymorphic(0)"
                 );
             } else {
                 panic!("Expected Lambda in Define");

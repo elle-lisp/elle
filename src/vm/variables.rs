@@ -108,8 +108,16 @@ pub(crate) fn handle_store_upvalue(
     // Upvalues are always cells (LocalCell for mutable captures).
     let env_val = env[idx];
     if let Some(cell_ref) = env_val.as_capture_cell() {
-        let mut cell_mut = cell_ref.borrow_mut();
-        *cell_mut = val;
+        let old_val = {
+            let mut cell_mut = cell_ref.borrow_mut();
+            let old = *cell_mut;
+            *cell_mut = val;
+            old
+        };
+        // Decref/incref after releasing the borrow_mut — transitive
+        // incref may walk into closures capturing this same cell.
+        crate::value::fiberheap::decref_and_free(old_val);
+        crate::value::fiberheap::incref(val);
         vm.fiber.stack.push(val);
     } else {
         panic!(

@@ -216,6 +216,10 @@ pub enum Instruction {
     /// Same as RegionRotate but returns slab slots to the free list.
     /// Used when no loop param references previous iteration's allocs.
     RegionRotateDealloc,
+    /// Rotate loop scope marks (refcount-aware — skip pinned values).
+    RegionRotateRefcounted,
+    /// Pop scope mark and release refcount-0 objects only.
+    RegionExitRefcounted,
 
     /// Push a parameter frame onto the fiber's param_frames stack.
     /// Operand: u8 count (number of (param, value) pairs on the stack).
@@ -563,6 +567,8 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::RegionExitCall
             | Instruction::RegionRotate
             | Instruction::RegionRotateDealloc
+            | Instruction::RegionRotateRefcounted
+            | Instruction::RegionExitRefcounted
             | Instruction::OutboxEnter
             | Instruction::OutboxExit
             | Instruction::FlipEnter

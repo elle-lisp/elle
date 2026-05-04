@@ -361,13 +361,89 @@ impl FiberHeap {
         // to the free list for reuse. Scope eligibility is gated by
         // Tofte-Talpin region inference (suspension + escape analysis).
         for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
-            // SAFETY: pool.run_dtors already ran destructors; scope
-            // eligibility proves no live values reference these slots.
             unsafe {
                 self.pool.dealloc_slot(self.pool.allocs[i]);
             }
         }
         self.pool.allocs.truncate(mark.root_allocs_len());
+
+        // Dealloc custom-allocated objects from the exiting scope.
+        if let Some(state) = self.custom_alloc_stack.last_mut() {
+            let start = mark.custom_ptrs_len();
+            for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
+                state.allocator.inner.dealloc(ptr, size, align);
+            }
+            state.custom_ptrs.truncate(start);
+        }
+
+        self.pool.alloc_count = mark.position();
+        self.shared_alloc_count = mark.shared_alloc_count();
+    }
+
+    /// Refcount-aware release: free objects with refcount == 0, skip
+    /// pinned objects (refcount > 0).
+    ///
+    /// Used by scope marks in while loops with outward mutations, where
+    /// escape analysis cannot prove all values are dead but refcounting
+    /// tracks which values are pinned by mutable collections/bindings.
+    pub fn release_refcounted(&mut self, mark: ArenaMark) {
+        // Phase 1: Propagate protection from pinned objects (rc > 0)
+        // to their transitive children. This uses temporary increfs so
+        // that children reachable from surviving objects are not freed.
+        let scope_allocs = &self.pool.allocs[mark.root_allocs_len()..];
+        let mut worklist: Vec<*mut HeapObject> = scope_allocs
+            .iter()
+            .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
+            .copied()
+            .collect();
+        while let Some(ptr) = worklist.pop() {
+            let obj = unsafe { &*ptr };
+            let mut children = Vec::new();
+            Self::collect_heap_children(obj, &mut children);
+            for child_val in children {
+                if let Some(child_ptr) = child_val.as_heap_ptr() {
+                    if self.pool.slab_owns(child_ptr) {
+                        let child_typed = child_ptr as *mut HeapObject;
+                        if self.pool.refcount(child_typed as *const HeapObject) == 0 {
+                            self.pool.incref(child_typed as *const HeapObject);
+                            worklist.push(child_typed);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Phase 2: Free unprotected objects (rc still == 0 after phase 1).
+        // Run dtors in reverse order for refcount-0 objects.
+        for i in (mark.dtor_len()..self.pool.dtors.len()).rev() {
+            let ptr = self.pool.dtors[i];
+            if self.pool.refcount(ptr as *const HeapObject) == 0 {
+                unsafe { std::ptr::drop_in_place(ptr) };
+            }
+        }
+        // Compact dtors: keep pinned, remove dead.
+        let mut kept = mark.dtor_len();
+        for i in mark.dtor_len()..self.pool.dtors.len() {
+            let ptr = self.pool.dtors[i];
+            if self.pool.refcount(ptr as *const HeapObject) > 0 {
+                self.pool.dtors[kept] = ptr;
+                kept += 1;
+            }
+        }
+        self.pool.dtors.truncate(kept);
+
+        // Dealloc refcount-0 slab slots, keep pinned.
+        let mut allocs_kept = mark.root_allocs_len();
+        for i in mark.root_allocs_len()..self.pool.allocs.len() {
+            let ptr = self.pool.allocs[i];
+            if self.pool.refcount(ptr as *const HeapObject) == 0 {
+                unsafe { self.pool.dealloc_slot(ptr) };
+            } else {
+                self.pool.allocs[allocs_kept] = ptr;
+                allocs_kept += 1;
+            }
+        }
+        self.pool.allocs.truncate(allocs_kept);
 
         // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
@@ -507,6 +583,30 @@ impl FiberHeap {
         self.scope_enters += 1;
     }
 
+    /// Refcount-aware rotation: like `rotate_scope_marks` but uses
+    /// `release_refcounted` to skip pinned values (refcount > 0).
+    /// Used by while loops with outward mutations that pass refcount
+    /// eligibility but not escape-analysis eligibility.
+    pub fn rotate_scope_marks_refcounted(&mut self) {
+        if self.scope_marks.len() < 2 {
+            return;
+        }
+        if !self.shared_alloc.is_null() {
+            unsafe { &mut *self.shared_alloc }.rotate_marks();
+        }
+        let curr = self.scope_marks.pop().unwrap();
+        let dtors_before = self.pool.dtors.len();
+        let prev = self
+            .scope_marks
+            .pop()
+            .expect("RegionRotateRefcounted: missing previous scope mark");
+        self.release_refcounted(prev);
+        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
+        self.scope_marks.push(curr);
+        self.scope_marks.push(self.mark());
+        self.scope_enters += 1;
+    }
+
     /// Pop two scope marks and release only the range between them.
     ///
     /// Used by `RegionExitCall`: mark2 (top) is the barrier pushed
@@ -537,7 +637,6 @@ impl FiberHeap {
 
         // Dealloc slab slots for the range, then drain the entries.
         for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
-            // SAFETY: dtors already ran for this range above.
             unsafe {
                 self.pool.dealloc_slot(self.pool.allocs[i]);
             }
@@ -1204,6 +1303,160 @@ impl FiberHeap {
                 // Note: outbox scope marks are managed through the main
                 // scope_marks stack (which records shared_alloc_count).
             }
+        }
+    }
+
+    // ── Refcounting ───────────────────────────────────────────────────
+
+    /// Increment the durable reference count for a heap value.
+    /// No-op for non-heap values (int, float, bool, nil, keyword, symbol).
+    #[inline]
+    pub fn incref_value(&mut self, val: Value) {
+        if !val.is_heap() {
+            return;
+        }
+        if let Some(ptr) = val.as_heap_ptr() {
+            if self.pool.slab_owns(ptr) {
+                self.pool.incref(ptr as *const HeapObject);
+            }
+        }
+    }
+
+    /// Decrement the durable reference count for a heap value.
+    /// No-op for non-heap values. Returns the new refcount (0 if non-heap).
+    pub fn decref_value(&mut self, val: Value) -> u32 {
+        if !val.is_heap() {
+            return 0;
+        }
+        if let Some(ptr) = val.as_heap_ptr() {
+            if self.pool.slab_owns(ptr) {
+                let old_rc = self.pool.refcount(ptr as *const HeapObject);
+                if old_rc == 0 {
+                    return 0; // Already at 0, no transition.
+                }
+                return self.pool.decref(ptr as *const HeapObject);
+            }
+        }
+        0
+    }
+
+    /// Get the durable reference count for a heap value.
+    #[inline]
+    pub fn refcount_value(&self, val: Value) -> u32 {
+        if !val.is_heap() {
+            return 0;
+        }
+        if let Some(ptr) = val.as_heap_ptr() {
+            if self.pool.slab_owns(ptr) {
+                return self.pool.refcount(ptr as *const HeapObject);
+            }
+        }
+        0
+    }
+
+    /// Decrement a value's refcount, and if it reaches 0, run its
+    /// destructor and return its slab slot to the free list.
+    ///
+    /// Called at mutation points (put/push/set) when the old value is
+    /// evicted from a collection. The old value is no longer referenced
+    /// by any collection; if no other collection holds it (refcount 0),
+    /// it can be freed immediately.
+    pub fn decref_and_free(&mut self, val: Value) {
+        if !val.is_heap() {
+            return;
+        }
+        let ptr = match val.as_heap_ptr() {
+            Some(p) => p,
+            None => return,
+        };
+        if !self.pool.slab_owns(ptr) {
+            return;
+        }
+        let typed = ptr as *mut HeapObject;
+        let new_rc = self.pool.decref(typed as *const HeapObject);
+        if new_rc == 0 {
+            // Transitively decref the entire subtree to undo temporary
+            // increfs from release_refcounted's protection phase.
+            // Slot deallocation is deferred to release_refcounted to
+            // avoid corrupting scope-mark-partitioned allocs/dtors lists.
+            self.recursive_decref_contents(typed);
+        }
+    }
+
+    /// Transitively decref all descendants of a dead object (rc==0).
+    /// Does NOT free/dealloc any slots — children remain in allocs/dtors
+    /// and will be collected by release_refcounted on the next rotation.
+    fn recursive_decref_contents(&mut self, typed: *mut HeapObject) {
+        let obj = unsafe { &*typed };
+        let mut children = Vec::new();
+        Self::collect_heap_children(obj, &mut children);
+        for child_val in children {
+            if let Some(child_ptr) = child_val.as_heap_ptr() {
+                if self.pool.slab_owns(child_ptr) {
+                    let child_typed = child_ptr as *mut HeapObject;
+                    let old_rc = self.pool.refcount(child_typed as *const HeapObject);
+                    if old_rc > 0 {
+                        let new_rc = self.pool.decref(child_typed as *const HeapObject);
+                        if new_rc == 0 {
+                            // Child reached 0 — propagate decref to its
+                            // children too (undoes their temporary increfs).
+                            self.recursive_decref_contents(child_typed);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Collect all heap-typed child Values from a HeapObject into `out`.
+    fn collect_heap_children(obj: &HeapObject, out: &mut Vec<Value>) {
+        match obj {
+            HeapObject::LArrayMut { data, .. } => {
+                out.extend(data.borrow().iter().filter(|v| v.is_heap()).copied());
+            }
+            HeapObject::LStructMut { data, .. } => {
+                out.extend(data.borrow().values().filter(|v| v.is_heap()).copied());
+            }
+            HeapObject::LArray { elements, .. } => {
+                out.extend(elements.as_slice().iter().filter(|v| v.is_heap()).copied());
+            }
+            HeapObject::LStruct { data, .. } => {
+                out.extend(data.iter().map(|(_, v)| *v).filter(|v| v.is_heap()));
+            }
+            HeapObject::Pair(pair) => {
+                out.extend(
+                    [pair.first, pair.rest]
+                        .iter()
+                        .filter(|v| v.is_heap())
+                        .copied(),
+                );
+            }
+            HeapObject::Closure { closure, .. } => {
+                out.extend(
+                    closure
+                        .env
+                        .as_slice()
+                        .iter()
+                        .filter(|v| v.is_heap())
+                        .copied(),
+                );
+            }
+            HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
+                let v = *cell.borrow();
+                if v.is_heap() {
+                    out.push(v);
+                }
+            }
+            HeapObject::LSet { data, .. } => {
+                out.extend(data.as_slice().iter().filter(|v| v.is_heap()).copied());
+            }
+            HeapObject::LSetMut { data, .. } => {
+                out.extend(data.borrow().iter().filter(|v| v.is_heap()).copied());
+            }
+            HeapObject::Parameter { default, .. } => {
+                out.extend(std::iter::once(*default).filter(|v| v.is_heap()));
+            }
+            _ => {}
         }
     }
 

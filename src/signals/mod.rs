@@ -240,10 +240,11 @@ impl Signal {
 
 impl Signal {
     /// Can this function suspend execution?
-    /// Suspension signals: yield, debug. Polymorphic signals may also
-    /// suspend (depends on the argument's signal at the call site).
+    /// Any signal emission is a fiber transfer — a potential suspension
+    /// point. Polymorphic signals may also suspend (depends on the
+    /// argument's signal at the call site).
     pub const fn may_suspend(&self) -> bool {
-        self.bits.intersects(SIG_YIELD.union(SIG_DEBUG)) || self.propagates != 0
+        !self.bits.is_empty() || self.propagates != 0
     }
 
     /// Can this function yield (cooperative suspension)?
@@ -384,7 +385,7 @@ mod tests {
     #[test]
     fn test_may_suspend() {
         assert!(!Signal::silent().may_suspend());
-        assert!(!Signal::errors().may_suspend());
+        assert!(Signal::errors().may_suspend()); // error is a fiber transfer
         assert!(Signal::yields().may_suspend());
         assert!(Signal::polymorphic(0).may_suspend());
         assert!(Signal {
@@ -411,7 +412,7 @@ mod tests {
         // Combining errors
         let combined = Signal::silent().combine(Signal::errors());
         assert!(combined.may_error());
-        assert!(!combined.may_suspend());
+        assert!(combined.may_suspend()); // error is a suspension
     }
 
     #[test]
@@ -427,7 +428,7 @@ mod tests {
         assert!(e.may_ffi());
         assert!(e.may_error());
         assert!(!e.may_yield());
-        assert!(!e.may_suspend());
+        assert!(e.may_suspend()); // FFI+error = has signal bits = may suspend
         assert!(!e.is_polymorphic());
     }
 
@@ -487,9 +488,10 @@ mod tests {
 
     #[test]
     fn test_exec_keyword_registered() {
-        use crate::signals::registry::with_registry;
+        use crate::signals::registry::global_registry;
         // The :exec keyword must be registered and map to SIG_EXEC.
-        let bit_pos = with_registry(|reg| reg.lookup("exec")).expect(":exec must be registered");
+        let reg = global_registry().lock().unwrap();
+        let bit_pos = reg.lookup("exec").expect(":exec must be registered");
         // lookup returns the bit position (11), not the bitmask; verify both.
         assert_eq!(bit_pos, 11);
         assert_eq!(SignalBits::from_bit(bit_pos), SIG_EXEC);
@@ -507,8 +509,9 @@ mod tests {
 
     #[test]
     fn test_fuel_keyword_registered() {
-        use crate::signals::registry::with_registry;
-        let bit_pos = with_registry(|reg| reg.lookup("fuel")).expect(":fuel must be registered");
+        use crate::signals::registry::global_registry;
+        let reg = global_registry().lock().unwrap();
+        let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
         assert_eq!(bit_pos, 12);
         assert_eq!(SignalBits::from_bit(bit_pos), SIG_FUEL);
     }
@@ -528,7 +531,7 @@ mod tests {
         let result = sig.squelch(SIG_YIELD);
         assert!(!result.may_yield());
         assert!(result.may_error());
-        assert!(!result.may_suspend());
+        assert!(result.may_suspend()); // squelch adds SIG_ERROR = suspension
     }
 
     #[test]
@@ -565,7 +568,7 @@ mod tests {
         let result = sig.squelch(SIG_YIELD);
         assert!(!result.may_yield());
         assert!(result.may_error());
-        assert!(!result.may_suspend());
+        assert!(result.may_suspend()); // error remains = still suspending
     }
 
     #[test]

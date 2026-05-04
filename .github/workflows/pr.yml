@@ -98,6 +98,7 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 16
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -168,6 +169,7 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -196,6 +198,7 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -240,6 +243,7 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

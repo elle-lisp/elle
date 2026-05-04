@@ -181,6 +181,62 @@ pub fn region_rotate() {
     }
 }
 
+// ── Refcounting ───────────────────────────────────────────────────
+
+/// Increment the durable reference count for a heap value on the
+/// current FiberHeap. No-op for non-heap values or if no heap installed.
+pub fn incref(val: crate::value::Value) {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).incref_value(val) };
+    }
+}
+
+/// Decrement the durable reference count for a heap value on the
+/// current FiberHeap. No-op for non-heap values or if no heap installed.
+pub fn decref(val: crate::value::Value) {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).decref_value(val) };
+    }
+}
+
+/// Decrement the durable reference count for a heap value and free it
+/// immediately if the refcount reaches 0. Called at mutation points
+/// (put/push) when the old value is evicted from a collection.
+pub fn decref_and_free(val: crate::value::Value) {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).decref_and_free(val) };
+    }
+}
+
+/// Refcount-aware rotation (`RegionRotateRefcounted`).
+pub fn region_rotate_refcounted() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).rotate_scope_marks_refcounted() };
+    }
+}
+
+/// Refcount-aware scope exit: pops scope mark and releases only
+/// refcount-0 objects. Pinned objects (refcount > 0) survive.
+pub fn region_exit_refcounted() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe {
+            let heap = &mut *ptr;
+            let mark = heap
+                .scope_marks
+                .pop()
+                .expect("RegionExitRefcounted without matching RegionEnter");
+            let dtors_before = heap.pool.dtors.len();
+            heap.release_refcounted(mark);
+            heap.scope_dtors_run += dtors_before - heap.pool.dtors.len();
+        };
+    }
+}
+
 /// Rotate loop scope marks with dealloc (`RegionRotateDealloc`).
 pub fn region_rotate_dealloc() {
     let ptr = current_heap_ptr();

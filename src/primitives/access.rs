@@ -5,6 +5,7 @@
 //! - `put`: updates values in @arrays, arrays, strings, @strings, @bytes, and structs
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiberheap;
 use crate::value::{error_val, sorted_struct_get, sorted_struct_insert, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -572,6 +573,9 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 );
             }
         };
+        let old = vec_ref.borrow()[resolved];
+        fiberheap::decref_and_free(old);
+        fiberheap::incref(args[2]);
         vec_ref.borrow_mut()[resolved] = args[2];
         return (SIG_OK, args[0]); // Return the mutated array
     }
@@ -706,6 +710,11 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
+        // Decref old value, incref new value.
+        if let Some(&old_val) = mstruct.borrow().get(&key) {
+            fiberheap::decref_and_free(old_val);
+        }
+        fiberheap::incref(value);
         mstruct.borrow_mut().insert(key, value);
         return (SIG_OK, args[0]); // Return the mutated struct
     }
