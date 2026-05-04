@@ -11,7 +11,6 @@ use crate::value::{
 use std::rc::Rc;
 
 use super::core::VM;
-use super::FrameContext;
 use super::{
     arithmetic, capture, closure, comparison, control, data, literals, stack, types, variables,
 };
@@ -167,14 +166,12 @@ impl VM {
                 Instruction::Call => {
                     check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_call(
-                        &mut FrameContext {
-                            bytecode,
-                            constants,
-                            closure_env,
-                            ip: &mut ip,
-                            location_map,
-                        },
+                        bytecode,
+                        constants,
+                        closure_env,
+                        &mut ip,
                         instr_ip,
+                        location_map,
                     ) {
                         return (bits, ip);
                     }
@@ -410,14 +407,12 @@ impl VM {
                 Instruction::CallArrayMut => {
                     check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_call_array(
-                        &mut FrameContext {
-                            bytecode,
-                            constants,
-                            closure_env,
-                            ip: &mut ip,
-                            location_map,
-                        },
+                        bytecode,
+                        constants,
+                        closure_env,
+                        &mut ip,
                         instr_ip,
+                        location_map,
                     ) {
                         return (bits, ip);
                     }
@@ -445,6 +440,12 @@ impl VM {
                 }
                 Instruction::RegionRotateDealloc => {
                     crate::value::fiberheap::region_rotate_dealloc();
+                }
+                Instruction::RegionRotateRefcounted => {
+                    crate::value::fiberheap::region_rotate_refcounted();
+                }
+                Instruction::RegionExitRefcounted => {
+                    crate::value::fiberheap::region_exit_refcounted();
                 }
 
                 // Outbox routing: toggle allocation target for yield-bound values.
@@ -600,13 +601,10 @@ impl VM {
                         let signal_bits = closure.signal().bits;
                         let excess = signal_bits.subtract(allowed_bits);
                         if !excess.is_empty() {
-                            let (excess_str, allowed_str) =
-                                crate::signals::registry::with_registry(|reg| {
-                                    (
-                                        reg.format_signal_bits(excess),
-                                        reg.format_signal_bits(allowed_bits),
-                                    )
-                                });
+                            let registry =
+                                crate::signals::registry::global_registry().lock().unwrap();
+                            let excess_str = registry.format_signal_bits(excess);
+                            let allowed_str = registry.format_signal_bits(allowed_bits);
                             let err = crate::value::error_val(
                                 "signal-violation",
                                 format!(

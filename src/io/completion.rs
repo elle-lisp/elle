@@ -3,7 +3,7 @@
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
 use crate::io::request::{ConnectAddr, IoOp};
-use crate::io::types::{FdState, PortKey};
+use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::io::Completion;
 use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
@@ -306,6 +306,10 @@ pub(super) fn process_raw_completion(
                     format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
+                let state = fd_states
+                    .entry(port_key.clone())
+                    .or_insert_with(FdState::new);
+                state.status = FdStatus::Error;
                 return Completion {
                     id,
                     result: Err(error_val(error_type, msg)),
@@ -318,6 +322,7 @@ pub(super) fn process_raw_completion(
                 let state = fd_states
                     .entry(port_key.clone())
                     .or_insert_with(FdState::new);
+                state.status = FdStatus::Eof;
 
                 // For ReadLine: check buffer for a partial last line
                 // (file content without trailing newline).

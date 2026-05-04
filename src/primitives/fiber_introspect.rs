@@ -126,14 +126,7 @@ pub(crate) fn prim_fiber_parent(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let parent_val = handle.with(|fiber| {
-        fiber
-            .parent
-            .as_ref()
-            .and_then(|w| w.upgrade())
-            .map(Value::fiber_from_handle)
-            .unwrap_or(Value::NIL)
-    });
+    let parent_val = handle.with(|fiber| fiber.parent_value.unwrap_or(Value::NIL));
     (SIG_OK, parent_val)
 }
 
@@ -164,13 +157,7 @@ pub(crate) fn prim_fiber_child(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let child_val = handle.with(|fiber| {
-        fiber
-            .child
-            .as_ref()
-            .map(|h| Value::fiber_from_handle(h.clone()))
-            .unwrap_or(Value::NIL)
-    });
+    let child_val = handle.with(|fiber| fiber.child_value.unwrap_or(Value::NIL));
     (SIG_OK, child_val)
 }
 
@@ -414,7 +401,8 @@ pub(crate) fn prim_fiber_caps(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let caps = handle.with(|fiber| crate::signals::CAP_MASK.subtract(fiber.withheld));
-    let keywords = crate::signals::registry::with_registry(|reg| reg.bits_to_keywords(caps));
+    let registry = crate::signals::registry::global_registry().lock().unwrap();
+    let keywords = registry.bits_to_keywords(caps);
     (SIG_OK, Value::set(keywords.into_iter().collect()))
 }
 

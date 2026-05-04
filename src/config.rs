@@ -330,14 +330,6 @@ pub struct RuntimeConfig {
     pub stats: bool,
     /// Whether flip instructions are enabled.
     pub flip: bool,
-    /// User-provided command-line arguments, from everything after `--`
-    /// in the argv passed to the elle binary. Empty if no `--` was given.
-    /// Set by `main.rs` before the file-execution loop. Read by `sys/args`.
-    pub user_args: Vec<String>,
-    /// The source argument: the script file path, `"-"` for stdin, or `""`
-    /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
-    /// Read by `sys/argv`. Empty string means REPL mode.
-    pub source_arg: String,
 }
 
 impl RuntimeConfig {
@@ -413,8 +405,6 @@ impl RuntimeConfig {
             dump_bits: dump_bits_u,
             stats: config.stats,
             flip: config.flip_instructions,
-            user_args: Vec::new(),
-            source_arg: String::new(),
         }
     }
 
@@ -454,8 +444,6 @@ impl Default for RuntimeConfig {
             dump_bits: 0,
             stats: false,
             flip: true,
-            user_args: Vec::new(),
-            source_arg: String::new(),
         }
     }
 }

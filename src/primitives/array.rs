@@ -2,11 +2,15 @@
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiberheap;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Create an array from arguments
 pub(crate) fn prim_array(args: &[Value]) -> (SignalBits, Value) {
+    for &val in args {
+        fiberheap::incref(val);
+    }
     (SIG_OK, Value::array_mut(args.to_vec()))
 }
 
@@ -56,6 +60,10 @@ pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let fill = args[1];
+    // Each slot in the array holds a reference to fill.
+    for _ in 0..n {
+        fiberheap::incref(fill);
+    }
     let vec = vec![fill; n];
     (SIG_OK, Value::array_mut(vec))
 }
@@ -73,6 +81,7 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if let Some(vec_ref) = args[0].as_array_mut() {
+        fiberheap::incref(args[1]);
         let mut vec = vec_ref.borrow_mut();
         vec.push(args[1]);
         drop(vec);
@@ -226,6 +235,8 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
         match vec.pop() {
             Some(v) => {
                 drop(vec);
+                // Decref: value leaves a durable collection reference.
+                fiberheap::decref(v);
                 return (SIG_OK, v);
             }
             None => {
@@ -337,8 +348,16 @@ pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
         let mut vec = vec_ref.borrow_mut();
         let len = vec.len();
         let remove_count = std::cmp::min(n, len);
+        // Decref values leaving the source @array.
+        for i in (len - remove_count)..len {
+            fiberheap::decref(vec[i]);
+        }
         let removed: Vec<Value> = vec.drain(len - remove_count..).collect();
         drop(vec);
+        // Incref values entering the new @array.
+        for &val in &removed {
+            fiberheap::incref(val);
+        }
         return (SIG_OK, Value::array_mut(removed));
     }
 
@@ -417,6 +436,8 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
                 }
             }
         };
+        // Incref: value enters a durable collection reference.
+        fiberheap::incref(args[2]);
         vec.insert(index, args[2]);
         drop(vec);
         return (SIG_OK, args[0]);
@@ -546,6 +567,10 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         let mut vec = vec_ref.borrow_mut();
         if let Some(index) = resolve_index(raw_index, vec.len()) {
             let remove_count = std::cmp::min(count, vec.len() - index);
+            for j in 0..remove_count {
+                // Decref: value leaves a durable collection reference.
+                fiberheap::decref(vec[index + j]);
+            }
             for _ in 0..remove_count {
                 vec.remove(index);
             }

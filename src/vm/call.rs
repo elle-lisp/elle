@@ -8,6 +8,7 @@
 //!
 //! Environment building (closure env population, parameter binding) lives in `env.rs`.
 
+use crate::error::LocationMap;
 use crate::primitives::access::resolve_index;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
@@ -22,7 +23,6 @@ use crate::value::{
 use std::rc::Rc;
 
 use super::core::VM;
-use super::FrameContext;
 
 /// Helper: set an error signal on the fiber.
 fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
@@ -40,11 +40,15 @@ impl VM {
     /// or `None` if the dispatch loop should continue.
     pub(super) fn handle_call(
         &mut self,
-        frame: &mut FrameContext,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
         instr_ip: usize,
+        location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
-        let bc: &[u8] = frame.bytecode;
-        let arg_count = self.read_u16(bc, frame.ip) as usize;
+        let bc: &[u8] = bytecode;
+        let arg_count = self.read_u16(bc, ip) as usize;
         let func = self
             .fiber
             .stack
@@ -62,7 +66,16 @@ impl VM {
         }
         args.reverse();
 
-        self.call_inner(func, args, frame, instr_ip)
+        self.call_inner(
+            func,
+            args,
+            bytecode,
+            constants,
+            closure_env,
+            ip,
+            instr_ip,
+            location_map,
+        )
     }
 
     /// Handle the CallArrayMut instruction.
@@ -75,8 +88,12 @@ impl VM {
     /// Stack: \[func, args_array\] → \[result\]
     pub(super) fn handle_call_array(
         &mut self,
-        frame: &mut FrameContext,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
         instr_ip: usize,
+        location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
         let args_val = self
             .fiber
@@ -107,19 +124,33 @@ impl VM {
             return None;
         };
 
-        self.call_inner(func, args, frame, instr_ip)
+        self.call_inner(
+            func,
+            args,
+            bytecode,
+            constants,
+            closure_env,
+            ip,
+            instr_ip,
+            location_map,
+        )
     }
 
     /// Shared Call/CallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions, executes closures with environment setup,
     /// handles yield-through-calls and JIT compilation.
+    #[allow(clippy::too_many_arguments)]
     fn call_inner(
         &mut self,
         func: Value,
         args: Vec<Value>,
-        frame: &mut FrameContext,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
         instr_ip: usize,
+        location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             etrace!(
@@ -136,7 +167,16 @@ impl VM {
                 .intersection(self.fiber.withheld)
                 .intersection(crate::signals::CAP_MASK);
             if !blocked.is_empty() {
-                return self.handle_capability_denial(def, blocked, &args, frame);
+                return self.handle_capability_denial(
+                    def,
+                    blocked,
+                    &args,
+                    bytecode,
+                    constants,
+                    closure_env,
+                    ip,
+                    location_map,
+                );
             }
             let (bits, value) =
                 if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
@@ -144,7 +184,15 @@ impl VM {
                 } else {
                     (def.func)(args.as_slice())
                 };
-            return self.handle_primitive_signal(bits, value, frame);
+            return self.handle_primitive_signal(
+                bits,
+                value,
+                bytecode,
+                constants,
+                closure_env,
+                ip,
+                location_map,
+            );
         }
 
         if let Some((id, default)) = func.as_parameter() {
@@ -182,7 +230,7 @@ impl VM {
                     .unwrap_or_else(|| Rc::from("<anonymous>")),
                 ip: instr_ip,
                 frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
-                location_map: frame.location_map.clone(),
+                location_map: location_map.clone(),
             });
 
             // Validate argument count
@@ -251,15 +299,15 @@ impl VM {
                             // Use unwrap_or_default() so this works whether the JIT callee
                             // populated fiber.suspended or not (tail-call-to-native path).
                             {
-                                let (_, value) = self.fiber.take_signal();
+                                let (_, value) = self.fiber.signal.take().unwrap();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                                 let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                                    bytecode: frame.bytecode.clone(),
-                                    constants: frame.constants.clone(),
-                                    env: frame.closure_env.clone(),
-                                    ip: *frame.ip,
+                                    bytecode: bytecode.clone(),
+                                    constants: constants.clone(),
+                                    env: closure_env.clone(),
+                                    ip: *ip,
                                     stack: caller_stack,
-                                    location_map: frame.location_map.clone(),
+                                    location_map: location_map.clone(),
                                     // Caller frame: on resume, the callee's return value
                                     // flows as current_value and must be pushed as the
                                     // Call instruction's result.
@@ -325,14 +373,13 @@ impl VM {
                 && closure.template.signal.propagates == 0
                 && self.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_ok())
             {
-                let (sig_bits, sig_val) = self.fiber.take_signal();
+                let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
                 let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
-                let sig_str =
-                    crate::signals::registry::with_registry(|reg| reg.format_signal_bits(sig_bits));
+                let reg = crate::signals::registry::global_registry().lock().unwrap();
                 eprintln!("panic: silence violation in '{}'", name);
                 eprintln!("  A (silence)'d function signaled at runtime.");
                 eprintln!("  silence asserts purity — any signal is a programmer bug.");
-                eprintln!("  signal: {}", sig_str);
+                eprintln!("  signal: {}", reg.format_signal_bits(sig_bits));
                 eprintln!("  value:  {}", sig_val);
                 if let Some(loc) = self.error_loc.as_ref() {
                     eprintln!("  at {}", loc);
@@ -360,9 +407,10 @@ impl VM {
             {
                 let squelched = bits.intersection(closure_squelch_mask);
                 if !squelched.is_empty() {
-                    let squelched_str = crate::signals::registry::with_registry(|reg| {
-                        reg.format_signal_bits(squelched)
-                    });
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(squelched)
+                    };
                     let err = crate::value::error_val(
                         "signal-violation",
                         format!("squelch: signal {} caught at boundary", squelched_str),
@@ -375,7 +423,7 @@ impl VM {
                 }
             }
             if bits.is_ok() {
-                let (_, value) = self.fiber.take_signal();
+                let (_, value) = self.fiber.signal.take().unwrap();
                 self.fiber.stack.push(value);
                 self.fiber.call_stack.pop();
             } else if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
@@ -388,7 +436,7 @@ impl VM {
                 // (TCO), so fiber.suspended may be None here — use unwrap_or_default()
                 // to cover both cases.
                 {
-                    let (_, value) = self.fiber.take_signal();
+                    let (_, value) = self.fiber.signal.take().unwrap();
 
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                     if self
@@ -398,8 +446,8 @@ impl VM {
                     {
                         eprintln!(
                             "[call_inner suspend] ip={} bc_len={} stack_depth={}",
-                            *frame.ip,
-                            frame.bytecode.len(),
+                            *ip,
+                            bytecode.len(),
                             caller_stack.len(),
                         );
                         for (si, sv) in caller_stack.iter().enumerate() {
@@ -407,12 +455,12 @@ impl VM {
                         }
                     }
                     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                        bytecode: frame.bytecode.clone(),
-                        constants: frame.constants.clone(),
-                        env: frame.closure_env.clone(),
-                        ip: *frame.ip,
+                        bytecode: bytecode.clone(),
+                        constants: constants.clone(),
+                        env: closure_env.clone(),
+                        ip: *ip,
                         stack: caller_stack,
-                        location_map: frame.location_map.clone(),
+                        location_map: location_map.clone(),
                         push_resume_value: true,
                     });
 
@@ -423,7 +471,7 @@ impl VM {
                     {
                         eprintln!(
                             "[call_inner] suspend: bits={} ip={} bc_len={} inner_frames={} env_len={}",
-                            bits, *frame.ip, frame.bytecode.len(), frames.len(), frame.closure_env.len(),
+                            bits, *ip, bytecode.len(), frames.len(), closure_env.len(),
                         );
                     }
                     frames.push(caller_frame);
@@ -597,15 +645,14 @@ impl VM {
             let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
 
             // Store the tail call information (Rc clones, not data copies)
-            self.pending =
-                crate::vm::core::PendingAction::TailCall(crate::vm::core::TailCallInfo {
-                    bytecode: closure.template.bytecode.clone(),
-                    constants: closure.template.constants.clone(),
-                    env: new_env_rc,
-                    location_map: closure.template.location_map.clone(),
-                    rotation_safe: closure.template.rotation_safe,
-                    squelch_mask: closure.squelch_mask,
-                });
+            self.pending_tail_call = Some(crate::vm::core::TailCallInfo {
+                bytecode: closure.template.bytecode.clone(),
+                constants: closure.template.constants.clone(),
+                env: new_env_rc,
+                location_map: closure.template.location_map.clone(),
+                rotation_safe: closure.template.rotation_safe,
+                squelch_mask: closure.squelch_mask,
+            });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));
             return Some(SIG_OK);
@@ -651,7 +698,7 @@ impl VM {
     ) -> Result<Value, String> {
         // Arity check — sets fiber.signal on mismatch.
         if !self.check_arity(&closure.template.arity, args.len()) {
-            let (_, err) = self.fiber.take_signal();
+            let (_, err) = self.fiber.signal.take().unwrap();
             return Err(self.format_error_with_location(err));
         }
 
@@ -659,7 +706,7 @@ impl VM {
         let new_env = match self.build_closure_env(closure, args) {
             Some(env) => env,
             None => {
-                let (_, err) = self.fiber.take_signal();
+                let (_, err) = self.fiber.signal.take().unwrap();
                 return Err(self.format_error_with_location(err));
             }
         };
@@ -674,7 +721,7 @@ impl VM {
 
         let bits = result.bits;
         if bits.is_ok() || bits == crate::value::SIG_HALT {
-            let (_, value) = self.fiber.take_signal();
+            let (_, value) = self.fiber.signal.take().unwrap();
             Ok(value)
         } else if bits.contains(crate::value::SIG_ERROR) {
             let (_, err) = self

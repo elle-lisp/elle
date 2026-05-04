@@ -91,6 +91,11 @@ pub(crate) struct Slab {
     /// Next slot index to use in the last chunk (bump cursor).
     bump_cursor: usize,
     live_count: usize,
+    /// Per-slot reference counts. Indexed by flat slot index.
+    /// Tracks **durable** references: mutable collection entries + mutable
+    /// bindings. NOT tracked: stack, let bindings, function parameters
+    /// (transient — handled by scope marks).
+    refcounts: Vec<u32>,
 }
 
 impl Slab {
@@ -100,6 +105,7 @@ impl Slab {
             free_head: None,
             bump_cursor: 0,
             live_count: 0,
+            refcounts: Vec::new(),
         }
     }
 
@@ -142,6 +148,10 @@ impl Slab {
         }
         self.free_head = Some(flat as u32);
         self.live_count -= 1;
+        // Reset refcount for the freed slot.
+        if flat < self.refcounts.len() {
+            self.refcounts[flat] = 0;
+        }
     }
 
     /// Reset the slab: discard free list, keep first chunk, drop (munmap) the rest.
@@ -153,6 +163,7 @@ impl Slab {
         self.free_head = None;
         self.bump_cursor = 0;
         self.live_count = 0;
+        self.refcounts.clear();
         self.chunks.truncate(1);
         if let Some(chunk) = self.chunks.first() {
             unsafe {
@@ -191,12 +202,61 @@ impl Slab {
         false
     }
 
+    // ── Refcounting ───────────────────────────────────────────────────
+
+    /// Increment the reference count for the slot pointed to by `ptr`.
+    /// No-op if `ptr` is not in this slab (safety: caller checked ownership).
+    #[inline]
+    pub fn incref(&mut self, ptr: *const HeapObject) {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        if flat < self.refcounts.len() {
+            self.refcounts[flat] = self.refcounts[flat].saturating_add(1);
+        }
+    }
+
+    /// Decrement the reference count for the slot pointed to by `ptr`.
+    /// Returns the new refcount. No-op (returns 0) if not in this slab.
+    #[inline]
+    pub fn decref(&mut self, ptr: *const HeapObject) -> u32 {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        if flat < self.refcounts.len() && self.refcounts[flat] > 0 {
+            self.refcounts[flat] -= 1;
+            self.refcounts[flat]
+        } else {
+            0
+        }
+    }
+
+    /// Get the reference count for the slot pointed to by `ptr`.
+    #[inline]
+    pub fn refcount(&self, ptr: *const HeapObject) -> u32 {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        if flat < self.refcounts.len() {
+            self.refcounts[flat]
+        } else {
+            0
+        }
+    }
+
+    /// Get the reference count for a slot by flat index.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn refcount_by_flat(&self, flat: usize) -> u32 {
+        if flat < self.refcounts.len() {
+            self.refcounts[flat]
+        } else {
+            0
+        }
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {
         let chunk = Chunk::new().expect("slab: mmap chunk failed");
         self.chunks.push(chunk);
         self.bump_cursor = 0;
+        // Grow refcount array for the new chunk (all zeros).
+        self.refcounts.resize(self.chunks.len() * CHUNK_SIZE, 0);
     }
 
     /// Convert a flat slot index to `(chunk_index, slot_within_chunk)`.

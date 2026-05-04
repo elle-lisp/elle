@@ -33,22 +33,20 @@ impl<'a> Lowerer<'a> {
                 doc,
                 syntax,
                 assert_numeric,
-            } => {
-                let info = super::lambda::LambdaInfo {
-                    params,
-                    num_required: *num_required,
-                    rest_param: rest_param.as_ref(),
-                    vararg_kind,
-                    captures,
-                    body,
-                    _num_locals: *num_locals,
-                    inferred_signal: inferred_signals,
-                    param_bounds,
-                    doc: *doc,
-                    syntax: syntax.clone(),
-                };
-                self.lower_lambda_expr(&info, *assert_numeric)
-            }
+            } => self.lower_lambda_expr(
+                params,
+                *num_required,
+                rest_param.as_ref(),
+                vararg_kind,
+                captures,
+                body,
+                *num_locals,
+                inferred_signals,
+                param_bounds,
+                *doc,
+                syntax.clone(),
+                *assert_numeric,
+            ),
 
             HirKind::If {
                 cond,
@@ -319,7 +317,8 @@ impl<'a> Lowerer<'a> {
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped = self.region_scope_check(hir_id);
+        let scoped =
+            self.region_scope_check(hir_id) && self.can_scope_allocate_block(block_id, body);
 
         // Record region depth BEFORE emitting RegionEnter so that breaks
         // targeting this block include the block's own region in their
@@ -332,6 +331,7 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.push(BlockLowerContext {
             block_id: *block_id,
+            result_reg,
             result_slot: block_result_slot,
             exit_label,
             region_depth_at_entry: depth_before,
@@ -406,12 +406,20 @@ impl<'a> Lowerer<'a> {
 
         // Emit compensating RegionExit for each region entered since the
         // target block was opened. This ensures scope marks are popped
-        // correctly on early exit.
-        let compensating_exits = self.region_depth - target_region_depth;
-        for _ in 0..compensating_exits {
-            self.emit(LirInstr::RegionExit);
+        // correctly on early exit. Use the refcounted stack to emit the
+        // correct exit type for each region.
+        let compensating_exits = (self.region_depth - target_region_depth) as usize;
+        let stack_len = self.region_refcounted_stack.len();
+        for i in 0..compensating_exits {
+            // Pop from top of stack (most recently entered region first)
+            let idx = stack_len - 1 - i;
+            if self.region_refcounted_stack[idx] {
+                self.emit(LirInstr::RegionExitRefcounted);
+            } else {
+                self.emit(LirInstr::RegionExit);
+            }
         }
-        // Note: we emit raw RegionExit (not emit_region_exit) because we
+        // Note: we emit raw instructions (not emit_region_exit) because we
         // don't want to decrement region_depth — the break jumps out of
         // the block entirely, and the dead code after the break is
         // unreachable. The block's RegionExit at the normal exit path
@@ -430,9 +438,11 @@ impl<'a> Lowerer<'a> {
     fn lower_while(&mut self, cond: &Hir, body: &Hir, _hir_id: HirId) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let flip_eligible = self.can_flip_while_loop(body, &[]);
-        // All flip-eligible loops get double-buffered scope marks.
-        let scope_eligible = flip_eligible;
-        let dealloc_eligible = scope_eligible && self.can_dealloc_in_loop(body, &[]);
+        let refcount_eligible = !flip_eligible && self.can_flip_while_loop_refcounted(body, &[]);
+        // All flip-eligible or refcount-eligible loops get double-buffered scope marks.
+        let scope_eligible = flip_eligible || refcount_eligible;
+        let dealloc_eligible =
+            scope_eligible && !refcount_eligible && self.can_dealloc_in_loop(body, &[]);
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
@@ -443,8 +453,13 @@ impl<'a> Lowerer<'a> {
 
         // Double-buffered scope marks: push prev (guard) + curr before loop.
         if scope_eligible {
-            self.emit_region_enter(); // prev (guard mark)
-            self.emit_region_enter(); // curr (first iteration)
+            if refcount_eligible {
+                self.emit_region_enter_refcounted(); // prev (guard mark)
+                self.emit_region_enter_refcounted(); // curr (first iteration)
+            } else {
+                self.emit_region_enter(); // prev (guard mark)
+                self.emit_region_enter(); // curr (first iteration)
+            }
         }
 
         // Jump to condition check
@@ -471,7 +486,9 @@ impl<'a> Lowerer<'a> {
 
         // Back-edge: rotate scope marks (free prev iteration, start new curr)
         if scope_eligible {
-            if dealloc_eligible {
+            if refcount_eligible {
+                self.emit_region_rotate_refcounted();
+            } else if dealloc_eligible {
                 self.emit_region_rotate_dealloc();
             } else {
                 self.emit_region_rotate();
@@ -497,8 +514,13 @@ impl<'a> Lowerer<'a> {
         // Done block — release both scope marks (curr + prev)
         self.current_block = BasicBlock::new(done_label);
         if scope_eligible {
-            self.emit_region_exit(); // curr
-            self.emit_region_exit(); // prev
+            if refcount_eligible {
+                self.emit_region_exit_refcounted(); // curr
+                self.emit_region_exit_refcounted(); // prev
+            } else {
+                self.emit_region_exit(); // curr
+                self.emit_region_exit(); // prev
+            }
         }
         self.emit(LirInstr::Const {
             dst: result_reg,
@@ -516,9 +538,12 @@ impl<'a> Lowerer<'a> {
         let result_reg = self.fresh_reg();
         let loop_scope: Vec<(Binding, &Hir)> = bindings.iter().map(|(b, h)| (*b, h)).collect();
         let flip_eligible = self.can_flip_while_loop(body, &loop_scope);
-        // All flip-eligible loops get double-buffered scope marks.
-        let scope_eligible = flip_eligible;
-        let dealloc_eligible = scope_eligible && self.can_dealloc_in_loop(body, &loop_scope);
+        let refcount_eligible =
+            !flip_eligible && self.can_flip_while_loop_refcounted(body, &loop_scope);
+        // All flip-eligible or refcount-eligible loops get double-buffered scope marks.
+        let scope_eligible = flip_eligible || refcount_eligible;
+        let dealloc_eligible =
+            scope_eligible && !refcount_eligible && self.can_dealloc_in_loop(body, &loop_scope);
 
         let loop_label = self.fresh_label();
         let done_label = self.fresh_label();
@@ -539,8 +564,13 @@ impl<'a> Lowerer<'a> {
 
         // Double-buffered scope marks: push prev (guard) + curr before loop.
         if scope_eligible {
-            self.emit_region_enter(); // prev (guard mark)
-            self.emit_region_enter(); // curr (first iteration)
+            if refcount_eligible {
+                self.emit_region_enter_refcounted(); // prev (guard mark)
+                self.emit_region_enter_refcounted(); // curr (first iteration)
+            } else {
+                self.emit_region_enter(); // prev (guard mark)
+                self.emit_region_enter(); // curr (first iteration)
+            }
         }
 
         // Jump to loop header
@@ -564,6 +594,7 @@ impl<'a> Lowerer<'a> {
             binding_slots: binding_slots.clone(),
             scope_eligible,
             dealloc_eligible,
+            refcount_eligible,
         });
 
         let body_reg = self.lower_expr(body)?;
@@ -584,8 +615,13 @@ impl<'a> Lowerer<'a> {
 
         // Release both scope marks (curr + prev)
         if scope_eligible {
-            self.emit_region_exit(); // curr
-            self.emit_region_exit(); // prev
+            if refcount_eligible {
+                self.emit_region_exit_refcounted(); // curr
+                self.emit_region_exit_refcounted(); // prev
+            } else {
+                self.emit_region_exit(); // curr
+                self.emit_region_exit(); // prev
+            }
         }
 
         let back_edge_label = self.current_block.label;
@@ -618,6 +654,7 @@ impl<'a> Lowerer<'a> {
         let binding_slots = ctx.binding_slots.clone();
         let scope_eligible = ctx.scope_eligible;
         let dealloc_eligible = ctx.dealloc_eligible;
+        let refcount_eligible = ctx.refcount_eligible;
 
         if args.len() != binding_slots.len() {
             return Err(format!(
@@ -643,7 +680,9 @@ impl<'a> Lowerer<'a> {
 
         // Rotate scope marks: free prev iteration, start new curr
         if scope_eligible {
-            if dealloc_eligible {
+            if refcount_eligible {
+                self.emit_region_rotate_refcounted();
+            } else if dealloc_eligible {
                 self.emit_region_rotate_dealloc();
             } else {
                 self.emit_region_rotate();

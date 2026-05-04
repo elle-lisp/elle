@@ -31,7 +31,7 @@ fn test_squelch_yields_to_silent() {
     let result = sig.squelch(SIG_YIELD);
     assert!(!result.may_yield());
     assert!(result.may_error()); // squelch adds error
-    assert!(!result.may_suspend());
+    assert!(result.may_suspend()); // error is a fiber transfer
 }
 
 #[test]

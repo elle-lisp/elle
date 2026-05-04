@@ -2182,8 +2182,8 @@ fn test_nqueens_eval_signals_are_silent() {
                 let signal = lir.signal;
                 let name = lir.name.as_deref().unwrap_or("<anon>");
                 assert!(
-                    !signal.may_suspend(),
-                    "nqueens closure '{}' should be silent, got signal {:?}",
+                    !signal.may_yield(),
+                    "nqueens closure '{}' should not yield, got signal {:?}",
                     name, signal
                 );
                 assert!(

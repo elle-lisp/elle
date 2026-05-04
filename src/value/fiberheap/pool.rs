@@ -192,6 +192,38 @@ impl SlabPool {
         // TODO: Enable `self.slab.dealloc(ptr)` after rotation partitioning fix.
     }
 
+    // ── Refcounting ───────────────────────────────────────────────────
+
+    /// Increment the durable reference count for a slab slot.
+    #[inline]
+    pub fn incref(&mut self, ptr: *const HeapObject) {
+        self.slab.incref(ptr);
+    }
+
+    /// Decrement the durable reference count. Returns the new refcount.
+    #[inline]
+    pub fn decref(&mut self, ptr: *const HeapObject) -> u32 {
+        self.slab.decref(ptr)
+    }
+
+    /// Get the durable reference count for a slab slot.
+    #[inline]
+    pub fn refcount(&self, ptr: *const HeapObject) -> u32 {
+        self.slab.refcount(ptr)
+    }
+
+    /// Get the reference count for a slot by flat index.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn refcount_by_flat(&self, flat: usize) -> u32 {
+        self.slab.refcount_by_flat(flat)
+    }
+
+    /// Check if a pointer is in the slab (not arena).
+    pub fn slab_owns(&self, ptr: *const ()) -> bool {
+        self.slab.owns(ptr)
+    }
+
     /// Check if a pointer falls within this pool's slab chunks or arena pages.
     pub fn owns(&self, ptr: *const ()) -> bool {
         self.slab.owns(ptr) || self.arena.owns(ptr)

@@ -747,14 +747,15 @@ fn test_nqueens_functions_are_pure() {
     assert!(result.is_ok(), "Compilation should succeed");
     let result = result.unwrap();
 
-    // Check that all closures don't suspend
+    // Check that all closures don't yield (they may error via stdlib calls,
+    // but error is a suspension-for-safety, not an IO/yield effect).
     let mut found_closures = 0;
     for constant in &result.bytecode.constants {
         if let Some(closure) = constant.as_closure() {
             found_closures += 1;
             assert!(
-                !closure.signal().may_suspend(),
-                "Closure should not suspend, got {:?}",
+                !closure.signal().may_yield(),
+                "Closure should not yield, got {:?}",
                 closure.signal()
             );
         }

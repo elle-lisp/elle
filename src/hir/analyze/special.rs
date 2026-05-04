@@ -189,8 +189,9 @@ impl<'a> Analyzer<'a> {
             Hir::silent(HirKind::Nil, span.clone())
         };
 
-        // Track direct signal emission (generalizes has_direct_yield)
-        self.current_signal_sources.has_direct_yield = true;
+        // Track direct signal emission — inherent to this function.
+        self.current_signal_sources.direct_bits =
+            self.current_signal_sources.direct_bits.union(signal_bits);
 
         let signal = Signal {
             bits: signal_bits,
@@ -223,19 +224,21 @@ impl<'a> Analyzer<'a> {
 
         match &syntax.kind {
             SyntaxKind::Keyword(name) => {
-                crate::signals::registry::with_registry(|reg| match reg.to_signal_bits(name) {
+                let registry = crate::signals::registry::global_registry().lock().unwrap();
+                match registry.to_signal_bits(name) {
                     Some(bits) => Ok(bits),
                     None => Err(format!(
                         "{}: emit: unknown signal keyword :{}",
                         syntax.span, name
                     )),
-                })
+                }
             }
-            SyntaxKind::Set(elements) => crate::signals::registry::with_registry(|reg| {
+            SyntaxKind::Set(elements) => {
+                let registry = crate::signals::registry::global_registry().lock().unwrap();
                 let mut bits = SignalBits::EMPTY;
                 for elem in elements {
                     match &elem.kind {
-                        SyntaxKind::Keyword(name) => match reg.to_signal_bits(name) {
+                        SyntaxKind::Keyword(name) => match registry.to_signal_bits(name) {
                             Some(b) => bits |= b,
                             None => {
                                 return Err(format!(
@@ -253,7 +256,7 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 Ok(bits)
-            }),
+            }
             _ => Err(format!(
                 "{}: emit: first argument must be a signal keyword or keyword set, got {:?}",
                 syntax.span, syntax.kind

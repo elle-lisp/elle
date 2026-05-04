@@ -739,11 +739,18 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
 
-                // Step 2: Check if value is an array
+                // Step 2: Check if value is an array.
+                // Reload from temp slot — value_reg was consumed by StoreLocal
+                // and cannot be reused in stack-based bytecode emission.
+                let reloaded_for_type = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_type,
+                    slot: temp_slot,
+                });
                 let is_tuple_reg = self.fresh_reg();
                 self.emit(LirInstr::IsArray {
                     dst: is_tuple_reg,
-                    src: value_reg,
+                    src: reloaded_for_type,
                 });
 
                 let type_ok_label = self.fresh_label();
@@ -850,11 +857,17 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
 
-                // Step 2: Check if value is an array
+                // Step 2: Check if value is a mutable array.
+                // Reload from temp slot — value_reg was consumed by StoreLocal.
+                let reloaded_for_type = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_type,
+                    slot: temp_slot,
+                });
                 let is_array_reg = self.fresh_reg();
                 self.emit(LirInstr::IsArrayMut {
                     dst: is_array_reg,
-                    src: value_reg,
+                    src: reloaded_for_type,
                 });
 
                 let type_ok_label = self.fresh_label();
@@ -961,11 +974,17 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
 
-                // Type guard: reject non-struct values
+                // Type guard: reject non-struct values.
+                // Reload from temp slot — value_reg was consumed by StoreLocal.
+                let reloaded_for_type = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_type,
+                    slot: temp_slot,
+                });
                 let is_struct_reg = self.fresh_reg();
                 self.emit(LirInstr::IsStruct {
                     dst: is_struct_reg,
-                    src: value_reg,
+                    src: reloaded_for_type,
                 });
 
                 let continue_label = self.fresh_label();
@@ -1033,11 +1052,17 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
 
-                // Type guard: reject non-@struct values
+                // Type guard: reject non-@struct values.
+                // Reload from temp slot — value_reg was consumed by StoreLocal.
+                let reloaded_for_type = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_type,
+                    slot: temp_slot,
+                });
                 let is_table_reg = self.fresh_reg();
                 self.emit(LirInstr::IsStructMut {
                     dst: is_table_reg,
-                    src: value_reg,
+                    src: reloaded_for_type,
                 });
 
                 let continue_label = self.fresh_label();

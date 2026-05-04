@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # ── portrait library tests ──────────────────────────────────────────────
 
 (def portrait ((import "std/portrait")))
@@ -13,14 +13,15 @@
 
 (def p1 (portrait:function a1 :add))
 (assert (= (get p1 :name) "add") "portrait has name")
-# add has SIG_ERROR (from +) so not strictly silent, but jit-eligible
+# add has SIG_ERROR (from +) — any signal is a potential suspension
 (assert (not (get (get p1 :signal) :silent)) "add has SIG_ERROR from +")
 (assert (empty? (get p1 :captures)) "add has no captures")
 # add has SIG_ERROR so portrait considers it non-memoizable (conservative)
 (assert (not (get (get p1 :composition) :memoizable))
         "add not memoizable (has SIG_ERROR)")
 (assert (get (get p1 :composition) :parallelizable) "add is parallelizable")
-(assert (get (get p1 :composition) :jit-eligible) "add is jit-eligible")
+(assert (not (get (get p1 :composition) :jit-eligible))
+        "add not jit-eligible (may error)")
 (assert (get (get p1 :composition) :stateless) "add is stateless")
 
 # double calls add

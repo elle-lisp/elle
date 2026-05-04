@@ -10,6 +10,7 @@ use crate::value::{
     BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK,
     SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
 };
+use std::rc::Rc;
 
 use super::core::VM;
 
@@ -18,11 +19,16 @@ impl VM {
     ///
     /// Returns `None` to continue the dispatch loop, or `Some(bits)` to
     /// return from the dispatch loop (for yields/signals).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_primitive_signal(
         &mut self,
         bits: SignalBits,
         value: Value,
-        frame: &mut super::FrameContext,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+        location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
         // Dispatch uses exact equality for VM-internal signals (which are
         // produced by specific primitives with known bit patterns) and
@@ -47,7 +53,14 @@ impl VM {
         // --- VM-internal signals (exact match — never composed) ---
 
         if bits == SIG_RESUME {
-            return self.handle_fiber_resume_signal(value, frame);
+            return self.handle_fiber_resume_signal(
+                value,
+                bytecode,
+                constants,
+                closure_env,
+                ip,
+                location_map,
+            );
         }
 
         if bits == SIG_PROPAGATE {
@@ -55,7 +68,7 @@ impl VM {
         }
 
         if bits == SIG_ABORT && value.as_fiber().is_some() {
-            return self.handle_fiber_abort_signal(value);
+            return self.handle_fiber_abort_signal(value, bytecode, constants, closure_env, ip);
         }
 
         if bits == SIG_QUERY {
@@ -107,20 +120,20 @@ impl VM {
         // are suspension signals — save the stack into a SuspendedFrame so
         // call.rs can build the caller frame chain on resume.
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-        let suspended_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-            bytecode: frame.bytecode.clone(),
-            constants: frame.constants.clone(),
-            env: frame.closure_env.clone(),
-            ip: *frame.ip,
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
+            bytecode: bytecode.clone(),
+            constants: constants.clone(),
+            env: closure_env.clone(),
+            ip: *ip,
             stack: saved_stack,
-            location_map: frame.location_map.clone(),
+            location_map: location_map.clone(),
             // Caller frame for a suspending primitive: on resume, the primitive's
             // eventual return value flows as current_value and must be pushed as
             // the result of the Call instruction.
             push_resume_value: true,
         });
         self.fiber.signal = Some((bits, value));
-        self.fiber.suspended = Some(vec![suspended_frame]);
+        self.fiber.suspended = Some(vec![frame]);
         Some(bits)
     }
 
@@ -205,28 +218,33 @@ impl VM {
     /// The fiber tried to call a primitive whose signal bits overlap with
     /// the fiber's `withheld` capabilities. Instead of running the primitive,
     /// emit a signal with the blocked bits and a denial payload struct.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn handle_capability_denial(
         &mut self,
         def: &'static crate::primitives::def::PrimitiveDef,
         blocked: SignalBits,
         args: &[Value],
-        frame: &mut super::FrameContext,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+        location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
         let payload = Self::build_denial_payload(def, blocked, args);
 
         // Save the stack and build a suspended frame (same as suspending signals)
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-        let suspended_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-            bytecode: frame.bytecode.clone(),
-            constants: frame.constants.clone(),
-            env: frame.closure_env.clone(),
-            ip: *frame.ip,
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
+            bytecode: bytecode.clone(),
+            constants: constants.clone(),
+            env: closure_env.clone(),
+            ip: *ip,
             stack: saved_stack,
-            location_map: frame.location_map.clone(),
+            location_map: location_map.clone(),
             push_resume_value: true,
         });
         self.fiber.signal = Some((blocked, payload));
-        self.fiber.suspended = Some(vec![suspended_frame]);
+        self.fiber.suspended = Some(vec![frame]);
         Some(blocked)
     }
 
@@ -254,8 +272,8 @@ impl VM {
         use crate::value::heap::TableKey;
         use std::collections::BTreeMap;
 
-        let denied_keywords =
-            crate::signals::registry::with_registry(|reg| reg.bits_to_keywords(blocked));
+        let registry = crate::signals::registry::global_registry().lock().unwrap();
+        let denied_keywords = registry.bits_to_keywords(blocked);
 
         let mut fields = BTreeMap::new();
         fields.insert(
@@ -340,17 +358,241 @@ impl VM {
                 let _ = arg;
                 (SIG_OK, Value::FALSE)
             }
-            "doc" => self.query_doc(arg),
+            "doc" => {
+                let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
+                    s
+                } else if let Some(s) = arg.as_keyword_name() {
+                    s
+                } else {
+                    return (
+                        SIG_ERROR,
+                        error_val("type-error", "doc: expected string or keyword".to_string()),
+                    );
+                };
+                // Look up builtin docs by name. Stdlib closures are handled
+                // upstream: the analyzer passes them through as closure values,
+                // and prim_doc extracts the docstring from closure.template.doc
+                // before the SIG_QUERY reaches here. This path is only reached
+                // for native primitives, special forms, and explicit string args.
+                if let Some(doc) = self.docs.get(&name) {
+                    (SIG_OK, Value::string(doc.format()))
+                } else {
+                    (
+                        SIG_OK,
+                        Value::string(format!("No documentation found for '{}'", name)),
+                    )
+                }
+            }
             "fiber/self" => (SIG_OK, self.current_fiber_value.unwrap_or(Value::NIL)),
             "fiber/caps" => {
                 let caps = crate::signals::CAP_MASK.subtract(self.fiber.withheld);
-                let keywords =
-                    crate::signals::registry::with_registry(|reg| reg.bits_to_keywords(caps));
+                let registry = crate::signals::registry::global_registry().lock().unwrap();
+                let keywords = registry.bits_to_keywords(caps);
                 (SIG_OK, Value::set(keywords.into_iter().collect()))
             }
-            "list-primitives" => self.query_list_primitives(arg),
-            "primitive-meta" => self.query_primitive_meta(arg),
-            "arena/stats" => self.query_arena_stats(arg),
+            "list-primitives" => {
+                // arg is nil (no filter) or a keyword/string category name
+                let category_filter: Option<String> = if arg.is_nil() {
+                    None
+                } else if let Some(k) = arg.as_keyword_name() {
+                    Some(k)
+                } else {
+                    arg.with_string(|s| s.to_string())
+                };
+
+                let mut names: Vec<&String> = if let Some(ref cat) = category_filter {
+                    self.docs
+                        .iter()
+                        .filter(|(_, doc)| doc.category == cat.as_str())
+                        .map(|(name, _)| name)
+                        .collect()
+                } else {
+                    self.docs.keys().collect()
+                };
+                names.sort();
+                let values: Vec<Value> = unsafe {
+                    let symbols_ptr = crate::context::get_symbol_table();
+                    names
+                        .iter()
+                        .map(|n| {
+                            if let Some(ptr) = symbols_ptr {
+                                let id = (*ptr).intern(n);
+                                Value::symbol(id.0)
+                            } else {
+                                Value::string(n)
+                            }
+                        })
+                        .collect()
+                };
+                (SIG_OK, crate::value::list(values))
+            }
+            "primitive-meta" => {
+                let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
+                    s
+                } else if let Some(s) = arg.as_keyword_name() {
+                    s
+                } else if let Some(sym_id) = arg.as_symbol() {
+                    match crate::context::resolve_symbol_name(sym_id) {
+                        Some(s) => s,
+                        None => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "internal-error",
+                                    format!(
+                                        "primitive-meta: symbol ID {} not found in symbol table",
+                                        sym_id
+                                    ),
+                                ),
+                            );
+                        }
+                    }
+                } else {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            "primitive-meta: expected string, keyword, or symbol".to_string(),
+                        ),
+                    );
+                };
+                if let Some(doc) = self.docs.get(&name) {
+                    use crate::value::heap::TableKey;
+                    use std::collections::BTreeMap;
+                    let mut fields = BTreeMap::new();
+                    fields.insert(
+                        TableKey::Keyword("name".to_string()),
+                        Value::string(doc.name),
+                    );
+                    fields.insert(TableKey::Keyword("doc".to_string()), Value::string(doc.doc));
+                    // params as a list of strings
+                    let params: Vec<Value> = doc.params.iter().map(|p| Value::string(*p)).collect();
+                    fields.insert(
+                        TableKey::Keyword("params".to_string()),
+                        crate::value::list(params),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("category".to_string()),
+                        Value::string(doc.category),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("example".to_string()),
+                        Value::string(doc.example),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("arity".to_string()),
+                        Value::string(format!("{}", doc.arity)),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("signal".to_string()),
+                        Value::string(format!("{}", doc.signal)),
+                    );
+                    // aliases as a list of strings
+                    let aliases: Vec<Value> =
+                        doc.aliases.iter().map(|a| Value::string(*a)).collect();
+                    fields.insert(
+                        TableKey::Keyword("aliases".to_string()),
+                        crate::value::list(aliases),
+                    );
+                    (SIG_OK, Value::struct_from(fields))
+                } else {
+                    (SIG_OK, Value::NIL)
+                }
+            }
+            "arena/stats" => {
+                use crate::value::heap::TableKey;
+                use std::collections::BTreeMap;
+
+                /// Build the unified stats struct from a FiberHeap reference.
+                /// Fields: :object-count, :peak-count, :allocated-bytes, :object-limit,
+                /// :scope-depth, :dtor-count, :root-live-count, :root-alloc-count,
+                /// :shared-count, :active-allocator, :scope-enter-count, :scope-dtor-count.
+                fn build_stats(heap: &crate::value::FiberHeap) -> Value {
+                    let mut fields = BTreeMap::new();
+                    fields.insert(
+                        TableKey::Keyword("object-count".to_string()),
+                        Value::int(heap.visible_len() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("peak-count".to_string()),
+                        Value::int(heap.peak_alloc_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("allocated-bytes".to_string()),
+                        Value::int(heap.allocated_bytes() as i64),
+                    );
+                    let limit_val = match heap.object_limit() {
+                        Some(n) => Value::int(n as i64),
+                        None => Value::NIL,
+                    };
+                    fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
+                    fields.insert(
+                        TableKey::Keyword("scope-depth".to_string()),
+                        Value::int(heap.scope_depth() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("dtor-count".to_string()),
+                        Value::int(heap.dtor_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("root-live-count".to_string()),
+                        Value::int(heap.root_live() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("root-alloc-count".to_string()),
+                        Value::int(heap.root_alloc_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("shared-count".to_string()),
+                        Value::int(heap.shared_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("active-allocator".to_string()),
+                        Value::keyword("slab"),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("scope-enter-count".to_string()),
+                        Value::int(heap.scope_enters() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("scope-dtor-count".to_string()),
+                        Value::int(heap.scope_dtors_run() as i64),
+                    );
+                    Value::struct_from(fields)
+                }
+
+                if arg.is_nil() {
+                    // 0-arg path: read from the current fiber's heap.
+                    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
+                    debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
+                    let stats = unsafe { build_stats(&*heap_ptr) };
+                    (SIG_OK, stats)
+                } else {
+                    // 1-arg path: read from the provided fiber's heap.
+                    let fiber_handle = match arg.as_fiber() {
+                        Some(h) => h,
+                        None => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "type-error",
+                                    format!("arena/stats: expected fiber, got {}", arg.type_name()),
+                                ),
+                            );
+                        }
+                    };
+                    match fiber_handle.try_with(|fiber| build_stats(&fiber.heap)) {
+                        Some(v) => (SIG_OK, v),
+                        None => (
+                            SIG_ERROR,
+                            error_val(
+                                "state-error",
+                                "arena/stats: fiber is currently executing".to_string(),
+                            ),
+                        ),
+                    }
+                }
+            }
             #[cfg(feature = "jit")]
             "jit/rejections" => {
                 use crate::value::heap::TableKey;
@@ -401,9 +643,113 @@ impl VM {
             "jit?" => (SIG_OK, Value::FALSE),
             "vm/config" => self.dispatch_vm_config_read(arg),
             #[cfg(feature = "mlir")]
-            "mlir/compile-spirv" => self.query_mlir_compile_spirv(arg),
+            "mlir/compile-spirv" => {
+                // arg is (closure . workgroup-size)
+                let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
+                    Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
+                    None => (arg, 256),
+                };
+
+                let closure = match closure_val.as_closure() {
+                    Some(c) => c,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "mlir/compile-spirv: expected closure, got {}",
+                                    closure_val.type_name()
+                                ),
+                            ),
+                        )
+                    }
+                };
+                let lir = match &closure.template.lir_function {
+                    Some(lir) => lir,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "mlir-error",
+                                "mlir/compile-spirv: closure has no LIR".to_string(),
+                            ),
+                        )
+                    }
+                };
+                if !lir.is_gpu_eligible() {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "mlir-error",
+                            "mlir/compile-spirv: closure is not GPU-eligible".to_string(),
+                        ),
+                    );
+                }
+                let key = closure.template.bytecode.as_ptr();
+                let cache = self
+                    .mlir_cache
+                    .get_or_insert_with(crate::mlir::MlirCache::new);
+                match cache.compile_spirv(key, lir, wg_size) {
+                    Ok(bytes) => (SIG_OK, Value::bytes(bytes.to_vec())),
+                    Err(e) => (
+                        SIG_ERROR,
+                        error_val("mlir-error", format!("mlir/compile-spirv: {}", e)),
+                    ),
+                }
+            }
             #[cfg(feature = "mlir")]
-            "git" => self.query_git(arg),
+            "git" => {
+                // arg is (closure . workgroup-size)
+                let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
+                    Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
+                    None => (arg, 256),
+                };
+
+                let closure = match closure_val.as_closure() {
+                    Some(c) => c,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!("git: expected closure, got {}", closure_val.type_name()),
+                            ),
+                        )
+                    }
+                };
+                // Already cached? Return early.
+                if closure.template.spirv.get().is_some() {
+                    return (SIG_OK, closure_val);
+                }
+                let lir = match &closure.template.lir_function {
+                    Some(lir) => lir,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val("mlir-error", "git: closure has no LIR".to_string()),
+                        )
+                    }
+                };
+                if !lir.is_gpu_eligible() {
+                    return (
+                        SIG_ERROR,
+                        error_val("mlir-error", "git: closure is not GPU-eligible".to_string()),
+                    );
+                }
+                let key = closure.template.bytecode.as_ptr();
+                let cache = self
+                    .mlir_cache
+                    .get_or_insert_with(crate::mlir::MlirCache::new);
+                match cache.compile_spirv(key, lir, wg_size) {
+                    Ok(bytes) => {
+                        // Cache on the template (OnceCell — idempotent).
+                        let _ = closure.template.spirv.set(bytes.to_vec());
+                        (SIG_OK, closure_val)
+                    }
+                    Err(e) => (SIG_ERROR, error_val("mlir-error", format!("git: {}", e))),
+                }
+            }
             "compile/run-on" => self.dispatch_compile_run_on(arg),
             _ => (
                 SIG_ERROR,
@@ -412,335 +758,6 @@ impl VM {
                     format!("SIG_QUERY: unknown operation: {}", op_name),
                 ),
             ),
-        }
-    }
-
-    fn query_doc(&self, arg: Value) -> (SignalBits, Value) {
-        let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
-            s
-        } else if let Some(s) = arg.as_keyword_name() {
-            s
-        } else {
-            return (
-                SIG_ERROR,
-                error_val("type-error", "doc: expected string or keyword".to_string()),
-            );
-        };
-        // Look up builtin docs by name. Stdlib closures are handled
-        // upstream: the analyzer passes them through as closure values,
-        // and prim_doc extracts the docstring from closure.template.doc
-        // before the SIG_QUERY reaches here. This path is only reached
-        // for native primitives, special forms, and explicit string args.
-        if let Some(doc) = self.docs.get(&name) {
-            (SIG_OK, Value::string(doc.format()))
-        } else {
-            (
-                SIG_OK,
-                Value::string(format!("No documentation found for '{}'", name)),
-            )
-        }
-    }
-
-    fn query_list_primitives(&self, arg: Value) -> (SignalBits, Value) {
-        // arg is nil (no filter) or a keyword/string category name
-        let category_filter: Option<String> = if arg.is_nil() {
-            None
-        } else if let Some(k) = arg.as_keyword_name() {
-            Some(k)
-        } else {
-            arg.with_string(|s| s.to_string())
-        };
-
-        let mut names: Vec<&String> = if let Some(ref cat) = category_filter {
-            self.docs
-                .iter()
-                .filter(|(_, doc)| doc.category == cat.as_str())
-                .map(|(name, _)| name)
-                .collect()
-        } else {
-            self.docs.keys().collect()
-        };
-        names.sort();
-        let values: Vec<Value> = unsafe {
-            let symbols_ptr = crate::context::get_symbol_table();
-            names
-                .iter()
-                .map(|n| {
-                    if let Some(ptr) = symbols_ptr {
-                        let id = (*ptr).intern(n);
-                        Value::symbol(id.0)
-                    } else {
-                        Value::string(n)
-                    }
-                })
-                .collect()
-        };
-        (SIG_OK, crate::value::list(values))
-    }
-
-    fn query_primitive_meta(&self, arg: Value) -> (SignalBits, Value) {
-        let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
-            s
-        } else if let Some(s) = arg.as_keyword_name() {
-            s
-        } else if let Some(sym_id) = arg.as_symbol() {
-            match crate::context::resolve_symbol_name(sym_id) {
-                Some(s) => s,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "internal-error",
-                            format!(
-                                "primitive-meta: symbol ID {} not found in symbol table",
-                                sym_id
-                            ),
-                        ),
-                    );
-                }
-            }
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    "primitive-meta: expected string, keyword, or symbol".to_string(),
-                ),
-            );
-        };
-        if let Some(doc) = self.docs.get(&name) {
-            use crate::value::heap::TableKey;
-            use std::collections::BTreeMap;
-            let mut fields = BTreeMap::new();
-            fields.insert(
-                TableKey::Keyword("name".to_string()),
-                Value::string(doc.name),
-            );
-            fields.insert(TableKey::Keyword("doc".to_string()), Value::string(doc.doc));
-            let params: Vec<Value> = doc.params.iter().map(|p| Value::string(*p)).collect();
-            fields.insert(
-                TableKey::Keyword("params".to_string()),
-                crate::value::list(params),
-            );
-            fields.insert(
-                TableKey::Keyword("category".to_string()),
-                Value::string(doc.category),
-            );
-            fields.insert(
-                TableKey::Keyword("example".to_string()),
-                Value::string(doc.example),
-            );
-            fields.insert(
-                TableKey::Keyword("arity".to_string()),
-                Value::string(format!("{}", doc.arity)),
-            );
-            fields.insert(
-                TableKey::Keyword("signal".to_string()),
-                Value::string(format!("{}", doc.signal)),
-            );
-            let aliases: Vec<Value> = doc.aliases.iter().map(|a| Value::string(*a)).collect();
-            fields.insert(
-                TableKey::Keyword("aliases".to_string()),
-                crate::value::list(aliases),
-            );
-            (SIG_OK, Value::struct_from(fields))
-        } else {
-            (SIG_OK, Value::NIL)
-        }
-    }
-
-    fn query_arena_stats(&self, arg: Value) -> (SignalBits, Value) {
-        use crate::value::heap::TableKey;
-        use std::collections::BTreeMap;
-
-        fn build_stats(heap: &crate::value::FiberHeap) -> Value {
-            let mut fields = BTreeMap::new();
-            fields.insert(
-                TableKey::Keyword("object-count".to_string()),
-                Value::int(heap.visible_len() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("peak-count".to_string()),
-                Value::int(heap.peak_alloc_count() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("allocated-bytes".to_string()),
-                Value::int(heap.allocated_bytes() as i64),
-            );
-            let limit_val = match heap.object_limit() {
-                Some(n) => Value::int(n as i64),
-                None => Value::NIL,
-            };
-            fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
-            fields.insert(
-                TableKey::Keyword("scope-depth".to_string()),
-                Value::int(heap.scope_depth() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("dtor-count".to_string()),
-                Value::int(heap.dtor_count() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("root-live-count".to_string()),
-                Value::int(heap.root_live() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("root-alloc-count".to_string()),
-                Value::int(heap.root_alloc_count() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("shared-count".to_string()),
-                Value::int(heap.shared_count() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("active-allocator".to_string()),
-                Value::keyword("slab"),
-            );
-            fields.insert(
-                TableKey::Keyword("scope-enter-count".to_string()),
-                Value::int(heap.scope_enters() as i64),
-            );
-            fields.insert(
-                TableKey::Keyword("scope-dtor-count".to_string()),
-                Value::int(heap.scope_dtors_run() as i64),
-            );
-            Value::struct_from(fields)
-        }
-
-        if arg.is_nil() {
-            let heap_ptr = crate::value::fiberheap::current_heap_ptr();
-            debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
-            let stats = unsafe { build_stats(&*heap_ptr) };
-            (SIG_OK, stats)
-        } else {
-            let fiber_handle = match arg.as_fiber() {
-                Some(h) => h,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("arena/stats: expected fiber, got {}", arg.type_name()),
-                        ),
-                    );
-                }
-            };
-            match fiber_handle.try_with(|fiber| build_stats(&fiber.heap)) {
-                Some(v) => (SIG_OK, v),
-                None => (
-                    SIG_ERROR,
-                    error_val(
-                        "state-error",
-                        "arena/stats: fiber is currently executing".to_string(),
-                    ),
-                ),
-            }
-        }
-    }
-
-    #[cfg(feature = "mlir")]
-    fn query_mlir_compile_spirv(&mut self, arg: Value) -> (SignalBits, Value) {
-        let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
-            Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
-            None => (arg, 256),
-        };
-
-        let closure = match closure_val.as_closure() {
-            Some(c) => c,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "mlir/compile-spirv: expected closure, got {}",
-                            closure_val.type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-        let lir = match &closure.template.lir_function {
-            Some(lir) => lir,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "mlir-error",
-                        "mlir/compile-spirv: closure has no LIR".to_string(),
-                    ),
-                )
-            }
-        };
-        if !lir.is_gpu_eligible() {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "mlir-error",
-                    "mlir/compile-spirv: closure is not GPU-eligible".to_string(),
-                ),
-            );
-        }
-        let key = closure.template.bytecode.as_ptr();
-        let cache = self
-            .mlir_cache
-            .get_or_insert_with(crate::mlir::MlirCache::new);
-        match cache.compile_spirv(key, lir, wg_size) {
-            Ok(bytes) => (SIG_OK, Value::bytes(bytes.to_vec())),
-            Err(e) => (
-                SIG_ERROR,
-                error_val("mlir-error", format!("mlir/compile-spirv: {}", e)),
-            ),
-        }
-    }
-
-    #[cfg(feature = "mlir")]
-    fn query_git(&mut self, arg: Value) -> (SignalBits, Value) {
-        let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
-            Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
-            None => (arg, 256),
-        };
-
-        let closure = match closure_val.as_closure() {
-            Some(c) => c,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("git: expected closure, got {}", closure_val.type_name()),
-                    ),
-                )
-            }
-        };
-        if closure.template.spirv.get().is_some() {
-            return (SIG_OK, closure_val);
-        }
-        let lir = match &closure.template.lir_function {
-            Some(lir) => lir,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("mlir-error", "git: closure has no LIR".to_string()),
-                )
-            }
-        };
-        if !lir.is_gpu_eligible() {
-            return (
-                SIG_ERROR,
-                error_val("mlir-error", "git: closure is not GPU-eligible".to_string()),
-            );
-        }
-        let key = closure.template.bytecode.as_ptr();
-        let cache = self
-            .mlir_cache
-            .get_or_insert_with(crate::mlir::MlirCache::new);
-        match cache.compile_spirv(key, lir, wg_size) {
-            Ok(bytes) => {
-                let _ = closure.template.spirv.set(bytes.to_vec());
-                (SIG_OK, closure_val)
-            }
-            Err(e) => (SIG_ERROR, error_val("mlir-error", format!("git: {}", e))),
         }
     }
 
@@ -1175,7 +1192,6 @@ mod tests {
     use super::*;
     use crate::error::LocationMap;
     use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
-    use std::rc::Rc;
 
     /// Create minimal test fixtures for handle_primitive_signal.
     type TestFixtures = (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>, Rc<LocationMap>);
@@ -1192,7 +1208,6 @@ mod tests {
 
     #[test]
     fn composed_error_io_treated_as_error() {
-        use crate::vm::FrameContext;
         let mut vm = VM::new();
         let (bc, consts, env, loc) = test_fixtures();
         let mut ip = 0usize;
@@ -1201,18 +1216,16 @@ mod tests {
         let result = vm.handle_primitive_signal(
             bits,
             Value::string("boom"),
-            &mut FrameContext {
-                bytecode: &bc,
-                constants: &consts,
-                closure_env: &env,
-                ip: &mut ip,
-                location_map: &loc,
-            },
+            &bc,
+            &consts,
+            &env,
+            &mut ip,
+            &loc,
         );
 
         // Error path returns None
         assert!(result.is_none());
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
         // NIL pushed (error convention)
         assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
@@ -1222,26 +1235,16 @@ mod tests {
 
     #[test]
     fn unknown_signal_propagates() {
-        use crate::vm::FrameContext;
         let mut vm = VM::new();
         let (bc, consts, env, loc) = test_fixtures();
         let mut ip = 0usize;
         let bits = SIG_DEBUG; // not handled by any specific branch
 
-        let result = vm.handle_primitive_signal(
-            bits,
-            Value::int(1),
-            &mut FrameContext {
-                bytecode: &bc,
-                constants: &consts,
-                closure_env: &env,
-                ip: &mut ip,
-                location_map: &loc,
-            },
-        );
+        let result =
+            vm.handle_primitive_signal(bits, Value::int(1), &bc, &consts, &env, &mut ip, &loc);
 
         assert_eq!(result, Some(SIG_DEBUG));
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_DEBUG);
     }
 
@@ -1257,7 +1260,7 @@ mod tests {
         // Should return the full composed bits
         assert!(result.contains(SIG_ERROR));
         assert!(result.contains(SIG_IO));
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_IO));
     }
@@ -1270,7 +1273,7 @@ mod tests {
         let result = vm.handle_primitive_signal_tail(bits, Value::int(42));
 
         assert_eq!(result, SIG_YIELD | SIG_IO);
-        let (sig, val) = vm.fiber.take_signal();
+        let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_YIELD | SIG_IO);
         assert_eq!(val, Value::int(42));
     }
@@ -1282,7 +1285,7 @@ mod tests {
         let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5));
 
         assert_eq!(result, SIG_OK);
-        let (sig, val) = vm.fiber.take_signal();
+        let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_OK);
         assert_eq!(val, Value::int(5));
     }
@@ -1295,7 +1298,7 @@ mod tests {
         let result = vm.handle_primitive_signal_tail(bits, Value::string("err"));
 
         assert!(result.contains(SIG_ERROR));
-        let (sig, _) = vm.fiber.take_signal();
+        let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
     }
 }

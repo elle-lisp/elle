@@ -191,7 +191,9 @@ impl WasmEmitter {
             | LirInstr::RegionExit
             | LirInstr::RegionExitCall
             | LirInstr::RegionRotate
-            | LirInstr::RegionRotateDealloc => {}
+            | LirInstr::RegionRotateDealloc
+            | LirInstr::RegionRotateRefcounted
+            | LirInstr::RegionExitRefcounted => {}
             // Outbox routing is VM-only.
             LirInstr::OutboxEnter | LirInstr::OutboxExit => {}
             // Flip rotation is VM-only (the WASM backend uses its own

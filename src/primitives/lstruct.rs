@@ -4,6 +4,7 @@
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiberheap;
 use crate::value::types::Arity;
 use crate::value::{error_val, sorted_struct_contains, sorted_struct_remove, TableKey, Value};
 use std::collections::BTreeMap;
@@ -119,6 +120,7 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let value = args[i + 1];
+        fiberheap::incref(value);
         map.insert(key, value);
     }
 
@@ -172,6 +174,10 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
+        // Decref removed value: it leaves a durable collection reference.
+        if let Some(old_val) = mstruct.borrow().get(&key).copied() {
+            crate::value::fiberheap::decref_and_free(old_val);
+        }
         mstruct.borrow_mut().remove(&key);
         (SIG_OK, args[0]) // Return the mutated struct
     } else if args[0].is_struct() {

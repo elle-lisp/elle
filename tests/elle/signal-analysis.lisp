@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # ── Signal analysis tests ─────────────────────────────────────────────
 #
 # Lock down expectations for compute_inferred_signal: which functions
@@ -30,11 +30,11 @@
 
 (assert (silent? (fn [x] x)) "identity is silent")
 
-(assert (silent? (fn [a b] (+ a b)))
-        "arithmetic is silent (error doesn't suspend)")
+(assert (not (silent? (fn [a b] (+ a b))))
+        "arithmetic may error → not silent (any signal suspends)")
 
-(assert (silent? (fn [x] (error "boom")))
-        "error-only is silent (error doesn't suspend)")
+(assert (not (silent? (fn [x] (error "boom"))))
+        "error-only → not silent (error is a suspension)")
 
 (assert (not (silent? (fn [x] (yield x)))) "yield is not silent")
 
@@ -102,7 +102,8 @@
 (def outer-val 10)
 (def capturing (fn [x] (+ x outer-val)))
 (assert (fn/errors? capturing) "capturing closure with arithmetic has SIG_ERROR")
-(assert (silent? capturing) "capturing closure with arithmetic is silent")
+(assert (not (silent? capturing))
+        "capturing closure with arithmetic may error → not silent")
 
 # ── compile/signal API ───────────────────────────────────────────────
 
@@ -116,9 +117,9 @@
 (def a2 (compile/analyze "(defn g [x] (+ x 1))"))
 (def sig2 (compile/signal a2 :g))
 (assert (not (get sig2 :silent)) "arithmetic not silent in compile/signal")
-(assert (not (get sig2 :yields)) "arithmetic doesn't yield")
+(assert (get sig2 :yields) "arithmetic may suspend (error is a suspension)")
 (assert (has? (get sig2 :bits) :error) "arithmetic has :error in bits")
-(assert (get sig2 :jit-eligible) "arithmetic is jit-eligible")
+(assert (not (get sig2 :jit-eligible)) "arithmetic not jit-eligible (may error)")
 
 (def a3 (compile/analyze "(defn h [x] (println x))"))
 (def sig3 (compile/signal a3 :h))
@@ -142,12 +143,12 @@
 (assert (= (length silent-fns) 1) "one silent function")
 (assert (= (get (first silent-fns) :name) "pure") "pure is the silent one")
 
-# io-fn yields; pure and arith don't
-(assert (= (length yielding-fns) 1) "one yielding function")
-(assert (= (get (first yielding-fns) :name) "io-fn") "io-fn is the yielding one")
+# arith and io-fn both may suspend (error and IO are both suspensions)
+(assert (= (length yielding-fns) 2) "two yielding functions (arith + io-fn)")
 
-# pure and arith are jit-eligible; io-fn is not
-(assert (= (length jit-fns) 2) "two jit-eligible functions")
+# only pure is jit-eligible (arith has SIG_ERROR, io-fn has SIG_IO)
+(assert (= (length jit-fns) 1) "one jit-eligible function")
+(assert (= (get (first jit-fns) :name) "pure") "pure is the jit-eligible one")
 
 # ── var/def signal propagation ──────────────────────────────────────
 # Define nodes must propagate their initializer's signal.
@@ -186,7 +187,8 @@
   (def @r (+ x 1))
   r)
 (assert (fn/errors? var-arith) "var with arithmetic propagates SIG_ERROR")
-(assert (silent? var-arith) "var with arithmetic stays silent (error only)")
+(assert (not (silent? var-arith))
+        "var with arithmetic may suspend (error is suspension)")
 
 # Multiple var bindings accumulate signals
 (defn multi-var [f]

@@ -453,8 +453,14 @@ pub struct Fiber {
     pub mask: SignalBits,
     /// Parent fiber (weak to avoid Rc cycles)
     pub parent: Option<WeakFiberHandle>,
+    /// Cached Value for the parent fiber. Set during resume chain
+    /// wiring. Avoids re-allocating a HeapObject on every `fiber/parent` call.
+    pub parent_value: Option<Value>,
     /// Most recently resumed child (for stack traces and resumption routing)
     pub child: Option<FiberHandle>,
+    /// Cached Value for the child fiber. Set during resume chain
+    /// wiring. Avoids re-allocating a HeapObject on every `fiber/child` call.
+    pub child_value: Option<Value>,
     /// The closure this fiber was created from
     pub closure: Rc<Closure>,
     /// Parameter binding frames. Each `parameterize` pushes a frame;
@@ -504,7 +510,9 @@ impl Fiber {
             status: FiberStatus::New,
             mask,
             parent: None,
+            parent_value: None,
             child: None,
+            child_value: None,
             closure,
             param_frames: Vec::new(),
             signal: None,
@@ -514,23 +522,6 @@ impl Fiber {
             fuel: None,
             withheld: SignalBits::EMPTY,
         }
-    }
-
-    /// Take the current signal, panicking with a diagnostic message if absent.
-    ///
-    /// The signal should always be `Some` at call sites — it is set before
-    /// the dispatch loop returns, and consumed immediately by the caller.
-    /// If the invariant is violated, the panic message includes fiber status,
-    /// call depth, and stack size for post-mortem diagnosis.
-    pub fn take_signal(&mut self) -> (SignalBits, Value) {
-        self.signal.take().unwrap_or_else(|| {
-            panic!(
-                "take_signal: signal is None (status={:?}, call_depth={}, stack_len={})",
-                self.status,
-                self.call_depth,
-                self.stack.len(),
-            )
-        })
     }
 }
 

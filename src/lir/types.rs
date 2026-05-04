@@ -603,6 +603,10 @@ pub enum LirInstr {
     RegionRotate,
     /// Rotate loop scope marks (hard — with slot deallocation).
     RegionRotateDealloc,
+    /// Rotate loop scope marks (refcount-aware — skip pinned values).
+    RegionRotateRefcounted,
+    /// Pop scope mark and release refcount-0 objects only.
+    RegionExitRefcounted,
 
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.

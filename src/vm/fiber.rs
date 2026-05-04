@@ -26,6 +26,7 @@ use crate::value::{
     BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT,
     SIG_OK, SIG_SWITCH, SIG_TERMINAL,
 };
+use std::rc::Rc;
 
 use super::core::VM;
 
@@ -58,7 +59,9 @@ impl VM {
 
         // 2. Wire up parent/child chain (Janet semantics)
         self.fiber.child = Some(child_handle.clone());
+        self.fiber.child_value = Some(child_value);
         child_fiber.parent = self.current_fiber_handle.as_ref().map(|h| h.downgrade());
+        child_fiber.parent_value = self.current_fiber_value;
 
         // 2a. Propagate withheld capabilities: child inherits parent's withheld.
         // This is idempotent (OR is monotonic) so safe on repeated resume.
@@ -169,7 +172,11 @@ impl VM {
     pub(super) fn handle_fiber_resume_signal(
         &mut self,
         fiber_value: Value,
-        frame: &mut super::FrameContext,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+        location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
@@ -195,7 +202,7 @@ impl VM {
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
-
+            self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
             None
         } else {
@@ -223,12 +230,12 @@ impl VM {
                     };
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
                     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                        bytecode: frame.bytecode.clone(),
-                        constants: frame.constants.clone(),
-                        env: frame.closure_env.clone(),
-                        ip: *frame.ip,
+                        bytecode: bytecode.clone(),
+                        constants: constants.clone(),
+                        env: closure_env.clone(),
+                        ip: *ip,
                         stack: caller_stack,
-                        location_map: frame.location_map.clone(),
+                        location_map: location_map.clone(),
                         push_resume_value: true,
                     });
                     self.fiber.suspended = Some(vec![fiber_resume_frame, caller_frame]);
@@ -263,7 +270,7 @@ impl VM {
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
-
+            self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));
             SIG_OK
         } else {
@@ -323,9 +330,9 @@ impl VM {
             if bits == SIG_SWITCH {
                 // A fiber called fiber/resume on a child: descend.
                 let pending = self
-                    .pending
-                    .take_fiber_resume()
-                    .expect("VM bug: SIG_SWITCH without pending fiber resume");
+                    .pending_fiber_resume
+                    .take()
+                    .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
 
                 fiber_stack.push((pending.handle.clone(), pending.fiber_value));
                 let (new_bits, new_value) =
@@ -348,6 +355,7 @@ impl VM {
 
                 if caught {
                     self.fiber.child = None;
+                    self.fiber.child_value = None;
 
                     // Update the fiber's signal so fiber/value returns
                     // the correct result to Elle code.
@@ -493,11 +501,10 @@ impl VM {
                 inner_handle.with_mut(|f| f.signal = Some((SIG_OK, resume_value)));
 
                 // Set up the trampoline to descend into the inner fiber.
-                self.pending =
-                    super::core::PendingAction::FiberResume(super::core::PendingFiberResume {
-                        handle: inner_handle,
-                        fiber_value: inner_fv,
-                    });
+                self.pending_fiber_resume = Some(super::core::PendingFiberResume {
+                    handle: inner_handle,
+                    fiber_value: inner_fv,
+                });
 
                 return (SIG_SWITCH, Value::NIL);
             }
@@ -629,7 +636,7 @@ impl VM {
         ));
 
         self.fiber.child = Some(handle);
-
+        self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
         if child_bits.contains(SIG_ERROR) {
@@ -669,7 +676,7 @@ impl VM {
         ));
 
         self.fiber.child = Some(handle);
-
+        self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
         if child_bits.contains(SIG_ERROR) {
@@ -694,7 +701,14 @@ impl VM {
     /// Injects an error and resumes the fiber. The result is handled
     /// identically to fiber/resume — the child's actual outcome (dead,
     /// error, paused) determines what the parent sees. No status stomp.
-    pub(super) fn handle_fiber_abort_signal(&mut self, fiber_value: Value) -> Option<SignalBits> {
+    pub(super) fn handle_fiber_abort_signal(
+        &mut self,
+        fiber_value: Value,
+        _bytecode: &Rc<Vec<u8>>,
+        _constants: &Rc<Vec<Value>>,
+        _closure_env: &Rc<Vec<Value>>,
+        _ip: &mut usize,
+    ) -> Option<SignalBits> {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
@@ -720,7 +734,7 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             self.fiber.child = None;
-
+            self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
             None
         } else {
@@ -774,7 +788,7 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             self.fiber.child = None;
-
+            self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));
             SIG_OK
         } else {
@@ -834,7 +848,7 @@ impl VM {
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
-
+            self.fiber.child_value = None;
             JitValue::from_value(result_value)
         } else {
             if result_bits.contains(SIG_ERROR) {
@@ -894,7 +908,7 @@ impl VM {
         ));
 
         self.fiber.child = Some(handle);
-
+        self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
         if child_bits.contains(SIG_ERROR) {
@@ -940,7 +954,7 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
             self.fiber.child = None;
-
+            self.fiber.child_value = None;
             JitValue::from_value(result_value)
         } else {
             if result_bits.contains(SIG_ERROR) {
