@@ -39,8 +39,24 @@
   (def c-bind-int (cfn "sqlite3_bind_int64" :int @[:ptr :int :i64]))
   (def c-bind-dbl (cfn "sqlite3_bind_double" :int @[:ptr :int :double]))
   (def c-bind-text (cfn "sqlite3_bind_text" :int @[:ptr :int :string :int :ptr]))
+  (def c-bind-blob (cfn "sqlite3_bind_blob" :int @[:ptr :int :ptr :int :ptr]))
   (def c-bind-null (cfn "sqlite3_bind_null" :int @[:ptr :int]))
+  (def c-col-blob (cfn "sqlite3_column_blob" :ptr @[:ptr :int]))
+  (def c-col-bytes (cfn "sqlite3_column_bytes" :int @[:ptr :int]))
   (def c-changes (cfn "sqlite3_changes" :int @[:ptr]))
+
+  ## ── Bytes helpers ──────────────────────────────────────────────────
+
+  (defn bytes->ptr [b]
+    "Copy bytes into C memory. Caller must ffi/free the result."
+    (let [n (length b)
+          ptr (ffi/malloc n)]
+      (ffi/write ptr (ffi/array :u8 n) b)
+      ptr))
+
+  (defn ptr->bytes [ptr n]
+    "Read n bytes from a C pointer into a bytes value."
+    (ffi/read ptr (ffi/array :u8 n)))
 
   ## ── Helpers ──────────────────────────────────────────────────────
 
@@ -65,6 +81,16 @@
         :integer (check db (c-bind-int stmt i p) "bind")
         :float (check db (c-bind-dbl stmt i p) "bind")
         :string (check db (c-bind-text stmt i p -1 SQLITE_TRANSIENT) "bind")
+        :bytes
+          (let [n (length p)]
+            (if (= n 0)
+              ## Empty blob: use a 1-byte alloc so sqlite sees type BLOB not NULL
+              (let [ptr (ffi/malloc 1)]
+                (check db (c-bind-blob stmt i ptr 0 SQLITE_TRANSIENT) "bind")
+                (ffi/free ptr))
+              (let [ptr (bytes->ptr p)]
+                (check db (c-bind-blob stmt i ptr n SQLITE_TRANSIENT) "bind")
+                (ffi/free ptr))))
         :boolean
           (check db (c-bind-int stmt i (if p 1 0)) "bind")
         t
@@ -80,6 +106,9 @@
                     1 (c-col-int stmt ci)
                     2 (c-col-dbl stmt ci)
                     3 (ffi/string (c-col-text stmt ci))
+                    4 (let [n (c-col-bytes stmt ci)
+                            ptr (c-col-blob stmt ci)]
+                        (if (> n 0) (ptr->bytes ptr n) (bytes)))
                     _ nil)]
           (put row name val)))
       (freeze row)))
