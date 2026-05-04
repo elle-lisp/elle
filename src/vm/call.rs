@@ -597,14 +597,15 @@ impl VM {
             let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
 
             // Store the tail call information (Rc clones, not data copies)
-            self.pending_tail_call = Some(crate::vm::core::TailCallInfo {
-                bytecode: closure.template.bytecode.clone(),
-                constants: closure.template.constants.clone(),
-                env: new_env_rc,
-                location_map: closure.template.location_map.clone(),
-                rotation_safe: closure.template.rotation_safe,
-                squelch_mask: closure.squelch_mask,
-            });
+            self.pending =
+                crate::vm::core::PendingAction::TailCall(crate::vm::core::TailCallInfo {
+                    bytecode: closure.template.bytecode.clone(),
+                    constants: closure.template.constants.clone(),
+                    env: new_env_rc,
+                    location_map: closure.template.location_map.clone(),
+                    rotation_safe: closure.template.rotation_safe,
+                    squelch_mask: closure.squelch_mask,
+                });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));
             return Some(SIG_OK);

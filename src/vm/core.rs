@@ -24,13 +24,41 @@ pub(crate) struct TailCallInfo {
     pub squelch_mask: SignalBits,
 }
 
-/// Pending fiber resume for the trampoline.
-///
-/// Set by `handle_fiber_resume_signal` when it wants to switch fibers
-/// without recursing. Consumed by the trampoline in `do_fiber_resume`.
 pub(crate) struct PendingFiberResume {
     pub handle: FiberHandle,
     pub fiber_value: Value,
+}
+
+/// Mutually exclusive pending actions: either a tail call or a fiber resume,
+/// never both simultaneously.
+pub(crate) enum PendingAction {
+    None,
+    TailCall(TailCallInfo),
+    FiberResume(PendingFiberResume),
+}
+
+impl PendingAction {
+    /// Take a pending tail call, leaving None in its place.
+    pub(crate) fn take_tail_call(&mut self) -> Option<TailCallInfo> {
+        match std::mem::replace(self, PendingAction::None) {
+            PendingAction::TailCall(tc) => Some(tc),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// Take a pending fiber resume, leaving None in its place.
+    pub(crate) fn take_fiber_resume(&mut self) -> Option<PendingFiberResume> {
+        match std::mem::replace(self, PendingAction::None) {
+            PendingAction::FiberResume(fr) => Some(fr),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 pub struct VM {
@@ -61,8 +89,7 @@ pub struct VM {
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
-    pub(crate) pending_tail_call: Option<TailCallInfo>,
-    pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
+    pub(crate) pending: PendingAction,
     /// Source location of the instruction that produced the current error.
     /// Resolved by the dispatch loop using the current closure's LocationMap.
     /// Reset to None at each translation boundary entry.
@@ -90,14 +117,6 @@ pub struct VM {
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
-    /// User-provided command-line arguments, from everything after `--`
-    /// in the argv passed to the elle binary. Empty if no `--` was given.
-    /// Set by `main.rs` before the file-execution loop. Read by `sys/args`.
-    pub user_args: Vec<String>,
-    /// The source argument: the script file path, `"-"` for stdin, or `""`
-    /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
-    /// Read by `sys/argv`. Empty string means REPL mode.
-    pub source_arg: String,
     /// Whether JIT compilation is enabled.
     /// Controlled by `--jit=N` CLI flag: `0` disables, `N>0` enables.
     /// Defaults to `true`.
@@ -198,8 +217,7 @@ impl VM {
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
-            pending_tail_call: None,
-            pending_fiber_resume: None,
+            pending: PendingAction::None,
             error_loc: None,
             #[cfg(feature = "jit")]
             jit_cache: FxHashMap::default(),
@@ -211,8 +229,6 @@ impl VM {
             jit_rejections: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
-            user_args: Vec::new(),
-            source_arg: String::new(),
             jit_enabled,
             jit_hotness_threshold: jit_threshold,
             #[cfg(feature = "wasm")]
@@ -247,8 +263,7 @@ impl VM {
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
-        self.pending_tail_call = None;
-        self.pending_fiber_resume = None;
+        self.pending = PendingAction::None;
         self.error_loc = None;
         self.closure_call_counts.clear();
         #[cfg(feature = "jit")]
@@ -534,7 +549,7 @@ impl VM {
                         f.signal = Some((SIG_OK, current_value));
                     });
 
-                    self.pending_fiber_resume = Some(PendingFiberResume {
+                    self.pending = PendingAction::FiberResume(PendingFiberResume {
                         handle: handle.clone(),
                         fiber_value: *fiber_value,
                     });

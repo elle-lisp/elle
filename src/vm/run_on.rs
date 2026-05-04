@@ -193,7 +193,7 @@ impl VM {
         // matches the pattern in run_jit (jit_entry.rs) — the tail-call
         // target may be a different closure, so we interpret its bytecode.
         if result_jv == crate::jit::TAIL_CALL_SENTINEL {
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(tail) = self.pending.take_tail_call() {
                 let exec_result = self.execute_bytecode_saving_stack(
                     &tail.bytecode,
                     &tail.constants,

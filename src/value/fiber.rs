@@ -453,14 +453,8 @@ pub struct Fiber {
     pub mask: SignalBits,
     /// Parent fiber (weak to avoid Rc cycles)
     pub parent: Option<WeakFiberHandle>,
-    /// Cached Value for the parent fiber. Set during resume chain
-    /// wiring. Avoids re-allocating a HeapObject on every `fiber/parent` call.
-    pub parent_value: Option<Value>,
     /// Most recently resumed child (for stack traces and resumption routing)
     pub child: Option<FiberHandle>,
-    /// Cached Value for the child fiber. Set during resume chain
-    /// wiring. Avoids re-allocating a HeapObject on every `fiber/child` call.
-    pub child_value: Option<Value>,
     /// The closure this fiber was created from
     pub closure: Rc<Closure>,
     /// Parameter binding frames. Each `parameterize` pushes a frame;
@@ -510,9 +504,7 @@ impl Fiber {
             status: FiberStatus::New,
             mask,
             parent: None,
-            parent_value: None,
             child: None,
-            child_value: None,
             closure,
             param_frames: Vec::new(),
             signal: None,

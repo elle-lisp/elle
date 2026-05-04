@@ -46,7 +46,7 @@ fn jit() {
 
 #[test]
 fn file_stat() {
-    run_elle_script("file_stat");
+    run_elle_script("file-stat");
 }
 
 #[test]
@@ -56,13 +56,13 @@ fn errors() {
 
 #[test]
 fn fiber_stress() {
-    run_elle_script("fiber_stress");
+    run_elle_script("fiber-stress");
 }
 
 #[test]
 #[ignore] // JIT leaks raw io-request structs after repeated sequential reads
 fn fiber_io_stress() {
-    run_elle_script("fiber_io_stress");
+    run_elle_script("fiber-io-stress");
 }
 
 #[test]

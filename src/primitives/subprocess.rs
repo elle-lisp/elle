@@ -85,7 +85,8 @@ pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
     let user_args: Vec<Value> = match crate::context::get_vm_context() {
         Some(ptr) => {
             let vm = unsafe { &*ptr };
-            vm.user_args
+            vm.runtime_config
+                .user_args
                 .iter()
                 .map(|s| Value::string(s.as_str()))
                 .collect()
@@ -109,12 +110,12 @@ pub(crate) fn prim_sys_argv(_args: &[Value]) -> (SignalBits, Value) {
     match crate::context::get_vm_context() {
         Some(ptr) => {
             let vm = unsafe { &*ptr };
-            if vm.source_arg.is_empty() {
+            if vm.runtime_config.source_arg.is_empty() {
                 return (SIG_OK, Value::EMPTY_LIST);
             }
-            let mut all: Vec<Value> = Vec::with_capacity(1 + vm.user_args.len());
-            all.push(Value::string(vm.source_arg.as_str()));
-            for s in &vm.user_args {
+            let mut all: Vec<Value> = Vec::with_capacity(1 + vm.runtime_config.user_args.len());
+            all.push(Value::string(vm.runtime_config.source_arg.as_str()));
+            for s in &vm.runtime_config.user_args {
                 all.push(Value::string(s.as_str()));
             }
             (SIG_OK, list(all))
@@ -851,7 +852,7 @@ mod tests {
     fn test_sys_args_reads_from_vm_context() {
         // Set up a VM with user_args and verify prim_sys_args reads them as a list.
         let mut vm = crate::vm::VM::new();
-        vm.user_args = vec!["a".to_string(), "b".to_string()];
+        vm.runtime_config.user_args = vec!["a".to_string(), "b".to_string()];
         crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
 
         let (sig, val) = prim_sys_args(&[]);
@@ -889,8 +890,8 @@ mod tests {
     #[test]
     fn test_sys_argv_reads_source_arg_and_user_args() {
         let mut vm = crate::vm::VM::new();
-        vm.source_arg = "-".to_string();
-        vm.user_args = vec!["foo".to_string(), "bar".to_string()];
+        vm.runtime_config.source_arg = "-".to_string();
+        vm.runtime_config.user_args = vec!["foo".to_string(), "bar".to_string()];
         crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
 
         let (sig, val) = prim_sys_argv(&[]);
@@ -921,8 +922,8 @@ mod tests {
         // In REPL mode source_arg is "", and user_args is empty.
         // sys/argv should return ().
         let mut vm = crate::vm::VM::new();
-        vm.source_arg = "".to_string();
-        vm.user_args = vec![];
+        vm.runtime_config.source_arg = "".to_string();
+        vm.runtime_config.user_args = vec![];
         crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
 
         let (sig, val) = prim_sys_argv(&[]);

@@ -43,9 +43,7 @@ mod time_elapsed {
     include!("time_elapsed.rs");
 }
 // destructuring tests migrated to tests/elle/destructuring.lisp
-mod blocks {
-    include!("blocks.rs");
-}
+// blocks tests migrated to tests/elle/blocks.lisp
 // primitives tests migrated to tests/elle/primitives.lisp
 // ffi tests migrated to tests/elle/ffi.lisp
 // bracket_errors tests migrated to tests/elle/brackets.lisp
@@ -91,9 +89,7 @@ mod file_scope {
 mod sys_args {
     include!("sys_args.rs");
 }
-mod cond_match_args {
-    include!("cond_match_args.rs");
-}
+// cond_match_args tests migrated to tests/elle/cond-match-args.lisp
 mod meta {
     include!("meta.rs");
 }
@@ -106,9 +102,7 @@ mod dump_cli {
 mod flip_cli {
     include!("flip_cli.rs");
 }
-mod mutability {
-    include!("mutability.rs");
-}
+// mutability tests migrated to tests/elle/mutability.lisp
 mod embedding {
     include!("embedding.rs");
 }

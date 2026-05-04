@@ -288,7 +288,7 @@ pub extern "C" fn elle_jit_call(
 
             // Handle tail call sentinel
             if result == TAIL_CALL_SENTINEL {
-                if let Some(tail) = vm.pending_tail_call.take() {
+                if let Some(tail) = vm.pending.take_tail_call() {
                     let exec_result = vm.execute_bytecode_saving_stack(
                         &tail.bytecode,
                         &tail.constants,
@@ -388,7 +388,7 @@ pub extern "C" fn elle_jit_resolve_tail_call(
         return result;
     }
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    if let Some(tail) = vm.pending_tail_call.take() {
+    if let Some(tail) = vm.pending.take_tail_call() {
         let exec_result = vm.execute_bytecode_saving_stack(
             &tail.bytecode,
             &tail.constants,
@@ -645,7 +645,7 @@ pub extern "C" fn elle_jit_tail_call(
             .collect();
 
         let new_env = build_closure_env_for_jit(closure, &args);
-        vm.pending_tail_call = Some(crate::vm::core::TailCallInfo {
+        vm.pending = crate::vm::core::PendingAction::TailCall(crate::vm::core::TailCallInfo {
             bytecode: closure.template.bytecode.clone(),
             constants: closure.template.constants.clone(),
             env: new_env,

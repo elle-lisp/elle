@@ -171,7 +171,7 @@ impl VM {
                 };
             }
 
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(tail) = self.pending.take_tail_call() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
@@ -290,7 +290,7 @@ impl VM {
                 };
             }
 
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(tail) = self.pending.take_tail_call() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
@@ -361,7 +361,7 @@ impl VM {
                 &current_location_map,
             );
 
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(tail) = self.pending.take_tail_call() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
                         crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));

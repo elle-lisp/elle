@@ -228,7 +228,7 @@ impl VM {
 
         // Check for pending tail call (JIT function did a TailCall)
         if result == TAIL_CALL_SENTINEL {
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(tail) = self.pending.take_tail_call() {
                 let exec_result = self.execute_bytecode_saving_stack(
                     &tail.bytecode,
                     &tail.constants,

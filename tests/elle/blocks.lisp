@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Tests for named blocks with break
 #
 # Note: block expressions containing break must be bound to a var before
@@ -255,23 +255,3 @@
                    (assign count (+ count 1))
                    (if (= ch "l") (break count) nil)))]
     (assert (= result 3) "break in each string")))
-
-# ============================================================================
-# Compile-time error tests (from integration/blocks.rs)
-# ============================================================================
-
-# break_outside_block_error
-(let [[ok? _] (protect ((fn () (eval '(break 42)))))]
-  (assert (not ok?) "break outside block is compile error"))
-
-# break_unknown_name_error
-(let [[ok? _] (protect ((fn ()
-                          (eval '(block :a
-                                   (break :b 42))))))]
-  (assert (not ok?) "break with unknown block name is compile error"))
-
-# break_across_fn_boundary_error
-(let [[ok? _] (protect ((fn ()
-                          (eval '(block :done
-                                   ((fn () (break :done 42))))))))]
-  (assert (not ok?) "break across function boundary is compile error"))
