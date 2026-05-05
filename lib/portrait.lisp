@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis

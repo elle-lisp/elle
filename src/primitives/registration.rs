@@ -2,13 +2,11 @@ use crate::symbol::SymbolTable;
 use crate::value::Value;
 use crate::vm::VM;
 
-#[cfg(feature = "ffi")]
-use super::calling;
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
     allocator, arena, arithmetic, array, bitwise, bytes, chan, comparison, compile, concurrency,
-    config, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers, fileio,
-    format, intrinsics, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
+    config, convert, debug, disassembly, display, fiber_introspect, fibers, fileio, format,
+    intrinsics, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
     modules, net, package, parameters, path, ports, r#box, read, sets, sort, stream, string,
     structs, subprocess, time, traits, types, unix, watch,
 };
@@ -32,7 +30,6 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     comparison::PRIMITIVES,
     convert::PRIMITIVES,
     concurrency::PRIMITIVES,
-    coroutines::PRIMITIVES,
     debug::PRIMITIVES,
     disassembly::PRIMITIVES,
     display::PRIMITIVES,
@@ -74,7 +71,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
 /// Primitive tables that require the `ffi` feature (libffi).
 #[cfg(feature = "ffi")]
 fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
-    &[calling::PRIMITIVES, loading::CALLBACK_PRIMITIVES]
+    &[loading::CALLBACK_PRIMITIVES]
 }
 
 #[cfg(not(feature = "ffi"))]

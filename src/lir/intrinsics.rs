@@ -16,7 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// A known intrinsic operation that can be compiled to specialized instructions.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum IntrinsicOp {
+pub enum IntrinsicOp {
     Conversion(ConvOp),
 }
 
@@ -202,7 +202,7 @@ pub(crate) fn build_arg_escaping_primitives(symbols: &SymbolTable) -> FxHashSet<
 /// is safe because the returned value wasn't allocated in the current scope
 /// or iteration — it predates the scope, so RegionExit / FlipSwap won't
 /// free it.
-/// Note: fiber/resume and coro/resume return values from the child's
+/// Note: fiber/resume returns values from the child's
 /// outbox (parent-owned arena), not from the current iteration's arena.
 /// FlipSwap won't free them, so they're safe for the same reason as
 /// accessors: the returned value predates the current scope.
@@ -214,7 +214,6 @@ const NON_ALLOCATING_ACCESSORS: &[&str] = &[
     "get",
     "last",
     "fiber/resume",
-    "coro/resume",
 ];
 
 /// Build the set of primitive SymbolIds that return pre-existing values.
@@ -283,15 +282,6 @@ pub(crate) fn build_non_escaping_stdlib(symbols: &SymbolTable) -> FxHashSet<Symb
     set
 }
 
-/// Build call classification data for region inference.
-pub(crate) fn build_call_classification(symbols: &SymbolTable) -> crate::hir::CallClassification {
-    crate::hir::CallClassification {
-        immediate_primitives: build_immediate_primitives(symbols),
-        intrinsic_ops: build_intrinsics(symbols).keys().copied().collect(),
-        ..Default::default()
-    }
-}
-
 /// Build the set of primitive SymbolIds that store heap values externally.
 #[allow(dead_code)]
 pub(crate) fn build_mutating_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
@@ -302,4 +292,41 @@ pub(crate) fn build_mutating_primitives(symbols: &SymbolTable) -> FxHashSet<Symb
         }
     }
     set
+}
+
+// ── PrimitiveClassification ─────────────────────────────────────────
+
+/// All primitive property sets needed by the Lowerer, built once.
+///
+/// Replaces the 6 independent `build_*` calls that were duplicated
+/// across every pipeline entry point.
+pub struct PrimitiveClassification {
+    pub intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
+    pub immediate_primitives: FxHashSet<SymbolId>,
+    pub mutating_primitives: FxHashSet<SymbolId>,
+    pub arg_escaping_primitives: FxHashSet<SymbolId>,
+    pub non_allocating_accessors: FxHashSet<SymbolId>,
+    pub non_escaping_stdlib: FxHashSet<SymbolId>,
+    pub call_classification: crate::hir::CallClassification,
+}
+
+impl PrimitiveClassification {
+    pub fn new(symbols: &SymbolTable) -> Self {
+        let intrinsics = build_intrinsics(symbols);
+        let immediate_primitives = build_immediate_primitives(symbols);
+        let call_classification = crate::hir::CallClassification {
+            immediate_primitives: immediate_primitives.clone(),
+            intrinsic_ops: intrinsics.keys().copied().collect(),
+            ..Default::default()
+        };
+        PrimitiveClassification {
+            intrinsics,
+            immediate_primitives,
+            mutating_primitives: build_mutating_primitives(symbols),
+            arg_escaping_primitives: build_arg_escaping_primitives(symbols),
+            non_allocating_accessors: build_non_allocating_accessors(symbols),
+            non_escaping_stdlib: build_non_escaping_stdlib(symbols),
+            call_classification,
+        }
+    }
 }

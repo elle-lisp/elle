@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Test: JIT yield with mutable captured parameter
 ## A parameter captured by a nested closure AND mutated needs LBox wrapping.
 

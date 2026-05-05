@@ -30,9 +30,9 @@ and faster. Current implementation: flat.
   type, no signal hierarchy. Pattern matching on the payload replaces hierarchy
   checks. See the "Error Signalling" section below.
 
-- **Coroutine aliases**: `yield` works as a special form (emits
-  `SIG_YIELD`). `make-coroutine` / `coro/resume` are thin wrappers
-  around `fiber/new` / `fiber/resume`. `try`/`catch` is a prelude macro.
+- **Coroutine pattern**: `yield` works as a special form (emits
+  `SIG_YIELD`). A generator fiber is `(fiber/new fn |:yield|)`, resumed
+  with `(fiber/resume f val)`. `try`/`catch` is a prelude macro.
 
 - **Signal erasure**: Signal bits are stored on the `Closure` struct
   (`SignalBits` = 4 bytes per closure). Acceptable cost.

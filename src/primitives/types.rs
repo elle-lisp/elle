@@ -5,182 +5,109 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// Check if value is nil
-pub(crate) fn prim_is_nil(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_nil()))
+/// Generate a type predicate that returns `(SIG_OK, Value::bool(...))`.
+macro_rules! predicate {
+    ($name:ident, $test:expr) => {
+        pub(crate) fn $name(args: &[Value]) -> (SignalBits, Value) {
+            (SIG_OK, Value::bool($test(&args[0])))
+        }
+    };
 }
 
-/// Check if value is a pair (pair)
-pub(crate) fn prim_is_pair(args: &[Value]) -> (SignalBits, Value) {
-    let is_pair = args[0].as_pair().is_some()
-        || args[0].as_syntax().is_some_and(
-            |s| matches!(s.kind, crate::syntax::SyntaxKind::List(ref items) if !items.is_empty()),
-        );
-    (SIG_OK, Value::bool(is_pair))
-}
+// ── Simple predicates ───────────────────────────────────────────────
 
-/// Check if value is a list (empty list or pair)
-pub(crate) fn prim_is_list(args: &[Value]) -> (SignalBits, Value) {
-    let is_list = args[0].is_empty_list()
-        || args[0].as_pair().is_some()
-        || args[0]
-            .as_syntax()
-            .is_some_and(|s| matches!(s.kind, crate::syntax::SyntaxKind::List(_)));
-    (SIG_OK, Value::bool(is_list))
-}
+predicate!(prim_is_nil, Value::is_nil);
+predicate!(prim_is_number, Value::is_number);
+predicate!(prim_is_integer, Value::is_int);
+predicate!(prim_is_float, Value::is_float);
+predicate!(prim_is_boolean, Value::is_bool);
+predicate!(prim_is_keyword, Value::is_keyword);
+predicate!(prim_is_native_fn, Value::is_native_fn);
+predicate!(prim_is_mutable, Value::is_mutable);
+predicate!(prim_is_immutable, |v: &Value| !v.is_mutable());
+predicate!(prim_is_string, |v: &Value| v.is_string()
+    || v.is_string_mut());
+predicate!(prim_is_bytes, |v: &Value| v.is_bytes() || v.is_bytes_mut());
+predicate!(prim_is_fn, |v: &Value| v.is_closure() || v.is_native_fn());
+predicate!(prim_is_array, |v: &Value| v.as_array().is_some()
+    || v.as_array_mut().is_some());
+predicate!(prim_is_struct, |v: &Value| v.as_struct().is_some()
+    || v.as_struct_mut().is_some());
+predicate!(prim_ptr_predicate, |v: &Value| v.is_pointer()
+    || v.as_managed_pointer().is_some());
+predicate!(prim_is_nan, |v: &Value| v
+    .as_number()
+    .map(|n| n.is_nan())
+    .unwrap_or(false));
+predicate!(prim_is_inf, |v: &Value| v
+    .as_number()
+    .map(|n| n.is_infinite())
+    .unwrap_or(false));
+predicate!(prim_is_zero, |v: &Value| {
+    if let Some(i) = v.as_int() {
+        i == 0
+    } else if let Some(f) = v.as_float() {
+        f == 0.0
+    } else {
+        false
+    }
+});
+predicate!(prim_is_nonzero, |v: &Value| {
+    if let Some(i) = v.as_int() {
+        i != 0
+    } else if let Some(f) = v.as_float() {
+        f != 0.0
+    } else {
+        true
+    }
+});
 
-/// Check if value is a number
-pub(crate) fn prim_is_number(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_number()))
-}
+// ── Predicates with syntax awareness ────────────────────────────────
 
-/// Check if value is an integer
-pub(crate) fn prim_is_integer(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_int()))
-}
+predicate!(prim_is_pair, |v: &Value| v.as_pair().is_some()
+    || v.as_syntax().is_some_and(|s| {
+        matches!(
+            s.kind,
+            crate::syntax::SyntaxKind::List(ref items) if !items.is_empty()
+        )
+    }));
 
-/// Check if value is a float
-pub(crate) fn prim_is_float(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_float()))
-}
+predicate!(prim_is_list, |v: &Value| v.is_empty_list()
+    || v.as_pair().is_some()
+    || v.as_syntax().is_some_and(|s| matches!(
+        s.kind,
+        crate::syntax::SyntaxKind::List(_)
+    )));
 
-/// Check if value is a symbol
-pub(crate) fn prim_is_symbol(args: &[Value]) -> (SignalBits, Value) {
-    let is_symbol = args[0].is_symbol()
-        || args[0]
-            .as_syntax()
-            .is_some_and(|s| matches!(s.kind, crate::syntax::SyntaxKind::Symbol(_)));
-    (SIG_OK, Value::bool(is_symbol))
-}
+predicate!(prim_is_symbol, |v: &Value| v.is_symbol()
+    || v.as_syntax().is_some_and(|s| matches!(
+        s.kind,
+        crate::syntax::SyntaxKind::Symbol(_)
+    )));
 
-/// Check if value is a string (immutable or mutable)
-pub(crate) fn prim_is_string(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_string() || args[0].is_string_mut()),
-    )
-}
+// ── Complex predicates (hand-written) ───────────────────────────────
 
-/// Check if value is a boolean
-pub(crate) fn prim_is_boolean(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_bool()))
-}
+predicate!(prim_is_callable, |v: &Value| v.is_closure()
+    || v.is_native_fn()
+    || v.as_parameter().is_some()
+    || v.as_struct().is_some()
+    || v.as_struct_mut().is_some()
+    || v.as_array().is_some()
+    || v.as_array_mut().is_some()
+    || v.as_set().is_some()
+    || v.as_set_mut().is_some()
+    || v.is_string()
+    || v.is_string_mut()
+    || v.is_bytes()
+    || v.is_bytes_mut());
 
-/// Check if value is a keyword
-pub(crate) fn prim_is_keyword(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_keyword()))
-}
-
-/// Check if value is a keyword
 /// Get the type name of a value as a keyword
 pub(crate) fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
     let type_name = args[0].type_name();
     (SIG_OK, Value::keyword(type_name))
 }
 
-/// Check if value is a raw C pointer
-pub(crate) fn prim_ptr_predicate(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_pointer() || args[0].as_managed_pointer().is_some()),
-    )
-}
-
-/// Check if value is an array (immutable or mutable indexed sequence)
-pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].as_array().is_some() || args[0].as_array_mut().is_some()),
-    )
-}
-
-/// Check if value is bytes (immutable or mutable binary data)
-pub(crate) fn prim_is_bytes(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_bytes() || args[0].is_bytes_mut()),
-    )
-}
-
-/// Check if value is a struct (immutable or mutable key-value map)
-pub(crate) fn prim_is_struct(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].as_struct().is_some() || args[0].as_struct_mut().is_some()),
-    )
-}
-
-/// Check if value is callable (closure or native function)
-pub(crate) fn prim_is_fn(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_closure() || args[0].is_native_fn()),
-    )
-}
-
-/// Check if value is callable (function, collection, or parameter)
-pub(crate) fn prim_is_callable(args: &[Value]) -> (SignalBits, Value) {
-    let v = &args[0];
-    let callable = v.is_closure()
-        || v.is_native_fn()
-        || v.as_parameter().is_some()
-        || v.as_struct().is_some()
-        || v.as_struct_mut().is_some()
-        || v.as_array().is_some()
-        || v.as_array_mut().is_some()
-        || v.as_set().is_some()
-        || v.as_set_mut().is_some()
-        || v.is_string()
-        || v.is_string_mut()
-        || v.is_bytes()
-        || v.is_bytes_mut();
-    (SIG_OK, Value::bool(callable))
-}
-
-/// Check if value is a native (built-in) function
-pub(crate) fn prim_is_native_fn(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_native_fn()))
-}
-
-/// Check if value is mutable (can be modified in-place)
-pub(crate) fn prim_is_mutable(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_mutable()))
-}
-
-pub(crate) fn prim_is_immutable(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(!args[0].is_mutable()))
-}
-
-/// Check if value is numerically zero
-pub(crate) fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
-    let is_zero = if let Some(i) = args[0].as_int() {
-        i == 0
-    } else if let Some(f) = args[0].as_float() {
-        f == 0.0
-    } else {
-        false
-    };
-    (SIG_OK, Value::bool(is_zero))
-}
-
-pub(crate) fn prim_is_nonzero(args: &[Value]) -> (SignalBits, Value) {
-    let is_nonzero = if let Some(i) = args[0].as_int() {
-        i != 0
-    } else if let Some(f) = args[0].as_float() {
-        f != 0.0
-    } else {
-        true
-    };
-    (SIG_OK, Value::bool(is_nonzero))
-}
-
-/// Check if value is NaN
-pub(crate) fn prim_is_nan(args: &[Value]) -> (SignalBits, Value) {
-    let is_nan = args[0].as_number().map(|n| n.is_nan()).unwrap_or(false);
-    (SIG_OK, Value::bool(is_nan))
-}
-
-/// Check if value is positive
+/// Check if value is positive (errors on non-number)
 pub(crate) fn prim_is_pos(args: &[Value]) -> (SignalBits, Value) {
     if let Some(i) = args[0].as_int() {
         return (SIG_OK, Value::bool(i > 0));
@@ -197,7 +124,7 @@ pub(crate) fn prim_is_pos(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if value is negative
+/// Check if value is negative (errors on non-number)
 pub(crate) fn prim_is_neg(args: &[Value]) -> (SignalBits, Value) {
     if let Some(i) = args[0].as_int() {
         return (SIG_OK, Value::bool(i < 0));
@@ -214,14 +141,7 @@ pub(crate) fn prim_is_neg(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if value is infinite
-pub(crate) fn prim_is_inf(args: &[Value]) -> (SignalBits, Value) {
-    let is_inf = args[0]
-        .as_number()
-        .map(|n| n.is_infinite())
-        .unwrap_or(false);
-    (SIG_OK, Value::bool(is_inf))
-}
+// ── Primitive table ─────────────────────────────────────────────────
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {

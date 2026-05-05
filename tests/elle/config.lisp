@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # vm/config tests
 #
 # Tests the unified runtime configuration system: vm/config read/write,

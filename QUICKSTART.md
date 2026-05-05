@@ -53,7 +53,7 @@ make smoke                 # run all tests (~30s)
 | [fibers](docs/signals/fibers.md) | Fiber basics, signal masks, status |
 | [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope, processes |
 | [threads](docs/threads.md) | OS threads, channels |
-| [coroutines](docs/coroutines.md) | coro/new, coro/resume, generators |
+| [fibers](docs/fibers.md) | fiber/new with \|:yield\| mask, fiber/resume, generators |
 | [parameters](docs/parameters.md) | Dynamic parameters, parameterize |
 | [macros](docs/macros.md) | defmacro, syntax-case, hygiene |
 | [modules](docs/modules.md) | import, closure-as-module pattern |

@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Git module tests (FFI to libgit2)
 
 (def [ok? _] (protect ((fn [] (ffi/native "libgit2.so")))))

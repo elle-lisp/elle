@@ -5,11 +5,9 @@
 //! execution for SIG_RESUME/SIG_PROPAGATE/SIG_ABORT, VM state reads
 //! for SIG_QUERY.
 
+use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::error_val;
-use crate::value::{
-    BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK,
-    SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
-};
+use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -30,111 +28,69 @@ impl VM {
         ip: &mut usize,
         location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
-        // Dispatch uses exact equality for VM-internal signals (which are
-        // produced by specific primitives with known bit patterns) and
-        // contains() for user-facing signals (which can be composed, e.g.
-        // SIG_ERROR | SIG_IO from an I/O primitive that errors).
-
-        if bits.is_ok() {
-            // SIG_OK — normal return, push result
-            self.fiber.stack.push(value);
-            return None;
+        if !bits.is_ok() {
+            etrace!(
+                self,
+                crate::config::trace_bits::SIGNAL,
+                "signal",
+                "bits={} value_type={}",
+                bits,
+                value.type_name()
+            );
         }
 
-        etrace!(
-            self,
-            crate::config::trace_bits::SIGNAL,
-            "signal",
-            "bits={} value_type={}",
-            bits,
-            value.type_name()
-        );
-
-        // --- VM-internal signals (exact match — never composed) ---
-
-        if bits == SIG_RESUME {
-            return self.handle_fiber_resume_signal(
+        match classify(bits, &value) {
+            SignalAction::Ok => {
+                self.fiber.stack.push(value);
+                None
+            }
+            SignalAction::Resume => self.handle_fiber_resume_signal(
                 value,
                 bytecode,
                 constants,
                 closure_env,
                 ip,
                 location_map,
-            );
-        }
-
-        if bits == SIG_PROPAGATE {
-            return self.handle_fiber_propagate_signal(value);
-        }
-
-        if bits == SIG_ABORT && value.as_fiber().is_some() {
-            return self.handle_fiber_abort_signal(value, bytecode, constants, closure_env, ip);
-        }
-
-        if bits == SIG_QUERY {
-            // Mutable queries — handled before dispatch_query (which takes &self).
-            if let Some(pair) = value.as_pair() {
-                if pair.first.as_keyword_name().as_deref() == Some("arena/allocs") {
-                    let thunk = pair.rest;
-                    match self.handle_arena_allocs(thunk) {
-                        Ok(val) => {
-                            self.fiber.stack.push(val);
-                            return None;
-                        }
-                        Err(bits) => return Some(bits),
-                    }
-                }
-                if pair.first.as_keyword_name().as_deref() == Some("vm/config-set") {
-                    let result = self.handle_vm_config_set(pair.rest);
+            ),
+            SignalAction::Propagate => self.handle_fiber_propagate_signal(value),
+            SignalAction::Abort => {
+                self.handle_fiber_abort_signal(value, bytecode, constants, closure_env, ip)
+            }
+            SignalAction::Query => {
+                let (sig, result) = self.dispatch_query(value);
+                if sig.contains(SIG_ERROR) {
+                    self.fiber.signal = Some((sig, result));
+                    self.fiber.stack.push(Value::NIL);
+                } else {
                     self.fiber.stack.push(result);
-                    return None;
                 }
+                None
             }
-            let (sig, result) = self.dispatch_query(value);
-            if sig == SIG_ERROR {
-                self.fiber.signal = Some((SIG_ERROR, result));
+            SignalAction::Error => {
+                self.fiber.signal = Some((bits, value));
                 self.fiber.stack.push(Value::NIL);
-            } else {
-                self.fiber.stack.push(result);
+                None
             }
-            return None;
+            SignalAction::Halt => {
+                self.fiber.signal = Some((bits, value));
+                Some(bits)
+            }
+            SignalAction::Suspend => {
+                let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                let frame = SuspendedFrame::Bytecode(BytecodeFrame {
+                    bytecode: bytecode.clone(),
+                    constants: constants.clone(),
+                    env: closure_env.clone(),
+                    ip: *ip,
+                    stack: saved_stack,
+                    location_map: location_map.clone(),
+                    push_resume_value: true,
+                });
+                self.fiber.signal = Some((bits, value));
+                self.fiber.suspended = Some(vec![frame]);
+                Some(bits)
+            }
         }
-
-        // --- User-facing signals (contains — handles composed bits) ---
-
-        if bits.contains(SIG_ERROR) {
-            // Store the error in fiber.signal. The dispatch loop will
-            // see it and return the full bits (preserving SIG_IO etc.).
-            self.fiber.signal = Some((bits, value));
-            self.fiber.stack.push(Value::NIL);
-            return None;
-        }
-
-        if bits.contains(SIG_HALT) {
-            self.fiber.signal = Some((bits, value));
-            return Some(bits);
-        }
-
-        // Any suspending signal: SIG_YIELD, user-defined (bits 32+),
-        // or any combination. All remaining signals after the checks above
-        // are suspension signals — save the stack into a SuspendedFrame so
-        // call.rs can build the caller frame chain on resume.
-        let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
-            bytecode: bytecode.clone(),
-            constants: constants.clone(),
-            env: closure_env.clone(),
-            ip: *ip,
-            stack: saved_stack,
-            location_map: location_map.clone(),
-            // Caller frame for a suspending primitive: on resume, the primitive's
-            // eventual return value flows as current_value and must be pushed as
-            // the result of the Call instruction.
-            push_resume_value: true,
-        });
-        self.fiber.signal = Some((bits, value));
-        self.fiber.suspended = Some(vec![frame]);
-        Some(bits)
     }
 
     /// Handle signal bits returned by a primitive in a TailCall position.
@@ -145,70 +101,24 @@ impl VM {
         bits: SignalBits,
         value: Value,
     ) -> SignalBits {
-        // Mirrors handle_primitive_signal but for tail position
-        // (always returns SignalBits, never None). Same dispatch
-        // strategy: exact match for VM-internal, contains() for
-        // user-facing composed signals.
-
-        if bits.is_ok() {
-            self.fiber.signal = Some((SIG_OK, value));
-            return SIG_OK;
-        }
-
-        // --- VM-internal signals (exact match — never composed) ---
-
-        if bits == SIG_RESUME {
-            return self.handle_fiber_resume_signal_tail(value);
-        }
-
-        if bits == SIG_PROPAGATE {
-            return self.handle_fiber_propagate_signal_tail(value);
-        }
-
-        if bits == SIG_ABORT && value.as_fiber().is_some() {
-            return self.handle_fiber_abort_signal_tail(value);
-        }
-
-        if bits == SIG_QUERY {
-            // Mutable queries — handled before dispatch_query (which takes &self).
-            if let Some(pair) = value.as_pair() {
-                if pair.first.as_keyword_name().as_deref() == Some("arena/allocs") {
-                    let thunk = pair.rest;
-                    match self.handle_arena_allocs(thunk) {
-                        Ok(val) => {
-                            self.fiber.signal = Some((SIG_OK, val));
-                            return SIG_OK;
-                        }
-                        Err(bits) => return bits,
-                    }
-                }
-                if pair.first.as_keyword_name().as_deref() == Some("vm/config-set") {
-                    let result = self.handle_vm_config_set(pair.rest);
-                    self.fiber.signal = Some((SIG_OK, result));
-                    return SIG_OK;
-                }
+        match classify(bits, &value) {
+            SignalAction::Ok => {
+                self.fiber.signal = Some((SIG_OK, value));
+                SIG_OK
             }
-            let (sig, result) = self.dispatch_query(value);
-            self.fiber.signal = Some((sig, result));
-            return sig;
+            SignalAction::Resume => self.handle_fiber_resume_signal_tail(value),
+            SignalAction::Propagate => self.handle_fiber_propagate_signal_tail(value),
+            SignalAction::Abort => self.handle_fiber_abort_signal_tail(value),
+            SignalAction::Query => {
+                let (sig, result) = self.dispatch_query(value);
+                self.fiber.signal = Some((sig, result));
+                sig
+            }
+            SignalAction::Error | SignalAction::Halt | SignalAction::Suspend => {
+                self.fiber.signal = Some((bits, value));
+                bits
+            }
         }
-
-        // --- User-facing signals (contains — handles composed bits) ---
-
-        if bits.contains(SIG_ERROR) {
-            self.fiber.signal = Some((bits, value));
-            return bits;
-        }
-
-        if bits.contains(SIG_HALT) {
-            self.fiber.signal = Some((bits, value));
-            return bits;
-        }
-
-        // --- Suspending and unknown signals ---
-
-        self.fiber.signal = Some((bits, value));
-        bits
     }
 
     // ── Capability denial ─────────────────────────────────────────────
@@ -751,6 +661,8 @@ impl VM {
                 }
             }
             "compile/run-on" => self.dispatch_compile_run_on(arg),
+            "arena/allocs" => self.handle_arena_allocs(arg),
+            "vm/config-set" => (SIG_OK, self.handle_vm_config_set(arg)),
             _ => (
                 SIG_ERROR,
                 error_val(
@@ -1122,40 +1034,29 @@ impl VM {
     /// Handle `arena/allocs` — snapshot count, call thunk, snapshot again.
     ///
     /// Uses `execute_bytecode_saving_stack` (re-entrant VM call). The thunk
-    /// runs on the current fiber — same heap, same parameter
-    /// frames. Yield from the thunk is propagated upward (not handled here);
-    /// callers should only pass non-yielding (silent signal) closures.
-    ///
-    /// The before/after count snapshots bracket the thunk's execution to
-    /// measure net allocations.
-    ///
-    /// Returns `Ok(pair(result, net_allocs))` on success, or `Err(bits)` on error/halt.
-    pub(crate) fn handle_arena_allocs(&mut self, thunk: Value) -> Result<Value, SignalBits> {
+    /// must be silent (non-yielding). Returns `(SIG_OK, pair(result, net))`
+    /// on success, or `(SIG_ERROR, err)` on failure.
+    fn handle_arena_allocs(&mut self, thunk: Value) -> (SignalBits, Value) {
         let closure = match thunk.as_closure() {
             Some(c) => c.clone(),
             None => {
-                let err = error_val("type-error", "arena/allocs: expected a closure");
-                self.fiber.signal = Some((SIG_ERROR, err));
-                self.fiber.stack.push(Value::NIL);
-                return Err(SIG_ERROR);
+                return (
+                    SIG_ERROR,
+                    error_val("type-error", "arena/allocs: expected a closure"),
+                );
             }
         };
 
-        // Snapshot count before (visible_len includes shared_alloc)
         let before = {
             let heap_ptr = crate::value::fiberheap::current_heap_ptr();
             debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
             unsafe { (*heap_ptr).visible_len() }
         };
 
-        // Build a proper env (captures + local slots) for the thunk.
-        // Passing closure.env directly would omit local variable slots,
-        // causing StoreUpvalue panics for closures with locals.
         let thunk_env = self
             .build_closure_env(&closure, &[])
             .expect("arena/allocs: zero-arg thunk env build cannot fail");
 
-        // Execute the thunk via execute_bytecode_saving_stack
         let exec_result = self.execute_bytecode_saving_stack(
             &closure.template.bytecode,
             &closure.template.constants,
@@ -1163,12 +1064,12 @@ impl VM {
             &closure.template.location_map,
         );
 
-        if exec_result.bits.contains(SIG_ERROR) {
-            // Propagate the error — signal is already set by the inner execution
-            return Err(exec_result.bits);
+        if !exec_result.bits.is_ok() {
+            // Propagate the error/signal — fiber.signal is already set by inner execution.
+            let (sig, val) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+            return (sig, val);
         }
 
-        // Get result from signal
         let result = self
             .fiber
             .signal
@@ -1176,14 +1077,13 @@ impl VM {
             .map(|(_, v)| v)
             .unwrap_or(Value::NIL);
 
-        // Snapshot count after (visible_len includes shared_alloc)
         let after = {
             let heap_ptr = crate::value::fiberheap::current_heap_ptr();
             unsafe { (*heap_ptr).visible_len() }
         };
 
         let net = (after as i64) - (before as i64);
-        Ok(Value::pair(result, Value::int(net)))
+        (SIG_OK, Value::pair(result, Value::int(net)))
     }
 }
 

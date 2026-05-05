@@ -22,7 +22,7 @@ use std::collections::HashMap;
 /// Tells the region inference walk which calls return immediates
 /// (no heap allocation) so their results don't need alloc_vars.
 /// Without this, every call inside a scope prevents scope reclamation.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CallClassification {
     /// Primitive SymbolIds known to return immediates.
     pub immediate_primitives: FxHashSet<SymbolId>,

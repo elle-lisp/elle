@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Fiber control-passing stress tests
 ##
 ## Tests sustained resume loops and deep nesting to verify
@@ -10,18 +10,18 @@
 
 (begin
   (def @co
-    (make-coroutine (fn []
-                      (let [@i 0]
-                        (while (< i 25)
-                          (yield i)
-                          (assign i (+ i 1)))
-                        i))))
+    (fiber/new (fn []
+                 (let [@i 0]
+                   (while (< i 25)
+                     (yield i)
+                     (assign i (+ i 1)))
+                   i)) |:yield|))
   (let [@i 0]
     (while (< i 25)
-      (assert (= (coro/resume co) i)
+      (assert (= (fiber/resume co) i)
               (string "sustained direct yield: iteration " i))
       (assign i (+ i 1))))
-  (assert (= (coro/resume co) 25) "sustained direct yield: final return"))
+  (assert (= (fiber/resume co) 25) "sustained direct yield: final return"))
 
 # ============================================================================
 # Sustained coroutine with resume values
@@ -29,19 +29,19 @@
 
 (begin
   (def @co
-    (make-coroutine (fn []
-                      (let [@acc 0]
-                        (let [@i 0]
-                          (while (< i 20)
-                            (let [v (yield acc)]
-                              (assign acc (+ acc v)))
-                            (assign i (+ i 1))))
-                        acc))))  # First resume starts the coroutine, yields acc=0
-  (assert (= (coro/resume co) 0) "resume values: initial acc")
+    (fiber/new (fn []
+                 (let [@acc 0]
+                   (let [@i 0]
+                     (while (< i 20)
+                       (let [v (yield acc)]
+                         (assign acc (+ acc v)))
+                       (assign i (+ i 1))))
+                   acc)) |:yield|))  # First resume starts the coroutine, yields acc=0
+  (assert (= (fiber/resume co) 0) "resume values: initial acc")
   (let [@expected 0
         @i 1]
     (while (<= i 20)
-      (let [result (coro/resume co i)]
+      (let [result (fiber/resume co i)]
         (assign expected (+ expected i))
         (if (<= i 19)
           (assert (= result expected)
@@ -78,17 +78,18 @@
   (defn yielder (x)
     (yield x))
   (def @co
-    (make-coroutine (fn []
-                      (let [@i 0]
-                        (while (< i 20)
-                          (yielder i)
-                          (assign i (+ i 1)))
-                        :done))))
+    (fiber/new (fn []
+                 (let [@i 0]
+                   (while (< i 20)
+                     (yielder i)
+                     (assign i (+ i 1)))
+                   :done)) |:yield|))
   (let [@i 0]
     (while (< i 20)
-      (assert (= (coro/resume co) i) (string "yield-through-call: iteration " i))
+      (assert (= (fiber/resume co) i)
+              (string "yield-through-call: iteration " i))
       (assign i (+ i 1))))
-  (assert (= (coro/resume co) :done) "yield-through-call: final"))
+  (assert (= (fiber/resume co) :done) "yield-through-call: final"))
 
 # ============================================================================
 # Nested fiber with sustained inner resumes
@@ -128,19 +129,19 @@
   (defn top (x)
     (mid x))
   (def @co
-    (make-coroutine (fn []
-                      (let [@i 0]
-                        (while (< i 20)
-                          (top (* i 10))
-                          (assign i (+ i 1)))
-                        :done))))
+    (fiber/new (fn []
+                 (let [@i 0]
+                   (while (< i 20)
+                     (top (* i 10))
+                     (assign i (+ i 1)))
+                   :done)) |:yield|))
   (let [@i 0]
     (while (< i 20)
-      (let [v (coro/resume co)]
+      (let [v (fiber/resume co)]
         (assert (= v (* i 10))
                 (string "deep chain: yield " i " expected " (* i 10) " got " v)))
       (assign i (+ i 1))))
-  (assert (= (coro/resume co) :done) "deep chain: final"))
+  (assert (= (fiber/resume co) :done) "deep chain: final"))
 
 # ============================================================================
 # Interleaved sustained coroutines
@@ -154,15 +155,15 @@
           (yield (+ start i))
           (assign i (+ i 1)))
         (+ start 100))))
-  (def @co-a (make-coroutine (gen 0)))
-  (def @co-b (make-coroutine (gen 1000)))
+  (def @co-a (fiber/new (gen 0) |:yield|))
+  (def @co-b (fiber/new (gen 1000) |:yield|))
   (let [@i 0]
     (while (< i 15)
-      (assert (= (coro/resume co-a) (+ 0 i)) (string "interleaved A: " i))
-      (assert (= (coro/resume co-b) (+ 1000 i)) (string "interleaved B: " i))
+      (assert (= (fiber/resume co-a) (+ 0 i)) (string "interleaved A: " i))
+      (assert (= (fiber/resume co-b) (+ 1000 i)) (string "interleaved B: " i))
       (assign i (+ i 1))))
-  (assert (= (coro/resume co-a) 100) "interleaved A: final")
-  (assert (= (coro/resume co-b) 1100) "interleaved B: final"))
+  (assert (= (fiber/resume co-a) 100) "interleaved A: final")
+  (assert (= (fiber/resume co-b) 1100) "interleaved B: final"))
 
 # ============================================================================
 # Yield-through-call with resume values (the tricky case)
@@ -175,13 +176,13 @@
     (let [result (yielder2 x)]
       (+ result 1)))
   (def @co
-    (make-coroutine (fn []
-                      (let [a (wrapper 10)]
-                        (let [b (wrapper 20)]
-                          (list a b))))))
-  (assert (= (coro/resume co) 10) "yield-through-call resume: first yield")
-  (assert (= (coro/resume co 100) 20) "yield-through-call resume: second yield")
-  (assert (= (coro/resume co 200) (list 101 201))
+    (fiber/new (fn []
+                 (let [a (wrapper 10)]
+                   (let [b (wrapper 20)]
+                     (list a b)))) |:yield|))
+  (assert (= (fiber/resume co) 10) "yield-through-call resume: first yield")
+  (assert (= (fiber/resume co 100) 20) "yield-through-call resume: second yield")
+  (assert (= (fiber/resume co 200) (list 101 201))
           "yield-through-call resume: final"))
 
 # ============================================================================
@@ -197,34 +198,34 @@
       (print (string "wrapper3: result=" result))
       (+ result 1)))
   (def @co
-    (make-coroutine (fn []
-                      (let [a (wrapper3 10)]
-                        (let [b (wrapper3 20)]
-                          (list a b))))))
-  (assert (= (coro/resume co) 10) "IO-in-coroutine: first yield")
-  (assert (= (coro/resume co 100) 20) "IO-in-coroutine: second yield")
-  (assert (= (coro/resume co 200) (list 101 201)) "IO-in-coroutine: final"))
+    (fiber/new (fn []
+                 (let [a (wrapper3 10)]
+                   (let [b (wrapper3 20)]
+                     (list a b)))) |:yield|))
+  (assert (= (fiber/resume co) 10) "IO-in-coroutine: first yield")
+  (assert (= (fiber/resume co 100) 20) "IO-in-coroutine: second yield")
+  (assert (= (fiber/resume co 200) (list 101 201)) "IO-in-coroutine: final"))
 
 # ============================================================================
-# Coroutine with print wrapping coro/resume in caller
+# Coroutine with print wrapping fiber/resume in caller
 # ============================================================================
 
 (begin
   (defn yielder4 (x)
     (yield x))
   (def @co
-    (make-coroutine (fn []
-                      (yielder4 10)
-                      (yielder4 20)
-                      :done)))
+    (fiber/new (fn []
+                 (yielder4 10)
+                 (yielder4 20)
+                 :done) |:yield|))
   (let [@v1 nil
         @v2 nil
         @v3 nil]
-    (assign v1 (coro/resume co))
+    (assign v1 (fiber/resume co))
     (assert (= v1 10) "print-around-resume: first yield")
-    (assign v2 (coro/resume co 100))
+    (assign v2 (fiber/resume co 100))
     (assert (= v2 20) "print-around-resume: second yield")
-    (assign v3 (coro/resume co 200))
+    (assign v3 (fiber/resume co 200))
     (assert (= v3 :done) "print-around-resume: final")))
 
 # ============================================================================
@@ -235,17 +236,17 @@
   (defn hot-yielder (x)
     (yield x))
   (def @co
-    (make-coroutine (fn []
-                      (let [@i 0]
-                        (while (< i 25)
-                          (hot-yielder (* i 10))
-                          (assign i (+ i 1)))
-                        :done))))
+    (fiber/new (fn []
+                 (let [@i 0]
+                   (while (< i 25)
+                     (hot-yielder (* i 10))
+                     (assign i (+ i 1)))
+                   :done)) |:yield|))
   (let [@i 0]
     (while (< i 25)
-      (let [v (coro/resume co)]
+      (let [v (fiber/resume co)]
         (assert (= v (* i 10))
                 (string "JIT sustained: yield " i " expected " (* i 10) " got "
                         v)))
       (assign i (+ i 1))))
-  (assert (= (coro/resume co) :done) "JIT sustained: final"))
+  (assert (= (fiber/resume co) :done) "JIT sustained: final"))

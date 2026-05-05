@@ -492,10 +492,10 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 # yield is sugar for (emit :yield value)
 # error is sugar for (emit 1 value)
 
-# coro/ aliases
-# (coro/new fn) => (fiber/new fn |:yield|)
-# (coro/resume co val) => (fiber/resume co val)
-# (coro/status co) => (fiber/status co)
+# fiber generator pattern (coroutine usage)
+# (fiber/new fn |:yield|)  — create a yielding fiber
+# (fiber/resume f val)     — resume, delivering val
+# (fiber/status f)         — :new :alive :paused :dead
 ```
 
 ### Signal Restrictions

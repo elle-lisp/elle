@@ -80,7 +80,7 @@ fn stopwatch_samples_are_monotonic() {
         (let [sw (time/stopwatch) @samples (list) @i 0]
           (while (< i 20)
             (begin
-              (assign samples (pair (coro/resume sw) samples))
+              (assign samples (pair (fiber/resume sw) samples))
               (assign i (+ i 1))))
           samples)
     "#;

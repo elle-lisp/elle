@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:
@@ -83,8 +83,7 @@
         :string (check db (c-bind-text stmt i p -1 SQLITE_TRANSIENT) "bind")
         :bytes
           (let [n (length p)]
-            (if (= n 0)
-              ## Empty blob: use a 1-byte alloc so sqlite sees type BLOB not NULL
+            (if (= n 0)  ## Empty blob: use a 1-byte alloc so sqlite sees type BLOB not NULL
               (let [ptr (ffi/malloc 1)]
                 (check db (c-bind-blob stmt i ptr 0 SQLITE_TRANSIENT) "bind")
                 (ffi/free ptr))
@@ -106,7 +105,8 @@
                     1 (c-col-int stmt ci)
                     2 (c-col-dbl stmt ci)
                     3 (ffi/string (c-col-text stmt ci))
-                    4 (let [n (c-col-bytes stmt ci)
+                    4
+                      (let [n (c-col-bytes stmt ci)
                             ptr (c-col-blob stmt ci)]
                         (if (> n 0) (ptr->bytes ptr n) (bytes)))
                     _ nil)]

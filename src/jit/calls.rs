@@ -6,10 +6,8 @@
 //! by the interpreter fallback paths.
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
-use crate::value::fiber::{
-    SignalBits, MAX_CALL_DEPTH, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
-    SIG_RESUME, SIG_YIELD,
-};
+use crate::signals::dispatch::{classify, SignalAction};
+use crate::value::fiber::{SignalBits, MAX_CALL_DEPTH, SIG_ERROR, SIG_HALT, SIG_OK};
 use crate::value::{error_val, Value};
 
 // =============================================================================
@@ -65,63 +63,29 @@ pub(crate) struct CallSiteMeta {
 ///
 /// Returns a `JitValue` for the result.
 fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> JitValue {
-    if bits.is_ok() {
-        return JitValue::from_value(value);
-    }
-
-    // --- VM-internal signals (exact match — never composed) ---
-
-    if bits == SIG_RESUME {
-        return vm.handle_fiber_resume_signal_jit(value);
-    }
-
-    if bits == SIG_PROPAGATE {
-        return vm.handle_fiber_propagate_signal_jit(value);
-    }
-
-    if bits == SIG_ABORT && value.as_fiber().is_some() {
-        return vm.handle_fiber_abort_signal_jit(value);
-    }
-
-    if bits == SIG_QUERY {
-        if let Some(pair) = value.as_pair() {
-            if pair.first.as_keyword_name().as_deref() == Some("arena/allocs") {
-                let thunk = pair.rest;
-                return match vm.handle_arena_allocs(thunk) {
-                    Ok(val) => JitValue::from_value(val),
-                    Err(_bits) => JitValue::nil(),
-                };
+    match classify(bits, &value) {
+        SignalAction::Ok => JitValue::from_value(value),
+        SignalAction::Resume => vm.handle_fiber_resume_signal_jit(value),
+        SignalAction::Propagate => vm.handle_fiber_propagate_signal_jit(value),
+        SignalAction::Abort => vm.handle_fiber_abort_signal_jit(value),
+        SignalAction::Query => {
+            let (sig, result) = vm.dispatch_query(value);
+            if sig.contains(SIG_ERROR) {
+                vm.fiber.signal = Some((sig, result));
+                JitValue::nil()
+            } else {
+                JitValue::from_value(result)
             }
         }
-        let (sig, result) = vm.dispatch_query(value);
-        if sig == SIG_ERROR {
-            vm.fiber.signal = Some((SIG_ERROR, result));
-            return JitValue::nil();
-        } else {
-            return JitValue::from_value(result);
+        SignalAction::Error | SignalAction::Halt => {
+            vm.fiber.signal = Some((bits, value));
+            JitValue::nil()
+        }
+        SignalAction::Suspend => {
+            vm.fiber.signal = Some((bits, value));
+            YIELD_SENTINEL
         }
     }
-
-    // --- User-facing signals (contains — handles composed bits) ---
-
-    if bits.contains(SIG_ERROR) {
-        vm.fiber.signal = Some((bits, value));
-        return JitValue::nil();
-    }
-
-    if bits.contains(SIG_HALT) {
-        vm.fiber.signal = Some((bits, value));
-        return JitValue::nil();
-    }
-
-    if bits.contains(SIG_YIELD) {
-        vm.fiber.signal = Some((bits, value));
-        return YIELD_SENTINEL;
-    }
-
-    // Any remaining signal: user-defined, SIG_DEBUG, SIG_FUEL, etc.
-    vm.fiber.signal = Some((bits, value));
-    YIELD_SENTINEL
 }
 
 // =============================================================================
@@ -860,7 +824,7 @@ pub(crate) fn build_closure_env_for_jit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::fiber::{SIG_DEBUG, SIG_IO, SIG_OK};
+    use crate::value::fiber::{SIG_DEBUG, SIG_IO, SIG_OK, SIG_YIELD};
     use crate::vm::VM;
 
     fn make_vm() -> VM {

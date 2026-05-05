@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/tls.lisp — TLS client and server for Elle
 ##
 ## TLS client and server using the elle-tls plugin for state machine management.
@@ -254,50 +254,50 @@
 
   ## ── Public: stream constructors ───────────────────────────────────────────
   ##
-  ## These return coroutines — Elle's universal stream type.
+  ## These return fibers — Elle's universal stream type.
   ## All stream/map, stream/filter, stream/collect, stream/take, etc. work
-  ## on these because they operate on coroutines via coro/resume, coro/done?,
-  ## coro/value — not on ports.
+  ## on these because they operate on fibers via fiber/resume, stream/done?,
+  ## fiber/value — not on ports.
 
   (defn tls/lines [conn]
-    "Return a coroutine that yields lines from a TLS connection one at a time.
+    "Return a fiber that yields lines from a TLS connection one at a time.
      Closes the connection when the stream is exhausted.
      Compose with stream/map, stream/filter, stream/take, stream/collect, etc.
      Must be called inside a scheduler context."
-    (coro/new (fn []
-                (forever
-                  (let [line (tls/read-line conn)]
-                    (if (nil? line)
-                      (begin
-                        (tls/close conn)
-                        (break))
-                      (yield line)))))))
+    (fiber/new (fn []
+                 (forever
+                   (let [line (tls/read-line conn)]
+                     (if (nil? line)
+                       (begin
+                         (tls/close conn)
+                         (break))
+                       (yield line))))) |:yield|))
 
   (defn tls/chunks [conn size]
-    "Return a coroutine that yields byte chunks of `size` from a TLS connection.
+    "Return a fiber that yields byte chunks of `size` from a TLS connection.
      Final chunk may be smaller. Closes the connection when exhausted.
      Must be called inside a scheduler context."
-    (coro/new (fn []
-                (forever
-                  (let [chunk (tls/read conn size)]
-                    (if (nil? chunk)
-                      (begin
-                        (tls/close conn)
-                        (break))
-                      (yield chunk)))))))
+    (fiber/new (fn []
+                 (forever
+                   (let [chunk (tls/read conn size)]
+                     (if (nil? chunk)
+                       (begin
+                         (tls/close conn)
+                         (break))
+                       (yield chunk))))) |:yield|))
 
   (defn tls/writer [conn]
-    "Return a write-stream coroutine. Resume with bytes/string to write.
+    "Return a write-stream fiber. Resume with bytes/string to write.
      Resume with nil to close the connection.
      Must be called inside a scheduler context."
-    (coro/new (fn []
-                (forever
-                  (let [val (yield nil)]
-                    (if (nil? val)
-                      (begin
-                        (tls/close conn)
-                        (break))
-                      (tls/write conn val)))))))
+    (fiber/new (fn []
+                 (forever
+                   (let [val (yield nil)]
+                     (if (nil? val)
+                       (begin
+                         (tls/close conn)
+                         (break))
+                       (tls/write conn val))))) |:yield|))
 
   ## ── Public: ALPN protocol query ──────────────────────────────────────
 

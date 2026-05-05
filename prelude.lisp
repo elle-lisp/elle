@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Elle standard prelude
 ##
 ## Loaded automatically by the Expander before user code expansion.
@@ -190,15 +190,18 @@
        (,dtor ,binding)
        ,;body)))
 
-## yield* - delegate to sub-coroutine
-## Resumes the sub-coroutine, yielding each of its values to the caller.
-## Resume values from the caller are passed through to the sub-coroutine.
-## Returns the sub-coroutine's final value when it completes.
+## yield* - delegate to sub-fiber
+## Resumes the sub-fiber, yielding each of its values to the caller.
+## Resume values from the caller are passed through to the sub-fiber.
+## Returns the sub-fiber's final value when it completes.
 (defmacro yield* (co)
-  `(let [c ,co]
-     (coro/resume c nil)
-     (while (not (coro/done? c)) (coro/resume c (yield (coro/value c))))
-     (coro/value c)))
+  `(let [c ,co
+         done? (fn [f]
+                 (let [s (fiber/status f)]
+                   (or (= s :dead) (= s :error))))]
+     (fiber/resume c nil)
+     (while (not (done? c)) (fiber/resume c (yield (fiber/value c))))
+     (fiber/value c)))
 
 ## ffi/defbind - convenient FFI function binding
 ## Usage: (ffi/defbind name lib-handle "c-name" return-type [arg-types...])
@@ -266,11 +269,11 @@
                (assign idx (%add idx 1))))
          :fiber
            (begin
-             (def @v (coro/resume seq))
+             (def @v (fiber/resume seq))
              (while v
                (let [,var v]
                  ,;body)
-               (assign v (coro/resume seq))))
+               (assign v (fiber/resume seq))))
          _ (error {:error :type-error
                    :reason :not-a-sequence
                    :message "not a sequence"})))))

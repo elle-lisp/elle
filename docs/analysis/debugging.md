@@ -24,7 +24,7 @@ get information about it. All are `NativeFn`. Primitives that need VM access use
 |-----------|-----------|---------|-------|
 | `jit?` | `(jit? value)` | `true` or `false` | True if value is a closure with JIT-compiled native code |
 | `silent?` | `(silent? value)` | `true` or `false` | True if value is a closure that does not suspend (no yield/debug/polymorphic signal) |
-| `coro?` | `(coro? value)` | `true` or `false` | True if value is a closure with the yield signal bit set |
+| `fiber?` | `(fiber? value)` | `true` or `false` | True if value is a fiber |
 | `mutates-params?` | `(mutates-params? value)` | `true` or `false` | True if value is a closure whose body mutates any of its own parameters (i.e., `capture_params_mask != 0`) |
 | `closure?` | `(closure? value)` | `true` or `false` | True if value is a closure (bytecode, not native/vm-aware) |
 
@@ -33,7 +33,7 @@ for closures, reads fields on the `Closure` struct.
 
 - `jit?` checks `closure.jit_code.is_some()`
 - `silent?` checks `!closure.signal.may_suspend()` (no yield/debug bits and propagates == 0)
-- `coro?` checks `closure.signal.bits & SIG_YIELD != 0`
+- `fiber?` checks `value.is_fiber()`
 - `mutates-params?` checks `closure.template.capture_params_mask != 0` (any capture-wrapped params)
 - `closure?` checks `value.as_closure().is_some()`
 - `global?` takes a symbol, always returns `false` (no runtime globals exist)
@@ -93,17 +93,17 @@ Use it when you need to distinguish computation time from I/O wait.
 | Primitive | Signature | Returns | Signal | Implementation |
 |-----------|-----------|---------|--------|----------------|
 | `time/sleep` | `(time/sleep seconds)` | nil | `Signal::errors()` | `std::thread::sleep` (Rust primitive) |
-| `time/stopwatch` | `(time/stopwatch)` | coroutine | yields | Elle: coroutine over `clock/monotonic` |
+| `time/stopwatch` | `(time/stopwatch)` | fiber | yields | Elle: fiber over `clock/monotonic` |
 | `time/elapsed` | `(time/elapsed thunk)` | `(result seconds)` | polymorphic | Elle: wraps thunk with clock reads |
 
-`time/stopwatch` returns a coroutine. Each `coro/resume` yields the total
+`time/stopwatch` returns a fiber. Each `fiber/resume` yields the total
 seconds elapsed since the stopwatch was created:
 
 ```lisp
 (var sw (time/stopwatch))
-(coro/resume sw)   # => 0.000234
+(fiber/resume sw nil)   # => 0.000234
 # ... do work ...
-(coro/resume sw)   # => 1.532100  (cumulative, not delta)
+(fiber/resume sw nil)   # => 1.532100  (cumulative, not delta)
 ```
 
 Implementation (in `src/primitives/time_def.rs`):
@@ -111,10 +111,11 @@ Implementation (in `src/primitives/time_def.rs`):
 ```lisp
 # time/stopwatch is defined in stdlib as:
 (def my-stopwatch (fn ()
-  (coro/new (fn ()
+  (fiber/new (fn ()
     (let [start (clock/monotonic)]
       (while true
-        (yield (- (clock/monotonic) start))))))))
+        (yield (- (clock/monotonic) start)))))
+    |:yield|)))
 ```
 
 `time/elapsed` takes a thunk and returns a pair of (result, elapsed-seconds):

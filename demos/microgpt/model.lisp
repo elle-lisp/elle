@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## model.lisp — GPT model: initialization, forward pass, loss
 ##
 ## Architecture: GPT-2 style transformer (RMSNorm, no biases, ReLU

@@ -16,6 +16,7 @@
 //! different phases. The `propagates` field has no runtime analogue. Do not
 //! attempt to unify them.
 
+pub mod dispatch;
 pub mod registry;
 
 use crate::value::fiber::SignalBits;

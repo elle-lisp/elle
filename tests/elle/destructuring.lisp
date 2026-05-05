@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Integration tests for destructuring patterns in def, var, let, let*, fn, defn
 #
 # Migrated from tests/integration/destructuring.rs
@@ -813,15 +813,15 @@
   (assert (not ok?) "keys tail call error"))
 
 # test_opt_fiber_resume
-(let [co (coro/new (fn (&opt a) (+ (or a 0) (yield a))))]
-  (coro/resume co)
-  (assert (= (coro/resume co 42) 42) "opt fiber resume: no initial arg"))
+(let [co (fiber/new (fn (&opt a) (+ (or a 0) (yield a))) |:yield|)]
+  (fiber/resume co)
+  (assert (= (fiber/resume co 42) 42) "opt fiber resume: no initial arg"))
 
-(let [co (coro/new (fn (&opt a)
-                     (yield a)
-                     a))]
-  (coro/resume co 10)
-  (assert (= (coro/resume co) 10) "opt fiber resume: with initial arg"))
+(let [co (fiber/new (fn (&opt a)
+                      (yield a)
+                      a) |:yield|)]
+  (fiber/resume co 10)
+  (assert (= (fiber/resume co) 10) "opt fiber resume: with initial arg"))
 
 # ============================================================
 # Symbol keys in struct/@struct destructuring (#424)

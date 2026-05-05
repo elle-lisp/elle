@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/gtk4/app.lisp — GtkApplication lifecycle wrapper
 ##
 ## Alternative to gtk4/open for apps that need GtkApplication features

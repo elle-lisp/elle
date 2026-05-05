@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # ── gpu/map: compiler-generated GPU compute ───────────────────────────
 #
 # Tests the full pipeline: Elle closure → MLIR → SPIR-V → Vulkan dispatch.

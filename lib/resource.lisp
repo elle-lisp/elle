@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/resource.lisp — Deterministic resource consumption measurement.
 ##
 ## Measures discrete, deterministic counters (allocation counts, intern table

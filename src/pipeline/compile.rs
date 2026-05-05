@@ -46,28 +46,12 @@ pub fn compile_to_lir(
     functionalize(&mut analysis.hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
-    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
-
-    // Build call classification for region inference
-    let call_class = crate::hir::CallClassification {
-        immediate_primitives: imm_prims.clone(),
-        intrinsic_ops: intrinsics.keys().copied().collect(),
-        ..Default::default()
-    };
-    let region_info = crate::hir::analyze_regions_with(&analysis.hir, &arena, call_class);
-    let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
-    let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
-    let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
-    let nes_prims = crate::lir::intrinsics::build_non_escaping_stdlib(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let region_info =
+        crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
-        .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
-        .with_mutating_primitives(mut_prims)
-        .with_arg_escaping_primitives(esc_prims)
-        .with_non_allocating_accessors(acc_prims.clone())
-        .with_non_escaping_stdlib(nes_prims.clone())
+        .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names)
         .with_region_info(region_info);
@@ -117,25 +101,12 @@ pub fn compile(
     crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
     // Phase 4: Lower to LIR with intrinsic specialization
-    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
-    let region_info = crate::hir::analyze_regions_with(
-        &analysis.hir,
-        &arena,
-        crate::lir::intrinsics::build_call_classification(symbols),
-    );
-    let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
-    let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
-    let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
-    let nes_prims = crate::lir::intrinsics::build_non_escaping_stdlib(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let region_info =
+        crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
-        .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
-        .with_mutating_primitives(mut_prims)
-        .with_arg_escaping_primitives(esc_prims)
-        .with_non_allocating_accessors(acc_prims.clone())
-        .with_non_escaping_stdlib(nes_prims.clone())
+        .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
@@ -283,26 +254,12 @@ pub fn compile_file_to_lir(
     functionalize(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
-    let region_info = crate::hir::analyze_regions_with(
-        &hir,
-        &arena,
-        crate::lir::intrinsics::build_call_classification(symbols),
-    );
-
-    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
-    let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
-    let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
-    let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
-    let nes_prims = crate::lir::intrinsics::build_non_escaping_stdlib(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let region_info =
+        crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
-        .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
-        .with_mutating_primitives(mut_prims)
-        .with_arg_escaping_primitives(esc_prims)
-        .with_non_allocating_accessors(acc_prims.clone())
-        .with_non_escaping_stdlib(nes_prims.clone())
+        .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names)
         .with_region_info(region_info);
@@ -482,25 +439,12 @@ fn compile_file_inner(
         compile_file_frontend(source, symbols, source_name)?;
 
     // Lower to LIR
-    let region_info = crate::hir::analyze_regions_with(
-        &hir,
-        &arena,
-        crate::lir::intrinsics::build_call_classification(symbols),
-    );
-    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
-    let mut_prims = crate::lir::intrinsics::build_mutating_primitives(symbols);
-    let esc_prims = crate::lir::intrinsics::build_arg_escaping_primitives(symbols);
-    let acc_prims = crate::lir::intrinsics::build_non_allocating_accessors(symbols);
-    let nes_prims = crate::lir::intrinsics::build_non_escaping_stdlib(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let region_info =
+        crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
-        .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
-        .with_mutating_primitives(mut_prims)
-        .with_arg_escaping_primitives(esc_prims)
-        .with_non_allocating_accessors(acc_prims.clone())
-        .with_non_escaping_stdlib(nes_prims.clone())
+        .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);

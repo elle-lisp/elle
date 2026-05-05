@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Sync primitives tests
 #
 # Tests for lib/sync.lisp: futex, lock, semaphore, condvar, rwlock,

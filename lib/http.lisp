@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/http.lisp — Pure Elle HTTP/1.1 client and server
 ##
 ## Plain HTTP only:
@@ -755,39 +755,39 @@
      :last-event-id — initial Last-Event-ID header.
      :headers — extra request headers merged into the SSE defaults."
     (default reconnect true)
-    (coro/new (fn []
-                (def @current-id last-event-id)
-                (def @retry-ms sse-default-retry-ms)
-                (block :session
-                  (forever
-                    (let* [[ok? result] (protect (let [conn (sse-open url
-                             headers current-id)]
-                             (defer
-                               (protect (t-close conn:transport))
-                               (cond
-                                 (= conn:status 204) :done
-                                 (and (>= conn:status 200) (< conn:status 300))
-                                   (begin
-                                     (sse-for-each-event conn:transport
-                                     conn:headers
-                                     (fn [evt]
-                                       (when evt:id (assign current-id evt:id))
-                                       (when evt:retry
-                                         (assign retry-ms evt:retry))
-                                       (yield evt)))
-                                     :eof)
-                                 true (error {:error :http-error
-                                 :reason :sse-bad-status
-                                 :status conn:status
-                                 :message "SSE: non-2xx response"})))))]
-                      (cond
-                        (and ok? (= result :done)) (break :session)
-                        (not reconnect) (break :session))
-                      (ev/sleep (/ retry-ms 1000.0))))))))
+    (fiber/new (fn []
+                 (def @current-id last-event-id)
+                 (def @retry-ms sse-default-retry-ms)
+                 (block :session
+                   (forever
+                     (let* [[ok? result] (protect (let [conn (sse-open url
+                              headers current-id)]
+                              (defer
+                                (protect (t-close conn:transport))
+                                (cond
+                                  (= conn:status 204) :done
+                                  (and (>= conn:status 200) (< conn:status 300))
+                                    (begin
+                                      (sse-for-each-event conn:transport
+                                      conn:headers
+                                      (fn [evt]
+                                        (when evt:id (assign current-id evt:id))
+                                        (when evt:retry
+                                          (assign retry-ms evt:retry))
+                                        (yield evt)))
+                                      :eof)
+                                  true (error {:error :http-error
+                                  :reason :sse-bad-status
+                                  :status conn:status
+                                  :message "SSE: non-2xx response"})))))]
+                       (cond
+                         (and ok? (= result :done)) (break :session)
+                         (not reconnect) (break :session))
+                       (ev/sleep (/ retry-ms 1000.0)))))) |:yield|))
 
   (defn sse-post [url body &named headers]
     "POST to url with body, expecting a text/event-stream response.
-     Returns a coroutine that yields events until the server closes.
+     Returns a fiber that yields events until the server closes.
      Unlike sse-get this does NOT auto-reconnect — POST is typically
      non-idempotent (think LLM streaming: you don't want to silently
      re-submit a prompt).
@@ -795,36 +795,37 @@
      Use case: OpenAI-compatible /v1/chat/completions with
      {\"stream\": true} — the body is an SSE stream of token deltas
      terminated by a `data: [DONE]` sentinel the caller can recognize."
-    (coro/new (fn []
-                (let* [url-parsed (parse-url url)
-                       base-headers {:accept "text/event-stream"
-                                     :cache-control "no-cache"
-                                     :content-type "application/json"}
-                       user-headers (freeze (or headers {}))
-                       final-headers (merge base-headers user-headers)
-                       t (open-transport url-parsed)]
-                  (defer
-                    (protect (t-close t))
-                    (write-request-line t "POST" url-parsed:path)
-                    (write-headers t
-                                   (build-request-headers url-parsed:host
-                                   final-headers body false))
-                    (t-write t "\r\n")
-                    (unless (nil? body) (t-write t body))
-                    (t-flush t)
-                    (let* [status-line (read-status-line t)
-                           resp-headers (read-headers t)]
-                      (cond
-                        (and (>= status-line:status 200)
-                             (< status-line:status 300))
-                          (sse-for-each-event t resp-headers
-                          (fn [evt] (yield evt)))
-                        true
-                          (error {:error :http-error
-                                  :reason :sse-bad-status
-                                  :status status-line:status
-                                  :body (read-body t resp-headers)
-                                  :message "SSE POST: non-2xx response"}))))))))
+    (fiber/new (fn []
+                 (let* [url-parsed (parse-url url)
+                        base-headers {:accept "text/event-stream"
+                                      :cache-control "no-cache"
+                                      :content-type "application/json"}
+                        user-headers (freeze (or headers {}))
+                        final-headers (merge base-headers user-headers)
+                        t (open-transport url-parsed)]
+                   (defer
+                     (protect (t-close t))
+                     (write-request-line t "POST" url-parsed:path)
+                     (write-headers t
+                                    (build-request-headers url-parsed:host
+                                    final-headers body false))
+                     (t-write t "\r\n")
+                     (unless (nil? body) (t-write t body))
+                     (t-flush t)
+                     (let* [status-line (read-status-line t)
+                            resp-headers (read-headers t)]
+                       (cond
+                         (and (>= status-line:status 200)
+                              (< status-line:status 300))
+                           (sse-for-each-event t resp-headers
+                           (fn [evt] (yield evt)))
+                         true
+                           (error {:error :http-error
+                                   :reason :sse-bad-status
+                                   :status status-line:status
+                                   :body (read-body t resp-headers)
+                                   :message "SSE POST: non-2xx response"}))))))
+               |:yield|))
 
   (defn sse-format-field [field value]
     "Serialize one field of an SSE event. Data values with embedded

@@ -83,7 +83,7 @@ expected failures. Do not rationalize failures away. Fix them.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `make smoke` | ~30s | Elle scripts (VM, JIT, WASM) + doctests + docgen |
-| `make test` | ~3min | smoke + MCP integration + fmt + clippy + rustdoc + unit tests |
+| `make test` | ~4min | smoke + fmt + clippy + rustdoc + unit + integration tests |
 
 See [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md) for
 test organization, helpers, and how to add tests.

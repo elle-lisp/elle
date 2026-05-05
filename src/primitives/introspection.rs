@@ -60,6 +60,13 @@ pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (coroutine? val) / (coro? val) → bool
+///
+/// Returns true if the value is a fiber (coroutines are fibers).
+pub(crate) fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::bool(args[0].is_fiber()))
+}
+
 /// (arity value) — closure arity as int, pair, or nil
 pub(crate) fn prim_arity(args: &[Value]) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
@@ -306,13 +313,13 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     },
     PrimitiveDef {
         name: "coroutine?",
-        func: crate::primitives::coroutines::prim_is_coroutine,
+        func: prim_is_coroutine,
         signal: Signal::silent(),
         arity: Arity::Exact(1),
-        doc: "Returns true if value is a coroutine (fiber-based)",
+        doc: "Returns true if value is a fiber (coroutines are fibers)",
         params: &["value"],
         category: "predicate",
-        example: "(coroutine? (coro/new (fn () 42)))",
+        example: "(coroutine? (fiber/new (fn () 42) |:yield|))",
         aliases: &["coro?"],
     },
     PrimitiveDef {

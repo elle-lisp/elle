@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.

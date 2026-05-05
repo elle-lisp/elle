@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 
 ## Hash plugin integration tests
 
@@ -114,9 +114,9 @@
           "update returns the context"))
 
 ## stream/fold integration
-(let* [chunks (coro/new (fn []
-                          (yield "hel")
-                          (yield "lo")))
+(let* [chunks (fiber/new (fn []
+                           (yield "hel")
+                           (yield "lo")) |:yield|)
        ctx (stream/fold hash:update (hash:new :sha256) chunks)]
   (assert (= (hash:finalize ctx) (hash:sha256 "hello"))
           "stream/fold with hash/update"))

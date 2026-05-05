@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # ── box: mutable cell tests ──────────────────────────────────────────
 #
 # Comprehensive tests for box/unbox/rebox/box? primitives.
@@ -107,18 +107,18 @@
     (inc-box)
     (assert (= (unbox b) 3) "box captured by closure, incremented 3x")))
 
-# ── box with coroutines ─────────────────────────────────────────────
+# ── box with fibers ─────────────────────────────────────────────────
 
 (let [counter (box 0)]
   (def @co
-    (coro/new (fn []
-                (rebox counter (+ (unbox counter) 1))
-                (yield (unbox counter))
-                (rebox counter (+ (unbox counter) 1))
-                (yield (unbox counter)))))
-  (assert (= (coro/resume co) 1) "box in coroutine: first yield")
-  (assert (= (coro/resume co) 2) "box in coroutine: second yield")
-  (assert (= (unbox counter) 2) "box in coroutine: final value"))
+    (fiber/new (fn []
+                 (rebox counter (+ (unbox counter) 1))
+                 (yield (unbox counter))
+                 (rebox counter (+ (unbox counter) 1))
+                 (yield (unbox counter))) |:yield|))
+  (assert (= (fiber/resume co) 1) "box in fiber: first yield")
+  (assert (= (fiber/resume co) 2) "box in fiber: second yield")
+  (assert (= (unbox counter) 2) "box in fiber: final value"))
 
 # ── box with fibers ─────────────────────────────────────────────────
 
