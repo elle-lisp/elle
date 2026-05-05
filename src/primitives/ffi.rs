@@ -301,11 +301,8 @@ mod tests {
         assert_eq!(result.0, SIG_ERROR);
     }
 
-    #[test]
-    fn test_ffi_string_arity() {
-        let result = prim_ffi_string(&[]);
-        assert_eq!(result.0, SIG_ERROR);
-    }
+    // Arity checking is handled at dispatch level since #831.
+    // prim_ffi_string(&[]) would panic, not return SIG_ERROR.
 
     #[test]
     fn test_ffi_struct_basic() {

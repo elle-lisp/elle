@@ -40,8 +40,8 @@ yields:
 (fiber/resume gen nil)  # → SIG_OK, (fiber/value gen) → nil
 ```
 
-Legacy coroutine primitives (`coro/new`, `coro/resume`,
-`coro/done?`) are thin wrappers around fiber operations.
+The coroutine pattern — a fiber whose closure yields values — is the
+basis of Elle's stream and generator abstractions.
 
 
 

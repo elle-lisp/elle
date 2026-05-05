@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/svg.lisp — SVG construction and emission (pure Elle)
 ##
 ## Build SVG documents as struct trees, emit as XML strings.

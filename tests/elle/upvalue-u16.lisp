@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Regression test: upvalue indices must be u16, not u8.
 #
 # When a closure captures more than 255 variables, indices above 255

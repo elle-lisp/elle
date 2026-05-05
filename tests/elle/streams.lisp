@@ -1,32 +1,32 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Stream combinators — sinks, transforms, port-to-stream converters
 
 
 # === Helpers ===
 
 (defn make-range [n]
-  "Return a coroutine that yields integers 0..n-1."
-  (coro/new (fn []
-              (def @i 0)
-              (while (< i n)
-                (yield i)
-                (assign i (+ i 1))))))
+  "Return a fiber that yields integers 0..n-1."
+  (fiber/new (fn []
+               (def @i 0)
+               (while (< i n)
+                 (yield i)
+                 (assign i (+ i 1)))) |:yield|))
 
 (defn make-from-list [lst]
-  "Return a coroutine that yields each element of lst."
-  (coro/new (fn []
-              (def @remaining lst)
-              (while (not (empty? remaining))
-                (yield (first remaining))
-                (assign remaining (rest remaining))))))
+  "Return a fiber that yields each element of lst."
+  (fiber/new (fn []
+               (def @remaining lst)
+               (while (not (empty? remaining))
+                 (yield (first remaining))
+                 (assign remaining (rest remaining)))) |:yield|))
 
 # === Sink combinators ===
 
-# stream/collect: finite coroutine
+# stream/collect: finite fiber
 (assert (= (stream/collect (make-from-list (list 1 2 3))) (list 1 2 3))
         "stream/collect: three values in order")
 
-# stream/collect: empty coroutine (immediately done)
+# stream/collect: empty fiber (immediately done)
 (assert (= (stream/collect (make-range 0)) ())
         "stream/collect: empty source yields empty list")
 
@@ -119,8 +119,8 @@
                            (make-range 0) (make-from-list (list 2)))) (list 1 2))
         "stream/concat: empty source in middle is skipped")
 
-# stream/concat: dead (pre-exhausted) coroutine as first argument
-# The dead coroutine must be skipped gracefully, no error.
+# stream/concat: dead (pre-exhausted) fiber as first argument
+# The dead fiber must be skipped gracefully, no error.
 (let [dead (make-range 2)]
   (stream/collect dead)
   (assert (= (stream/collect (stream/concat dead (make-from-list (list 99))))
@@ -211,19 +211,19 @@
 # port/writer: write values and read back
 (let* [p (port/open "/tmp/elle-test-streams-writer-478" :write)
        w (port/writer p)]
-  (coro/resume w)  # start: advance to first yield nil
-  (coro/resume w "hello ")  # write "hello "
-  (coro/resume w "world")  # write "world"
-  (coro/resume w nil))  # nil signals close
+  (fiber/resume w)  # start: advance to first yield nil
+  (fiber/resume w "hello ")  # write "hello "
+  (fiber/resume w "world")  # write "world"
+  (fiber/resume w nil))  # nil signals close
 (assert (= (slurp "/tmp/elle-test-streams-writer-478") "hello world")
         "port/writer: writes values to port")
 
 # port/writer: port is closed after nil resume
 (let* [p (port/open "/tmp/elle-test-streams-writerclose-478" :write)
        w (port/writer p)]
-  (coro/resume w)  # start
-  (coro/resume w "data")  # write
-  (coro/resume w nil))
+  (fiber/resume w)  # start
+  (fiber/resume w "data")  # write
+  (fiber/resume w nil))
 # close
 
 # Composition: port/lines -> stream/map -> stream/take -> stream/collect

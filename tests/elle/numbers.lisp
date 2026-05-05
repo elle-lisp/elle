@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Numeric Literal Tests (#540)
 ##
 ## Tests for hexadecimal, octal, binary, underscore, and scientific notation

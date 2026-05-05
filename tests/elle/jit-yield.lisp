@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## JIT Yield Tests
 ##
 ## Tests that verify yield propagates correctly through JIT-compiled
@@ -24,15 +24,15 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
   # Now outer should be JIT-compiled. Test it.
-  (def c (make-coroutine run))
-  (def v1 (coro/resume c))
-  (def v2 (coro/resume c))
+  (def c (fiber/new run |:yield|))
+  (def v1 (fiber/resume c))
+  (def v2 (fiber/resume c))
   (assert (= v1 42) "JIT yield through call: first")
   (assert (= v2 99) "JIT yield through call: second"))
 
@@ -52,14 +52,14 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c 0)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c 0)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (coro/resume c)
-  (assert (= (coro/resume c 5) 15) "JIT yield with resume value"))
+  (def c (fiber/new run |:yield|))
+  (fiber/resume c)
+  (assert (= (fiber/resume c 5) 15) "JIT yield with resume value"))
 
 # ============================================================================
 # JIT yield through multiple yields
@@ -79,18 +79,18 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (assert (= (coro/resume c) 1) "JIT multiple yields: first")
-  (assert (= (coro/resume c) 2) "JIT multiple yields: second")
-  (assert (= (coro/resume c) 3) "JIT multiple yields: third")
-  (assert (= (coro/resume c) 4) "JIT multiple yields: fourth"))
+  (def c (fiber/new run |:yield|))
+  (assert (= (fiber/resume c) 1) "JIT multiple yields: first")
+  (assert (= (fiber/resume c) 2) "JIT multiple yields: second")
+  (assert (= (fiber/resume c) 3) "JIT multiple yields: third")
+  (assert (= (fiber/resume c) 4) "JIT multiple yields: fourth"))
 
 # ============================================================================
 # JIT yield stack preservation
@@ -108,14 +108,14 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (def v1 (coro/resume c))
-  (def v2 (coro/resume c))
+  (def c (fiber/new run |:yield|))
+  (def v1 (fiber/resume c))
+  (def v2 (fiber/resume c))
   (assert (= v1 10) "JIT stack preservation: first")
   (assert (= v2 21) "JIT stack preservation: 1+20=21"))
 
@@ -136,14 +136,14 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (def v1 (coro/resume c))
-  (def v2 (coro/resume c))
+  (def c (fiber/new run |:yield|))
+  (def v1 (fiber/resume c))
+  (def v2 (fiber/resume c))
   (assert (= v1 42) "JIT nested calls: first")
   (assert (= v2 99) "JIT nested calls: second"))
 
@@ -164,14 +164,14 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (def v1 (coro/resume c))
-  (def v2 (coro/resume c))
+  (def c (fiber/new run |:yield|))
+  (def v1 (fiber/resume c))
+  (def v2 (fiber/resume c))
   (assert (= v1 10) "JIT with captures: first")
   (assert (= v2 11) "JIT with captures: second"))
 
@@ -195,14 +195,14 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (def v1 (coro/resume c))
-  (def v2 (coro/resume c))
+  (def c (fiber/new run |:yield|))
+  (def v1 (fiber/resume c))
+  (def v2 (fiber/resume c))
   (assert (= v1 1) "JIT locals survive: first")
   (assert (= v2 12) "JIT locals survive: 10+2=12"))
 
@@ -228,13 +228,13 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (make-coroutine run))
-    (coro/resume warmup-c)
-    (coro/resume warmup-c)
+    (def warmup-c (fiber/new run |:yield|))
+    (fiber/resume warmup-c)
+    (fiber/resume warmup-c)
     (assign warmup-i (+ warmup-i 1)))
 
-  (def c (make-coroutine run))
-  (def v1 (coro/resume c))
-  (def v2 (coro/resume c))
+  (def c (fiber/new run |:yield|))
+  (def v1 (fiber/resume c))
+  (def v2 (fiber/resume c))
   (assert (= v1 100) "JIT multiple locals: first")
   (assert (= v2 206) "JIT multiple locals: 1+2+3+200=206"))

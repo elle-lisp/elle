@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Async error propagation tests
 #
 # These tests document the expected behavior of error propagation through
@@ -8,27 +8,27 @@
 # === Helpers ===
 
 (defn make-range [n]
-  (coro/new (fn []
-              (def @i 0)
-              (while (< i n)
-                (yield i)
-                (assign i (+ i 1))))))
+  (fiber/new (fn []
+               (def @i 0)
+               (while (< i n)
+                 (yield i)
+                 (assign i (+ i 1)))) |:yield|))
 
-# === 1. Synchronous coroutine errors propagate through stream/collect ===
-
-(let [[ok? val] (protect ((fn []
-                            (let [co (coro/new (fn [] (error "boom")))]
-                              (coro/resume co)))))]
-  (assert (not ok?) "1a: error from coroutine propagates through coro/resume"))
+# === 1. Synchronous fiber errors propagate through stream/collect ===
 
 (let [[ok? val] (protect ((fn []
-                            (let [co (coro/new (fn []
+                            (let [co (fiber/new (fn [] (error "boom")) |:yield|)]
+                              (fiber/resume co)))))]
+  (assert (not ok?) "1a: error from fiber propagates through fiber/resume"))
+
+(let [[ok? val] (protect ((fn []
+                            (let [co (fiber/new (fn []
                                     (yield 1)
                                     (yield 2)
                                     (error "boom")
-                                    (yield 3)))]
+                                    (yield 3)) |:yield|)]
                               (stream/collect co)))))]
-  (assert (not ok?) "1b: stream/collect propagates coroutine error"))
+  (assert (not ok?) "1b: stream/collect propagates fiber error"))
 
 # === 2. stream/map error propagation (no async, no scheduler) ===
 

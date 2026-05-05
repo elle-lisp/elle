@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/contract.lisp — Compositional validation system for function boundaries.
 ##
 ## Loaded via:

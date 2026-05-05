@@ -434,6 +434,20 @@ impl<'a> Lowerer<'a> {
         self
     }
 
+    /// Set all primitive property sets from a PrimitiveClassification.
+    pub fn with_primitive_classification(
+        mut self,
+        pc: crate::lir::intrinsics::PrimitiveClassification,
+    ) -> Self {
+        self.intrinsics = pc.intrinsics;
+        self.immediate_primitives = pc.immediate_primitives;
+        self.mutating_primitives = pc.mutating_primitives;
+        self.arg_escaping_primitives = pc.arg_escaping_primitives;
+        self.non_allocating_accessors = pc.non_allocating_accessors;
+        self.non_escaping_stdlib = pc.non_escaping_stdlib;
+        self
+    }
+
     /// Set symbol names for error messages.
     pub fn with_symbol_names(mut self, names: HashMap<u32, String>) -> Self {
         self.symbol_names = names;

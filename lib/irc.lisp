@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/irc.lisp -- IRCv3 client for Elle
 ##
 ## Coroutine-based IRC client with IRCv3 capability negotiation and SASL.
@@ -445,15 +445,15 @@
         (let* [write-fn (get transport :write)
                read-fn (get transport :read-line)
                close-fn (get transport :close)
-               messages (coro/new (fn []
-                                    (forever
-                                      (let [line (read-fn)]
-                                        (when (nil? line) (break))
-                                        (let [msg (parse-message line)]
-                                          (if (= msg:command "PING")
-                                            (write-fn (build-line "PONG"
-                                            [(or (get msg:params 0) "")]))
-                                            (yield msg)))))))]
+               messages (fiber/new (fn []
+                                     (forever
+                                       (let [line (read-fn)]
+                                         (when (nil? line) (break))
+                                         (let [msg (parse-message line)]
+                                           (if (= msg:command "PING")
+                                             (write-fn (build-line "PONG"
+                                             [(or (get msg:params 0) "")]))
+                                             (yield msg)))))) |:yield|)]
           {:messages messages
            :send (fn [command & params]
                    (write-fn (build-line command [;params])))

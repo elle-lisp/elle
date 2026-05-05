@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/hash.lisp — streaming hash convenience functions
 ##
 ## Provides high-level helpers for hashing ports, coroutine streams,

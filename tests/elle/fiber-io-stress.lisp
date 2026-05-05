@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Stream I/O stress tests
 ##
 ## Tests sustained port/lines, stream/collect, and ReadLine EOF handling.

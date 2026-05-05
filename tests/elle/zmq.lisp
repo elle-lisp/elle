@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 
 ## ZMQ FFI library integration tests
 ## Tests lib/zmq.lisp (FFI bindings to system libzmq)

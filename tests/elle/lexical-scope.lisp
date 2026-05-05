@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 
 # ============================================================================
 # SECTION 1: Deeply Nested Captures (4+ levels)
@@ -133,21 +133,21 @@
 (assert (= (let [x 10]
              (let [y 20]
                (let [gen (fn () (yield (+ x y)))]
-                 (let [co (make-coroutine gen)]
-                   (coro/resume co))))) 30)
+                 (let [co (fiber/new gen |:yield|)]
+                   (fiber/resume co))))) 30)
         "test_coroutine_captures_from_nested_let")
 
 (assert (= ((fn (base)
               (let [gen (fn () (yield base))]
-                (let [co (make-coroutine gen)]
-                  (coro/resume co)))) 42) 42)
+                (let [co (fiber/new gen |:yield|)]
+                  (fiber/resume co)))) 42) 42)
         "test_coroutine_captures_lambda_param")
 
 (assert (= ((fn (a)
               ((fn (b)
                  (let [gen (fn () (yield (+ a b)))]
-                   (let [co (make-coroutine gen)]
-                     (coro/resume co)))) 20)) 10) 30)
+                   (let [co (fiber/new gen |:yield|)]
+                     (fiber/resume co)))) 20)) 10) 30)
         "test_coroutine_captures_multiple_levels")
 
 (assert (= (let [@counter 0]
@@ -155,14 +155,14 @@
                          (begin
                            (assign counter (+ counter 1))
                            (yield counter)))]
-               (let [co (make-coroutine gen)]
-                 (coro/resume co)))) 1) "test_coroutine_with_mutable_capture")
+               (let [co (fiber/new gen |:yield|)]
+                 (fiber/resume co)))) 1) "test_coroutine_with_mutable_capture")
 
 (assert (= (let* [x 5
                   y (+ x 10)
                   gen (fn () (yield (+ x y)))
-                  co (make-coroutine gen)]
-             (coro/resume co)) 20) "test_coroutine_captures_let_star_binding")
+                  co (fiber/new gen |:yield|)]
+             (fiber/resume co)) 20) "test_coroutine_captures_let_star_binding")
 
 # ============================================================================
 # SECTION 5: Complex Interaction Tests

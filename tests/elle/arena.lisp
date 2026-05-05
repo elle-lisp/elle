@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Integration tests for arena/stats, arena/count, arena/allocs, and fiber heap isolation
 #
 # Migrated from tests/integration/arena.rs
@@ -292,15 +292,15 @@
 # test_yield_star_with_shared_alloc
 # yield* delegates iteration. Values flow through shared alloc.
 (def sub
-  (coro/new (fn ()
-              (yield "a")
-              (yield "b")
-              :done)))
-(def main (coro/new (fn () (yield* sub))))
-(coro/resume main nil)
-(def v1 (coro/value main))
-(coro/resume main nil)
-(def v2 (coro/value main))
+  (fiber/new (fn ()
+               (yield "a")
+               (yield "b")
+               :done) |:yield|))
+(def main (fiber/new (fn () (yield* sub)) |:yield|))
+(fiber/resume main nil)
+(def v1 (fiber/value main))
+(fiber/resume main nil)
+(def v2 (fiber/value main))
 (assert (= v1 "a") "yield star: first")
 (assert (= v2 "b") "yield star: second")
 
@@ -324,23 +324,26 @@
     (assert (= v1 "yielded") "cancel child: yielded value")
     (assert (= status "error") "cancel child: status is error")))
 
-# test_long_lived_coroutine_many_resumes
-# Resume a coroutine 50 times, each time yielding a heap value (list).
+# test_long_lived_fiber_many_resumes
+# Resume a fiber 50 times, each time yielding a heap value (list).
 # Exercises M2 — many shared allocs accumulate in owned_shared.
 # All yielded values must be readable at the end.
+(defn fiber-done? [f]
+  (let [s (fiber/status f)]
+    (or (= s :dead) (= s :error))))
 (def @gen
-  (coro/new (fn ()
-              (var i 0)
-              (while (< i 50)
-                (yield (list i (+ i 1)))
-                (assign i (+ i 1))))))
+  (fiber/new (fn ()
+               (var i 0)
+               (while (< i 50)
+                 (yield (list i (+ i 1)))
+                 (assign i (+ i 1)))) |:yield|))
 (def @results @[])
-(while (not (coro/done? gen))
-  (coro/resume gen nil)
-  (when (not (coro/done? gen)) (push results (coro/value gen))))
-(assert (= (length results) 50) "long lived coroutine: 50 yields")
-(assert (= (first (get results 0)) 0) "long lived coroutine: first yield")
-(assert (= (first (get results 49)) 49) "long lived coroutine: last yield")
+(while (not (fiber-done? gen))
+  (fiber/resume gen nil)
+  (when (not (fiber-done? gen)) (push results (fiber/value gen))))
+(assert (= (length results) 50) "long lived fiber: 50 yields")
+(assert (= (first (get results 0)) 0) "long lived fiber: first yield")
+(assert (= (first (get results 49)) 49) "long lived fiber: last yield")
 
 # ── Root fiber scope management (new in issue-525) ──────────────────
 

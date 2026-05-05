@@ -107,7 +107,6 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 | `cell.rs` | `box`, `unbox`, `rebox`, `box?` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
-| `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `emit`, `fiber/status`, `fiber/value` |
 | `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `parameters.rs` | `make-parameter`, `parameter?` |
@@ -115,7 +114,7 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `squelch`, `meta/origin` |
-| `introspection.rs` | `closure?`, `jit?`, `silent?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword` (alias: `string->keyword`) |
+| `introspection.rs` | `closure?`, `jit?`, `silent?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword` (alias: `string->keyword`) |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
 | `arena.rs` | `arena/count`, `arena/stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `environment` |
 | `debug.rs` | `debug/print`, `debug/trace`, `debug/memory` |
@@ -489,7 +488,7 @@ Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is 
 | `mod.rs` | ~60 | Re-exports |
 | `registration.rs` | ~190 | `register_primitives`, `build_primitive_meta`, `cached_primitive_meta` |
 | `module_init.rs` | ~170 | `init_stdlib`, module initialization |
-| `introspection.rs` | ~384 | Function introspection predicates and metadata queries |
+| `introspection.rs` | ~384 | Function introspection predicates and metadata queries (`closure?`, `jit?`, `silent?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword`) |
 | `disassembly.rs` | ~416 | Bytecode/JIT disassembly and CFG extraction |
 | `arena.rs` | ~577 | Heap arena management primitives |
 | `debug.rs` | ~221 | Debug print, trace, memory usage |

@@ -21,7 +21,7 @@ depend on other modules or plugins take them as arguments.
 | `contract.lisp` | Compositional validation for function boundaries |
 | `lua.lisp` | Lua standard library compatibility prelude |
 | `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
-| `irc.lisp` | IRCv3 client: CAP negotiation, SASL PLAIN, message tags, coroutine read stream |
+| `irc.lisp` | IRCv3 client: CAP negotiation, SASL PLAIN, message tags, fiber read stream |
 | `sync.lisp` | Concurrency primitives: lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor (built on futex) |
 | `spirv.lisp` | SPIR-V compute shader emitter: buffer I/O, arithmetic, loops, local variables, structured control flow |
 | `gpu.lisp` | GPU compute convenience layer wrapping vulkan plugin + spirv emitter |
@@ -91,7 +91,7 @@ http-serve port handler → tcp/listen → forever:
 | `write-chunk` / `write-last-chunk` | `(fn [t [data]])` | Yields | nil |
 | `tcp-transport` / `tls-transport` | `(fn [port-or-conn])` | Silent | transport struct |
 | `gzip` / `gunzip` / `zlib` / `unzlib` / `deflate` / `inflate` / `zstd` / `unzstd` | `(fn [data & opts])` | FFI | bytes |
-| `sse-get` | `(fn [url &named headers last-event-id reconnect])` | Yields | coroutine yielding events |
+| `sse-get` | `(fn [url &named headers last-event-id reconnect])` | Yields | fiber yielding events |
 | `sse-response` | `(fn [body-fn &named headers])` | Silent | response struct |
 | `format-sse-event` | `(fn [event])` | Silent | string |
 
@@ -135,11 +135,11 @@ passed at module init.
 
 | Function | Signature | Returns |
 |----------|-----------|---------|
-| `sse-get` | `(fn [url &named headers last-event-id reconnect])` | coroutine |
+| `sse-get` | `(fn [url &named headers last-event-id reconnect])` | fiber |
 | `sse-response` | `(fn [body-fn &named headers])` | response struct |
 | `format-sse-event` | `(fn [event])` | string (SSE wire frame) |
 
-**Client**: `sse-get` returns a coroutine yielding event structs
+**Client**: `sse-get` returns a fiber (with `|:yield|` mask) yielding event structs
 `{:event :data :id :retry}`. Iterate with `each`:
 
 ```lisp
@@ -150,7 +150,7 @@ passed at module init.
 `:reconnect` defaults to `true` — the client follows EventSource
 semantics: on disconnect/error it waits `retry-ms` (last server-sent
 `:retry`, default 3000) and reopens with `Last-Event-ID`. Stops on HTTP
-204 No Content. Set `:reconnect false` to make the coroutine end on
+204 No Content. Set `:reconnect false` to make the fiber end on
 the first disconnect.
 
 **Server**: return an `http:sse-response` from a handler. The body
@@ -389,7 +389,7 @@ tls:write conn data → tls/encrypt → port/write TCP
 
 Stream:
 ```
-tls:lines conn → coro/new (loop: tls:read-line → yield)
+tls:lines conn → fiber/new |:yield| (loop: tls:read-line → yield)
 ```
 
 ## Exported functions
@@ -404,9 +404,9 @@ tls:lines conn → coro/new (loop: tls:read-line → yield)
 | `tls:read-all` | `conn` | bytes | async |
 | `tls:write` | `conn data` | int | async |
 | `tls:close` | `conn` | nil | async |
-| `tls:lines` | `conn` | coroutine | stream |
-| `tls:chunks` | `conn size` | coroutine | stream |
-| `tls:writer` | `conn` | coroutine | stream |
+| `tls:lines` | `conn` | fiber | stream |
+| `tls:chunks` | `conn size` | fiber | stream |
+| `tls:writer` | `conn` | fiber | stream |
 
 ## tls-conn shape
 
@@ -646,9 +646,9 @@ Agent guide for `lib/irc.lisp` -- IRCv3 client.
 ## Purpose
 
 IRC client with IRCv3 capability negotiation, SASL PLAIN authentication,
-and message tags. Coroutine-based: the connection struct exposes a read
-stream and a send function. No background fibers -- the caller controls
-when messages are consumed.
+and message tags. Fiber-based: the connection struct exposes a read
+stream (a fiber with `|:yield|` mask) and a send function. No background
+fibers -- the caller controls when messages are consumed.
 
 ## Loading
 
@@ -677,7 +677,7 @@ irc:connect host port :nick :sasl [user pass]
 ## Connection struct
 
 ```lisp
-{:messages <coroutine>   # yields parsed messages, auto-PONGs
+{:messages <fiber>       # yields parsed messages, auto-PONGs (fiber/new f |:yield|)
  :send     <function>    # (conn:send "COMMAND" "param1" ...)
  :close    <function>    # sends QUIT, closes transport
  :nick     "nick"        # resolved nick after registration

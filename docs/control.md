@@ -174,7 +174,7 @@ count                      # => 5
 ## each
 
 Iteration macro. `in` is optional sugar. Works on lists, arrays,
-strings, bytes, sets, structs, fibers, and coroutines.
+strings, bytes, sets, structs, and fibers.
 
 ```lisp
 (var total 0)
@@ -192,10 +192,6 @@ total                      # => 60
 # fibers: iterate over yielded values until the fiber completes
 (def fib (fiber/new (fn [] (yield 1) (yield 2) (yield 3)) |:yield|))
 (each n in fib (println n))  # prints 1 2 3
-
-# coroutines: same pattern via coro/>iterator
-(def co (coro/new (fn [] (yield 1) (yield 2) (yield 3))))
-(each n in co (println n))   # prints 1 2 3
 ```
 
 ---

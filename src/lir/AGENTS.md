@@ -122,7 +122,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 7. **Emit is a block terminator, not an instruction.** `Terminator::Emit { signal: SignalBits, value: Reg, resume_label: Label }`
     splits the block: the current block ends with emit, and a new resume block
     begins. The resume block starts with `LoadResumeValue` to capture the value
-    passed to `coro/resume`.
+    passed to `fiber/resume`.
 
 8. **Docstring and syntax are threaded from HIR.** `LirFunction.doc` and
       `LirFunction.syntax` are copied from `HirKind::Lambda.doc` and

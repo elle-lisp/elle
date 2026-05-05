@@ -62,7 +62,7 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 
 # Approximate runtimes (for guidance — vary by machine):
 #   make smoke    ~3min docs + elle scripts, VM, JIT, WASM (parallel, debug build)
-#   make test     ~3min smoke + rust unit tests (PROPTEST_CASES=4)
+#   make test     ~4min smoke + rust unit + integration tests
 #   cargo test    ~60min full suite (unit + integration + property)
 #
 # Every Elle test target runs twice: first with JIT disabled (VM-only),
@@ -166,11 +166,12 @@ MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
                MLIR_SYS_220_PREFIX=$(MLIR_PREFIX) \
                TABLEGEN_220_PREFIX=$(MLIR_PREFIX)
 
-test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
+test: smoke  ## Rust unit + integration tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
 	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
 	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-	$(MLIR_ENV) PROPTEST_CASES=4 cargo test --workspace --lib --all-features
+	$(MLIR_ENV) cargo test --workspace --lib --all-features
+	cargo test --test '*' -- --skip property
 
 # ── Clean ───────────────────────────────────────────────────────────
 

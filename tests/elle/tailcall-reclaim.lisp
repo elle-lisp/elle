@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Tail-call memory reclamation via pool rotation
 #
 # Verifies that tail-recursive loops don't accumulate slab allocations
@@ -85,9 +85,9 @@
 
 (assert (= (sum-loop 100 0) 5050) "tail-call accumulator: sum 1..100")
 
-# ── Coroutine with tail-call body ───────────────────────────────────
+# ── Fiber with tail-call body ───────────────────────────────────────
 #
-# A coroutine that yields values from a tail-recursive inner loop.
+# A fiber that yields values from a tail-recursive inner loop.
 # Yielded values must survive across resume boundaries.
 
 (defn coro-inner (n)
@@ -97,13 +97,13 @@
       (yield (concat "item-" (number->string n)))
       (coro-inner (%sub n 1)))))
 
-(let* [co (coro/new (fn () (coro-inner 5)))
-       v1 (coro/resume co)
-       v2 (coro/resume co)
-       v3 (coro/resume co)]
-  (assert (= v1 "item-5") (concat "coroutine yield 1: got " v1))
-  (assert (= v2 "item-4") (concat "coroutine yield 2: got " v2))
-  (assert (= v3 "item-3") (concat "coroutine yield 3: got " v3)))
+(let* [co (fiber/new (fn () (coro-inner 5)) |:yield|)
+       v1 (fiber/resume co)
+       v2 (fiber/resume co)
+       v3 (fiber/resume co)]
+  (assert (= v1 "item-5") (concat "fiber yield 1: got " v1))
+  (assert (= v2 "item-4") (concat "fiber yield 2: got " v2))
+  (assert (= v3 "item-3") (concat "fiber yield 3: got " v3)))
 
 # ── Nested lets with tail call ──────────────────────────────────────
 #

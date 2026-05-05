@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Test: multiple yielding calls in the same function
 # Regression test for the WASM drive_resume_chain stale-frame bug.
 # When a resumed WASM closure yields again, old outer frames must

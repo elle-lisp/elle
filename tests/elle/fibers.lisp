@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## Fiber Primitive Tests
 ##
 ## Migrated from tests/property/fibers.rs (behavioral property tests).
@@ -179,18 +179,18 @@
 (begin
   (def helper (fn [x] (yield (* x 2))))
   (def caller (fn [x] (+ (helper x) 1)))
-  (def @co (make-coroutine (fn [] (caller 5))))
-  (assert (= (coro/resume co) 10) "multi-frame yield: first yield is 5*2=10")
-  (assert (= (coro/resume co 7) 8)
+  (def @co (fiber/new (fn [] (caller 5)) |:yield|))
+  (assert (= (fiber/resume co) 10) "multi-frame yield: first yield is 5*2=10")
+  (assert (= (fiber/resume co 7) 8)
           "multi-frame yield: resume 7, caller adds 1 = 8"))
 
 (begin
   (def helper2 (fn [x] (yield (* x 2))))
   (def caller2 (fn [x] (+ (helper2 x) 1)))
-  (def @co2 (make-coroutine (fn [] (caller2 -25))))
-  (assert (= (coro/resume co2) -50)
+  (def @co2 (fiber/new (fn [] (caller2 -25)) |:yield|))
+  (assert (= (fiber/resume co2) -50)
           "multi-frame yield: first yield is -25*2=-50")
-  (assert (= (coro/resume co2 10) 11)
+  (assert (= (fiber/resume co2 10) 11)
           "multi-frame yield: resume 10, caller adds 1 = 11"))
 
 # ============================================================================
@@ -205,10 +205,10 @@
       (rh 10)
       (yield 20)
       42))
-  (def @rco (make-coroutine rgen))
-  (assert (= (coro/resume rco) 10) "re-yield: first yield from helper")
-  (assert (= (coro/resume rco 5) 20) "re-yield: second yield from gen")
-  (assert (= (coro/resume rco) 42) "re-yield: final return"))
+  (def @rco (fiber/new rgen |:yield|))
+  (assert (= (fiber/resume rco) 10) "re-yield: first yield from helper")
+  (assert (= (fiber/resume rco 5) 20) "re-yield: second yield from gen")
+  (assert (= (fiber/resume rco) 42) "re-yield: final return"))
 
 (begin
   (def rh2 (fn [x] (yield x)))
@@ -217,10 +217,10 @@
       (rh2 -30)
       (yield 50)
       99))
-  (def @rco2 (make-coroutine rgen2))
-  (assert (= (coro/resume rco2) -30) "re-yield: first yield -30")
-  (assert (= (coro/resume rco2 0) 50) "re-yield: second yield 50")
-  (assert (= (coro/resume rco2) 99) "re-yield: final return 99"))
+  (def @rco2 (fiber/new rgen2 |:yield|))
+  (assert (= (fiber/resume rco2) -30) "re-yield: first yield -30")
+  (assert (= (fiber/resume rco2 0) 50) "re-yield: second yield 50")
+  (assert (= (fiber/resume rco2) 99) "re-yield: final return 99"))
 
 # ============================================================================
 # Error during multi-frame resume
@@ -233,9 +233,9 @@
       (yield x)
       (/ 1 0)))
   (def egen (fn [] (+ (eh 5) 1)))
-  (def @eco (make-coroutine egen))
-  (coro/resume eco)
-  (let [[ok? _] (protect ((fn [] (coro/resume eco))))]
+  (def @eco (fiber/new egen |:yield|))
+  (fiber/resume eco)
+  (let [[ok? _] (protect ((fn [] (fiber/resume eco))))]
     (assert (not ok?) "error during multi-frame resume: division by zero")))
 
 # ============================================================================

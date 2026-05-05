@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/aws/sigv4.lisp — AWS Signature Version 4 signing
 ##
 ## Pure Elle. Receives crypto and jiff functions as arguments.

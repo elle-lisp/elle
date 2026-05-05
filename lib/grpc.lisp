@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/grpc.lisp — gRPC client for Elle
 ##
 ## Layers on lib/http2 for transport; adds gRPC framing and trailer handling.

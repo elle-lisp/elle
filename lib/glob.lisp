@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 ## lib/glob.lisp — Glob pattern matching and file discovery (pure Elle)
 ##
 ## Supports *, ?, [abc], [!abc], ** (recursive), and character ranges.

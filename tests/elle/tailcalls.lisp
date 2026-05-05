@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Tests for tail call optimization
 #
 # Comprehensive tests for tail call optimization including:
@@ -169,8 +169,8 @@
 (defn coro-yield-tail-test [n]
   "Test yield in tail position"
   (block :b
-    (let [co (coro/new (fn () (yield (sum-to n 0))))]
-      (coro/resume co))))
+    (let [co (fiber/new (fn () (yield (sum-to n 0))) |:yield|)]
+      (fiber/resume co))))
 
 (assert (= (coro-yield-tail-test 10) 55) "yield in tail position")
 
@@ -178,16 +178,16 @@
 # Each yield should be tail when in tail position
 (defn coro-multi-yield [n]
   "Test multiple yields with tail calls"
-  (coro/new (fn ()
-              (yield (sum-to n 0))
-              (yield (sum-to (+ n 1) 0))
-              (sum-to (+ n 2) 0))))
+  (fiber/new (fn ()
+               (yield (sum-to n 0))
+               (yield (sum-to (+ n 1) 0))
+               (sum-to (+ n 2) 0)) |:yield|))
 
 (begin
   (let [co (coro-multi-yield 5)]
-    (assert (= (coro/resume co) 15) "first yield in coro")
-    (assert (= (coro/resume co) 21) "second yield in coro")
-    (assert (= (coro/resume co) 28) "final value in coro")))
+    (assert (= (fiber/resume co) 15) "first yield in coro")
+    (assert (= (fiber/resume co) 21) "second yield in coro")
+    (assert (= (fiber/resume co) 28) "final value in coro")))
 
 # ============================================================================
 # Complex tail call patterns

@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # Tests for prelude macros: when, unless, try/catch, protect, defer, with,
 # butlast, hygiene, case, if-let, when-let, while, forever
 
@@ -266,16 +266,16 @@
   (assert (= result :done) "forever break value"))
 
 # ============================================================================
-# each — iterates coroutines (fibers)
+# each — iterates fibers
 # ============================================================================
 
-# Drives a coroutine via coro/resume until it stops yielding.
+# Drives a fiber via fiber/resume until it stops yielding.
 (let [seen @[]]
   (def co
-    (coro/new (fn ()
-                (yield 10)
-                (yield 20)
-                (yield 30))))
+    (fiber/new (fn ()
+                 (yield 10)
+                 (yield 20)
+                 (yield 30)) |:yield|))
   (each x in co
     (push seen x))
   (assert (= (length seen) 3) "each+fiber: yielded values consumed")
@@ -283,10 +283,9 @@
   (assert (= (get seen 1) 20) "each+fiber: second value")
   (assert (= (get seen 2) 30) "each+fiber: third value"))
 
-# Exhausted coroutine iterates zero times.
+# Exhausted fiber iterates zero times.
 (let [calls @[0]]
-  (def co (coro/new (fn () nil)))  # body returns immediately, never yields
+  (def co (fiber/new (fn () nil) |:yield|))  # body returns immediately, never yields
   (each _ in co
     (put calls 0 (inc (get calls 0))))
-  (assert (= (get calls 0) 0)
-          "each+fiber: empty coroutine invokes body zero times"))
+  (assert (= (get calls 0) 0) "each+fiber: empty fiber invokes body zero times"))

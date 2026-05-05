@@ -6,15 +6,12 @@ pub mod array;
 pub mod bitwise;
 pub mod r#box;
 pub mod bytes;
-#[cfg(feature = "ffi")]
-pub mod calling;
 pub mod chan;
 pub mod comparison;
 pub mod compile;
 pub mod concurrency;
 pub mod config;
 pub mod convert;
-pub mod coroutines;
 pub mod debug;
 pub mod def;
 pub mod disassembly;
