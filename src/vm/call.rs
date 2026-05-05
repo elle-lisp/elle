@@ -11,7 +11,7 @@
 use crate::error::LocationMap;
 use crate::primitives::access::resolve_index;
 use crate::value::error_val;
-use crate::value::fiber::CallFrame;
+use crate::value::fiber::{CallFrame, MAX_CALL_DEPTH};
 use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
     SIG_HALT, SIG_OK, SIG_SWITCH,
@@ -256,6 +256,20 @@ impl VM {
                 frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
                 location_map: location_map.clone(),
             });
+
+            // Stack overflow guard: emit a catchable error instead of
+            // letting the Rust runtime abort on actual stack overflow.
+            if self.fiber.call_depth > MAX_CALL_DEPTH {
+                self.fiber.call_depth -= 1;
+                self.fiber.call_stack.pop();
+                set_error(
+                    &mut self.fiber,
+                    "stack-overflow",
+                    format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+                );
+                self.fiber.stack.push(Value::NIL);
+                return None;
+            }
 
             // Validate argument count (skip if compiler verified)
             if !checked && !self.check_arity(&closure.template.arity, args.len()) {

@@ -414,6 +414,22 @@ pub struct CallFrame {
     pub location_map: Rc<crate::error::LocationMap>,
 }
 
+/// Maximum non-tail call depth before emitting a catchable stack-overflow
+/// error.
+///
+/// Empirically each non-tail closure call costs ~25–30 KB of Rust stack
+/// (dominated by `SmallVec<[Value; 256]>` in `execute_bytecode_saving_stack`).
+/// With the default 8 MB thread stack the hard crash limit is ~280–310
+/// levels.  We set the guard well below that to leave headroom for the call
+/// chain above user code (compilation, dispatch loop, primitives) and for
+/// platforms with smaller default stacks.
+///
+/// Tail calls bypass this check entirely — they are trampolined in the
+/// `execute_bytecode_saving_stack` loop and never grow the Rust stack.
+///
+/// Shared by the interpreter (`vm::call`) and JIT (`jit::calls`) paths.
+pub const MAX_CALL_DEPTH: usize = 200;
+
 /// The fiber: an independent execution context.
 ///
 /// Holds all per-execution state that was previously on the VM struct:

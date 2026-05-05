@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # tests/elle/errors.lisp
 # Smoke-tests that specific error keywords are produced.
 # Each assert-err-kind call verifies the :error field keyword.
@@ -55,8 +55,15 @@
   (assert (not ok?) "fiber/new unknown signal keyword")
   (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
 # ── stack-overflow ────────────────────────────────────────────────────────────
-# stack-overflow is hard to reliably trigger without killing the test process;
-# leave this commented out for now and rely on the JIT unit tests.
-# (assert-err-kind (fn [] (let loop () (loop))) :stack-overflow "infinite recursion")
+# Deep non-tail recursion must produce a catchable error, not SIGABRT.
+(let [[ok? err] (protect ((fn []
+                            (letrec [f (fn (n)
+                                         (if (= n 0)
+                                           (list)
+                                           (pair n (f (- n 1)))))]
+                              (length (f 100000))))))]
+  (assert (not ok?) "deep recursion produces error")
+  (assert (= (get err :error) :stack-overflow)
+          "deep recursion error kind is :stack-overflow"))
 # ── internal-error (gensym without symbol table) — not easily testable in Elle
 # Skip: requires running without symbol table context.

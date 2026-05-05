@@ -7,8 +7,8 @@
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::value::fiber::{
-    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
-    SIG_YIELD,
+    SignalBits, MAX_CALL_DEPTH, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
+    SIG_RESUME, SIG_YIELD,
 };
 use crate::value::{error_val, Value};
 
@@ -225,6 +225,17 @@ pub extern "C" fn elle_jit_call(
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             vm.fiber.call_depth += 1;
 
+            // Stack overflow guard (shared constant from value::fiber)
+            if vm.fiber.call_depth > MAX_CALL_DEPTH {
+                vm.fiber.call_depth -= 1;
+                let err = error_val(
+                    "stack-overflow",
+                    format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+                );
+                vm.fiber.signal = Some((SIG_ERROR, err));
+                return JitValue::nil();
+            }
+
             // Save/restore rotation base so nested self-tail-call loops
             // don't corrupt the caller's rotation state.
             let saved_rotation_base =
@@ -320,6 +331,18 @@ pub extern "C" fn elle_jit_call(
         let new_env = build_closure_env_for_jit(closure, &args);
 
         vm.fiber.call_depth += 1;
+
+        // Stack overflow guard (shared constant from value::fiber)
+        if vm.fiber.call_depth > MAX_CALL_DEPTH {
+            vm.fiber.call_depth -= 1;
+            let err = error_val(
+                "stack-overflow",
+                format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+            );
+            vm.fiber.signal = Some((SIG_ERROR, err));
+            return JitValue::nil();
+        }
+
         let result = vm.execute_bytecode_saving_stack(
             &closure.template.bytecode,
             &closure.template.constants,
