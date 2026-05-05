@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 # tests/elle/errors.lisp
 # Smoke-tests that specific error keywords are produced.
 # Each assert-err-kind call verifies the :error field keyword.
@@ -55,8 +55,13 @@
   (assert (not ok?) "fiber/new unknown signal keyword")
   (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
 # ── stack-overflow ────────────────────────────────────────────────────────────
-# stack-overflow is hard to reliably trigger without killing the test process;
-# leave this commented out for now and rely on the JIT unit tests.
-# (assert-err-kind (fn [] (let loop () (loop))) :stack-overflow "infinite recursion")
+# Stack overflow is a resource exhaustion condition (SIG_HALT), not a catchable
+# error (SIG_ERROR).  It cannot be intercepted by protect, silence, or signal
+# masks.  The script simply terminates with exit code 1 and an error message.
+#
+# Testing this requires running a separate elle process (see Rust integration
+# tests).  The deeply-recursive stdlib functions (filter, map, etc.) are tested
+# with large lists in functional.lisp — those tests pass because the functions
+# are now tail-recursive and stay within the call-depth limit.
 # ── internal-error (gensym without symbol table) — not easily testable in Elle
 # Skip: requires running without symbol table context.

@@ -416,9 +416,18 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                     let wasm_tier = vm_ref.wasm_tier.as_ref().unwrap();
                     match wasm_tier.call(vm, bytecode_ptr, &closure_rc, &args) {
                         Ok((value, signal)) => {
-                            if signal.is_ok() || signal == crate::value::SIG_HALT {
+                            if signal.is_ok() {
                                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
                                 return (tag, payload, 0);
+                            } else if signal == crate::value::SIG_HALT {
+                                if value == Value::NIL {
+                                    let (tag, payload) =
+                                        caller.data_mut().inner.value_to_wasm(value);
+                                    return (tag, payload, 0);
+                                }
+                                // Non-NIL halt: propagate as error
+                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
+                                return (tag, payload, signal.raw() as i64);
                             }
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
                             return (tag, payload, signal.raw() as i64);
@@ -442,10 +451,25 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                             &closure.template.location_map,
                         );
                         let bits = exec.bits;
-                        if bits.is_ok() || bits == crate::value::SIG_HALT {
+                        if bits.is_ok() {
                             let (_, val) = vm_ref.fiber.signal.take().unwrap();
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
                             (tag, payload, 0)
+                        } else if bits == crate::value::SIG_HALT {
+                            let val = vm_ref
+                                .fiber
+                                .signal
+                                .as_ref()
+                                .map(|(_, v)| *v)
+                                .unwrap_or(Value::NIL);
+                            if val == Value::NIL {
+                                vm_ref.fiber.signal.take();
+                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
+                                (tag, payload, 0)
+                            } else {
+                                let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
+                                (tag, payload, bits.raw() as i64)
+                            }
                         } else {
                             let val = vm_ref
                                 .fiber

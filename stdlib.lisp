@@ -182,9 +182,11 @@
           (add acc (f item)))
         (if (mutable? coll) acc (freeze acc)))
     (or (pair? coll) (empty? coll))
-      (if (empty? coll)
-        ()
-        (pair (f (first coll)) (map f (rest coll))))
+      (letrec [go (fn (c acc)
+                    (if (empty? c)
+                      (reverse acc)
+                      (go (rest c) (pair (f (first c)) acc))))]
+        (go coll ()))
     true (error {:error :type-error
                  :reason :not-a-sequence
                  :message "not a sequence"})))
@@ -208,11 +210,11 @@
           (when (p item) (add acc item)))
         acc)
     (or (pair? coll) (empty? coll))
-      (if (empty? coll)
-        ()
-        (if (p (first coll))
-          (pair (first coll) (filter p (rest coll)))
-          (filter p (rest coll))))
+      (letrec [go (fn (c acc)
+                    (if (empty? c)
+                      (reverse acc)
+                      (go (rest c) (if (p (first c)) (pair (first c) acc) acc))))]
+        (go coll ()))
     true (error {:error :type-error
                  :reason :not-a-sequence
                  :message "not a sequence"})))
@@ -400,14 +402,14 @@
                    :message "not a sequence"}))))
 
 (defn take-while [pred coll]
-  (letrec [tw-list (fn (lst)
+  (letrec [tw-list (fn (lst acc)
                      (if (empty? lst)
-                       ()
+                       (reverse acc)
                        (if (pred (first lst))
-                         (pair (first lst) (tw-list (rest lst)))
-                         ())))]
+                         (tw-list (rest lst) (pair (first lst) acc))
+                         (reverse acc))))]
     (cond
-      (or (pair? coll) (empty? coll)) (tw-list coll)
+      (or (pair? coll) (empty? coll)) (tw-list coll ())
       (array? coll)
         (let [result @[]]
           (letrec [loop (fn (i)
@@ -423,7 +425,7 @@
                                       (if (>= i (length coll))
                                         (reverse acc)
                                         (loop (+ i 1) (pair (get coll i) acc))))]
-                             (loop 0 ())))]
+                             (loop 0 ())) ())]
           (apply array lst))
       true (error {:error :type-error
                    :reason :not-a-sequence
@@ -462,16 +464,16 @@
 
 (defn distinct [coll]
   (let [seen @{}]
-    (letrec [dist-list (fn (lst)
+    (letrec [dist-list (fn (lst acc)
                          (if (empty? lst)
-                           ()
+                           (reverse acc)
                            (if (has? seen (first lst))
-                             (dist-list (rest lst))
+                             (dist-list (rest lst) acc)
                              (begin
                                (put seen (first lst) true)
-                               (pair (first lst) (dist-list (rest lst)))))))]
+                               (dist-list (rest lst) (pair (first lst) acc))))))]
       (cond
-        (or (pair? coll) (empty? coll)) (dist-list coll)
+        (or (pair? coll) (empty? coll)) (dist-list coll ())
         (array? coll)
           (let [result @[]]
             (each x in coll
@@ -485,7 +487,7 @@
                                             (reverse acc)
                                             (loop (+ i 1)
                                             (pair (get coll i) acc))))]
-                                 (loop 0 ())))]
+                                 (loop 0 ())) ())]
             (apply array lst))
         true (error {:error :type-error
                      :reason :not-a-sequence
@@ -529,11 +531,11 @@
 (defn map-indexed [f coll]
   (cond
     (or (pair? coll) (empty? coll))
-      (letrec [go (fn (i l)
+      (letrec [go (fn (i l acc)
                     (if (empty? l)
-                      ()
-                      (pair (f i (first l)) (go (+ i 1) (rest l)))))]
-        (go 0 coll))
+                      (reverse acc)
+                      (go (+ i 1) (rest l) (pair (f i (first l)) acc))))]
+        (go 0 coll ()))
     (array? coll)
       (let [result @[]]
         (letrec [loop (fn (i)
@@ -591,12 +593,14 @@
                  :message "not a sequence"})))
 
 (defn interpose [sep coll]
-  (letrec [ip-list (fn (lst)
-                     (if (or (empty? lst) (empty? (rest lst)))
-                       lst
-                       (pair (first lst) (pair sep (ip-list (rest lst))))))]
+  (letrec [ip-list (fn (lst acc)
+                     (if (empty? lst)
+                       (reverse acc)
+                       (if (empty? acc)
+                         (ip-list (rest lst) (pair (first lst) acc))
+                         (ip-list (rest lst) (pair (first lst) (pair sep acc))))))]
     (cond
-      (or (pair? coll) (empty? coll)) (ip-list coll)
+      (or (pair? coll) (empty? coll)) (ip-list coll ())
       (array? coll)
         (if (< (length coll) 2)
           coll
@@ -613,7 +617,7 @@
                                       (if (>= i (length coll))
                                         (reverse acc)
                                         (loop (+ i 1) (pair (get coll i) acc))))]
-                             (loop 0 ())))]
+                             (loop 0 ())) ())]
           (apply array lst))
       true (error {:error :type-error
                    :reason :not-a-sequence
@@ -658,13 +662,15 @@
                              arr)
                          (array? orig) (apply array lst)))
            merge (fn (a b)
-                   (cond
-                     (empty? a) b
-                     (empty? b) a
-                     (<= (first (first a)) (first (first b)))
-                       (pair (first a) (merge (rest a) b))
-                     true
-                       (pair (first b) (merge a (rest b)))))
+                   (letrec [go (fn (a b acc)
+                                 (cond
+                                   (empty? a) (append (reverse acc) b)
+                                   (empty? b) (append (reverse acc) a)
+                                   (<= (first (first a)) (first (first b)))
+                                     (go (rest a) b (pair (first a) acc))
+                                   true
+                                     (go a (rest b) (pair (first b) acc))))]
+                     (go a b ())))
            halve (fn (lst)
                    (let [mid (/ (length lst) 2)]
                      [(take mid lst) (drop mid lst)]))
@@ -703,13 +709,15 @@
                              arr)
                          (array? orig) (apply array lst)))
            merge-lists (fn (a b)
-                         (cond
-                           (empty? a) b
-                           (empty? b) a
-                           (<= (cmp (first a) (first b)) 0)
-                             (pair (first a) (merge-lists (rest a) b))
-                           true
-                             (pair (first b) (merge-lists a (rest b)))))
+                         (letrec [go (fn (a b acc)
+                                       (cond
+                                         (empty? a) (append (reverse acc) b)
+                                         (empty? b) (append (reverse acc) a)
+                                         (<= (cmp (first a) (first b)) 0)
+                                           (go (rest a) b (pair (first a) acc))
+                                         true
+                                           (go a (rest b) (pair (first b) acc))))]
+                           (go a b ())))
            halve (fn (lst)
                    (let [mid (/ (length lst) 2)]
                      [(take mid lst) (drop mid lst)]))

@@ -113,3 +113,29 @@ fn test_repl_piped_input_multiple_errors_exit_code() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn test_stack_overflow_exits_with_error() {
+    // Stack overflow is resource exhaustion (SIG_HALT), not a catchable error.
+    // It must terminate the process with exit code 1 and a descriptive message,
+    // not SIGABRT.
+    let elle_bin = get_elle_binary();
+
+    let output = Command::new(elle_bin)
+        .args(["--jit=off", "-e"])
+        .arg("(letrec [f (fn (n) (if (= n 0) () (pair n (f (- n 1)))))] (length (f 100000)))")
+        .output()
+        .unwrap_or_else(|_| panic!("Failed to spawn elle process at {}", elle_bin));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "Expected non-zero exit code for stack overflow. stderr: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("stack-overflow"),
+        "Expected 'stack-overflow' in stderr, got: {}",
+        stderr
+    );
+}

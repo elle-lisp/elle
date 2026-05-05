@@ -11,7 +11,7 @@
 use crate::error::LocationMap;
 use crate::primitives::access::resolve_index;
 use crate::value::error_val;
-use crate::value::fiber::CallFrame;
+use crate::value::fiber::{CallFrame, MAX_CALL_DEPTH};
 use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
     SIG_HALT, SIG_OK, SIG_SWITCH,
@@ -256,6 +256,24 @@ impl VM {
                 frame_base: 0, // Closures always execute with fresh stack via execute_bytecode_saving_stack
                 location_map: location_map.clone(),
             });
+
+            // Stack overflow guard: resource exhaustion (not a signal-theoretic
+            // error — the analyzer cannot predict this).  Uses SIG_HALT so the
+            // condition bypasses all signal masks and propagates to the top-level
+            // executor as a fatal error.
+            if self.fiber.call_depth > MAX_CALL_DEPTH {
+                self.fiber.call_depth -= 1;
+                self.fiber.call_stack.pop();
+                self.fiber.signal = Some((
+                    SIG_HALT,
+                    error_val(
+                        "stack-overflow",
+                        format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+                    ),
+                ));
+                self.fiber.stack.push(Value::NIL);
+                return None;
+            }
 
             // Validate argument count (skip if compiler verified)
             if !checked && !self.check_arity(&closure.template.arity, args.len()) {
@@ -767,9 +785,16 @@ impl VM {
         );
 
         let bits = result.bits;
-        if bits.is_ok() || bits == crate::value::SIG_HALT {
+        if bits.is_ok() {
             let (_, value) = self.fiber.signal.take().unwrap();
             Ok(value)
+        } else if bits == crate::value::SIG_HALT {
+            let (_, value) = self.fiber.signal.take().unwrap();
+            if value == Value::NIL {
+                Ok(value)
+            } else {
+                Err(self.format_error_with_location(value))
+            }
         } else if bits.contains(crate::value::SIG_ERROR) {
             let (_, err) = self
                 .fiber

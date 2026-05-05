@@ -34,32 +34,39 @@ fn test_undefined_variable_error_shows_name() {
 // ============================================================================
 
 #[test]
-fn test_halt_returns_value() {
-    let result = eval_source("(halt 42)");
-    assert_eq!(result.unwrap(), Value::int(42));
-}
-
-#[test]
 fn test_halt_returns_nil() {
+    // (halt) with no args → NIL → Ok (clean exit)
     let result = eval_source("(halt)");
     assert_eq!(result.unwrap(), Value::NIL);
 }
 
 #[test]
-fn test_halt_stops_execution() {
+fn test_halt_with_value_is_fatal() {
+    // (halt <value>) → non-NIL → Err (fatal error, used for stack overflow etc.)
+    let result = eval_source("(halt 42)");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("42"));
+}
+
+#[test]
+fn test_halt_no_args_stops_execution() {
+    // (halt) stops execution and returns NIL
+    let result = eval_source("(begin (halt) 2)");
+    assert_eq!(result.unwrap(), Value::NIL);
+}
+
+#[test]
+fn test_halt_with_value_stops_execution() {
+    // (halt 1) stops execution with a fatal error (never reaches 2)
     let result = eval_source("(begin (halt 1) 2)");
-    assert_eq!(result.unwrap(), Value::int(1));
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("1"));
 }
 
 #[test]
-fn test_halt_in_function() {
+fn test_halt_with_value_in_function() {
+    // (halt 99) inside a function → fatal error
     let result = eval_source("(begin (def f (fn () (halt 99))) (f))");
-    assert_eq!(result.unwrap(), Value::int(99));
-}
-
-#[test]
-fn test_halt_with_complex_value() {
-    let result = eval_source("(halt (list 1 2 3))");
-    let vec = result.unwrap().list_to_vec().unwrap();
-    assert_eq!(vec, vec![Value::int(1), Value::int(2), Value::int(3)]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("99"));
 }

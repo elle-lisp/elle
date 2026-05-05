@@ -1,4 +1,4 @@
-(elle/epoch 9)
+(elle/epoch 10)
 
 ## ── sort ────────────────────────────────────────────────────────────
 (assert (= (sort (list 3 1 2)) (list 1 2 3)) "sort: list")
@@ -345,6 +345,53 @@
 # sort-by-cmp alias works
 (assert (= (sort-by-cmp compare (list 3 1 2)) (list 1 2 3))
         "sort-by-cmp: alias works")
+
+## ── sort-by / sort-with on large lists ────────────────────────────────
+# These used to crash the VM with SIGABRT (stack overflow) because the
+# merge step in merge sort recursed O(N) deep.  The merge is now
+# tail-recursive with an accumulator + reverse.
+(assert (= (length (sort-by identity (reverse (range 5000)))) 5000)
+        "sort-by: 5000 elements reversed")
+(assert (= (first (sort-by identity (reverse (range 5000)))) 0)
+        "sort-by: first element is 0")
+(assert (= (last (sort-by identity (reverse (range 5000)))) 4999)
+        "sort-by: last element is 4999")
+(assert (= (length (sort-with (fn (a b) (- a b)) (reverse (range 5000)))) 5000)
+        "sort-with: 5000 elements reversed")
+(assert (= (first (sort-with (fn (a b) (- a b)) (reverse (range 5000)))) 0)
+        "sort-with: first element is 0")
+
+## ── Tail-recursive stdlib functions on large lists ───────────────────
+# These functions were converted from O(N)-deep recursion to tail-recursive
+# accumulator + reverse to avoid hitting the 200 call-depth limit.
+(let [big (range 500)]
+  (assert (= (length (filter (fn (x) (= (rem x 2) 0)) big)) 250)
+          "filter: 500 elements, half pass")
+  (assert (= (first (filter (fn (x) (= (rem x 2) 0)) big)) 0)
+          "filter: first passing element is 0")
+
+  # take-while
+  (assert (= (length (take-while (fn (x) (< x 100)) big)) 100)
+          "take-while: takes first 100 of 500")
+  (assert (= (last (take-while (fn (x) (< x 100)) big)) 99)
+          "take-while: last taken is 99")
+
+  # map-indexed
+  (assert (= (length (map-indexed (fn (i x) (+ i x)) big)) 500)
+          "map-indexed: 500 elements")
+  (assert (= (first (map-indexed (fn (i x) (+ i x)) big)) 0)
+          "map-indexed: first is 0+0")
+
+  # interpose
+  (assert (= (length (interpose :x big)) 999)
+          "interpose: 500 elements → 999 with separators")
+  (assert (= (get (interpose :x big) 1) :x)
+          "interpose: separator in correct position")
+
+  # distinct
+  (assert (= (length (distinct big)) 500) "distinct: all 500 elements unique")
+  (assert (= (distinct (pair 1 (pair 1 (pair 2 ())))) (list 1 2))
+          "distinct: deduplicates small list"))
 
 ## ── freeze / thaw: structs ───────────────────────────────────────────
 (let [t @{:a 1 :b 2}]

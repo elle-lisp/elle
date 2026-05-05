@@ -7,8 +7,8 @@
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::value::fiber::{
-    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
-    SIG_YIELD,
+    SignalBits, MAX_CALL_DEPTH, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
+    SIG_RESUME, SIG_YIELD,
 };
 use crate::value::{error_val, Value};
 
@@ -225,6 +225,18 @@ pub extern "C" fn elle_jit_call(
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             vm.fiber.call_depth += 1;
 
+            // Stack overflow guard: resource exhaustion (not signal-theoretic).
+            // Uses SIG_HALT so the condition bypasses all signal masks.
+            if vm.fiber.call_depth > MAX_CALL_DEPTH {
+                vm.fiber.call_depth -= 1;
+                let err = error_val(
+                    "stack-overflow",
+                    format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+                );
+                vm.fiber.signal = Some((SIG_HALT, err));
+                return JitValue::nil();
+            }
+
             // Save/restore rotation base so nested self-tail-call loops
             // don't corrupt the caller's rotation state.
             let saved_rotation_base =
@@ -320,6 +332,19 @@ pub extern "C" fn elle_jit_call(
         let new_env = build_closure_env_for_jit(closure, &args);
 
         vm.fiber.call_depth += 1;
+
+        // Stack overflow guard: resource exhaustion (not signal-theoretic).
+        // Uses SIG_HALT so the condition bypasses all signal masks.
+        if vm.fiber.call_depth > MAX_CALL_DEPTH {
+            vm.fiber.call_depth -= 1;
+            let err = error_val(
+                "stack-overflow",
+                format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+            );
+            vm.fiber.signal = Some((SIG_HALT, err));
+            return JitValue::nil();
+        }
+
         let result = vm.execute_bytecode_saving_stack(
             &closure.template.bytecode,
             &closure.template.constants,
@@ -576,12 +601,28 @@ pub extern "C" fn elle_jit_make_closure(
 // =============================================================================
 
 /// Convert an ExecResult from execute_bytecode_saving_stack to a `JitValue`.
-/// Handles SIG_OK, SIG_HALT (both return the value), SIG_YIELD (returns
-/// YIELD_SENTINEL), and errors (signal already set, returns JitValue::nil()).
+/// Handles SIG_OK, SIG_HALT (NIL→return value, else→error propagated via signal),
+/// SIG_YIELD (returns YIELD_SENTINEL), and errors.
 fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
-    if bits.is_ok() || bits == SIG_HALT {
+    if bits.is_ok() {
         let (_, val) = vm.fiber.signal.take().unwrap();
         JitValue::from_value(val)
+    } else if bits == SIG_HALT {
+        // (halt) → NIL → normal return. (halt <value>) → non-NIL → leave signal
+        // in place for the JIT caller to detect via elle_jit_has_exception.
+        let val = vm
+            .fiber
+            .signal
+            .as_ref()
+            .map(|(_, v)| *v)
+            .unwrap_or(Value::NIL);
+        if val == Value::NIL {
+            vm.fiber.signal.take();
+            JitValue::from_value(val)
+        } else {
+            // Non-NIL halt (stack overflow): signal stays set, JIT caller checks.
+            JitValue::nil()
+        }
     } else if bits.contains(SIG_ERROR) {
         // SIG_ERROR — signal already set on fiber
         JitValue::nil()
