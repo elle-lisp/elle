@@ -8,7 +8,7 @@
 # merge block, the stack depth mismatch causes wrong DupN offsets,
 # shifting key-value pairs so a struct lands in a key position.
 #
-# This is a regression test for the "expected hashable value, got struct"
+# This is a regression test for the "struct keys must be immutable (got struct)"
 # bug in struct literal compilation.
 
 # ── minimal reproduction ──────────────────────────────────

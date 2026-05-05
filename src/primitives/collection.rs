@@ -185,7 +185,7 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
         let key = TableKey::from_value(needle).ok_or_else(|| {
             error_val(
                 "type-error",
-                format!("expected hashable value, got {}", needle.type_name()),
+                format!("struct keys must be immutable (got {})", needle.type_name()),
             )
         })?;
         if let Some(s) = coll.as_struct() {

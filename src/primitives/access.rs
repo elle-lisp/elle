@@ -261,7 +261,10 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("expected hashable value, got {}", args[1].type_name()),
+                        format!(
+                            "struct keys must be immutable (got {})",
+                            args[1].type_name()
+                        ),
                     ),
                 )
             }
@@ -291,7 +294,10 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("expected hashable value, got {}", args[1].type_name()),
+                        format!(
+                            "struct keys must be immutable (got {})",
+                            args[1].type_name()
+                        ),
                     ),
                 )
             }
@@ -670,7 +676,10 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("expected hashable value, got {}", args[1].type_name()),
+                    format!(
+                        "struct keys must be immutable (got {})",
+                        args[1].type_name()
+                    ),
                 ),
             )
         }

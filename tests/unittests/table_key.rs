@@ -40,7 +40,21 @@ fn test_from_value_string() {
     assert!(matches!(key, TableKey::String(ref s) if s == "hello"));
 }
 
-// ── Identity keys ───────────────────────────────────────────────
+// ── EmptyList key ───────────────────────────────────────────
+
+#[test]
+fn test_from_value_empty_list() {
+    let key = TableKey::from_value(&Value::EMPTY_LIST).unwrap();
+    assert_eq!(key, TableKey::EmptyList);
+    assert_eq!(key.to_value(), Value::EMPTY_LIST);
+}
+
+#[test]
+fn test_empty_list_is_sendable() {
+    assert!(TableKey::EmptyList.is_sendable());
+}
+
+// ── Heap keys ───────────────────────────────────────────────
 
 #[test]
 fn test_from_value_external() {
@@ -48,7 +62,7 @@ fn test_from_value_external() {
     let key = TableKey::from_value(&ext);
     assert!(key.is_some(), "external should be accepted as key");
     let key = key.unwrap();
-    assert!(matches!(key, TableKey::Identity(_)));
+    assert!(matches!(key, TableKey::Heap(_)));
 }
 
 #[test]
@@ -100,11 +114,12 @@ fn test_is_sendable_value_keys() {
     assert!(TableKey::Int(42).is_sendable());
     assert!(TableKey::String("hello".to_string()).is_sendable());
     assert!(TableKey::Keyword("foo".to_string()).is_sendable());
+    assert!(TableKey::EmptyList.is_sendable());
 }
 
 #[test]
-fn test_is_sendable_identity_key() {
+fn test_is_sendable_heap_key() {
     let ext = Value::external("test-type", 42u32);
     let key = TableKey::from_value(&ext).unwrap();
-    assert!(!key.is_sendable(), "identity keys must not be sendable");
+    assert!(!key.is_sendable(), "heap keys must not be sendable");
 }

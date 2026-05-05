@@ -45,6 +45,7 @@ fn table_key_to_syntax(
         }
         TableKey::String(s) => SyntaxKind::String(s.clone()),
         TableKey::Keyword(s) => SyntaxKind::Keyword(s.clone()),
+        TableKey::EmptyList => SyntaxKind::List(vec![]),
         TableKey::Array(keys) => {
             let elements: Result<Vec<_>, _> = keys
                 .iter()
@@ -52,8 +53,8 @@ fn table_key_to_syntax(
                 .collect();
             return Ok(Syntax::new(SyntaxKind::Array(elements?), span.clone()));
         }
-        TableKey::Identity(_) => {
-            return Err("Cannot convert identity key to Syntax".to_string());
+        TableKey::Heap(_) => {
+            return Err("Cannot convert heap key to Syntax".to_string());
         }
     };
     Ok(Syntax::new(kind, span.clone()))

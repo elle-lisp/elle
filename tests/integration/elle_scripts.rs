@@ -84,3 +84,8 @@ fn grpc() {
 fn websocket() {
     run_elle_script("websocket");
 }
+
+#[test]
+fn table_key_expand() {
+    run_elle_script("table-key-expand");
+}
