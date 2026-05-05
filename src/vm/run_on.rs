@@ -76,13 +76,24 @@ impl VM {
         self.jit_enabled = saved_jit;
 
         let bits = result.bits;
-        if bits.is_ok() || bits == crate::value::SIG_HALT {
+        if bits.is_ok() {
             let val = if let Some((_, v)) = self.fiber.signal.take() {
                 v
             } else {
                 Value::NIL
             };
             return (SIG_OK, val);
+        } else if bits == crate::value::SIG_HALT {
+            // (halt) → NIL → absorb as success. (halt <value>) → propagate.
+            let val = if let Some((_, v)) = self.fiber.signal.take() {
+                v
+            } else {
+                Value::NIL
+            };
+            if val == Value::NIL {
+                return (SIG_OK, val);
+            }
+            return (crate::value::SIG_HALT, val);
         }
 
         // Squelch enforcement: if the closure has a squelch mask and a
@@ -208,15 +219,23 @@ impl VM {
                     self.fiber.signal = Some(sig);
                 }
 
-                if eb.is_ok() || eb == crate::value::SIG_HALT {
-                    // Success — the result is on the fiber signal (set by
-                    // execute_bytecode_saving_stack's Halt handler).
+                if eb.is_ok() {
                     let val = if let Some((_, v)) = self.fiber.signal.take() {
                         v
                     } else {
                         Value::NIL
                     };
                     return (SIG_OK, val);
+                } else if eb == crate::value::SIG_HALT {
+                    let val = if let Some((_, v)) = self.fiber.signal.take() {
+                        v
+                    } else {
+                        Value::NIL
+                    };
+                    if val == Value::NIL {
+                        return (SIG_OK, val);
+                    }
+                    return (crate::value::SIG_HALT, val);
                 } else if eb.contains(SIG_ERROR) {
                     // Error already set on fiber.signal — extract it.
                     if let Some((bits, val)) = self.fiber.signal.take() {
@@ -422,8 +441,14 @@ impl VM {
 
         let result = match tier.call(vm_ptr, bytecode_ptr, &closure_rc, args) {
             Ok((value, signal)) => {
-                if signal.is_ok() || signal == crate::value::SIG_HALT {
+                if signal.is_ok() {
                     (SIG_OK, value)
+                } else if signal == crate::value::SIG_HALT {
+                    if value == Value::NIL {
+                        (SIG_OK, value)
+                    } else {
+                        (signal, value)
+                    }
                 } else {
                     (signal, value)
                 }

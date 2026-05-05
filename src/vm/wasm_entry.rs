@@ -72,9 +72,18 @@ impl VM {
         let wasm_tier = self.wasm_tier.as_ref().unwrap();
         match wasm_tier.call(vm_ptr, bytecode_ptr, &closure_rc, args) {
             Ok((value, signal)) => {
-                if signal.is_ok() || signal == SIG_HALT {
+                if signal.is_ok() {
                     self.fiber.stack.push(value);
-                    None // Continue dispatch
+                    None
+                } else if signal == SIG_HALT {
+                    if value == Value::NIL {
+                        self.fiber.stack.push(value);
+                        return None;
+                    }
+                    // Non-NIL halt: set signal, dispatch loop will catch it
+                    self.fiber.signal = Some((signal, value));
+                    self.fiber.stack.push(Value::NIL);
+                    None
                 } else if signal.contains(SIG_ERROR) {
                     // Error — set signal on fiber
                     self.fiber.signal = Some((signal, value));

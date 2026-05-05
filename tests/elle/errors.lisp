@@ -55,15 +55,13 @@
   (assert (not ok?) "fiber/new unknown signal keyword")
   (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
 # ── stack-overflow ────────────────────────────────────────────────────────────
-# Deep non-tail recursion must produce a catchable error, not SIGABRT.
-(let [[ok? err] (protect ((fn []
-                            (letrec [f (fn (n)
-                                         (if (= n 0)
-                                           (list)
-                                           (pair n (f (- n 1)))))]
-                              (length (f 100000))))))]
-  (assert (not ok?) "deep recursion produces error")
-  (assert (= (get err :error) :stack-overflow)
-          "deep recursion error kind is :stack-overflow"))
+# Stack overflow is a resource exhaustion condition (SIG_HALT), not a catchable
+# error (SIG_ERROR).  It cannot be intercepted by protect, silence, or signal
+# masks.  The script simply terminates with exit code 1 and an error message.
+#
+# Testing this requires running a separate elle process (see Rust integration
+# tests).  The deeply-recursive stdlib functions (filter, map, etc.) are tested
+# with large lists in functional.lisp — those tests pass because the functions
+# are now tail-recursive and stay within the call-depth limit.
 # ── internal-error (gensym without symbol table) — not easily testable in Elle
 # Skip: requires running without symbol table context.

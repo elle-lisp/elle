@@ -210,7 +210,10 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
+            if self.current_fiber_handle.is_none()
+                && !result_bits.contains(SIG_ERROR)
+                && !result_bits.contains(SIG_HALT)
+            {
                 set_error(
                     &mut self.fiber,
                     "state-error",
@@ -220,7 +223,7 @@ impl VM {
                 None
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) {
+                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
                     self.fiber.stack.push(Value::NIL);
                     None
                 } else {
@@ -278,7 +281,10 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
+            if self.current_fiber_handle.is_none()
+                && !result_bits.contains(SIG_ERROR)
+                && !result_bits.contains(SIG_HALT)
+            {
                 set_error(
                     &mut self.fiber,
                     "state-error",
@@ -639,7 +645,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits.contains(SIG_ERROR) {
+        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
             self.fiber.stack.push(Value::NIL);
             None
         } else if self.current_fiber_handle.is_none() {
@@ -679,7 +685,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits.contains(SIG_ERROR) {
+        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
             child_bits
         } else if self.current_fiber_handle.is_none() {
             // At root fiber: no parent to catch the propagated signal
@@ -742,7 +748,10 @@ impl VM {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
+            if self.current_fiber_handle.is_none()
+                && !result_bits.contains(SIG_ERROR)
+                && !result_bits.contains(SIG_HALT)
+            {
                 set_error(
                     &mut self.fiber,
                     "state-error",
@@ -795,7 +804,10 @@ impl VM {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
+            if self.current_fiber_handle.is_none()
+                && !result_bits.contains(SIG_ERROR)
+                && !result_bits.contains(SIG_HALT)
+            {
                 set_error(
                     &mut self.fiber,
                     "state-error",
@@ -855,7 +867,10 @@ impl VM {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
 
-            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
+            if self.current_fiber_handle.is_none()
+                && !result_bits.contains(SIG_ERROR)
+                && !result_bits.contains(SIG_HALT)
+            {
                 set_error(
                     &mut self.fiber,
                     "state-error",
@@ -864,7 +879,7 @@ impl VM {
                 JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) {
+                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
                     JitValue::nil()
                 } else {
                     // Uncaught non-error signal (yield, I/O, etc.) — side-exit.
@@ -911,7 +926,7 @@ impl VM {
         self.fiber.child_value = Some(fiber_value);
         self.fiber.signal = Some((child_bits, child_value));
 
-        if child_bits.contains(SIG_ERROR) {
+        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
             JitValue::nil()
         } else if self.current_fiber_handle.is_none() {
             set_error(
@@ -960,7 +975,10 @@ impl VM {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
             }
-            if self.current_fiber_handle.is_none() && !result_bits.contains(SIG_ERROR) {
+            if self.current_fiber_handle.is_none()
+                && !result_bits.contains(SIG_ERROR)
+                && !result_bits.contains(SIG_HALT)
+            {
                 set_error(
                     &mut self.fiber,
                     "state-error",
@@ -969,7 +987,7 @@ impl VM {
                 JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) {
+                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
                     JitValue::nil()
                 } else {
                     YIELD_SENTINEL

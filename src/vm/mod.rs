@@ -127,9 +127,17 @@ impl VM {
 
         // Signal handling loop — handles SIG_SWITCH iteratively.
         loop {
-            if bits.is_ok() || bits == SIG_HALT {
+            if bits.is_ok() {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 return Ok(value);
+            } else if bits == SIG_HALT {
+                let (_, value) = self.fiber.signal.take().unwrap();
+                // (halt) with no args → NIL → clean exit.
+                // (halt <value>) or stack overflow → non-NIL → fatal error.
+                if value == Value::NIL {
+                    return Ok(value);
+                }
+                return Err(self.format_error_with_location(value));
             } else if bits.contains(SIG_ERROR) {
                 let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                 return Err(self.format_error_with_location(err_value));

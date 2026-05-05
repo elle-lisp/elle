@@ -257,16 +257,20 @@ impl VM {
                 location_map: location_map.clone(),
             });
 
-            // Stack overflow guard: emit a catchable error instead of
-            // letting the Rust runtime abort on actual stack overflow.
+            // Stack overflow guard: resource exhaustion (not a signal-theoretic
+            // error — the analyzer cannot predict this).  Uses SIG_HALT so the
+            // condition bypasses all signal masks and propagates to the top-level
+            // executor as a fatal error.
             if self.fiber.call_depth > MAX_CALL_DEPTH {
                 self.fiber.call_depth -= 1;
                 self.fiber.call_stack.pop();
-                set_error(
-                    &mut self.fiber,
-                    "stack-overflow",
-                    format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
-                );
+                self.fiber.signal = Some((
+                    SIG_HALT,
+                    error_val(
+                        "stack-overflow",
+                        format!("call depth exceeded maximum ({})", MAX_CALL_DEPTH),
+                    ),
+                ));
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -781,9 +785,16 @@ impl VM {
         );
 
         let bits = result.bits;
-        if bits.is_ok() || bits == crate::value::SIG_HALT {
+        if bits.is_ok() {
             let (_, value) = self.fiber.signal.take().unwrap();
             Ok(value)
+        } else if bits == crate::value::SIG_HALT {
+            let (_, value) = self.fiber.signal.take().unwrap();
+            if value == Value::NIL {
+                Ok(value)
+            } else {
+                Err(self.format_error_with_location(value))
+            }
         } else if bits.contains(crate::value::SIG_ERROR) {
             let (_, err) = self
                 .fiber

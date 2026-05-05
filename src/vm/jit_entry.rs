@@ -234,9 +234,25 @@ impl VM {
                     &tail.location_map,
                 );
                 let eb = exec_result.bits;
-                if eb.is_ok() || eb == SIG_HALT {
+                if eb.is_ok() {
                     let (_, val) = self.fiber.signal.take().unwrap();
                     self.fiber.stack.push(val);
+                    return None;
+                } else if eb == SIG_HALT {
+                    // (halt) → NIL → absorb. (halt <value>) → let dispatch loop catch it.
+                    let val = self
+                        .fiber
+                        .signal
+                        .as_ref()
+                        .map(|(_, v)| *v)
+                        .unwrap_or(Value::NIL);
+                    if val == Value::NIL {
+                        self.fiber.signal.take();
+                        self.fiber.stack.push(Value::NIL);
+                        return None;
+                    }
+                    // Non-NIL halt: leave signal in place, dispatch loop will see it.
+                    self.fiber.stack.push(Value::NIL);
                     return None;
                 } else if eb.contains(SIG_ERROR) {
                     // SIG_ERROR — signal already set on fiber
