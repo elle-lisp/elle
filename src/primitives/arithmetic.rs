@@ -6,15 +6,6 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 pub(crate) fn prim_abs(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("abs: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match arithmetic::abs_value(&args[0]) {
         Ok(val) => (SIG_OK, val),
         Err(err_val) => (SIG_ERROR, err_val),
@@ -22,13 +13,6 @@ pub(crate) fn prim_abs(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_min(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "min: expected at least 1 argument, got 0"),
-        );
-    }
-
     let mut min = args[0];
     for arg in &args[1..] {
         if !arg.is_number() {
@@ -46,13 +30,6 @@ pub(crate) fn prim_min(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_max(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "max: expected at least 1 argument, got 0"),
-        );
-    }
-
     let mut max = args[0];
     for arg in &args[1..] {
         if !arg.is_number() {
@@ -70,16 +47,6 @@ pub(crate) fn prim_max(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_even(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("even?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     match args[0].as_int() {
         Some(n) => (SIG_OK, Value::bool(n % 2 == 0)),
         _ => (
@@ -93,16 +60,6 @@ pub(crate) fn prim_even(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_odd(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("odd?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     match args[0].as_int() {
         Some(n) => (SIG_OK, Value::bool(n % 2 != 0)),
         _ => (

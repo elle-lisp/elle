@@ -7,29 +7,11 @@ use crate::value::{error_val, Value};
 
 /// Check if value is nil
 pub(crate) fn prim_is_nil(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("nil?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_nil()))
 }
 
 /// Check if value is a pair (pair)
 pub(crate) fn prim_is_pair(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("pair?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_pair = args[0].as_pair().is_some()
         || args[0].as_syntax().is_some_and(
             |s| matches!(s.kind, crate::syntax::SyntaxKind::List(ref items) if !items.is_empty()),
@@ -39,15 +21,6 @@ pub(crate) fn prim_is_pair(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is a list (empty list or pair)
 pub(crate) fn prim_is_list(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("list?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_list = args[0].is_empty_list()
         || args[0].as_pair().is_some()
         || args[0]
@@ -58,57 +31,21 @@ pub(crate) fn prim_is_list(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is a number
 pub(crate) fn prim_is_number(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("number?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_number()))
 }
 
 /// Check if value is an integer
 pub(crate) fn prim_is_integer(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("integer?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_int()))
 }
 
 /// Check if value is a float
 pub(crate) fn prim_is_float(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("float?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_float()))
 }
 
 /// Check if value is a symbol
 pub(crate) fn prim_is_symbol(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("symbol?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_symbol = args[0].is_symbol()
         || args[0]
             .as_syntax()
@@ -118,15 +55,6 @@ pub(crate) fn prim_is_symbol(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is a string (immutable or mutable)
 pub(crate) fn prim_is_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].is_string() || args[0].is_string_mut()),
@@ -135,60 +63,23 @@ pub(crate) fn prim_is_string(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is a boolean
 pub(crate) fn prim_is_boolean(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("boolean?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_bool()))
 }
 
 /// Check if value is a keyword
 pub(crate) fn prim_is_keyword(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("keyword?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_keyword()))
 }
 
 /// Check if value is a keyword
 /// Get the type name of a value as a keyword
 pub(crate) fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("type-of: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let type_name = args[0].type_name();
     (SIG_OK, Value::keyword(type_name))
 }
 
 /// Check if value is a raw C pointer
 pub(crate) fn prim_ptr_predicate(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ptr?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].is_pointer() || args[0].as_managed_pointer().is_some()),
@@ -197,15 +88,6 @@ pub(crate) fn prim_ptr_predicate(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is an array (immutable or mutable indexed sequence)
 pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("array?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].as_array().is_some() || args[0].as_array_mut().is_some()),
@@ -214,15 +96,6 @@ pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is bytes (immutable or mutable binary data)
 pub(crate) fn prim_is_bytes(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bytes?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].is_bytes() || args[0].is_bytes_mut()),
@@ -231,15 +104,6 @@ pub(crate) fn prim_is_bytes(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is a struct (immutable or mutable key-value map)
 pub(crate) fn prim_is_struct(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("struct?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].as_struct().is_some() || args[0].as_struct_mut().is_some()),
@@ -248,12 +112,6 @@ pub(crate) fn prim_is_struct(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is callable (closure or native function)
 pub(crate) fn prim_is_fn(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "fn?: expected 1 argument"),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].is_closure() || args[0].is_native_fn()),
@@ -262,12 +120,6 @@ pub(crate) fn prim_is_fn(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is callable (function, collection, or parameter)
 pub(crate) fn prim_is_callable(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "callable?: expected 1 argument"),
-        );
-    }
     let v = &args[0];
     let callable = v.is_closure()
         || v.is_native_fn()
@@ -287,53 +139,20 @@ pub(crate) fn prim_is_callable(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is a native (built-in) function
 pub(crate) fn prim_is_native_fn(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "native-fn?: expected 1 argument"),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_native_fn()))
 }
 
 /// Check if value is mutable (can be modified in-place)
 pub(crate) fn prim_is_mutable(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("mutable?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(args[0].is_mutable()))
 }
 
 pub(crate) fn prim_is_immutable(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("immutable?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (SIG_OK, Value::bool(!args[0].is_mutable()))
 }
 
 /// Check if value is numerically zero
 pub(crate) fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("zero?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_zero = if let Some(i) = args[0].as_int() {
         i == 0
     } else if let Some(f) = args[0].as_float() {
@@ -345,15 +164,6 @@ pub(crate) fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_is_nonzero(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("nonzero?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_nonzero = if let Some(i) = args[0].as_int() {
         i != 0
     } else if let Some(f) = args[0].as_float() {
@@ -366,30 +176,12 @@ pub(crate) fn prim_is_nonzero(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is NaN
 pub(crate) fn prim_is_nan(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("nan?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_nan = args[0].as_number().map(|n| n.is_nan()).unwrap_or(false);
     (SIG_OK, Value::bool(is_nan))
 }
 
 /// Check if value is positive
 pub(crate) fn prim_is_pos(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("pos?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(i) = args[0].as_int() {
         return (SIG_OK, Value::bool(i > 0));
     }
@@ -407,15 +199,6 @@ pub(crate) fn prim_is_pos(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is negative
 pub(crate) fn prim_is_neg(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("neg?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(i) = args[0].as_int() {
         return (SIG_OK, Value::bool(i < 0));
     }
@@ -433,15 +216,6 @@ pub(crate) fn prim_is_neg(args: &[Value]) -> (SignalBits, Value) {
 
 /// Check if value is infinite
 pub(crate) fn prim_is_inf(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("inf?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let is_inf = args[0]
         .as_number()
         .map(|n| n.is_infinite())

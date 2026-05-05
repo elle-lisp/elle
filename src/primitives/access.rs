@@ -45,16 +45,6 @@ pub(crate) fn resolve_slice_index(index: i64, len: usize) -> usize {
 /// Polymorphic get - works on arrays, @arrays, strings, @strings, and structs
 /// `(get collection key [default])`
 pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("get: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let default = if args.len() == 3 { args[2] } else { Value::NIL };
 
     // Array (mutable indexed collection)
@@ -400,16 +390,6 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if args.len() != 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("put: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // @string (mutable string — indexed by grapheme cluster position)
     if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {

@@ -301,16 +301,6 @@ pub(crate) fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
 /// Convert a struct to a list of [key value] pairs
 /// (pairs {:a 1 :b 2}) -> ((:a 1) (:b 2))
 pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("pairs: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     // Helper: convert a slice of (TableKey, Value) pairs into a list of [key value] pairs
     fn pairs_from_slice(entries: &[(TableKey, Value)]) -> Value {
         let mut result = Value::EMPTY_LIST;

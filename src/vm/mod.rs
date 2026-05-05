@@ -30,6 +30,7 @@ pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
 use crate::compiler::bytecode::{Bytecode, Instruction};
+use crate::error::LocationMap;
 use crate::pipeline::lookup_stdlib_value;
 use crate::symbol::SymbolTable;
 use crate::value::{
@@ -39,7 +40,6 @@ use std::rc::Rc;
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
-        self.location_map = bytecode.location_map.clone();
         self.execute_bytecode(&bytecode.instructions, &bytecode.constants, None)
     }
 
@@ -84,7 +84,7 @@ impl VM {
         let mut current_bytecode = Rc::new(bytecode.to_vec());
         let mut current_constants = Rc::new(constants.to_vec());
         let mut current_env = closure_env.cloned().unwrap_or(empty_env);
-        let mut current_location_map = Rc::new(self.location_map.clone());
+        let mut current_location_map = Rc::new(LocationMap::new());
 
         // Initial execution with tail-call loop.
         // Pool rotation: when a tail call is rotation-safe, release the
@@ -277,7 +277,6 @@ impl VM {
         ];
         let synthetic_constants = vec![thunk, ev_run];
 
-        self.location_map = bytecode.location_map.clone();
         self.execute_bytecode(&synthetic_bc, &synthetic_constants, None)
     }
 }

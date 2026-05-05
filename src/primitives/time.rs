@@ -14,17 +14,7 @@ fn process_epoch() -> &'static Instant {
 
 /// Returns seconds elapsed since process start (monotonic clock)
 /// (clock/monotonic)
-pub(crate) fn prim_clock_monotonic(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("clock/monotonic: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
+pub(crate) fn prim_clock_monotonic(_args: &[Value]) -> (SignalBits, Value) {
     (
         SIG_OK,
         Value::float(process_epoch().elapsed().as_secs_f64()),
@@ -33,17 +23,7 @@ pub(crate) fn prim_clock_monotonic(args: &[Value]) -> (SignalBits, Value) {
 
 /// Returns thread CPU time in seconds
 /// (clock/cpu)
-pub(crate) fn prim_clock_cpu(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("clock/cpu: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
+pub(crate) fn prim_clock_cpu(_args: &[Value]) -> (SignalBits, Value) {
     let mut ts = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
@@ -63,17 +43,7 @@ pub(crate) fn prim_clock_cpu(args: &[Value]) -> (SignalBits, Value) {
 
 /// Returns seconds since Unix epoch (wall clock)
 /// (clock/realtime)
-pub(crate) fn prim_clock_realtime(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("clock/realtime: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
+pub(crate) fn prim_clock_realtime(_args: &[Value]) -> (SignalBits, Value) {
     match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => (SIG_OK, Value::float(duration.as_secs_f64())),
         Err(_) => (
@@ -89,16 +59,6 @@ pub(crate) fn prim_clock_realtime(args: &[Value]) -> (SignalBits, Value) {
 /// Sleeps for the specified number of seconds
 /// (time/sleep seconds)
 pub(crate) fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("time/sleep: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(n) = args[0].as_int() {
         if n < 0 {
             return (

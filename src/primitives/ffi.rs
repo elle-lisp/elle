@@ -90,8 +90,6 @@ mod tests {
     use crate::value::fiber::{SIG_ERROR, SIG_OK};
     use crate::value::Value;
 
-    #[cfg(feature = "ffi")]
-    use super::super::calling::prim_ffi_call;
     use super::super::loading::{prim_ffi_native, prim_ffi_signature};
     use super::super::memory::{
         prim_ffi_align, prim_ffi_array, prim_ffi_free, prim_ffi_malloc, prim_ffi_read,
@@ -200,13 +198,6 @@ mod tests {
     #[test]
     fn test_ffi_read_null_error() {
         let result = prim_ffi_read(&[Value::NIL, Value::keyword("i32")]);
-        assert_eq!(result.0, SIG_ERROR);
-    }
-
-    #[cfg(feature = "ffi")]
-    #[test]
-    fn test_ffi_call_arity_error() {
-        let result = prim_ffi_call(&[]);
         assert_eq!(result.0, SIG_ERROR);
     }
 

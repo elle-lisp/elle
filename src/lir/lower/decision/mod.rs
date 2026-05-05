@@ -781,17 +781,16 @@ fn compile_matrix(matrix: PatternMatrix, col_access: Vec<AccessPath>) -> Decisio
     }
 }
 
-// ── Reachability analysis ──────────────────────────────────────────
+// ── Test-only helpers ─────────────────────────────────────────────
 
-/// Find which arm indices are reachable in the decision tree.
-#[allow(dead_code)]
-pub fn find_reachable_arms(tree: &DecisionTree) -> HashSet<usize> {
+#[cfg(test)]
+fn find_reachable_arms(tree: &DecisionTree) -> HashSet<usize> {
     let mut reachable = HashSet::new();
     collect_reachable(tree, &mut reachable);
     reachable
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn collect_reachable(tree: &DecisionTree, out: &mut HashSet<usize>) {
     match tree {
         DecisionTree::Leaf { arm_index, .. } => {

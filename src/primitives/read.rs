@@ -16,16 +16,6 @@ use crate::value::{error_val, Value};
 /// (read "true")       # → true
 /// ```
 pub(crate) fn prim_read(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("read: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
@@ -69,16 +59,6 @@ pub(crate) fn prim_read(args: &[Value]) -> (SignalBits, Value) {
 /// (read-all "(+ 1 2) (- 3 4)")  # → ((+ 1 2) (- 3 4))
 /// ```
 pub(crate) fn prim_read_all(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("read-all: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let source = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {

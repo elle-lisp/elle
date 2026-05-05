@@ -459,14 +459,31 @@ pub enum LirInstr {
 
     // === Function Calls ===
     /// Call a function (callee is known to not suspend).
-    Call { dst: Reg, func: Reg, args: Vec<Reg> },
+    /// When `arity_checked` is true, the compiler verified arity at compile time.
+    Call {
+        dst: Reg,
+        func: Reg,
+        args: Vec<Reg>,
+        arity_checked: bool,
+    },
     /// Call a function that may suspend (yield, I/O, etc.).
     /// The WASM emitter creates a call-site continuation with spill/restore
     /// so the caller can resume if the callee yields.
     /// Only emitted inside functions whose signal includes may_suspend().
-    SuspendingCall { dst: Reg, func: Reg, args: Vec<Reg> },
+    /// When `arity_checked` is true, the compiler verified arity at compile time.
+    SuspendingCall {
+        dst: Reg,
+        func: Reg,
+        args: Vec<Reg>,
+        arity_checked: bool,
+    },
     /// Tail call (no return)
-    TailCall { func: Reg, args: Vec<Reg> },
+    /// When `arity_checked` is true, the compiler verified arity at compile time.
+    TailCall {
+        func: Reg,
+        args: Vec<Reg>,
+        arity_checked: bool,
+    },
 
     // === Data Construction ===
     /// Construct a cons cell

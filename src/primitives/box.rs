@@ -11,16 +11,6 @@ use crate::value::{error_val, Value};
 ///
 /// Creates a mutable box that can be modified with rebox
 pub(crate) fn prim_box(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("box: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     (SIG_OK, Value::lbox(args[0]))
 }
 
@@ -30,16 +20,6 @@ pub(crate) fn prim_box(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns the current value stored in the box
 pub(crate) fn prim_unbox(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("unbox: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(cell) = args[0].as_lbox() {
         let borrowed = cell.borrow();
         (SIG_OK, *borrowed)
@@ -60,16 +40,6 @@ pub(crate) fn prim_unbox(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Sets the box to contain the new value and returns the new value
 pub(crate) fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("rebox: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(cell) = args[0].as_lbox() {
         let mut borrowed = cell.borrow_mut();
         *borrowed = args[1];
@@ -91,16 +61,6 @@ pub(crate) fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns true if the value is a box, false otherwise
 pub(crate) fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("box?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     (SIG_OK, Value::bool(args[0].is_lbox()))
 }
 

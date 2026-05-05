@@ -9,16 +9,7 @@ use crate::value::types::Arity;
 use crate::value::{error_val, sorted_struct_get, Value};
 
 /// (watch) — create a filesystem watcher, returns an External handle.
-fn prim_watch(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("watch: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+fn prim_watch(_args: &[Value]) -> (SignalBits, Value) {
     match FsWatcher::new() {
         Ok(w) => (SIG_OK, Value::external("fs-watcher", w)),
         Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
@@ -27,15 +18,6 @@ fn prim_watch(args: &[Value]) -> (SignalBits, Value) {
 
 /// (watch-add watcher path) or (watch-add watcher path {:recursive bool})
 fn prim_watch_add(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("watch-add: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let watcher = match args[0].as_external::<FsWatcher>() {
         Some(w) => w,
         None => {
@@ -80,15 +62,6 @@ fn prim_watch_add(args: &[Value]) -> (SignalBits, Value) {
 
 /// (watch-remove watcher path)
 fn prim_watch_remove(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("watch-remove: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let watcher = match args[0].as_external::<FsWatcher>() {
         Some(w) => w,
         None => {
@@ -121,15 +94,6 @@ fn prim_watch_remove(args: &[Value]) -> (SignalBits, Value) {
 
 /// (watch-next watcher) — async: yields SIG_IO, resumes with event batch.
 fn prim_watch_next(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("watch-next: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     // Validate it's a watcher before yielding
     if args[0].as_external::<FsWatcher>().is_none() {
         return (
@@ -142,15 +106,6 @@ fn prim_watch_next(args: &[Value]) -> (SignalBits, Value) {
 
 /// (watch-close watcher)
 fn prim_watch_close(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("watch-close: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let watcher = match args[0].as_external::<FsWatcher>() {
         Some(w) => w,
         None => {

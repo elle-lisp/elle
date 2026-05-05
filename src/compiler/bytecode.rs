@@ -322,6 +322,11 @@ pub enum Instruction {
     IntrThaw,
     /// Bitwise tag+payload equality (pops b, pops a, pushes bool)
     Identical,
+
+    /// Arity-checked function call (arg_count). Compiler verified arity.
+    CallChecked,
+    /// Arity-checked tail call (arg_count). Compiler verified arity.
+    TailCallChecked,
 }
 
 /// Compiled bytecode with constants
@@ -504,7 +509,12 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (depth={}, index={})", depth, index));
                 i += 3;
             }
-            Instruction::Call | Instruction::TailCall if i + 1 < instructions.len() => {
+            Instruction::Call
+            | Instruction::TailCall
+            | Instruction::CallChecked
+            | Instruction::TailCallChecked
+                if i + 1 < instructions.len() =>
+            {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (args={})", arg_count));
                 i += 2;

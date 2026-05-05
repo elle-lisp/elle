@@ -28,15 +28,6 @@ where
 }
 
 fn prim_path_join(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                "path/join: expected at least 1 argument, got 0",
-            ),
-        );
-    }
     let mut parts = Vec::with_capacity(args.len());
     for arg in args {
         if let Some(s) = arg.with_string(|s| s.to_string()) {

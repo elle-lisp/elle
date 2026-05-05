@@ -25,16 +25,6 @@ pub(crate) fn prim_tuple(args: &[Value]) -> (SignalBits, Value) {
 /// pre-allocation of a fixed-size array with a uniform initial value.
 /// Returns @array (mutable), not array (immutable).
 pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("array/new: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let n = match args[0].as_int() {
         Some(i) => {
             if i < 0 {
@@ -70,16 +60,6 @@ pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
 
 /// Push a value onto the end of an array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("push: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(vec_ref) = args[0].as_array_mut() {
         fiberheap::incref(args[1]);
         let mut vec = vec_ref.borrow_mut();
@@ -220,16 +200,6 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
 
 /// Pop a value from the end of an @array or @string (mutates in place, returns the removed element)
 pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("pop: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
         match vec.pop() {
@@ -310,16 +280,6 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
 
 /// Pop n values from the end of an @array or @string and return them as a new collection
 pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("popn: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let n = match args[1].as_int() {
         Some(i) => {
             if i < 0 {
@@ -384,16 +344,6 @@ pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
 
 /// Insert a value at an index in an @array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("insert: expected 3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     use crate::primitives::access::resolve_index;
 
     let raw_index = match args[1].as_int() {
@@ -510,16 +460,6 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
 
 /// Remove element(s) at an index from an @array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("remove: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     use crate::primitives::access::resolve_index;
 
     let raw_index = match args[1].as_int() {

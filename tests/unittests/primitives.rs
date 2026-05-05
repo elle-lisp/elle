@@ -288,18 +288,25 @@ fn test_list_operation_errors() {
     assert!(call_primitive(&first, &[Value::NIL]).is_err());
 }
 
+// Arity checking — verified at the VM dispatch level
 #[test]
 fn test_arity_errors() {
-    let (_vm, mut symbols, meta) = setup();
-
     // first requires exactly 1 argument
-    let first = get_primitive(&meta, &mut symbols, "first");
-    assert!(call_primitive(&first, &[]).is_err());
-    assert!(call_primitive(&first, &[Value::int(1), Value::int(2)]).is_err());
+    assert!(eval_source("(first)").is_err());
+    assert!(eval_source("(first 1 2)").is_err());
 
     // = requires exactly 2 arguments
-    let eq = get_primitive(&meta, &mut symbols, "=");
-    assert!(call_primitive(&eq, &[Value::int(1)]).is_err());
+    assert!(eval_source("(= 1)").is_err());
+}
+
+#[test]
+fn test_disbit_arity_error() {
+    assert!(eval_source("(disassemble/bytecode)").is_err());
+}
+
+#[test]
+fn test_disjit_arity_error() {
+    assert!(eval_source("(disassemble/jit)").is_err());
 }
 
 // Macro and meta-programming tests
@@ -706,20 +713,6 @@ fn test_string_split_errors() {
     let (_vm, mut symbols, meta) = setup();
     let split_fn = get_primitive(&meta, &mut symbols, "string-split");
 
-    // Wrong arity - too few args
-    assert!(call_primitive(&split_fn, &[Value::string("hello")]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(
-        &split_fn,
-        &[
-            Value::string("hello"),
-            Value::string(","),
-            Value::string("extra"),
-        ]
-    )
-    .is_err());
-
     // Wrong type - first arg not string
     assert!(call_primitive(&split_fn, &[Value::int(42), Value::string(","),]).is_err());
 
@@ -734,21 +727,6 @@ fn test_string_split_errors() {
 fn test_string_replace_errors() {
     let (_vm, mut symbols, meta) = setup();
     let replace_fn = get_primitive(&meta, &mut symbols, "string-replace");
-
-    // Wrong arity - too few args
-    assert!(call_primitive(&replace_fn, &[Value::string("hello"), Value::string("l"),]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(
-        &replace_fn,
-        &[
-            Value::string("hello"),
-            Value::string("l"),
-            Value::string("x"),
-            Value::string("extra"),
-        ]
-    )
-    .is_err());
 
     // Wrong type - first arg not string
     assert!(call_primitive(
@@ -788,12 +766,6 @@ fn test_string_trim_errors() {
     let (_vm, mut symbols, meta) = setup();
     let trim_fn = get_primitive(&meta, &mut symbols, "string-trim");
 
-    // Wrong arity - too few args
-    assert!(call_primitive(&trim_fn, &[]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(&trim_fn, &[Value::string("hello"), Value::string("extra"),]).is_err());
-
     // Wrong type - not string
     assert!(call_primitive(&trim_fn, &[Value::int(42)]).is_err());
 }
@@ -802,20 +774,6 @@ fn test_string_trim_errors() {
 fn test_string_contains_errors() {
     let (_vm, mut symbols, meta) = setup();
     let contains_fn = get_primitive(&meta, &mut symbols, "string-contains?");
-
-    // Wrong arity - too few args
-    assert!(call_primitive(&contains_fn, &[Value::string("hello")]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(
-        &contains_fn,
-        &[
-            Value::string("hello"),
-            Value::string("l"),
-            Value::string("extra"),
-        ]
-    )
-    .is_err());
 
     // Wrong type - first arg not string
     assert!(call_primitive(&contains_fn, &[Value::int(42), Value::string("l"),]).is_err());
@@ -829,20 +787,6 @@ fn test_string_starts_with_errors() {
     let (_vm, mut symbols, meta) = setup();
     let starts_fn = get_primitive(&meta, &mut symbols, "string-starts-with?");
 
-    // Wrong arity - too few args
-    assert!(call_primitive(&starts_fn, &[Value::string("hello")]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(
-        &starts_fn,
-        &[
-            Value::string("hello"),
-            Value::string("h"),
-            Value::string("extra"),
-        ]
-    )
-    .is_err());
-
     // Wrong type - first arg not string
     assert!(call_primitive(&starts_fn, &[Value::int(42), Value::string("h"),]).is_err());
 
@@ -855,20 +799,6 @@ fn test_string_ends_with_errors() {
     let (_vm, mut symbols, meta) = setup();
     let ends_fn = get_primitive(&meta, &mut symbols, "string-ends-with?");
 
-    // Wrong arity - too few args
-    assert!(call_primitive(&ends_fn, &[Value::string("hello")]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(
-        &ends_fn,
-        &[
-            Value::string("hello"),
-            Value::string("o"),
-            Value::string("extra"),
-        ]
-    )
-    .is_err());
-
     // Wrong type - first arg not string
     assert!(call_primitive(&ends_fn, &[Value::int(42), Value::string("o"),]).is_err());
 
@@ -880,16 +810,6 @@ fn test_string_ends_with_errors() {
 fn test_string_join_errors() {
     let (_vm, mut symbols, meta) = setup();
     let join_fn = get_primitive(&meta, &mut symbols, "string-join");
-
-    // Wrong arity - too few args
-    assert!(call_primitive(&join_fn, &[list(vec![])]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(
-        &join_fn,
-        &[list(vec![]), Value::string(","), Value::string("extra"),]
-    )
-    .is_err());
 
     // Wrong type - second arg not string
     assert!(call_primitive(&join_fn, &[list(vec![]), Value::int(42),]).is_err());
@@ -990,10 +910,6 @@ fn test_import_file_primitive() {
 
     // Test with invalid argument type
     let result = call_primitive(&import_file, &[Value::int(42)]);
-    assert!(result.is_err());
-
-    // Test with wrong argument count
-    let result = call_primitive(&import_file, &[]);
     assert!(result.is_err());
 }
 
@@ -1231,10 +1147,6 @@ fn test_clock_monotonic_primitive() {
         t2 >= t1,
         "clock/monotonic should be monotonically non-decreasing"
     );
-
-    // Arity error when given arguments
-    let result = call_primitive(&clock, &[Value::int(1)]);
-    assert!(result.is_err());
 }
 
 #[test]
@@ -1254,10 +1166,6 @@ fn test_clock_realtime_primitive() {
         val.as_float().unwrap() > 1_700_000_000.0,
         "clock/realtime should be a plausible epoch timestamp"
     );
-
-    // Arity error when given arguments
-    let result = call_primitive(&clock, &[Value::int(1)]);
-    assert!(result.is_err());
 }
 
 #[test]
@@ -1279,10 +1187,6 @@ fn test_clock_cpu_primitive() {
     let t1 = call_primitive(&clock, &[]).unwrap().as_float().unwrap();
     let t2 = call_primitive(&clock, &[]).unwrap().as_float().unwrap();
     assert!(t2 >= t1, "clock/cpu should be non-decreasing");
-
-    // Arity error when given arguments
-    let result = call_primitive(&clock, &[Value::int(1)]);
-    assert!(result.is_err());
 }
 
 #[test]
@@ -1681,14 +1585,6 @@ fn test_disbit_type_error_on_non_closure() {
 }
 
 #[test]
-fn test_disbit_arity_error() {
-    let (_vm, mut symbols, meta) = setup();
-    let disbit = get_primitive(&meta, &mut symbols, "disbit");
-    let result = call_primitive(&disbit, &[]);
-    assert!(result.is_err(), "disbit with no args should error");
-}
-
-#[test]
 fn test_disbit_returns_array_for_pure_closure() {
     let (_vm, mut symbols, meta) = setup();
     let disbit = get_primitive(&meta, &mut symbols, "disbit");
@@ -1715,14 +1611,6 @@ fn test_disjit_type_error_on_non_closure() {
     let disjit = get_primitive(&meta, &mut symbols, "disjit");
     let result = call_primitive(&disjit, &[Value::int(42)]);
     assert!(result.is_err(), "disjit on non-closure should error");
-}
-
-#[test]
-fn test_disjit_arity_error() {
-    let (_vm, mut symbols, meta) = setup();
-    let disjit = get_primitive(&meta, &mut symbols, "disjit");
-    let result = call_primitive(&disjit, &[]);
-    assert!(result.is_err(), "disjit with no args should error");
 }
 
 // ============================================================================

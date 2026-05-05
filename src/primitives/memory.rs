@@ -12,12 +12,6 @@ use super::ffi::{extract_pointer_addr, resolve_type_desc};
 // ── Struct/array type creation ──────────────────────────────────────
 
 pub(crate) fn prim_ffi_struct(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/struct: expected 1 argument"),
-        );
-    }
     // Accept array, @array, or list of type descriptors
     let field_vals = if let Some(arr) = args[0].as_array() {
         arr.to_vec()
@@ -75,12 +69,6 @@ pub(crate) fn prim_ffi_struct(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_ffi_array(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/array: expected 2 arguments"),
-        );
-    }
     let elem_desc = match resolve_type_desc(&args[0], "ffi/array") {
         Ok(desc) => {
             if matches!(desc, TypeDesc::Void) {
@@ -133,12 +121,6 @@ pub(crate) fn prim_ffi_array(args: &[Value]) -> (SignalBits, Value) {
 // ── Type introspection ──────────────────────────────────────────────
 
 pub fn prim_ffi_size(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/size: expected 1 argument"),
-        );
-    }
     let desc = match resolve_type_desc(&args[0], "ffi/size") {
         Ok(t) => t,
         Err(e) => return e,
@@ -150,12 +132,6 @@ pub fn prim_ffi_size(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub fn prim_ffi_align(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/align: expected 1 argument"),
-        );
-    }
     let desc = match resolve_type_desc(&args[0], "ffi/align") {
         Ok(t) => t,
         Err(e) => return e,
@@ -169,12 +145,6 @@ pub fn prim_ffi_align(args: &[Value]) -> (SignalBits, Value) {
 // ── Memory management ───────────────────────────────────────────────
 
 pub fn prim_ffi_malloc(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/malloc: expected 1 argument"),
-        );
-    }
     let size = match args[0].as_int() {
         Some(n) if n > 0 => n as usize,
         Some(_) => {
@@ -205,12 +175,6 @@ pub fn prim_ffi_malloc(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub fn prim_ffi_free(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/free: expected 1 argument"),
-        );
-    }
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL); // free(NULL) is a no-op
     }
@@ -248,12 +212,6 @@ pub fn prim_ffi_free(args: &[Value]) -> (SignalBits, Value) {
 // ── Typed memory access ─────────────────────────────────────────────
 
 pub fn prim_ffi_read(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/read: expected 2 arguments"),
-        );
-    }
     let addr = match extract_pointer_addr(&args[0], "ffi/read") {
         Ok(a) => a,
         Err(e) => return e,
@@ -327,12 +285,6 @@ pub fn prim_ffi_read(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub fn prim_ffi_write(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 3 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/write: expected 3 arguments"),
-        );
-    }
     let addr = match extract_pointer_addr(&args[0], "ffi/write") {
         Ok(a) => a,
         Err(e) => return e,
@@ -548,12 +500,6 @@ pub fn prim_ffi_write(args: &[Value]) -> (SignalBits, Value) {
 // ── String from pointer ─────────────────────────────────────────────
 
 pub(crate) fn prim_ffi_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/string: expected 1 or 2 arguments"),
-        );
-    }
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL);
     }
@@ -610,15 +556,6 @@ pub(crate) fn prim_ffi_string(args: &[Value]) -> (SignalBits, Value) {
 /// existing allocation; ownership remains with the original managed pointer.
 /// The offset may be negative to move backwards.
 pub fn prim_ptr_add(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ptr/add: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let addr = match extract_pointer_addr(&args[0], "ptr/add") {
         Ok(a) => a,
         Err(e) => return e,
@@ -680,15 +617,6 @@ pub fn prim_ptr_add(args: &[Value]) -> (SignalBits, Value) {
 /// Returns `addr_a - addr_b` as a signed integer. Negative if `a < b`.
 /// Both inputs may be raw or managed pointers.
 pub fn prim_ptr_diff(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ptr/diff: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let addr_a = match extract_pointer_addr(&args[0], "ptr/diff") {
         Ok(a) => a,
         Err(e) => return e,
@@ -708,15 +636,6 @@ pub fn prim_ptr_diff(args: &[Value]) -> (SignalBits, Value) {
 /// The address is at most 48 bits on current hardware, so it always fits
 /// in a signed i64 (2^63-1 >> 2^48-1). The cast is safe.
 pub fn prim_ptr_to_int(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ptr/to-int: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let addr = match extract_pointer_addr(&args[0], "ptr/to-int") {
         Ok(a) => a,
         Err(e) => return e,
@@ -730,15 +649,6 @@ pub fn prim_ptr_to_int(args: &[Value]) -> (SignalBits, Value) {
 /// Returns `nil` if the address is 0 (consistent with `Value::pointer(0) == NIL`).
 /// Validates the address fits in a usize before calling `Value::pointer`.
 pub fn prim_ptr_from_int(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("ptr/from-int: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let n = match args[0].as_int() {
         Some(n) => n,
         None => {

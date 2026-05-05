@@ -191,6 +191,7 @@ mod tests {
                 dst: Reg(2),
                 func: Reg(1),
                 args: vec![Reg(0)],
+                arity_checked: false,
             },
             Span::synthetic(),
         ));
@@ -506,6 +507,7 @@ mod tests {
             LirInstr::TailCall {
                 func: Reg(1),
                 args: vec![Reg(0)],
+                arity_checked: false,
             },
             Span::synthetic(),
         ));

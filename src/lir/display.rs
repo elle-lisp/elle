@@ -120,15 +120,38 @@ impl fmt::Display for LirInstr {
             }
 
             // === Function Calls ===
-            LirInstr::Call { dst, func, args } | LirInstr::SuspendingCall { dst, func, args } => {
+            LirInstr::Call {
+                dst,
+                func,
+                args,
+                arity_checked,
+            }
+            | LirInstr::SuspendingCall {
+                dst,
+                func,
+                args,
+                arity_checked,
+            } => {
                 write!(f, "{} ← {}(", dst, func)?;
                 fmt_regs(args, f)?;
-                f.write_str(")")
+                if *arity_checked {
+                    f.write_str(") ✓")
+                } else {
+                    f.write_str(")")
+                }
             }
-            LirInstr::TailCall { func, args } => {
+            LirInstr::TailCall {
+                func,
+                args,
+                arity_checked,
+            } => {
                 write!(f, "tailcall {}(", func)?;
                 fmt_regs(args, f)?;
-                f.write_str(")")
+                if *arity_checked {
+                    f.write_str(") ✓")
+                } else {
+                    f.write_str(")")
+                }
             }
 
             // === Data Construction ===
@@ -395,6 +418,7 @@ mod tests {
             dst: Reg(5),
             func: Reg(3),
             args: vec![Reg(4)],
+            arity_checked: false,
         };
         assert_eq!(format!("{}", instr), "r5 ← r3(r4)");
     }
@@ -405,6 +429,7 @@ mod tests {
             dst: Reg(5),
             func: Reg(3),
             args: vec![Reg(1), Reg(2)],
+            arity_checked: false,
         };
         assert_eq!(format!("{}", instr), "r5 ← r3(r1, r2)");
     }
@@ -414,6 +439,7 @@ mod tests {
         let instr = LirInstr::TailCall {
             func: Reg(0),
             args: vec![Reg(1), Reg(2)],
+            arity_checked: false,
         };
         assert_eq!(format!("{}", instr), "tailcall r0(r1, r2)");
     }

@@ -6,11 +6,8 @@
 //! - Batch JIT compilation for call peers
 //! - Fallback to interpreter on compilation failure
 
-use crate::jit::{
-    JitCode, JitCompiler, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL,
-};
+use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::{SignalBits, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use super::core::VM;
@@ -325,113 +322,6 @@ impl VM {
 
     /// Try batch JIT compilation for a hot function and its call peers.
     ///
-    /// Returns `Some` if batch compilation succeeded and the hot function
-    /// was executed. Returns `None` to fall through to solo compilation.
-    ///
-    /// Currently always returns `None` (discover_compilation_group returns
-    /// empty with globals removed). Retained for future batch compilation.
-    #[allow(dead_code)]
-    fn try_batch_jit(
-        &mut self,
-        lir_func: &Rc<crate::lir::LirFunction>,
-        _bytecode_ptr: *const u8,
-        closure: &crate::value::Closure,
-        args: &[Value],
-        func: Value,
-        hot_sym: Option<SymbolId>,
-    ) -> Option<Option<SignalBits>> {
-        // With globals removed, discover_compilation_group always returns
-        // empty — batch JIT requires compile-time peer discovery (future work).
-        let group = crate::jit::discover_compilation_group(lir_func, &[]);
-        if group.is_empty() {
-            return None;
-        }
-
-        let hot_sym = hot_sym?;
-
-        let compiler = match JitCompiler::new() {
-            Ok(c) => c,
-            Err(e) => {
-                panic!("JIT compiler creation failed: {}. This is a bug.", e);
-            }
-        };
-
-        let mut members = Vec::with_capacity(group.len() + 1);
-        members.push(crate::jit::BatchMember {
-            sym: hot_sym,
-            lir: lir_func,
-        });
-
-        for (sym, lir) in &group {
-            if *sym != hot_sym {
-                members.push(crate::jit::BatchMember { sym: *sym, lir });
-            }
-        }
-
-        if members.len() <= 1 {
-            return None;
-        }
-
-        let results =
-            match compiler.compile_batch(&members, (*closure.template.symbol_names).clone()) {
-                Ok(r) => r,
-                Err(e) => match &e {
-                    crate::jit::JitError::UnsupportedInstruction(_)
-                    | crate::jit::JitError::Yielding => {
-                        return None;
-                    }
-                    _ => {
-                        panic!(
-                            "Batch JIT compilation failed: {}. \
-                         This is a bug — all members were pre-validated as JIT-compilable.",
-                            e
-                        );
-                    }
-                },
-            };
-
-        // Insert all compiled functions into cache and find the hot one
-        let mut hot_jit_code = None;
-        for (sym, jit_code) in results {
-            let jit_code = Arc::new(jit_code);
-            if sym == hot_sym {
-                let bc_ptr = closure.template.bytecode.as_ptr();
-                self.jit_cache.insert(bc_ptr, jit_code.clone());
-                hot_jit_code = Some(jit_code);
-            }
-        }
-
-        if let Some(jit_code) = hot_jit_code {
-            return Some(self.run_jit(&jit_code, closure, args, func));
-        }
-
-        None
-    }
-
-    /// Record a JIT rejection for a closure. Only the first rejection per
-    /// closure template is stored (deduplicated by bytecode pointer).
-    #[allow(dead_code)]
-    fn record_jit_rejection(
-        &mut self,
-        bytecode_ptr: *const u8,
-        closure: &crate::value::Closure,
-        error: crate::jit::JitError,
-    ) {
-        self.jit_rejections.entry(bytecode_ptr).or_insert_with(|| {
-            // Prefer LIR name, fall back to closure template name.
-            let name = closure
-                .template
-                .lir_function
-                .as_ref()
-                .and_then(|f| f.name.clone())
-                .or_else(|| closure.template.name.as_ref().map(|n| n.to_string()));
-            JitRejectionInfo {
-                name,
-                reason: error,
-            }
-        });
-    }
-
     /// Find the SymbolId for a closure matching the given bytecode pointer.
     ///
     /// With globals removed, there is no global symbol table to scan.

@@ -19,15 +19,6 @@ use crate::value::{error_val, Value};
 /// - returns a new heap object with the same data and traits = table
 /// - for mutable types, data storage is shared (same RefCell)
 pub(crate) fn prim_with_traits(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("with-traits: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let value = args[0];
     let table = args[1];
 
@@ -183,15 +174,6 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
 /// Returns the trait table attached to value, or nil if none.
 /// For immediate values and infrastructure types, returns nil (no error).
 pub(crate) fn prim_traits(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("traits: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let value = args[0];
     if !value.is_heap() {
         return (SIG_OK, Value::NIL);

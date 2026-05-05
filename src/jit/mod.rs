@@ -36,6 +36,7 @@ mod compiler;
 mod data;
 pub(crate) mod dispatch;
 mod fastpath;
+#[allow(dead_code)]
 mod group;
 mod helpers;
 mod runtime;
@@ -48,7 +49,6 @@ pub(crate) mod worker;
 pub use code::JitCode;
 pub use compiler::{BatchMember, JitCompiler};
 pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
-pub(crate) use group::discover_compilation_group;
 pub use value::JitValue;
 
 use std::fmt;

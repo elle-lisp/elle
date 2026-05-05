@@ -458,7 +458,9 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::Call { dst, func, args } => {
+            LirInstr::Call {
+                dst, func, args, ..
+            } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self
                     .vm_ptr
@@ -545,7 +547,7 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::TailCall { func, args } => {
+            LirInstr::TailCall { func, args, .. } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("TailCall without vm pointer".to_string())
@@ -947,7 +949,9 @@ impl<'a> FunctionTranslator<'a> {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
 
-            LirInstr::SuspendingCall { dst, func, args } => {
+            LirInstr::SuspendingCall {
+                dst, func, args, ..
+            } => {
                 // SuspendingCall: the callee may yield. Handled identically
                 // to Call, with an unconditional yield check after the call.
                 // LBox cells are first-class values in registers (no auto-

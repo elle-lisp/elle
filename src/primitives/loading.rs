@@ -10,12 +10,6 @@ use crate::value::{error_val, Value};
 use super::ffi::resolve_type_desc;
 
 pub(crate) fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/native: expected 1 argument"),
-        );
-    }
     let vm_ptr = match crate::context::get_vm_context() {
         Some(ptr) => ptr,
         None => {
@@ -62,12 +56,6 @@ pub(crate) fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_ffi_lookup(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/lookup: expected 2 arguments"),
-        );
-    }
     let lib_id = match args[0].as_lib_handle() {
         Some(id) => id,
         None => {
@@ -126,12 +114,6 @@ pub(crate) fn prim_ffi_lookup(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/signature: expected 2 or 3 arguments"),
-        );
-    }
     let ret = match resolve_type_desc(&args[0], "ffi/signature") {
         Ok(t) => t,
         Err(e) => return e,
@@ -213,12 +195,6 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
 
 #[cfg(feature = "ffi")]
 pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/callback: expected 2 arguments"),
-        );
-    }
     let sig = match args[0].as_ffi_signature() {
         Some(s) => s.clone(),
         None => {
@@ -298,12 +274,6 @@ pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
 
 #[cfg(feature = "ffi")]
 pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val("arity-error", "ffi/callback-free: expected 1 argument"),
-        );
-    }
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL); // free(nil) is a no-op
     }

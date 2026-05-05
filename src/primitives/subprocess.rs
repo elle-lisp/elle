@@ -16,33 +16,23 @@ use crate::value::{error_val, list, sorted_struct_get, Value};
 pub(crate) fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
     let code = if args.is_empty() {
         0
-    } else if args.len() == 1 {
-        if let Some(n) = args[0].as_int() {
-            if !(0..=255).contains(&n) {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        format!("exit: code must be between 0 and 255, got {}", n),
-                    ),
-                );
-            }
-            n as i32
-        } else {
+    } else if let Some(n) = args[0].as_int() {
+        if !(0..=255).contains(&n) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "type-error",
-                    format!("exit: expected integer, got {}", args[0].type_name()),
+                    "argument-error",
+                    format!("exit: code must be between 0 and 255, got {}", n),
                 ),
             );
         }
+        n as i32
     } else {
         return (
             SIG_ERROR,
             error_val(
-                "arity-error",
-                format!("exit: expected 0-1 arguments, got {}", args.len()),
+                "type-error",
+                format!("exit: expected integer, got {}", args[0].type_name()),
             ),
         );
     };
@@ -60,15 +50,6 @@ pub(crate) fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
 /// is maskable by fiber signal masks but non-resumable: once a fiber
 /// halts, it is Dead.
 pub(crate) fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() > 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("halt: expected 0-1 arguments, got {}", args.len()),
-            ),
-        );
-    }
     let value = if args.is_empty() { Value::NIL } else { args[0] };
     (SIG_HALT, value)
 }
@@ -130,15 +111,6 @@ pub(crate) fn prim_sys_argv(_args: &[Value]) -> (SignalBits, Value) {
 /// (sys/env) => {"HOME" "/home/user" "PATH" "/usr/bin:..." ...}
 /// (sys/env "HOME") => "/home/user" or nil if not set
 pub(crate) fn prim_sys_env(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() > 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("sys/env: expected 0-1 arguments, got {}", args.len()),
-            ),
-        );
-    }
     if args.len() == 1 {
         let name = match args[0].with_string(|s| s.to_string()) {
             Some(s) => s,
@@ -441,19 +413,6 @@ fn extract_string_sequence(seq: &Value, fn_name: &str) -> Result<Vec<String>, (S
 ///
 /// Returns (SIG_EXEC | SIG_IO | SIG_YIELD, io-request).
 fn prim_subprocess_exec(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "subprocess/exec: expected 2-3 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-
     let program = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
         None => {
@@ -508,15 +467,6 @@ fn prim_subprocess_exec(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Returns (SIG_EXEC | SIG_IO | SIG_YIELD, io-request).
 fn prim_subprocess_wait(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("subprocess/wait: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let handle_val = match extract_process_handle(&args[0], "subprocess/wait") {
         Ok(v) => v,
         Err(e) => return e,
@@ -563,18 +513,6 @@ fn keyword_to_signal(name: &str) -> Option<libc::c_int> {
 ///
 /// Synchronous — returns (SIG_OK, nil) on success, (SIG_ERROR, error) on failure.
 fn prim_subprocess_kill(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "subprocess/kill: expected 1-2 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
     let handle_val = match extract_process_handle(&args[0], "subprocess/kill") {
         Ok(v) => v,
         Err(e) => return e,
@@ -644,15 +582,6 @@ fn prim_subprocess_kill(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Synchronous — no yield.
 fn prim_subprocess_pid(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("subprocess/pid: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let handle_val = match extract_process_handle(&args[0], "subprocess/pid") {
         Ok(v) => v,
         Err(e) => return e,
@@ -824,12 +753,6 @@ mod tests {
         assert_eq!(value, Value::int(42));
     }
 
-    #[test]
-    fn test_halt_too_many_args() {
-        let (signal, _) = prim_halt(&[Value::int(0), Value::int(1)]);
-        assert_eq!(signal, SIG_ERROR);
-    }
-
     // --- sys/args ---
 
     #[test]
@@ -987,25 +910,6 @@ mod tests {
     // --- subprocess/exec ---
 
     #[test]
-    fn test_subprocess_exec_arity_too_few() {
-        let (sig, _) = prim_subprocess_exec(&[]);
-        assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo")]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_arity_too_many() {
-        let (sig, _) = prim_subprocess_exec(&[
-            Value::string("echo"),
-            Value::array(vec![]),
-            Value::struct_from(std::collections::BTreeMap::new()),
-            Value::string("extra"),
-        ]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
     fn test_subprocess_exec_program_not_string() {
         let (sig, _) = prim_subprocess_exec(&[Value::int(42), Value::array(vec![])]);
         assert_eq!(sig, SIG_ERROR);
@@ -1139,14 +1043,6 @@ mod tests {
     // --- subprocess/wait ---
 
     #[test]
-    fn test_subprocess_wait_arity() {
-        let (sig, _) = prim_subprocess_wait(&[]);
-        assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_subprocess_wait(&[Value::NIL, Value::NIL]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
     fn test_subprocess_wait_wrong_type() {
         let (sig, _) = prim_subprocess_wait(&[Value::int(42)]);
         assert_eq!(sig, SIG_ERROR);
@@ -1234,14 +1130,6 @@ mod tests {
     }
 
     // --- subprocess/pid ---
-
-    #[test]
-    fn test_subprocess_pid_arity() {
-        let (sig, _) = prim_subprocess_pid(&[]);
-        assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_subprocess_pid(&[Value::NIL, Value::NIL]);
-        assert_eq!(sig, SIG_ERROR);
-    }
 
     #[test]
     fn test_subprocess_pid_wrong_type() {

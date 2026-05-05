@@ -56,20 +56,6 @@ fn mode_to_flags(mode: &str) -> Option<(i32, Direction)> {
 /// Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Open`.
 /// Argument validation (path type, mode keyword, timeout) happens here before yielding.
 fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits, Value) {
-    if args.len() < 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "{}: expected at least 2 arguments, got {}",
-                    prim_name,
-                    args.len()
-                ),
-            ),
-        );
-    }
-
     let path = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
         None => {
@@ -164,15 +150,6 @@ fn prim_port_open_bytes(args: &[Value]) -> (SignalBits, Value) {
 /// fd is dropped. For stdio ports (no owned fd) and already-closed
 /// ports, completes synchronously.
 fn prim_port_close(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/close: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let port = match extract_port(&args[0], "port/close") {
         Ok(p) => p,
         Err(e) => return e,
@@ -192,58 +169,22 @@ fn prim_port_close(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (port/stdin) → port
-fn prim_port_stdin(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/stdin: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+fn prim_port_stdin(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::external("port", Port::stdin()))
 }
 
 /// (port/stdout) → port
-fn prim_port_stdout(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/stdout: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+fn prim_port_stdout(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::external("port", Port::stdout()))
 }
 
 /// (port/stderr) → port
-fn prim_port_stderr(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/stderr: expected 0 arguments, got {}", args.len()),
-            ),
-        );
-    }
+fn prim_port_stderr(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::external("port", Port::stderr()))
 }
 
 /// (port? value) → boolean
 fn prim_is_port(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     (
         SIG_OK,
         Value::bool(args[0].external_type_name() == Some("port")),
@@ -255,15 +196,6 @@ fn prim_is_port(args: &[Value]) -> (SignalBits, Value) {
 /// Returns true if the port is open, false if closed.
 /// Signals :type-error if argument is not a port.
 fn prim_is_port_open(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/open?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let port = match extract_port(&args[0], "port/open?") {
         Ok(p) => p,
         Err(e) => return e,
@@ -371,15 +303,6 @@ fn prim_port_set_options(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Signals :type-error if argument is not a port.
 fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/path: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let port = match extract_port(&args[0], "port/path") {
         Ok(p) => p,
         Err(e) => return e,
@@ -406,15 +329,6 @@ fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
 fn prim_port_seek(args: &[Value]) -> (SignalBits, Value) {
     // Arity: exactly 2 or exactly 4 (port, offset, :from, :value).
     // 0, 1, 3, or 5+ args are all errors.
-    if args.len() < 2 || args.len() > 4 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/seek: expected 2 or 4 arguments, got {}", args.len()),
-            ),
-        );
-    }
     if args.len() == 3 {
         return (
             SIG_ERROR,
@@ -524,16 +438,6 @@ fn prim_port_seek(args: &[Value]) -> (SignalBits, Value) {
 /// Logical position = kernel file offset - buffered-but-unconsumed bytes.
 /// Only valid on file ports. Returns :type-error on other port kinds.
 fn prim_port_tell(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/tell: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let port = match extract_port(&args[0], "port/tell") {
         Ok(p) => p,
         Err(e) => return e,
@@ -913,18 +817,6 @@ mod tests {
     // ── port/open early-error cases (before yielding) ─────────────────────────
 
     #[test]
-    fn test_port_open_too_few_args_errors() {
-        let (bits, _) = prim_port_open(&[Value::string("/tmp/foo")]);
-        assert_eq!(bits, SIG_ERROR, "too few args must error before yielding");
-    }
-
-    #[test]
-    fn test_port_open_no_args_errors() {
-        let (bits, _) = prim_port_open(&[]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
     fn test_port_open_non_string_path_errors() {
         let (bits, _) = prim_port_open(&[Value::int(42), Value::keyword("read")]);
         assert_eq!(
@@ -1078,12 +970,6 @@ mod tests {
     }
 
     #[test]
-    fn test_port_path_wrong_arity_errors() {
-        let (bits, _) = prim_port_path(&[]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
     fn test_port_path_tcp_listener() {
         use std::net::TcpListener;
         use std::os::unix::io::{FromRawFd, IntoRawFd, OwnedFd};
@@ -1199,36 +1085,10 @@ mod tests {
     }
 
     #[test]
-    fn test_port_seek_zero_args_errors() {
-        let (bits, _) = prim_port_seek(&[]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_port_seek_one_arg_errors() {
-        let port = make_file_port();
-        let (bits, _) = prim_port_seek(&[port]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
     fn test_port_seek_three_args_errors() {
         // 3 args = incomplete keyword pair (port, offset, :from without value)
         let port = make_file_port();
         let (bits, _) = prim_port_seek(&[port, Value::int(0), Value::keyword("from")]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_port_seek_five_args_errors() {
-        let port = make_file_port();
-        let (bits, _) = prim_port_seek(&[
-            port,
-            Value::int(0),
-            Value::keyword("from"),
-            Value::keyword("start"),
-            Value::int(99),
-        ]);
         assert_eq!(bits, SIG_ERROR);
     }
 
@@ -1301,19 +1161,6 @@ mod tests {
         let (_, val) = prim_port_tell(&[port]);
         let req = val.as_external::<IoRequest>().unwrap();
         assert!(matches!(req.op, IoOp::Tell));
-    }
-
-    #[test]
-    fn test_port_tell_zero_args_errors() {
-        let (bits, _) = prim_port_tell(&[]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_port_tell_two_args_errors() {
-        let port = make_file_port();
-        let (bits, _) = prim_port_tell(&[port, Value::int(0)]);
-        assert_eq!(bits, SIG_ERROR);
     }
 
     #[test]

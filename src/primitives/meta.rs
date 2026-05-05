@@ -71,16 +71,6 @@ pub(crate) fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
 ///      (if ,(datum->syntax test 'it) ,then ,else)))
 /// ```
 pub(crate) fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("datum->syntax: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let context = &args[0];
     let datum = &args[1];
 
@@ -130,16 +120,6 @@ pub(crate) fn prim_datum_to_syntax(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// If the argument is not a syntax object, it is returned unchanged.
 pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("syntax->datum: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     let stx = &args[0];
 
     let syntax_rc = match stx.as_syntax() {
@@ -168,15 +148,6 @@ pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
 /// Extract a syntax object from args\[0\], or return a type-error.
 /// `prim_name` is the function name for the error message.
 fn require_syntax(args: &[Value], prim_name: &'static str) -> Result<Syntax, (SignalBits, Value)> {
-    if args.len() != 1 {
-        return Err((
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("{}: expected 1 argument, got {}", prim_name, args.len()),
-            ),
-        ));
-    }
     match args[0].as_syntax() {
         Some(stx) => Ok(stx.clone()),
         None => Err((
@@ -194,15 +165,6 @@ fn require_syntax(args: &[Value], prim_name: &'static str) -> Result<Syntax, (Si
 }
 
 pub(crate) fn prim_syntax_pair(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("syntax-pair?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match args[0].as_syntax() {
         Some(stx) => {
             let result = matches!(&stx.kind, SyntaxKind::List(items) if !items.is_empty());
@@ -213,15 +175,6 @@ pub(crate) fn prim_syntax_pair(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_syntax_list(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("syntax-list?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match args[0].as_syntax() {
         Some(stx) => (
             SIG_OK,
@@ -232,15 +185,6 @@ pub(crate) fn prim_syntax_list(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_syntax_symbol(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("syntax-symbol?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match args[0].as_syntax() {
         Some(stx) => (
             SIG_OK,
@@ -251,15 +195,6 @@ pub(crate) fn prim_syntax_symbol(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_syntax_keyword(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("syntax-keyword?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match args[0].as_syntax() {
         Some(stx) => (
             SIG_OK,
@@ -270,15 +205,6 @@ pub(crate) fn prim_syntax_keyword(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_syntax_nil(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("syntax-nil?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     match args[0].as_syntax() {
         Some(stx) => (SIG_OK, Value::bool(matches!(&stx.kind, SyntaxKind::Nil))),
         None => (SIG_OK, Value::FALSE),
@@ -407,25 +333,6 @@ pub(crate) fn prim_syntax_e(args: &[Value]) -> (SignalBits, Value) {
 /// - First arg not a closure: type-error
 /// - Invalid signal spec: type-error or signal-error
 pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("squelch: expected at least 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    if args.len() == 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                "squelch: expected at least 2 arguments (closure + keywords), got 1",
-            ),
-        );
-    }
-
     // Validate first argument is a closure.
     let closure_rc = match args[0].as_closure() {
         Some(c) => c,
@@ -470,16 +377,6 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
 /// Argument order is mask-first: the signal spec declares intent, the closure
 /// follows. This reads as "attune to yield+error: this function."
 pub(crate) fn prim_attune(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("attune: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // First argument: signal spec (keyword, set, array, list, or integer)
     let permitted_bits = match crate::primitives::fibers::resolve_signal_bits(&args[0], "attune") {
         Ok(bits) => bits,
@@ -565,15 +462,6 @@ pub(crate) fn prim_git(args: &[Value]) -> (SignalBits, Value) {
     }
     #[cfg(feature = "mlir")]
     {
-        if args.is_empty() || args.len() > 2 {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "arity-error",
-                    format!("git: expected 1-2 arguments, got {}", args.len()),
-                ),
-            );
-        }
         let closure = match args[0].as_closure() {
             Some(c) => c,
             None => {
@@ -621,15 +509,6 @@ pub(crate) fn prim_git(args: &[Value]) -> (SignalBits, Value) {
 
 /// `(fn/git? f)` — true if the closure has cached SPIR-V bytes.
 pub(crate) fn prim_fn_git(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("fn/git?: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     if let Some(closure) = args[0].as_closure() {
         (SIG_OK, Value::bool(closure.template.spirv.get().is_some()))
     } else {
@@ -641,15 +520,6 @@ pub(crate) fn prim_fn_git(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Errors if `f` is not a closure or has not been GIT'd.
 pub(crate) fn prim_disgit(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("disgit: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
     let closure = match args[0].as_closure() {
         Some(c) => c,
         None => {

@@ -10,16 +10,6 @@ use crate::value::{error_val, list, Value};
 /// Type-preserving: @arrays mutated in place, arrays and lists return new sorted values.
 /// Supports any comparable values via Value::Ord.
 pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("sort: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     // Array — mutate in place
     if let Some(arr) = args[0].as_array_mut() {
         let mut vec = arr.borrow_mut();
@@ -69,16 +59,6 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
 /// `(range start end)` — start to end-1
 /// `(range start end step)` — start, start+step, ... while < end (or > end for negative step)
 pub(crate) fn prim_range(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("range: expected 1-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     let (start, end, step) = match args.len() {
         1 => {
             let end = match args[0].as_number() {

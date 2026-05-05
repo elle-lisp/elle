@@ -133,16 +133,6 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
 /// For sets: delegates to set-specific del
 /// `(del collection key)`
 pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("del: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // Delegate to set-specific del for set types
     if args[0].is_set() || args[0].is_set_mut() {
         return crate::primitives::sets::prim_del(args);
@@ -211,16 +201,6 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
 /// Polymorphic keys - works on both structs
 /// `(keys collection)`
 pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("keys: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if args[0].is_struct_mut() {
         let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
@@ -266,16 +246,6 @@ pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
 /// Polymorphic values - works on both structs
 /// `(values collection)`
 pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("values: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-
     if args[0].is_struct_mut() {
         let mstruct = match args[0].as_struct_mut() {
             Some(t) => t,
@@ -325,16 +295,6 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
 /// For sets: checks if value is a member
 /// For strings: checks if substring is present
 pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("has?: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
     // Delegate to set/string membership check
     if args[0].is_set() || args[0].is_set_mut() || args[0].is_string() || args[0].is_string_mut() {
         return crate::primitives::sets::prim_contains(args);

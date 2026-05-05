@@ -12,32 +12,22 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_QUERY};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 /// `(vm/config)` or `(vm/config key)` — read runtime configuration.
 ///
 /// With no args: returns the full config as a struct.
 /// With a keyword arg: returns the value of that config field.
 pub(crate) fn prim_vm_config(args: &[Value]) -> (SignalBits, Value) {
-    match args.len() {
-        0 => {
-            // Return full config — SIG_QUERY "vm/config" nil
-            (
-                SIG_QUERY,
-                Value::pair(Value::keyword("vm/config"), Value::NIL),
-            )
-        }
-        1 => {
-            // Return specific field — SIG_QUERY "vm/config" key
-            (SIG_QUERY, Value::pair(Value::keyword("vm/config"), args[0]))
-        }
-        _ => (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("vm/config: expected 0-1 arguments, got {}", args.len()),
-            ),
-        ),
+    if args.is_empty() {
+        // Return full config — SIG_QUERY "vm/config" nil
+        (
+            SIG_QUERY,
+            Value::pair(Value::keyword("vm/config"), Value::NIL),
+        )
+    } else {
+        // Return specific field — SIG_QUERY "vm/config" key
+        (SIG_QUERY, Value::pair(Value::keyword("vm/config"), args[0]))
     }
 }
 
@@ -47,15 +37,6 @@ pub(crate) fn prim_vm_config(args: &[Value]) -> (SignalBits, Value) {
 /// The analyzer rewrites `(put (vm/config) :trace ...)` to this.
 /// For now, we use SIG_QUERY for both read and write.
 pub(crate) fn prim_vm_config_set(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("vm/config-set: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
     // SIG_QUERY "vm/config-set" (key . value)
     (
         SIG_QUERY,

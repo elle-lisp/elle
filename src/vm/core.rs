@@ -58,7 +58,6 @@ pub struct VM {
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
-    pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub(crate) pending_tail_call: Option<TailCallInfo>,
@@ -195,7 +194,6 @@ impl VM {
             loading_modules: std::collections::HashSet::new(),
             loaded_plugins: HashMap::new(),
             closure_call_counts: FxHashMap::default(),
-            location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
@@ -253,18 +251,7 @@ impl VM {
         self.closure_call_counts.clear();
         #[cfg(feature = "jit")]
         self.jit_rejections.clear();
-        self.location_map = LocationMap::new();
         self.loading_modules.clear();
-    }
-
-    /// Set the location map for mapping bytecode instructions to source locations
-    pub fn set_location_map(&mut self, map: LocationMap) {
-        self.location_map = map;
-    }
-
-    /// Get the location map for bytecode instruction lookups
-    pub fn get_location_map(&self) -> &LocationMap {
-        &self.location_map
     }
 
     /// Format a runtime error value with source location.
