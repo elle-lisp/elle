@@ -23,6 +23,10 @@ pub(crate) enum TyKind {
     Symbol,
     EmptyList,
     Bytes,
+    Array,
+    MutableArray,
+    Struct,
+    MutableStruct,
     Top,
 }
 
@@ -48,6 +52,10 @@ impl TypeInterner {
     pub const SYMBOL: TyId = TyId(9);
     pub const EMPTY_LIST: TyId = TyId(10);
     pub const BYTES: TyId = TyId(11);
+    pub const ARRAY: TyId = TyId(12);
+    pub const MUTABLE_ARRAY: TyId = TyId(13);
+    pub const STRUCT: TyId = TyId(14);
+    pub const MUTABLE_STRUCT: TyId = TyId(15);
 }
 
 impl Default for TypeInterner {
@@ -71,6 +79,10 @@ impl TypeInterner {
             TyKind::Symbol,
             TyKind::EmptyList,
             TyKind::Bytes,
+            TyKind::Array,
+            TyKind::MutableArray,
+            TyKind::Struct,
+            TyKind::MutableStruct,
         ];
         TypeInterner { types: preinterned }
     }
@@ -161,6 +173,20 @@ impl TypeInterner {
                 || ty == Self::NUMBER
         )
     }
+
+    /// Is this type stringifiable (can be converted to string without error)?
+    pub fn is_stringifiable(&self, id: TyId) -> bool {
+        self.subtype(id, Self::NUMBER)
+            || id == Self::STRING
+            || id == Self::BOOL
+            || id == Self::NIL
+            || id == Self::KEYWORD
+    }
+
+    /// Is this a struct type (Struct or MutableStruct)?
+    pub fn is_struct(&self, id: TyId) -> bool {
+        id == Self::STRUCT || id == Self::MUTABLE_STRUCT
+    }
 }
 
 #[cfg(test)]
@@ -241,5 +267,50 @@ mod tests {
         assert!(i.is_immediate(TypeInterner::BOOL));
         assert!(!i.is_immediate(TypeInterner::STRING));
         assert!(!i.is_immediate(TypeInterner::TOP));
+    }
+
+    #[test]
+    fn join_array_mutable_array_is_top() {
+        let i = TypeInterner::new();
+        assert_eq!(
+            i.join(TypeInterner::ARRAY, TypeInterner::MUTABLE_ARRAY),
+            TypeInterner::TOP
+        );
+    }
+
+    #[test]
+    fn subtype_mutable_array_top() {
+        let i = TypeInterner::new();
+        assert!(i.subtype(TypeInterner::MUTABLE_ARRAY, TypeInterner::TOP));
+    }
+
+    #[test]
+    fn is_immediate_array_false() {
+        let i = TypeInterner::new();
+        assert!(!i.is_immediate(TypeInterner::ARRAY));
+        assert!(!i.is_immediate(TypeInterner::MUTABLE_ARRAY));
+        assert!(!i.is_immediate(TypeInterner::STRUCT));
+        assert!(!i.is_immediate(TypeInterner::MUTABLE_STRUCT));
+    }
+
+    #[test]
+    fn is_stringifiable() {
+        let i = TypeInterner::new();
+        assert!(i.is_stringifiable(TypeInterner::INT));
+        assert!(i.is_stringifiable(TypeInterner::STRING));
+        assert!(i.is_stringifiable(TypeInterner::BOOL));
+        assert!(i.is_stringifiable(TypeInterner::NIL));
+        assert!(i.is_stringifiable(TypeInterner::KEYWORD));
+        assert!(!i.is_stringifiable(TypeInterner::TOP));
+        assert!(!i.is_stringifiable(TypeInterner::ARRAY));
+    }
+
+    #[test]
+    fn is_struct() {
+        let i = TypeInterner::new();
+        assert!(i.is_struct(TypeInterner::STRUCT));
+        assert!(i.is_struct(TypeInterner::MUTABLE_STRUCT));
+        assert!(!i.is_struct(TypeInterner::ARRAY));
+        assert!(!i.is_struct(TypeInterner::TOP));
     }
 }

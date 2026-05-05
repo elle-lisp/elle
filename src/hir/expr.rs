@@ -573,6 +573,122 @@ impl Hir {
     }
 
     /// Iterate over the immediate child HIR nodes of this node.
+    /// Visit each child mutably, in the same order as `for_each_child`.
+    pub(crate) fn for_each_child_mut(&mut self, mut f: impl FnMut(&mut Hir)) {
+        match &mut self.kind {
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
+
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (_, init) in bindings {
+                    f(init);
+                }
+                f(body);
+            }
+            HirKind::Lambda { body, .. } => f(body),
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                f(cond);
+                f(then_branch);
+                f(else_branch);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    f(e);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    f(e);
+                }
+            }
+            HirKind::Break { value, .. } => f(value),
+            HirKind::Call { func, args, .. } => {
+                f(func);
+                for a in args {
+                    f(&mut a.expr);
+                }
+            }
+            HirKind::Assign { value, .. }
+            | HirKind::Define { value, .. }
+            | HirKind::MakeCell { value } => f(value),
+            HirKind::DerefCell { cell } => f(cell),
+            HirKind::SetCell { cell, value } => {
+                f(cell);
+                f(value);
+            }
+            HirKind::While { cond, body } => {
+                f(cond);
+                f(body);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (_, init) in bindings {
+                    f(init);
+                }
+                f(body);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    f(a);
+                }
+            }
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    f(e);
+                }
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    f(c);
+                    f(b);
+                }
+                if let Some(eb) = else_branch {
+                    f(eb);
+                }
+            }
+            HirKind::Emit { value, .. } => f(value),
+            HirKind::Match { value, arms } => {
+                f(value);
+                for (_, guard, body) in arms {
+                    if let Some(g) = guard {
+                        f(g);
+                    }
+                    f(body);
+                }
+            }
+            HirKind::Destructure { value, .. } => f(value),
+            HirKind::Eval { expr, env } => {
+                f(expr);
+                f(env);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (_, v) in bindings {
+                    f(v);
+                }
+                f(body);
+            }
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    f(a);
+                }
+            }
+        }
+    }
+
     pub(crate) fn for_each_child(&self, mut f: impl FnMut(&Hir)) {
         match &self.kind {
             HirKind::Nil

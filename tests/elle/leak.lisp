@@ -965,8 +965,8 @@
 
 (let [d100 (leak-push-outer 100)
       d10k (leak-push-outer 10000)]
-  (assert (or checked? (not (bounded? d100 d10k 30)))
-          (string "push-outer: FIXED? d100=" d100 " d10k=" d10k)))
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "push-outer: d100=" d100 " d10k=" d10k)))
 
 # put stores heap string into outer mutable struct
 # With refcounting: old value decref'd on overwrite → freed at scope exit.
@@ -981,8 +981,8 @@
 
 (let [d100 (leak-put-outer 100)
       d10k (leak-put-outer 10000)]
-  (assert (or checked? (not (bounded? d100 d10k 30)))
-          (string "put-outer: FIXED? d100=" d100 " d10k=" d10k)))
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "put-outer: d100=" d100 " d10k=" d10k)))
 
 # ── Known leaks: fixable (escape analysis limitations) ──────────
 # These don't genuinely escape heap values but are rejected by
@@ -1105,11 +1105,8 @@
 # and mutable bindings are reclaimed via deferred reference counting.
 # Before refcounting, these leak linearly. After, they are bounded.
 #
-# Known regression (11a-d): loop bodies call stdlib functions with
-# SIG_ERROR (string, struct literals). The corrected may_suspend()
-# treats any signal as a suspension, blocking refcounted rotation.
-# Fix requires type-aware signal narrowing. Inverted assertions
-# expect leaking; they will FAIL when the fix lands.
+# Type-aware signal narrowing strips SIG_ERROR from calls with
+# provably typed arguments, unblocking refcounted rotation.
 
 # 11a: put overwrites heap string in mutable struct — old value freed
 (defn t11-put-overwrite [n]
@@ -1123,8 +1120,8 @@
 
 (let [d100 (t11-put-overwrite 100)
       d10k (t11-put-overwrite 10000)]
-  (assert (or checked? (not (bounded? d100 d10k 30)))
-          (string "t11 put-overwrite: FIXED? d100=" d100 " d10k=" d10k)))
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t11 put-overwrite: d100=" d100 " d10k=" d10k)))
 
 # 11b: put overwrites heap struct in mutable struct
 (defn t11-put-struct [n]
@@ -1138,8 +1135,8 @@
 
 (let [d100 (t11-put-struct 100)
       d10k (t11-put-struct 10000)]
-  (assert (or checked? (not (bounded? d100 d10k 30)))
-          (string "t11 put-struct: FIXED? d100=" d100 " d10k=" d10k)))
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t11 put-struct: d100=" d100 " d10k=" d10k)))
 
 # 11c: set overwrites heap value in mutable array
 (defn t11-set-array [n]
@@ -1153,8 +1150,8 @@
 
 (let [d100 (t11-set-array 100)
       d10k (t11-set-array 10000)]
-  (assert (or checked? (not (bounded? d100 d10k 30)))
-          (string "t11 set-array: FIXED? d100=" d100 " d10k=" d10k)))
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t11 set-array: d100=" d100 " d10k=" d10k)))
 
 # 11d: multiple puts per iteration (roster pattern)
 (defn t11-roster [n]
@@ -1170,8 +1167,8 @@
 
 (let [d100 (t11-roster 100)
       d10k (t11-roster 10000)]
-  (assert (or checked? (not (bounded? d100 d10k 30)))
-          (string "t11 roster: FIXED? d100=" d100 " d10k=" d10k)))
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t11 roster: d100=" d100 " d10k=" d10k)))
 
 # 11e: mutable binding reassignment with heap values
 (defn t11-binding-reassign [n]

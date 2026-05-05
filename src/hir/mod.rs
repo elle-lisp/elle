@@ -19,6 +19,7 @@ mod expr;
 pub mod functionalize;
 pub mod lint;
 mod liveness;
+mod narrow;
 mod pattern;
 pub mod region;
 mod regions;
