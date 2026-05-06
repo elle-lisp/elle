@@ -492,7 +492,7 @@ impl<'a> Lowerer<'a> {
     /// Built-in primitives do not internally create heap objects that
     /// escape to external mutable structures — they only produce return
     /// values and/or mutate their arguments (caught separately).
-    fn callee_is_primitive(&self, func: &Hir) -> bool {
+    pub(super) fn callee_is_primitive(&self, func: &Hir) -> bool {
         let binding = match &func.kind {
             HirKind::Var(b) => b,
             HirKind::DerefCell { cell } => match &cell.kind {
@@ -2205,7 +2205,7 @@ impl<'a> Lowerer<'a> {
 
     /// Check if an expression is either a rotation-safe closure or not a
     /// closure at all. Used by struct field analysis.
-    fn value_is_rotation_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
+    pub(super) fn value_is_rotation_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
         match &hir.kind {
             // Lambda: check its body
             HirKind::Lambda { body, .. } => !self.body_escapes_heap_values(body),
@@ -2290,7 +2290,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn value_is_param_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
+    pub(super) fn value_is_param_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
         match &hir.kind {
             HirKind::Lambda { body, params, .. } => {
                 !self.body_stores_params_externally(body, params)

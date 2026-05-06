@@ -369,6 +369,10 @@ pub struct Lowerer<'a> {
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
     closures: Vec<LirFunction>,
+    /// Escape projection: maps struct field names to rotation-safe/param-safe.
+    /// Computed during lowering for module-pattern files. Consumed by the
+    /// compile pipeline and stored on Bytecode for cross-module propagation.
+    escape_projection: Option<HashMap<String, bool>>,
     /// Binding of the current function being analyzed (for self-tail-call
     /// detection in escape analysis and drop insertion).
     current_function_binding: Option<Binding>,
@@ -421,6 +425,7 @@ impl<'a> Lowerer<'a> {
             discard_slot: None,
             symbol_names: HashMap::new(),
             closures: Vec::new(),
+            escape_projection: None,
             current_function_binding: None,
             current_function_params: None,
             region_info: RegionInfo::empty(),
@@ -518,6 +523,21 @@ impl<'a> Lowerer<'a> {
         &self.scope_stats
     }
 
+    /// Take the computed escape projection (if any).
+    /// Called by the compile pipeline after lowering.
+    pub fn take_escape_projection(&mut self) -> Option<HashMap<String, bool>> {
+        self.escape_projection.take()
+    }
+
+    /// Seed `callee_struct_fields_rotation_safe` and `callee_struct_fields_param_safe`
+    /// for a binding from an imported module's escape projection.
+    pub fn seed_import_escape_projection(&mut self, binding: Binding, all_safe: bool) {
+        self.callee_struct_fields_rotation_safe
+            .insert(binding, all_safe);
+        self.callee_struct_fields_param_safe
+            .insert(binding, all_safe);
+    }
+
     /// Lower a HIR expression to an LIR module.
     ///
     /// Returns an `LirModule` with the entry function and a flat list of
@@ -565,6 +585,9 @@ impl<'a> Lowerer<'a> {
         self.current_func.result_is_immediate = self.result_is_safe(hir, &[]);
         self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
         self.current_func.rotation_safe = !self.body_escapes_heap_values(hir);
+
+        // Compute escape projection for module-pattern files.
+        self.escape_projection = self.compute_escape_projection(hir);
 
         let mut entry =
             std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
@@ -1956,6 +1979,80 @@ impl<'a> Lowerer<'a> {
             if !changed {
                 break;
             }
+        }
+    }
+
+    /// Compute escape projection for module-pattern files.
+    ///
+    /// Walks the HIR's return position (through Letrec/Begin/Lambda) to find
+    /// a struct literal. For each field, checks whether the value binding is
+    /// rotation-safe and param-safe. Returns a map from field name to
+    /// all-safe boolean (rotation AND param safe).
+    fn compute_escape_projection(&self, hir: &Hir) -> Option<HashMap<String, bool>> {
+        self.extract_escape_struct(hir)
+    }
+
+    fn extract_escape_struct(&self, hir: &Hir) -> Option<HashMap<String, bool>> {
+        match &hir.kind {
+            HirKind::Call { func, args, .. } => {
+                // Check if this is a struct construction call
+                if !self.callee_is_primitive(func) {
+                    return None;
+                }
+                let binding = match &func.kind {
+                    HirKind::Var(b) => b,
+                    _ => return None,
+                };
+                let bi = self.arena.get(*binding);
+                let name = self.symbol_names.get(&bi.name.0)?;
+                if name != "struct" {
+                    return None;
+                }
+                let mut projection = HashMap::new();
+                let mut i = 0;
+                while i + 1 < args.len() {
+                    if let HirKind::Keyword(key) = &args[i].expr.kind {
+                        let val = &args[i + 1].expr;
+                        let safe = self.value_is_rotation_safe_closure_or_non_closure(val)
+                            && self.value_is_param_safe_closure_or_non_closure(val);
+                        projection.insert(key.clone(), safe);
+                    }
+                    i += 2;
+                }
+                if projection.is_empty() {
+                    None
+                } else {
+                    Some(projection)
+                }
+            }
+            HirKind::Lambda { body, .. } => self.extract_escape_struct(body),
+            HirKind::Begin(exprs) => exprs.last().and_then(|e| self.extract_escape_struct(e)),
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                // If body is a Var referencing a binding, recurse into its init
+                if let HirKind::Var(b) = &body.kind {
+                    if let Some((_, init)) = bindings.iter().find(|(bind, _)| bind == b) {
+                        return self.extract_escape_struct(init);
+                    }
+                }
+                self.extract_escape_struct(body)
+            }
+            HirKind::Define { value, .. } => self.extract_escape_struct(value),
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                // Both branches must return structs; AND the safety values
+                let a = self.extract_escape_struct(then_branch)?;
+                let b = self.extract_escape_struct(else_branch)?;
+                let mut merged = a;
+                for (k, v) in b {
+                    let entry = merged.entry(k).or_insert(true);
+                    *entry = *entry && v;
+                }
+                Some(merged)
+            }
+            _ => None,
         }
     }
 

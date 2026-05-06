@@ -589,6 +589,9 @@ impl<'a> Analyzer<'a> {
         if let Some(proj) = self.last_import_projection.take() {
             self.projection_env.insert(binding, proj);
         }
+        if let Some(proj) = self.last_import_escape_projection.take() {
+            self.escape_projection_env.insert(binding, proj);
+        }
         // Compile-time squelch: the value was `(squelch f mask)`
         if let Some(sig) = self.last_squelch_signal.take() {
             self.signal_env.insert(binding, sig);
