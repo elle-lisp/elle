@@ -63,7 +63,7 @@ thread_local! {
 
     /// Escape projection cache: maps resolved file paths to their
     /// keyword→safe projections. Populated alongside signal projections.
-    static ESCAPE_PROJECTION_CACHE: std::cell::RefCell<HashMap<String, Option<HashMap<String, bool>>>> =
+    static ESCAPE_PROJECTION_CACHE: std::cell::RefCell<HashMap<String, Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>>> =
         std::cell::RefCell::new(HashMap::new());
 }
 
@@ -213,7 +213,9 @@ pub fn get_or_compile_projection(resolved_path: &str) -> Option<HashMap<String, 
 /// Returns a map from field name to `true` (all closure fields are
 /// rotation-safe and param-safe) for module-pattern files that return
 /// a struct of closures.
-pub fn get_or_compile_escape_projection(resolved_path: &str) -> Option<HashMap<String, bool>> {
+pub fn get_or_compile_escape_projection(
+    resolved_path: &str,
+) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
     let cached = ESCAPE_PROJECTION_CACHE.with(|pc| pc.borrow().get(resolved_path).cloned());
     if let Some(proj) = cached {
         return proj;

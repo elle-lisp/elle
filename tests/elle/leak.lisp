@@ -1406,3 +1406,26 @@
       d10k (t13-struct-field 10000)]
   (assert (or checked? (bounded? d100 d10k 30))
           (string "t13 struct-field: d100=" d100 " d10k=" d10k)))
+
+# 13g: struct-returning function with heap values (outward-safe)
+# do-process returns {:x i :label (string ...)} — rotation_safe=false
+# but outward_safe=true because no external heap stores.
+(defn make-heap-module []
+  (defn do-process [i]
+    {:x i :label (string "item-" i)})
+  {:process do-process})
+
+(def heap-mod (make-heap-module))
+
+(defn t13-heap-struct-field [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (heap-mod:process i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t13-heap-struct-field 100)
+      d10k (t13-heap-struct-field 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 heap-struct-field: d100=" d100 " d10k=" d10k)))

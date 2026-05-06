@@ -157,7 +157,7 @@ fn unknown_stage_is_rejected() {
     assert!(!status.success(), "expected non-zero exit for bogus stage");
     assert!(
         err.contains("--dump: unknown stage 'bogus'")
-            && err.contains("Valid: ast, hir, fhir, lir, jit, cfg, dfa, defuse, regions, git"),
+            && err.contains("Valid: ast, hir, fhir, lir, jit, cfg, dfa, defuse, regions, escape, git"),
         "expected helpful error listing valid stages, got:\n{}",
         err
     );

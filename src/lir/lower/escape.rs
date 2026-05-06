@@ -630,6 +630,7 @@ impl<'a> Lowerer<'a> {
                             }
                         } else if !self.callee_is_primitive(func)
                             && !self.callee_is_rotation_safe(func)
+                            && !self.callee_is_outward_safe(func)
                             && !self.callee_is_non_escaping_stdlib(func)
                             && !self.callee_is_param_safe(func)
                             && !self.computed_callee_is_safe(func, scope_bindings)
@@ -1593,6 +1594,181 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Check whether a function body has outward side effects: stores heap
+    /// values into external mutable state. Unlike `body_escapes_heap_values`,
+    /// this does NOT care about heap content in tail-call return values.
+    /// A function is outward-safe if its body never stores heap values
+    /// externally, even if it returns structs containing heap values.
+    pub(super) fn body_has_outward_side_effects(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Assign { value, .. } => {
+                !self.result_is_safe(value, &[]) || self.body_has_outward_side_effects(value)
+            }
+            HirKind::Call {
+                func,
+                args,
+                is_tail,
+            } => {
+                // Mutating primitives escape even in tail position
+                if self.callee_is_mutating_primitive(func)
+                    && args
+                        .iter()
+                        .any(|a| !Self::arg_is_compile_time_immediate(&a.expr))
+                {
+                    return true;
+                }
+                if *is_tail {
+                    // For outward-safety, tail-call args become return values,
+                    // not external stores. We only need the callee itself to
+                    // be outward-safe (no arg check needed).
+                    if !self.callee_is_primitive(func)
+                        && !self.callee_is_outward_safe(func)
+                        && !self.callee_is_non_escaping_stdlib(func)
+                    {
+                        return true;
+                    }
+                    return false;
+                }
+                if !self.callee_is_primitive(func)
+                    && !self.callee_is_outward_safe(func)
+                    && !self.callee_is_non_escaping_stdlib(func)
+                    && !self.callee_is_param_safe(func)
+                {
+                    return true;
+                }
+                self.body_has_outward_side_effects(func)
+                    || args
+                        .iter()
+                        .any(|a| self.body_has_outward_side_effects(&a.expr))
+            }
+            HirKind::Lambda { .. } => false,
+            HirKind::Emit { value, .. } => {
+                !self.result_is_safe(value, &[]) || self.body_has_outward_side_effects(value)
+            }
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_) => false,
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.body_has_outward_side_effects(cond)
+                    || self.body_has_outward_side_effects(then_branch)
+                    || self.body_has_outward_side_effects(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs.iter().any(|e| self.body_has_outward_side_effects(e)),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    self.body_has_outward_side_effects(c) || self.body_has_outward_side_effects(b)
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| self.body_has_outward_side_effects(b))
+            }
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                exprs.iter().any(|e| self.body_has_outward_side_effects(e))
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.body_has_outward_side_effects(init))
+                    || self.body_has_outward_side_effects(body)
+            }
+            HirKind::Define { value, .. } => self.body_has_outward_side_effects(value),
+            HirKind::While { cond, body } => {
+                self.body_has_outward_side_effects(cond) || self.body_has_outward_side_effects(body)
+            }
+            HirKind::Block { body, .. } => {
+                body.iter().any(|e| self.body_has_outward_side_effects(e))
+            }
+            HirKind::Break { value, .. } => self.body_has_outward_side_effects(value),
+            HirKind::Match { value, arms } => {
+                self.body_has_outward_side_effects(value)
+                    || arms
+                        .iter()
+                        .any(|(_, _, body)| self.body_has_outward_side_effects(body))
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, v)| self.body_has_outward_side_effects(v))
+                    || self.body_has_outward_side_effects(body)
+            }
+            HirKind::Loop { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.body_has_outward_side_effects(init))
+                    || self.body_has_outward_side_effects(body)
+            }
+            HirKind::Recur { args } => args.iter().any(|a| !self.result_is_safe(a, &[])),
+            HirKind::MakeCell { value } => self.body_has_outward_side_effects(value),
+            HirKind::DerefCell { cell } => self.body_has_outward_side_effects(cell),
+            HirKind::SetCell { cell, value } => {
+                self.body_has_outward_side_effects(cell)
+                    || self.body_has_outward_side_effects(value)
+            }
+            HirKind::Intrinsic { args, .. } => {
+                args.iter().any(|a| self.body_has_outward_side_effects(a))
+            }
+            _ => true,
+        }
+    }
+
+    /// Check if a callee is a known outward-safe user function.
+    /// An outward-safe function never stores heap values into external
+    /// mutable state, but may return structs containing heap values.
+    fn callee_is_outward_safe(&self, func: &Hir) -> bool {
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return self.callee_from_struct_get_is_outward_safe(func),
+            },
+            _ => return self.callee_from_struct_get_is_outward_safe(func),
+        };
+        self.callee_outward_safe
+            .get(binding)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Like `callee_from_struct_get_is_rotation_safe` but for outward-safety.
+    fn callee_from_struct_get_is_outward_safe(&self, func: &Hir) -> bool {
+        let HirKind::Call { args, .. } = &func.kind else {
+            return false;
+        };
+        if !self.value_is_non_allocating_accessor(func) {
+            return false;
+        }
+        let Some(first_arg) = args.first() else {
+            return false;
+        };
+        let struct_binding = match &first_arg.expr.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        let bi = self.arena.get(*struct_binding);
+        if !bi.is_immutable || bi.is_mutated {
+            return false;
+        }
+        self.callee_struct_fields_outward_safe
+            .get(struct_binding)
+            .copied()
+            .unwrap_or(false)
+    }
+
     /// Check if a callee is a known param-safe user function.
     /// A param-safe function never stores its parameters into external
     /// mutable state, so calling it with heap args won't escape them.
@@ -2303,6 +2479,91 @@ impl<'a> Lowerer<'a> {
                     && !self.callee_param_safe.contains_key(b)
             }
             HirKind::DerefCell { cell } => self.value_is_param_safe_closure_or_non_closure(cell),
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Quote(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Walk a function body's return positions to check whether all
+    /// closures in any returned struct are outward-safe.
+    pub(super) fn body_returns_struct_fields_outward_safe(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Call { func, args, .. } if self.callee_is_primitive(func) => {
+                args.iter().enumerate().all(|(i, a)| {
+                    if i % 2 == 0 {
+                        return true; // key position
+                    }
+                    self.value_is_outward_safe_closure_or_non_closure(&a.expr)
+                })
+            }
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self
+                        .callee_struct_fields_outward_safe
+                        .get(b)
+                        .copied()
+                        .unwrap_or(false),
+                    None => false,
+                }
+            }
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.body_returns_struct_fields_outward_safe(then_branch)
+                    && self.body_returns_struct_fields_outward_safe(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_none_or(|e| self.body_returns_struct_fields_outward_safe(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.body_returns_struct_fields_outward_safe(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, b)| self.body_returns_struct_fields_outward_safe(b))
+                    && else_branch
+                        .as_ref()
+                        .is_none_or(|b| self.body_returns_struct_fields_outward_safe(b))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| self.body_returns_struct_fields_outward_safe(body)),
+            HirKind::Block { body, .. } => body
+                .last()
+                .is_none_or(|e| self.body_returns_struct_fields_outward_safe(e)),
+            _ => false,
+        }
+    }
+
+    /// Check if an expression is either an outward-safe closure or not a
+    /// closure at all. Used by struct field analysis.
+    pub(super) fn value_is_outward_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Lambda { body, .. } => !self.body_has_outward_side_effects(body),
+            HirKind::Var(b) => {
+                if self.callee_outward_safe.get(b).copied().unwrap_or(false) {
+                    return true;
+                }
+                // If not in any function map, it's not a closure — safe
+                !self.callee_rotation_safe.contains_key(b)
+                    && !self.callee_param_safe.contains_key(b)
+                    && !self.callee_outward_safe.contains_key(b)
+            }
+            HirKind::DerefCell { cell } => self.value_is_outward_safe_closure_or_non_closure(cell),
             HirKind::Int(_)
             | HirKind::Float(_)
             | HirKind::Bool(_)

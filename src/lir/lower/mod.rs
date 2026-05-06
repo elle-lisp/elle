@@ -286,12 +286,19 @@ pub struct Lowerer<'a> {
     /// A function returns-param-safe if all closures it returns are
     /// param-safe (their bodies don't store params externally).
     callee_returns_param_safe: HashMap<Binding, bool>,
+    /// Binding → outward_safe for function definitions. A function is
+    /// outward-safe if its body never stores heap values into external
+    /// mutable state. Unlike rotation-safe, it does NOT care about
+    /// return value heap content. Used by `walk_for_outward_set`.
+    callee_outward_safe: HashMap<Binding, bool>,
     /// Binding → struct-fields-rotation-safe. True when a binding holds
     /// a struct where all closure-typed values are rotation-safe.
     /// Used by `callee_is_rotation_safe` to handle `(get struct :field)` callees.
     callee_struct_fields_rotation_safe: HashMap<Binding, bool>,
     /// Binding → struct-fields-param-safe. Same for param-safety.
     callee_struct_fields_param_safe: HashMap<Binding, bool>,
+    /// Binding → struct-fields-outward-safe. Same for outward-safety.
+    callee_struct_fields_outward_safe: HashMap<Binding, bool>,
     /// Binding → result_is_immediate for function definitions.
     /// Precomputed via fixpoint iteration so that `call_result_is_safe`
     /// can identify user functions that always return immediates.
@@ -340,10 +347,10 @@ pub struct Lowerer<'a> {
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
     closures: Vec<LirFunction>,
-    /// Escape projection: maps struct field names to rotation-safe/param-safe.
+    /// Escape projection: maps struct field names to escape analysis info.
     /// Computed during lowering for module-pattern files. Consumed by the
     /// compile pipeline and stored on Bytecode for cross-module propagation.
-    escape_projection: Option<HashMap<String, bool>>,
+    escape_projection: Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Binding of the current function being analyzed (for self-tail-call
     /// detection in escape analysis and drop insertion).
     current_function_binding: Option<Binding>,
@@ -377,11 +384,13 @@ impl<'a> Lowerer<'a> {
             non_escaping_stdlib: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
             callee_param_safe: HashMap::new(),
+            callee_outward_safe: HashMap::new(),
             callee_return_safe: HashMap::new(),
             callee_returns_rotation_safe: HashMap::new(),
             callee_returns_param_safe: HashMap::new(),
             callee_struct_fields_rotation_safe: HashMap::new(),
             callee_struct_fields_param_safe: HashMap::new(),
+            callee_struct_fields_outward_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
             callee_return_params: HashMap::new(),
             callee_rest_index: HashMap::new(),
@@ -494,19 +503,124 @@ impl<'a> Lowerer<'a> {
         &self.scope_stats
     }
 
+    /// Format escape analysis maps for `--dump=escape`.
+    pub fn format_escape_analysis(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        let name = |b: &Binding| -> String {
+            let bi = self.arena.get(*b);
+            self.symbol_names
+                .get(&bi.name.0)
+                .cloned()
+                .unwrap_or_else(|| format!("?#{}", b.0))
+        };
+        writeln!(
+            out,
+            ";; rotation_safe ({} entries):",
+            self.callee_rotation_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_rotation_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} rotation_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; param_safe ({} entries):",
+            self.callee_param_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_param_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} param_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; struct_fields_rotation_safe ({} entries):",
+            self.callee_struct_fields_rotation_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_struct_fields_rotation_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} struct_fields_rotation_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; struct_fields_param_safe ({} entries):",
+            self.callee_struct_fields_param_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_struct_fields_param_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} struct_fields_param_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; outward_safe ({} entries):",
+            self.callee_outward_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_outward_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} outward_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; struct_fields_outward_safe ({} entries):",
+            self.callee_struct_fields_outward_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_struct_fields_outward_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} struct_fields_outward_safe={}", name(b), safe).unwrap();
+        }
+        if let Some(ref proj) = self.escape_projection {
+            writeln!(out, ";; escape_projection ({} fields):", proj.len()).unwrap();
+            let mut entries: Vec<_> = proj.iter().collect();
+            entries.sort_by_key(|(k, _)| (*k).clone());
+            for (k, info) in &entries {
+                writeln!(
+                    out,
+                    "  :{:29} rotation_safe={} outward_safe={}",
+                    k, info.rotation_safe, info.outward_safe
+                )
+                .unwrap();
+            }
+        } else {
+            writeln!(out, ";; escape_projection: none").unwrap();
+        }
+        out
+    }
+
     /// Take the computed escape projection (if any).
     /// Called by the compile pipeline after lowering.
-    pub fn take_escape_projection(&mut self) -> Option<HashMap<String, bool>> {
+    pub fn take_escape_projection(
+        &mut self,
+    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
         self.escape_projection.take()
     }
 
-    /// Seed `callee_struct_fields_rotation_safe` and `callee_struct_fields_param_safe`
-    /// for a binding from an imported module's escape projection.
-    pub fn seed_import_escape_projection(&mut self, binding: Binding, all_safe: bool) {
+    /// Seed `callee_struct_fields_*` for a binding from an imported module's
+    /// escape projection. `rotation_safe` controls rotation and param maps;
+    /// `outward_safe` controls the outward-safe map.
+    pub fn seed_import_escape_projection(
+        &mut self,
+        binding: Binding,
+        rotation_safe: bool,
+        outward_safe: bool,
+    ) {
         self.callee_struct_fields_rotation_safe
-            .insert(binding, all_safe);
+            .insert(binding, rotation_safe);
         self.callee_struct_fields_param_safe
-            .insert(binding, all_safe);
+            .insert(binding, rotation_safe);
+        self.callee_struct_fields_outward_safe
+            .insert(binding, outward_safe);
     }
 
     /// Lower a HIR expression to an LIR module.
@@ -534,6 +648,7 @@ impl<'a> Lowerer<'a> {
         self.precompute_return_safe(hir);
         self.precompute_param_safety(hir);
         self.precompute_rotation_safety(hir);
+        self.precompute_outward_safety(hir);
         self.precompute_returns_rotation_safe(hir);
         self.precompute_returns_param_safe(hir);
         self.widen_rotation_safety(hir);
@@ -575,7 +690,12 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        Ok(LirModule { entry, closures })
+        let escape_dump = Some(self.format_escape_analysis());
+        Ok(LirModule {
+            entry,
+            closures,
+            escape_dump,
+        })
     }
 
     // === Helper Methods ===
@@ -1712,6 +1832,42 @@ impl<'a> Lowerer<'a> {
         self.scope_stats.rotation_safe = self.callee_rotation_safe.values().filter(|&&v| v).count();
     }
 
+    /// Precompute `callee_outward_safe` for all function definitions.
+    ///
+    /// A function is outward-safe if its body never stores heap values into
+    /// external mutable state. Unlike rotation-safe, it does NOT care about
+    /// heap content in tail-call return values. Fixpoint: seed all safe,
+    /// iterate `body_has_outward_side_effects` until stable.
+    fn precompute_outward_safety(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
+        Self::collect_lambda_defs_with_params(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically outward-safe.
+        for &(binding, _, _) in &defs {
+            self.callee_outward_safe.insert(binding, true);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, _, body) in &defs {
+                if !self.callee_outward_safe[&binding] {
+                    continue; // already unsafe, skip
+                }
+                if self.body_has_outward_side_effects(body) {
+                    self.callee_outward_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
     /// Precompute `callee_returns_rotation_safe` for all function definitions.
     ///
     /// A function returns-rotation-safe if every closure it returns (in all
@@ -1828,8 +1984,9 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Precompute `callee_struct_fields_rotation_safe` and
-    /// `callee_struct_fields_param_safe` for all Lambda-bound functions.
+    /// Precompute `callee_struct_fields_rotation_safe`,
+    /// `callee_struct_fields_param_safe`, and `callee_struct_fields_outward_safe`
+    /// for all Lambda-bound functions.
     ///
     /// A function has struct-fields-rotation-safe if its body returns
     /// a struct where all closure-valued fields are rotation-safe.
@@ -1845,6 +2002,7 @@ impl<'a> Lowerer<'a> {
             self.callee_struct_fields_rotation_safe
                 .insert(binding, true);
             self.callee_struct_fields_param_safe.insert(binding, true);
+            self.callee_struct_fields_outward_safe.insert(binding, true);
         }
 
         // Iterate rotation-safe until stable.
@@ -1874,6 +2032,24 @@ impl<'a> Lowerer<'a> {
                 }
                 if !self.body_returns_struct_fields_param_safe(body) {
                     self.callee_struct_fields_param_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Iterate outward-safe until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                if !self.callee_struct_fields_outward_safe[&binding] {
+                    continue;
+                }
+                if !self.body_returns_struct_fields_outward_safe(body) {
+                    self.callee_struct_fields_outward_safe
+                        .insert(binding, false);
                     changed = true;
                 }
             }
@@ -1951,19 +2127,55 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
+
+        // Same for outward-safe
+        loop {
+            let mut changed = false;
+            for &(binding, init) in &all_bindings {
+                if self
+                    .callee_struct_fields_outward_safe
+                    .contains_key(&binding)
+                {
+                    continue;
+                }
+                if let HirKind::Call { func, .. } = &init.kind {
+                    let callee = self.extract_callee_binding(func);
+                    if let Some(b) = callee {
+                        if let Some(&safe) = self.callee_struct_fields_outward_safe.get(b) {
+                            self.callee_struct_fields_outward_safe.insert(binding, safe);
+                            changed = true;
+                        }
+                    }
+                }
+                if let HirKind::Var(b) = &init.kind {
+                    if let Some(&safe) = self.callee_struct_fields_outward_safe.get(b) {
+                        self.callee_struct_fields_outward_safe.insert(binding, safe);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     /// Compute escape projection for module-pattern files.
     ///
     /// Walks the HIR's return position (through Letrec/Begin/Lambda) to find
-    /// a struct literal. For each field, checks whether the value binding is
-    /// rotation-safe and param-safe. Returns a map from field name to
-    /// all-safe boolean (rotation AND param safe).
-    fn compute_escape_projection(&self, hir: &Hir) -> Option<HashMap<String, bool>> {
+    /// a struct literal. For each field, checks rotation-safe, param-safe,
+    /// and outward-safe properties.
+    fn compute_escape_projection(
+        &self,
+        hir: &Hir,
+    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
         self.extract_escape_struct(hir)
     }
 
-    fn extract_escape_struct(&self, hir: &Hir) -> Option<HashMap<String, bool>> {
+    fn extract_escape_struct(
+        &self,
+        hir: &Hir,
+    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
         match &hir.kind {
             HirKind::Call { func, args, .. } => {
                 // Check if this is a struct construction call
@@ -1984,9 +2196,16 @@ impl<'a> Lowerer<'a> {
                 while i + 1 < args.len() {
                     if let HirKind::Keyword(key) = &args[i].expr.kind {
                         let val = &args[i + 1].expr;
-                        let safe = self.value_is_rotation_safe_closure_or_non_closure(val)
+                        let rotation_safe = self.value_is_rotation_safe_closure_or_non_closure(val)
                             && self.value_is_param_safe_closure_or_non_closure(val);
-                        projection.insert(key.clone(), safe);
+                        let outward_safe = self.value_is_outward_safe_closure_or_non_closure(val);
+                        projection.insert(
+                            key.clone(),
+                            crate::compiler::bytecode::FieldEscapeInfo {
+                                rotation_safe,
+                                outward_safe,
+                            },
+                        );
                     }
                     i += 2;
                 }
@@ -2018,8 +2237,15 @@ impl<'a> Lowerer<'a> {
                 let b = self.extract_escape_struct(else_branch)?;
                 let mut merged = a;
                 for (k, v) in b {
-                    let entry = merged.entry(k).or_insert(true);
-                    *entry = *entry && v;
+                    let entry =
+                        merged
+                            .entry(k)
+                            .or_insert(crate::compiler::bytecode::FieldEscapeInfo {
+                                rotation_safe: true,
+                                outward_safe: true,
+                            });
+                    entry.rotation_safe = entry.rotation_safe && v.rotation_safe;
+                    entry.outward_safe = entry.outward_safe && v.outward_safe;
                 }
                 Some(merged)
             }

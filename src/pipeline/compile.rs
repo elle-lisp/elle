@@ -219,7 +219,10 @@ fn compile_file_frontend(
         crate::syntax::Expander,
         std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
         Option<std::collections::HashMap<String, crate::signals::Signal>>,
-        std::collections::HashMap<crate::hir::Binding, std::collections::HashMap<String, bool>>,
+        std::collections::HashMap<
+            crate::hir::Binding,
+            std::collections::HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>,
+        >,
     ),
     String,
 > {
@@ -372,8 +375,9 @@ fn compile_file_inner(
 
     // Seed escape projections from imported modules
     for (binding, proj) in &escape_projection_env {
-        let all_safe = proj.values().all(|&v| v);
-        lowerer.seed_import_escape_projection(*binding, all_safe);
+        let rotation_safe = proj.values().all(|v| v.rotation_safe);
+        let outward_safe = proj.values().all(|v| v.outward_safe);
+        lowerer.seed_import_escape_projection(*binding, rotation_safe, outward_safe);
     }
 
     let lir_module = lowerer.lower(&hir)?;

@@ -664,6 +664,7 @@ impl<'a> FunctionTranslator<'a> {
                 let lir_module = crate::lir::LirModule {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
+                    escape_dump: None,
                 };
                 let (nested_bytecode, nested_yield_points, nested_call_sites) =
                     emitter.emit_module(&lir_module);
