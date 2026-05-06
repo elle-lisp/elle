@@ -1,13 +1,14 @@
 //! List manipulation primitives
 mod advanced;
 
+use crate::primitives::collection::{coll_empty, coll_len, coll_to_vec};
 use crate::primitives::def::PrimitiveDef;
+use crate::primitives::seq::{seq_first, seq_nth, seq_rest};
 use crate::signals::Signal;
 use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, list, Value};
-use unicode_segmentation::UnicodeSegmentation;
 
 // Re-export advanced functions for use in PRIMITIVES array
 pub(crate) use advanced::{
@@ -16,90 +17,6 @@ pub(crate) use advanced::{
 
 /// Get the first element of a sequence (list, array, @array, string)
 pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
-    // Pair cell — the common case for lists
-    if let Some(pair) = args[0].as_pair() {
-        return (SIG_OK, pair.first);
-    }
-    // Empty list → error
-    if args[0].is_empty_list() {
-        return (
-            SIG_ERROR,
-            error_val("argument-error", "first: empty sequence"),
-        );
-    }
-    // Array
-    if let Some(elems) = args[0].as_array() {
-        return if elems.is_empty() {
-            (
-                SIG_ERROR,
-                error_val("argument-error", "first: empty sequence"),
-            )
-        } else {
-            (SIG_OK, elems[0])
-        };
-    }
-    // @array
-    if let Some(arr) = args[0].as_array_mut() {
-        let borrowed = arr.borrow();
-        return if borrowed.is_empty() {
-            (
-                SIG_ERROR,
-                error_val("argument-error", "first: empty sequence"),
-            )
-        } else {
-            (SIG_OK, borrowed[0])
-        };
-    }
-    // String — first grapheme cluster
-    if let Some(result) = args[0].with_string(|s| match s.graphemes(true).next() {
-        Some(g) => (SIG_OK, Value::string(g)),
-        None => (
-            SIG_ERROR,
-            error_val("argument-error", "first: empty sequence"),
-        ),
-    }) {
-        return result;
-    }
-    // @string — first grapheme cluster
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        if let Ok(s) = std::str::from_utf8(&borrowed) {
-            return match s.graphemes(true).next() {
-                Some(g) => (SIG_OK, Value::string(g)),
-                None => (
-                    SIG_ERROR,
-                    error_val("argument-error", "first: empty sequence"),
-                ),
-            };
-        }
-        return (
-            SIG_ERROR,
-            error_val("argument-error", "first: empty sequence"),
-        );
-    }
-    // Bytes — first byte as integer
-    if let Some(b) = args[0].as_bytes() {
-        return if b.is_empty() {
-            (
-                SIG_ERROR,
-                error_val("argument-error", "first: empty sequence"),
-            )
-        } else {
-            (SIG_OK, Value::int(b[0] as i64))
-        };
-    }
-    // @bytes — first byte as integer
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        return if borrowed.is_empty() {
-            (
-                SIG_ERROR,
-                error_val("argument-error", "first: empty sequence"),
-            )
-        } else {
-            (SIG_OK, Value::int(borrowed[0] as i64))
-        };
-    }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
@@ -109,167 +26,29 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
             return (SIG_OK, Value::syntax(items[0].clone()));
         }
     }
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "first: expected sequence (list, array, string, bytes), got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    match seq_first(&args[0]) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
+    }
 }
 
 /// Get the second element of a sequence
 pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
-    let too_short = (
-        SIG_ERROR,
-        error_val(
-            "argument-error",
-            "second: sequence has fewer than 2 elements",
-        ),
-    );
-    // Pair cell — walk to second
-    if let Some(pair) = args[0].as_pair() {
-        if let Some(c2) = pair.rest.as_pair() {
-            return (SIG_OK, c2.first);
-        }
-        return too_short;
-    }
-    if args[0].is_empty_list() {
-        return too_short;
-    }
-    // Array
-    if let Some(elems) = args[0].as_array() {
-        return if elems.len() < 2 {
-            too_short
-        } else {
-            (SIG_OK, elems[1])
-        };
-    }
-    // @array
-    if let Some(arr) = args[0].as_array_mut() {
-        let borrowed = arr.borrow();
-        return if borrowed.len() < 2 {
-            too_short
-        } else {
-            (SIG_OK, borrowed[1])
-        };
-    }
-    // String — second grapheme cluster
-    if let Some(result) = args[0].with_string(|s| match s.graphemes(true).nth(1) {
-        Some(g) => (SIG_OK, Value::string(g)),
-        None => (
+    // Syntax is not a seq type, handle it inline
+    match seq_nth(&args[0], 1) {
+        Ok(v) => (SIG_OK, v),
+        Err(_) => (
             SIG_ERROR,
             error_val(
                 "argument-error",
                 "second: sequence has fewer than 2 elements",
             ),
         ),
-    }) {
-        return result;
     }
-    // @string — second grapheme cluster
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        if let Ok(s) = std::str::from_utf8(&borrowed) {
-            return match s.graphemes(true).nth(1) {
-                Some(g) => (SIG_OK, Value::string(g)),
-                None => too_short,
-            };
-        }
-        return too_short;
-    }
-    // Bytes — second byte as integer
-    if let Some(b) = args[0].as_bytes() {
-        return if b.len() < 2 {
-            too_short
-        } else {
-            (SIG_OK, Value::int(b[1] as i64))
-        };
-    }
-    // @bytes — second byte as integer
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        return if borrowed.len() < 2 {
-            too_short
-        } else {
-            (SIG_OK, Value::int(borrowed[1] as i64))
-        };
-    }
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "second: expected sequence (list, array, string, bytes), got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
 }
 
 /// Get the rest of a sequence (list, array, @array, string, @string, bytes, @bytes)
 pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
-    // Pair cell — the common case for lists
-    if let Some(pair) = args[0].as_pair() {
-        return (SIG_OK, pair.rest);
-    }
-    // Empty list → empty list
-    if args[0].is_empty_list() {
-        return (SIG_OK, Value::EMPTY_LIST);
-    }
-    // Array — return array
-    if let Some(elems) = args[0].as_array() {
-        return if elems.len() <= 1 {
-            (SIG_OK, Value::array(vec![]))
-        } else {
-            (SIG_OK, Value::array(elems[1..].to_vec()))
-        };
-    }
-    // Array — return array
-    if let Some(arr) = args[0].as_array_mut() {
-        let borrowed = arr.borrow();
-        return if borrowed.len() <= 1 {
-            (SIG_OK, Value::array_mut(vec![]))
-        } else {
-            (SIG_OK, Value::array_mut(borrowed[1..].to_vec()))
-        };
-    }
-    // String — skip first grapheme, return string
-    if let Some(result) = args[0].with_string(|s| {
-        let rest: String = s.graphemes(true).skip(1).collect();
-        (SIG_OK, Value::string(rest))
-    }) {
-        return result;
-    }
-    // @string — skip first grapheme, return new @string
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        if let Ok(s) = std::str::from_utf8(&borrowed) {
-            let rest: String = s.graphemes(true).skip(1).collect();
-            return (SIG_OK, Value::string_mut(rest.into_bytes()));
-        }
-        return (SIG_OK, Value::string_mut(vec![]));
-    }
-    // Bytes — return bytes from index 1 onward
-    if let Some(b) = args[0].as_bytes() {
-        return if b.len() <= 1 {
-            (SIG_OK, Value::bytes(vec![]))
-        } else {
-            (SIG_OK, Value::bytes(b[1..].to_vec()))
-        };
-    }
-    // @bytes — return new @bytes from index 1 onward
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        return if borrowed.len() <= 1 {
-            (SIG_OK, Value::bytes_mut(vec![]))
-        } else {
-            (SIG_OK, Value::bytes_mut(borrowed[1..].to_vec()))
-        };
-    }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
@@ -285,88 +64,15 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
             return (SIG_OK, Value::syntax(rest));
         }
     }
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "rest: expected sequence (list, array, string, bytes), got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
+    match seq_rest(&args[0]) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
+    }
 }
 
 /// Create a list from arguments
 pub(crate) fn prim_list(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(args.to_vec()))
-}
-
-/// Collect elements of any sequence into a `Vec<Value>`.
-fn collect_elements(val: &Value) -> Result<Vec<Value>, (SignalBits, Value)> {
-    // List — walk cons cells
-    if val.is_pair() || val.is_empty_list() {
-        let mut elements = Vec::new();
-        let mut cur = *val;
-        while let Some(c) = cur.as_pair() {
-            elements.push(c.first);
-            cur = c.rest;
-        }
-        return Ok(elements);
-    }
-    // Array / @array
-    if let Some(elems) = val.as_array() {
-        return Ok(elems.to_vec());
-    }
-    if let Some(data) = val.as_array_mut() {
-        return Ok(data.borrow().clone());
-    }
-    // Set / @set
-    if let Some(set) = val.as_set() {
-        return Ok(set.to_vec());
-    }
-    if let Some(set) = val.as_set_mut() {
-        return Ok(set.borrow().iter().copied().collect());
-    }
-    // String — grapheme clusters as single-char strings
-    if val.is_string() {
-        return val
-            .with_string(|s| {
-                use unicode_segmentation::UnicodeSegmentation;
-                Ok(s.graphemes(true).map(Value::string).collect())
-            })
-            .unwrap_or_else(|| Ok(vec![]));
-    }
-    // @string — grapheme clusters
-    if val.is_string_mut() {
-        if let Some(data) = val.as_string_mut() {
-            let bytes = data.borrow();
-            if let Ok(s) = std::str::from_utf8(&bytes) {
-                use unicode_segmentation::UnicodeSegmentation;
-                return Ok(s.graphemes(true).map(Value::string).collect());
-            }
-        }
-        return Ok(vec![]);
-    }
-    // Bytes — each byte as integer
-    if let Some(b) = val.as_bytes() {
-        return Ok(b.iter().map(|&byte| Value::int(byte as i64)).collect());
-    }
-    // @bytes — each byte as integer
-    if let Some(data) = val.as_bytes_mut() {
-        return Ok(data
-            .borrow()
-            .iter()
-            .map(|&byte| Value::int(byte as i64))
-            .collect());
-    }
-    Err((
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!("expected sequence, got {}", val.type_name()),
-        ),
-    ))
 }
 
 /// Convert any sequence to an immutable array.
@@ -375,9 +81,9 @@ pub(crate) fn prim_to_array(args: &[Value]) -> (SignalBits, Value) {
     if args[0].as_array().is_some() {
         return (SIG_OK, args[0]);
     }
-    match collect_elements(&args[0]) {
+    match coll_to_vec(&args[0]) {
         Ok(elements) => (SIG_OK, Value::array(elements)),
-        Err(e) => e,
+        Err(e) => (SIG_ERROR, e),
     }
 }
 
@@ -387,275 +93,33 @@ pub(crate) fn prim_to_list(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_pair() || args[0].is_empty_list() {
         return (SIG_OK, args[0]);
     }
-    match collect_elements(&args[0]) {
+    match coll_to_vec(&args[0]) {
         Ok(elements) => (SIG_OK, list(elements)),
-        Err(e) => e,
+        Err(e) => (SIG_ERROR, e),
     }
 }
 
 /// Get the length of a collection (universal for all container types)
 pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
-    if args[0].is_nil() || args[0].is_empty_list() {
-        (SIG_OK, Value::int(0))
-    } else if args[0].is_pair() {
-        let vec = match args[0].list_to_vec() {
-            Ok(v) => v,
-            Err(e) => return (SIG_ERROR, error_val("type-error", format!("length: {}", e))),
-        };
-        (SIG_OK, Value::int(vec.len() as i64))
-    } else if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
-            (SIG_OK, Value::int(items.len() as i64))
-        } else {
-            (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    "length: expected collection type, got syntax object (non-list)",
-                ),
-            )
-        }
-    } else if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        match std::str::from_utf8(&borrowed) {
-            Ok(s) => (SIG_OK, Value::int(s.graphemes(true).count() as i64)),
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "encoding-error",
-                    format!("length: @string contains invalid UTF-8: {}", e),
-                ),
-            ),
-        }
-    } else if let Some(b) = args[0].as_bytes() {
-        (SIG_OK, Value::int(b.len() as i64))
-    } else if let Some(blob_ref) = args[0].as_bytes_mut() {
-        (SIG_OK, Value::int(blob_ref.borrow().len() as i64))
-    } else if let Some(r) =
-        args[0].with_string(|s| (SIG_OK, Value::int(s.graphemes(true).count() as i64)))
-    {
-        r
-    } else if let Some(elems) = args[0].as_array() {
-        (SIG_OK, Value::int(elems.len() as i64))
-    } else if args[0].is_array_mut() {
-        let vec = match args[0].as_array_mut() {
-            Some(v) => v,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "length: failed to get array".to_string()),
-                )
-            }
-        };
-        (SIG_OK, Value::int(vec.borrow().len() as i64))
-    } else if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "length: failed to get table".to_string()),
-                )
-            }
-        };
-        (SIG_OK, Value::int(table.borrow().len() as i64))
-    } else if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "length: failed to get struct".to_string()),
-                )
-            }
-        };
-        (SIG_OK, Value::int(s.len() as i64))
-    } else if let Some(sid) = args[0].as_symbol() {
-        // Get the symbol name from the symbol table context
-        if let Some(name) = crate::context::resolve_symbol_name(sid) {
-            (SIG_OK, Value::int(name.graphemes(true).count() as i64))
-        } else {
-            (
-                SIG_ERROR,
-                error_val(
-                    "internal-error",
-                    format!("length: unable to resolve symbol name for id {:?}", sid),
-                ),
-            )
-        }
-    } else if let Some(name) = args[0].as_keyword_name() {
-        (SIG_OK, Value::int(name.graphemes(true).count() as i64))
-    } else if args[0].is_set() {
-        let set = match args[0].as_set() {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "length: failed to get set".to_string()),
-                )
-            }
-        };
-        (SIG_OK, Value::int(set.len() as i64))
-    } else if args[0].is_set_mut() {
-        let set = match args[0].as_set_mut() {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "internal-error",
-                        "length: failed to get mutable set".to_string(),
-                    ),
-                )
-            }
-        };
-        (SIG_OK, Value::int(set.borrow().len() as i64))
-    } else {
-        (SIG_ERROR, error_val("type-error", format!(
-            "length: expected collection type (list, string, array, @array, @struct, struct, set, symbol, or keyword), got {}",
-            args[0].type_name()
-        )))
+    match coll_len(&args[0]) {
+        Ok(n) => (SIG_OK, Value::int(n as i64)),
+        Err(e) => (SIG_ERROR, e),
     }
 }
 
 /// Check if a collection is empty (O(1) operation for most types)
 pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
-    // nil is not a container - error if passed
-    if args[0].is_nil() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                "empty?: expected collection type (list, string, array, @array, @string, @struct, struct, or set), got nil"
-                    .to_string(),
-            ),
-        );
+    match coll_empty(&args[0]) {
+        Ok(empty) => (SIG_OK, if empty { Value::TRUE } else { Value::FALSE }),
+        Err(e) => (SIG_ERROR, e),
     }
-
-    let result = if let Some(syntax) = args[0].as_syntax() {
-        if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
-            items.is_empty()
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "empty?: expected collection type (list, string, array, @array, @string, @struct, struct, or set), got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    } else if args[0].is_empty_list() {
-        true
-    } else if args[0].is_pair() {
-        false
-    } else if let Some(buf_ref) = args[0].as_string_mut() {
-        buf_ref.borrow().is_empty()
-    } else if let Some(r) = args[0].with_string(|s| s.is_empty()) {
-        r
-    } else if args[0].is_array_mut() {
-        let vec = match args[0].as_array_mut() {
-            Some(v) => v,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "empty?: failed to get array".to_string()),
-                )
-            }
-        };
-        vec.borrow().is_empty()
-    } else if let Some(b) = args[0].as_bytes() {
-        b.is_empty()
-    } else if let Some(blob_ref) = args[0].as_bytes_mut() {
-        blob_ref.borrow().is_empty()
-    } else if args[0].is_array() {
-        let elems = match args[0].as_array() {
-            Some(e) => e,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "empty?: failed to get array".to_string()),
-                )
-            }
-        };
-        elems.is_empty()
-    } else if args[0].is_struct_mut() {
-        let table = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "empty?: failed to get table".to_string()),
-                )
-            }
-        };
-        table.borrow().is_empty()
-    } else if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "empty?: failed to get struct".to_string()),
-                )
-            }
-        };
-        s.is_empty()
-    } else if args[0].is_set() {
-        let set = match args[0].as_set() {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("internal-error", "empty?: failed to get set".to_string()),
-                )
-            }
-        };
-        set.is_empty()
-    } else if args[0].is_set_mut() {
-        let set = match args[0].as_set_mut() {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "internal-error",
-                        "empty?: failed to get mutable set".to_string(),
-                    ),
-                )
-            }
-        };
-        set.borrow().is_empty()
-    } else {
-        return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                "empty?: expected collection type (list, string, array, @array, @string, @struct, struct, set, or @set), got {}",
-                args[0].type_name()
-            ),
-            ),
-        );
-    };
-
-    (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
 }
 
 /// Check if a collection is non-empty (negation of empty?)
 pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
-    let (sig, val) = prim_empty(args);
-    if sig != SIG_OK {
-        // Re-wrap errors with nonempty? name
-        return (sig, val);
-    }
-    // Negate the boolean result
-    if val == Value::TRUE {
-        (SIG_OK, Value::FALSE)
-    } else {
-        (SIG_OK, Value::TRUE)
+    match coll_empty(&args[0]) {
+        Ok(empty) => (SIG_OK, if empty { Value::FALSE } else { Value::TRUE }),
+        Err(e) => (SIG_ERROR, e),
     }
 }
 

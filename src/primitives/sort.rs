@@ -1,56 +1,20 @@
 //! Sort and range primitives
 use crate::primitives::def::PrimitiveDef;
+use crate::primitives::seq::seq_sort;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, list, Value};
+use crate::value::{error_val, Value};
 
 /// Sort a collection in ascending order using the built-in value ordering.
 ///
 /// Type-preserving: @arrays mutated in place, arrays and lists return new sorted values.
 /// Supports any comparable values via Value::Ord.
 pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
-    // Array — mutate in place
-    if let Some(arr) = args[0].as_array_mut() {
-        let mut vec = arr.borrow_mut();
-        vec.sort();
-        drop(vec);
-        return (SIG_OK, args[0]);
+    match seq_sort(&args[0]) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
     }
-
-    // Array — return new sorted array
-    if let Some(elems) = args[0].as_array() {
-        let mut vec = elems.to_vec();
-        vec.sort();
-        return (SIG_OK, Value::array(vec));
-    }
-
-    // Empty list
-    if args[0].is_empty_list() {
-        return (SIG_OK, Value::EMPTY_LIST);
-    }
-
-    // List — collect, sort, rebuild
-    if args[0].is_pair() {
-        let vec = match args[0].list_to_vec() {
-            Ok(v) => v,
-            Err(e) => return (SIG_ERROR, error_val("type-error", format!("sort: {}", e))),
-        };
-        let mut sorted = vec;
-        sorted.sort();
-        return (SIG_OK, list(sorted));
-    }
-
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "sort: expected list, array, or tuple, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
 }
 
 /// Generate a range of numbers as an array.

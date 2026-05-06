@@ -1,10 +1,10 @@
 //! Bytes and @bytes primitives (binary data)
 use crate::primitives::def::PrimitiveDef;
+use crate::primitives::seq::seq_slice;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
-use unicode_segmentation::UnicodeSegmentation;
 
 /// Create immutable bytes from integer arguments, or from a single string/keyword.
 ///
@@ -264,8 +264,6 @@ pub(crate) fn prim_seq_to_hex(args: &[Value]) -> (SignalBits, Value) {
 /// Supports: bytes, @bytes, array, @array, list, string, @string.
 /// Indices are 0-based, clamped to length. start >= end returns empty.
 pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
-    use crate::primitives::access::resolve_slice_index;
-
     let raw_start = match args[1].as_int() {
         Some(i) => i,
         None => {
@@ -297,127 +295,9 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    // Bytes (immutable)
-    if let Some(b) = args[0].as_bytes() {
-        let start = resolve_slice_index(raw_start, b.len());
-        let end = resolve_slice_index(raw_end, b.len());
-        if start >= end {
-            return (SIG_OK, Value::bytes(vec![]));
-        }
-        return (SIG_OK, Value::bytes(b[start..end].to_vec()));
-    }
-
-    // @bytes (mutable)
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        let start = resolve_slice_index(raw_start, borrowed.len());
-        let end = resolve_slice_index(raw_end, borrowed.len());
-        if start >= end {
-            return (SIG_OK, Value::bytes_mut(vec![]));
-        }
-        return (SIG_OK, Value::bytes_mut(borrowed[start..end].to_vec()));
-    }
-
-    // Array (immutable)
-    if let Some(elems) = args[0].as_array() {
-        let start = resolve_slice_index(raw_start, elems.len());
-        let end = resolve_slice_index(raw_end, elems.len());
-        if start >= end {
-            return (SIG_OK, Value::array(vec![]));
-        }
-        return (SIG_OK, Value::array(elems[start..end].to_vec()));
-    }
-
-    // Array (mutable)
-    if let Some(arr_ref) = args[0].as_array_mut() {
-        let borrowed = arr_ref.borrow();
-        let start = resolve_slice_index(raw_start, borrowed.len());
-        let end = resolve_slice_index(raw_end, borrowed.len());
-        if start >= end {
-            return (SIG_OK, Value::array_mut(vec![]));
-        }
-        return (SIG_OK, Value::array_mut(borrowed[start..end].to_vec()));
-    }
-
-    // String (immutable, grapheme-aware)
-    if args[0].is_string() {
-        return args[0]
-            .with_string(|s| {
-                let grapheme_count = s.graphemes(true).count();
-                let start = resolve_slice_index(raw_start, grapheme_count);
-                let end = resolve_slice_index(raw_end, grapheme_count);
-                slice_graphemes(s, start, end, false)
-            })
-            .unwrap();
-    }
-
-    // @string (mutable, grapheme-aware)
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        // @string is valid UTF-8 by construction
-        let s = unsafe { std::str::from_utf8_unchecked(&borrowed) };
-        let grapheme_count = s.graphemes(true).count();
-        let start = resolve_slice_index(raw_start, grapheme_count);
-        let end = resolve_slice_index(raw_end, grapheme_count);
-        return slice_graphemes(s, start, end, true);
-    }
-
-    // List
-    if args[0].is_empty_list() || args[0].is_pair() {
-        match args[0].list_to_vec() {
-            Ok(elems) => {
-                let clamped_start = resolve_slice_index(raw_start, elems.len());
-                let clamped_end = resolve_slice_index(raw_end, elems.len());
-                if clamped_start >= clamped_end {
-                    return (SIG_OK, Value::EMPTY_LIST);
-                }
-                let mut result = Value::EMPTY_LIST;
-                for v in elems[clamped_start..clamped_end].iter().rev() {
-                    result = Value::pair(*v, result);
-                }
-                return (SIG_OK, result);
-            }
-            Err(_) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("slice: expected proper list, got {}", args[0].type_name()),
-                    ),
-                );
-            }
-        }
-    }
-
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "slice: expected sequence (bytes, @bytes, array, @array, list, string, or @string), got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
-}
-
-/// Grapheme-aware slicing for strings and @strings.
-fn slice_graphemes(s: &str, start: usize, end: usize, is_buffer: bool) -> (SignalBits, Value) {
-    let graphemes: Vec<&str> = s.graphemes(true).collect();
-    let clamped_start = start.min(graphemes.len());
-    let clamped_end = end.min(graphemes.len());
-    if clamped_start >= clamped_end {
-        if is_buffer {
-            return (SIG_OK, Value::string_mut(vec![]));
-        } else {
-            return (SIG_OK, Value::string(""));
-        }
-    }
-    let result: String = graphemes[clamped_start..clamped_end].concat();
-    if is_buffer {
-        (SIG_OK, Value::string_mut(result.into_bytes()))
-    } else {
-        (SIG_OK, Value::string(result))
+    match seq_slice(&args[0], raw_start, raw_end) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
     }
 }
 

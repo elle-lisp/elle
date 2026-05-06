@@ -1,5 +1,6 @@
 //! Array operations primitives
 use crate::primitives::def::PrimitiveDef;
+use crate::primitives::seq::{seq_pop, seq_push};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::fiberheap;
@@ -60,222 +61,18 @@ pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
 
 /// Push a value onto the end of an array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(vec_ref) = args[0].as_array_mut() {
-        fiberheap::incref(args[1]);
-        let mut vec = vec_ref.borrow_mut();
-        vec.push(args[1]);
-        drop(vec);
-        return (SIG_OK, args[0]);
+    match seq_push(&args[0], args[1]) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
     }
-
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let s = match args[1].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "push: @string value must be string, got {}",
-                            args[1].type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
-        return (SIG_OK, args[0]);
-    }
-
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let byte = match args[1].as_int() {
-            Some(n) if (0..=255).contains(&n) => n as u8,
-            Some(n) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        format!("push: byte value out of range 0-255: {}", n),
-                    ),
-                )
-            }
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "push: @bytes value must be integer, got {}",
-                            args[1].type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-        blob_ref.borrow_mut().push(byte);
-        return (SIG_OK, args[0]);
-    }
-
-    // Immutable array — return new array with element appended
-    if let Some(elems) = args[0].as_array() {
-        let mut new = elems.to_vec();
-        new.push(args[1]);
-        return (SIG_OK, Value::array(new));
-    }
-
-    // Immutable string — return new string with value appended
-    if args[0].is_string() {
-        let s = match args[1].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "push: string value must be string, got {}",
-                            args[1].type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-        return args[0]
-            .with_string(|base| {
-                let mut new = base.to_string();
-                new.push_str(&s);
-                (SIG_OK, Value::string(new))
-            })
-            .unwrap_or_else(|| {
-                (
-                    SIG_ERROR,
-                    error_val("type-error", "push: unreachable string case".to_string()),
-                )
-            });
-    }
-
-    // Immutable bytes — return new bytes with byte appended
-    if let Some(b) = args[0].as_bytes() {
-        let byte = match args[1].as_int() {
-            Some(n) if (0..=255).contains(&n) => n as u8,
-            Some(n) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        format!("push: byte value out of range 0-255: {}", n),
-                    ),
-                )
-            }
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "push: bytes value must be integer, got {}",
-                            args[1].type_name()
-                        ),
-                    ),
-                )
-            }
-        };
-        let mut new = b.to_vec();
-        new.push(byte);
-        return (SIG_OK, Value::bytes(new));
-    }
-
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "push: expected array, @array, string, @string, bytes, or @bytes, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
 }
 
 /// Pop a value from the end of an @array or @string (mutates in place, returns the removed element)
 pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(vec_ref) = args[0].as_array_mut() {
-        let mut vec = vec_ref.borrow_mut();
-        match vec.pop() {
-            Some(v) => {
-                drop(vec);
-                // Decref: value leaves a durable collection reference.
-                fiberheap::decref(v);
-                return (SIG_OK, v);
-            }
-            None => {
-                drop(vec);
-                return (
-                    SIG_ERROR,
-                    error_val("argument-error", "pop: empty array".to_string()),
-                );
-            }
-        }
+    match seq_pop(&args[0]) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
     }
-
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let mut buf = buf_ref.borrow_mut();
-        if buf.is_empty() {
-            drop(buf);
-            return (
-                SIG_ERROR,
-                error_val("argument-error", "pop: empty @string".to_string()),
-            );
-        }
-        let s = match std::str::from_utf8(&buf) {
-            Ok(s) => s,
-            Err(_) => {
-                drop(buf);
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "encoding-error",
-                        "pop: @string contains invalid UTF-8".to_string(),
-                    ),
-                );
-            }
-        };
-        use unicode_segmentation::UnicodeSegmentation;
-        let cluster = s.graphemes(true).next_back().unwrap().to_string();
-        let new_len = buf.len() - cluster.len();
-        buf.truncate(new_len);
-        drop(buf);
-        return (SIG_OK, Value::string(cluster));
-    }
-
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let mut blob = blob_ref.borrow_mut();
-        match blob.pop() {
-            Some(byte) => {
-                drop(blob);
-                return (SIG_OK, Value::int(byte as i64));
-            }
-            None => {
-                drop(blob);
-                return (
-                    SIG_ERROR,
-                    error_val("argument-error", "pop: empty @bytes".to_string()),
-                );
-            }
-        }
-    }
-
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "pop: expected @array, @string, or @bytes, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
 }
 
 /// Pop n values from the end of an @array or @string and return them as a new collection
@@ -361,12 +158,9 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
-        // insert allows index == len (append), so try resolve_index first,
-        // then also accept len exactly for non-negative raw_index
         let index = match resolve_index(raw_index, vec.len()) {
             Some(i) => i,
             None => {
-                // Allow index == len for append (only when non-negative or resolved == len)
                 if raw_index >= 0 && raw_index as usize <= vec.len() {
                     raw_index as usize
                 } else if raw_index < 0 {
@@ -382,11 +176,10 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
                         ),
                     );
                 } else {
-                    vec.len() // clamp to append
+                    vec.len()
                 }
             }
         };
-        // Incref: value enters a durable collection reference.
         fiberheap::incref(args[2]);
         vec.insert(index, args[2]);
         drop(vec);
@@ -508,7 +301,6 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         if let Some(index) = resolve_index(raw_index, vec.len()) {
             let remove_count = std::cmp::min(count, vec.len() - index);
             for j in 0..remove_count {
-                // Decref: value leaves a durable collection reference.
                 fiberheap::decref(vec[index + j]);
             }
             for _ in 0..remove_count {

@@ -1,12 +1,13 @@
 //! Struct operations primitives (mutable hash tables)
 //!
 //! Polymorphic collection access (get, put) is in `access.rs`.
+use crate::primitives::collection::coll_has;
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::fiberheap;
 use crate::value::types::Arity;
-use crate::value::{error_val, sorted_struct_contains, sorted_struct_remove, TableKey, Value};
+use crate::value::{error_val, sorted_struct_remove, TableKey, Value};
 use std::collections::BTreeMap;
 
 use super::access::{prim_get, prim_put};
@@ -290,67 +291,9 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
 
 /// Polymorphic has? - works on structs, sets, and strings
 /// `(has? collection key-or-value)`
-///
-/// For structs: checks if key exists
-/// For sets: checks if value is a member
-/// For strings: checks if substring is present
 pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
-    // Delegate to set/string membership check
-    if args[0].is_set() || args[0].is_set_mut() || args[0].is_string() || args[0].is_string_mut() {
-        return crate::primitives::sets::prim_contains(args);
-    }
-
-    let key = match TableKey::from_value(&args[1]) {
-        Some(k) => k,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("expected hashable value, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-
-    if args[0].is_struct_mut() {
-        let mstruct = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("has?: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
-        (SIG_OK, Value::bool(mstruct.borrow().contains_key(&key)))
-    } else if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("has?: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
-        (SIG_OK, Value::bool(sorted_struct_contains(s, &key)))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "has?: expected struct, set, or string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+    match coll_has(&args[0], &args[1]) {
+        Ok(found) => (SIG_OK, if found { Value::TRUE } else { Value::FALSE }),
+        Err(e) => (SIG_ERROR, e),
     }
 }
