@@ -315,6 +315,12 @@ pub struct Lowerer<'a> {
     /// A function returns-param-safe if all closures it returns are
     /// param-safe (their bodies don't store params externally).
     callee_returns_param_safe: HashMap<Binding, bool>,
+    /// Binding → struct-fields-rotation-safe. True when a binding holds
+    /// a struct where all closure-typed values are rotation-safe.
+    /// Used by `callee_is_rotation_safe` to handle `(get struct :field)` callees.
+    callee_struct_fields_rotation_safe: HashMap<Binding, bool>,
+    /// Binding → struct-fields-param-safe. Same for param-safety.
+    callee_struct_fields_param_safe: HashMap<Binding, bool>,
     /// Binding → result_is_immediate for function definitions.
     /// Precomputed via fixpoint iteration so that `call_result_is_safe`
     /// can identify user functions that always return immediates.
@@ -399,6 +405,8 @@ impl<'a> Lowerer<'a> {
             callee_return_safe: HashMap::new(),
             callee_returns_rotation_safe: HashMap::new(),
             callee_returns_param_safe: HashMap::new(),
+            callee_struct_fields_rotation_safe: HashMap::new(),
+            callee_struct_fields_param_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
             callee_return_params: HashMap::new(),
             callee_rest_index: HashMap::new(),
@@ -539,6 +547,8 @@ impl<'a> Lowerer<'a> {
         self.precompute_returns_param_safe(hir);
         self.widen_rotation_safety(hir);
         self.widen_param_safety(hir);
+        self.precompute_struct_fields_safety(hir);
+        self.widen_struct_fields_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
         self.terminate(Terminator::Return(result_reg));
@@ -1816,6 +1826,131 @@ impl<'a> Lowerer<'a> {
                 if let Some(safe) = self.resolve_value_param_safe(init) {
                     self.callee_param_safe.insert(binding, safe);
                     changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Precompute `callee_struct_fields_rotation_safe` and
+    /// `callee_struct_fields_param_safe` for all Lambda-bound functions.
+    ///
+    /// A function has struct-fields-rotation-safe if its body returns
+    /// a struct where all closure-valued fields are rotation-safe.
+    fn precompute_struct_fields_safety(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_lambda_defs(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically safe.
+        for &(binding, _) in &defs {
+            self.callee_struct_fields_rotation_safe
+                .insert(binding, true);
+            self.callee_struct_fields_param_safe.insert(binding, true);
+        }
+
+        // Iterate rotation-safe until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                if !self.callee_struct_fields_rotation_safe[&binding] {
+                    continue;
+                }
+                if !self.body_returns_struct_fields_rotation_safe(body) {
+                    self.callee_struct_fields_rotation_safe
+                        .insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Iterate param-safe until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                if !self.callee_struct_fields_param_safe[&binding] {
+                    continue;
+                }
+                if !self.body_returns_struct_fields_param_safe(body) {
+                    self.callee_struct_fields_param_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Widen `callee_struct_fields_*` to non-Lambda bindings.
+    /// When a binding is initialized from a Call to a function with
+    /// struct-fields-safe, the binding itself is struct-fields-safe.
+    fn widen_struct_fields_safety(&mut self, hir: &Hir) {
+        let mut all_bindings: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_all_bindings(hir, &mut all_bindings);
+
+        loop {
+            let mut changed = false;
+            for &(binding, init) in &all_bindings {
+                if self
+                    .callee_struct_fields_rotation_safe
+                    .contains_key(&binding)
+                {
+                    continue;
+                }
+                // For Call inits, check if callee returns struct-fields-safe
+                if let HirKind::Call { func, .. } = &init.kind {
+                    let callee = self.extract_callee_binding(func);
+                    if let Some(b) = callee {
+                        if let Some(&safe) = self.callee_struct_fields_rotation_safe.get(b) {
+                            self.callee_struct_fields_rotation_safe
+                                .insert(binding, safe);
+                            changed = true;
+                        }
+                    }
+                }
+                // For Var inits (aliases), propagate
+                if let HirKind::Var(b) = &init.kind {
+                    if let Some(&safe) = self.callee_struct_fields_rotation_safe.get(b) {
+                        self.callee_struct_fields_rotation_safe
+                            .insert(binding, safe);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Same for param-safe
+        loop {
+            let mut changed = false;
+            for &(binding, init) in &all_bindings {
+                if self.callee_struct_fields_param_safe.contains_key(&binding) {
+                    continue;
+                }
+                if let HirKind::Call { func, .. } = &init.kind {
+                    let callee = self.extract_callee_binding(func);
+                    if let Some(b) = callee {
+                        if let Some(&safe) = self.callee_struct_fields_param_safe.get(b) {
+                            self.callee_struct_fields_param_safe.insert(binding, safe);
+                            changed = true;
+                        }
+                    }
+                }
+                if let HirKind::Var(b) = &init.kind {
+                    if let Some(&safe) = self.callee_struct_fields_param_safe.get(b) {
+                        self.callee_struct_fields_param_safe.insert(binding, safe);
+                        changed = true;
+                    }
                 }
             }
             if !changed {

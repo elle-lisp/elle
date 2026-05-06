@@ -1382,3 +1382,27 @@
       d10k (t13-let-alias 10000)]
   (assert (or checked? (bounded? d100 d10k 30))
           (string "t13 let-alias: d100=" d100 " d10k=" d10k)))
+
+# 13f: struct-field callee — module pattern
+(defn make-module []
+  (defn mod-make [i]
+    {:x i})
+  (defn mod-label [i]
+    (string "item-" i))
+  {:make mod-make :label mod-label})
+
+(def the-mod (make-module))
+
+(defn t13-struct-field [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (the-mod:make i)
+    (the-mod:label i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t13-struct-field 100)
+      d10k (t13-struct-field 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 struct-field: d100=" d100 " d10k=" d10k)))

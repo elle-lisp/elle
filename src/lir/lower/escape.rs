@@ -1601,12 +1601,41 @@ impl<'a> Lowerer<'a> {
             HirKind::Var(b) => b,
             HirKind::DerefCell { cell } => match &cell.kind {
                 HirKind::Var(b) => b,
+                _ => return self.callee_from_struct_get_is_param_safe(func),
+            },
+            _ => return self.callee_from_struct_get_is_param_safe(func),
+        };
+        self.callee_param_safe
+            .get(binding)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Like `callee_from_struct_get_is_rotation_safe` but for param-safety.
+    fn callee_from_struct_get_is_param_safe(&self, func: &Hir) -> bool {
+        let HirKind::Call { args, .. } = &func.kind else {
+            return false;
+        };
+        if !self.value_is_non_allocating_accessor(func) {
+            return false;
+        }
+        let Some(first_arg) = args.first() else {
+            return false;
+        };
+        let struct_binding = match &first_arg.expr.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
                 _ => return false,
             },
             _ => return false,
         };
-        self.callee_param_safe
-            .get(binding)
+        let bi = self.arena.get(*struct_binding);
+        if !bi.is_immutable || bi.is_mutated {
+            return false;
+        }
+        self.callee_struct_fields_param_safe
+            .get(struct_binding)
             .copied()
             .unwrap_or(false)
     }
@@ -1858,12 +1887,48 @@ impl<'a> Lowerer<'a> {
             HirKind::Var(b) => b,
             HirKind::DerefCell { cell } => match &cell.kind {
                 HirKind::Var(b) => b,
+                _ => return self.callee_from_struct_get_is_rotation_safe(func),
+            },
+            _ => return self.callee_from_struct_get_is_rotation_safe(func),
+        };
+        self.callee_rotation_safe
+            .get(binding)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Check if a callee expression is `(get struct-var :field)` where the
+    /// struct binding holds a struct whose closure fields are all rotation-safe.
+    /// This handles the module-init pattern: `(def grace (module-init ...))`
+    /// followed by `(grace:bulk-evolve-stream ...)` which desugars to
+    /// `((get grace :bulk-evolve-stream) ...)`.
+    fn callee_from_struct_get_is_rotation_safe(&self, func: &Hir) -> bool {
+        let HirKind::Call { args, .. } = &func.kind else {
+            return false;
+        };
+        // Must be a call to a non-allocating accessor (get, first, rest, etc.)
+        if !self.value_is_non_allocating_accessor(func) {
+            return false;
+        }
+        // First arg must be a Var referencing an immutable binding
+        let Some(first_arg) = args.first() else {
+            return false;
+        };
+        let struct_binding = match &first_arg.expr.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
                 _ => return false,
             },
             _ => return false,
         };
-        self.callee_rotation_safe
-            .get(binding)
+        let bi = self.arena.get(*struct_binding);
+        if !bi.is_immutable || bi.is_mutated {
+            return false;
+        }
+        // Check if the struct binding is in the struct-fields-safe map
+        self.callee_struct_fields_rotation_safe
+            .get(struct_binding)
             .copied()
             .unwrap_or(false)
     }
@@ -2072,6 +2137,184 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Walk a function body's return positions to check whether all
+    /// closures in any returned struct are rotation-safe. Like
+    /// `body_returns_rotation_safe_closures` but handles struct construction
+    /// in return position: all value args of the struct must be rotation-safe
+    /// closures (or non-closures).
+    pub(super) fn body_returns_struct_fields_rotation_safe(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            // Struct construction: check all value args
+            HirKind::Call { func, args, .. } if self.callee_is_primitive(func) => {
+                // Struct literal: args alternate key, value, key, value...
+                // All value args (odd indices) that are closures must be rotation-safe
+                args.iter().enumerate().all(|(i, a)| {
+                    if i % 2 == 0 {
+                        return true; // key position
+                    }
+                    self.value_is_rotation_safe_closure_or_non_closure(&a.expr)
+                })
+            }
+            // Call to a function: check if it returns struct with safe fields
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self
+                        .callee_struct_fields_rotation_safe
+                        .get(b)
+                        .copied()
+                        .unwrap_or(false),
+                    None => false,
+                }
+            }
+            // Control flow: all branches must satisfy
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.body_returns_struct_fields_rotation_safe(then_branch)
+                    && self.body_returns_struct_fields_rotation_safe(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_none_or(|e| self.body_returns_struct_fields_rotation_safe(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.body_returns_struct_fields_rotation_safe(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, b)| self.body_returns_struct_fields_rotation_safe(b))
+                    && else_branch
+                        .as_ref()
+                        .is_none_or(|b| self.body_returns_struct_fields_rotation_safe(b))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| self.body_returns_struct_fields_rotation_safe(body)),
+            HirKind::Block { body, .. } => body
+                .last()
+                .is_none_or(|e| self.body_returns_struct_fields_rotation_safe(e)),
+            _ => false,
+        }
+    }
+
+    /// Check if an expression is either a rotation-safe closure or not a
+    /// closure at all. Used by struct field analysis.
+    fn value_is_rotation_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            // Lambda: check its body
+            HirKind::Lambda { body, .. } => !self.body_escapes_heap_values(body),
+            // Var: either a known rotation-safe function or a non-closure value
+            HirKind::Var(b) => {
+                // If it's in the rotation-safe map, it's a known-safe closure
+                if self.callee_rotation_safe.get(b).copied().unwrap_or(false) {
+                    return true;
+                }
+                // If it's NOT in any function map, it's not a closure — safe
+                !self.callee_rotation_safe.contains_key(b)
+                    && !self.callee_param_safe.contains_key(b)
+            }
+            HirKind::DerefCell { cell } => self.value_is_rotation_safe_closure_or_non_closure(cell),
+            // Literals, keywords, etc. — not closures
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Quote(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Same as `body_returns_struct_fields_rotation_safe` but for param-safety.
+    pub(super) fn body_returns_struct_fields_param_safe(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Call { func, args, .. } if self.callee_is_primitive(func) => {
+                args.iter().enumerate().all(|(i, a)| {
+                    if i % 2 == 0 {
+                        return true;
+                    }
+                    self.value_is_param_safe_closure_or_non_closure(&a.expr)
+                })
+            }
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self
+                        .callee_struct_fields_param_safe
+                        .get(b)
+                        .copied()
+                        .unwrap_or(false),
+                    None => false,
+                }
+            }
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.body_returns_struct_fields_param_safe(then_branch)
+                    && self.body_returns_struct_fields_param_safe(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_none_or(|e| self.body_returns_struct_fields_param_safe(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.body_returns_struct_fields_param_safe(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, b)| self.body_returns_struct_fields_param_safe(b))
+                    && else_branch
+                        .as_ref()
+                        .is_none_or(|b| self.body_returns_struct_fields_param_safe(b))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| self.body_returns_struct_fields_param_safe(body)),
+            HirKind::Block { body, .. } => body
+                .last()
+                .is_none_or(|e| self.body_returns_struct_fields_param_safe(e)),
+            _ => false,
+        }
+    }
+
+    fn value_is_param_safe_closure_or_non_closure(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Lambda { body, params, .. } => {
+                !self.body_stores_params_externally(body, params)
+            }
+            HirKind::Var(b) => {
+                if self.callee_param_safe.get(b).copied().unwrap_or(false) {
+                    return true;
+                }
+                !self.callee_rotation_safe.contains_key(b)
+                    && !self.callee_param_safe.contains_key(b)
+            }
+            HirKind::DerefCell { cell } => self.value_is_param_safe_closure_or_non_closure(cell),
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Quote(_) => true,
+            _ => false,
+        }
+    }
+
     /// Resolve the rotation-safety of a non-Lambda init expression.
     /// Returns `Some(true/false)` if resolvable, `None` if dependencies
     /// haven't been resolved yet.
@@ -2219,7 +2462,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Extract the Binding from a callee expression (Var or DerefCell{Var}).
-    fn extract_callee_binding<'h>(&self, func: &'h Hir) -> Option<&'h Binding> {
+    pub(super) fn extract_callee_binding<'h>(&self, func: &'h Hir) -> Option<&'h Binding> {
         match &func.kind {
             HirKind::Var(b) => Some(b),
             HirKind::DerefCell { cell } => match &cell.kind {
