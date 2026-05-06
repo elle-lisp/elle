@@ -1291,3 +1291,94 @@
       d10k (t12-wrap-map 10000)]
   (assert (or checked? (bounded? d100 d10k 30))
           (string "t12 wrap-map: d100=" d100 " d10k=" d10k)))
+
+# ── Tier 13: value-flow propagation ───────────────────────────
+# Closures obtained through non-Lambda value paths (factory calls,
+# aliases, conditional construction) should be recognized as
+# rotation-safe / param-safe so the caller's while loop can reclaim.
+
+# 13a: factory function returning a closure
+(defn make-proc []
+  (fn [i] {:x i}))
+
+(defn t13-factory [n]
+  (def proc (make-proc))
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (proc i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t13-factory 100)
+      d10k (t13-factory 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 factory: d100=" d100 " d10k=" d10k)))
+
+# 13b: conditional factory — both branches return closures
+(defn make-thing [mode]
+  (if (= mode :fast) (fn [x] {:fast x}) (fn [x] {:slow x})))
+
+(defn t13-cond-factory [n]
+  (def proc (make-thing :fast))
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (proc i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t13-cond-factory 100)
+      d10k (t13-cond-factory 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 cond-factory: d100=" d100 " d10k=" d10k)))
+
+# 13c: alias to a known-safe function
+(defn t13-alias [n]
+  (def f make-struct)
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (f i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t13-alias 100)
+      d10k (t13-alias 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 alias: d100=" d100 " d10k=" d10k)))
+
+# 13d: nested factory — factory calls another factory
+(defn make-inner []
+  (fn [x] {:x x}))
+(defn make-outer []
+  (make-inner))
+
+(defn t13-nested-factory [n]
+  (def proc (make-outer))
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (proc i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t13-nested-factory 100)
+      d10k (t13-nested-factory 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 nested-factory: d100=" d100 " d10k=" d10k)))
+
+# 13e: let-bound alias
+(defn t13-let-alias [n]
+  (let [f make-struct]
+    (def before (arena/count))
+    (def @i 0)
+    (while (%lt i n)
+      (f i)
+      (assign i (%add i 1)))
+    (%sub (arena/count) before)))
+
+(let [d100 (t13-let-alias 100)
+      d10k (t13-let-alias 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t13 let-alias: d100=" d100 " d10k=" d10k)))
