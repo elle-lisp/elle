@@ -7,6 +7,8 @@ pub mod bitwise;
 pub mod r#box;
 pub mod bytes;
 pub mod chan;
+pub mod collection;
+
 pub mod comparison;
 pub mod compile;
 pub mod concurrency;
@@ -44,6 +46,7 @@ pub mod path;
 pub mod ports;
 pub mod read;
 pub mod registration;
+pub mod seq;
 pub mod sets;
 pub mod sort;
 pub mod stream;

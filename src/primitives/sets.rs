@@ -1,6 +1,7 @@
 //! Set primitives for immutable and mutable sets
 use std::collections::BTreeSet;
 
+use crate::primitives::collection::{coll_combine, coll_has};
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -85,93 +86,10 @@ pub(crate) fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
 /// For sets: returns true if the value is a member of the set.
 /// For strings: returns true if the string contains the substring.
 pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
-    // Set membership check
-    let frozen = freeze_value(args[1]);
-    if let Some(s) = args[0].as_set() {
-        return (SIG_OK, Value::bool(s.binary_search(&frozen).is_ok()));
-    } else if let Some(s) = args[0].as_set_mut() {
-        return (SIG_OK, Value::bool(s.borrow().contains(&frozen)));
+    match coll_has(&args[0], &args[1]) {
+        Ok(found) => (SIG_OK, if found { Value::TRUE } else { Value::FALSE }),
+        Err(e) => (SIG_ERROR, e),
     }
-
-    // String substring check (immutable string)
-    if args[0].is_string() {
-        let needle = if let Some(n) = args[1].with_string(|s| s.to_string()) {
-            n
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "contains?: expected string as substring, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        };
-        return args[0]
-            .with_string(|haystack| {
-                (
-                    SIG_OK,
-                    if haystack.contains(&*needle) {
-                        Value::TRUE
-                    } else {
-                        Value::FALSE
-                    },
-                )
-            })
-            .unwrap();
-    }
-
-    // Mutable @string substring check
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let needle = if let Some(n) = args[1].with_string(|s| s.to_string()) {
-            n
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "contains?: expected string as substring, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        };
-        let borrowed = buf_ref.borrow();
-        let haystack = match String::from_utf8(borrowed.clone()) {
-            Ok(s) => s,
-            Err(e) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "encoding-error",
-                        format!("contains?: buffer contains invalid UTF-8: {}", e),
-                    ),
-                )
-            }
-        };
-        return (
-            SIG_OK,
-            if haystack.contains(&*needle) {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            },
-        );
-    }
-
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "contains?: expected set, string, or @string, got {}",
-                args[0].type_name()
-            ),
-        ),
-    )
 }
 
 /// Add an element to a set
@@ -239,22 +157,9 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing all elements from both sets.
 pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
-    if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
-        let sa: BTreeSet<Value> = a.iter().copied().collect();
-        let sb: BTreeSet<Value> = b.iter().copied().collect();
-        let result: BTreeSet<Value> = sa.union(&sb).copied().collect();
-        (SIG_OK, Value::set(result))
-    } else if let (Some(a), Some(b)) = (args[0].as_set_mut(), args[1].as_set_mut()) {
-        let result: BTreeSet<Value> = a.borrow().union(&*b.borrow()).copied().collect();
-        (SIG_OK, Value::set_mut(result))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                "union: both arguments must be sets or both must be mutable sets".to_string(),
-            ),
-        )
+    match coll_combine(&args[0], &args[1]) {
+        Ok(v) => (SIG_OK, v),
+        Err(e) => (SIG_ERROR, e),
     }
 }
 
