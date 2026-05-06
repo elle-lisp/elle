@@ -2,6 +2,16 @@ use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
 
+/// Per-field escape analysis info for cross-module projection.
+#[derive(Debug, Clone, Copy)]
+pub struct FieldEscapeInfo {
+    /// True when the field's closure is rotation-safe AND param-safe.
+    pub rotation_safe: bool,
+    /// True when the field's closure is outward-safe (no external
+    /// heap stores, even if it returns heap values).
+    pub outward_safe: bool,
+}
+
 /// Bytecode instruction set
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -352,11 +362,11 @@ pub struct Bytecode {
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
     /// Escape projection: maps keyword field names to escape analysis
-    /// properties (rotation-safe, param-safe). Populated during lowering
-    /// for module-pattern files that return a struct of closures.
-    /// When an importing file sees `module:field` as a callee, the lowerer
-    /// uses this projection to determine safety properties.
-    pub escape_projection: Option<std::collections::HashMap<String, bool>>,
+    /// properties. Populated during lowering for module-pattern files
+    /// that return a struct of closures. When an importing file sees
+    /// `module:field` as a callee, the lowerer uses this projection to
+    /// determine safety properties.
+    pub escape_projection: Option<std::collections::HashMap<String, FieldEscapeInfo>>,
 }
 
 impl Bytecode {

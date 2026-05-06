@@ -217,10 +217,12 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
         print!("{}", elle::hir::format_regions(&info, &arena, &names));
     }
 
-    let needs_pipeline = cfg
-        .dump
-        .iter()
-        .any(|k| matches!(k.as_str(), "hir" | "lir" | "cfg" | "dfa" | "jit" | "git"));
+    let needs_pipeline = cfg.dump.iter().any(|k| {
+        matches!(
+            k.as_str(),
+            "hir" | "lir" | "cfg" | "dfa" | "jit" | "git" | "escape"
+        )
+    });
     if !needs_pipeline {
         return Ok(());
     }
@@ -230,6 +232,13 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
             eprintln!("{}", e);
             e
         })?;
+
+    if cfg.dump.contains("escape") {
+        println!(";; ── escape analysis ────────────────────────────────────────");
+        if let Some(ref dump) = module.escape_dump {
+            print!("{}", dump);
+        }
+    }
 
     if cfg.dump.contains("hir") {
         println!(";; ── hir ────────────────────────────────────────────────────");

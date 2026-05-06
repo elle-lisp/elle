@@ -161,7 +161,8 @@ pub struct Analyzer<'a> {
     projection_env: HashMap<Binding, HashMap<String, Signal>>,
     /// Escape projection env: maps bindings from import-and-call patterns
     /// to their field→safe properties from the imported module's lowering.
-    pub(crate) escape_projection_env: HashMap<Binding, HashMap<String, bool>>,
+    pub(crate) escape_projection_env:
+        HashMap<Binding, HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Compile-time squelch result signal. Set during call analysis when
     /// the analyzer detects `(squelch f mask)` and computes the resulting
     /// closure's signal statically. Consumed by binding analysis to seed
@@ -172,7 +173,8 @@ pub struct Analyzer<'a> {
     /// projection. Consumed by binding analysis to populate projection_env.
     last_import_projection: Option<HashMap<String, Signal>>,
     /// Escape projection from the most recently compiled import.
-    last_import_escape_projection: Option<HashMap<String, bool>>,
+    last_import_escape_projection:
+        Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Tracks signal sources within the current lambda body for polymorphic inference
     current_signal_sources: SignalSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
