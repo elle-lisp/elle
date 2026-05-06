@@ -188,26 +188,27 @@ fn flip_on_break_from_while() {
 
 #[test]
 fn flip_on_unsafe_while_no_flip_injected() {
-    // A while loop that pushes heap values (pair cells) to an outer binding
-    // must NOT get FlipSwap — the outward set makes it unsafe.
+    // A while loop that pushes heap values into an outer mutable array
+    // must NOT get scope marks — push is an arg-escaping primitive that
+    // stores values into a collection outliving the scope.
     let (out, _, status) = run(
         &["--flip=on", "--dump=lir"],
         "(defn f [] \
-           (def @acc nil) \
+           (def @acc @[]) \
            (def @i 0) \
            (while (< i 3) \
-             (assign acc (pair i acc)) \
+             (push acc (string \"v\" i)) \
              (assign i (+ i 1))) \
            acc)",
     );
     assert!(status.success(), "compile failed with --flip=on");
-    // No flip-swap should appear — function-level flip-swap only fires
-    // at tail calls, and while-loop flip-swap was rejected by safety analysis.
-    let flip_swap_count = out.matches("flip-swap").count();
+    // No region-rotate should appear — push escapes heap values into
+    // the outer collection, making scope reclamation unsafe.
+    let region_rotate_count = out.matches("region-rotate").count();
     assert!(
-        flip_swap_count == 0,
-        "expected 0 flip-swap (unsafe while should be rejected), got {}:\n{}",
-        flip_swap_count,
+        region_rotate_count == 0,
+        "expected 0 region-rotate (unsafe while with push), got {}:\n{}",
+        region_rotate_count,
         out
     );
 }

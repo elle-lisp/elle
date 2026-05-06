@@ -236,6 +236,7 @@ pub(crate) fn build_non_allocating_accessors(symbols: &SymbolTable) -> FxHashSet
 /// Used by `walk_for_outward_set` and `body_escapes_heap_values` to
 /// treat calls to these as safe (equivalent to rotation-safe callees).
 const NON_ESCAPING_STDLIB: &[&str] = &[
+    "pair",
     "map",
     "filter",
     "reduce",

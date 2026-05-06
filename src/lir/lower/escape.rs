@@ -600,6 +600,7 @@ impl<'a> Lowerer<'a> {
                         } else if !self.callee_is_primitive(func)
                             && !self.callee_is_rotation_safe(func)
                             && !self.callee_is_non_escaping_stdlib(func)
+                            && !self.callee_is_param_safe(func)
                             && !self.computed_callee_is_safe(func, scope_bindings)
                         {
                             return true;
@@ -1458,12 +1459,19 @@ impl<'a> Lowerer<'a> {
                     if args.iter().any(|a| !self.tail_arg_is_safe(&a.expr)) {
                         return true;
                     }
-                    if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
+                    if !self.callee_is_primitive(func)
+                        && !self.callee_is_rotation_safe(func)
+                        && !self.callee_is_non_escaping_stdlib(func)
+                    {
                         return true;
                     }
                     return false;
                 }
-                if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
+                if !self.callee_is_primitive(func)
+                    && !self.callee_is_rotation_safe(func)
+                    && !self.callee_is_non_escaping_stdlib(func)
+                    && !self.callee_is_param_safe(func)
+                {
                     return true;
                 }
                 self.body_escapes_heap_values(func)
@@ -1551,6 +1559,263 @@ impl<'a> Lowerer<'a> {
                 args.iter().any(|a| self.body_escapes_heap_values(a))
             }
             _ => true,
+        }
+    }
+
+    /// Check if a callee is a known param-safe user function.
+    /// A param-safe function never stores its parameters into external
+    /// mutable state, so calling it with heap args won't escape them.
+    fn callee_is_param_safe(&self, func: &Hir) -> bool {
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        self.callee_param_safe
+            .get(binding)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Check whether a function body stores any parameter-derived value
+    /// into external mutable state. Used by the param-safety fixpoint.
+    ///
+    /// `params` is extended as we discover bindings that derive from params
+    /// (let init, match destructuring, define).
+    pub(super) fn body_stores_params_externally(&self, hir: &Hir, params: &[Binding]) -> bool {
+        self.body_stores_params_ext(hir, &mut params.to_vec())
+    }
+
+    fn body_stores_params_ext(&self, hir: &Hir, params: &mut Vec<Binding>) -> bool {
+        match &hir.kind {
+            // Literals, Var, Lambda — no external store
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Quote(_)
+            | HirKind::Var(_)
+            | HirKind::Error => false,
+            // Lambda is a separate scope — params don't flow in
+            HirKind::Lambda { .. } => false,
+
+            // Assign to outer binding: escapes if value references a param
+            HirKind::Assign { value, .. } => {
+                self.expr_references_any_param(value, params)
+                    || self.body_stores_params_ext(value, params)
+            }
+            // SetCell: escapes if value references a param
+            HirKind::SetCell { cell, value } => {
+                self.expr_references_any_param(value, params)
+                    || self.body_stores_params_ext(cell, params)
+                    || self.body_stores_params_ext(value, params)
+            }
+            // Emit: escapes if value references a param
+            HirKind::Emit { value, .. } => {
+                self.expr_references_any_param(value, params)
+                    || self.body_stores_params_ext(value, params)
+            }
+
+            // Call
+            HirKind::Call { func, args, .. } => {
+                // Mutating primitives (push/put): escapes if any arg refs a param
+                if self.callee_is_arg_escaping_primitive(func)
+                    && args
+                        .iter()
+                        .any(|a| self.expr_references_any_param(&a.expr, params))
+                {
+                    return true;
+                }
+                // Non-primitive, non-param-safe callee: if any arg refs a param, unsafe
+                if !self.callee_is_primitive(func)
+                    && !self.callee_is_param_safe(func)
+                    && !self.callee_is_non_escaping_stdlib(func)
+                    && args
+                        .iter()
+                        .any(|a| self.expr_references_any_param(&a.expr, params))
+                {
+                    return true;
+                }
+                // Recurse into func and args for nested stores
+                self.body_stores_params_ext(func, params)
+                    || args
+                        .iter()
+                        .any(|a| self.body_stores_params_ext(&a.expr, params))
+            }
+
+            // Let/Letrec: check inits, extend param set, recurse body
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    if self.body_stores_params_ext(init, params) {
+                        return true;
+                    }
+                    // If init references a param, the binding is param-derived
+                    if self.expr_references_any_param(init, params) {
+                        params.push(*binding);
+                    }
+                }
+                self.body_stores_params_ext(body, params)
+            }
+
+            // Define: same logic
+            HirKind::Define { binding, value } => {
+                if self.body_stores_params_ext(value, params) {
+                    return true;
+                }
+                if self.expr_references_any_param(value, params) {
+                    params.push(*binding);
+                }
+                false
+            }
+
+            // Match: if value refs a param, pattern bindings are param-derived
+            HirKind::Match { value, arms } => {
+                if self.body_stores_params_ext(value, params) {
+                    return true;
+                }
+                let value_refs_param = self.expr_references_any_param(value, params);
+                for (pattern, guard, body) in arms {
+                    let mut arm_params = params.clone();
+                    if value_refs_param {
+                        Self::collect_pattern_bindings(pattern, &mut arm_params);
+                    }
+                    if let Some(g) = guard {
+                        if self.body_stores_params_ext(g, &mut arm_params) {
+                            return true;
+                        }
+                    }
+                    if self.body_stores_params_ext(body, &mut arm_params) {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            // Destructure: same as Match
+            HirKind::Destructure { pattern, value, .. } => {
+                if self.body_stores_params_ext(value, params) {
+                    return true;
+                }
+                if self.expr_references_any_param(value, params) {
+                    Self::collect_pattern_bindings(pattern, params);
+                }
+                false
+            }
+
+            // Structural recursion — branches get isolated param snapshots
+            // to prevent Define in one branch from contaminating another.
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.body_stores_params_ext(cond, params)
+                    || self.body_stores_params_ext(then_branch, &mut params.clone())
+                    || self.body_stores_params_ext(else_branch, &mut params.clone())
+            }
+            HirKind::Begin(exprs) => exprs.iter().any(|e| self.body_stores_params_ext(e, params)),
+            HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .any(|e| self.body_stores_params_ext(e, &mut params.clone())),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    self.body_stores_params_ext(c, &mut params.clone())
+                        || self.body_stores_params_ext(b, &mut params.clone())
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| self.body_stores_params_ext(b, &mut params.clone()))
+            }
+            HirKind::While { cond, body } => {
+                self.body_stores_params_ext(cond, params)
+                    || self.body_stores_params_ext(body, params)
+            }
+            HirKind::Loop { bindings, body } => {
+                for (binding, init) in bindings {
+                    if self.body_stores_params_ext(init, params) {
+                        return true;
+                    }
+                    if self.expr_references_any_param(init, params) {
+                        params.push(*binding);
+                    }
+                }
+                self.body_stores_params_ext(body, params)
+            }
+            HirKind::Recur { args } => args.iter().any(|a| self.body_stores_params_ext(a, params)),
+            HirKind::Block { body, .. } => {
+                body.iter().any(|e| self.body_stores_params_ext(e, params))
+            }
+            HirKind::Break { value, .. } => self.body_stores_params_ext(value, params),
+            HirKind::MakeCell { value } => self.body_stores_params_ext(value, params),
+            HirKind::DerefCell { cell } => self.body_stores_params_ext(cell, params),
+            HirKind::Intrinsic { args, .. } => {
+                args.iter().any(|a| self.body_stores_params_ext(a, params))
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, v)| self.body_stores_params_ext(v, params))
+                    || self.body_stores_params_ext(body, params)
+            }
+            // Eval can execute arbitrary code — conservatively unsafe.
+            HirKind::Eval { .. } => true,
+        }
+    }
+
+    /// Check if an expression references any binding in the param set.
+    fn expr_references_any_param(&self, hir: &Hir, params: &[Binding]) -> bool {
+        params.iter().any(|p| Self::hir_references_binding(hir, *p))
+    }
+
+    /// Collect all Var bindings introduced by a pattern.
+    fn collect_pattern_bindings(pattern: &HirPattern, out: &mut Vec<Binding>) {
+        match pattern {
+            HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
+            HirPattern::Var(b) => out.push(*b),
+            HirPattern::Pair { head, tail } => {
+                Self::collect_pattern_bindings(head, out);
+                Self::collect_pattern_bindings(tail, out);
+            }
+            HirPattern::List { elements, rest }
+            | HirPattern::Tuple { elements, rest }
+            | HirPattern::Array { elements, rest } => {
+                for e in elements {
+                    Self::collect_pattern_bindings(e, out);
+                }
+                if let Some(r) = rest {
+                    Self::collect_pattern_bindings(r, out);
+                }
+            }
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+                for (_, p) in entries {
+                    Self::collect_pattern_bindings(p, out);
+                }
+                if let Some(r) = rest {
+                    Self::collect_pattern_bindings(r, out);
+                }
+            }
+            HirPattern::NamedStruct { entries } => {
+                for (_, p) in entries {
+                    Self::collect_pattern_bindings(p, out);
+                }
+            }
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+                Self::collect_pattern_bindings(binding, out);
+            }
+            HirPattern::Or(alts) => {
+                // All alts bind the same names; just collect from first
+                if let Some(first) = alts.first() {
+                    Self::collect_pattern_bindings(first, out);
+                }
+            }
         }
     }
 
