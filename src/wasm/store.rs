@@ -67,7 +67,7 @@ pub fn create_engine() -> Result<Engine> {
     config.wasm_tail_call(true);
     config.wasm_multi_value(true);
 
-    if crate::config::get().jit == 0 {
+    if !crate::config::get().jit_enabled() {
         config.cranelift_opt_level(OptLevel::None);
     } else {
         config.cranelift_opt_level(OptLevel::Speed);

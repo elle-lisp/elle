@@ -12,54 +12,6 @@ use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use std::collections::HashSet;
 
-/// Compile source code to LIR (for the WASM backend).
-///
-/// Runs phases 1-4 (parse, expand, analyze, lower) and returns the
-/// LirModule before bytecode emission.
-pub fn compile_to_lir(
-    source: &str,
-    symbols: &mut SymbolTable,
-    source_name: &str,
-) -> Result<crate::lir::LirModule, String> {
-    intern_primitive_names(symbols);
-
-    let syntax = read_syntax(source, source_name)?;
-
-    let (expanded, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-        let expanded = expander.expand(syntax, symbols, macro_vm)?;
-        Ok::<_, String>((expanded, meta))
-    })?;
-
-    let mut arena = crate::hir::BindingArena::new();
-    let mut analyzer = crate::hir::Analyzer::new_with_primitives(
-        symbols,
-        &mut arena,
-        meta.signals.clone(),
-        meta.arities.clone(),
-    );
-    analyzer.bind_primitives(&meta);
-    let mut analysis = analyzer.analyze(&expanded)?;
-    let prim_values = analyzer.primitive_values().clone();
-    drop(analyzer);
-
-    mark_tail_calls(&mut analysis.hir);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
-
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
-    let region_info =
-        crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
-    let symbol_names = symbols.all_names();
-    let mut lowerer = Lowerer::new(&arena)
-        .with_primitive_classification(pc)
-        .with_primitive_values(prim_values)
-        .with_symbol_names(symbol_names)
-        .with_region_info(region_info);
-    let result = lowerer.lower(&analysis.hir);
-    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
-    result
-}
-
 /// Compile source code to bytecode.
 ///
 /// Creates an internal VM for macro expansion. Macro side effects
@@ -111,12 +63,16 @@ pub fn compile(
         .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
+    let scope_stats = lowerer.scope_stats().clone();
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
-    Ok(CompileResult { bytecode })
+    Ok(CompileResult {
+        bytecode,
+        scope_stats,
+    })
 }
 
 /// Classify an expanded top-level form into a `FileForm`.
@@ -176,33 +132,12 @@ pub fn compile_file_to_lir(
         let mut expanded_forms = Vec::new();
         let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
         while let Some(syntax) = pending.pop_front() {
-            if let Some((spec, is_include)) = extract_include(&syntax) {
-                let path = if is_include {
-                    crate::primitives::modules::resolve_import(&spec)
-                } else {
-                    resolve_include_file(&spec, source_name)
-                };
-                let path =
-                    path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
-                if !included.insert(path.clone()) {
-                    return Err(format!(
-                        "{}: include: circular dependency on '{}'",
-                        syntax.span, path
-                    ));
-                }
-                let contents = std::fs::read_to_string(&path).map_err(|e| {
-                    format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
-                })?;
-                let forms = read_syntax_all_for(&contents, &path)?;
-                for (i, form) in forms.into_iter().enumerate() {
-                    pending.insert(i, form);
-                }
+            if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
                 continue;
             }
-            let expanded = expander.expand(syntax, symbols, macro_vm)?;
-            expanded_forms.push(expanded);
+            expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
         }
-        Ok((expanded_forms, meta))
+        Ok::<_, String>((expanded_forms, meta))
     })?;
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
@@ -263,9 +198,7 @@ pub fn compile_file_to_lir(
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names)
         .with_region_info(region_info);
-    let result = lowerer.lower(&hir);
-    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
-    result
+    lowerer.lower(&hir)
 }
 
 /// Shared front-end for file compilation: parse, epoch migration, macro
@@ -312,33 +245,12 @@ fn compile_file_frontend(
             let mut expanded_forms = Vec::new();
             let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
             while let Some(syntax) = pending.pop_front() {
-                if let Some((spec, is_include)) = extract_include(&syntax) {
-                    let path = if is_include {
-                        crate::primitives::modules::resolve_import(&spec)
-                    } else {
-                        resolve_include_file(&spec, source_name)
-                    };
-                    let path = path
-                        .ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
-                    if !included.insert(path.clone()) {
-                        return Err(format!(
-                            "{}: include: circular dependency on '{}'",
-                            syntax.span, path
-                        ));
-                    }
-                    let contents = std::fs::read_to_string(&path).map_err(|e| {
-                        format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
-                    })?;
-                    let forms = read_syntax_all_for(&contents, &path)?;
-                    for (i, form) in forms.into_iter().enumerate() {
-                        pending.insert(i, form);
-                    }
+                if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
                     continue;
                 }
-                let expanded = expander.expand(syntax, symbols, macro_vm)?;
-                expanded_forms.push(expanded);
+                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
-            Ok((expanded_forms, expander, meta))
+            Ok::<_, String>((expanded_forms, expander, meta))
         })?;
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
@@ -466,6 +378,7 @@ fn compile_file_inner(
 
     let lir_module = lowerer.lower(&hir)?;
     let escape_projection = lowerer.take_escape_projection();
+    let scope_stats = lowerer.scope_stats().clone();
 
     // Emit bytecode
     let signal = lir_module.entry.signal;
@@ -475,7 +388,13 @@ fn compile_file_inner(
     bytecode.signal_projection = signal_projection;
     bytecode.escape_projection = escape_projection;
 
-    Ok((CompileResult { bytecode }, expander))
+    Ok((
+        CompileResult {
+            bytecode,
+            scope_stats,
+        },
+        expander,
+    ))
 }
 
 /// Splice include/include-file directives in source text.
@@ -490,34 +409,47 @@ pub fn splice_includes(source: &str, source_name: &str) -> Result<String, String
     let mut parts: Vec<String> = Vec::new();
 
     while let Some(syntax) = pending.pop_front() {
-        if let Some((spec, is_include)) = extract_include(&syntax) {
-            let path = if is_include {
-                crate::primitives::modules::resolve_import(&spec)
-            } else {
-                resolve_include_file(&spec, source_name)
-            };
-            let path =
-                path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
-            if !included.insert(path.clone()) {
-                return Err(format!(
-                    "{}: include: circular dependency on '{}'",
-                    syntax.span, path
-                ));
-            }
-            let contents = std::fs::read_to_string(&path).map_err(|e| {
-                format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
-            })?;
-            let forms = read_syntax_all_for(&contents, &path)?;
-            for (i, form) in forms.into_iter().enumerate() {
-                pending.insert(i, form);
-            }
+        if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
             continue;
         }
-        // Preserve the original source text for this form
         parts.push(format!("{}", syntax));
     }
 
     Ok(parts.join("\n"))
+}
+
+/// Resolve and splice a single include directive into the pending queue.
+/// Returns `Ok(true)` if the syntax was an include (resolved and spliced),
+/// `Ok(false)` if it was not an include, or `Err` on resolution failure.
+fn resolve_and_splice_include(
+    syntax: &Syntax,
+    source_name: &str,
+    pending: &mut std::collections::VecDeque<Syntax>,
+    included: &mut HashSet<String>,
+) -> Result<bool, String> {
+    let (spec, is_include) = match extract_include(syntax) {
+        Some(pair) => pair,
+        None => return Ok(false),
+    };
+    let path = if is_include {
+        crate::primitives::modules::resolve_import(&spec)
+    } else {
+        resolve_include_file(&spec, source_name)
+    };
+    let path = path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
+    if !included.insert(path.clone()) {
+        return Err(format!(
+            "{}: include: circular dependency on '{}'",
+            syntax.span, path
+        ));
+    }
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|e| format!("{}: include: failed to read '{}': {}", syntax.span, path, e))?;
+    let forms = read_syntax_all_for(&contents, &path)?;
+    for (i, form) in forms.into_iter().enumerate() {
+        pending.insert(i, form);
+    }
+    Ok(true)
 }
 
 /// Extract the spec from `(include-file "path")` or `(include "spec")`.

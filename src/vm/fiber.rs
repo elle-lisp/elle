@@ -30,11 +30,6 @@ use std::rc::Rc;
 
 use super::core::VM;
 
-/// Helper: set an error signal on a fiber.
-fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
-    fiber.signal = Some((SIG_ERROR, error_val(kind, msg)));
-}
-
 impl VM {
     // ── Shared swap protocol ────────────────────────────────────────
 
@@ -181,11 +176,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_RESUME with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_RESUME with non-fiber value");
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -214,8 +206,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "state-error",
                     "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -253,11 +244,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_RESUME with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_RESUME with non-fiber value");
                 return SIG_ERROR;
             }
         };
@@ -285,8 +273,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "state-error",
                     "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -604,8 +591,7 @@ impl VM {
         let frames = match self.fiber.suspended.take() {
             Some(frames) => frames,
             None => {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "internal-error",
                     "fiber/resume: suspended fiber has no saved context",
                 );
@@ -626,11 +612,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_PROPAGATE with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_PROPAGATE with non-fiber value");
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -650,8 +633,7 @@ impl VM {
             None
         } else if self.current_fiber_handle.is_none() {
             // At root fiber: no parent to catch the propagated signal
-            set_error(
-                &mut self.fiber,
+            self.fiber.set_error(
                 "state-error",
                 "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
             );
@@ -667,11 +649,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_PROPAGATE with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_PROPAGATE with non-fiber value");
                 return SIG_ERROR;
             }
         };
@@ -689,8 +668,7 @@ impl VM {
             child_bits
         } else if self.current_fiber_handle.is_none() {
             // At root fiber: no parent to catch the propagated signal
-            set_error(
-                &mut self.fiber,
+            self.fiber.set_error(
                 "state-error",
                 "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
             );
@@ -718,11 +696,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_ABORT with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_ABORT with non-fiber value");
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -752,8 +727,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "state-error",
                     "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -776,11 +750,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_ABORT with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_ABORT with non-fiber value");
                 return SIG_ERROR;
             }
         };
@@ -808,8 +779,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "state-error",
                     "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -839,11 +809,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_RESUME with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_RESUME with non-fiber value");
                 return JitValue::nil();
             }
         };
@@ -871,8 +838,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "state-error",
                     "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -908,11 +874,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_PROPAGATE with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_PROPAGATE with non-fiber value");
                 return JitValue::nil();
             }
         };
@@ -929,8 +892,7 @@ impl VM {
         if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
             JitValue::nil()
         } else if self.current_fiber_handle.is_none() {
-            set_error(
-                &mut self.fiber,
+            self.fiber.set_error(
                 "state-error",
                 "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
             );
@@ -948,11 +910,8 @@ impl VM {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                set_error(
-                    &mut self.fiber,
-                    "internal-error",
-                    "SIG_ABORT with non-fiber value",
-                );
+                self.fiber
+                    .set_error("internal-error", "SIG_ABORT with non-fiber value");
                 return JitValue::nil();
             }
         };
@@ -979,8 +938,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "state-error",
                     "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
                 );

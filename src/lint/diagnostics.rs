@@ -3,11 +3,6 @@
 use crate::reader::SourceLoc;
 use std::fmt;
 
-/// Optional source code for displaying diagnostics with context
-pub struct DiagnosticContext {
-    pub source: String,
-}
-
 /// Severity level of a diagnostic
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -53,11 +48,6 @@ impl Diagnostic {
             location,
             suggestions: Vec::new(),
         }
-    }
-
-    pub fn with_suggestions(mut self, suggestions: Vec<String>) -> Self {
-        self.suggestions = suggestions;
-        self
     }
 
     /// Format as human-readable output
@@ -161,14 +151,14 @@ mod tests {
         let loc = SourceLoc::from_line_col(5, 2);
         let diag = Diagnostic::new(
             Severity::Warning,
-            "W001",
-            "naming-kebab-case",
-            "identifier should use kebab-case",
+            "W002",
+            "arity-mismatch",
+            "function expects 1 argument but got 2",
             Some(loc),
         );
 
         assert_eq!(diag.severity, Severity::Warning);
-        assert_eq!(diag.rule, "naming-kebab-case");
+        assert_eq!(diag.rule, "arity-mismatch");
     }
 
     #[test]

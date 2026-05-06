@@ -1,6 +1,6 @@
 //! Lint CLI wrapper — configuration, output formatting, and the Linter type.
 
-use crate::context::set_symbol_table;
+use crate::context::SymbolTableGuard;
 use crate::hir::HirLinter;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::symbol::SymbolTable;
@@ -47,7 +47,7 @@ impl Linter {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let _signals = register_primitives(&mut vm, &mut symbols);
-        set_symbol_table(&mut symbols as *mut SymbolTable);
+        let _sym_guard = SymbolTableGuard::new(&mut symbols);
         init_stdlib(&mut vm, &mut symbols);
 
         // Use pipeline: parse -> expand -> analyze -> HIR
@@ -99,34 +99,24 @@ impl Linter {
         Diagnostic::new(Severity::Error, code, rule, error.description(), Some(loc))
     }
 
-    /// Convert a String error (from fatal analysis failure) to a Diagnostic
     fn error_to_diagnostic(error: &str, file: &str) -> Diagnostic {
-        // Try to parse location from "file:line:col: message" format
-        if let Some(colon_idx) = error.find(": ") {
-            let loc_part = &error[..colon_idx];
-            let parts: Vec<&str> = loc_part.rsplitn(3, ':').collect();
-            if parts.len() >= 2 {
-                if let (Ok(col), Ok(line)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>())
-                {
-                    let file_part = if parts.len() == 3 { parts[2] } else { file };
-                    let message = &error[colon_idx + 2..];
-                    return Diagnostic::new(
-                        Severity::Error,
-                        "E000",
-                        "analysis-error",
-                        message,
-                        Some(crate::reader::SourceLoc::new(file_part, line, col)),
-                    );
-                }
-            }
+        if let Some((f, line, col, message)) = crate::error::parse_located_error(error) {
+            Diagnostic::new(
+                Severity::Error,
+                "E000",
+                "analysis-error",
+                message,
+                Some(crate::reader::SourceLoc::new(f, line, col)),
+            )
+        } else {
+            Diagnostic::new(
+                Severity::Error,
+                "E000",
+                "analysis-error",
+                error,
+                Some(crate::reader::SourceLoc::new(file, 0, 0)),
+            )
         }
-        Diagnostic::new(
-            Severity::Error,
-            "E000",
-            "analysis-error",
-            error,
-            Some(crate::reader::SourceLoc::new(file, 0, 0)),
-        )
     }
 
     /// Lint a file

@@ -97,15 +97,6 @@ impl Value {
         })
     }
 
-    /// Create a heap string without interning. Used by `SendValue::into_value()`
-    /// to avoid thread-local interner issues when reconstructing values on
-    /// a different thread.
-    #[inline]
-    pub fn string_no_intern(s: impl AsRef<str>) -> Self {
-        // Same path as `string()` now that bytes are arena-allocated.
-        Self::string(s)
-    }
-
     /// Create a cons cell.
     #[inline]
     pub fn pair(head: Value, tail: Value) -> Self {

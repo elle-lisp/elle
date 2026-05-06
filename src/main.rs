@@ -1,4 +1,4 @@
-use elle::context::{clear_vm_context, set_symbol_table, set_vm_context};
+use elle::context::{SymbolTableGuard, VmContextGuard};
 use elle::pipeline::compile_file;
 use elle::repl::Repl;
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
@@ -78,26 +78,14 @@ fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
 /// Uses Generic kind so `description()` returns just the message without
 /// an extra "Compile error:" prefix (the caller provides context).
 fn parse_compilation_error(error: &str) -> elle::error::LError {
-    // Try to extract location from "file:line:col: message" pattern
-    if let Some(colon_idx) = error.find(": ") {
-        let loc_part = &error[..colon_idx];
-        let parts: Vec<&str> = loc_part.rsplitn(3, ':').collect();
-        if parts.len() >= 2 {
-            if let (Ok(col), Ok(line)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
-                let file = if parts.len() == 3 {
-                    parts[2]
-                } else {
-                    "<unknown>"
-                };
-                let message = &error[colon_idx + 2..];
-                return elle::error::LError::new(elle::error::ErrorKind::CompileError {
-                    message: message.to_string(),
-                })
-                .with_location(elle::error::SourceLoc::new(file, line, col));
-            }
-        }
+    if let Some((file, line, col, message)) = elle::error::parse_located_error(error) {
+        elle::error::LError::new(elle::error::ErrorKind::CompileError {
+            message: message.to_string(),
+        })
+        .with_location(elle::error::SourceLoc::new(file, line, col))
+    } else {
+        elle::error::LError::compile_error(error)
     }
-    elle::error::LError::compile_error(error)
 }
 
 /// Format a compilation error as JSON for --json mode
@@ -462,7 +450,7 @@ fn run_source(
 
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
     #[cfg(feature = "wasm")]
-    if elle::config::get().wasm_full {
+    if elle::config::get().wasm_full() {
         let no_stdlib = elle::config::get().wasm_no_stdlib;
         let eval_fn = if no_stdlib {
             elle::wasm::eval_wasm
@@ -492,8 +480,13 @@ fn run_source(
         }
     };
 
+    // Print scope stats if --stats is set
+    if elle::config::get().stats && result.scope_stats.scopes_analyzed > 0 {
+        eprint!("{}", result.scope_stats);
+    }
+
     // Debug: print bytecode if --debug is set
-    if elle::config::get().debug {
+    if elle::config::get().has_trace("bytecode") {
         eprintln!(
             "{}",
             elle::compiler::format_bytecode_with_constants(
@@ -612,11 +605,11 @@ fn main() {
 
     let _signals = register_primitives(&mut vm, &mut symbols);
 
-    set_symbol_table(&mut symbols as *mut SymbolTable);
+    let _sym_guard = SymbolTableGuard::new(&mut symbols);
 
     init_stdlib(&mut vm, &mut symbols);
 
-    set_vm_context(&mut vm as *mut VM);
+    let _vm_guard = VmContextGuard::new(&mut vm);
 
     let mut had_errors = false;
     let mut files: Vec<String> = Vec::new();
@@ -670,13 +663,11 @@ fn main() {
         had_errors = true;
     }
 
-    clear_vm_context();
+    // VM and symbol table guards drop here (or at function exit),
+    // clearing the TLS pointers automatically.
+    drop(_vm_guard);
 
     if elle::config::get().stats {
-        let scope_stats = elle::lir::lower::global_scope_stats();
-        if scope_stats.scopes_analyzed > 0 {
-            eprint!("{}", scope_stats);
-        }
         #[cfg(feature = "jit")]
         print_jit_stats(&mut vm);
         let cvc = elle::lir::closure_value_const_count();

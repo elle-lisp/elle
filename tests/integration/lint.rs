@@ -16,7 +16,9 @@ fn test_lint_naming_good() {
 }
 
 #[test]
-fn test_lint_naming_bad() {
+fn test_lint_naming_bad_no_longer_warns() {
+    // The kebab-case naming lint was removed — naming-bad.lisp should
+    // now produce zero diagnostics.
     let config = LintConfig {
         min_severity: Severity::Warning,
         format: OutputFormat::Human,
@@ -25,13 +27,10 @@ fn test_lint_naming_bad() {
 
     let result = linter.lint_file("tests/fixtures/naming-bad.lisp");
     assert!(result.is_ok());
-    assert!(!linter.diagnostics().is_empty());
-
-    // All diagnostics should be warnings about naming
-    for diag in linter.diagnostics() {
-        assert_eq!(diag.rule, "naming-kebab-case");
-        assert_eq!(diag.severity, Severity::Warning);
-    }
+    assert!(
+        linter.diagnostics().is_empty(),
+        "naming-bad.lisp should produce no diagnostics after kebab lint removal"
+    );
 }
 
 #[test]
@@ -42,12 +41,11 @@ fn test_json_output() {
     };
     let mut linter = Linter::new(config);
 
-    let result = linter.lint_file("tests/fixtures/naming-bad.lisp");
+    let result = linter.lint_str("(+ 1 2)", "test.lisp");
     assert!(result.is_ok());
 
     let output = linter.format_output();
     assert!(output.contains("\"diagnostics\""));
-    assert!(output.contains("naming-kebab-case"));
 }
 
 #[test]

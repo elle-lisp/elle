@@ -502,7 +502,7 @@ impl SendValue {
         match self {
             SendValue::Immediate(v) => v,
             SendValue::Keyword(name) => Value::keyword(&name),
-            SendValue::String(s) => Value::string_no_intern(s),
+            SendValue::String(s) => Value::string(s),
             SendValue::Pair(first, rest, traits) => {
                 let first_val = first.into_value();
                 let rest_val = rest.into_value();
@@ -647,7 +647,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
     match sv {
         SendValue::Immediate(v) => v,
         SendValue::Keyword(name) => Value::keyword(&name),
-        SendValue::String(s) => Value::string_no_intern(s),
+        SendValue::String(s) => Value::string(s),
         SendValue::Pair(first, rest, traits) => {
             let f = into_value_inner(*first, ctx);
             let r = into_value_inner(*rest, ctx);

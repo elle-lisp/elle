@@ -58,10 +58,34 @@
 //!    parameter frames. It is not isolated.
 
 use crate::error::LocationMap;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
+use crate::value::{SignalBits, Value, SIG_ERROR};
 use std::rc::Rc;
 
 use super::core::VM;
+
+/// Advance pool rotation state at a tail-call boundary.
+///
+/// If the previous iteration was rotation-safe, either rotate pools
+/// (if a base mark exists) or capture a new base mark. If the previous
+/// iteration was NOT rotation-safe, clear the base mark to prevent
+/// rotating across an unsafe boundary.
+#[inline]
+pub(super) fn advance_rotation(
+    rotation_base: &mut Option<crate::value::fiberheap::RotationBase>,
+    prev_rotation_safe: &mut bool,
+    tail_rotation_safe: bool,
+) {
+    if *prev_rotation_safe {
+        if let Some(ref base) = rotation_base {
+            crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
+        } else {
+            *rotation_base = crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
+        }
+    } else {
+        *rotation_base = None;
+    }
+    *prev_rotation_safe = tail_rotation_safe;
+}
 
 /// Result of `execute_bytecode_saving_stack`.
 ///
@@ -99,7 +123,9 @@ impl VM {
     /// Returns `ExecResult` containing the signal, IP, and the active
     /// bytecode/constants/env at exit. The active context may differ from
     /// the input if a tail call occurred before the signal.
-    pub(crate) fn execute_bytecode_from_ip(
+    /// Core tail-call trampoline loop shared by `execute_bytecode_from_ip`
+    /// and `execute_bytecode_saving_stack`.
+    fn trampoline_loop(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
@@ -126,25 +152,7 @@ impl VM {
             );
 
             if !bits.is_ok() {
-                // Enforce accumulated squelch mask before exiting.
-                // Skip enforcement for error and halt signals (already terminal).
-                let squelched = bits.intersection(accumulated_squelch_mask);
-                if !accumulated_squelch_mask.is_empty()
-                    && !bits.contains(SIG_ERROR)
-                    && !bits.contains(SIG_HALT)
-                    && bits != SIG_SWITCH
-                    && !squelched.is_empty()
-                {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
-                    let err = crate::value::error_val(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                    );
-                    self.fiber.suspended = None;
-                    self.fiber.signal = Some((SIG_ERROR, err));
+                if self.enforce_squelch(bits, accumulated_squelch_mask) {
                     break ExecResult {
                         bits: SIG_ERROR,
                         ip,
@@ -155,11 +163,6 @@ impl VM {
                         stack: vec![],
                     };
                 }
-                // Capture the inner stack for the caller. When a tail call
-                // changed current_bytecode before the signal, this stack
-                // belongs to the tail-called function's context — the caller
-                // (resume_suspended) may need it to build a continuation
-                // frame for the outer level.
                 let inner_stack = std::mem::take(&mut self.fiber.stack).into_vec();
                 break ExecResult {
                     bits,
@@ -173,17 +176,11 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
-                if prev_rotation_safe {
-                    if let Some(ref base) = rotation_base {
-                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
-                    } else {
-                        rotation_base =
-                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
-                    }
-                } else {
-                    rotation_base = None;
-                }
-                prev_rotation_safe = tail.rotation_safe;
+                advance_rotation(
+                    &mut rotation_base,
+                    &mut prev_rotation_safe,
+                    tail.rotation_safe,
+                );
                 accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
@@ -204,17 +201,24 @@ impl VM {
         }
     }
 
+    /// Execute bytecode starting from a specific instruction pointer.
+    /// Used for resuming fibers from where they suspended.
+    pub(crate) fn execute_bytecode_from_ip(
+        &mut self,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        start_ip: usize,
+        location_map: &Rc<LocationMap>,
+    ) -> ExecResult {
+        self.trampoline_loop(bytecode, constants, closure_env, start_ip, location_map)
+    }
+
     /// Execute bytecode returning SignalBits (for fiber/closure execution).
     /// The result value is stored in `self.fiber.signal`.
     ///
-    /// Saves/restores the caller's stack and the active allocator pointer
-    /// around execution. Handles pending tail calls in a loop.
-    ///
-    /// Returns `ExecResult` containing the signal, IP, and the active
-    /// bytecode/constants/env at exit. The active context may differ from
-    /// the input if a tail call occurred before the signal — callers that
-    /// create `SuspendedFrame`s must use the returned context, not the
-    /// original closure fields.
+    /// Saves/restores the caller's stack around execution.
+    /// Handles pending tail calls in a loop.
     pub(crate) fn execute_bytecode_saving_stack(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
@@ -222,172 +226,9 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         location_map: &Rc<LocationMap>,
     ) -> ExecResult {
-        // Save the caller's stack. Restored on return.
         let saved_stack = std::mem::take(&mut self.fiber.stack);
-
-        let mut current_bytecode = bytecode.clone();
-        let mut current_constants = constants.clone();
-        let mut current_env = closure_env.clone();
-        let mut current_location_map = location_map.clone();
-        let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        // Base mark for tail-call pool rotation: lazy-initialized on first tail call.
-        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
-        let mut prev_rotation_safe = true;
-
-        let result = loop {
-            let (bits, ip) = self.execute_bytecode_inner_impl(
-                &current_bytecode,
-                &current_constants,
-                &current_env,
-                0,
-                &current_location_map,
-            );
-
-            if !bits.is_ok() {
-                // Enforce accumulated squelch mask before exiting.
-                // Skip enforcement for error and halt signals (already terminal).
-                let squelched = bits.intersection(accumulated_squelch_mask);
-                if !accumulated_squelch_mask.is_empty()
-                    && !bits.contains(SIG_ERROR)
-                    && !bits.contains(SIG_HALT)
-                    && bits != SIG_SWITCH
-                    && !squelched.is_empty()
-                {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
-                    let err = crate::value::error_val(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                    );
-                    self.fiber.suspended = None;
-                    self.fiber.signal = Some((SIG_ERROR, err));
-                    break ExecResult {
-                        bits: SIG_ERROR,
-                        ip,
-                        bytecode: current_bytecode,
-                        constants: current_constants,
-                        env: current_env,
-                        location_map: current_location_map,
-                        stack: vec![],
-                    };
-                }
-                // Capture the inner stack before restoring the outer stack.
-                // This is critical for fuel-pause resumption: when SIG_FUEL
-                // fires at a Call/TailCall instruction, the args are still on
-                // the operand stack. On resume the instruction re-executes from
-                // the saved IP, so the stack must be in the same state.
-                // SIG_YIELD is exempt — handle_yield already saved the stack
-                // into fiber.suspended, so callers skip creating a new frame.
-                let inner_stack = std::mem::take(&mut self.fiber.stack).into_vec();
-                break ExecResult {
-                    bits,
-                    ip,
-                    bytecode: current_bytecode,
-                    constants: current_constants,
-                    env: current_env,
-                    location_map: current_location_map,
-                    stack: inner_stack,
-                };
-            }
-
-            if let Some(tail) = self.pending_tail_call.take() {
-                if prev_rotation_safe {
-                    if let Some(ref base) = rotation_base {
-                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
-                    } else {
-                        rotation_base =
-                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
-                    }
-                } else {
-                    rotation_base = None;
-                }
-                prev_rotation_safe = tail.rotation_safe;
-                accumulated_squelch_mask |= tail.squelch_mask;
-                current_bytecode = tail.bytecode;
-                current_constants = tail.constants;
-                current_env = tail.env;
-                current_location_map = tail.location_map;
-            } else {
-                break ExecResult {
-                    bits,
-                    ip,
-                    bytecode: current_bytecode,
-                    constants: current_constants,
-                    env: current_env,
-                    location_map: current_location_map,
-                    stack: vec![],
-                };
-            }
-        };
-
-        // Restore the caller's stack.
-        // Note: in the non-OK path, self.fiber.stack was already taken into
-        // result.stack above, so this restores to the correct caller state.
+        let result = self.trampoline_loop(bytecode, constants, closure_env, 0, location_map);
         self.fiber.stack = saved_stack;
-
         result
-    }
-
-    /// Execute closure bytecode without copying.
-    ///
-    /// Like `execute_bytecode` but takes `&Rc` references directly,
-    /// avoiding the `.to_vec()` copies that `execute_bytecode` performs.
-    /// Used by JIT trampolines where the closure already owns Rc'd data.
-    ///
-    /// Returns `(SignalBits, Value)` — the signal and the result value.
-    /// The caller is responsible for handling the signal and formatting errors.
-    pub fn execute_closure_bytecode(
-        &mut self,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
-        closure_env: &Rc<Vec<Value>>,
-        location_map: &Rc<LocationMap>,
-    ) -> (SignalBits, Value) {
-        self.error_loc = None;
-
-        let mut current_bytecode = bytecode.clone();
-        let mut current_constants = constants.clone();
-        let mut current_env = closure_env.clone();
-        let mut current_location_map = location_map.clone();
-        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
-        let mut prev_rotation_safe = true;
-
-        loop {
-            let (bits, _ip) = self.execute_bytecode_inner_impl(
-                &current_bytecode,
-                &current_constants,
-                &current_env,
-                0,
-                &current_location_map,
-            );
-
-            if let Some(tail) = self.pending_tail_call.take() {
-                if prev_rotation_safe {
-                    if let Some(ref base) = rotation_base {
-                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
-                    } else {
-                        rotation_base =
-                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
-                    }
-                } else {
-                    rotation_base = None;
-                }
-                prev_rotation_safe = tail.rotation_safe;
-                current_bytecode = tail.bytecode;
-                current_constants = tail.constants;
-                current_env = tail.env;
-                current_location_map = tail.location_map;
-            } else {
-                let value = self
-                    .fiber
-                    .signal
-                    .take()
-                    .map(|(_, v)| v)
-                    .unwrap_or(Value::NIL);
-                return (bits, value);
-            }
-        }
     }
 }

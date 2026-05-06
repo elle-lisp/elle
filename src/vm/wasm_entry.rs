@@ -38,7 +38,7 @@ impl VM {
             .get(&bytecode_ptr)
             .copied()
             .unwrap_or(0);
-        if count < self.jit_hotness_threshold {
+        if count < self.runtime_config.jit.threshold() {
             return None;
         }
 

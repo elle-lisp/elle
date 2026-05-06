@@ -539,6 +539,12 @@ impl Fiber {
             withheld: SignalBits::EMPTY,
         }
     }
+
+    /// Set an error signal on this fiber.
+    #[inline]
+    pub fn set_error(&mut self, kind: &str, msg: impl Into<String>) {
+        self.signal = Some((SIG_ERROR, crate::value::error_val(kind, msg)));
+    }
 }
 
 impl std::fmt::Debug for Fiber {

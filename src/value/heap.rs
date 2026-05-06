@@ -301,17 +301,9 @@ pub struct ThreadHandle {
 }
 
 impl ThreadHandle {
-    /// Create a new thread handle with no result yet
-    pub fn new() -> Self {
-        ThreadHandle {
-            result: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-impl Default for ThreadHandle {
-    fn default() -> Self {
-        Self::new()
+    /// Create a new thread handle with a shared result slot.
+    pub fn new(result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>) -> Self {
+        ThreadHandle { result }
     }
 }
 
@@ -537,9 +529,8 @@ impl std::fmt::Debug for HeapObject {
 // Re-export arena types and functions so existing `use crate::value::heap::{...}`
 // import sites continue working after the arena code moved to `arena.rs`.
 pub use super::arena::{
-    alloc, alloc_permanent, clone_heap, deref, drop_heap, heap_arena_capacity, heap_arena_len,
-    heap_arena_mark, heap_arena_object_limit, heap_arena_peak, heap_arena_release,
-    heap_arena_reset_peak, heap_arena_set_object_limit, ArenaGuard, ArenaMark,
+    alloc, alloc_permanent, deref, drop_heap, heap_arena_len, heap_arena_mark, heap_arena_release,
+    ArenaGuard, ArenaMark,
 };
 
 #[cfg(test)]

@@ -10,16 +10,10 @@
 //! - `populate_env`: fills a caller-supplied buffer; shared by `build_closure_env`
 //!   and `tail_call_inner` (which uses `tail_call_env_cache`)
 
-use crate::value::error_val;
-use crate::value::{Value, SIG_ERROR};
+use crate::value::Value;
 use std::rc::Rc;
 
 use super::core::VM;
-
-/// Helper: set an error signal on the fiber.
-fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
-    fiber.signal = Some((SIG_ERROR, error_val(kind, msg)));
-}
 
 impl VM {
     /// Build a closure environment from captured variables and arguments.
@@ -193,8 +187,7 @@ impl VM {
         }
 
         if !args.len().is_multiple_of(2) {
-            set_error(
-                fiber,
+            fiber.set_error(
                 "argument-error",
                 format!("odd number of keyword arguments ({} args)", args.len()),
             );
@@ -206,8 +199,7 @@ impl VM {
             let key = match TableKey::from_value(&args[i]) {
                 Some(TableKey::Keyword(k)) => k,
                 _ => {
-                    set_error(
-                        fiber,
+                    fiber.set_error(
                         "argument-error",
                         format!(
                             "keyword argument key must be a keyword, got {}",
@@ -221,8 +213,7 @@ impl VM {
             // Strict validation for &named
             if let Some(valid) = valid_keys {
                 if !valid.iter().any(|v| v == &key) {
-                    set_error(
-                        fiber,
+                    fiber.set_error(
                         "argument-error",
                         format!(
                             "unknown named parameter :{}, valid parameters are: {}",
@@ -240,8 +231,7 @@ impl VM {
 
             let table_key = TableKey::Keyword(key.clone());
             if map.contains_key(&table_key) {
-                set_error(
-                    fiber,
+                fiber.set_error(
                     "argument-error",
                     format!("duplicate keyword argument :{}", key),
                 );

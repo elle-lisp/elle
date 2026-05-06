@@ -229,9 +229,6 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
 
 /// (pp value) — Pretty-print a value with indentation, returns the value
 pub(crate) fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (SIG_OK, Value::NIL);
-    }
     let val = args[0];
 
     const DEFAULT_WIDTH: usize = 80;
@@ -243,10 +240,6 @@ pub(crate) fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
 
 /// (describe value) — Return a string describing a value's type and content
 pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (SIG_OK, Value::string("<error>"));
-    }
-
     let val = args[0];
 
     if val.is_nil() {

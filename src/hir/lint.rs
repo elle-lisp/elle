@@ -5,7 +5,6 @@
 
 use crate::hir::arena::BindingArena;
 use crate::hir::expr::{Hir, HirKind};
-use crate::hir::pattern::is_exhaustive_match;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::lint::rules;
 use crate::reader::SourceLoc;
@@ -31,11 +30,6 @@ impl HirLinter {
     /// Get all diagnostics
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
-    }
-
-    /// Get mutable diagnostics
-    pub fn diagnostics_mut(&mut self) -> &mut Vec<Diagnostic> {
-        &mut self.diagnostics
     }
 
     /// Check if there are any errors
@@ -82,23 +76,7 @@ impl HirLinter {
             }
 
             HirKind::Letrec { bindings, body } => {
-                for (binding, init) in bindings {
-                    // Check naming convention on file-level def/var bindings.
-                    // Skip gensyms (__file_expr_N) and primitive bindings
-                    // (identified by their initializer being a quoted NativeFn).
-                    let is_primitive = matches!(&init.kind, HirKind::Quote(v) if v.is_native_fn());
-                    if !is_primitive {
-                        if let Some(sym_name) = symbols.name(arena.get(*binding).name) {
-                            if !sym_name.starts_with("__") {
-                                let binding_loc = Self::span_to_loc(&init.span);
-                                rules::check_naming_convention(
-                                    sym_name,
-                                    &binding_loc,
-                                    &mut self.diagnostics,
-                                );
-                            }
-                        }
-                    }
+                for (_, init) in bindings {
                     self.check(init, symbols, arena);
                 }
                 self.check(body, symbols, arena);
@@ -171,11 +149,7 @@ impl HirLinter {
                 self.check(value, symbols, arena);
             }
 
-            HirKind::Define { binding, value } => {
-                // Check naming convention
-                if let Some(sym_name) = symbols.name(arena.get(*binding).name) {
-                    rules::check_naming_convention(sym_name, &loc, &mut self.diagnostics);
-                }
+            HirKind::Define { binding: _, value } => {
                 self.check(value, symbols, arena);
             }
 
@@ -208,17 +182,6 @@ impl HirLinter {
                         self.check(g, symbols, arena);
                     }
                     self.check(body, symbols, arena);
-                }
-
-                // Check for non-exhaustive match
-                if !arms.is_empty() && !is_exhaustive_match(arms) {
-                    self.diagnostics.push(Diagnostic::new(
-                        Severity::Warning,
-                        "W003",
-                        "non-exhaustive-match",
-                        "match expression may not cover all cases; consider adding a wildcard (_) or variable pattern as the last arm",
-                        loc.clone(),
-                    ));
                 }
             }
 
@@ -295,40 +258,6 @@ mod tests {
         assert_eq!(linter.diagnostics().len(), 0);
         assert!(!linter.has_errors());
         assert!(!linter.has_warnings());
-    }
-
-    #[test]
-    fn test_hir_linter_naming_convention() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze("(var camelCase 42)", &mut symbols, &mut vm, "<test>");
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols, &analysis.arena);
-
-        assert!(linter.has_warnings());
-        assert!(linter
-            .diagnostics()
-            .iter()
-            .any(|d| d.rule == "naming-kebab-case"));
-    }
-
-    #[test]
-    fn test_hir_linter_valid_naming() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze("(var valid-name 42)", &mut symbols, &mut vm, "<test>");
-        assert!(result.is_ok());
-        let analysis = result.unwrap();
-
-        let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols, &analysis.arena);
-
-        // Should have no naming warnings
-        assert!(!linter
-            .diagnostics()
-            .iter()
-            .any(|d| d.rule == "naming-kebab-case"));
     }
 
     #[test]

@@ -14,7 +14,7 @@ use crate::value::error_val;
 use crate::value::fiber::{CallFrame, MAX_CALL_DEPTH};
 use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
-    SIG_HALT, SIG_OK, SIG_SWITCH,
+    SIG_HALT, SIG_OK,
 };
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
@@ -23,11 +23,6 @@ use crate::value::{
 use std::rc::Rc;
 
 use super::core::VM;
-
-/// Helper: set an error signal on the fiber.
-fn set_error(fiber: &mut crate::value::Fiber, kind: &str, msg: impl Into<String>) {
-    fiber.signal = Some((SIG_ERROR, error_val(kind, msg)));
-}
 
 impl VM {
     /// Handle the Call instruction.
@@ -117,8 +112,7 @@ impl VM {
         } else if let Some(tup) = args_val.as_array() {
             tup.to_vec()
         } else {
-            set_error(
-                &mut self.fiber,
+            self.fiber.set_error(
                 "type-error",
                 format!(
                     "splice: expected array or tuple for args, got {}",
@@ -189,8 +183,7 @@ impl VM {
                 );
             }
             if !checked && !def.arity.matches(args.len()) {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "arity-error",
                     format!(
                         "{}: expected {} argument(s), got {}",
@@ -221,8 +214,7 @@ impl VM {
 
         if let Some((id, default)) = func.as_parameter() {
             if !args.is_empty() {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "arity-error",
                     format!("parameter call: expected 0 arguments, got {}", args.len()),
                 );
@@ -441,28 +433,9 @@ impl VM {
             // to the initial fiber execution.
             //
             // Discard suspended frames: we're converting to error, not suspending.
-            if !closure_squelch_mask.is_empty()
-                && !bits.is_ok()
-                && !bits.contains(SIG_ERROR)
-                && !bits.contains(SIG_HALT)
-                && bits != SIG_SWITCH
-            {
-                let squelched = bits.intersection(closure_squelch_mask);
-                if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
-                    let err = crate::value::error_val(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                    );
-                    // Discard suspended frames — we're converting to error, not suspending.
-                    self.fiber.suspended = None;
-                    self.fiber.signal = Some((SIG_ERROR, err));
-                    self.fiber.call_stack.pop();
-                    return Some(SIG_ERROR);
-                }
+            if self.enforce_squelch(bits, closure_squelch_mask) {
+                self.fiber.call_stack.pop();
+                return Some(SIG_ERROR);
             }
             if bits.is_ok() {
                 let (_, value) = self.fiber.signal.take().unwrap();
@@ -538,7 +511,7 @@ impl VM {
                     return None;
                 }
                 Err((kind, msg)) => {
-                    set_error(&mut self.fiber, kind, msg);
+                    self.fiber.set_error(kind, msg);
                     self.fiber.stack.push(Value::NIL);
                     return None;
                 }
@@ -546,11 +519,8 @@ impl VM {
         }
 
         // Cannot call this value
-        set_error(
-            &mut self.fiber,
-            "type-error",
-            format!("Cannot call {:?}", func),
-        );
+        self.fiber
+            .set_error("type-error", format!("Cannot call {:?}", func));
         self.fiber.stack.push(Value::NIL);
         None
     }
@@ -619,8 +589,7 @@ impl VM {
         } else if let Some(tup) = args_val.as_array() {
             tup.to_vec()
         } else {
-            set_error(
-                &mut self.fiber,
+            self.fiber.set_error(
                 "type-error",
                 format!(
                     "splice: expected array or tuple for args, got {}",
@@ -656,8 +625,7 @@ impl VM {
                 return Some(self.handle_capability_denial_tail(def, blocked, &args));
             }
             if !checked && !def.arity.matches(args.len()) {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "arity-error",
                     format!(
                         "{}: expected {} argument(s), got {}",
@@ -679,8 +647,7 @@ impl VM {
 
         if let Some((id, default)) = func.as_parameter() {
             if !args.is_empty() {
-                set_error(
-                    &mut self.fiber,
+                self.fiber.set_error(
                     "arity-error",
                     format!("parameter call: expected 0 arguments, got {}", args.len()),
                 );
@@ -731,18 +698,15 @@ impl VM {
                     return Some(SIG_OK);
                 }
                 Err((kind, msg)) => {
-                    set_error(&mut self.fiber, kind, msg);
+                    self.fiber.set_error(kind, msg);
                     return Some(SIG_ERROR);
                 }
             }
         }
 
         // Cannot call this value
-        set_error(
-            &mut self.fiber,
-            "type-error",
-            format!("Cannot call {:?}", func),
-        );
+        self.fiber
+            .set_error("type-error", format!("Cannot call {:?}", func));
         Some(SIG_ERROR)
     }
 

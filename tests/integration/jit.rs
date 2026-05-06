@@ -2210,7 +2210,7 @@ fn test_nqueens_letrec_no_jit() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    vm.jit_enabled = false;
+    vm.runtime_config.jit = elle::config::JitPolicy::Off;
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let result = eval(
@@ -2346,7 +2346,7 @@ fn test_nqueens_4queens_no_jit() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    vm.jit_enabled = false;
+    vm.runtime_config.jit = elle::config::JitPolicy::Off;
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let result = eval(

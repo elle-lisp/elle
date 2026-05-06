@@ -137,6 +137,27 @@ pub(crate) fn abs_value(a: &Value) -> Result<Value, Value> {
     }
 }
 
+/// Numeric-aware equality: int-int stays exact, mixed promotes to f64.
+/// Returns true if both values are bitwise equal or numerically equal.
+/// Used by both the VM's Eq instruction and the `=` primitive.
+#[inline]
+pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {
+    // Fast path: bitwise identical (covers same-type immediates)
+    if *a == *b {
+        return true;
+    }
+    // Numeric coercion: int-int stays exact, mixed promotes to f64
+    if a.is_number() && b.is_number() {
+        if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+            return x == y;
+        }
+        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
+            return x == y;
+        }
+    }
+    false
+}
+
 /// Get minimum of two numeric values
 pub(crate) fn min_values(a: &Value, b: &Value) -> Value {
     match (a.as_int(), b.as_int()) {
