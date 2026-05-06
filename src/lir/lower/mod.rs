@@ -293,6 +293,12 @@ pub struct Lowerer<'a> {
     /// lowering so that `body_escapes_heap_values` can check callees
     /// transitively: a call to a rotation-safe function doesn't escape.
     callee_rotation_safe: HashMap<Binding, bool>,
+    /// Binding → param_safe for function definitions.
+    /// A function is param-safe if its body never stores a parameter-derived
+    /// value into external mutable state (Assign, SetCell, push/put, emit).
+    /// Used at non-tail call sites: a call to a param-safe function cannot
+    /// cause the caller's scope-allocated values to escape.
+    callee_param_safe: HashMap<Binding, bool>,
     /// Binding → return_safe for function definitions.
     /// A function is return-safe if its body never returns a freshly
     /// heap-allocated value (returns immediates, Vars, or results of
@@ -381,6 +387,7 @@ impl<'a> Lowerer<'a> {
             non_allocating_accessors: FxHashSet::default(),
             non_escaping_stdlib: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
+            callee_param_safe: HashMap::new(),
             callee_return_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
             callee_return_params: HashMap::new(),
@@ -516,6 +523,7 @@ impl<'a> Lowerer<'a> {
         self.precompute_return_params(hir);
         self.precompute_rest_index(hir);
         self.precompute_return_safe(hir);
+        self.precompute_param_safety(hir);
         self.precompute_rotation_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
@@ -1578,6 +1586,41 @@ impl<'a> Lowerer<'a> {
             | HirKind::Parameterize { .. }
             | HirKind::Intrinsic { .. }
             | HirKind::Error => false,
+        }
+    }
+
+    /// Precompute `callee_param_safe` for all function definitions.
+    ///
+    /// A function is param-safe if its body never stores a parameter-derived
+    /// value into external mutable state. Fixpoint: seed all safe, iterate
+    /// `body_stores_params_externally` until stable.
+    fn precompute_param_safety(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
+        Self::collect_lambda_defs_with_params(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically param-safe.
+        for &(binding, _, _) in &defs {
+            self.callee_param_safe.insert(binding, true);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, ref params, body) in &defs {
+                if !self.callee_param_safe[&binding] {
+                    continue; // already unsafe, skip
+                }
+                if self.body_stores_params_externally(body, params) {
+                    self.callee_param_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
         }
     }
 

@@ -73,6 +73,39 @@
   (assert (or checked? (bounded? d100 d10k 10))
           (string "t0 string: d100=" d100 " d10k=" d10k)))
 
+# Pair (cons cell) allocation in while loop — scope reclaims.
+# pair is a stdlib wrapper around %pair; it must be recognized
+# as non-escaping so scope marks are inserted.
+
+(defn t0-pair [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (pair i (list))
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t0-pair 100)
+      d10k (t0-pair 10000)]
+  (assert (or checked? (bounded? d100 d10k 10))
+          (string "t0 pair: d100=" d100 " d10k=" d10k)))
+
+# Pair with let binding — scope reclaims.
+
+(defn t0-let-pair [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (let [x (pair i ())]
+      x)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t0-let-pair 100)
+      d10k (t0-let-pair 10000)]
+  (assert (or checked? (bounded? d100 d10k 10))
+          (string "t0 let-pair: d100=" d100 " d10k=" d10k)))
+
 # ── Tier 1: nested while loops ───────────────────────────────────
 # Inner and outer loops both allocate; scoping must handle both.
 
@@ -1184,3 +1217,77 @@
       d10k (t11-binding-reassign 10000)]
   (assert (or checked? (bounded? d100 d10k 30))
           (string "t11 binding-reassign: d100=" d100 " d10k=" d10k)))
+
+# ── Tier 12: user functions in while loops ──────────────────────
+# Calling a user-defined function that allocates internally should
+# NOT prevent scope reclamation in the caller's while loop. The callee
+# runs and returns before rotation; its internal allocations cannot
+# cause the caller's scope-allocated values to dangle.
+
+# 12a: user function returning a struct
+(defn make-struct [i]
+  {:iter i :val (%add i 1)})
+
+(defn t12-user-struct [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (make-struct i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t12-user-struct 100)
+      d10k (t12-user-struct 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t12 user-struct: d100=" d100 " d10k=" d10k)))
+
+# 12b: user function returning a string
+(defn make-label [i]
+  (string "item-" i))
+
+(defn t12-user-string [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (make-label i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t12-user-string 100)
+      d10k (t12-user-string 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t12 user-string: d100=" d100 " d10k=" d10k)))
+
+# 12c: chained user functions (user fn calls another user fn)
+(defn process [i]
+  (make-struct (%add i 10)))
+
+(defn t12-chain [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (process i)
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t12-chain 100)
+      d10k (t12-chain 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t12 chain: d100=" d100 " d10k=" d10k)))
+
+# 12d: user function wrapping map (stdlib HOF)
+(defn transform [xs]
+  (map (fn [x] (%add x 1)) xs))
+
+(defn t12-wrap-map [n]
+  (def before (arena/count))
+  (def @i 0)
+  (while (%lt i n)
+    (transform [1 2 3])
+    (assign i (%add i 1)))
+  (%sub (arena/count) before))
+
+(let [d100 (t12-wrap-map 100)
+      d10k (t12-wrap-map 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t12 wrap-map: d100=" d100 " d10k=" d10k)))
