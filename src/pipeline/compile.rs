@@ -272,7 +272,7 @@ pub fn compile_file_to_lir(
 /// expansion (with file-scope stamping and include resolution), analysis,
 /// error surfacing, tail-call marking, and functionalization.
 ///
-/// Returns `(hir, arena, expander, prim_values, signal_projection)`.
+/// Returns `(hir, arena, expander, prim_values, signal_projection, escape_projection_env)`.
 /// Callers that don't need all fields can ignore the extras.
 #[allow(clippy::type_complexity)]
 fn compile_file_frontend(
@@ -286,6 +286,7 @@ fn compile_file_frontend(
         crate::syntax::Expander,
         std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
         Option<std::collections::HashMap<String, crate::signals::Signal>>,
+        std::collections::HashMap<crate::hir::Binding, std::collections::HashMap<String, bool>>,
     ),
     String,
 > {
@@ -362,6 +363,7 @@ fn compile_file_frontend(
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let signal_projection = analyzer.take_signal_projection();
+    let escape_projection_env = std::mem::take(&mut analyzer.escape_projection_env);
     let errors = analyzer.take_errors();
     drop(analyzer);
 
@@ -384,7 +386,14 @@ fn compile_file_frontend(
     functionalize(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
-    Ok((hir, arena, expander, prim_values, signal_projection))
+    Ok((
+        hir,
+        arena,
+        expander,
+        prim_values,
+        signal_projection,
+        escape_projection_env,
+    ))
 }
 
 /// Compile a file as a single synthetic letrec.
@@ -403,7 +412,7 @@ pub fn compile_file_to_fhir(
     ),
     String,
 > {
-    let (hir, arena, _expander, _prim_values, _signal_projection) =
+    let (hir, arena, _expander, _prim_values, _signal_projection, _escape_proj_env) =
         compile_file_frontend(source, symbols, source_name)?;
     let names = symbols.all_names();
     Ok((hir, arena, names))
@@ -435,7 +444,7 @@ fn compile_file_inner(
     symbols: &mut SymbolTable,
     source_name: &str,
 ) -> Result<(CompileResult, crate::syntax::Expander), String> {
-    let (hir, arena, expander, prim_values, signal_projection) =
+    let (hir, arena, expander, prim_values, signal_projection, escape_projection_env) =
         compile_file_frontend(source, symbols, source_name)?;
 
     // Lower to LIR
@@ -448,7 +457,15 @@ fn compile_file_inner(
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
+
+    // Seed escape projections from imported modules
+    for (binding, proj) in &escape_projection_env {
+        let all_safe = proj.values().all(|&v| v);
+        lowerer.seed_import_escape_projection(*binding, all_safe);
+    }
+
     let lir_module = lowerer.lower(&hir)?;
+    let escape_projection = lowerer.take_escape_projection();
 
     // Emit bytecode
     let signal = lir_module.entry.signal;
@@ -456,6 +473,7 @@ fn compile_file_inner(
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
+    bytecode.escape_projection = escape_projection;
 
     Ok((CompileResult { bytecode }, expander))
 }

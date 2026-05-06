@@ -38,6 +38,11 @@ thread_local! {
     /// encounters `(import "...")` with a literal string argument.
     static PROJECTION_CACHE: std::cell::RefCell<HashMap<String, Option<HashMap<String, Signal>>>> =
         std::cell::RefCell::new(HashMap::new());
+
+    /// Escape projection cache: maps resolved file paths to their
+    /// keyword→safe projections. Populated alongside signal projections.
+    static ESCAPE_PROJECTION_CACHE: std::cell::RefCell<HashMap<String, Option<HashMap<String, bool>>>> =
+        std::cell::RefCell::new(HashMap::new());
 }
 
 /// Run a closure with access to the cached macro-expansion VM.
@@ -201,4 +206,37 @@ pub fn get_or_compile_projection(resolved_path: &str) -> Option<HashMap<String, 
     });
 
     projection
+}
+
+/// Look up or compute the escape projection for a file.
+///
+/// Returns a map from field name to `true` (all closure fields are
+/// rotation-safe and param-safe) for module-pattern files that return
+/// a struct of closures.
+pub fn get_or_compile_escape_projection(resolved_path: &str) -> Option<HashMap<String, bool>> {
+    let cached = ESCAPE_PROJECTION_CACHE.with(|pc| pc.borrow().get(resolved_path).cloned());
+    if let Some(proj) = cached {
+        return proj;
+    }
+
+    // Read the file and compile it
+    let source = std::fs::read_to_string(resolved_path).ok()?;
+    let mut symbols = SymbolTable::new();
+    let result = super::compile::compile_file(&source, &mut symbols, resolved_path).ok()?;
+    let escape_proj = result.bytecode.escape_projection;
+
+    // Cache signal projection too if not already cached
+    let signal_proj = result.bytecode.signal_projection;
+    PROJECTION_CACHE.with(|pc| {
+        pc.borrow_mut()
+            .entry(resolved_path.to_string())
+            .or_insert(signal_proj);
+    });
+
+    ESCAPE_PROJECTION_CACHE.with(|pc| {
+        pc.borrow_mut()
+            .insert(resolved_path.to_string(), escape_proj.clone());
+    });
+
+    escape_proj
 }
