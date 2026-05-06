@@ -3,8 +3,23 @@
 //! This module contains fundamental types used throughout the value system:
 //! - `SymbolId` - Interned symbol identifier
 //! - `Arity` - Function arity specification
-//! - `TableKey` - Keys for tables and structs
+//! - `TableKey` - Keys for structs (accepts all immutable non-float types)
 //! - `NativeFn` - Unified primitive function type
+//!
+//! ## TableKey design
+//!
+//! `TableKey` accepts any immutable, non-float value as a struct key:
+//! - **Scalar**: nil, bool, int, symbol, keyword, string, empty list
+//! - **Compound immutable**: arrays, cons cells, empty list, bytes, sets, structs
+//! - **Identity types**: fiber, closure, external (compared by pointer identity)
+//!
+//! Mutable types (@array, @struct, @set, @bytes, @string, box) and floats are
+//! rejected. Mutable values could change after insertion, breaking hash invariants.
+//! Floats are rejected because NaN violates Eq/Hash.
+//!
+//! Compound immutable keys store the original `Value` directly in the `Heap`
+//! variant; `from_value()` recursively validates sub-elements but always stores
+//! the original value, not a reconstructed copy.
 
 use crate::value::heap::HeapTag;
 use crate::value::Value;
@@ -101,21 +116,21 @@ pub enum TableKey {
     Symbol(SymbolId),
     String(String),
     Keyword(String),
+    EmptyList,
     /// Immutable array key. All elements must themselves be valid TableKeys.
     /// Mutable arrays are rejected — mutation after insertion would break
     /// the hash invariant.
     Array(Vec<TableKey>),
-    /// Identity-compared key for reference types (fiber, closure, external).
+    /// Any non-scalar immutable heap value used as a struct key.
     ///
-    /// **Invariant**: Only constructed via `from_value()`. The stored `Value`
-    /// must be a type where `identical?` uses pointer identity (currently: fiber,
-    /// closure, external). Storing a value-compared type here would silently
-    /// use bit-pattern comparison instead of value comparison.
+    /// Stores the original `Value` directly. `from_value()` recursively validates
+    /// that all sub-elements are themselves valid keys (immutable, non-float) but
+    /// always stores the original `*val`, not a reconstructed copy.
     ///
-    /// Hash/Eq/Ord compare by tag+payload equality, which
-    /// encodes the heap pointer. This gives the same identity semantics as
-    /// `identical?` for these types.
-    Identity(Value),
+    /// `Hash`/`Eq`/`Ord` delegate to `Value`'s implementations, which give:
+    /// - **Identity semantics** for fiber, closure, external (compared by pointer)
+    /// - **Structural semantics** for cons, set, struct, bytes, empty list
+    Heap(Value),
 }
 
 impl TableKey {
@@ -142,8 +157,29 @@ impl TableKey {
                 keys.push(TableKey::from_value(elem)?);
             }
             Some(TableKey::Array(keys))
+        } else if val.is_empty_list() {
+            Some(TableKey::EmptyList)
+        } else if val.is_pair() {
+            let pair = val.as_pair().unwrap();
+            Self::from_value(&pair.first)?;
+            Self::from_value(&pair.rest)?;
+            Some(TableKey::Heap(*val))
+        } else if val.is_bytes() {
+            Some(TableKey::Heap(*val))
+        } else if val.is_set() {
+            let set = val.as_set().unwrap();
+            for elem in set {
+                Self::from_value(elem)?;
+            }
+            Some(TableKey::Heap(*val))
+        } else if val.is_struct() {
+            let entries = val.as_struct().unwrap();
+            for (_key, value) in entries {
+                Self::from_value(value)?;
+            }
+            Some(TableKey::Heap(*val))
         } else if val.is_fiber() || val.is_closure() || val.heap_tag() == Some(HeapTag::External) {
-            Some(TableKey::Identity(*val))
+            Some(TableKey::Heap(*val))
         } else {
             None
         }
@@ -160,19 +196,20 @@ impl TableKey {
             TableKey::Symbol(sid) => Value::symbol(sid.0),
             TableKey::String(s) => Value::string(s.as_str()),
             TableKey::Keyword(s) => Value::keyword(s.as_str()),
+            TableKey::EmptyList => Value::EMPTY_LIST,
             TableKey::Array(keys) => Value::array(keys.iter().map(|k| k.to_value()).collect()),
-            TableKey::Identity(v) => *v,
+            TableKey::Heap(v) => *v,
         }
     }
 
     /// Whether this key can be safely sent across thread boundaries.
     ///
-    /// Identity keys contain heap pointers (`Rc`) that are not thread-safe.
+    /// Heap keys contain `Rc` data that is not thread-safe.
     /// Value-based keys (nil, bool, int, symbol, string, keyword) are always
     /// sendable.
     pub fn is_sendable(&self) -> bool {
         match self {
-            TableKey::Identity(_) => false,
+            TableKey::Heap(_) => false,
             TableKey::Array(keys) => keys.iter().all(|k| k.is_sendable()),
             _ => true,
         }
@@ -186,8 +223,9 @@ impl TableKey {
             TableKey::Symbol(_) => 3,
             TableKey::String(_) => 4,
             TableKey::Keyword(_) => 5,
-            TableKey::Array(_) => 6,
-            TableKey::Identity(_) => 7,
+            TableKey::EmptyList => 6,
+            TableKey::Array(_) => 7,
+            TableKey::Heap(_) => 8,
         }
     }
 }
@@ -197,6 +235,7 @@ impl std::hash::Hash for TableKey {
         std::mem::discriminant(self).hash(state);
         match self {
             TableKey::Nil => {}
+            TableKey::EmptyList => {}
             TableKey::Bool(b) => b.hash(state),
             TableKey::Int(i) => i.hash(state),
             TableKey::Symbol(id) => id.hash(state),
@@ -207,7 +246,9 @@ impl std::hash::Hash for TableKey {
             // that encodes a stable Rc/Arc-backed identity rather than
             // the slot pointer, so outbox relocation on fiber yield
             // doesn't turn the same fiber into a different map key.
-            TableKey::Identity(v) => v.hash(state),
+            // For cons/set/struct/bytes/empty-list, gives structural
+            // hashing based on the value's content.
+            TableKey::Heap(v) => v.hash(state),
         }
     }
 }
@@ -221,10 +262,12 @@ impl PartialEq for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
             (TableKey::String(a), TableKey::String(b)) => a == b,
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
+            (TableKey::EmptyList, TableKey::EmptyList) => true,
             (TableKey::Array(a), TableKey::Array(b)) => a == b,
             // Delegate to Value's PartialEq (stable identity for Fiber
-            // and friends — see Hash impl above).
-            (TableKey::Identity(a), TableKey::Identity(b)) => a == b,
+            // and friends — see Hash impl above). Structural equality
+            // for cons/set/struct/bytes/empty-list.
+            (TableKey::Heap(a), TableKey::Heap(b)) => a == b,
             _ => false,
         }
     }
@@ -241,7 +284,7 @@ impl PartialOrd for TableKey {
 impl Ord for TableKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Variant ordering follows enum declaration order (same as derive).
-        // Discriminant index: Nil=0, Bool=1, Int=2, Symbol=3, String=4, Keyword=5, Array=6, Identity=7
+        // Discriminant index: Nil=0, Bool=1, Int=2, Symbol=3, String=4, Keyword=5, EmptyList=6, Array=7, Heap=8
         let self_disc = self.discriminant_index();
         let other_disc = other.discriminant_index();
         match self_disc.cmp(&other_disc) {
@@ -255,10 +298,12 @@ impl Ord for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
             (TableKey::String(a), TableKey::String(b)) => a.cmp(b),
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
+            (TableKey::EmptyList, TableKey::EmptyList) => std::cmp::Ordering::Equal,
             (TableKey::Array(a), TableKey::Array(b)) => a.cmp(b),
             // Delegate to Value's Ord. Stable identity for Fiber and
-            // friends — see Hash impl above.
-            (TableKey::Identity(a), TableKey::Identity(b)) => a.cmp(b),
+            // friends — see Hash impl above. Structural ordering for
+            // cons/set/struct/bytes/empty-list.
+            (TableKey::Heap(a), TableKey::Heap(b)) => a.cmp(b),
             _ => unreachable!("discriminant match already handled"),
         }
     }
@@ -273,6 +318,7 @@ impl fmt::Display for TableKey {
             TableKey::Symbol(id) => write!(f, "{:?}", id),
             TableKey::String(s) => write!(f, "\"{}\"", s),
             TableKey::Keyword(s) => write!(f, ":{}", s),
+            TableKey::EmptyList => write!(f, "()"),
             TableKey::Array(keys) => {
                 write!(f, "[")?;
                 for (i, k) in keys.iter().enumerate() {
@@ -283,7 +329,7 @@ impl fmt::Display for TableKey {
                 }
                 write!(f, "]")
             }
-            TableKey::Identity(v) => write!(f, "{}", v),
+            TableKey::Heap(v) => write!(f, "{}", v),
         }
     }
 }
@@ -308,6 +354,7 @@ impl fmt::Debug for TableKey {
             }
             TableKey::String(s) => write!(f, "\"{}\"", s),
             TableKey::Keyword(s) => write!(f, ":{}", s),
+            TableKey::EmptyList => write!(f, "()"),
             TableKey::Array(keys) => {
                 write!(f, "[")?;
                 for (i, k) in keys.iter().enumerate() {
@@ -318,7 +365,7 @@ impl fmt::Debug for TableKey {
                 }
                 write!(f, "]")
             }
-            TableKey::Identity(v) => write!(f, "{:?}", v),
+            TableKey::Heap(v) => write!(f, "{:?}", v),
         }
     }
 }

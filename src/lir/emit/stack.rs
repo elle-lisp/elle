@@ -73,7 +73,7 @@ impl super::Emitter {
     /// leaving different stack depths at the merge point.  This causes
     /// DupN offsets in the merge block to be wrong, shifting operands and
     /// producing incorrect results (e.g. a struct value in a hash-key
-    /// slot → "expected hashable value, got struct").
+    /// slot → "struct keys must be immutable (got struct)").
     ///
     /// Call this before saving stack state to `yield_stack_state` in
     /// terminators so that all predecessors of a merge block agree on

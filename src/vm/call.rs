@@ -836,7 +836,7 @@ pub(crate) fn call_collection(
                 return Some(Err((
                     "type-error",
                     format!(
-                        "struct call: expected hashable key, got {}",
+                        "struct call: struct keys must be immutable (got {})",
                         args[0].type_name()
                     ),
                 )))
@@ -858,7 +858,7 @@ pub(crate) fn call_collection(
                 return Some(Err((
                     "type-error",
                     format!(
-                        "@struct call: expected hashable key, got {}",
+                        "@struct call: struct keys must be immutable (got {})",
                         args[0].type_name()
                     ),
                 )))

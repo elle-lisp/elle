@@ -87,7 +87,10 @@ pub(crate) fn prim_struct(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("expected hashable value, got {}", args[i].type_name()),
+                        format!(
+                            "struct keys must be immutable (got {})",
+                            args[i].type_name()
+                        ),
                     ),
                 )
             }
@@ -312,8 +315,9 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
                 TableKey::Symbol(sym) => Value::symbol(sym.0),
                 TableKey::String(s) => Value::string(s.as_str()),
                 TableKey::Keyword(kw) => Value::keyword(kw.as_str()),
+                TableKey::EmptyList => Value::EMPTY_LIST,
                 TableKey::Array(keys) => Value::array(keys.iter().map(|k| k.to_value()).collect()),
-                TableKey::Identity(v) => *v,
+                TableKey::Heap(v) => *v,
             };
             let pair = Value::array(vec![key_val, *value]);
             result = Value::pair(pair, result);

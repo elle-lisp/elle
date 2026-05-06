@@ -115,7 +115,10 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("expected hashable value, got {}", args[i].type_name()),
+                        format!(
+                            "struct keys must be immutable (got {})",
+                            args[i].type_name()
+                        ),
                     ),
                 )
             }
@@ -146,7 +149,10 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("expected hashable value, got {}", args[1].type_name()),
+                    format!(
+                        "struct keys must be immutable (got {})",
+                        args[1].type_name()
+                    ),
                 ),
             )
         }
