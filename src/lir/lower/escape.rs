@@ -97,6 +97,11 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
+            // DerefCell: functionalize wraps letrec bindings in cells.
+            // Treat like Var — the cell holds a pre-existing value.
+            HirKind::DerefCell { cell } => {
+                self.result_is_safe_impl(cell, scope_bindings, trust_return_safe)
+            }
 
             // Control flow: recurse into all result positions
             HirKind::If {
@@ -197,8 +202,17 @@ impl<'a> Lowerer<'a> {
                 // Extended mode: also trust calls to callee_return_safe functions.
                 // These are user functions proven (by fixpoint) to never return
                 // freshly heap-allocated values.
+                // Look through DerefCell (functionalize wraps letrec bindings).
                 if trust_return_safe {
-                    if let HirKind::Var(binding) = &func.kind {
+                    let binding = match &func.kind {
+                        HirKind::Var(b) => Some(b),
+                        HirKind::DerefCell { cell } => match &cell.kind {
+                            HirKind::Var(b) => Some(b),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if let Some(binding) = binding {
                         if self
                             .callee_return_safe
                             .get(binding)
@@ -300,7 +314,15 @@ impl<'a> Lowerer<'a> {
         }
         // For Call expressions: check callee_result_immediate
         if let HirKind::Call { func, .. } = &hir.kind {
-            if let HirKind::Var(binding) = &func.kind {
+            let binding = match &func.kind {
+                HirKind::Var(b) => Some(b),
+                HirKind::DerefCell { cell } => match &cell.kind {
+                    HirKind::Var(b) => Some(b),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(binding) = binding {
                 if self
                     .callee_result_immediate
                     .get(binding)
@@ -384,7 +406,16 @@ impl<'a> Lowerer<'a> {
                 if self.call_result_is_safe(func, args) {
                     return true;
                 }
-                if let HirKind::Var(binding) = &func.kind {
+                // Look through DerefCell (functionalize wraps letrec bindings)
+                let binding = match &func.kind {
+                    HirKind::Var(b) => Some(b),
+                    HirKind::DerefCell { cell } => match &cell.kind {
+                        HirKind::Var(b) => Some(b),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(binding) = binding {
                     if self
                         .callee_result_immediate
                         .get(binding)
