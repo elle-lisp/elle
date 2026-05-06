@@ -43,6 +43,8 @@ pub struct ClosureId(pub u32);
 pub struct LirModule {
     pub entry: LirFunction,
     pub closures: Vec<LirFunction>,
+    /// Escape analysis dump for `--dump=escape`. Populated by the lowerer.
+    pub escape_dump: Option<String>,
 }
 
 impl Reg {

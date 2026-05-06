@@ -494,6 +494,74 @@ impl<'a> Lowerer<'a> {
         &self.scope_stats
     }
 
+    /// Format escape analysis maps for `--dump=escape`.
+    pub fn format_escape_analysis(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        let name = |b: &Binding| -> String {
+            let bi = self.arena.get(*b);
+            self.symbol_names
+                .get(&bi.name.0)
+                .cloned()
+                .unwrap_or_else(|| format!("?#{}", b.0))
+        };
+        writeln!(
+            out,
+            ";; rotation_safe ({} entries):",
+            self.callee_rotation_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_rotation_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} rotation_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; param_safe ({} entries):",
+            self.callee_param_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_param_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} param_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; struct_fields_rotation_safe ({} entries):",
+            self.callee_struct_fields_rotation_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_struct_fields_rotation_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} struct_fields_rotation_safe={}", name(b), safe).unwrap();
+        }
+        writeln!(
+            out,
+            ";; struct_fields_param_safe ({} entries):",
+            self.callee_struct_fields_param_safe.len()
+        )
+        .unwrap();
+        let mut entries: Vec<_> = self.callee_struct_fields_param_safe.iter().collect();
+        entries.sort_by_key(|(b, _)| b.0);
+        for (b, safe) in &entries {
+            writeln!(out, "  {:30} struct_fields_param_safe={}", name(b), safe).unwrap();
+        }
+        if let Some(ref proj) = self.escape_projection {
+            writeln!(out, ";; escape_projection ({} fields):", proj.len()).unwrap();
+            let mut entries: Vec<_> = proj.iter().collect();
+            entries.sort_by_key(|(k, _)| (*k).clone());
+            for (k, safe) in &entries {
+                writeln!(out, "  :{:29} safe={}", k, safe).unwrap();
+            }
+        } else {
+            writeln!(out, ";; escape_projection: none").unwrap();
+        }
+        out
+    }
+
     /// Take the computed escape projection (if any).
     /// Called by the compile pipeline after lowering.
     pub fn take_escape_projection(&mut self) -> Option<HashMap<String, bool>> {
@@ -575,7 +643,12 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        Ok(LirModule { entry, closures })
+        let escape_dump = Some(self.format_escape_analysis());
+        Ok(LirModule {
+            entry,
+            closures,
+            escape_dump,
+        })
     }
 
     // === Helper Methods ===
