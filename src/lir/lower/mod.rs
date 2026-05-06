@@ -1566,8 +1566,29 @@ impl<'a> Lowerer<'a> {
             HirKind::While { .. } | HirKind::Recur { .. } => true, // returns nil
             HirKind::Loop { body, .. } => self.body_result_is_immediate(body),
 
-            // ALL calls (tail or not): check if callee returns immediate
-            HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
+            // ALL calls (tail or not): check if callee returns immediate.
+            // Look through DerefCell (functionalize wraps letrec bindings).
+            HirKind::Call { func, args, .. } => {
+                if self.call_result_is_safe(func, args) {
+                    return true;
+                }
+                let binding = match &func.kind {
+                    HirKind::Var(b) => Some(b),
+                    HirKind::DerefCell { cell } => match &cell.kind {
+                        HirKind::Var(b) => Some(b),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(binding) = binding {
+                    return self
+                        .callee_result_immediate
+                        .get(binding)
+                        .copied()
+                        .unwrap_or(false);
+                }
+                false
+            }
 
             // Cell ops: MakeCell creates a heap cell, DerefCell/SetCell
             // may return heap values — conservatively not immediate.
