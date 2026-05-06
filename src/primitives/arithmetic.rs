@@ -13,6 +13,15 @@ pub(crate) fn prim_abs(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_min(args: &[Value]) -> (SignalBits, Value) {
+    if !args[0].is_number() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("min: expected number, got {}", args[0].type_name()),
+            ),
+        );
+    }
     let mut min = args[0];
     for arg in &args[1..] {
         if !arg.is_number() {
@@ -30,6 +39,15 @@ pub(crate) fn prim_min(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) fn prim_max(args: &[Value]) -> (SignalBits, Value) {
+    if !args[0].is_number() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("max: expected number, got {}", args[0].type_name()),
+            ),
+        );
+    }
     let mut max = args[0];
     for arg in &args[1..] {
         if !arg.is_number() {

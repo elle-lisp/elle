@@ -186,7 +186,7 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
     let max_slots = cross_block_count + pool_high_water;
 
     // Debug: check for any registers in 0..num_regs not in the map
-    if crate::config::get().debug_wasm {
+    if crate::config::get().has_trace("wasm") {
         for reg_id in 0..func.num_regs {
             if !reg_to_slot.contains_key(&Reg(reg_id)) {
                 eprintln!(

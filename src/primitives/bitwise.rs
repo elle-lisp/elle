@@ -33,55 +33,32 @@ fn coerce_to_int(val: &Value, name: &str) -> Result<i64, (SignalBits, Value)> {
     ))
 }
 
-/// Bitwise AND: fold all arguments with &
+/// Fold arguments with a bitwise operation.
+fn fold_bitwise(args: &[Value], name: &str, op: fn(i64, i64) -> i64) -> (SignalBits, Value) {
+    let mut result = match coerce_to_int(&args[0], name) {
+        Ok(n) => n,
+        Err(e) => return e,
+    };
+    for arg in &args[1..] {
+        let n = match coerce_to_int(arg, name) {
+            Ok(n) => n,
+            Err(e) => return e,
+        };
+        result = op(result, n);
+    }
+    (SIG_OK, Value::int(result))
+}
+
 pub(crate) fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
-    let mut result = match coerce_to_int(&args[0], "bit/and") {
-        Ok(n) => n,
-        Err(e) => return e,
-    };
-
-    for arg in &args[1..] {
-        let n = match coerce_to_int(arg, "bit/and") {
-            Ok(n) => n,
-            Err(e) => return e,
-        };
-        result &= n;
-    }
-    (SIG_OK, Value::int(result))
+    fold_bitwise(args, "bit/and", |a, b| a & b)
 }
 
-/// Bitwise OR: fold all arguments with |
 pub(crate) fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
-    let mut result = match coerce_to_int(&args[0], "bit/or") {
-        Ok(n) => n,
-        Err(e) => return e,
-    };
-
-    for arg in &args[1..] {
-        let n = match coerce_to_int(arg, "bit/or") {
-            Ok(n) => n,
-            Err(e) => return e,
-        };
-        result |= n;
-    }
-    (SIG_OK, Value::int(result))
+    fold_bitwise(args, "bit/or", |a, b| a | b)
 }
 
-/// Bitwise XOR: fold all arguments with ^
 pub(crate) fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
-    let mut result = match coerce_to_int(&args[0], "bit/xor") {
-        Ok(n) => n,
-        Err(e) => return e,
-    };
-
-    for arg in &args[1..] {
-        let n = match coerce_to_int(arg, "bit/xor") {
-            Ok(n) => n,
-            Err(e) => return e,
-        };
-        result ^= n;
-    }
-    (SIG_OK, Value::int(result))
+    fold_bitwise(args, "bit/xor", |a, b| a ^ b)
 }
 
 /// Bitwise NOT: apply ! to single integer argument

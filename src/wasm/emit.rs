@@ -596,7 +596,7 @@ impl WasmEmitter {
 
         let alloc = super::regalloc::allocate(func, 0);
         let n = alloc.max_slots;
-        if crate::config::get().debug_wasm {
+        if crate::config::get().has_trace("wasm") {
             eprintln!(
                 "[emit] closure {:?}: {} virtual regs → {} slots",
                 func.name, func.num_regs, n
@@ -651,7 +651,7 @@ impl WasmEmitter {
                 self.spill_live_map.clear();
             }
 
-            if crate::config::get().debug_wasm {
+            if crate::config::get().has_trace("wasm") {
                 eprintln!(
                     "[emit] suspending closure: name={:?} regs={} locals={} captures={} params={}",
                     func.name, func.num_regs, func.num_locals, func.num_captures, func.num_params

@@ -114,13 +114,6 @@ impl SlabPool {
         self.alloc_count = mark.alloc_count;
     }
 
-    /// Reset the bump arena pointer to a saved mark. Called by
-    /// `FiberHeap::release()` after dtors and tracking vecs are handled.
-    #[allow(dead_code)]
-    pub fn release_bump(&mut self, mark: BumpMark) {
-        self.arena.release_to(mark);
-    }
-
     /// Run all destructors and reset both allocators.
     pub fn teardown(&mut self) {
         self.run_dtors(0);
@@ -210,13 +203,6 @@ impl SlabPool {
     #[inline]
     pub fn refcount(&self, ptr: *const HeapObject) -> u32 {
         self.slab.refcount(ptr)
-    }
-
-    /// Get the reference count for a slot by flat index.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn refcount_by_flat(&self, flat: usize) -> u32 {
-        self.slab.refcount_by_flat(flat)
     }
 
     /// Check if a pointer is in the slab (not arena).

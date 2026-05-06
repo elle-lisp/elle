@@ -238,17 +238,6 @@ impl Slab {
         }
     }
 
-    /// Get the reference count for a slot by flat index.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn refcount_by_flat(&self, flat: usize) -> u32 {
-        if flat < self.refcounts.len() {
-            self.refcounts[flat]
-        } else {
-            0
-        }
-    }
-
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {

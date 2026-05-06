@@ -819,7 +819,7 @@ impl VM {
             );
             map.insert(
                 TableKey::from_value(&Value::keyword("flip")).unwrap(),
-                Value::bool(rc.flip),
+                Value::bool(crate::config::flip_enabled()),
             );
             map.insert(
                 TableKey::from_value(&Value::keyword("checked-intrinsics")).unwrap(),
@@ -837,7 +837,7 @@ impl VM {
                     (SIG_OK, Value::set(trace_set.into_iter().collect()))
                 }
                 "stats" => (SIG_OK, Value::bool(rc.stats)),
-                "flip" => (SIG_OK, Value::bool(rc.flip)),
+                "flip" => (SIG_OK, Value::bool(crate::config::flip_enabled())),
                 "checked-intrinsics" => {
                     (SIG_OK, Value::bool(crate::config::get().checked_intrinsics))
                 }
@@ -888,16 +888,11 @@ impl VM {
         match kw.as_str() {
             "jit" => {
                 if let Some(closure) = val.as_closure() {
-                    // Custom policy via closure — store on VM (future: store the closure)
                     let _ = closure; // TODO: store for actual dispatch
                     self.runtime_config.jit = crate::config::JitPolicy::Custom;
-                    self.jit_enabled = true;
-                    self.jit_hotness_threshold = 0;
                 } else if let Some(policy_kw) = val.as_keyword_name() {
                     match crate::config::JitPolicy::from_keyword(&policy_kw) {
                         Some(policy) => {
-                            self.jit_enabled = policy.enabled();
-                            self.jit_hotness_threshold = policy.threshold();
                             self.runtime_config.jit = policy;
                         }
                         None => {
@@ -1018,7 +1013,6 @@ impl VM {
                         ),
                     );
                 };
-                self.runtime_config.flip = on;
                 crate::config::set_flip(on);
                 Value::NIL
             }

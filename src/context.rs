@@ -54,3 +54,59 @@ pub fn resolve_symbol_name(sym_id: u32) -> Option<String> {
             .map(|s| s.to_string())
     }
 }
+
+// ── RAII guards ─────────────────────────────────────────────────────
+//
+// Scoped guards that save the previous TLS value on construction and
+// restore it on drop.  This prevents:
+//  - forgetting to clear (use-after-free on stack unwind)
+//  - forgetting to restore after nested set/clear (subprocess pattern)
+
+/// RAII guard for the VM context TLS slot.
+/// On drop, restores the previous value (which may be None).
+pub struct VmContextGuard {
+    prev: Option<*mut VM>,
+}
+
+impl VmContextGuard {
+    /// Set the VM context for the current scope.  The previous value
+    /// is saved and restored when the guard is dropped.
+    pub fn new(vm: &mut VM) -> Self {
+        let prev = get_vm_context();
+        set_vm_context(vm as *mut VM);
+        VmContextGuard { prev }
+    }
+}
+
+impl Drop for VmContextGuard {
+    fn drop(&mut self) {
+        match self.prev {
+            Some(ptr) => set_vm_context(ptr),
+            None => clear_vm_context(),
+        }
+    }
+}
+
+/// RAII guard for the symbol table TLS slot.
+/// On drop, restores the previous value (which may be None).
+pub struct SymbolTableGuard {
+    prev: Option<*mut SymbolTable>,
+}
+
+impl SymbolTableGuard {
+    /// Set the symbol table context for the current scope.
+    pub fn new(symbols: &mut SymbolTable) -> Self {
+        let prev = unsafe { get_symbol_table() };
+        set_symbol_table(symbols as *mut SymbolTable);
+        SymbolTableGuard { prev }
+    }
+}
+
+impl Drop for SymbolTableGuard {
+    fn drop(&mut self) {
+        match self.prev {
+            Some(ptr) => set_symbol_table(ptr),
+            None => clear_symbol_table(),
+        }
+    }
+}

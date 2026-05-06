@@ -105,7 +105,7 @@ impl WasmTier {
 
         match Module::new(&self.engine, &result.wasm_bytes) {
             Ok(module) => {
-                if crate::config::get().debug_wasm {
+                if crate::config::get().has_trace("wasm") {
                     eprintln!(
                         "[wasm-tier] compiled {:?} ({} bytes, {} consts)",
                         lir_func.name,
@@ -123,7 +123,7 @@ impl WasmTier {
                 true
             }
             Err(e) => {
-                if crate::config::get().debug_wasm {
+                if crate::config::get().has_trace("wasm") {
                     eprintln!("[wasm-tier] compile failed for {:?}: {}", lir_func.name, e);
                 }
                 false

@@ -1,30 +1,15 @@
 use super::core::VM;
+use crate::arithmetic::values_eq;
 use crate::value::Value;
 
 pub(crate) fn handle_eq(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
-    // Fast path: bitwise identical
-    if a == b {
-        vm.fiber.stack.push(Value::TRUE);
-        return;
-    }
-    // Numeric coercion: int-int stays exact, mixed promotes to f64
-    if a.is_number() && b.is_number() {
-        if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-            vm.fiber
-                .stack
-                .push(if x == y { Value::TRUE } else { Value::FALSE });
-            return;
-        }
-        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-            vm.fiber
-                .stack
-                .push(if x == y { Value::TRUE } else { Value::FALSE });
-            return;
-        }
-    }
-    vm.fiber.stack.push(Value::FALSE);
+    vm.fiber.stack.push(if values_eq(&a, &b) {
+        Value::TRUE
+    } else {
+        Value::FALSE
+    });
 }
 
 /// Comparison helper macro. Unchecked — incomparable types produce false

@@ -20,35 +20,6 @@ use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Mutex;
-
-static GLOBAL_SCOPE_STATS: Mutex<ScopeStats> = Mutex::new(ScopeStats {
-    scopes_analyzed: 0,
-    scopes_qualified: 0,
-    rejected_captured: 0,
-    rejected_suspends: 0,
-    rejected_unsafe_result: 0,
-    rejected_outward_set: 0,
-    rejected_break: 0,
-    calls_scoped: 0,
-    rotation_analyzed: 0,
-    rotation_safe: 0,
-});
-
-/// Merge local scope stats into the global accumulator.
-pub fn accumulate_scope_stats(stats: &ScopeStats) {
-    if let Ok(mut global) = GLOBAL_SCOPE_STATS.lock() {
-        global.merge(stats);
-    }
-}
-
-/// Read the global scope stats.
-pub fn global_scope_stats() -> ScopeStats {
-    GLOBAL_SCOPE_STATS
-        .lock()
-        .map(|g| g.clone())
-        .unwrap_or_default()
-}
 
 /// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
 /// before every tail call. Used by Phase 4b auto-insertion

@@ -23,93 +23,35 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
 /// `(range start end)` — start to end-1
 /// `(range start end step)` — start, start+step, ... while < end (or > end for negative step)
 pub(crate) fn prim_range(args: &[Value]) -> (SignalBits, Value) {
+    macro_rules! require_num {
+        ($v:expr) => {
+            match $v.as_number() {
+                Some(n) => n,
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!("range: expected number, got {}", $v.type_name()),
+                        ),
+                    )
+                }
+            }
+        };
+    }
+
     let (start, end, step) = match args.len() {
-        1 => {
-            let end = match args[0].as_number() {
-                Some(n) => n,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("range: expected number, got {}", args[0].type_name()),
-                        ),
-                    )
-                }
-            };
-            (0.0, end, 1.0)
-        }
-        2 => {
-            let start = match args[0].as_number() {
-                Some(n) => n,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("range: expected number, got {}", args[0].type_name()),
-                        ),
-                    )
-                }
-            };
-            let end = match args[1].as_number() {
-                Some(n) => n,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("range: expected number, got {}", args[1].type_name()),
-                        ),
-                    )
-                }
-            };
-            (start, end, 1.0)
-        }
+        1 => (0.0, require_num!(args[0]), 1.0),
+        2 => (require_num!(args[0]), require_num!(args[1]), 1.0),
         3 => {
-            let start = match args[0].as_number() {
-                Some(n) => n,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("range: expected number, got {}", args[0].type_name()),
-                        ),
-                    )
-                }
-            };
-            let end = match args[1].as_number() {
-                Some(n) => n,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("range: expected number, got {}", args[1].type_name()),
-                        ),
-                    )
-                }
-            };
-            let step = match args[2].as_number() {
-                Some(n) => n,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!("range: expected number, got {}", args[2].type_name()),
-                        ),
-                    )
-                }
-            };
+            let step = require_num!(args[2]);
             if step == 0.0 {
                 return (
                     SIG_ERROR,
                     error_val("argument-error", "range: step cannot be zero"),
                 );
             }
-            (start, end, step)
+            (require_num!(args[0]), require_num!(args[1]), step)
         }
         _ => unreachable!(),
     };

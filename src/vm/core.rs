@@ -2,7 +2,6 @@ use crate::error::{LocationMap, StackFrame};
 use crate::ffi::FFISubsystem;
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
-use crate::value::fiber::CallFrame;
 use crate::value::{
     BytecodeFrame, Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR,
     SIG_FUEL, SIG_HALT, SIG_OK, SIG_SWITCH,
@@ -97,14 +96,6 @@ pub struct VM {
     /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
     /// Read by `sys/argv`. Empty string means REPL mode.
     pub source_arg: String,
-    /// Whether JIT compilation is enabled.
-    /// Controlled by `--jit=N` CLI flag: `0` disables, `N>0` enables.
-    /// Defaults to `true`.
-    pub jit_enabled: bool,
-    /// JIT hotness threshold: a closure must be called this many times
-    /// before it becomes a JIT compilation candidate.
-    /// Set by `--jit=N` (threshold = N-1), defaulting to 10.
-    pub jit_hotness_threshold: usize,
     /// Lazy WASM compilation tier. When `--wasm=N`, hot closures are
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.
     #[cfg(feature = "wasm")]
@@ -180,8 +171,6 @@ impl VM {
             rc.set_trace(kws);
         }
 
-        let jit_enabled = rc.jit.enabled();
-        let jit_threshold = rc.jit.threshold();
         #[cfg(feature = "mlir")]
         let mlir_enabled = rc.mlir.enabled();
 
@@ -211,10 +200,8 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
-            jit_enabled,
-            jit_hotness_threshold: jit_threshold,
             #[cfg(feature = "wasm")]
-            wasm_tier: if crate::config::get().wasm > 0 && !crate::config::get().wasm_full {
+            wasm_tier: if crate::config::get().wasm_tier_enabled() {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
                 None
@@ -306,12 +293,40 @@ impl VM {
         result
     }
 
+    /// Check a signal against a squelch mask. If the signal is squelched,
+    /// sets the fiber to a signal-violation error and returns `true`.
+    /// Callers handle any additional side effects (stack push, call_stack pop, etc.).
+    pub(crate) fn enforce_squelch(&mut self, bits: SignalBits, mask: SignalBits) -> bool {
+        if mask.is_empty()
+            || bits.contains(crate::value::SIG_ERROR)
+            || bits.contains(crate::value::SIG_HALT)
+            || bits == crate::value::SIG_SWITCH
+        {
+            return false;
+        }
+        let squelched = bits.intersection(mask);
+        if squelched.is_empty() {
+            return false;
+        }
+        let squelched_str = {
+            let registry = crate::signals::registry::global_registry().lock().unwrap();
+            registry.format_signal_bits(squelched)
+        };
+        let err = crate::value::error_val(
+            "signal-violation",
+            format!("squelch: signal {} caught at boundary", squelched_str),
+        );
+        self.fiber.suspended = None;
+        self.fiber.signal = Some((crate::value::SIG_ERROR, err));
+        true
+    }
+
     /// Record a closure call and return whether it's "hot" (called N+ times,
     /// where N is `jit_hotness_threshold`, default 10, set via `--jit=N`).
     pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
         let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
         *count += 1;
-        *count >= self.jit_hotness_threshold
+        *count >= self.runtime_config.jit.threshold()
     }
 
     /// Get call count for a closure
@@ -347,7 +362,8 @@ impl VM {
             .unwrap_or(0)
     }
 
-    pub fn push_call_frame(
+    #[cfg(test)]
+    fn push_call_frame(
         &mut self,
         name: String,
         ip: usize,
@@ -355,47 +371,12 @@ impl VM {
     ) {
         let frame_base = self.fiber.stack.len();
         self.fiber.call_depth += 1;
-        self.fiber.call_stack.push(CallFrame {
+        self.fiber.call_stack.push(crate::value::fiber::CallFrame {
             name: Rc::from(name.as_str()),
             ip,
             frame_base,
             location_map,
         });
-    }
-
-    pub fn push_call_frame_with_base(
-        &mut self,
-        name: String,
-        ip: usize,
-        frame_base: usize,
-        location_map: Rc<crate::error::LocationMap>,
-    ) {
-        self.fiber.call_depth += 1;
-        self.fiber.call_stack.push(CallFrame {
-            name: Rc::from(name.as_str()),
-            ip,
-            frame_base,
-            location_map,
-        });
-    }
-
-    pub fn pop_call_frame(&mut self) {
-        if self.fiber.call_depth > 0 {
-            self.fiber.call_depth -= 1;
-            self.fiber.call_stack.pop();
-        }
-    }
-
-    pub fn format_stack_trace(&self) -> String {
-        if self.fiber.call_stack.is_empty() {
-            "No call frames".to_string()
-        } else {
-            let mut trace = String::new();
-            for (i, frame) in self.fiber.call_stack.iter().rev().enumerate() {
-                trace.push_str(&format!("  #{}: {} (ip={})\n", i, frame.name, frame.ip));
-            }
-            trace
-        }
     }
 
     /// Capture current call stack as trace frames

@@ -8,5 +8,4 @@ pub mod rules;
 pub mod run;
 
 pub use cli::{LintConfig, Linter, OutputFormat};
-pub use diagnostics::{Diagnostic, DiagnosticContext, Severity};
-pub use rules::check_naming_convention;
+pub use diagnostics::{Diagnostic, Severity};

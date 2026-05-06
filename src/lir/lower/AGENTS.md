@@ -133,17 +133,6 @@ checks `callee_result_immediate` or `callee_return_safe` for Call expressions
 at any depth. Used by `body_escapes_heap_values` (rotation safety) when the
 standard flat check fails.
 
-**Value-flow propagation (`callee_returns_*` + widen passes):**
-
-`precompute_returns_rotation_safe()` and `precompute_returns_param_safe()` determine
-whether each function's return positions always produce rotation-safe or param-safe
-closures. `widen_rotation_safety()` and `widen_param_safety()` then extend the
-`callee_rotation_safe` / `callee_param_safe` maps to cover non-Lambda bindings:
-factory returns (`(def proc (make-proc))`), aliases (`(def f g)`), conditional
-construction (`(def f (if ... (fn ...) (fn ...)))`), and nested factories.
-Uses `collect_all_bindings` to find all Define/Let/Letrec bindings regardless of
-init type, then resolves each through value-flow analysis with fixpoint iteration.
-
 **Known limitations and why they exist:**
 
 - **`suspends` (condition 2)**: Any let body that calls a polymorphic-signal

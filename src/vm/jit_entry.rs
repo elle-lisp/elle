@@ -7,7 +7,7 @@
 //! - Fallback to interpreter on compilation failure
 
 use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
-use crate::value::{SignalBits, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
 
 use super::core::VM;
@@ -30,7 +30,7 @@ impl VM {
         args: &[Value],
         func: Value,
     ) -> Option<Option<SignalBits>> {
-        if !self.jit_enabled {
+        if !self.runtime_config.jit.enabled() {
             return None;
         }
         let bytecode_ptr = closure.template.bytecode.as_ptr();
@@ -106,10 +106,9 @@ impl VM {
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
     ) {
-        let self_sym = self.find_global_sym_for_bytecode(bytecode_ptr);
         let task = crate::jit::worker::prepare_task(
             lir_func,
-            self_sym,
+            None,
             (*closure.template.symbol_names).clone(),
             bytecode_ptr as usize,
         );
@@ -200,25 +199,9 @@ impl VM {
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
 
-            // Squelch enforcement: if the closure has a squelch mask and the
-            // signal matches, convert to signal-violation error.
-            let squelch_mask = closure.squelch_mask;
-            if !squelch_mask.is_empty() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
-                let squelched = sig.intersection(squelch_mask);
-                if !squelched.is_empty() {
-                    let squelched_str = {
-                        let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(squelched)
-                    };
-                    let err = crate::value::error_val(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                    );
-                    self.fiber.suspended = None;
-                    self.fiber.signal = Some((SIG_ERROR, err));
-                    self.fiber.stack.push(Value::NIL);
-                    return None;
-                }
+            if self.enforce_squelch(sig, closure.squelch_mask) {
+                self.fiber.stack.push(Value::NIL);
+                return None;
             }
 
             return Some(sig);
@@ -260,25 +243,9 @@ impl VM {
                     return None;
                 } else {
                     // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
-                    // Squelch enforcement on the tail-call path
-                    let tail_squelch = tail.squelch_mask | closure.squelch_mask;
-                    if !tail_squelch.is_empty() {
-                        let squelched = eb.intersection(tail_squelch);
-                        if !squelched.is_empty() {
-                            let squelched_str = {
-                                let registry =
-                                    crate::signals::registry::global_registry().lock().unwrap();
-                                registry.format_signal_bits(squelched)
-                            };
-                            let err = crate::value::error_val(
-                                "signal-violation",
-                                format!("squelch: signal {} caught at boundary", squelched_str),
-                            );
-                            self.fiber.suspended = None;
-                            self.fiber.signal = Some((SIG_ERROR, err));
-                            self.fiber.stack.push(Value::NIL);
-                            return None;
-                        }
+                    if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask) {
+                        self.fiber.stack.push(Value::NIL);
+                        return None;
                     }
                     // Propagate so call_inner can build the caller frame.
                     return Some(eb);
@@ -334,16 +301,5 @@ impl VM {
         });
 
         result
-    }
-
-    /// Try batch JIT compilation for a hot function and its call peers.
-    ///
-    /// Find the SymbolId for a closure matching the given bytecode pointer.
-    ///
-    /// With globals removed, there is no global symbol table to scan.
-    /// Always returns `None`. Solo JIT compilation still works — it just
-    /// won't emit direct self-calls (falls back to `elle_jit_call`).
-    fn find_global_sym_for_bytecode(&self, _bytecode_ptr: *const u8) -> Option<SymbolId> {
-        None
     }
 }

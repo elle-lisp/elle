@@ -14,6 +14,7 @@ pub mod fiber;
 pub mod fiberheap;
 pub mod heap;
 pub mod inline_slice;
+#[cfg(test)]
 pub mod intern;
 pub mod keyword;
 pub mod repr;

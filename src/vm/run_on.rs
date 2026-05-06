@@ -38,7 +38,7 @@ fn rejected(tier: &str, msg: impl Into<String>) -> Value {
 impl VM {
     /// Run a closure under pure bytecode interpretation.
     ///
-    /// Saves and restores `jit_enabled` so the VM's tier dispatch can't
+    /// Saves and restores JIT policy so the VM's tier dispatch can't
     /// route the top-level call through JIT or MLIR. Nested calls still
     /// honor the surrounding configuration — Phase 1 differential tests
     /// use leaf functions, so this is a non-issue in practice.
@@ -61,8 +61,8 @@ impl VM {
             }
         };
 
-        let saved_jit = self.jit_enabled;
-        self.jit_enabled = false;
+        let saved_jit = self.runtime_config.jit.clone();
+        self.runtime_config.jit = crate::config::JitPolicy::Off;
 
         let squelch_mask = closure.squelch_mask;
 
@@ -73,7 +73,7 @@ impl VM {
             &closure.template.location_map,
         );
 
-        self.jit_enabled = saved_jit;
+        self.runtime_config.jit = saved_jit;
 
         let bits = result.bits;
         if bits.is_ok() {
@@ -96,29 +96,8 @@ impl VM {
             return (crate::value::SIG_HALT, val);
         }
 
-        // Squelch enforcement: if the closure has a squelch mask and a
-        // non-error signal matches, convert to :signal-violation.
-        if !squelch_mask.is_empty()
-            && !bits.contains(SIG_ERROR)
-            && !bits.contains(crate::value::SIG_HALT)
-        {
-            let squelched = bits.intersection(squelch_mask);
-            if !squelched.is_empty() {
-                let squelched_str = {
-                    let registry = crate::signals::registry::global_registry().lock().unwrap();
-                    registry.format_signal_bits(squelched)
-                };
-                self.fiber.suspended = None;
-                self.fiber.signal = None;
-                return (
-                    SIG_ERROR,
-                    error_val_extra(
-                        "signal-violation",
-                        format!("squelch: signal {} caught at boundary", squelched_str),
-                        &[],
-                    ),
-                );
-            }
+        if self.enforce_squelch(bits, squelch_mask) {
+            return self.fiber.signal.take().unwrap();
         }
 
         // Other errors: extract from fiber signal.

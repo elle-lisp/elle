@@ -63,8 +63,6 @@ pub enum JitPolicy {
     Eager,
     /// Compile after N calls (default: threshold=10).
     Adaptive { threshold: usize },
-    /// Only compile silent, capture-free functions.
-    Conservative,
     /// Defer to an Elle closure stored on the VM (see `vm/config`).
     Custom,
 }
@@ -82,7 +80,6 @@ impl JitPolicy {
             JitPolicy::Off => usize::MAX,
             JitPolicy::Eager => 0,
             JitPolicy::Adaptive { threshold } => *threshold,
-            JitPolicy::Conservative => 10,
             JitPolicy::Custom => 0,
         }
     }
@@ -93,7 +90,6 @@ impl JitPolicy {
             JitPolicy::Off => "off",
             JitPolicy::Eager => "eager",
             JitPolicy::Adaptive { .. } => "adaptive",
-            JitPolicy::Conservative => "conservative",
             JitPolicy::Custom => "custom",
         }
     }
@@ -104,7 +100,6 @@ impl JitPolicy {
             "off" => Some(JitPolicy::Off),
             "eager" => Some(JitPolicy::Eager),
             "adaptive" => Some(JitPolicy::Adaptive { threshold: 10 }),
-            "conservative" => Some(JitPolicy::Conservative),
             "custom" => Some(JitPolicy::Custom),
             _ => None,
         }
@@ -122,8 +117,6 @@ pub enum WasmPolicy {
     Full,
     /// Per-function lazy compilation after N calls.
     Lazy { threshold: usize },
-    /// Per-module WASM compilation (future).
-    Modular,
 }
 
 impl WasmPolicy {
@@ -132,7 +125,6 @@ impl WasmPolicy {
             WasmPolicy::Off => "off",
             WasmPolicy::Full => "full",
             WasmPolicy::Lazy { .. } => "lazy",
-            WasmPolicy::Modular => "modular",
         }
     }
 
@@ -141,7 +133,6 @@ impl WasmPolicy {
             "off" => Some(WasmPolicy::Off),
             "full" => Some(WasmPolicy::Full),
             "lazy" => Some(WasmPolicy::Lazy { threshold: 10 }),
-            "modular" => Some(WasmPolicy::Modular),
             _ => None,
         }
     }
@@ -322,89 +313,28 @@ pub struct RuntimeConfig {
     pub mlir: MlirPolicy,
     /// Print bytecode before execution.
     pub debug_bytecode: bool,
-    /// Active compiler-stage dumps (see `DUMP_KEYWORDS`).
-    pub dump: HashSet<String>,
-    /// Bitfield cache mirroring `dump`.
-    pub dump_bits: u32,
     /// Print compilation stats on exit.
     pub stats: bool,
-    /// Whether flip instructions are enabled.
-    pub flip: bool,
 }
 
 impl RuntimeConfig {
     /// Build a RuntimeConfig from the static global Config.
     pub fn from_static_config(config: &Config) -> Self {
-        let jit = if config.jit == 0 {
-            JitPolicy::Off
-        } else if config.jit == 1 {
-            JitPolicy::Eager
-        } else {
-            JitPolicy::Adaptive {
-                threshold: (config.jit - 1) as usize,
-            }
-        };
-
-        let wasm = if config.wasm_full {
-            WasmPolicy::Full
-        } else if config.wasm > 0 {
-            WasmPolicy::Lazy {
-                threshold: (config.wasm - 1) as usize,
-            }
-        } else {
-            WasmPolicy::Off
-        };
-
-        let mlir = if config.mlir == 0 {
-            MlirPolicy::Off
-        } else if config.mlir == 1 {
-            MlirPolicy::Eager
-        } else {
-            MlirPolicy::Adaptive {
-                threshold: (config.mlir - 1) as usize,
-            }
-        };
-
-        // Map old debug_* flags to trace keywords
         let mut trace = HashSet::new();
         let mut bits = 0u32;
-        if config.debug {
-            trace.insert("bytecode".to_string());
-            bits |= trace_bits::BYTECODE;
-        }
-        if config.debug_jit {
-            trace.insert("jit".to_string());
-            bits |= trace_bits::JIT;
-        }
-        if config.debug_resume {
-            trace.insert("fiber".to_string());
-            bits |= trace_bits::FIBER;
-        }
-        if config.debug_stack {
-            trace.insert("call".to_string());
-            bits |= trace_bits::CALL;
-        }
-        if config.debug_wasm {
-            trace.insert("wasm".to_string());
-            bits |= trace_bits::WASM;
-        }
-
-        let mut dump_bits_u = 0u32;
-        for kw in &config.dump {
-            dump_bits_u |= dump_bits::from_name(kw);
+        for kw in &config.trace_keywords {
+            trace.insert(kw.clone());
+            bits |= trace_bits::from_name(kw);
         }
 
         RuntimeConfig {
             trace,
             trace_bits: bits,
-            jit,
-            wasm,
-            mlir,
-            debug_bytecode: config.debug,
-            dump: config.dump.clone(),
-            dump_bits: dump_bits_u,
+            jit: config.jit.clone(),
+            wasm: config.wasm.clone(),
+            mlir: config.mlir.clone(),
+            debug_bytecode: bits & trace_bits::BYTECODE != 0,
             stats: config.stats,
-            flip: config.flip_instructions,
         }
     }
 
@@ -423,12 +353,6 @@ impl RuntimeConfig {
     pub fn has_trace_bit(&self, bit: u32) -> bool {
         self.trace_bits & bit != 0
     }
-
-    /// Check if a dump bit is set.
-    #[inline(always)]
-    pub fn has_dump_bit(&self, bit: u32) -> bool {
-        self.dump_bits & bit != 0
-    }
 }
 
 impl Default for RuntimeConfig {
@@ -440,10 +364,7 @@ impl Default for RuntimeConfig {
             wasm: WasmPolicy::Off,
             mlir: MlirPolicy::Adaptive { threshold: 10 },
             debug_bytecode: false,
-            dump: HashSet::new(),
-            dump_bits: 0,
             stats: false,
-            flip: true,
         }
     }
 }
@@ -471,24 +392,17 @@ impl Default for RuntimeConfig {
 /// Default: 0 (disabled).
 #[derive(Debug, Clone)]
 pub struct Config {
-    // -- JIT --
-    /// JIT hotness value from `--jit=N`. 0 = disabled, N = threshold is N-1.
-    pub jit: u32,
+    /// JIT compilation policy.
+    pub jit: JitPolicy,
 
     /// Print compilation stats on exit.
     pub stats: bool,
 
-    // -- MLIR --
-    /// MLIR tier value from `--mlir=N`. 0 = disabled, 1 = eager, N = threshold is N-1.
-    /// Default: 11 (threshold 10, same as JIT).
-    pub mlir: u32,
+    /// MLIR compilation policy for GPU-eligible functions.
+    pub mlir: MlirPolicy,
 
-    // -- WASM --
-    /// WASM tier value from `--wasm=N`. 0 = disabled, N = threshold is N-1.
-    pub wasm: u32,
-
-    /// Full-module WASM mode (`--wasm=full`).
-    pub wasm_full: bool,
+    /// WASM compilation policy.
+    pub wasm: WasmPolicy,
 
     /// Skip stdlib in full-module WASM mode.
     pub wasm_no_stdlib: bool,
@@ -512,22 +426,6 @@ pub struct Config {
     // -- Output --
     /// JSON output on stderr (errors, stats, timing).
     pub json: bool,
-
-    // -- Debug (old flags, mapped to RuntimeConfig on VM init) --
-    /// Print bytecode before execution.
-    pub debug: bool,
-
-    /// Print JIT compilation decisions.
-    pub debug_jit: bool,
-
-    /// Print fiber resume traces.
-    pub debug_resume: bool,
-
-    /// Print stack operations.
-    pub debug_stack: bool,
-
-    /// Print WASM host call traces.
-    pub debug_wasm: bool,
 
     /// Dump WASM module bytes to /tmp/elle-wasm-dump.wasm.
     pub wasm_dump: bool,
@@ -568,22 +466,16 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            jit: 11,
+            jit: JitPolicy::Adaptive { threshold: 10 },
             stats: false,
-            mlir: 11,
-            wasm: 0,
-            wasm_full: false,
+            mlir: MlirPolicy::Adaptive { threshold: 10 },
+            wasm: WasmPolicy::Off,
             wasm_no_stdlib: false,
             cache: default_cache_dir(),
             no_uring: false,
             home: std::env::var("ELLE_HOME").ok(),
             path: std::env::var("ELLE_PATH").ok(),
             json: false,
-            debug: false,
-            debug_jit: false,
-            debug_resume: false,
-            debug_stack: false,
-            debug_wasm: false,
             wasm_dump: false,
             wasm_lir: false,
             wasm_chunk: false,
@@ -597,24 +489,24 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Check if a trace keyword is set.
+    pub fn has_trace(&self, keyword: &str) -> bool {
+        self.trace_keywords.iter().any(|k| k == keyword)
+    }
+
     /// Whether JIT compilation is enabled.
     pub fn jit_enabled(&self) -> bool {
-        self.jit > 0
+        self.jit.enabled()
     }
 
-    /// JIT hotness threshold (calls before compilation).
-    pub fn jit_threshold(&self) -> usize {
-        self.jit.saturating_sub(1) as usize
-    }
-
-    /// Whether WASM tiered compilation is enabled.
+    /// Whether WASM tiered compilation is enabled (lazy mode).
     pub fn wasm_tier_enabled(&self) -> bool {
-        self.wasm > 0
+        matches!(self.wasm, WasmPolicy::Lazy { .. })
     }
 
-    /// WASM tier hotness threshold.
-    pub fn wasm_threshold(&self) -> usize {
-        self.wasm.saturating_sub(1) as usize
+    /// Whether full-module WASM mode is enabled.
+    pub fn wasm_full(&self) -> bool {
+        matches!(self.wasm, WasmPolicy::Full)
     }
 
     /// Parse CLI arguments into a Config and remaining positional args.
@@ -639,57 +531,78 @@ impl Config {
 
             // --key=value style
             if let Some(rest) = arg.strip_prefix("--jit=") {
-                // Named policies: off, eager, adaptive
-                match rest {
-                    "off" => config.jit = 0,
-                    "eager" => config.jit = 1,
-                    "adaptive" => config.jit = 11,
+                config.jit = match rest {
+                    "off" => JitPolicy::Off,
+                    "eager" => JitPolicy::Eager,
+                    "adaptive" => JitPolicy::Adaptive { threshold: 10 },
                     _ => {
-                        config.jit = rest.parse::<u32>().map_err(|_| {
+                        let n: u32 = rest.parse().map_err(|_| {
                             format!(
                                 "--jit: expected integer or policy name (off/eager/adaptive), got '{}'",
                                 rest
                             )
                         })?;
+                        if n == 0 {
+                            JitPolicy::Off
+                        } else if n == 1 {
+                            JitPolicy::Eager
+                        } else {
+                            JitPolicy::Adaptive {
+                                threshold: (n - 1) as usize,
+                            }
+                        }
                     }
-                }
+                };
                 i += 1;
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--mlir=") {
-                match rest {
-                    "off" => config.mlir = 0,
-                    "eager" => config.mlir = 1,
-                    "adaptive" => config.mlir = 11,
+                config.mlir = match rest {
+                    "off" => MlirPolicy::Off,
+                    "eager" => MlirPolicy::Eager,
+                    "adaptive" => MlirPolicy::Adaptive { threshold: 10 },
                     _ => {
-                        config.mlir = rest.parse::<u32>().map_err(|_| {
+                        let n: u32 = rest.parse().map_err(|_| {
                             format!(
                                 "--mlir: expected integer or policy name (off/eager/adaptive), got '{}'",
                                 rest
                             )
                         })?;
+                        if n == 0 {
+                            MlirPolicy::Off
+                        } else if n == 1 {
+                            MlirPolicy::Eager
+                        } else {
+                            MlirPolicy::Adaptive {
+                                threshold: (n - 1) as usize,
+                            }
+                        }
                     }
-                }
+                };
                 i += 1;
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--wasm=") {
-                match rest {
-                    "off" => {
-                        config.wasm = 0;
-                        config.wasm_full = false;
-                    }
-                    "full" => config.wasm_full = true,
-                    "lazy" => config.wasm = 11,
+                config.wasm = match rest {
+                    "off" => WasmPolicy::Off,
+                    "full" => WasmPolicy::Full,
+                    "lazy" => WasmPolicy::Lazy { threshold: 10 },
                     _ => {
-                        config.wasm = rest.parse::<u32>().map_err(|_| {
+                        let n: u32 = rest.parse().map_err(|_| {
                             format!(
                                 "--wasm: expected integer or policy name (off/full/lazy), got '{}'",
                                 rest
                             )
                         })?;
+                        if n == 0 {
+                            WasmPolicy::Off
+                        } else {
+                            WasmPolicy::Lazy {
+                                threshold: (n - 1) as usize,
+                            }
+                        }
                     }
-                }
+                };
                 i += 1;
                 continue;
             }
@@ -715,18 +628,6 @@ impl Config {
                         if !kw.is_empty() {
                             config.trace_keywords.push(kw.to_string());
                         }
-                    }
-                }
-                // Also set old debug_* flags for backward compat with code
-                // that still checks them directly (wasm paths, etc.)
-                for kw in &config.trace_keywords {
-                    match kw.as_str() {
-                        "jit" => config.debug_jit = true,
-                        "fiber" => config.debug_resume = true,
-                        "call" => config.debug_stack = true,
-                        "wasm" => config.debug_wasm = true,
-                        "bytecode" => config.debug = true,
-                        _ => {}
                     }
                 }
                 i += 1;
@@ -782,35 +683,20 @@ impl Config {
                 "--stats" => config.stats = true,
                 "--wasm-no-stdlib" => config.wasm_no_stdlib = true,
                 "--no-uring" => config.no_uring = true,
-                // Old debug flags — kept as aliases
-                "--debug" => {
-                    config.debug = true;
-                    config.trace_keywords.push("bytecode".into());
-                }
-                "--debug-jit" => {
-                    config.debug_jit = true;
-                    config.trace_keywords.push("jit".into());
-                }
-                "--debug-resume" => {
-                    config.debug_resume = true;
-                    config.trace_keywords.push("fiber".into());
-                }
-                "--debug-stack" => {
-                    config.debug_stack = true;
-                    config.trace_keywords.push("call".into());
-                }
-                "--debug-wasm" => {
-                    config.debug_wasm = true;
-                    config.trace_keywords.push("wasm".into());
-                }
+                // Old debug flags — kept as aliases for --trace=<kw>
+                "--debug" => config.trace_keywords.push("bytecode".into()),
+                "--debug-jit" => config.trace_keywords.push("jit".into()),
+                "--debug-resume" => config.trace_keywords.push("fiber".into()),
+                "--debug-stack" => config.trace_keywords.push("call".into()),
+                "--debug-wasm" => config.trace_keywords.push("wasm".into()),
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,
                 "--wasm-no-sparse-spill" => config.wasm_sparse_spill = false,
                 "--checked-intrinsics" => {
                     config.checked_intrinsics = true;
-                    config.jit = 0;
-                    config.mlir = 0;
+                    config.jit = JitPolicy::Off;
+                    config.mlir = MlirPolicy::Off;
                 }
                 "--eval" | "-e" => {
                     i += 1;
@@ -835,13 +721,13 @@ impl Config {
         }
 
         // --checked-intrinsics requires JIT and MLIR off
-        if config.checked_intrinsics && config.jit > 0 {
+        if config.checked_intrinsics && config.jit.enabled() {
             return Err(
                 "--checked-intrinsics is incompatible with --jit (JIT would bypass type checks)"
                     .to_string(),
             );
         }
-        if config.checked_intrinsics && config.mlir > 0 {
+        if config.checked_intrinsics && config.mlir.enabled() {
             return Err(
                 "--checked-intrinsics is incompatible with --mlir (MLIR would bypass type checks)"
                     .to_string(),

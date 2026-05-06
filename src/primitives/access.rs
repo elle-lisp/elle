@@ -241,19 +241,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Struct (mutable keyed collection)
-    if args[0].is_struct_mut() {
-        let mstruct = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("get: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+    if let Some(mstruct) = args[0].as_struct_mut() {
         let key = match TableKey::from_value(&args[1]) {
             Some(k) => k,
             None => {
@@ -274,19 +262,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Struct (immutable keyed collection)
-    if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("get: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+    if let Some(s) = args[0].as_struct() {
         let key = match TableKey::from_value(&args[1]) {
             Some(k) => k,
             None => {
@@ -686,19 +662,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     };
     let value = args[2];
 
-    if args[0].is_struct_mut() {
-        let mstruct = match args[0].as_struct_mut() {
-            Some(t) => t,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("put: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+    if let Some(mstruct) = args[0].as_struct_mut() {
         // Decref old value, incref new value.
         if let Some(&old_val) = mstruct.borrow().get(&key) {
             fiberheap::decref_and_free(old_val);
@@ -709,19 +673,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Struct (immutable keyed collection) - return new struct
-    if args[0].is_struct() {
-        let s = match args[0].as_struct() {
-            Some(st) => st,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("put: expected struct, got {}", args[0].type_name()),
-                    ),
-                )
-            }
-        };
+    if let Some(s) = args[0].as_struct() {
         return (
             SIG_OK,
             Value::struct_from_sorted(sorted_struct_insert(s, key, value)),

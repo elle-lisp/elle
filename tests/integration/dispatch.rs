@@ -37,7 +37,9 @@ fn test_lint_good_file_exits_zero() {
 }
 
 #[test]
-fn test_lint_bad_file_exits_two() {
+fn test_lint_naming_file_exits_zero() {
+    // Kebab-case naming lint was removed — naming-bad.lisp now produces
+    // zero diagnostics and exits 0.
     let output = Command::new(get_elle_binary())
         .args(["lint", "tests/fixtures/naming-bad.lisp"])
         .output()
@@ -45,8 +47,8 @@ fn test_lint_bad_file_exits_two() {
 
     assert_eq!(
         output.status.code().unwrap_or(-1),
-        2,
-        "elle lint on bad-naming file should exit 2 (warnings), stderr: {}",
+        0,
+        "elle lint on naming-bad.lisp should exit 0 (no warnings), stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }

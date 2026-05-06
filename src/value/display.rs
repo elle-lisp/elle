@@ -8,6 +8,49 @@ use crate::value::cycle::{fmt_enter, HareState};
 use crate::value::Value;
 use std::fmt;
 
+/// Format a `@string` (mutable string buffer) value.
+fn fmt_string_mut(buf: &std::cell::RefCell<Vec<u8>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let borrowed = buf.borrow();
+    write!(f, "@\"")?;
+    for &byte in borrowed.iter() {
+        if byte == b'"' {
+            write!(f, "\\\"")?;
+        } else if byte == b'\\' {
+            write!(f, "\\\\")?;
+        } else if (0x20..0x7f).contains(&byte) {
+            write!(f, "{}", byte as char)?;
+        } else {
+            write!(f, "\\x{:02x}", byte)?;
+        }
+    }
+    write!(f, "\"")
+}
+
+/// Format immutable `bytes` value.
+fn fmt_bytes(b: &[u8], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "b[")?;
+    for (i, byte) in b.iter().enumerate() {
+        if i > 0 {
+            write!(f, " ")?;
+        }
+        write!(f, "{}", byte)?;
+    }
+    write!(f, "]")
+}
+
+/// Format mutable `@bytes` value.
+fn fmt_bytes_mut(blob: &std::cell::RefCell<Vec<u8>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let borrowed = blob.borrow();
+    write!(f, "@b[")?;
+    for (i, byte) in borrowed.iter().enumerate() {
+        if i > 0 {
+            write!(f, " ")?;
+        }
+        write!(f, "{}", byte)?;
+    }
+    write!(f, "]")
+}
+
 /// Resolve a symbol ID to its name via the thread-local symbol table.
 fn resolve_symbol(id: u32) -> Option<String> {
     crate::context::resolve_symbol_name(id)
@@ -186,48 +229,14 @@ impl fmt::Display for Value {
             return write!(f, "<parameter:{}>", id);
         }
 
-        // @string
         if let Some(buf_ref) = self.as_string_mut() {
-            let borrowed = buf_ref.borrow();
-            write!(f, "@\"")?;
-            // Display as UTF-8 where valid, escape otherwise
-            for &byte in borrowed.iter() {
-                if byte == b'"' {
-                    write!(f, "\\\"")?;
-                } else if byte == b'\\' {
-                    write!(f, "\\\\")?;
-                } else if (0x20..0x7f).contains(&byte) {
-                    write!(f, "{}", byte as char)?;
-                } else {
-                    write!(f, "\\x{:02x}", byte)?;
-                }
-            }
-            return write!(f, "\"");
+            return fmt_string_mut(buf_ref, f);
         }
-
-        // Bytes (immutable binary data)
         if let Some(b) = self.as_bytes() {
-            write!(f, "b[")?;
-            for (i, byte) in b.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", byte)?;
-            }
-            return write!(f, "]");
+            return fmt_bytes(b, f);
         }
-
-        // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
-            let borrowed = blob_ref.borrow();
-            write!(f, "@b[")?;
-            for (i, byte) in borrowed.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", byte)?;
-            }
-            return write!(f, "]");
+            return fmt_bytes_mut(blob_ref, f);
         }
 
         // Array (immutable)
@@ -382,45 +391,14 @@ impl fmt::Debug for Value {
             }
             return write!(f, "]");
         }
-        // @string
         if let Some(buf_ref) = self.as_string_mut() {
-            let borrowed = buf_ref.borrow();
-            write!(f, "@\"")?;
-            for &byte in borrowed.iter() {
-                if byte == b'"' {
-                    write!(f, "\\\"")?;
-                } else if byte == b'\\' {
-                    write!(f, "\\\\")?;
-                } else if (0x20..0x7f).contains(&byte) {
-                    write!(f, "{}", byte as char)?;
-                } else {
-                    write!(f, "\\x{:02x}", byte)?;
-                }
-            }
-            return write!(f, "\"");
+            return fmt_string_mut(buf_ref, f);
         }
-        // Bytes (immutable binary data)
         if let Some(b) = self.as_bytes() {
-            write!(f, "b[")?;
-            for (i, byte) in b.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", byte)?;
-            }
-            return write!(f, "]");
+            return fmt_bytes(b, f);
         }
-        // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
-            let borrowed = blob_ref.borrow();
-            write!(f, "@b[")?;
-            for (i, byte) in borrowed.iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", byte)?;
-            }
-            return write!(f, "]");
+            return fmt_bytes_mut(blob_ref, f);
         }
         // Array (immutable)
         if let Some(elems) = self.as_array() {
@@ -497,9 +475,9 @@ impl fmt::Debug for Value {
 }
 
 impl Value {
-    /// Format a cons cell (list) with Debug (quoted strings).
-    /// Uses Floyd's tortoise-and-hare to detect cycles in the cdr chain.
-    fn fmt_cons_debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// Format a cons cell (list) with cycle detection.
+    /// `debug` controls whether elements use `{:?}` (true) or `{}` (false).
+    fn fmt_cons_inner(&self, f: &mut fmt::Formatter<'_>, debug: bool) -> fmt::Result {
         write!(f, "(")?;
         let mut current = *self;
         let mut hare = HareState::new(*self);
@@ -513,54 +491,34 @@ impl Value {
             }
             first = false;
             if let Some(c) = current.as_pair() {
-                write!(f, "{:?}", c.first)?;
+                if debug {
+                    write!(f, "{:?}", c.first)?;
+                } else {
+                    write!(f, "{}", c.first)?;
+                }
                 current = c.rest;
                 if current.is_heap() && hare.advance(current) {
                     write!(f, " . <cycle>")?;
                     break;
                 }
             } else {
-                write!(f, ". {:?}", current)?;
+                if debug {
+                    write!(f, ". {:?}", current)?;
+                } else {
+                    write!(f, ". {}", current)?;
+                }
                 break;
             }
         }
         write!(f, ")")
     }
 
-    /// Format a cons cell (list) with proper list notation.
-    /// Uses Floyd's tortoise-and-hare to detect cycles in the cdr chain.
+    fn fmt_cons_debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_cons_inner(f, true)
+    }
+
     fn fmt_cons(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(")?;
-
-        let mut current = *self;
-        let mut hare = HareState::new(*self);
-        let mut first = true;
-
-        loop {
-            if current.is_nil() || current.is_empty_list() {
-                break;
-            }
-
-            if !first {
-                write!(f, " ")?;
-            }
-            first = false;
-
-            if let Some(c) = current.as_pair() {
-                write!(f, "{}", c.first)?;
-                current = c.rest;
-                if current.is_heap() && hare.advance(current) {
-                    write!(f, " . <cycle>")?;
-                    break;
-                }
-            } else {
-                // Improper list: (a . b)
-                write!(f, ". {}", current)?;
-                break;
-            }
-        }
-
-        write!(f, ")")
+        self.fmt_cons_inner(f, false)
     }
 }
 

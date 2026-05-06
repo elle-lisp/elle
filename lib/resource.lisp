@@ -1,7 +1,7 @@
 (elle/epoch 10)
 ## lib/resource.lisp — Deterministic resource consumption measurement.
 ##
-## Measures discrete, deterministic counters (allocation counts, intern table
+## Measures discrete, deterministic counters (allocation counts, symbol table
 ## sizes, etc.) — not wall-clock time. Same program always gives same numbers,
 ## making these ideal for CI regression detection.
 ##
@@ -24,7 +24,6 @@
     "Capture all resource counters at a point in time."
     {:objects (arena/count)
      :bytes (arena/bytes)
-     :interns (debug/intern-count)
      :symbols (debug/symbol-count)
      :keywords (debug/keyword-count)})
 
@@ -48,7 +47,6 @@
      Before-snapshot uses raw scalars (no struct) to avoid tainting peak."
     (let* [b-objects (arena/count)
            b-bytes (arena/bytes)
-           b-interns (debug/intern-count)
            b-symbols (debug/symbol-count)
            b-keywords (debug/keyword-count)
            _ (arena/reset-peak)
@@ -58,7 +56,6 @@
        :allocs (rest pair)
        :peak peak
        :bytes (- (arena/bytes) b-bytes)
-       :interns (- (debug/intern-count) b-interns)
        :symbols (- (debug/symbol-count) b-symbols)
        :keywords (- (debug/keyword-count) b-keywords)}))
 
@@ -79,8 +76,7 @@
     "Format a measurement as a tab-separated key=value line."
     (let [n (pad-right name 24)]
       (string n "\tallocs=" (m :allocs) "\tpeak=" (m :peak) "\tbytes="
-              (m :bytes) "\tinterns=" (m :interns) "\tsymbols=" (m :symbols)
-              "\tkeywords=" (m :keywords))))
+              (m :bytes) "\tsymbols=" (m :symbols) "\tkeywords=" (m :keywords))))
 
   ## ── Suite ───────────────────────────────────────────────────────────
 

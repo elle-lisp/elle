@@ -1,89 +1,63 @@
-//! String interning for the tagged-union value system.
+//! Dead-code string interner, preserved for test coverage.
 //!
-//! All strings are interned to enable O(1) equality comparison via pointer
-//! equality. This is essential because Values compare by tag+payload equality,
-//! so strings must share the same heap allocation to be equal.
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-
-use crate::value::Value;
-
-use crate::value::heap::HeapObject;
-use crate::value::inline_slice::InlineSlice;
-
-thread_local! {
-    static STRING_INTERNER: RefCell<StringInterner> = RefCell::new(StringInterner::new());
-}
-
-/// An interned entry keeps its bytes pinned on the Rust heap in `bytes`, so
-/// the `InlineSlice<u8>` inside `heap.s` stays valid for the lifetime of
-/// this entry. The outer `Rc` is held by the `strings` map; cloning the Rc
-/// does not move either the HeapObject or the byte buffer.
-struct InternEntry {
-    /// Owning storage for the string bytes. Never moved or dropped while
-    /// the entry lives in the interner map.
-    _bytes: Box<[u8]>,
-    /// HeapObject whose InlineSlice points into `_bytes`.
-    heap: HeapObject,
-}
-
-struct StringInterner {
-    // Map from string content to Rc<InternEntry>
-    // We use Rc to keep the strings alive and prevent them from being dropped
-    strings: HashMap<Box<str>, Rc<InternEntry>>,
-}
-
-impl StringInterner {
-    fn new() -> Self {
-        StringInterner {
-            strings: HashMap::new(),
-        }
-    }
-
-    fn intern(&mut self, s: &str) -> *const HeapObject {
-        // Check if already interned
-        if let Some(rc) = self.strings.get(s) {
-            return &rc.heap as *const HeapObject;
-        }
-
-        // Pin the bytes on the Rust heap so the InlineSlice pointer is stable.
-        let bytes: Box<[u8]> = s.as_bytes().to_vec().into_boxed_slice();
-        let slice = unsafe { InlineSlice::from_raw(bytes.as_ptr(), bytes.len() as u32) };
-        let entry = Rc::new(InternEntry {
-            _bytes: bytes,
-            heap: HeapObject::LString {
-                s: slice,
-                traits: Value::NIL,
-            },
-        });
-        let ptr = &entry.heap as *const HeapObject;
-
-        // Store in table
-        self.strings.insert(s.into(), entry);
-
-        ptr
-    }
-}
-
-/// Intern a string, returning a pointer to the HeapObject.
-///
-/// The returned pointer is valid for the lifetime of the thread.
-/// Interned strings are never dropped during program execution.
-pub fn intern_string(s: &str) -> *const HeapObject {
-    STRING_INTERNER.with(|interner| interner.borrow_mut().intern(s))
-}
-
-/// Return the number of interned strings in the thread-local table.
-pub fn intern_string_count() -> usize {
-    STRING_INTERNER.with(|interner| interner.borrow().strings.len())
-}
+//! This module was originally used for O(1) string equality via pointer
+//! comparison. It was superseded when `Value::string()` moved to bump-arena
+//! allocation (`alloc_inline_slice`); string equality is now content-based
+//! via `InlineSlice::PartialEq`. The interner has zero production callers.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    use crate::value::heap::HeapObject;
+    use crate::value::inline_slice::InlineSlice;
     use crate::value::Value;
+
+    thread_local! {
+        static STRING_INTERNER: RefCell<StringInterner> = RefCell::new(StringInterner::new());
+    }
+
+    struct InternEntry {
+        _bytes: Box<[u8]>,
+        heap: HeapObject,
+    }
+
+    struct StringInterner {
+        strings: HashMap<Box<str>, Rc<InternEntry>>,
+    }
+
+    impl StringInterner {
+        fn new() -> Self {
+            StringInterner {
+                strings: HashMap::new(),
+            }
+        }
+
+        fn intern(&mut self, s: &str) -> *const HeapObject {
+            if let Some(rc) = self.strings.get(s) {
+                return &rc.heap as *const HeapObject;
+            }
+
+            let bytes: Box<[u8]> = s.as_bytes().to_vec().into_boxed_slice();
+            let slice = unsafe { InlineSlice::from_raw(bytes.as_ptr(), bytes.len() as u32) };
+            let entry = Rc::new(InternEntry {
+                _bytes: bytes,
+                heap: HeapObject::LString {
+                    s: slice,
+                    traits: Value::NIL,
+                },
+            });
+            let ptr = &entry.heap as *const HeapObject;
+            self.strings.insert(s.into(), entry);
+            ptr
+        }
+    }
+
+    fn intern_string(s: &str) -> *const HeapObject {
+        STRING_INTERNER.with(|interner| interner.borrow_mut().intern(s))
+    }
 
     // === Basic Interning Tests ===
 

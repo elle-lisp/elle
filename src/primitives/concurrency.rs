@@ -72,11 +72,8 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         }
     });
 
-    let thread_handle_data = ThreadHandle {
-        result: result_holder,
-    };
     Ok(alloc(HeapObject::ThreadHandle {
-        handle: thread_handle_data,
+        handle: ThreadHandle::new(result_holder),
         traits: Value::NIL,
     }))
 }

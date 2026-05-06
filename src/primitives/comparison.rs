@@ -1,4 +1,5 @@
 //! Comparison primitives
+use crate::arithmetic::values_eq;
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
@@ -14,28 +15,9 @@ use std::hash::{Hash, Hasher};
 /// Chained: (= a b c) means all pairs are equal.
 pub(crate) fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
     for i in 0..args.len() - 1 {
-        // Fast path: bitwise identical (covers same-type immediates)
-        if args[i] == args[i + 1] {
-            continue;
+        if !values_eq(&args[i], &args[i + 1]) {
+            return (SIG_OK, Value::FALSE);
         }
-        // Numeric coercion: int-int stays exact, mixed promotes to f64
-        if args[i].is_number() && args[i + 1].is_number() {
-            if let (Some(a), Some(b)) = (args[i].as_int(), args[i + 1].as_int()) {
-                if a == b {
-                    continue;
-                } else {
-                    return (SIG_OK, Value::FALSE);
-                }
-            }
-            if let (Some(a), Some(b)) = (args[i].as_number(), args[i + 1].as_number()) {
-                if a == b {
-                    continue;
-                } else {
-                    return (SIG_OK, Value::FALSE);
-                }
-            }
-        }
-        return (SIG_OK, Value::FALSE);
     }
     (SIG_OK, Value::TRUE)
 }
@@ -43,19 +25,14 @@ pub(crate) fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
 /// Inequality comparison — negation of `=`.
 /// Numeric-aware: (not= 1 1.0) is false. Accepts exactly 2 arguments.
 pub(crate) fn prim_not_eq(args: &[Value]) -> (SignalBits, Value) {
-    // Fast path: bitwise identical
-    if args[0] == args[1] {
-        return (SIG_OK, Value::FALSE);
-    }
-    // Numeric coercion: if both are numbers, compare as f64
-    if args[0].is_number() && args[1].is_number() {
-        if let (Some(a), Some(b)) = (args[0].as_number(), args[1].as_number()) {
-            if a == b {
-                return (SIG_OK, Value::FALSE);
-            }
-        }
-    }
-    (SIG_OK, Value::TRUE)
+    (
+        SIG_OK,
+        if values_eq(&args[0], &args[1]) {
+            Value::FALSE
+        } else {
+            Value::TRUE
+        },
+    )
 }
 
 /// Strict identity comparison — bitwise/structural equality with no coercion.

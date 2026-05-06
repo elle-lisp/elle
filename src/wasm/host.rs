@@ -124,7 +124,7 @@ impl ElleHost {
             resume_value: None,
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
-            debug: crate::config::get().debug_wasm,
+            debug: crate::config::get().has_trace("wasm"),
             io_backend: None,
             precached_closures: Vec::new(),
         }

@@ -86,7 +86,6 @@ impl ArenaMark {
         self.root_allocs_len
     }
 
-    #[allow(dead_code)]
     pub(crate) fn bump_mark(&self) -> Option<BumpMark> {
         self.bump_mark
     }
@@ -144,31 +143,6 @@ pub fn heap_arena_len() -> usize {
     crate::value::fiberheap::with_current_heap_mut(|h| h.len()).unwrap_or(0)
 }
 
-/// Current capacity (slab chunk bytes) of the root heap.
-pub fn heap_arena_capacity() -> usize {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.capacity()).unwrap_or(0)
-}
-
-/// Get the current object limit for the root heap.
-pub fn heap_arena_object_limit() -> Option<usize> {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.object_limit()).flatten()
-}
-
-/// Set the object limit for the root heap. Returns the previous limit.
-pub fn heap_arena_set_object_limit(limit: Option<usize>) -> Option<usize> {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.set_object_limit(limit)).flatten()
-}
-
-/// Get the peak object count for the root heap.
-pub fn heap_arena_peak() -> usize {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.peak_alloc_count()).unwrap_or(0)
-}
-
-/// Reset peak to current count. Returns previous peak.
-pub fn heap_arena_reset_peak() -> usize {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.reset_peak()).unwrap_or(0)
-}
-
 /// Allocate a heap object and return a Value pointing to it.
 ///
 /// Dispatches through the current FiberHeap. If no heap is installed
@@ -219,18 +193,6 @@ pub fn alloc_permanent(obj: HeapObject) -> Value {
 pub unsafe fn deref(value: Value) -> &'static HeapObject {
     let ptr = value.as_heap_ptr().unwrap() as *const HeapObject;
     &*ptr
-}
-
-/// Clone (increment refcount) a heap value.
-///
-/// # Safety
-/// The Value must be a heap pointer allocated via `alloc_permanent` (Rc-based).
-#[inline]
-pub unsafe fn clone_heap(value: Value) {
-    let ptr = value.as_heap_ptr().unwrap() as *const HeapObject;
-    let rc = Rc::from_raw(ptr);
-    let _ = Rc::clone(&rc);
-    std::mem::forget(rc); // Don't decrement refcount
 }
 
 /// Drop (decrement refcount) a heap value.

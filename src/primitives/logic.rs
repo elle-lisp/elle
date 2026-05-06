@@ -1,10 +1,8 @@
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
-use crate::value::heap::TableKey;
 use crate::value::types::Arity;
-use crate::value::Value;
-use std::collections::BTreeMap;
+use crate::value::{error_val, Value};
 
 /// Logical AND operation
 /// (and) => true
@@ -66,17 +64,16 @@ pub(crate) fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
     let message = if args.len() == 2 { args[1] } else { Value::NIL };
 
     if value.is_truthy() {
-        // Pass through the value
         (SIG_OK, value)
     } else {
-        // Signal error with {:error :failed-assertion :message msg}
-        let mut fields = BTreeMap::new();
-        fields.insert(
-            TableKey::Keyword("error".into()),
-            Value::keyword("failed-assertion"),
-        );
-        fields.insert(TableKey::Keyword("message".into()), message);
-        (SIG_ERROR, Value::struct_from(fields))
+        let msg_str = if message.is_nil() {
+            "assertion failed".to_string()
+        } else if let Some(s) = message.with_string(|s| s.to_string()) {
+            s
+        } else {
+            format!("{}", message)
+        };
+        (SIG_ERROR, error_val("failed-assertion", msg_str))
     }
 }
 

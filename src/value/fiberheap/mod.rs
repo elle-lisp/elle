@@ -981,25 +981,8 @@ impl FiberHeap {
         ptr
     }
 
-    /// Return an existing shared allocator from `owned_shared`, or create one.
-    ///
-    /// Prevents the per-resume leak: without this, each `with_child_fiber`
-    /// call pushes a new `SharedAllocator` that accumulates until the
-    /// owner's `FiberHeap::clear()` runs. Reusing the last allocator keeps
-    /// `owned_shared` at most length 1 for non-propagation cases.
-    #[allow(dead_code)]
-    pub(crate) fn get_or_create_shared_allocator(
-        &mut self,
-    ) -> *mut crate::value::shared_alloc::SharedAllocator {
-        if let Some(sa) = self.owned_shared.last_mut() {
-            &mut **sa as *mut crate::value::shared_alloc::SharedAllocator
-        } else {
-            self.create_shared_allocator()
-        }
-    }
-
     /// Current shared allocator pointer. Returns null if none is set.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
         self.shared_alloc
     }
@@ -1011,7 +994,7 @@ impl FiberHeap {
 
     /// Set the shared allocator pointer for this fiber.
     /// When non-null, `alloc()` routes all allocations to the shared allocator.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn set_shared_alloc(
         &mut self,
         ptr: *mut crate::value::shared_alloc::SharedAllocator,
@@ -1038,14 +1021,6 @@ impl FiberHeap {
         self.shared_alloc_count = 0;
         self.outbox = Some(Box::new(pool));
         self.outbox_active = false;
-    }
-
-    /// Detach and return the outbox pool. Called at yield time.
-    /// The parent stores the outbox and reads yielded values from it.
-    #[allow(dead_code)]
-    pub(crate) fn take_outbox(&mut self) -> Option<Box<SlabPool>> {
-        self.outbox_active = false;
-        self.outbox.take()
     }
 
     /// Check whether an outbox is installed.

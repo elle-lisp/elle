@@ -27,6 +27,28 @@ struct CompilationCache {
     expander: Expander,
     /// Primitive metadata from register_primitives.
     meta: PrimitiveMeta,
+    /// Signal projection cache: maps resolved file paths to their
+    /// keyword→signal projections. Populated lazily when the analyzer
+    /// encounters `(import "...")` with a literal string argument.
+    projections: HashMap<String, Option<HashMap<String, Signal>>>,
+}
+
+impl CompilationCache {
+    fn new() -> Self {
+        let mut vm = VM::new();
+        let mut init_symbols = SymbolTable::new();
+        let meta = register_primitives(&mut vm, &mut init_symbols);
+        let mut expander = Expander::new();
+        expander
+            .load_prelude(&mut init_symbols, &mut vm)
+            .expect("prelude loading must succeed");
+        CompilationCache {
+            vm,
+            expander,
+            meta,
+            projections: HashMap::new(),
+        }
+    }
 }
 
 thread_local! {
@@ -57,19 +79,7 @@ where
 {
     COMPILATION_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
-        let c = cache_ref.get_or_insert_with(|| {
-            let mut vm = VM::new();
-            let mut init_symbols = SymbolTable::new();
-            let meta = register_primitives(&mut vm, &mut init_symbols);
-            let mut expander = Expander::new();
-            // Prelude loading needs the VM for macro body evaluation.
-            // The init_symbols is throwaway — prelude is 100% defmacro,
-            // so handle_defmacro doesn't touch SymbolTable.
-            expander
-                .load_prelude(&mut init_symbols, &mut vm)
-                .expect("prelude loading must succeed");
-            CompilationCache { vm, expander, meta }
-        });
+        let c = cache_ref.get_or_insert_with(CompilationCache::new);
 
         // Always reset fiber before use
         c.vm.reset_fiber();
@@ -86,16 +96,7 @@ where
 pub(super) fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
     COMPILATION_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
-        let c = cache_ref.get_or_insert_with(|| {
-            let mut vm = VM::new();
-            let mut init_symbols = SymbolTable::new();
-            let meta = register_primitives(&mut vm, &mut init_symbols);
-            let mut expander = Expander::new();
-            expander
-                .load_prelude(&mut init_symbols, &mut vm)
-                .expect("prelude loading must succeed");
-            CompilationCache { vm, expander, meta }
-        });
+        let c = cache_ref.get_or_insert_with(CompilationCache::new);
         (c.expander.clone(), c.meta.clone())
     })
 }
@@ -162,16 +163,7 @@ pub fn update_cache_with_stdlib(
 ) {
     COMPILATION_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
-        let c = cache_ref.get_or_insert_with(|| {
-            let mut vm = VM::new();
-            let mut init_symbols = SymbolTable::new();
-            let meta = register_primitives(&mut vm, &mut init_symbols);
-            let mut expander = Expander::new();
-            expander
-                .load_prelude(&mut init_symbols, &mut vm)
-                .expect("prelude loading must succeed");
-            CompilationCache { vm, expander, meta }
-        });
+        let c = cache_ref.get_or_insert_with(CompilationCache::new);
         for (sym_id, (value, signal)) in &exports {
             c.meta.signals.insert(*sym_id, *signal);
             c.meta.functions.insert(*sym_id, *value);
@@ -188,7 +180,12 @@ pub fn update_cache_with_stdlib(
 /// Returns `None` if the file's return value is not a projectable struct.
 pub fn get_or_compile_projection(resolved_path: &str) -> Option<HashMap<String, Signal>> {
     // Check cache first (outside the compilation cache borrow)
-    let cached = PROJECTION_CACHE.with(|pc| pc.borrow().get(resolved_path).cloned());
+    let cached = COMPILATION_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .and_then(|c| c.projections.get(resolved_path).cloned())
+    });
     if let Some(proj) = cached {
         return proj;
     }
@@ -200,9 +197,12 @@ pub fn get_or_compile_projection(resolved_path: &str) -> Option<HashMap<String, 
     let projection = result.bytecode.signal_projection;
 
     // Cache the result (even if None, to avoid re-compiling)
-    PROJECTION_CACHE.with(|pc| {
-        pc.borrow_mut()
-            .insert(resolved_path.to_string(), projection.clone());
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        if let Some(c) = cache_ref.as_mut() {
+            c.projections
+                .insert(resolved_path.to_string(), projection.clone());
+        }
     });
 
     projection

@@ -76,7 +76,7 @@ impl VM {
         let cache = self.mlir_cache.as_mut().unwrap();
         match cache.compile(bytecode_ptr, lir, num_captures, capture_types, param_types) {
             Ok(_name) => {
-                if crate::config::get().debug_jit {
+                if crate::config::get().has_trace("jit") {
                     eprintln!(
                         "[mlir] compiled: {}",
                         closure.template.name.as_deref().unwrap_or("<anon>")
@@ -90,7 +90,7 @@ impl VM {
                     .as_mut()
                     .unwrap()
                     .reject(bytecode_ptr, capture_types, param_types);
-                if crate::config::get().debug_jit {
+                if crate::config::get().has_trace("jit") {
                     eprintln!(
                         "[mlir] failed {}: {}",
                         closure.template.name.as_deref().unwrap_or("<anon>"),

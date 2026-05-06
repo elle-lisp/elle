@@ -94,6 +94,7 @@ impl VM {
         let mut bits;
         let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
         let mut prev_rotation_safe = true;
+        let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
             let (b, _ip) = self.execute_bytecode_inner_impl(
                 &current_bytecode,
@@ -104,23 +105,21 @@ impl VM {
             );
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
-                if prev_rotation_safe {
-                    if let Some(ref base) = rotation_base {
-                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
-                    } else {
-                        rotation_base =
-                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
-                    }
-                } else {
-                    rotation_base = None;
-                }
-                prev_rotation_safe = tail.rotation_safe;
+                execute::advance_rotation(
+                    &mut rotation_base,
+                    &mut prev_rotation_safe,
+                    tail.rotation_safe,
+                );
+                accumulated_squelch_mask |= tail.squelch_mask;
 
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
                 current_env = tail.env;
                 current_location_map = tail.location_map;
             } else {
+                if self.enforce_squelch(bits, accumulated_squelch_mask) {
+                    bits = SIG_ERROR;
+                }
                 break;
             }
         }

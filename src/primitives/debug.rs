@@ -163,13 +163,6 @@ fn get_memory_usage() -> (u64, u64) {
     (0, 0)
 }
 
-/// Returns the number of interned strings in the thread-local table.
-/// (debug/intern-count)
-pub(crate) fn prim_intern_count(_args: &[Value]) -> (SignalBits, Value) {
-    let count = crate::value::intern::intern_string_count();
-    (SIG_OK, Value::int(count as i64))
-}
-
 /// Returns the number of interned symbols in the thread-local symbol table.
 /// (debug/symbol-count)
 pub(crate) fn prim_symbol_count(_args: &[Value]) -> (SignalBits, Value) {
@@ -223,17 +216,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(debug/memory)",
         aliases: &["memory-usage"],
-    },
-    PrimitiveDef {
-        name: "debug/intern-count",
-        func: prim_intern_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
-        doc: "Returns the number of interned strings in the thread-local table",
-        params: &[],
-        category: "debug",
-        example: "(debug/intern-count)",
-        aliases: &[],
     },
     PrimitiveDef {
         name: "debug/symbol-count",
