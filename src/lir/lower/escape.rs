@@ -1958,6 +1958,278 @@ impl<'a> Lowerer<'a> {
         false
     }
 
+    /// Walk a function body's return positions to check whether all
+    /// returned closures are rotation-safe.
+    ///
+    /// At each return position:
+    /// - Lambda: check `!body_escapes_heap_values(body)`
+    /// - Call: check `callee_returns_rotation_safe` for the callee
+    /// - Var: check `callee_rotation_safe` for the binding
+    /// - Control flow: all branches must satisfy
+    pub(super) fn body_returns_rotation_safe_closures(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Lambda { body, .. } => !self.body_escapes_heap_values(body),
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self
+                        .callee_returns_rotation_safe
+                        .get(b)
+                        .copied()
+                        .unwrap_or(false),
+                    None => false,
+                }
+            }
+            HirKind::Var(b) => self.callee_rotation_safe.get(b).copied().unwrap_or(false),
+            HirKind::DerefCell { cell } => self.body_returns_rotation_safe_closures(cell),
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.body_returns_rotation_safe_closures(then_branch)
+                    && self.body_returns_rotation_safe_closures(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_none_or(|e| self.body_returns_rotation_safe_closures(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.body_returns_rotation_safe_closures(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, b)| self.body_returns_rotation_safe_closures(b))
+                    && else_branch
+                        .as_ref()
+                        .is_none_or(|b| self.body_returns_rotation_safe_closures(b))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| self.body_returns_rotation_safe_closures(body)),
+            HirKind::Block { body, .. } => body
+                .last()
+                .is_none_or(|e| self.body_returns_rotation_safe_closures(e)),
+            _ => false, // conservative
+        }
+    }
+
+    /// Walk a function body's return positions to check whether all
+    /// returned closures are param-safe.
+    pub(super) fn body_returns_param_safe_closures(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Lambda { body, params, .. } => {
+                !self.body_stores_params_externally(body, params)
+            }
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self
+                        .callee_returns_param_safe
+                        .get(b)
+                        .copied()
+                        .unwrap_or(false),
+                    None => false,
+                }
+            }
+            HirKind::Var(b) => self.callee_param_safe.get(b).copied().unwrap_or(false),
+            HirKind::DerefCell { cell } => self.body_returns_param_safe_closures(cell),
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.body_returns_param_safe_closures(then_branch)
+                    && self.body_returns_param_safe_closures(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_none_or(|e| self.body_returns_param_safe_closures(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.body_returns_param_safe_closures(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, b)| self.body_returns_param_safe_closures(b))
+                    && else_branch
+                        .as_ref()
+                        .is_none_or(|b| self.body_returns_param_safe_closures(b))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| self.body_returns_param_safe_closures(body)),
+            HirKind::Block { body, .. } => body
+                .last()
+                .is_none_or(|e| self.body_returns_param_safe_closures(e)),
+            _ => false, // conservative
+        }
+    }
+
+    /// Resolve the rotation-safety of a non-Lambda init expression.
+    /// Returns `Some(true/false)` if resolvable, `None` if dependencies
+    /// haven't been resolved yet.
+    pub(super) fn resolve_value_rotation_safe(&self, hir: &Hir) -> Option<bool> {
+        match &hir.kind {
+            HirKind::Lambda { body, .. } => Some(!self.body_escapes_heap_values(body)),
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self
+                        .callee_returns_rotation_safe
+                        .get(b)
+                        .copied()
+                        .map(Some)?,
+                    None => Some(false),
+                }
+            }
+            HirKind::Var(b) => self
+                .callee_rotation_safe
+                .get(b)
+                .copied()
+                .map(Some)
+                .or(Some(None))?,
+            HirKind::DerefCell { cell } => self.resolve_value_rotation_safe(cell),
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let t = self.resolve_value_rotation_safe(then_branch)?;
+                let e = self.resolve_value_rotation_safe(else_branch)?;
+                Some(t && e)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .map_or(Some(true), |e| self.resolve_value_rotation_safe(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.resolve_value_rotation_safe(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                let mut all = true;
+                for (_, b) in clauses {
+                    match self.resolve_value_rotation_safe(b) {
+                        Some(v) => all = all && v,
+                        None => return None,
+                    }
+                }
+                if let Some(e) = else_branch {
+                    match self.resolve_value_rotation_safe(e) {
+                        Some(v) => all = all && v,
+                        None => return None,
+                    }
+                }
+                Some(all)
+            }
+            HirKind::Match { arms, .. } => {
+                let mut all = true;
+                for (_, _, body) in arms {
+                    match self.resolve_value_rotation_safe(body) {
+                        Some(v) => all = all && v,
+                        None => return None,
+                    }
+                }
+                Some(all)
+            }
+            HirKind::Block { body, .. } => body
+                .last()
+                .map_or(Some(true), |e| self.resolve_value_rotation_safe(e)),
+            _ => None, // can't determine
+        }
+    }
+
+    /// Resolve the param-safety of a non-Lambda init expression.
+    pub(super) fn resolve_value_param_safe(&self, hir: &Hir) -> Option<bool> {
+        match &hir.kind {
+            HirKind::Lambda { body, params, .. } => {
+                Some(!self.body_stores_params_externally(body, params))
+            }
+            HirKind::Call { func, .. } => {
+                let binding = self.extract_callee_binding(func);
+                match binding {
+                    Some(b) => self.callee_returns_param_safe.get(b).copied().map(Some)?,
+                    None => Some(false),
+                }
+            }
+            HirKind::Var(b) => self
+                .callee_param_safe
+                .get(b)
+                .copied()
+                .map(Some)
+                .or(Some(None))?,
+            HirKind::DerefCell { cell } => self.resolve_value_param_safe(cell),
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let t = self.resolve_value_param_safe(then_branch)?;
+                let e = self.resolve_value_param_safe(else_branch)?;
+                Some(t && e)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .map_or(Some(true), |e| self.resolve_value_param_safe(e)),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.resolve_value_param_safe(body)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                let mut all = true;
+                for (_, b) in clauses {
+                    match self.resolve_value_param_safe(b) {
+                        Some(v) => all = all && v,
+                        None => return None,
+                    }
+                }
+                if let Some(e) = else_branch {
+                    match self.resolve_value_param_safe(e) {
+                        Some(v) => all = all && v,
+                        None => return None,
+                    }
+                }
+                Some(all)
+            }
+            HirKind::Match { arms, .. } => {
+                let mut all = true;
+                for (_, _, body) in arms {
+                    match self.resolve_value_param_safe(body) {
+                        Some(v) => all = all && v,
+                        None => return None,
+                    }
+                }
+                Some(all)
+            }
+            HirKind::Block { body, .. } => body
+                .last()
+                .map_or(Some(true), |e| self.resolve_value_param_safe(e)),
+            _ => None, // can't determine
+        }
+    }
+
+    /// Extract the Binding from a callee expression (Var or DerefCell{Var}).
+    fn extract_callee_binding<'h>(&self, func: &'h Hir) -> Option<&'h Binding> {
+        match &func.kind {
+            HirKind::Var(b) => Some(b),
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => Some(b),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Check if an expression is statically proven to produce an immediate
     /// (non-heap) Value. Conservative: returns false if we cannot prove it.
     ///

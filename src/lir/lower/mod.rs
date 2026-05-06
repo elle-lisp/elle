@@ -307,6 +307,14 @@ pub struct Lowerer<'a> {
     /// to see through call boundaries that `call_result_is_safe` rejects
     /// (e.g. letrec-bound functions).
     callee_return_safe: HashMap<Binding, bool>,
+    /// Binding → returns_rotation_safe for function definitions.
+    /// A function returns-rotation-safe if all closures it returns are
+    /// rotation-safe (their bodies don't escape heap values).
+    callee_returns_rotation_safe: HashMap<Binding, bool>,
+    /// Binding → returns_param_safe for function definitions.
+    /// A function returns-param-safe if all closures it returns are
+    /// param-safe (their bodies don't store params externally).
+    callee_returns_param_safe: HashMap<Binding, bool>,
     /// Binding → result_is_immediate for function definitions.
     /// Precomputed via fixpoint iteration so that `call_result_is_safe`
     /// can identify user functions that always return immediates.
@@ -389,6 +397,8 @@ impl<'a> Lowerer<'a> {
             callee_rotation_safe: HashMap::new(),
             callee_param_safe: HashMap::new(),
             callee_return_safe: HashMap::new(),
+            callee_returns_rotation_safe: HashMap::new(),
+            callee_returns_param_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
             callee_return_params: HashMap::new(),
             callee_rest_index: HashMap::new(),
@@ -525,6 +535,10 @@ impl<'a> Lowerer<'a> {
         self.precompute_return_safe(hir);
         self.precompute_param_safety(hir);
         self.precompute_rotation_safety(hir);
+        self.precompute_returns_rotation_safe(hir);
+        self.precompute_returns_param_safe(hir);
+        self.widen_rotation_safety(hir);
+        self.widen_param_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
         self.terminate(Terminator::Return(result_reg));
@@ -1692,6 +1706,246 @@ impl<'a> Lowerer<'a> {
         // Record stats
         self.scope_stats.rotation_analyzed = defs.len();
         self.scope_stats.rotation_safe = self.callee_rotation_safe.values().filter(|&&v| v).count();
+    }
+
+    /// Precompute `callee_returns_rotation_safe` for all function definitions.
+    ///
+    /// A function returns-rotation-safe if every closure it returns (in all
+    /// return positions) is itself rotation-safe. This enables the widen pass
+    /// to resolve `(def proc (factory))` — if `factory` returns-rotation-safe,
+    /// then `proc` is rotation-safe.
+    fn precompute_returns_rotation_safe(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_lambda_defs(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically return rotation-safe closures.
+        for &(binding, _) in &defs {
+            self.callee_returns_rotation_safe.insert(binding, true);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                if !self.callee_returns_rotation_safe[&binding] {
+                    continue;
+                }
+                if !self.body_returns_rotation_safe_closures(body) {
+                    self.callee_returns_rotation_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Precompute `callee_returns_param_safe` for all function definitions.
+    fn precompute_returns_param_safe(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_lambda_defs(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically return param-safe closures.
+        for &(binding, _) in &defs {
+            self.callee_returns_param_safe.insert(binding, true);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                if !self.callee_returns_param_safe[&binding] {
+                    continue;
+                }
+                if !self.body_returns_param_safe_closures(body) {
+                    self.callee_returns_param_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Widen `callee_rotation_safe` to cover non-Lambda bindings.
+    ///
+    /// After the Lambda-only fixpoints and returns_* fixpoints have run,
+    /// this pass iterates over ALL bindings (including those with Call,
+    /// Var, If, etc. inits) and resolves their rotation-safety using
+    /// value-flow analysis.
+    fn widen_rotation_safety(&mut self, hir: &Hir) {
+        let mut all_bindings: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_all_bindings(hir, &mut all_bindings);
+
+        loop {
+            let mut changed = false;
+            for &(binding, init) in &all_bindings {
+                if self.callee_rotation_safe.contains_key(&binding) {
+                    continue; // already resolved
+                }
+                if let Some(safe) = self.resolve_value_rotation_safe(init) {
+                    self.callee_rotation_safe.insert(binding, safe);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Widen `callee_param_safe` to cover non-Lambda bindings.
+    fn widen_param_safety(&mut self, hir: &Hir) {
+        let mut all_bindings: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_all_bindings(hir, &mut all_bindings);
+
+        loop {
+            let mut changed = false;
+            for &(binding, init) in &all_bindings {
+                if self.callee_param_safe.contains_key(&binding) {
+                    continue; // already resolved
+                }
+                if let Some(safe) = self.resolve_value_param_safe(init) {
+                    self.callee_param_safe.insert(binding, safe);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Collect ALL `(binding, init_expr)` pairs from Define/Let/Letrec,
+    /// regardless of whether the init is a Lambda. Used by widen passes.
+    fn collect_all_bindings<'b>(hir: &'b Hir, out: &mut Vec<(Binding, &'b Hir)>) {
+        match &hir.kind {
+            HirKind::Define { binding, value } => {
+                out.push((*binding, value));
+                Self::collect_all_bindings(value, out);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    Self::collect_all_bindings(e, out);
+                }
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    out.push((*binding, init));
+                    Self::collect_all_bindings(init, out);
+                }
+                Self::collect_all_bindings(body, out);
+            }
+            HirKind::Lambda { body, .. } => {
+                Self::collect_all_bindings(body, out);
+            }
+            HirKind::While { cond, body } => {
+                Self::collect_all_bindings(cond, out);
+                Self::collect_all_bindings(body, out);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (binding, init) in bindings {
+                    out.push((*binding, init));
+                    Self::collect_all_bindings(init, out);
+                }
+                Self::collect_all_bindings(body, out);
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    Self::collect_all_bindings(a, out);
+                }
+            }
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_all_bindings(cond, out);
+                Self::collect_all_bindings(then_branch, out);
+                Self::collect_all_bindings(else_branch, out);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    Self::collect_all_bindings(c, out);
+                    Self::collect_all_bindings(b, out);
+                }
+                if let Some(e) = else_branch {
+                    Self::collect_all_bindings(e, out);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    Self::collect_all_bindings(e, out);
+                }
+            }
+            HirKind::Break { value, .. } => Self::collect_all_bindings(value, out),
+            HirKind::Match { value, arms } => {
+                Self::collect_all_bindings(value, out);
+                for (_, guard, body) in arms {
+                    if let Some(g) = guard {
+                        Self::collect_all_bindings(g, out);
+                    }
+                    Self::collect_all_bindings(body, out);
+                }
+            }
+            HirKind::Call { func, args, .. } => {
+                Self::collect_all_bindings(func, out);
+                for a in args {
+                    Self::collect_all_bindings(&a.expr, out);
+                }
+            }
+            HirKind::Assign { value, .. } => Self::collect_all_bindings(value, out),
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    Self::collect_all_bindings(e, out);
+                }
+            }
+            HirKind::Emit { value, .. } => Self::collect_all_bindings(value, out),
+            HirKind::Destructure { value, .. } => Self::collect_all_bindings(value, out),
+            HirKind::Eval { expr, env } => {
+                Self::collect_all_bindings(expr, out);
+                Self::collect_all_bindings(env, out);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (k, v) in bindings {
+                    Self::collect_all_bindings(k, out);
+                    Self::collect_all_bindings(v, out);
+                }
+                Self::collect_all_bindings(body, out);
+            }
+            HirKind::MakeCell { value } => Self::collect_all_bindings(value, out),
+            HirKind::DerefCell { cell } => Self::collect_all_bindings(cell, out),
+            HirKind::SetCell { cell, value } => {
+                Self::collect_all_bindings(cell, out);
+                Self::collect_all_bindings(value, out);
+            }
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    Self::collect_all_bindings(a, out);
+                }
+            }
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Var(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => {}
+        }
     }
 
     /// Collect all `(binding, lambda_body)` pairs from Define nodes.

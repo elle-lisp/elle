@@ -1,68 +1,55 @@
 # Memory
 
 Elle has no garbage collector. Memory is managed deterministically through
-per-fiber tracked pools, compiler-directed scope reclamation, and tail-call
-pool rotation. These mechanisms are derived from the same static analysis that
-drives signal inference — the compiler knows at every allocation site whether
-the value can escape its scope, whether the containing function is a tail call,
+per-fiber tracked pools, compiler-directed scope reclamation, tail-call
+pool rotation, flip rotation, and deferred reference counting. These
+mechanisms are derived from the same static analysis that drives signal
+inference — the compiler knows at every allocation site whether the value
+can escape its scope, whether the containing function is a tail call,
 and whether the fiber will yield.
 
 ## How to write leak-free code
 
 Most Elle code is naturally leak-free. The three rules:
 
-### 1. Don't assign heap values to outer mutable bindings in a loop
+### 1. Don't push heap values into unbounded collections in a loop
 
 ```lisp
-# BAD: struct escapes to outer @var — linear growth
+# BAD: push stores heap structs into growing array — linear growth
+(def @acc @[])
+(def @i 0)
+(while (< i 100)
+  (push acc {:x i})
+  (assign i (+ i 1)))
+# the array grows without bound
+```
+
+Overwriting patterns (assign, put) are bounded thanks to deferred
+reference counting — the old value is decref'd and freed at scope exit:
+
+```lisp
+# OK: assign overwrites — old value freed via refcount decrement
 (def @last nil)
 (def @i 0)
 (while (< i 100)
   (assign last {:x i})
   (assign i (+ i 1)))
-# each iteration's struct stays alive — the old value of last is never freed
+# bounded: each old struct is freed when its refcount drops to zero
 
-# GOOD: let-bind the struct — scope reclamation frees it
-(def @i 0)
-(while (< i 100)
-  (let [x {:x i}]
-    x)
-  (assign i (+ i 1)))
-# the struct is reclaimed at each iteration's scope exit
-```
-
-```lisp
-# BAD: strings accumulate via concat to outer @var
-(def @s "")
-(def @i 0)
-(while (< i 100)
-  (assign s (concat s "x"))
-  (assign i (+ i 1)))
-
-# BAD: push stores heap structs into outer mutable array
-(def @acc [])
-(def @i 0)
-(while (< i 100)
-  (push acc {:x i})
-  (assign i (+ i 1)))
-
-# BAD: put stores heap strings into outer mutable struct
-(def @s {:x 0})
+# OK: put overwrites — old string freed via refcount decrement
+(def @s @{:x 0})
 (def @i 0)
 (while (< i 100)
   (put s :x (string "v" i))
   (assign i (+ i 1)))
+# bounded: each old string is freed on overwrite
 ```
-
-These patterns are inherently leaky — the value genuinely escapes the scope
-and must stay alive because something still references it. Fixing them requires
-drop-on-overwrite semantics (not yet implemented).
 
 ### 2. Prefer tail calls for loops with heap allocation
 
 ```lisp
 # Tail-recursive loop: trampoline rotation keeps memory bounded
-(defn process-all (n)
+(defn process-all [n]
   (if (= n 0)
     :done
     (begin
@@ -78,11 +65,11 @@ doesn't outlive the iteration:
 
 ```lisp
 # Mutual tail recursion — also bounded
-(defn ping (n)
+(defn ping [n]
   (if (= n 0) :done
     (begin (string "ping " n) (pong (- n 1)))))
 
-(defn pong (n)
+(defn pong [n]
   (if (= n 0) :done
     (begin (string "pong " n) (ping (- n 1)))))
 
@@ -97,7 +84,7 @@ pools each iteration:
 
 ```lisp
 # Yielding fiber — flip rotation keeps memory bounded
-(defn yield-items (n)
+(defn yield-items [n]
   (fiber/new (fn []
     (def @i 0)
     (while (< i n)
@@ -144,6 +131,32 @@ The escape analysis is conservative but handles common patterns:
 - `fiber/new` + `fiber/resume` within the same scope
 - `protect` expressions
 - `map`, `filter`, `each` over known-safe collections
+- Factory-returned closures (`(def proc (make-proc))`)
+- Binding aliases (`(def f existing-fn)`)
+- Conditional closures (`(def f (if ... (fn ...) (fn ...)))`)
+
+### Deferred reference counting
+
+The slab tracks a per-slot reference count for durable references — mutable
+collection entries and mutable bindings. Transient references (stack values,
+let bindings, function parameters) are handled by scope marks without
+refcount overhead.
+
+When a mutable binding is overwritten (`assign`) or a mutable collection
+entry is replaced (`put`), the old value's refcount is decremented. At
+scope exit, `RegionExitRefcounted` skips objects whose refcount is still
+positive (they're referenced by something outside the scope) and frees
+everything else. This makes overwrite-heavy patterns bounded:
+
+```lisp
+# Overwrite in a loop — bounded via refcounting
+(def @v (string "init"))
+(def @i 0)
+(while (< i 10000)
+  (assign v (string "val-" i))     # old string decref'd → freed
+  (assign i (+ i 1)))
+# net allocs: bounded (~30)
+```
 
 ### Tail-call rotation
 
@@ -177,8 +190,8 @@ tracked pool owned by the fiber.
 
 Each fiber owns a `FiberHeap` containing a `SlabPool` — a slab allocator for
 HeapObjects plus a bump arena for inline slice data, both backed by `mmap`
-pages. The slab allocates fixed-size HeapObject slots from 18KB chunks (256
-slots each). The bump arena allocates variable-size data (string bytes, array
+pages. The slab allocates fixed-size HeapObject slots from chunks of 256
+slots each. The bump arena allocates variable-size data (string bytes, array
 elements) sequentially into 64KB pages. Both use `munmap` to return pages to
 the OS on fiber death — no process-allocator caching, no RSS hoarding.
 
@@ -189,21 +202,16 @@ owned shared allocators and outboxes, and returns all mmap'd pages to the OS.
 
 The slab manages HeapObject slots:
 
-- **Chunks**: `mmap`'d regions of 256 HeapObject slots (~18KB each)
+- **Chunks**: `mmap`'d regions of 256 HeapObject slots each
 - **Allocation**: check free list first, then bump cursor within last chunk
-- **Deallocation**: write intrusive `Option<u32>` free-list link into the
-  dead slot's bytes, return to free list for reuse
+- **Deallocation**: write intrusive free-list link into the dead slot's bytes,
+  return to free list for reuse
+- **Reference counting**: per-slot `u32` refcount for durable references
+  (mutable bindings and collection entries). `incref`/`decref` manage the
+  count; `release_refcounted` skips pinned slots during scope exit
 - **Pointer stability**: chunk addresses never move; `Value` payloads are
   raw pointers into chunk slots
 - **OS return**: `munmap` on `Drop` returns chunk pages immediately
-
-Slot recycling via the free list is the target mechanism for drop-on-overwrite
-(assign frees the old slot) and scope reclamation (RegionExit frees batches).
-`dealloc_slot` is currently gated — scope eligibility for while/loop forms
-needs to be routed through the region inference system before enabling it.
-Rotation paths use `dealloc_slot_deferred()` (no-op) until Phase 2A enables
-rotation slot recycling. Until then, memory is reclaimed only on fiber death
-(teardown).
 
 ### Bump arena
 
@@ -225,7 +233,7 @@ elements):
 - `allocs: Vec<*mut HeapObject>` — every allocation in order (for rotation
   and scope release)
 - `dtors: Vec<*mut HeapObject>` — objects that need `Drop` (closures,
-  fibers, mutable types with `Rc<RefCell<...>>`)
+  fibers, mutable types)
 - `alloc_count` — running total for `arena/count` introspection
 
 `alloc(obj)` routes to the slab. `alloc_inline_slice(items)` routes to the
@@ -235,8 +243,10 @@ bump arena. `teardown()` clears both.
 
 `RegionEnter` pushes an `ArenaMark` recording the pool's position and destructor
 count. `RegionExit` pops the mark, runs destructors for objects allocated since
-the mark, and rewinds the pool. This is transparent to user code — it's
-entirely compiler-directed.
+the mark, and rewinds the pool. `RegionExitRefcounted` does the same but skips
+objects whose refcount is positive (they're referenced by durable bindings or
+collection entries). This is transparent to user code — it's entirely
+compiler-directed.
 
 ### Inter-fiber value exchange
 
@@ -248,12 +258,12 @@ inference:
 allocations to a `SharedAllocator` owned by the parent's `FiberHeap`. The
 parent reads yielded values directly — zero copy, zero serialization.
 
-**Outbox mechanism** (newer path): The parent installs an outbox `SlabPool`
-before child execution. Between `OutboxEnter`/`OutboxExit` bytecodes,
-allocations go to the outbox. At yield time, values in the private pool are
-deep-copied to the outbox; values already in the outbox are returned directly.
-Previous outboxes are preserved so the parent can read values from earlier
-yields. All outboxes are freed in bulk on fiber death.
+**Outbox mechanism**: The parent installs an outbox `SlabPool` before child
+execution. Between `OutboxEnter`/`OutboxExit` bytecodes, allocations go to
+the outbox. At yield time, values in the private pool are deep-copied to the
+outbox; values already in the outbox are returned directly. Previous outboxes
+are preserved so the parent can read values from earlier yields. All outboxes
+are freed in bulk on fiber death.
 
 **Silent fibers** (no yields): neither mechanism is needed. The fiber allocates
 exclusively into its own private pool with no indirection overhead.
@@ -297,8 +307,8 @@ The memory model exploits two properties that the compiler guarantees:
 
 Together, these give deterministic memory management with no GC pauses, no
 write barriers, no card tables, and no stop-the-world collection. Memory is
-reclaimed at four granularities: scope exit, tail-call rotation, flip
-rotation, and fiber death — all in bounded time.
+reclaimed at five granularities: scope exit, refcount-aware scope exit,
+tail-call rotation, flip rotation, and fiber death — all in bounded time.
 
 ## Introspection
 
@@ -370,19 +380,16 @@ For loop patterns, measure at two scales to detect linear leaks:
 
 ## Known leak patterns
 
-These patterns leak linearly and cannot be fixed without drop-on-overwrite
-semantics or reference counting:
+These patterns leak linearly because the value genuinely escapes to an
+unbounded accumulator:
 
 | Pattern | Why it leaks |
 |---------|-------------|
-| `(assign var (struct ...))` in a loop | Old value referenced by `var` |
-| `(assign s (concat s "x"))` in a loop | Old string referenced by `s` |
-| `(push arr (struct ...))` in a loop | Struct stored in growing array |
-| `(put s :key (string ...))` in a loop | Old string stored in struct |
+| `(push arr {:x i})` in a loop | Struct stored in growing array — every pushed value is kept alive |
+| `(assign acc (append acc [i]))` in a loop | Functional append creates new arrays; old array freed by refcount, but the new array grows without bound |
 
-These are inherent — the value genuinely escapes its scope. If you must
-accumulate, be aware that the accumulated data lives until the containing
-fiber dies.
+Overwrite patterns (`assign`, `put`) are **not** leaky — deferred reference
+counting frees old values at scope exit.
 
 ---
 
