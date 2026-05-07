@@ -480,26 +480,21 @@ fn test_closure_capturing_nested_closures() {
 // ============================================================================
 
 #[test]
-fn test_closure_capturing_non_sendable_rejected() {
-    // A closure that captures a mutable @struct (via an inner closure) is rejected.
+fn test_closure_capturing_struct_mut_sendable() {
+    // A closure that captures a mutable @struct (via an inner closure) is now sendable.
     let result = eval_source(
         r#"
-        (let [t (@struct)]
-          (let [f (fn () t)]
-            (spawn (fn () (f)))))
+        (let [t (@struct :x 42)]
+          (let [f (fn () (t :x))]
+            (join (spawn (fn () (f))))))
         "#,
     );
 
-    // spawn should error because f captures a mutable @struct.
+    // spawn should succeed — @struct is sendable.
     assert!(
-        result.is_err(),
-        "Expected spawn to fail for non-sendable transitive capture"
-    );
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("@struct") || err.contains("struct") || err.contains("mutable"),
-        "Error should mention @struct: {}",
-        err
+        result.is_ok(),
+        "Expected spawn to succeed for @struct capture: {:?}",
+        result
     );
 }
 

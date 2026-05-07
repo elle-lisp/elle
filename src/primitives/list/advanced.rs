@@ -1,6 +1,6 @@
 //! Advanced list operations: append, concat, take, drop, butlast, reverse, last
 use crate::primitives::collection::coll_combine;
-use crate::primitives::seq::{seq_butlast, seq_last, seq_reverse};
+use crate::primitives::seq::{seq_butlast, seq_reverse};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, list, Value};
 
@@ -36,7 +36,11 @@ pub(crate) fn prim_take(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(taken))
 }
 
-/// Get all elements of a sequence except the last
+/// Get all elements of a sequence except the last.
+///
+/// butlast doesn't have a trait method — it's defined in terms of
+/// the underlying seq/collection implementations. User-defined Sequence
+/// types that only implement the trait protocol won't support butlast.
 pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
     match seq_butlast(&args[0]) {
         Ok(v) => (SIG_OK, v),
@@ -477,7 +481,11 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Reverse a sequence (list, array, @array, string)
+/// Reverse a sequence (list, array, @array, string).
+///
+/// reverse doesn't have a trait method — it's defined in terms of
+/// the underlying seq/collection implementations. User-defined Sequence
+/// types that only implement the trait protocol won't support reverse.
 pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     match seq_reverse(&args[0]) {
         Ok(v) => (SIG_OK, v),
@@ -487,10 +495,7 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get the last element of a sequence
 pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
-    match seq_last(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
+    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Sequence", "last", args)
 }
 
 /// Drop the first n elements of a list

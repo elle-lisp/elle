@@ -24,7 +24,7 @@ use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
 use crate::value::{
     BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT,
-    SIG_OK, SIG_SWITCH, SIG_TERMINAL,
+    SIG_OK, SIG_SWITCH, SIG_TERMINAL, SIG_YIELD,
 };
 use std::rc::Rc;
 
@@ -418,6 +418,27 @@ impl VM {
         child_handle: &FiberHandle,
         child_value: Value,
     ) -> (SignalBits, Value) {
+        // ── Native iterator fast path ────────────────────────────────
+        // Native iter fibers hold a Vec<Value> + cursor. Each resume
+        // yields the next element; exhaustion kills the fiber.
+        let is_native = child_handle.with(|f| f.native_iter.is_some());
+        if is_native {
+            return child_handle.with_mut(|f| {
+                let iter = f.native_iter.as_mut().unwrap();
+                if iter.cursor < iter.elements.len() {
+                    let val = iter.elements[iter.cursor];
+                    iter.cursor += 1;
+                    f.status = FiberStatus::Paused;
+                    f.signal = Some((SIG_YIELD, val));
+                    (SIG_YIELD, val)
+                } else {
+                    f.status = FiberStatus::Dead;
+                    f.signal = Some((SIG_OK, Value::NIL));
+                    (SIG_OK, Value::NIL)
+                }
+            });
+        }
+
         // Extract resume value and status before taking the fiber
         let (resume_value, is_first_resume) = child_handle.with_mut(|child| {
             let rv = child.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);

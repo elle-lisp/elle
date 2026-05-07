@@ -3,7 +3,6 @@ mod advanced;
 
 use crate::primitives::collection::{coll_empty, coll_len, coll_to_vec};
 use crate::primitives::def::PrimitiveDef;
-use crate::primitives::seq::{seq_first, seq_nth, seq_rest};
 use crate::signals::Signal;
 use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -26,25 +25,24 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
             return (SIG_OK, Value::syntax(items[0].clone()));
         }
     }
-    match seq_first(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
+    // Empty list is an immediate — no traitset, error explicitly
+    if args[0].is_empty_list() {
+        return (
+            SIG_ERROR,
+            error_val("argument-error", "first: empty sequence"),
+        );
     }
+    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Sequence", "first", args)
 }
 
 /// Get the second element of a sequence
 pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
-    // Syntax is not a seq type, handle it inline
-    match seq_nth(&args[0], 1) {
-        Ok(v) => (SIG_OK, v),
-        Err(_) => (
-            SIG_ERROR,
-            error_val(
-                "argument-error",
-                "second: sequence has fewer than 2 elements",
-            ),
-        ),
-    }
+    crate::primitives::traitregistry::dispatch_trait_method(
+        &args[0],
+        "Sequence",
+        "nth",
+        &[args[0], Value::int(1)],
+    )
 }
 
 /// Get the rest of a sequence (list, array, @array, string, @string, bytes, @bytes)
@@ -64,10 +62,11 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
             return (SIG_OK, Value::syntax(rest));
         }
     }
-    match seq_rest(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
+    // Empty list is an immediate — no traitset, return empty list
+    if args[0].is_empty_list() {
+        return (SIG_OK, Value::EMPTY_LIST);
     }
+    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Sequence", "rest", args)
 }
 
 /// Create a list from arguments
@@ -101,26 +100,48 @@ pub(crate) fn prim_to_list(args: &[Value]) -> (SignalBits, Value) {
 
 /// Get the length of a collection (universal for all container types)
 pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
-    match coll_len(&args[0]) {
-        Ok(n) => (SIG_OK, Value::int(n as i64)),
-        Err(e) => (SIG_ERROR, e),
+    // Types without traitsets that still support length
+    if args[0].is_nil()
+        || args[0].is_symbol()
+        || args[0].as_keyword_name().is_some()
+        || args[0].as_syntax().is_some()
+        || args[0].is_empty_list()
+    {
+        match coll_len(&args[0]) {
+            Ok(n) => return (SIG_OK, Value::int(n as i64)),
+            Err(e) => return (SIG_ERROR, e),
+        }
     }
+    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Collection", "length", args)
 }
 
 /// Check if a collection is empty (O(1) operation for most types)
 pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
-    match coll_empty(&args[0]) {
-        Ok(empty) => (SIG_OK, if empty { Value::TRUE } else { Value::FALSE }),
-        Err(e) => (SIG_ERROR, e),
+    // Types without traitsets that still support empty?
+    if args[0].as_syntax().is_some() || args[0].is_empty_list() || args[0].is_nil() {
+        match coll_empty(&args[0]) {
+            Ok(empty) => return (SIG_OK, if empty { Value::TRUE } else { Value::FALSE }),
+            Err(e) => return (SIG_ERROR, e),
+        }
     }
+    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Collection", "empty?", args)
 }
 
 /// Check if a collection is non-empty (negation of empty?)
 pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
-    match coll_empty(&args[0]) {
-        Ok(empty) => (SIG_OK, if empty { Value::FALSE } else { Value::TRUE }),
-        Err(e) => (SIG_ERROR, e),
+    let (sig, val) = prim_empty(args);
+    if sig != SIG_OK {
+        return (sig, val);
     }
+    // Negate the boolean result
+    (
+        SIG_OK,
+        if val == Value::TRUE {
+            Value::FALSE
+        } else {
+            Value::TRUE
+        },
+    )
 }
 
 /// Declarative primitive definitions for list operations
