@@ -79,6 +79,10 @@ pub struct SendableClosure {
     /// LIR function for JIT compilation in spawned threads.
     /// Stripped of doc/syntax (not sendable), but retains all JIT-relevant fields.
     pub lir_function: Option<crate::lir::LirFunction>,
+    /// Escape analysis flags preserved across serialization.
+    pub rotation_safe: bool,
+    pub result_is_immediate: bool,
+    pub has_outward_heap_set: bool,
 }
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
@@ -379,6 +383,9 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 squelch_mask: SignalBits::EMPTY,
                 env: Vec::new(),
                 lir_function: None,
+                rotation_safe: false,
+                result_is_immediate: false,
+                has_outward_heap_set: false,
             });
             ctx.visited.insert(key, idx);
 
@@ -437,6 +444,9 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                         None
                     }
                 }),
+                rotation_safe: closure_rc.template.rotation_safe,
+                result_is_immediate: closure_rc.template.result_is_immediate,
+                has_outward_heap_set: closure_rc.template.has_outward_heap_set,
             };
 
             Ok(SendValue::Ref(idx))
@@ -922,14 +932,14 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
 
                 symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
-                rotation_safe: false,
+                rotation_safe: sc.rotation_safe,
                 lir_function,
                 doc,
                 syntax: None,
                 vararg_kind: sc.vararg_kind,
                 name: sc.name.map(|s| Rc::from(s.as_str())),
-                result_is_immediate: false,
-                has_outward_heap_set: false,
+                result_is_immediate: sc.result_is_immediate,
+                has_outward_heap_set: sc.has_outward_heap_set,
                 wasm_func_idx: None,
                 spirv: std::cell::OnceCell::new(),
             });

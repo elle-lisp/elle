@@ -126,10 +126,6 @@ pub struct LirFunction {
     pub has_outward_heap_set: bool,
     /// True when the function body is safe for tail-call pool rotation.
     pub rotation_safe: bool,
-    /// While-loop triples `(entry, back_edge, done)` that passed escape
-    /// analysis during lowering. `inject_flip` uses these to insert
-    /// FlipEnter/FlipSwap/FlipExit without CFG heuristics.
-    pub while_loops: Vec<(Label, Label, Label)>,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.
@@ -201,7 +197,6 @@ impl LirFunction {
             result_is_immediate: false,
             has_outward_heap_set: false,
             rotation_safe: false,
-            while_loops: Vec::new(),
         }
     }
 
@@ -432,7 +427,10 @@ impl BasicBlock {
 pub enum LirInstr {
     // === Constants ===
     /// Load a constant into a register
-    Const { dst: Reg, value: LirConst },
+    Const {
+        dst: Reg,
+        value: LirConst,
+    },
     /// Load a Value constant into a register
     ValueConst {
         dst: Reg,
@@ -441,15 +439,30 @@ pub enum LirInstr {
 
     // === Variables ===
     /// Load from local slot
-    LoadLocal { dst: Reg, slot: u16 },
+    LoadLocal {
+        dst: Reg,
+        slot: u16,
+    },
     /// Store to local slot
-    StoreLocal { slot: u16, src: Reg },
+    StoreLocal {
+        slot: u16,
+        src: Reg,
+    },
     /// Load from capture (auto-unwraps LocalCell)
-    LoadCapture { dst: Reg, index: u16 },
+    LoadCapture {
+        dst: Reg,
+        index: u16,
+    },
     /// Load from capture without unwrapping (for forwarding cells to nested closures)
-    LoadCaptureRaw { dst: Reg, index: u16 },
+    LoadCaptureRaw {
+        dst: Reg,
+        index: u16,
+    },
     /// Store to capture (handles cells automatically)
-    StoreCapture { index: u16, src: Reg },
+    StoreCapture {
+        index: u16,
+        src: Reg,
+    },
     // === Closures ===
     /// Create a closure. The closure body is in the module's closure
     /// list at the given `ClosureId`, not owned by this instruction.
@@ -489,13 +502,26 @@ pub enum LirInstr {
 
     // === Data Construction ===
     /// Construct a cons cell
-    List { dst: Reg, head: Reg, tail: Reg },
+    List {
+        dst: Reg,
+        head: Reg,
+        tail: Reg,
+    },
     /// Construct an array
-    MakeArrayMut { dst: Reg, elements: Vec<Reg> },
+    MakeArrayMut {
+        dst: Reg,
+        elements: Vec<Reg>,
+    },
     /// Get car of cons
-    First { dst: Reg, pair: Reg },
+    First {
+        dst: Reg,
+        pair: Reg,
+    },
     /// Get cdr of cons
-    Rest { dst: Reg, pair: Reg },
+    Rest {
+        dst: Reg,
+        pair: Reg,
+    },
 
     // === Primitive Operations ===
     /// Binary arithmetic
@@ -506,9 +532,17 @@ pub enum LirInstr {
         rhs: Reg,
     },
     /// Unary operations
-    UnaryOp { dst: Reg, op: UnaryOp, src: Reg },
+    UnaryOp {
+        dst: Reg,
+        op: UnaryOp,
+        src: Reg,
+    },
     /// Type conversion (float↔int intrinsics)
-    Convert { dst: Reg, op: ConvOp, src: Reg },
+    Convert {
+        dst: Reg,
+        op: ConvOp,
+        src: Reg,
+    },
     /// Comparison
     Compare {
         dst: Reg,
@@ -519,47 +553,105 @@ pub enum LirInstr {
 
     // === Type Checks ===
     /// Check if value is nil
-    IsNil { dst: Reg, src: Reg },
+    IsNil {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a pair
-    IsPair { dst: Reg, src: Reg },
+    IsPair {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is an array (for pattern matching)
-    IsArray { dst: Reg, src: Reg },
+    IsArray {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is an @array (for pattern matching)
-    IsArrayMut { dst: Reg, src: Reg },
+    IsArrayMut {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a struct (for pattern matching)
-    IsStruct { dst: Reg, src: Reg },
+    IsStruct {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is an @struct (for pattern matching)
-    IsStructMut { dst: Reg, src: Reg },
+    IsStructMut {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is an immutable set (for pattern matching)
-    IsSet { dst: Reg, src: Reg },
+    IsSet {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a mutable set (for pattern matching)
-    IsSetMut { dst: Reg, src: Reg },
+    IsSetMut {
+        dst: Reg,
+        src: Reg,
+    },
     /// Get array length (for pattern matching)
-    ArrayMutLen { dst: Reg, src: Reg },
+    ArrayMutLen {
+        dst: Reg,
+        src: Reg,
+    },
 
     // === Capture Cell Operations (for mutable captures) ===
     /// Create a capture cell containing a value
-    MakeCaptureCell { dst: Reg, value: Reg },
+    MakeCaptureCell {
+        dst: Reg,
+        value: Reg,
+    },
     /// Load value from capture cell
-    LoadCaptureCell { dst: Reg, cell: Reg },
+    LoadCaptureCell {
+        dst: Reg,
+        cell: Reg,
+    },
     /// Store value into capture cell
-    StoreCaptureCell { cell: Reg, value: Reg },
+    StoreCaptureCell {
+        cell: Reg,
+        value: Reg,
+    },
 
     // === Destructuring ===
     /// First for destructuring: signals error if not a cons cell
-    FirstDestructure { dst: Reg, src: Reg },
+    FirstDestructure {
+        dst: Reg,
+        src: Reg,
+    },
     /// Rest for destructuring: signals error if not a cons cell
-    RestDestructure { dst: Reg, src: Reg },
+    RestDestructure {
+        dst: Reg,
+        src: Reg,
+    },
     /// Array ref for destructuring: signals error if out of bounds or not an array
-    ArrayMutRefDestructure { dst: Reg, src: Reg, index: u16 },
+    ArrayMutRefDestructure {
+        dst: Reg,
+        src: Reg,
+        index: u16,
+    },
     /// Array slice from index: returns a new array from index to end, or empty array
-    ArrayMutSliceFrom { dst: Reg, src: Reg, index: u16 },
+    ArrayMutSliceFrom {
+        dst: Reg,
+        src: Reg,
+        index: u16,
+    },
     /// Table/struct get with silent nil: nil if key missing/wrong type. Used by match.
     /// `key` is a constant pool index holding a keyword Value.
-    StructGetOrNil { dst: Reg, src: Reg, key: LirConst },
+    StructGetOrNil {
+        dst: Reg,
+        src: Reg,
+        key: LirConst,
+    },
     /// Table/struct get for destructuring: signals error if key missing or wrong type.
     /// `key` is a constant pool index holding a keyword Value.
-    StructGetDestructure { dst: Reg, src: Reg, key: LirConst },
+    StructGetDestructure {
+        dst: Reg,
+        src: Reg,
+        key: LirConst,
+    },
 
     /// Struct rest for destructuring: collect all keys from src NOT in exclude_keys
     /// into a new immutable struct. Used by `{:a a & rest}` patterns.
@@ -573,38 +665,69 @@ pub enum LirInstr {
     // === Silent destructuring (parameter context: absent optional params → nil) ===
     /// First with silent nil: returns nil if not a cons cell.
     /// Used for &opt/(required) parameter destructuring where absent values produce nil.
-    FirstOrNil { dst: Reg, src: Reg },
+    FirstOrNil {
+        dst: Reg,
+        src: Reg,
+    },
     /// Rest with silent empty-list: returns EMPTY_LIST if not a cons cell.
     /// Used for &opt/(required) parameter destructuring.
-    RestOrNil { dst: Reg, src: Reg },
+    RestOrNil {
+        dst: Reg,
+        src: Reg,
+    },
     /// Array ref with silent nil: returns nil if out of bounds or not an array.
     /// Used for `&opt`/\[required\] parameter destructuring.
-    ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
+    ArrayMutRefOrNil {
+        dst: Reg,
+        src: Reg,
+        index: u16,
+    },
 
     // === Coroutines ===
     /// Load the resume value after a yield.
     /// This is the first instruction in a yield's resume block.
     /// At runtime, the resume value is on top of the operand stack
     /// (pushed by the VM's resume_continuation).
-    LoadResumeValue { dst: Reg },
+    LoadResumeValue {
+        dst: Reg,
+    },
 
     // === Runtime Eval ===
     /// Runtime eval: compile and execute a datum.
     /// Pops env and expr from stack, compiles and executes, pushes result.
-    Eval { dst: Reg, expr: Reg, env: Reg },
+    Eval {
+        dst: Reg,
+        expr: Reg,
+        env: Reg,
+    },
 
     // === Splice Support ===
     /// Extend an array with all elements of an indexed type (array or @array).
     /// Used by splice path: builds the args array incrementally.
-    ArrayMutExtend { dst: Reg, array: Reg, source: Reg },
+    ArrayMutExtend {
+        dst: Reg,
+        array: Reg,
+        source: Reg,
+    },
     /// Append a single value to an array.
     /// Used by splice path: adds non-spliced args to the args array.
-    ArrayMutPush { dst: Reg, array: Reg, value: Reg },
+    ArrayMutPush {
+        dst: Reg,
+        array: Reg,
+        value: Reg,
+    },
     /// Call a function with elements of an array as arguments.
     /// The array is unpacked into individual arguments at runtime.
-    CallArrayMut { dst: Reg, func: Reg, args: Reg },
+    CallArrayMut {
+        dst: Reg,
+        func: Reg,
+        args: Reg,
+    },
     /// Tail call with elements of an array as arguments.
-    TailCallArrayMut { func: Reg, args: Reg },
+    TailCallArrayMut {
+        func: Reg,
+        args: Reg,
+    },
 
     // === Allocation Regions ===
     /// Enter an allocation region (scope boundary for allocator).
@@ -630,7 +753,9 @@ pub enum LirInstr {
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.
     /// All param/value registers are consumed from the stack.
-    PushParamFrame { pairs: Vec<(Reg, Reg)> },
+    PushParamFrame {
+        pairs: Vec<(Reg, Reg)>,
+    },
     /// Pop the top parameter frame.
     /// No registers produced or consumed.
     PopParamFrame,
@@ -656,35 +781,78 @@ pub enum LirInstr {
 
     // === Type predicates (intrinsics) ===
     /// Check if value is the empty list
-    IsEmpty { dst: Reg, src: Reg },
+    IsEmpty {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a boolean
-    IsBool { dst: Reg, src: Reg },
+    IsBool {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is an integer
-    IsInt { dst: Reg, src: Reg },
+    IsInt {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a float
-    IsFloat { dst: Reg, src: Reg },
+    IsFloat {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a string (immutable or mutable)
-    IsString { dst: Reg, src: Reg },
+    IsString {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a keyword
-    IsKeyword { dst: Reg, src: Reg },
+    IsKeyword {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a symbol
-    IsSymbolCheck { dst: Reg, src: Reg },
+    IsSymbolCheck {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is bytes (immutable or mutable)
-    IsBytes { dst: Reg, src: Reg },
+    IsBytes {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a box (lbox)
-    IsBox { dst: Reg, src: Reg },
+    IsBox {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a closure
-    IsClosure { dst: Reg, src: Reg },
+    IsClosure {
+        dst: Reg,
+        src: Reg,
+    },
     /// Check if value is a fiber
-    IsFiber { dst: Reg, src: Reg },
+    IsFiber {
+        dst: Reg,
+        src: Reg,
+    },
     /// Get type keyword for a value
-    TypeOf { dst: Reg, src: Reg },
+    TypeOf {
+        dst: Reg,
+        src: Reg,
+    },
 
     // === Data access (intrinsics) ===
     /// Polymorphic length
-    Length { dst: Reg, src: Reg },
+    Length {
+        dst: Reg,
+        src: Reg,
+    },
     /// Polymorphic get (2 args: collection, key)
-    Get { dst: Reg, obj: Reg, key: Reg },
+    Get {
+        dst: Reg,
+        obj: Reg,
+        key: Reg,
+    },
     /// Polymorphic put (3 args: collection, key, value)
     Put {
         dst: Reg,
@@ -693,36 +861,53 @@ pub enum LirInstr {
         val: Reg,
     },
     /// Polymorphic del (2 args: collection, key)
-    Del { dst: Reg, obj: Reg, key: Reg },
+    Del {
+        dst: Reg,
+        obj: Reg,
+        key: Reg,
+    },
     /// Polymorphic has? (2 args: collection, key)
-    Has { dst: Reg, obj: Reg, key: Reg },
+    Has {
+        dst: Reg,
+        obj: Reg,
+        key: Reg,
+    },
     /// Polymorphic push (2 args: collection, value). Mutates @array in place;
     /// returns new array for immutable. Distinct from `ArrayMutPush` (splice).
-    IntrPush { dst: Reg, array: Reg, value: Reg },
+    IntrPush {
+        dst: Reg,
+        array: Reg,
+        value: Reg,
+    },
     /// @array pop (1 arg, returns popped value)
-    Pop { dst: Reg, src: Reg },
+    Pop {
+        dst: Reg,
+        src: Reg,
+    },
 
     // === Mutability (intrinsics) ===
     /// Mutable → immutable copy
-    Freeze { dst: Reg, src: Reg },
+    Freeze {
+        dst: Reg,
+        src: Reg,
+    },
     /// Immutable → mutable copy
-    Thaw { dst: Reg, src: Reg },
+    Thaw {
+        dst: Reg,
+        src: Reg,
+    },
 
     // === Identity (intrinsics) ===
     /// Bitwise tag+payload equality
-    Identical { dst: Reg, lhs: Reg, rhs: Reg },
+    Identical {
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
 
-    // === Explicit rotation (Flip) ===
-    /// Push a flip frame (save caller's swap pool; remember heap mark).
-    /// No registers produced or consumed.
+    // === Legacy no-ops (kept for bytecode format compat) ===
     FlipEnter,
-    /// Rotate generations using the top flip frame's base. Tears down
-    /// iteration N-2 and moves the current iteration into the swap pool.
-    /// No registers produced or consumed.
     FlipSwap,
-    /// Pop the top flip frame: tear down this frame's remaining swap pool
-    /// and restore the caller's.
-    /// No registers produced or consumed.
     FlipExit,
 }
 

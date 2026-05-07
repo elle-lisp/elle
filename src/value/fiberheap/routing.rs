@@ -244,27 +244,3 @@ pub fn region_rotate_dealloc() {
         unsafe { (*ptr).rotate_scope_marks_dealloc() };
     }
 }
-
-/// Push a flip frame on the current FiberHeap (`FlipEnter`).
-pub fn flip_enter() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).flip_enter() };
-    }
-}
-
-/// Rotate using the top flip frame (`FlipSwap`).
-pub fn flip_swap() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).flip_swap() };
-    }
-}
-
-/// Pop the top flip frame (`FlipExit`).
-pub fn flip_exit() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).flip_exit() };
-    }
-}

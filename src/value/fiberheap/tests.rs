@@ -351,117 +351,82 @@ fn test_shared_alloc_survives_private_clear() {
     assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared unchanged
 }
 
-// ── Flip* instructions ─────────────────────────────────────────────
-
-fn alloc_drop_tracked(heap: &mut FiberHeap) {
-    // Allocate an LString — it's in `needs_drop=true` territory, so it
-    // enters both `allocs` and `dtors` lists. This is exactly the kind
-    // of allocation the rotation/flip path needs to free.
-    let s = heap.alloc_inline_slice::<u8>(b"x");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-}
+// ── Trampoline rotation tests ────────────────────────────────────────
+//
+// These simulate the trampoline's mark/release protocol: mark at first
+// tail-call, release+mark at subsequent tail-calls.
 
 #[test]
-fn flip_enter_and_exit_balance() {
+fn release_returns_slots_to_free_list() {
+    // mark → alloc → release → alloc reuses freed slot.
     let mut heap = FiberHeap::new();
-    assert_eq!(heap.flip_depth(), 0);
-    heap.flip_enter();
-    assert_eq!(heap.flip_depth(), 1);
-    heap.flip_enter();
-    assert_eq!(heap.flip_depth(), 2);
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 1);
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
-}
+    let base_live = heap.root_live();
 
-#[test]
-fn flip_swap_resets_current_iteration_count() {
-    // `FlipSwap` has the same semantics as the trampoline's implicit
-    // rotation: current iteration's allocations move into the swap
-    // pool, and `alloc_count` resets to the base mark. The previous
-    // iteration (now swap) is reclaimed at the *next* swap/exit.
-    let mut heap = FiberHeap::new();
-    heap.flip_enter();
+    let mark = heap.mark();
+    let v1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    let v2 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+    assert_eq!(heap.root_live(), base_live + 2);
 
-    alloc_drop_tracked(&mut heap);
-    assert_eq!(heap.len(), 1, "current iteration has 1 live object");
-
-    heap.flip_swap();
+    heap.release(mark);
     assert_eq!(
-        heap.len(),
-        0,
-        "after swap, current iteration's count is back at base"
+        heap.root_live(),
+        base_live,
+        "release must return slots to the free list"
     );
 
-    alloc_drop_tracked(&mut heap);
-    assert_eq!(heap.len(), 1);
-
-    heap.flip_swap();
-    assert_eq!(heap.len(), 0);
-
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
-}
-
-#[test]
-fn flip_exit_restores_caller_swap_pool() {
-    // A nested flip frame must not touch the caller's swap generation.
-    // After an inner enter/swap/exit, the outer's next swap continues
-    // to see the generation it set up before nesting — i.e. the swap
-    // pool pointer is restored, not overwritten.
-    //
-    // We observe this through `rotation_freed`: once the outer calls
-    // `flip_swap` again after the inner returns, its own (pre-inner)
-    // swap pool must be the one that gets torn down. If the inner
-    // stomped the outer's swap_pool, the outer's next swap would have
-    // nothing to free.
-    let mut heap = FiberHeap::new();
-
-    heap.flip_enter();
-    alloc_drop_tracked(&mut heap); // outer iter 0
-    heap.flip_swap(); // outer iter 0 → outer's swap pool
-
-    let freed_before = heap.rotation_freed;
-
-    // Inner frame does its own rotations; must not see or touch
-    // outer's swap pool.
-    heap.flip_enter();
-    alloc_drop_tracked(&mut heap);
-    heap.flip_swap();
-    alloc_drop_tracked(&mut heap);
-    heap.flip_exit();
-
-    // Now outer does another swap. Its saved swap pool (containing
-    // outer's iter 0) should be what gets freed.
-    alloc_drop_tracked(&mut heap); // outer iter 1
-    heap.flip_swap();
-
+    let n1 = heap.alloc(HeapObject::Pair(Pair::new(Value::int(10), Value::NIL)));
+    let freed_ptrs: [usize; 2] = [
+        v1.as_heap_ptr().unwrap() as usize,
+        v2.as_heap_ptr().unwrap() as usize,
+    ];
     assert!(
-        heap.rotation_freed > freed_before,
-        "outer's swap pool survived the inner frame \
-         (rotation_freed did not advance: before={}, after={})",
-        freed_before,
-        heap.rotation_freed
+        freed_ptrs.contains(&(n1.as_heap_ptr().unwrap() as usize)),
+        "new allocation must reuse a freed slot"
     );
-
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
 }
 
 #[test]
-fn flip_noop_without_frame() {
-    // Isolated FlipSwap or FlipExit (no matching FlipEnter) must be
-    // safe no-ops — the bytecode could be malformed, or the function
-    // could have been lowered without auto-insertion and we still
-    // want the instructions to be callable.
+fn release_no_dealloc_preserves_slots() {
+    // mark → alloc → release_no_dealloc → slots NOT freed.
     let mut heap = FiberHeap::new();
-    heap.flip_swap();
-    heap.flip_exit();
-    assert_eq!(heap.flip_depth(), 0);
+    let base_live = heap.root_live();
+
+    let mark = heap.mark();
+    heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+
+    heap.release_no_dealloc(mark);
+    assert_eq!(
+        heap.root_live(),
+        base_live + 2,
+        "release_no_dealloc must NOT return slots to the free list"
+    );
+    assert_eq!(heap.len(), 0, "alloc_count must be reset to mark position");
+}
+
+#[test]
+fn simulated_trampoline_rotation() {
+    // Simulate the trampoline protocol: mark → alloc → release → mark →
+    // alloc → release. After each release, live count returns to base.
+    let mut heap = FiberHeap::new();
+    let base_live = heap.root_live();
+
+    for i in 0..100 {
+        let mark = heap.mark();
+        for j in 0..5 {
+            heap.alloc(HeapObject::Pair(Pair::new(
+                Value::int((i * 5 + j) as i64),
+                Value::NIL,
+            )));
+        }
+        heap.release(mark);
+        assert_eq!(
+            heap.root_live(),
+            base_live,
+            "iteration {}: live count must return to base after release",
+            i
+        );
+    }
 }
 
 // ── Region slot recycling tests ──────────────────────────────────────

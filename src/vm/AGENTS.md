@@ -277,9 +277,10 @@ the parent's heap (always non-null after issue-525) is restored.
 `FiberHeap` uses a bump arena (`BumpArena`) wrapped in `SlabPool` for all
 allocations. Destructor tracking ensures `HeapObject` variants with inner heap
 allocations (`Vec`, `Rc`, `BTreeMap`) have their `Drop` impls called on
-`release()` and `clear()`. `release()` runs destructors and rewinds the arena
-to the scope-entry position. Individual slot deallocation is a no-op; memory
-is reclaimed only by scope release or fiber death.
+`release()` and `clear()`. `release()` runs destructors, returns slab slots to
+the free list, and rewinds the arena to the scope-entry position. Memory is
+reclaimed by scope release (`RegionExit`), tail-call rotation (trampoline
+`release()` at each boundary), or fiber death.
 
 The root fiber uses the persistent `ROOT_HEAP` thread-local (a leaked `Box<FiberHeap>`
 created by `ensure_root_heap()`). The heap outlives any individual VM, so Values

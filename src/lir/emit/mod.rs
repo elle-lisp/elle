@@ -412,8 +412,9 @@ impl Emitter {
 
                     rotation_safe: func.rotation_safe,
                 };
+                let template_rc = Rc::new(template);
                 let closure = Closure {
-                    template: Rc::new(template),
+                    template: template_rc,
                     env: crate::value::inline_slice::InlineSlice::empty(),
                     squelch_mask: SignalBits::EMPTY,
                 };

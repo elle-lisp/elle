@@ -1600,22 +1600,41 @@ impl<'a> Lowerer<'a> {
     /// A function is outward-safe if its body never stores heap values
     /// externally, even if it returns structs containing heap values.
     pub(super) fn body_has_outward_side_effects(&self, hir: &Hir) -> bool {
+        self.body_has_outward_effects_ext(hir, &mut Vec::new())
+    }
+
+    /// Scope-aware outward side-effect check. `locals` tracks bindings
+    /// defined within the current function body — mutations to these are
+    /// internal and don't count as outward effects.
+    fn body_has_outward_effects_ext(&self, hir: &Hir, locals: &mut Vec<Binding>) -> bool {
         match &hir.kind {
-            HirKind::Assign { value, .. } => {
-                !self.result_is_safe(value, &[]) || self.body_has_outward_side_effects(value)
+            HirKind::Assign { target, value } => {
+                if locals.contains(target) {
+                    // Local mutation — not an outward effect; recurse for nested
+                    self.body_has_outward_effects_ext(value, locals)
+                } else {
+                    !self.result_is_safe(value, &[])
+                        || self.body_has_outward_effects_ext(value, locals)
+                }
             }
             HirKind::Call {
                 func,
                 args,
                 is_tail,
             } => {
-                // Mutating primitives escape even in tail position
-                if self.callee_is_mutating_primitive(func)
-                    && args
-                        .iter()
-                        .any(|a| !Self::arg_is_compile_time_immediate(&a.expr))
-                {
-                    return true;
+                // Mutating primitives (put, push): only outward if target is
+                // not a locally-defined binding.
+                if self.callee_is_mutating_primitive(func) {
+                    let target_is_local = args
+                        .first()
+                        .is_some_and(|a| self.expr_is_local_binding(&a.expr, locals));
+                    if !target_is_local
+                        && args
+                            .iter()
+                            .any(|a| !Self::arg_is_compile_time_immediate(&a.expr))
+                    {
+                        return true;
+                    }
                 }
                 if *is_tail {
                     // For outward-safety, tail-call args become return values,
@@ -1636,14 +1655,14 @@ impl<'a> Lowerer<'a> {
                 {
                     return true;
                 }
-                self.body_has_outward_side_effects(func)
+                self.body_has_outward_effects_ext(func, locals)
                     || args
                         .iter()
-                        .any(|a| self.body_has_outward_side_effects(&a.expr))
+                        .any(|a| self.body_has_outward_effects_ext(&a.expr, locals))
             }
             HirKind::Lambda { .. } => false,
             HirKind::Emit { value, .. } => {
-                !self.result_is_safe(value, &[]) || self.body_has_outward_side_effects(value)
+                !self.result_is_safe(value, &[]) || self.body_has_outward_effects_ext(value, locals)
             }
             HirKind::Int(_)
             | HirKind::Float(_)
@@ -1658,66 +1677,85 @@ impl<'a> Lowerer<'a> {
                 then_branch,
                 else_branch,
             } => {
-                self.body_has_outward_side_effects(cond)
-                    || self.body_has_outward_side_effects(then_branch)
-                    || self.body_has_outward_side_effects(else_branch)
+                self.body_has_outward_effects_ext(cond, locals)
+                    || self.body_has_outward_effects_ext(then_branch, locals)
+                    || self.body_has_outward_effects_ext(else_branch, locals)
             }
-            HirKind::Begin(exprs) => exprs.iter().any(|e| self.body_has_outward_side_effects(e)),
+            HirKind::Begin(exprs) => exprs
+                .iter()
+                .any(|e| self.body_has_outward_effects_ext(e, locals)),
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => {
                 clauses.iter().any(|(c, b)| {
-                    self.body_has_outward_side_effects(c) || self.body_has_outward_side_effects(b)
+                    self.body_has_outward_effects_ext(c, locals)
+                        || self.body_has_outward_effects_ext(b, locals)
                 }) || else_branch
                     .as_ref()
-                    .is_some_and(|b| self.body_has_outward_side_effects(b))
+                    .is_some_and(|b| self.body_has_outward_effects_ext(b, locals))
             }
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                exprs.iter().any(|e| self.body_has_outward_side_effects(e))
-            }
+            HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .any(|e| self.body_has_outward_effects_ext(e, locals)),
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                bindings
-                    .iter()
-                    .any(|(_, init)| self.body_has_outward_side_effects(init))
-                    || self.body_has_outward_side_effects(body)
+                for (binding, init) in bindings {
+                    if self.body_has_outward_effects_ext(init, locals) {
+                        return true;
+                    }
+                    locals.push(*binding);
+                }
+                self.body_has_outward_effects_ext(body, locals)
             }
-            HirKind::Define { value, .. } => self.body_has_outward_side_effects(value),
+            HirKind::Define { binding, value } => {
+                let result = self.body_has_outward_effects_ext(value, locals);
+                locals.push(*binding);
+                result
+            }
             HirKind::While { cond, body } => {
-                self.body_has_outward_side_effects(cond) || self.body_has_outward_side_effects(body)
+                self.body_has_outward_effects_ext(cond, locals)
+                    || self.body_has_outward_effects_ext(body, locals)
             }
-            HirKind::Block { body, .. } => {
-                body.iter().any(|e| self.body_has_outward_side_effects(e))
-            }
-            HirKind::Break { value, .. } => self.body_has_outward_side_effects(value),
+            HirKind::Block { body, .. } => body
+                .iter()
+                .any(|e| self.body_has_outward_effects_ext(e, locals)),
+            HirKind::Break { value, .. } => self.body_has_outward_effects_ext(value, locals),
             HirKind::Match { value, arms } => {
-                self.body_has_outward_side_effects(value)
+                self.body_has_outward_effects_ext(value, locals)
                     || arms
                         .iter()
-                        .any(|(_, _, body)| self.body_has_outward_side_effects(body))
+                        .any(|(_, _, body)| self.body_has_outward_effects_ext(body, locals))
             }
             HirKind::Parameterize { bindings, body } => {
                 bindings
                     .iter()
-                    .any(|(_, v)| self.body_has_outward_side_effects(v))
-                    || self.body_has_outward_side_effects(body)
+                    .any(|(_, v)| self.body_has_outward_effects_ext(v, locals))
+                    || self.body_has_outward_effects_ext(body, locals)
             }
             HirKind::Loop { bindings, body } => {
-                bindings
-                    .iter()
-                    .any(|(_, init)| self.body_has_outward_side_effects(init))
-                    || self.body_has_outward_side_effects(body)
+                for (binding, init) in bindings {
+                    if self.body_has_outward_effects_ext(init, locals) {
+                        return true;
+                    }
+                    locals.push(*binding);
+                }
+                self.body_has_outward_effects_ext(body, locals)
             }
             HirKind::Recur { args } => args.iter().any(|a| !self.result_is_safe(a, &[])),
-            HirKind::MakeCell { value } => self.body_has_outward_side_effects(value),
-            HirKind::DerefCell { cell } => self.body_has_outward_side_effects(cell),
+            HirKind::MakeCell { value } => self.body_has_outward_effects_ext(value, locals),
+            HirKind::DerefCell { cell } => self.body_has_outward_effects_ext(cell, locals),
             HirKind::SetCell { cell, value } => {
-                self.body_has_outward_side_effects(cell)
-                    || self.body_has_outward_side_effects(value)
+                if self.expr_is_local_binding(cell, locals) {
+                    // Local cell mutation — not an outward effect
+                    self.body_has_outward_effects_ext(value, locals)
+                } else {
+                    self.body_has_outward_effects_ext(cell, locals)
+                        || self.body_has_outward_effects_ext(value, locals)
+                }
             }
-            HirKind::Intrinsic { args, .. } => {
-                args.iter().any(|a| self.body_has_outward_side_effects(a))
-            }
+            HirKind::Intrinsic { args, .. } => args
+                .iter()
+                .any(|a| self.body_has_outward_effects_ext(a, locals)),
             _ => true,
         }
     }
@@ -1767,6 +1805,19 @@ impl<'a> Lowerer<'a> {
             .get(struct_binding)
             .copied()
             .unwrap_or(false)
+    }
+
+    /// Check if an expression is a reference to a locally-defined binding.
+    /// Used by outward-safety to skip mutations to local state.
+    fn expr_is_local_binding(&self, hir: &Hir, locals: &[Binding]) -> bool {
+        match &hir.kind {
+            HirKind::Var(b) => locals.contains(b),
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => locals.contains(b),
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     /// Check if a callee is a known param-safe user function.

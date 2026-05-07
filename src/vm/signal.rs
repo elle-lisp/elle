@@ -990,32 +990,8 @@ impl VM {
                 self.runtime_config.stats = val.is_truthy();
                 Value::NIL
             }
-            "flip" => {
-                let on = if let Some(b) = val.as_bool() {
-                    b
-                } else if let Some(kw) = val.as_keyword_name() {
-                    match kw.as_str() {
-                        "on" => true,
-                        "off" => false,
-                        _ => {
-                            return error_val(
-                                "argument-error",
-                                format!("vm/config-set :flip: expected :on/:off, got :{}", kw),
-                            )
-                        }
-                    }
-                } else {
-                    return error_val(
-                        "type-error",
-                        format!(
-                            "vm/config-set :flip: expected bool or keyword, got {}",
-                            val.type_name()
-                        ),
-                    );
-                };
-                crate::config::set_flip(on);
-                Value::NIL
-            }
+            // Legacy: flip is always off (no-op). Accept for compat.
+            "flip" => Value::NIL,
             _ => error_val(
                 "argument-error",
                 format!("vm/config-set: unknown field :{}", kw),

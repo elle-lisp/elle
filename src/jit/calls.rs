@@ -205,7 +205,7 @@ pub extern "C" fn elle_jit_call(
             // don't corrupt the caller's rotation state.
             let saved_rotation_base =
                 crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
-                    .flatten();
+                    .unwrap_or((None, None));
 
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
@@ -398,12 +398,12 @@ pub extern "C" fn elle_jit_resolve_tail_call(
     }
 }
 
-/// Rotate slab pools at a self-tail-call boundary in JIT code.
+/// Release heap objects at a self-tail-call boundary in JIT code.
 ///
 /// Called from the JIT self-tail-call loop after reading argument values
-/// but before writing them back. The argument SSA values are in registers;
-/// the rotation frees iteration N-2's slab slots while iteration N-1's
-/// slots (referenced by argument values) remain in the swap pool.
+/// but before writing them back. Uses mark/release: the first call
+/// captures a base mark; subsequent calls release to the previous mark
+/// and capture a fresh one.
 #[no_mangle]
 pub extern "C" fn elle_jit_rotate_pools(_vm: *mut ()) {
     crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools_jit());

@@ -165,26 +165,6 @@ impl SlabPool {
         self.slab.dealloc(ptr);
     }
 
-    /// Deferred slot deallocation for rotation paths.
-    ///
-    /// Rotation (`rotate_pools`, `flip_swap`, `flip_exit`) moves objects to a
-    /// swap pool and frees them one iteration later. The one-iteration lag
-    /// is intended to keep argument values alive, but the temporal partitioning
-    /// is incorrect: some objects allocated after the rotation mark survive
-    /// across iterations (returned values, closures, mutable bindings).
-    ///
-    /// Until the rotation partitioning is fixed (Phase 2A), slot deallocation
-    /// in rotation paths remains disabled. Slots are reclaimed only on fiber
-    /// death (teardown/clear), which is where the mmap-backed pages return to
-    /// the OS.
-    ///
-    /// # Safety
-    /// Same contract as `dealloc_slot`. Currently a no-op.
-    #[inline]
-    pub unsafe fn dealloc_slot_deferred(&mut self, _ptr: *mut HeapObject) {
-        // TODO: Enable `self.slab.dealloc(ptr)` after rotation partitioning fix.
-    }
-
     // ── Refcounting ───────────────────────────────────────────────────
 
     /// Increment the durable reference count for a slab slot.

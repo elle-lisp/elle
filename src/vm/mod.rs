@@ -87,13 +87,13 @@ impl VM {
         let mut current_location_map = Rc::new(LocationMap::new());
 
         // Initial execution with tail-call loop.
-        // Pool rotation: when a tail call is rotation-safe, release the
-        // previous iteration's temporaries via rotate_pools(). The tail
-        // call's env (arguments) was built before release, so referenced
-        // values survive. Only unreferenced temporaries are freed.
+        // Scope-mark rotation: when a tail call is rotation-safe,
+        // release the previous iteration's temporaries via release().
+        // The tail call's env (arguments) was built before release, so
+        // referenced values survive. Only unreferenced temporaries are freed.
         let mut bits;
-        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
-        let mut prev_rotation_safe = true;
+        let mut base_alloc_count: Option<(usize, usize)> = None;
+        let mut prev_rotation_safe = false;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
             let (b, _ip) = self.execute_bytecode_inner_impl(
@@ -106,7 +106,7 @@ impl VM {
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
                 execute::advance_rotation(
-                    &mut rotation_base,
+                    &mut base_alloc_count,
                     &mut prev_rotation_safe,
                     tail.rotation_safe,
                 );

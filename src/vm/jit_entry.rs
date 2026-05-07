@@ -283,7 +283,7 @@ impl VM {
         // don't corrupt the caller's rotation state.
         let saved_rotation_base =
             crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
-                .flatten();
+                .unwrap_or((None, None));
 
         let result = unsafe {
             jit_code.call(

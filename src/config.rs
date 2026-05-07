@@ -4,23 +4,13 @@
 //! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Separate atomic for runtime-togglable flip; initialized from Config default,
-/// updated by `set_flip`, read by `flip_enabled`.
-static FLIP_OVERRIDE: AtomicBool = AtomicBool::new(true);
-
-/// Check whether flip instructions are enabled (runtime-togglable).
+/// Legacy: flip instructions are always no-ops. Kept for API compat.
 pub fn flip_enabled() -> bool {
-    FLIP_OVERRIDE.load(Ordering::Relaxed)
-}
-
-/// Toggle flip instructions at runtime (from vm/config-set :flip).
-pub fn set_flip(on: bool) {
-    FLIP_OVERRIDE.store(on, Ordering::Relaxed);
+    false
 }
 
 /// Default cache directory.
@@ -48,7 +38,6 @@ pub fn get() -> &'static Config {
 /// Initialize the global config. Must be called before `get` for
 /// CLI-parsed values to take effect. No-op if already initialized.
 pub fn init(config: Config) {
-    FLIP_OVERRIDE.store(config.flip_instructions, Ordering::Relaxed);
     let _ = CONFIG.set(config);
 }
 
@@ -448,12 +437,6 @@ pub struct Config {
     /// BinOp/CmpOp/etc. Implies jit=off, mlir=off.
     pub checked_intrinsics: bool,
 
-    /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
-    /// lowered functions (Phase 4b). On by default — escape-analysis
-    /// gates injection so only safe loops get flip. Disable via
-    /// `--flip=off` to fall back to trampoline-only rotation.
-    pub flip_instructions: bool,
-
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
     /// are listed in `DUMP_KEYWORDS`. When non-empty, the compiler runs up
     /// to each requested stage, prints its artifact, and exits without
@@ -483,7 +466,6 @@ impl Default for Config {
             wasm_chunk: false,
             wasm_sparse_spill: true,
             checked_intrinsics: false,
-            flip_instructions: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
         }
@@ -609,13 +591,13 @@ impl Config {
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--flip=") {
-                config.flip_instructions = match rest {
-                    "on" | "true" | "1" => true,
-                    "off" | "false" | "0" => false,
+                // Legacy: accepted for backwards compat but has no effect.
+                match rest {
+                    "on" | "true" | "1" | "off" | "false" | "0" => {}
                     _ => {
                         return Err(format!("--flip: expected on/off, got '{}'", rest));
                     }
-                };
+                }
                 i += 1;
                 continue;
             }

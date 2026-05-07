@@ -32,8 +32,7 @@ fn print_help() {
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
     println!("  --mlir=POLICY         MLIR policy: off, eager, adaptive (default), or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
-    println!("  --flip=on|off         Insert FlipEnter/FlipSwap/FlipExit instructions");
-    println!("                          (escape-analysis-gated rotation; default on)");
+    println!("  --flip=on|off         Legacy no-op (accepted for backwards compat)");
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
     println!("                          call, signal, compile, fiber, hir, lir,");
     println!("                          emit, jit, io, gc, import, macro, wasm,");

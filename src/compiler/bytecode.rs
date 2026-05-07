@@ -266,20 +266,11 @@ pub enum Instruction {
     /// Reverts allocation routing to the private heap.
     OutboxExit,
 
-    /// Push an explicit rotation frame. No operands.
-    /// Captures the current heap state so `FlipSwap` can rotate relative
-    /// to it and `FlipExit` can tear down this frame's swap pool without
-    /// touching the caller's. Emitted at function entry when the function
-    /// wants explicit rotation (e.g., a self-tail-recursive loop).
+    /// Legacy no-op. Kept for bytecode format compatibility.
     FlipEnter,
-
-    /// Rotate generations using the top flip frame. No operands.
-    /// Equivalent to the trampoline's implicit `rotate_pools` but keyed
-    /// off the flip stack. Emitted before a self-tail-call.
+    /// Legacy no-op. Kept for bytecode format compatibility.
     FlipSwap,
-
-    /// Pop the top flip frame and tear down its trailing swap pool. No
-    /// operands. Emitted before every Return in a flip-wrapped function.
+    /// Legacy no-op. Kept for bytecode format compatibility.
     FlipExit,
 
     /// Convert int → float. Pops value, pushes float. Identity on floats.

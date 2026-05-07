@@ -49,11 +49,9 @@ a `BumpArena` with allocation and destructor tracking:
 `release(mark)` runs destructors, truncates tracking vecs, resets arena.
 `teardown()` does a full reset.
 
-`dealloc_slot()` returns a slab slot to the free list for reuse. Currently
-disabled — slot recycling is blocked on routing scope eligibility for
-while/loop forms through the region inference system. `dealloc_slot_deferred()`
-is a no-op used by rotation paths (Phase 2A: rotation slot recycling not yet
-enabled).
+`dealloc_slot()` returns a slab slot to the free list for reuse. Used by
+scope reclamation (`RegionExit`) and tail-call rotation (`release()` at each
+trampoline boundary). Both are gated by Tofte-Talpin escape analysis.
 
 ## BumpArena
 

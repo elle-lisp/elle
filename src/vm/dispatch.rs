@@ -478,16 +478,10 @@ impl VM {
                     crate::value::fiberheap::outbox_exit();
                 }
 
-                // Explicit rotation: push/rotate/pop a flip frame.
-                Instruction::FlipEnter => {
-                    crate::value::fiberheap::flip_enter();
-                }
-                Instruction::FlipSwap => {
-                    crate::value::fiberheap::flip_swap();
-                }
-                Instruction::FlipExit => {
-                    crate::value::fiberheap::flip_exit();
-                }
+                // FlipEnter/FlipSwap/FlipExit are legacy no-ops.
+                // While/loop reclamation uses RegionRotate/RegionRotateDealloc.
+                // Self-tail-call reclamation uses mark/release in the trampoline.
+                Instruction::FlipEnter | Instruction::FlipSwap | Instruction::FlipExit => {}
 
                 // Dynamic parameter frame management
                 Instruction::PushParamFrame => {

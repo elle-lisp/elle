@@ -21,83 +21,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 use std::fmt;
 
-/// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
-/// before every tail call. Used by Phase 4b auto-insertion
-/// (gated by `config::flip_enabled()`).
-///
-/// The resulting LIR is semantically equivalent under the runtime's
-/// existing rotation mechanism — `FlipSwap` tears down the previous
-/// iteration's allocations at each tail-call boundary the same way
-/// the trampoline does, and `FlipExit` tears down the trailing
-/// generation when the function returns.
-fn inject_flip(func: &mut LirFunction) {
-    // Locate the entry block: prepend FlipEnter at the top.
-    if let Some(entry_block) = func.blocks.iter_mut().find(|b| b.label == func.entry) {
-        entry_block
-            .instructions
-            .insert(0, SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
-    }
-
-    for block in &mut func.blocks {
-        // Insert FlipSwap immediately before every tail call.
-        let mut i = 0;
-        while i < block.instructions.len() {
-            if matches!(
-                block.instructions[i].instr,
-                LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. }
-            ) {
-                block
-                    .instructions
-                    .insert(i, SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
-                i += 2;
-            } else {
-                i += 1;
-            }
-        }
-
-        // Insert FlipExit before every Return terminator. (TailCalls
-        // leave the frame without a Return, so their exit is subsumed
-        // by the next frame's FlipExit on its own return.)
-        if matches!(block.terminator.terminator, Terminator::Return(_)) {
-            block
-                .instructions
-                .push(SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
-        }
-    }
-
-    // While-loop flip frames: detect back-edges from the CFG and inject
-    // FlipEnter/FlipSwap/FlipExit around each loop so per-iteration
-    // allocations are reclaimed.
-    //
-    // Pattern: entry→Jump(cond), cond→Branch{body,done}, back_edge→Jump(cond).
-    // Detect Branch blocks with exactly two Jump predecessors (forward entry +
-    // backward back-edge), distinguished by block order.
-    inject_flip_while_loops(func);
-}
-
-/// Inject per-loop FlipEnter/FlipSwap/FlipExit using the
-/// `while_loops` metadata recorded during lowering. Each triple
-/// `(entry, back_edge, done)` has already passed escape analysis.
-fn inject_flip_while_loops(func: &mut LirFunction) {
-    for &(entry_label, back_edge_label, done_label) in &func.while_loops.clone() {
-        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == entry_label) {
-            block
-                .instructions
-                .push(SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
-        }
-        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == back_edge_label) {
-            block
-                .instructions
-                .push(SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
-        }
-        if let Some(block) = func.blocks.iter_mut().find(|b| b.label == done_label) {
-            block
-                .instructions
-                .insert(0, SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
-        }
-    }
-}
-
 /// Compile-time scope allocation statistics.
 ///
 /// Tracks how many let/letrec/block scopes were analyzed for scope
@@ -215,10 +138,6 @@ struct BlockLowerContext {
     /// `break` emits `(current_region_depth - region_depth_at_entry)`
     /// compensating `RegionExit` instructions before jumping to the exit.
     region_depth_at_entry: u32,
-    /// The `flip_depth` at the time this block was entered.
-    /// `break` emits compensating `FlipExit` instructions for each
-    /// flip frame entered since the block was opened.
-    flip_depth_at_entry: u32,
 }
 
 /// Lowers HIR to LIR
@@ -329,11 +248,6 @@ pub struct Lowerer<'a> {
     /// `emit_region_exit_refcounted`. Used by `lower_break` to emit
     /// the correct exit type for each compensating exit.
     region_refcounted_stack: Vec<bool>,
-    /// Current nesting depth of while-loop flip frames.
-    /// Incremented when entering a flip-eligible while loop,
-    /// decremented when leaving. Used by `lower_break` to emit
-    /// compensating `FlipExit` instructions.
-    flip_depth: u32,
     pending_region_exits: u32,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
@@ -399,7 +313,6 @@ impl<'a> Lowerer<'a> {
             block_lower_contexts: Vec::new(),
             region_depth: 0,
             region_refcounted_stack: Vec::new(),
-            flip_depth: 0,
             pending_region_exits: 0,
             scope_stats: ScopeStats::default(),
             discard_slot: None,
@@ -675,20 +588,8 @@ impl<'a> Lowerer<'a> {
         // Compute escape projection for module-pattern files.
         self.escape_projection = self.compute_escape_projection(hir);
 
-        let mut entry =
-            std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
-        let mut closures = std::mem::take(&mut self.closures);
-
-        // Phase 4b: optional FlipEnter/FlipSwap/FlipExit injection. The
-        // pass is a no-op unless `--flip=on` or the vm/config equivalent
-        // is set. It runs after lowering so it doesn't perturb any
-        // scope/rotation analysis upstream.
-        if crate::config::flip_enabled() {
-            inject_flip(&mut entry);
-            for f in &mut closures {
-                inject_flip(f);
-            }
-        }
+        let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
+        let closures = std::mem::take(&mut self.closures);
 
         let escape_dump = Some(self.format_escape_analysis());
         Ok(LirModule {

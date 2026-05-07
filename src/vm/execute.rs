@@ -63,28 +63,28 @@ use std::rc::Rc;
 
 use super::core::VM;
 
-/// Advance pool rotation state at a tail-call boundary.
+/// Reset alloc_count at a tail-call boundary for arena/count bookkeeping.
 ///
-/// If the previous iteration was rotation-safe, either rotate pools
-/// (if a base mark exists) or capture a new base mark. If the previous
-/// iteration was NOT rotation-safe, clear the base mark to prevent
-/// rotating across an unsafe boundary.
+/// Slab slot reclamation in the interpreter trampoline is blocked on two
+/// issues: (1) the `rotation_safe` flag does not propagate to runtime
+/// closure templates, and (2) using the scope_marks stack interferes with
+/// fiber suspension. The JIT reclaims via `rotate_pools_jit`. See
+/// `tests/elle/tailcall-reclaim.lisp` for the tracking test.
 #[inline]
 pub(super) fn advance_rotation(
-    rotation_base: &mut Option<crate::value::fiberheap::RotationBase>,
-    prev_rotation_safe: &mut bool,
+    base_alloc_count: &mut Option<(usize, usize)>,
+    _prev_rotation_safe: &mut bool,
     tail_rotation_safe: bool,
 ) {
-    if *prev_rotation_safe {
-        if let Some(ref base) = rotation_base {
-            crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
-        } else {
-            *rotation_base = crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
-        }
+    if let Some((count, shared)) = *base_alloc_count {
+        crate::value::fiberheap::with_current_heap_mut(|h| {
+            h.reset_alloc_count(count, shared);
+        });
     } else {
-        *rotation_base = None;
+        *base_alloc_count =
+            crate::value::fiberheap::with_current_heap_mut(|h| Some((h.len(), 0))).flatten();
     }
-    *prev_rotation_safe = tail_rotation_safe;
+    *_prev_rotation_safe = tail_rotation_safe;
 }
 
 /// Result of `execute_bytecode_saving_stack`.
@@ -139,8 +139,8 @@ impl VM {
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
-        let mut prev_rotation_safe = true;
+        let mut base_alloc_count: Option<(usize, usize)> = None;
+        let mut prev_rotation_safe = false;
 
         loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -177,7 +177,7 @@ impl VM {
 
             if let Some(tail) = self.pending_tail_call.take() {
                 advance_rotation(
-                    &mut rotation_base,
+                    &mut base_alloc_count,
                     &mut prev_rotation_safe,
                     tail.rotation_safe,
                 );

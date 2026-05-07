@@ -21,20 +21,10 @@ struct SharedMark {
     slab: SlabMark,
 }
 
-/// Previous tail-call iteration's shared allocations, preserved for one
-/// rotation cycle so argument values from iteration N remain valid until
-/// iteration N+1 copies them.
-struct SharedSwapPool {
-    allocs: Vec<*mut HeapObject>,
-    dtors: Vec<*mut HeapObject>,
-}
-
 pub(crate) struct SharedAllocator {
     pool: SlabPool,
     /// Stack of scope marks for RegionEnter/RegionExit on child fibers.
     marks: Vec<SharedMark>,
-    /// Swap pool for tail-call rotation.
-    swap: Option<SharedSwapPool>,
 }
 
 impl SharedAllocator {
@@ -42,7 +32,6 @@ impl SharedAllocator {
         SharedAllocator {
             pool: SlabPool::new(),
             marks: Vec::new(),
-            swap: None,
         }
     }
 
@@ -89,39 +78,8 @@ impl SharedAllocator {
         });
     }
 
-    /// Rotate the shared pool at a tail-call boundary.
-    pub(crate) fn rotate(&mut self, base: &SlabMark) {
-        if let Some(old) = self.swap.take() {
-            for i in (0..old.dtors.len()).rev() {
-                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
-            }
-            for &ptr in old.allocs.iter().rev() {
-                unsafe { self.pool.dealloc_slot_deferred(ptr) };
-            }
-        }
-
-        let iter_allocs = self.pool.allocs.split_off(base.allocs_len);
-        let iter_dtors = self.pool.dtors.split_off(base.dtor_len);
-
-        self.swap = if iter_allocs.is_empty() {
-            None
-        } else {
-            Some(SharedSwapPool {
-                allocs: iter_allocs,
-                dtors: iter_dtors,
-            })
-        };
-
-        self.pool.alloc_count = base.alloc_count;
-    }
-
     /// Run destructors, return all slots to the slab free list, and reset.
     pub fn teardown(&mut self) {
-        if let Some(old) = self.swap.take() {
-            for i in (0..old.dtors.len()).rev() {
-                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
-            }
-        }
         self.pool.teardown();
         self.marks.clear();
     }
