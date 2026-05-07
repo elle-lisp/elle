@@ -130,11 +130,12 @@
 # Error tests (from integration/concurrency.rs)
 # ============================================================================
 
-# spawn_rejects_mutable_table_capture
-(let [[ok? _] (protect ((fn ()
-                          (let [t (@struct)]
-                            (spawn (fn () t))))))]
-  (assert (not ok?) "spawn rejects mutable @struct capture"))
+# spawn_sends_mutable_struct_capture
+(let [[ok? result] (protect ((fn ()
+                               (let [t (@struct :a 1)]
+                                 (join (spawn (fn () (t :a))))))))]
+  (assert ok? "spawn sends mutable @struct capture")
+  (assert (= result 1) "spawned @struct preserves data"))
 
 # spawn_rejects_native_function
 (let [[ok? _] (protect ((fn () (spawn abs))))]
@@ -190,11 +191,29 @@
                (join (spawn (fn () (add-offset 32)))))) 42)
         "spawn closure capturing closure and data")
 
-(let [[ok? _] (protect ((fn ()
-                          (let [t (@struct)]
-                            (let [f (fn () t)]
-                              (spawn (fn () (f))))))))]
-  (assert (not ok?) "spawn rejects closure capturing closure with @struct"))
+(let [[ok? result] (protect ((fn ()
+                               (let [t (@struct :x 42)]
+                                 (let [f (fn () (t :x))]
+                                   (join (spawn (fn () (f)))))))))]
+  (assert ok? "spawn sends closure capturing closure with @struct")
+  (assert (= result 42) "spawned @struct through closure preserves data"))
+
+# ============================================================================
+# Cross-thread trait survival
+# ============================================================================
+
+# User-attached traits survive cross-thread send
+(begin
+  (def v (with-traits [1 2 3] {:tag :my-type}))
+  (def result (join (spawn (fn [] (traits v)))))
+  (assert (not (nil? result)) "user traits survive cross-thread send")
+  (assert (= (result :tag) :my-type) "user trait data preserved across threads"))
+
+# Default traits are re-stamped on the receiving thread
+(begin
+  (def v [10 20 30])
+  (def result (join (spawn (fn [] (first v)))))
+  (assert (= result 10) "default trait dispatch works across threads"))
 
 # ============================================================================
 # Recursive closure tests (letrec)

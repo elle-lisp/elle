@@ -88,48 +88,48 @@ impl Value {
     #[inline]
     pub fn string(s: impl AsRef<str>) -> Self {
         use crate::value::arena::alloc_inline_slice;
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         let bytes = s.as_ref().as_bytes();
         let slice = alloc_inline_slice::<u8>(bytes);
         alloc(HeapObject::LString {
             s: slice,
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LString),
         })
     }
 
     /// Create a cons cell.
     #[inline]
     pub fn pair(head: Value, tail: Value) -> Self {
-        use crate::value::heap::{alloc, HeapObject, Pair};
+        use crate::value::heap::{alloc, HeapObject, HeapTag, Pair};
         alloc(HeapObject::Pair(Pair {
             first: head,
             rest: tail,
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::Pair),
         }))
     }
 
     /// Create a mutable @array.
     #[inline]
     pub fn array_mut(elements: Vec<Value>) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         use std::cell::RefCell;
         use std::rc::Rc;
         alloc(HeapObject::LArrayMut {
             data: Rc::new(RefCell::new(elements)),
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LArrayMut),
         })
     }
 
     /// Create an empty mutable @struct.
     #[inline]
     pub fn struct_mut() -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         use std::cell::RefCell;
         use std::collections::BTreeMap;
         use std::rc::Rc;
         alloc(HeapObject::LStructMut {
             data: Rc::new(RefCell::new(BTreeMap::new())),
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LStructMut),
         })
     }
 
@@ -138,12 +138,12 @@ impl Value {
     pub fn struct_mut_from(
         entries: std::collections::BTreeMap<crate::value::heap::TableKey, Value>,
     ) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         use std::cell::RefCell;
         use std::rc::Rc;
         alloc(HeapObject::LStructMut {
             data: Rc::new(RefCell::new(entries)),
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LStructMut),
         })
     }
 
@@ -166,10 +166,10 @@ impl Value {
     /// Caller must ensure entries are sorted by key and contain no duplicates.
     #[inline]
     pub fn struct_from_sorted(entries: Vec<(crate::value::heap::TableKey, Value)>) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         alloc(HeapObject::LStruct {
             data: entries,
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LStruct),
         })
     }
 
@@ -222,23 +222,23 @@ impl Value {
     #[inline]
     pub fn array(elements: Vec<Value>) -> Self {
         use crate::value::arena::alloc_inline_slice;
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         let slice = alloc_inline_slice::<Value>(&elements);
         alloc(HeapObject::LArray {
             elements: slice,
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LArray),
         })
     }
 
     /// Create a mutable @string value.
     #[inline]
     pub fn string_mut(bytes: Vec<u8>) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         use std::cell::RefCell;
         use std::rc::Rc;
         alloc(HeapObject::LStringMut {
             data: Rc::new(RefCell::new(bytes)),
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LStringMut),
         })
     }
 
@@ -246,23 +246,23 @@ impl Value {
     #[inline]
     pub fn bytes(data: Vec<u8>) -> Self {
         use crate::value::arena::alloc_inline_slice;
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         let slice = alloc_inline_slice::<u8>(&data);
         alloc(HeapObject::LBytes {
             data: slice,
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LBytes),
         })
     }
 
     /// Create a mutable @bytes value.
     #[inline]
     pub fn bytes_mut(data: Vec<u8>) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         use std::cell::RefCell;
         use std::rc::Rc;
         alloc(HeapObject::LBytesMut {
             data: Rc::new(RefCell::new(data)),
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LBytesMut),
         })
     }
 
@@ -382,25 +382,25 @@ impl Value {
     #[inline]
     pub fn set(items: BTreeSet<Value>) -> Self {
         use crate::value::arena::alloc_inline_slice;
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         // BTreeSet iterates in sorted order; collect into Vec and copy into arena.
         let sorted: Vec<Value> = items.into_iter().collect();
         let slice = alloc_inline_slice::<Value>(&sorted);
         alloc(HeapObject::LSet {
             data: slice,
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LSet),
         })
     }
 
     /// Create a mutable set value.
     #[inline]
     pub fn set_mut(items: BTreeSet<Value>) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
+        use crate::value::heap::{alloc, HeapObject, HeapTag};
         use std::cell::RefCell;
         use std::rc::Rc;
         alloc(HeapObject::LSetMut {
             data: Rc::new(RefCell::new(items)),
-            traits: Value::NIL,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LSetMut),
         })
     }
 }

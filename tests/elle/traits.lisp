@@ -17,13 +17,17 @@
   (def v (with-traits [1 2 3] tbl))
   (assert (= (traits v) tbl) "traits retrieves the attached table"))
 
-# traits on an untraited value returns nil
-(assert (= (traits [1 2 3]) nil) "traits returns nil for untraited array")
+# Collection/sequence types now have default traitsets (not nil)
+(assert (not (nil? (traits [1 2 3])))
+        "traits returns traitset for array (default)")
 
-(assert (= (traits {:a 1}) nil) "traits returns nil for untraited struct")
+(assert (not (nil? (traits {:a 1})))
+        "traits returns traitset for struct (default)")
 
-(assert (= (traits "hello world") nil) "traits returns nil for untraited string")
+(assert (not (nil? (traits "hello world")))
+        "traits returns traitset for string (default)")
 
+# Immediate types still have no traits
 (assert (= (traits 42) nil) "traits returns nil for integer (immediate)")
 
 (assert (= (traits nil) nil) "traits returns nil for nil (immediate)")
@@ -36,12 +40,12 @@
 # Falsy / truthy via traits
 # ============================================================================
 
-# nil is falsy — (traits untraited) is usable as false branch
-(assert (not (traits [1 2 3])) "nil from traits is falsy")
+# Default traitsets are truthy (not nil)
+(assert (traits [1 2 3]) "default traitset on array is truthy")
 
-(assert (not (traits "hello world")) "nil from traits on string is falsy")
+(assert (traits "hello world") "default traitset on string is truthy")
 
-# the retrieved table is an immutable struct
+# the retrieved table is a struct (may be immutable or mutable)
 (assert (struct? (traits (with-traits [1 2] {:a 1})))
         "traits result is a struct")
 
@@ -297,11 +301,9 @@
 # Validation errors
 # ============================================================================
 
-# Trait table must be an immutable struct — not a mutable struct
-(let [[ok? err] (protect ((fn () (with-traits [1 2 3] @{:a 1}))))]
-  (assert (not ok?) "with-traits rejects mutable struct as table")
-  (assert (= (get err :error) :type-error)
-          "with-traits rejects mutable struct as table"))
+# Trait table now accepts both immutable and mutable structs
+(let [[ok? _] (protect ((fn () (with-traits [1 2 3] @{:a 1}))))]
+  (assert ok? "with-traits accepts mutable struct as table"))
 
 # Trait table must be a struct — not an array
 (let [[ok? err] (protect ((fn () (with-traits [1 2 3] [1 2]))))]

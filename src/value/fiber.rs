@@ -514,6 +514,58 @@ pub struct Fiber {
     /// denial signal is emitted instead. Default: empty (full access).
     /// Transitive: `child.withheld = parent.withheld | deny_bits`.
     pub withheld: SignalBits,
+    /// Native iterator state for trait-based :iter fibers.
+    /// When set, fiber/resume pulls the next value from here instead of
+    /// executing bytecode. `None` = normal bytecode fiber.
+    pub native_iter: Option<NativeIter>,
+}
+
+/// A Rust-side iterator that feeds values to a fiber.
+/// Each resume pops the next element; exhaustion kills the fiber.
+pub struct NativeIter {
+    pub elements: Vec<Value>,
+    pub cursor: usize,
+}
+
+/// Create a minimal no-op closure for native iterator fibers.
+/// The bytecode is a single Return instruction (opcode 3) which
+/// is never actually executed — native iter fibers short-circuit
+/// in the VM's resume path.
+fn noop_closure() -> Rc<Closure> {
+    use crate::error::LocationMap;
+    use crate::signals::Signal;
+    use crate::value::arena::alloc_inline_slice;
+    use crate::value::closure::ClosureTemplate;
+    use crate::value::types::Arity;
+    use std::collections::HashMap;
+
+    Rc::new(Closure {
+        template: Rc::new(ClosureTemplate {
+            bytecode: Rc::new(vec![3, 0, 0, 0]), // Return
+            arity: Arity::Exact(0),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants: Rc::new(vec![]),
+            signal: Signal::silent(),
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            rotation_safe: false,
+            lir_function: None,
+            doc: None,
+            syntax: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+            result_is_immediate: true,
+            has_outward_heap_set: false,
+            wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
+        }),
+        env: alloc_inline_slice(&[]),
+        squelch_mask: SignalBits::EMPTY,
+    })
 }
 
 impl Fiber {
@@ -537,6 +589,38 @@ impl Fiber {
             call_stack: Vec::new(),
             fuel: None,
             withheld: SignalBits::EMPTY,
+            native_iter: None,
+        }
+    }
+
+    /// Create a native iterator fiber from a Vec of elements.
+    ///
+    /// Each `fiber/resume` call returns the next element. When all
+    /// elements are exhausted, the fiber dies. No bytecode is executed.
+    pub fn native_iter(elements: Vec<Value>, mask: SignalBits) -> Self {
+        let closure = noop_closure();
+        Fiber {
+            heap: Box::new(crate::value::fiberheap::FiberHeap::new()),
+            stack: SmallVec::new(),
+            frames: Vec::new(),
+            status: FiberStatus::Paused,
+            mask,
+            parent: None,
+            parent_value: None,
+            child: None,
+            child_value: None,
+            closure,
+            param_frames: Vec::new(),
+            signal: None,
+            suspended: None,
+            call_depth: 0,
+            call_stack: Vec::new(),
+            fuel: None,
+            withheld: SignalBits::EMPTY,
+            native_iter: Some(NativeIter {
+                elements,
+                cursor: 0,
+            }),
         }
     }
 
