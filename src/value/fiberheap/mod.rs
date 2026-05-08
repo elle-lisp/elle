@@ -135,6 +135,11 @@ pub struct FiberHeap {
     /// True when allocations should route to the outbox (between
     /// `OutboxEnter` and `OutboxExit` bytecodes).
     outbox_active: bool,
+    /// Append-only list of slab pointers for trampoline rotation.
+    /// Unlike `pool.allocs`, this is NOT truncated by scope exits
+    /// (RegionExit/RegionExitCall). The trampoline drains it at each
+    /// tail-call boundary to snapshot one iteration's allocations.
+    pub(crate) rotation_log: Vec<*mut HeapObject>,
 }
 
 impl FiberHeap {
@@ -156,6 +161,7 @@ impl FiberHeap {
             outbox: None,
             old_outboxes: Vec::new(),
             outbox_active: false,
+            rotation_log: Vec::new(),
         }
     }
 
@@ -221,6 +227,8 @@ impl FiberHeap {
 
         // Allocate from the slab pool.
         let v = self.pool.alloc(obj);
+        // Append to rotation log (append-only, not affected by scope exits).
+        self.rotation_log.push(self.pool.last_alloc_ptr());
         if self.pool.alloc_count > self.peak_alloc_count {
             self.peak_alloc_count = self.pool.alloc_count;
         }
@@ -423,40 +431,31 @@ impl FiberHeap {
         self.shared_alloc_count = mark.shared_alloc_count();
     }
 
-    /// Release slab slots in the half-open range [from, to).
-    ///
-    /// Used by the double-buffered trampoline rotation to free one
-    /// iteration's allocations without disturbing later allocations.
-    /// Returns `(allocs_drained, dtors_drained, count_freed)`.
-    pub fn release_between(
-        &mut self,
-        from: &ArenaMark,
-        to: &ArenaMark,
-    ) -> (usize, usize, usize) {
-        let alloc_from = from.root_allocs_len();
-        let alloc_to = to.root_allocs_len();
-        let dtor_from = from.dtor_len();
-        let dtor_to = to.dtor_len();
+    /// Drain the rotation log and return all slab pointers accumulated
+    /// since the last drain.  This is append-only and not affected by
+    /// scope exits (RegionExit/RegionExitCall).
+    pub fn drain_rotation_log(&mut self) -> Vec<*mut HeapObject> {
+        std::mem::take(&mut self.rotation_log)
+    }
 
-        for i in (dtor_from..dtor_to).rev() {
-            unsafe { std::ptr::drop_in_place(self.pool.dtors[i]) }
+    /// Dealloc a list of slab pointers directly.  Used by the trampoline
+    /// to free a previous iteration's snapshot.  The pointers are removed
+    /// from the internal allocs list by value (O(n) scan).  Objects whose
+    /// refcount is nonzero are skipped — they are pinned by external
+    /// references and must not be freed.
+    pub fn dealloc_ptrs(&mut self, ptrs: &[*mut HeapObject]) {
+        for &ptr in ptrs {
+            if self.pool.refcount(ptr as *const _) > 0 {
+                continue;
+            }
+            unsafe { self.pool.dealloc_slot(ptr) }
+            // Remove from allocs list so future releases don't double-free.
+            if let Some(pos) = self.pool.allocs.iter().position(|&p| p == ptr) {
+                self.pool.allocs.swap_remove(pos);
+            }
+            // Keep alloc_count accurate: one fewer live object.
+            self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
         }
-        let dtors_drained = dtor_to - dtor_from;
-        self.pool.dtors.drain(dtor_from..dtor_to);
-
-        for i in (alloc_from..alloc_to).rev() {
-            unsafe { self.pool.dealloc_slot(self.pool.allocs[i]) }
-        }
-        let allocs_drained = alloc_to - alloc_from;
-        self.pool.allocs.drain(alloc_from..alloc_to);
-
-        let count_freed = to.position() - from.position();
-        self.pool.alloc_count -= count_freed;
-        self.shared_alloc_count = self
-            .shared_alloc_count
-            .saturating_sub(to.shared_alloc_count() - from.shared_alloc_count());
-
-        (allocs_drained, dtors_drained, count_freed)
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
@@ -622,13 +621,6 @@ impl FiberHeap {
             .drain(mark1.root_allocs_len()..mark2.root_allocs_len());
 
         self.pool.alloc_count -= mark2.position() - mark1.position();
-    }
-
-    /// Reset alloc_count without running dtors or truncating vecs.
-    /// Used by the trampoline for arena/count bookkeeping.
-    pub fn reset_alloc_count(&mut self, count: usize, shared: usize) {
-        self.pool.alloc_count = count;
-        self.shared_alloc_count = shared;
     }
 
     /// Private heap object count (used by mark/release scoping).

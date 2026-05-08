@@ -90,18 +90,6 @@ impl ArenaMark {
         self.bump_mark
     }
 
-    /// Adjust indices after `release_between` drains entries before
-    /// this mark's position.
-    pub(crate) fn adjust_after_drain(
-        &mut self,
-        allocs_drained: usize,
-        dtors_drained: usize,
-        count_freed: usize,
-    ) {
-        self.root_allocs_len -= allocs_drained;
-        self.dtor_len -= dtors_drained;
-        self.position -= count_freed;
-    }
 }
 
 /// RAII guard that releases the arena to a saved mark on drop.

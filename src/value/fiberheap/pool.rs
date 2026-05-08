@@ -63,6 +63,12 @@ impl SlabPool {
         Value::from_heap_ptr(ptr as *const (), value_tag)
     }
 
+    /// Return the slab pointer from the most recent allocation.
+    #[inline]
+    pub fn last_alloc_ptr(&self) -> *mut HeapObject {
+        *self.allocs.last().expect("last_alloc_ptr: no allocations")
+    }
+
     /// Copy `items` into the bump arena and return an `InlineSlice`.
     /// Inline-slice allocations don't count against `alloc_count` — they're
     /// data buffers attached to a `HeapObject` rather than standalone objects.

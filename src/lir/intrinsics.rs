@@ -146,6 +146,63 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "-inf",
     "math/nan",
     "nan",
+    // Arithmetic → int or float (needed for --checked-intrinsics where
+    // %add/%sub/%mul/%div become calls to these wrappers)
+    "+",
+    "-",
+    "*",
+    "/",
+    "mod",
+    "rem",
+    "min",
+    "max",
+    // Comparison → bool
+    "=",
+    "!=",
+    "<",
+    ">",
+    "<=",
+    ">=",
+    // Bitwise → int
+    "bit/and",
+    "bit/or",
+    "bit/xor",
+    "bit/not",
+    "bit/shift-left",
+    "bit/shift-right",
+    // Numeric → bool
+    "zero?",
+    "positive?",
+    "negative?",
+    "nan?",
+    "infinite?",
+    "finite?",
+    // Numeric → number
+    "negate",
+    "inc",
+    "dec",
+    "not",
+    // %-prefixed intrinsic names (used with --checked-intrinsics where
+    // %add/%sub/etc. compile as Call to the NativeFn binding, not Intrinsic)
+    "%add",
+    "%sub",
+    "%mul",
+    "%div",
+    "%rem",
+    "%le",
+    "%lt",
+    "%gt",
+    "%ge",
+    "%eq",
+    "%ne",
+    "%and",
+    "%or",
+    "%xor",
+    "%not",
+    "%shl",
+    "%shr",
+    "%int->float",
+    "%float->int",
 ];
 
 /// Primitives that store their argument(s) into external mutable data

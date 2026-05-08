@@ -1279,8 +1279,22 @@ impl<'a> Lowerer<'a> {
             | HirKind::Keyword(_)
             | HirKind::EmptyList
             | HirKind::String(_)
-            | HirKind::Lambda { .. }
             | HirKind::Quote(_) => 0,
+
+            // A lambda that captures a param effectively embeds the
+            // param's value in its closure env.  If the closure is
+            // returned, the param is reachable through it.
+            HirKind::Lambda { captures, .. } => {
+                let mut mask = 0u64;
+                for cap in captures {
+                    if let Some(idx) = params.iter().position(|p| *p == cap.binding) {
+                        if idx < 64 {
+                            mask |= 1u64 << idx;
+                        }
+                    }
+                }
+                mask
+            }
 
             // Control flow: union of all result positions
             HirKind::If {
@@ -1363,15 +1377,44 @@ impl<'a> Lowerer<'a> {
                 let mut mask = 0u64;
                 for (j, arg) in args.iter().enumerate() {
                     if j < 64 && (callee_rp & (1u64 << j)) != 0 {
-                        if let HirKind::Var(b) = &arg.expr.kind {
-                            if let Some(k) = params.iter().position(|p| p == b) {
-                                if k < 64 {
-                                    mask |= 1u64 << k;
+                        match &arg.expr.kind {
+                            // Direct param reference: bit set
+                            HirKind::Var(b) => {
+                                if let Some(k) = params.iter().position(|p| p == b) {
+                                    if k < 64 {
+                                        mask |= 1u64 << k;
+                                    }
                                 }
                             }
+                            // Lambda arg: captures embed param values
+                            // in the closure env → param flows to return
+                            HirKind::Lambda { captures, .. } => {
+                                for cap in captures {
+                                    if let Some(k) =
+                                        params.iter().position(|p| *p == cap.binding)
+                                    {
+                                        if k < 64 {
+                                            mask |= 1u64 << k;
+                                        }
+                                    }
+                                }
+                            }
+                            // DerefCell(Var): letrec self-ref
+                            HirKind::DerefCell { cell } => {
+                                if let HirKind::Var(b) = &cell.kind {
+                                    if let Some(k) =
+                                        params.iter().position(|p| p == b)
+                                    {
+                                        if k < 64 {
+                                            mask |= 1u64 << k;
+                                        }
+                                    }
+                                }
+                            }
+                            // Other expressions (calls, literals, etc.)
+                            // produce new values — params don't flow through.
+                            _ => {}
                         }
-                        // Non-Var arg (like (search ...)) doesn't map
-                        // to any of our params — no bits set.
                     }
                 }
                 mask
