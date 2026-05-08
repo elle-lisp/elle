@@ -92,7 +92,8 @@ impl VM {
         // The tail call's env (arguments) was built before release, so
         // referenced values survive. Only unreferenced temporaries are freed.
         let mut bits;
-        let mut base_alloc_count: Option<(usize, usize)> = None;
+        let mut prev_mark: Option<crate::value::arena::ArenaMark> = None;
+        let mut curr_mark: Option<crate::value::arena::ArenaMark> = None;
         let mut prev_rotation_safe = false;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
@@ -106,7 +107,8 @@ impl VM {
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
                 execute::advance_rotation(
-                    &mut base_alloc_count,
+                    &mut prev_mark,
+                    &mut curr_mark,
                     &mut prev_rotation_safe,
                     tail.rotation_safe,
                 );

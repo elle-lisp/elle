@@ -1483,7 +1483,15 @@ impl<'a> Lowerer<'a> {
                             }
                         }
                     }
-                    // Non-self tail call: args must not dangle AND callee
+                    // Non-self tail call: check callee and args.
+                    //
+                    // Tail calls to primitives execute inline (no
+                    // pending_tail_call, no rotation), so heap-allocating
+                    // args can't dangle — skip the arg check for them.
+                    if self.callee_is_primitive(func) {
+                        return false;
+                    }
+                    // For closure callees: args must not dangle AND callee
                     // itself must not escape. Without the callee check, a
                     // rotation-safe caller could tail-call a function that
                     // stores its args into external mutable state, creating
@@ -1491,8 +1499,7 @@ impl<'a> Lowerer<'a> {
                     if args.iter().any(|a| !self.tail_arg_is_safe(&a.expr)) {
                         return true;
                     }
-                    if !self.callee_is_primitive(func)
-                        && !self.callee_is_rotation_safe(func)
+                    if !self.callee_is_rotation_safe(func)
                         && !self.callee_is_non_escaping_stdlib(func)
                     {
                         return true;

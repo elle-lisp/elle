@@ -20,12 +20,33 @@
       (tail-loop (%sub n 1)))))
 
 # Run 100 iterations, then 10000 iterations.
-# If reclamation works, the count at 10000 should NOT be 100x the count at 100.
+# If reclamation works, the live slab count at 10000 should NOT be 100x
+# the count at 100.
 (let* [count-100 (tail-loop 100)
        count-10000 (tail-loop 10000)]
   (assert (%lt count-10000 (%mul count-100 10))
           (concat "tail-call reclamation: count-100=" (number->string count-100)
                   " count-10000=" (number->string count-10000))))
+
+# Slab slot reclamation: root-live-count must be bounded.
+# 100 iterations vs 10000 — if slots are reclaimed, live count
+# should not grow proportionally.
+(defn tail-alloc (n)
+  (if (%le n 0)
+    (get (arena/stats) :root-live-count)
+    (let* [s (concat "iter-" (number->string n))]
+      (tail-alloc (%sub n 1)))))
+
+(def before-100 (get (arena/stats) :root-live-count))
+(tail-alloc 100)
+(def delta-100 (%sub (get (arena/stats) :root-live-count) before-100))
+(def before-10k (get (arena/stats) :root-live-count))
+(tail-alloc 10000)
+(def delta-10k (%sub (get (arena/stats) :root-live-count) before-10k))
+(println "slab: delta-100=" delta-100 " delta-10k=" delta-10k)
+(assert (%lt delta-10k (%mul delta-100 10))
+        (concat "slab slot reclamation: delta-100=" (number->string delta-100)
+                " delta-10k=" (number->string delta-10k)))
 
 # ── Mutual tail recursion ─────────────────────────────────────────────
 

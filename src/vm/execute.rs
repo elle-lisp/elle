@@ -63,28 +63,47 @@ use std::rc::Rc;
 
 use super::core::VM;
 
-/// Reset alloc_count at a tail-call boundary for arena/count bookkeeping.
+/// Double-buffered mark/release at tail-call boundaries.
 ///
-/// Slab slot reclamation in the interpreter trampoline is blocked on two
-/// issues: (1) the `rotation_safe` flag does not propagate to runtime
-/// closure templates, and (2) using the scope_marks stack interferes with
-/// fiber suspension. The JIT reclaims via `rotate_pools_jit`. See
-/// `tests/elle/tailcall-reclaim.lisp` for the tracking test.
+/// Two marks track allocation ranges across iterations:
+///   prev_mark — from iteration N-2 (released at iteration N)
+///   curr_mark — from iteration N-1 (promoted to prev at iteration N)
+///
+/// Uses `release_between` to free only [prev, curr), keeping later
+/// objects intact.  The one-iteration lag ensures tail-call arguments
+/// (which may reference previous-iteration objects) remain live.
 #[inline]
 pub(super) fn advance_rotation(
-    base_alloc_count: &mut Option<(usize, usize)>,
-    _prev_rotation_safe: &mut bool,
+    prev_mark: &mut Option<crate::value::arena::ArenaMark>,
+    curr_mark: &mut Option<crate::value::arena::ArenaMark>,
+    prev_rotation_safe: &mut bool,
     tail_rotation_safe: bool,
 ) {
-    if let Some((count, shared)) = *base_alloc_count {
-        crate::value::fiberheap::with_current_heap_mut(|h| {
-            h.reset_alloc_count(count, shared);
-        });
-    } else {
-        *base_alloc_count =
-            crate::value::fiberheap::with_current_heap_mut(|h| Some((h.len(), 0))).flatten();
+    if let Some(ref prev) = prev_mark {
+        if let Some(ref curr) = curr_mark {
+            if *prev_rotation_safe {
+                if let Some((ad, dd, cf)) =
+                    crate::value::fiberheap::with_current_heap_mut(|h| {
+                        h.release_between(prev, curr)
+                    })
+                {
+                    if let Some(ref mut cm) = curr_mark {
+                        cm.adjust_after_drain(ad, dd, cf);
+                    }
+                }
+            } else {
+                // Not rotation-safe: reset alloc_count so arena/count
+                // stays bounded without freeing slab slots.
+                let delta = curr.position().saturating_sub(prev.position());
+                crate::value::fiberheap::with_current_heap_mut(|h| {
+                    h.reset_alloc_count(h.len().saturating_sub(delta), 0);
+                });
+            }
+        }
     }
-    *_prev_rotation_safe = tail_rotation_safe;
+    *prev_mark = curr_mark.take();
+    *prev_rotation_safe = tail_rotation_safe;
+    *curr_mark = crate::value::fiberheap::with_current_heap_mut(|h| h.mark());
 }
 
 /// Result of `execute_bytecode_saving_stack`.
@@ -139,7 +158,8 @@ impl VM {
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        let mut base_alloc_count: Option<(usize, usize)> = None;
+        let mut prev_mark: Option<crate::value::arena::ArenaMark> = None;
+        let mut curr_mark: Option<crate::value::arena::ArenaMark> = None;
         let mut prev_rotation_safe = false;
 
         loop {
@@ -177,7 +197,8 @@ impl VM {
 
             if let Some(tail) = self.pending_tail_call.take() {
                 advance_rotation(
-                    &mut base_alloc_count,
+                    &mut prev_mark,
+                    &mut curr_mark,
                     &mut prev_rotation_safe,
                     tail.rotation_safe,
                 );

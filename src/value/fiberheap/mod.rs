@@ -423,6 +423,42 @@ impl FiberHeap {
         self.shared_alloc_count = mark.shared_alloc_count();
     }
 
+    /// Release slab slots in the half-open range [from, to).
+    ///
+    /// Used by the double-buffered trampoline rotation to free one
+    /// iteration's allocations without disturbing later allocations.
+    /// Returns `(allocs_drained, dtors_drained, count_freed)`.
+    pub fn release_between(
+        &mut self,
+        from: &ArenaMark,
+        to: &ArenaMark,
+    ) -> (usize, usize, usize) {
+        let alloc_from = from.root_allocs_len();
+        let alloc_to = to.root_allocs_len();
+        let dtor_from = from.dtor_len();
+        let dtor_to = to.dtor_len();
+
+        for i in (dtor_from..dtor_to).rev() {
+            unsafe { std::ptr::drop_in_place(self.pool.dtors[i]) }
+        }
+        let dtors_drained = dtor_to - dtor_from;
+        self.pool.dtors.drain(dtor_from..dtor_to);
+
+        for i in (alloc_from..alloc_to).rev() {
+            unsafe { self.pool.dealloc_slot(self.pool.allocs[i]) }
+        }
+        let allocs_drained = alloc_to - alloc_from;
+        self.pool.allocs.drain(alloc_from..alloc_to);
+
+        let count_freed = to.position() - from.position();
+        self.pool.alloc_count -= count_freed;
+        self.shared_alloc_count = self
+            .shared_alloc_count
+            .saturating_sub(to.shared_alloc_count() - from.shared_alloc_count());
+
+        (allocs_drained, dtors_drained, count_freed)
+    }
+
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
     ///
     /// Records the current slab position so that `pop_scope_mark_and_release`

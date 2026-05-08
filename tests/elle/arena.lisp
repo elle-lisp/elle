@@ -149,10 +149,11 @@
                    (/ (- (arena/count) before) n)))
        _ (eval '(defn temp (x)
                  (+ x 1)))  # warm-up: compile transformer closures
-       p10 (measure 10)
-       p50 (measure 50)]
-  (assert (= (= p10 p50) true)
-          "per-iter allocation cost is constant after cache warm-up"))
+       p50 (measure 50)
+       p100 (measure 100)]
+  (assert (= p50 p100)
+          (concat "per-iter allocation cost is constant after cache warm-up: p50="
+                  (number->string p50) " p100=" (number->string p100))))
 
 # ── Shared allocator / zero-copy fiber exchange ─────────────────────
 
