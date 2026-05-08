@@ -750,6 +750,13 @@ pub enum LirInstr {
     /// Pop scope mark and release refcount-0 objects only.
     RegionExitRefcounted,
 
+    /// Drop a single heap object from a local slot.
+    /// If the slot holds a heap value owned by the pool with refcount == 0,
+    /// runs its destructor, frees the slab slot, and sets the slot to nil.
+    DropSlot {
+        slot: u16,
+    },
+
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.
     /// All param/value registers are consumed from the stack.

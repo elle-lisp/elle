@@ -307,8 +307,12 @@ impl FiberHeap {
 
         let n_freed = self.pool.allocs.len() - mark.root_allocs_len();
         for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
-            unsafe {
-                self.pool.dealloc_slot(self.pool.allocs[i]);
+            let ptr = self.pool.allocs[i];
+            // Skip slots already freed by DropSlot.
+            if !self.pool.is_dropped(ptr as *const _) {
+                unsafe {
+                    self.pool.dealloc_slot(ptr);
+                }
             }
         }
         self.pool.allocs.truncate(mark.root_allocs_len());
@@ -388,10 +392,14 @@ impl FiberHeap {
         }
         self.pool.dtors.truncate(kept);
 
-        // Dealloc refcount-0 slab slots, keep pinned.
+        // Dealloc refcount-0 slab slots, keep pinned. Skip dropped slots.
         let mut allocs_kept = mark.root_allocs_len();
         for i in mark.root_allocs_len()..self.pool.allocs.len() {
             let ptr = self.pool.allocs[i];
+            if self.pool.is_dropped(ptr as *const _) {
+                // Already freed by DropSlot — skip.
+                continue;
+            }
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
                 unsafe { self.pool.dealloc_slot(ptr) };
             } else {
@@ -458,6 +466,9 @@ impl FiberHeap {
     /// references and must not be freed.
     pub fn dealloc_ptrs(&mut self, ptrs: &[*mut HeapObject]) {
         for &ptr in ptrs {
+            if self.pool.is_dropped(ptr as *const _) {
+                continue;
+            }
             if self.pool.refcount(ptr as *const _) > 0 {
                 continue;
             }

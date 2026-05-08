@@ -59,6 +59,12 @@ impl<'a> Lowerer<'a> {
             };
 
             if is_tail {
+                // DropSlot: free dead parameters before self-tail-calls.
+                // Only for self-recursion where we know the callee's signature.
+                if self.is_self_tail_call(func) {
+                    self.emit_drop_slots_for_tail_call(args);
+                }
+
                 // Emit pending RegionExits before TailCall — the scope's
                 // allocations must be freed before the frame is replaced.
                 // Args are already in registers, so they're not affected.

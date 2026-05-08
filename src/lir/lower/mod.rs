@@ -751,6 +751,75 @@ impl<'a> Lowerer<'a> {
         self.region_refcounted_stack.pop();
     }
 
+    /// Check if the callee is the current function (self-tail-call).
+    fn is_self_tail_call(&self, func: &Hir) -> bool {
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        self.current_function_binding
+            .as_ref()
+            .is_some_and(|b| b == binding)
+    }
+
+    /// Emit DropSlot instructions for dead parameters at a tail-call site.
+    ///
+    /// Collects all Var bindings referenced by the tail-call arguments,
+    /// then emits DropSlot for each function parameter that:
+    /// 1. Is NOT referenced by any tail-call argument
+    /// 2. Has a local slot (not an upvalue/capture)
+    /// 3. Is in the current function's parameter list
+    fn emit_drop_slots_for_tail_call(&mut self, args: &[CallArg]) {
+        let params = match &self.current_function_params {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        if params.is_empty() {
+            return;
+        }
+
+        // Collect all Var bindings transitively referenced by args.
+        let mut referenced = std::collections::HashSet::new();
+        for arg in args {
+            Self::collect_var_refs(&arg.expr, &mut referenced);
+        }
+
+        // Emit DropSlot for unreferenced parameters (reverse order).
+        for param in params.iter().rev() {
+            if referenced.contains(param) {
+                continue;
+            }
+            // Only drop local-slot params, not upvalues.
+            if self.upvalue_bindings.contains(param) {
+                continue;
+            }
+            if let Some(&slot) = self.binding_to_slot.get(param) {
+                self.emit(LirInstr::DropSlot { slot });
+            }
+        }
+    }
+
+    /// Collect all Var bindings referenced in a HIR expression.
+    fn collect_var_refs(hir: &Hir, out: &mut std::collections::HashSet<Binding>) {
+        match &hir.kind {
+            HirKind::Var(b) => {
+                out.insert(*b);
+            }
+            HirKind::DerefCell { cell } => {
+                Self::collect_var_refs(cell, out);
+            }
+            _ => {
+                hir.for_each_child(|child| {
+                    Self::collect_var_refs(child, out);
+                });
+            }
+        }
+    }
+
     /// Discard an unused value by storing it to a scratch slot.
     /// The emitter's auto-pop after StoreLocal cleans up the value
     /// from the operand stack. The scratch slot is lazily allocated

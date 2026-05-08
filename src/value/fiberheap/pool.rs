@@ -96,8 +96,11 @@ impl SlabPool {
     /// Run destructors in reverse order from `self.dtors[start..]`.
     pub fn run_dtors(&self, start: usize) {
         for i in (start..self.dtors.len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.dtors[i]);
+            // Skip slots already freed by DropSlot.
+            if !self.slab.is_dropped(self.dtors[i] as *const _) {
+                unsafe {
+                    std::ptr::drop_in_place(self.dtors[i]);
+                }
             }
         }
     }
@@ -108,10 +111,11 @@ impl SlabPool {
         self.run_dtors(mark.dtor_len);
         self.dtors.truncate(mark.dtor_len);
 
-        // Return slab slots to the free list.
+        // Return slab slots to the free list. Skip dropped slots.
         for i in (mark.allocs_len..self.allocs.len()).rev() {
-            // SAFETY: run_dtors already ran destructors; slots are safe to free.
-            self.slab.dealloc(self.allocs[i]);
+            if !self.slab.is_dropped(self.allocs[i] as *const _) {
+                self.slab.dealloc(self.allocs[i]);
+            }
         }
         self.allocs.truncate(mark.allocs_len);
 
@@ -177,6 +181,20 @@ impl SlabPool {
     #[inline]
     pub unsafe fn dealloc_slot(&mut self, ptr: *mut HeapObject) {
         self.slab.dealloc(ptr);
+    }
+
+    // ── Dropped bitmap ─────────────────────────────────────────────
+
+    /// Mark a slot as dropped by DropSlot.
+    #[inline]
+    pub fn mark_dropped(&mut self, ptr: *const HeapObject) {
+        self.slab.mark_dropped(ptr);
+    }
+
+    /// Check if a slot was already dropped.
+    #[inline]
+    pub fn is_dropped(&self, ptr: *const HeapObject) -> bool {
+        self.slab.is_dropped(ptr)
     }
 
     // ── Refcounting ───────────────────────────────────────────────────

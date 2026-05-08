@@ -1128,6 +1128,12 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
+            LirInstr::DropSlot { .. } => {
+                // TODO: JIT DropSlot — for now, fall back to interpreter.
+                // The JIT only compiles silent functions; DropSlot is emitted
+                // at tail-call sites which the JIT handles differently.
+            }
+
             LirInstr::PushParamFrame { pairs } => {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PushParamFrame without vm pointer".to_string())

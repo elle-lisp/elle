@@ -944,6 +944,12 @@ impl Emitter {
                 self.bytecode.emit(Instruction::RegionExitRefcounted);
             }
 
+            LirInstr::DropSlot { slot } => {
+                self.bytecode.emit(Instruction::DropSlot);
+                self.bytecode.emit_u16(*slot);
+                // No stack effect — operates on a local slot directly.
+            }
+
             LirInstr::OutboxEnter => {
                 self.bytecode.emit(Instruction::OutboxEnter);
                 // No stack effect

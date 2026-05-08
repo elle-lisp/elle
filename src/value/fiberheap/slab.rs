@@ -96,6 +96,10 @@ pub(crate) struct Slab {
     /// bindings. NOT tracked: stack, let bindings, function parameters
     /// (transient — handled by scope marks).
     refcounts: Vec<u32>,
+    /// Per-slot dropped bitmap. 1 bit per slot (4 u64s per 256-slot chunk).
+    /// Set by DropSlot; checked by release() to skip already-freed slots;
+    /// cleared by alloc() on slot reuse.
+    dropped: Vec<u64>,
 }
 
 impl Slab {
@@ -106,6 +110,7 @@ impl Slab {
             bump_cursor: 0,
             live_count: 0,
             refcounts: Vec::new(),
+            dropped: Vec::new(),
         }
     }
 
@@ -118,6 +123,7 @@ impl Slab {
             let slot = self.chunks[chunk_idx].slot(slot_idx);
             let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
+            self.clear_dropped(flat as usize);
             unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
             slot as *mut HeapObject
         } else {
@@ -164,6 +170,7 @@ impl Slab {
         self.bump_cursor = 0;
         self.live_count = 0;
         self.refcounts.clear();
+        self.dropped.clear();
         self.chunks.truncate(1);
         if let Some(chunk) = self.chunks.first() {
             unsafe {
@@ -238,14 +245,51 @@ impl Slab {
         }
     }
 
+    // ── Dropped bitmap ─────────────────────────────────────────────
+
+    /// Mark a slot as dropped. Used by DropSlot to prevent double-free
+    /// when release() later iterates the allocs list.
+    pub fn mark_dropped(&mut self, ptr: *const HeapObject) {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        let word = flat / 64;
+        let bit = flat % 64;
+        if word >= self.dropped.len() {
+            self.dropped.resize(word + 1, 0);
+        }
+        self.dropped[word] |= 1u64 << bit;
+    }
+
+    /// Check if a slot was already dropped by DropSlot.
+    pub fn is_dropped(&self, ptr: *const HeapObject) -> bool {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        let word = flat / 64;
+        let bit = flat % 64;
+        if word >= self.dropped.len() {
+            return false;
+        }
+        (self.dropped[word] & (1u64 << bit)) != 0
+    }
+
+    /// Clear the dropped bit for a slot (on alloc reuse).
+    fn clear_dropped(&mut self, flat: usize) {
+        let word = flat / 64;
+        let bit = flat % 64;
+        if word < self.dropped.len() {
+            self.dropped[word] &= !(1u64 << bit);
+        }
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {
         let chunk = Chunk::new().expect("slab: mmap chunk failed");
         self.chunks.push(chunk);
         self.bump_cursor = 0;
-        // Grow refcount array for the new chunk (all zeros).
+        // Grow refcount and dropped arrays for the new chunk.
         self.refcounts.resize(self.chunks.len() * CHUNK_SIZE, 0);
+        // Dropped bitmap: ceil(CHUNK_SIZE / 64) u64s per chunk.
+        self.dropped
+            .resize((self.chunks.len() * CHUNK_SIZE).div_ceil(64), 0);
     }
 
     /// Convert a flat slot index to `(chunk_index, slot_within_chunk)`.

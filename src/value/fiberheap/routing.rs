@@ -244,3 +244,39 @@ pub fn region_rotate_dealloc() {
         unsafe { (*ptr).rotate_scope_marks_dealloc() };
     }
 }
+
+/// Drop a single heap value: if owned by the current pool with refcount == 0,
+/// run its destructor, return the slab slot to the free list, and mark it
+/// as dropped in the bitmap. Does NOT modify pool.allocs — release() checks
+/// the bitmap to skip already-dropped slots.
+pub fn drop_slot_value(val: crate::value::Value) {
+    let ptr = current_heap_ptr();
+    if ptr.is_null() {
+        return;
+    }
+    let Some(heap_ptr) = val.as_heap_ptr() else {
+        return;
+    };
+    unsafe {
+        let heap = &mut *ptr;
+        if !heap.pool.slab_owns(heap_ptr) {
+            return;
+        }
+        let obj_ptr = heap_ptr as *mut crate::value::heap::HeapObject;
+        // Skip if already dropped or refcount > 0.
+        if heap.pool.is_dropped(obj_ptr as *const _) {
+            return;
+        }
+        if heap.pool.refcount(obj_ptr as *const _) > 0 {
+            return;
+        }
+        // Run destructor if needed.
+        if super::needs_drop((*obj_ptr).tag()) {
+            std::ptr::drop_in_place(obj_ptr);
+        }
+        // Return slab slot to free list and mark as dropped.
+        heap.pool.dealloc_slot(obj_ptr);
+        heap.pool.mark_dropped(obj_ptr as *const _);
+        heap.pool.alloc_count = heap.pool.alloc_count.saturating_sub(1);
+    }
+}

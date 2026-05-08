@@ -470,6 +470,17 @@ impl VM {
                     crate::value::fiberheap::region_exit_refcounted();
                 }
 
+                Instruction::DropSlot => {
+                    let slot = self.read_u16(bc, &mut ip) as usize;
+                    let frame_base = self.current_frame_base();
+                    let abs_idx = frame_base + slot;
+                    let val = self.fiber.stack[abs_idx];
+                    if val.is_heap() {
+                        crate::value::fiberheap::drop_slot_value(val);
+                        self.fiber.stack[abs_idx] = Value::NIL;
+                    }
+                }
+
                 // Outbox routing: toggle allocation target for yield-bound values.
                 Instruction::OutboxEnter => {
                     crate::value::fiberheap::outbox_enter();

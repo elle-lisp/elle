@@ -328,6 +328,14 @@ pub enum Instruction {
     CallChecked,
     /// Arity-checked tail call (arg_count). Compiler verified arity.
     TailCallChecked,
+
+    /// Drop a single heap object from a local slot.
+    /// Operand: u16 local slot index.
+    /// If the slot holds a heap value owned by the current pool with
+    /// refcount == 0, runs its destructor, returns the slab slot to the
+    /// free list, marks it dropped, and sets the register to nil.
+    /// Idempotent: re-dropping a nil slot is a no-op.
+    DropSlot,
 }
 
 /// Compiled bytecode with constants
@@ -596,6 +604,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one
+            }
+            Instruction::DropSlot if i + 1 < instructions.len() => {
+                let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (slot={})", slot));
+                i += 2;
             }
             Instruction::PushParamFrame if i < instructions.len() => {
                 let count = instructions[i];
