@@ -88,11 +88,17 @@ impl<'a> Lowerer<'a> {
 
             // Var: safe if binding is from outside the scope (value was
             // allocated before RegionEnter) or if the binding is in-scope
-            // but its init expression is provably immediate.
+            // but its init expression is provably immediate AND the binding
+            // is not mutated. A mutated binding's current value at scope
+            // exit may be a heap-allocated object from within the scope,
+            // even if its init was immediate.
             HirKind::Var(binding) => {
                 match scope_bindings.iter().find(|(b, _)| b == binding) {
                     None => true, // outer binding — safe
                     Some((_, init)) => {
+                        if self.arena.get(*binding).is_mutated {
+                            return false;
+                        }
                         self.result_is_safe_impl(init, scope_bindings, trust_return_safe)
                     }
                 }

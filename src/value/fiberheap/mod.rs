@@ -305,9 +305,7 @@ impl FiberHeap {
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
 
-        // Dealloc slab slots allocated after the mark, returning them
-        // to the free list for reuse. Scope eligibility is gated by
-        // Tofte-Talpin region inference (suspension + escape analysis).
+        let n_freed = self.pool.allocs.len() - mark.root_allocs_len();
         for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
             unsafe {
                 self.pool.dealloc_slot(self.pool.allocs[i]);
@@ -315,13 +313,23 @@ impl FiberHeap {
         }
         self.pool.allocs.truncate(mark.root_allocs_len());
 
-        // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
             let start = mark.custom_ptrs_len();
             for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
                 state.allocator.inner.dealloc(ptr, size, align);
             }
             state.custom_ptrs.truncate(start);
+        }
+
+        // Rewind bump arena for inline data (strings, arrays, bytes).
+        // Only rewind when slab slots were actually freed — their inline
+        // data is dead. When n_freed == 0, the call-site scope freed no
+        // objects but the bump may contain live inline data from the
+        // callee's return value.
+        if n_freed > 0 {
+            if let Some(bm) = mark.bump_mark() {
+                self.pool.release_bump_to(bm);
+            }
         }
 
         self.pool.alloc_count = mark.position();
@@ -426,6 +434,11 @@ impl FiberHeap {
             }
             state.custom_ptrs.truncate(start);
         }
+
+        // NOTE: no bump rewind here. release_no_dealloc keeps slab slots
+        // alive, so their inline data (InlineSlice pointers into the bump
+        // arena) must also stay alive. Bump data is reclaimed later by
+        // teardown or a full release().
 
         self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();

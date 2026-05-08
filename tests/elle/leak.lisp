@@ -73,6 +73,21 @@
   (assert (or checked? (bounded? d100 d10k 10))
           (string "t0 string: d100=" d100 " d10k=" d10k)))
 
+# arena/bytes: bump arena reclaimed for strings in scope-marked while loops.
+(defn t0-string-bytes [n]
+  (def before (arena/bytes))
+  (def @i 0)
+  (while (%lt i n)
+    (let [x (string "iter-" i "-padding-to-make-string-longer")]
+      x)
+    (assign i (%add i 1)))
+  (%sub (arena/bytes) before))
+
+(let [d100 (t0-string-bytes 100)
+      d10k (t0-string-bytes 10000)]
+  (assert (or checked? (bounded? d100 d10k 131072))
+          (string "t0 string-bytes: d100=" d100 " d10k=" d10k)))
+
 # Pair (cons cell) allocation in while loop — scope reclaims.
 # pair is a stdlib wrapper around %pair; it must be recognized
 # as non-escaping so scope marks are inserted.
