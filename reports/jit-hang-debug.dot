@@ -3,31 +3,23 @@ digraph refcount_protocol {
     node [shape=box, style=filled, fontname="monospace", fontsize=10];
     edge [fontname="monospace", fontsize=9];
 
-    // ── Completed ────────────────────────────────────────────────
-    s1 [label="StoreLocal: incref ✓", fillcolor="#99ff99"];
-    s2 [label="StoreLocalRefcounted ✓\ndecref(old) + incref(new)", fillcolor="#99ff99"];
-    s3 [label="DecrefLocal bytecode ✓\nemitted before RegionExit\nfor region-scoped bindings", fillcolor="#99ff99"];
-    s4 [label="DropSlot: decref + drop ✓\nescape-analysis gated", fillcolor="#99ff99"];
-    s5 [label="Intrusive linked list ✓\nO(1) unlink in DropSlot\nfixes resource.lisp double-free", fillcolor="#99ff99"];
-    s6 [label="Refcounted rotation ✓\naccepts may_suspend()\nfixes http2:serve leak", fillcolor="#99ff99"];
-    s7 [label="Result-protection slots ✓\nlet/letrec body result\nsurvives DecrefLocal+release", fillcolor="#99ff99"];
-    s8 [label="release() → release_refcounted() ✓\nall scope exits are rc-aware", fillcolor="#99ff99"];
+    // ── Completed infrastructure ─────────────────────────────────
+    infra [label="Infrastructure (all done):\n• StoreLocal incref\n• StoreLocalRefcounted decref+incref\n• DecrefLocal bytecode + emission\n• DropSlot decref+drop (escape-gated)\n• Intrusive linked list (O(1) unlink)\n• Refcounted rotation (accept suspend)\n• Result-protection slots\n• release() → release_refcounted()\n• Alloc-time child incref\n• Decref-on-free for children\n• --trace=rc\n• Tier 14 leak tests", fillcolor="#99ff99"];
 
-    // ── Test status ──────────────────────────────────────────────
-    pass [label="PASS:\nleak.lisp (all tiers 0-14) ✓\nresource.lisp ✓\nhttp2 serve ✓\nh2-stress-scoped ✓", fillcolor="#99ff99", penwidth=2];
+    // ── What passes ──────────────────────────────────────────────
+    pass [label="PASS (DecrefLocal disabled):\nALL tests pass\nincluding telemetry.lisp", fillcolor="#99ff99"];
 
-    // ── Current blocker ──────────────────────────────────────────
-    blocker [label="FAIL: telemetry.lisp\n(get metrics 1) → type-error\n\nUAF: struct child freed by\nrelease_refcounted when\nparent binding is decref'd.\nChild is rc=0 (only structural\nreference, not binding ref)\n→ freed despite being reachable", fillcolor="#ff9999", penwidth=3];
+    // ── What fails ───────────────────────────────────────────────
+    fail [label="FAIL (DecrefLocal enabled):\ntelemetry.lisp UAF\nleak.lisp tier 14 passes\nresource.lisp passes\nhttp2 passes", fillcolor="#ff9999", penwidth=3];
 
     // ── Root cause ───────────────────────────────────────────────
-    cause [label="Refcount tracks BINDING refs only.\nStruct/array children have rc=0\nunless also held by a binding.\nDecrefLocal drops parent rc → 0\nrelease_refcounted propagates\nfrom rc>0 objects only.\nParent rc=0 → children unprotected\n→ freed → UAF", fillcolor="#ffcccc"];
+    cause [label="DecrefLocal drops binding rc → 0\nrelease_refcounted frees the value\nBUT: value is a struct child of\nanother live value, and the child\nincref balance is wrong.\n\nThe child was incref'd at alloc time\nbut also decref'd somewhere before\nthe parent scope exits.", fillcolor="#ffcccc"];
 
-    // ── Fix ──────────────────────────────────────────────────────
-    fix [label="FIX: struct/array construction\nmust incref each child value.\nThis makes children reachable\nthrough the parent's rc>0 state.\nrelease_refcounted propagation\nthen correctly protects them.", fillcolor="#cce5ff", penwidth=2];
+    // ── Investigation needed ─────────────────────────────────────
+    invest [label="INVESTIGATE:\n1. Trace rc of specific metrics[1]\n   value through its lifecycle\n2. Find which decref drops it to 0\n   before release_refcounted\n3. Check freeze/thaw incref balance\n   (freeze creates new array from\n   @array — children incref'd twice?)", fillcolor="#cce5ff"];
 
     // ── Edges ────────────────────────────────────────────────────
-    s1 -> s2 -> s3 -> s4 -> s5 -> s6 -> s7 -> s8;
-    s8 -> pass;
-    s8 -> blocker;
-    blocker -> cause -> fix;
+    infra -> pass [label="without\nDecrefLocal"];
+    infra -> fail [label="with\nDecrefLocal"];
+    fail -> cause -> invest;
 }

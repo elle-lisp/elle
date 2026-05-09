@@ -161,7 +161,6 @@ impl Slab {
         }
         self.free_head = Some(flat as u32);
         self.live_count = self.live_count.saturating_sub(1);
-        // Reset refcount for the freed slot.
         if flat < self.refcounts.len() {
             self.refcounts[flat] = 0;
         }
