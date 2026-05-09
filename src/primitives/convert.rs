@@ -255,41 +255,99 @@ pub(crate) fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
         0 => (SIG_OK, Value::string("")),
         1 => prim_to_string_single(args[0]),
         _ => {
+            // Multi-arg: format directly into a Rust String to avoid
+            // allocating slab-backed intermediate strings per argument.
             let mut result = String::new();
             for arg in args {
-                let (sig, val) = prim_to_string_single(*arg);
-                if sig != SIG_OK {
+                if let Err((sig, val)) = write_value_to_string(*arg, &mut result) {
                     return (sig, val);
-                }
-                if let Some(s) = val.with_string(|s| s.to_string()) {
-                    result.push_str(&s);
-                } else if let Some(ms) = val.as_string_mut() {
-                    let borrowed = ms.borrow();
-                    match std::str::from_utf8(&borrowed) {
-                        Ok(s) => result.push_str(s),
-                        Err(e) => {
-                            return (
-                                SIG_ERROR,
-                                error_val(
-                                    "encoding-error",
-                                    format!("string: invalid UTF-8: {}", e),
-                                ),
-                            )
-                        }
-                    }
-                } else {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "internal-error",
-                            "to-string: internal conversion failure".to_string(),
-                        ),
-                    );
                 }
             }
             (SIG_OK, Value::string(result))
         }
     }
+}
+
+/// Append a value's string representation directly to a Rust String,
+/// avoiding slab allocation for intermediates.
+fn write_value_to_string(val: Value, out: &mut String) -> Result<(), (SignalBits, Value)> {
+    use std::fmt::Write;
+
+    if val.is_string() {
+        val.with_string(|s| out.push_str(s));
+        return Ok(());
+    }
+    if let Some(ms) = val.as_string_mut() {
+        let borrowed = ms.borrow();
+        match std::str::from_utf8(&borrowed) {
+            Ok(s) => out.push_str(s),
+            Err(e) => {
+                return Err((
+                    SIG_ERROR,
+                    error_val("encoding-error", format!("string: invalid UTF-8: {}", e)),
+                ))
+            }
+        }
+        return Ok(());
+    }
+    if let Some(n) = val.as_int() {
+        let _ = write!(out, "{}", n);
+        return Ok(());
+    }
+    if let Some(f) = val.as_float() {
+        if f.is_infinite() {
+            out.push_str(if f.is_sign_positive() { "inf" } else { "-inf" });
+        } else if f.is_nan() {
+            out.push_str("NaN");
+        } else if f.fract() == 0.0 {
+            let _ = write!(out, "{:.1}", f);
+        } else {
+            let _ = write!(out, "{}", f);
+        }
+        return Ok(());
+    }
+    if let Some(b) = val.as_bool() {
+        out.push_str(if b { "true" } else { "false" });
+        return Ok(());
+    }
+    if val.is_nil() {
+        out.push_str("nil");
+        return Ok(());
+    }
+    if let Some(name) = val.as_keyword_name() {
+        out.push_str(&name);
+        return Ok(());
+    }
+    if let Some(sym_id) = val.as_symbol() {
+        match crate::context::resolve_symbol_name(sym_id) {
+            Some(name) => out.push_str(&name),
+            None => {
+                return Err((
+                    SIG_ERROR,
+                    error_val(
+                        "internal-error",
+                        format!("to-string: symbol ID {} not found in symbol table", sym_id),
+                    ),
+                ))
+            }
+        }
+        return Ok(());
+    }
+    // For compound/heap types, fall back to prim_to_string_single
+    // (these are rare in hot concat paths).
+    let (sig, string_val) = prim_to_string_single(val);
+    if sig != SIG_OK {
+        return Err((sig, string_val));
+    }
+    if let Some(s) = string_val.with_string(|s| s.to_string()) {
+        out.push_str(&s);
+    } else {
+        return Err((
+            SIG_ERROR,
+            error_val("internal-error", "to-string: internal conversion failure".to_string()),
+        ));
+    }
+    Ok(())
 }
 
 /// Single-value string conversion (original behavior).

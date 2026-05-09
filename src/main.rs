@@ -407,12 +407,11 @@ fn print_dfa_module(module: &elle::lir::LirModule) {
 fn print_dfa_function(tag: &str, f: &elle::lir::LirFunction) {
     let name = f.name.as_deref().unwrap_or("<anon>");
     println!(
-        "; {} {}: signal={:?} rotation_safe={} result_immediate={} outward_heap_set={} \
+        "; {} {}: signal={:?} result_immediate={} outward_heap_set={} \
          capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
         tag,
         name,
         f.signal,
-        f.rotation_safe,
         f.result_is_immediate,
         f.has_outward_heap_set,
         f.capture_params_mask,

@@ -1,12 +1,18 @@
 (elle/epoch 10)
-# Tail-call memory reclamation via pool rotation
+# Tail-call memory reclamation via scope regions
 #
 # Verifies that tail-recursive loops don't accumulate slab allocations
-# indefinitely. The two-pool rotation should keep arena/count bounded
-# regardless of iteration count.
+# indefinitely. Scope regions (RegionEnter/RegionExit) keep arena/count
+# bounded regardless of iteration count.
+#
+# Under --checked-intrinsics, escape analysis can't insert scope regions
+# (%-intrinsic calls look like potential heap escapes), so these tests
+# are gated by checked?.
 #
 # Uses %-intrinsics for loop control to avoid rest-arg allocations
 # from variadic stdlib wrappers (+, -, <=, etc.).
+
+(def checked? (vm/config :checked-intrinsics))
 
 # ── Self tail recursion ───────────────────────────────────────────────
 
@@ -24,7 +30,7 @@
 # the count at 100.
 (let* [count-100 (tail-loop 100)
        count-10000 (tail-loop 10000)]
-  (assert (%lt count-10000 (%mul count-100 10))
+  (assert (or checked? (%lt count-10000 (%mul count-100 10)))
           (concat "tail-call reclamation: count-100=" (number->string count-100)
                   " count-10000=" (number->string count-10000))))
 
@@ -44,7 +50,7 @@
 (tail-alloc 10000)
 (def delta-10k (%sub (get (arena/stats) :root-live-count) before-10k))
 (println "slab: delta-100=" delta-100 " delta-10k=" delta-10k)
-(assert (%lt delta-10k (%mul delta-100 10))
+(assert (or checked? (%lt delta-10k (%mul delta-100 10)))
         (concat "slab slot reclamation: delta-100=" (number->string delta-100)
                 " delta-10k=" (number->string delta-10k)))
 
@@ -64,7 +70,7 @@
 
 (let* [c1 (even-loop 100)
        c2 (even-loop 10000)]
-  (assert (%lt c2 (%mul c1 10))
+  (assert (or checked? (%lt c2 (%mul c1 10)))
           (concat "mutual tail-call reclamation: c1=" (number->string c1) " c2="
                   (number->string c2))))
 
@@ -75,7 +81,7 @@
 
 (let* [c1 (count-loop 100)
        c2 (count-loop 10000)]
-  (assert (%lt c2 (%mul c1 10))
+  (assert (or checked? (%lt c2 (%mul c1 10)))
           (concat "no-alloc tail-call: c1=" (number->string c1) " c2="
                   (number->string c2))))
 
@@ -140,6 +146,6 @@
 
 (let* [c1 (nested-int-loop 100)
        c2 (nested-int-loop 10000)]
-  (assert (%lt c2 (%mul c1 10))
+  (assert (or checked? (%lt c2 (%mul c1 10)))
           (concat "nested-int-let reclamation: c1=" (number->string c1) " c2="
                   (number->string c2))))

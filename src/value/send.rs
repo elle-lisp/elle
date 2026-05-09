@@ -80,7 +80,6 @@ pub struct SendableClosure {
     /// Stripped of doc/syntax (not sendable), but retains all JIT-relevant fields.
     pub lir_function: Option<crate::lir::LirFunction>,
     /// Escape analysis flags preserved across serialization.
-    pub rotation_safe: bool,
     pub result_is_immediate: bool,
     pub has_outward_heap_set: bool,
 }
@@ -383,7 +382,6 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 squelch_mask: SignalBits::EMPTY,
                 env: Vec::new(),
                 lir_function: None,
-                rotation_safe: false,
                 result_is_immediate: false,
                 has_outward_heap_set: false,
             });
@@ -444,7 +442,6 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                         None
                     }
                 }),
-                rotation_safe: closure_rc.template.rotation_safe,
                 result_is_immediate: closure_rc.template.result_is_immediate,
                 has_outward_heap_set: closure_rc.template.has_outward_heap_set,
             };
@@ -932,7 +929,6 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
 
                 symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
-                rotation_safe: sc.rotation_safe,
                 lir_function,
                 doc,
                 syntax: None,
@@ -1073,7 +1069,6 @@ mod tests {
             capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
             lir_function: lir.map(Rc::new),
             doc: None,
             syntax: None,
@@ -1141,7 +1136,6 @@ mod tests {
             capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
             lir_function: Some(Rc::new(lir)),
             doc: None,
             syntax: None,

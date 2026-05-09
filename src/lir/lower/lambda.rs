@@ -173,6 +173,7 @@ impl<'a> Lowerer<'a> {
 
         self.next_reg = 0;
         self.next_label = 1;
+        self.discard_slot = None;
         // num_locals starts at 0; non-LBox params and let-bound vars
         // will increment it as they're allocated.
         // LBox params go into the env (not counted in num_locals for stack frame).

@@ -19,7 +19,6 @@ pub(crate) struct TailCallInfo {
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
-    pub rotation_safe: bool,
     pub squelch_mask: SignalBits,
 }
 
@@ -135,7 +134,6 @@ fn root_closure() -> Rc<Closure> {
 
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
             lir_function: None,
             doc: None,
             syntax: None,

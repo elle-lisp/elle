@@ -255,7 +255,6 @@ mod tests {
             has_outward_heap_set: false,
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
-            rotation_safe: false,
         });
 
         // VM must exist before allocating the closure env slice so a root
@@ -319,7 +318,6 @@ mod tests {
             has_outward_heap_set: false,
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
-            rotation_safe: false,
         });
 
         // VM must exist before allocating the closure env slice so a root

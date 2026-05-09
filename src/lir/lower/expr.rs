@@ -300,8 +300,19 @@ impl<'a> Lowerer<'a> {
         }
 
         let mut last_reg = self.lower_expr(&exprs[0])?;
-        for expr in exprs.iter().skip(1) {
-            self.discard(last_reg);
+        // DropSlot for fresh allocations is only safe outside scope
+        // regions. Inside a scoped while loop, RegionRotate handles
+        // reclamation; DropSlot there causes double-free when a freed
+        // slot is reused and the stale allocs-list entry survives into
+        // the next rotation.
+        let can_drop = self.region_depth == 0;
+        for (i, expr) in exprs.iter().enumerate().skip(1) {
+            let prev = &exprs[i - 1];
+            if can_drop && self.expr_is_fresh_allocation(prev) {
+                self.discard_and_drop(last_reg);
+            } else {
+                self.discard(last_reg);
+            }
             last_reg = self.lower_expr(expr)?;
         }
         Ok(last_reg)
@@ -346,8 +357,14 @@ impl<'a> Lowerer<'a> {
             });
         } else {
             let mut last_reg = self.lower_expr(&body[0])?;
-            for expr in body.iter().skip(1) {
-                self.discard(last_reg);
+            let can_drop = self.region_depth == 0;
+            for (i, expr) in body.iter().enumerate().skip(1) {
+                let prev = &body[i - 1];
+                if can_drop && self.expr_is_fresh_allocation(prev) {
+                    self.discard_and_drop(last_reg);
+                } else {
+                    self.discard(last_reg);
+                }
                 last_reg = self.lower_expr(expr)?;
             }
             self.emit(LirInstr::StoreLocal {

@@ -253,7 +253,6 @@ mod tests {
             has_outward_heap_set: false,
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
-            rotation_safe: false,
         });
 
         let closure = crate::value::Closure {
@@ -463,7 +462,6 @@ mod tests {
             has_outward_heap_set: false,
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
-            rotation_safe: false,
         });
 
         let closure = crate::value::Closure {

@@ -821,9 +821,6 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Discard an unused value by storing it to a scratch slot.
-    /// The emitter's auto-pop after StoreLocal cleans up the value
-    /// from the operand stack. The scratch slot is lazily allocated
-    /// on first use and reused for all discards in the function.
     fn discard(&mut self, src: Reg) {
         let slot = match self.discard_slot {
             Some(s) => s,
@@ -835,6 +832,73 @@ impl<'a> Lowerer<'a> {
             }
         };
         self.emit(LirInstr::StoreLocal { slot, src });
+    }
+
+    /// Discard an unused value and immediately free it via DropSlot.
+    /// Used for intermediate expressions in begin blocks where the
+    /// discarded value is provably a fresh allocation (not aliased).
+    fn discard_and_drop(&mut self, src: Reg) {
+        self.discard(src);
+        if let Some(slot) = self.discard_slot {
+            self.emit(LirInstr::DropSlot { slot });
+        }
+    }
+
+    /// Check if an expression provably produces a fresh heap allocation.
+    ///
+    /// Returns true only when the result is guaranteed to be a new object
+    /// that no other reference points to. This is critical for DropSlot
+    /// safety: mutating primitives like `put`/`push` return their first
+    /// argument (an existing object), so freeing that would corrupt live
+    /// references through upvalues or other bindings.
+    fn expr_is_fresh_allocation(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Lambda { .. } => true,
+            HirKind::Call { func, .. } => self.callee_is_fresh_allocator(func),
+            _ => false,
+        }
+    }
+
+    /// Check if a callee is a primitive known to always return a fresh
+    /// heap allocation (never an alias of an argument).
+    fn callee_is_fresh_allocator(&self, func: &Hir) -> bool {
+        static FRESH_PRIMS: &[&str] = &[
+            "struct", "struct-mut", "string", "array", "bytes", "set", "set-mut",
+        ];
+
+        let binding = match &func.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
+        };
+
+        // Check immutable_values directly (works for top-level primitives).
+        if let Some(val) = self.immutable_values.get(binding) {
+            if let Some(def) = val.as_native_def() {
+                return FRESH_PRIMS.contains(&def.name);
+            }
+        }
+
+        // For captured primitives (functionalize wraps them in cells),
+        // check if the binding's value was seeded as a known primitive.
+        // Walk the binding info: if it's is_primitive + is_immutable,
+        // look up the original primitive value by checking all
+        // immutable_values entries that share the same SymbolId.
+        let bi = self.arena.get(*binding);
+        if bi.is_immutable && !bi.is_mutated {
+            let target_sym = bi.name;
+            for (&other_binding, val) in &self.immutable_values {
+                if self.arena.get(other_binding).name == target_sym {
+                    if let Some(def) = val.as_native_def() {
+                        return FRESH_PRIMS.contains(&def.name);
+                    }
+                }
+            }
+        }
+        false
     }
 
     // ── Escape analysis ────────────────────────────────────────────

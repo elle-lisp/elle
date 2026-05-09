@@ -92,7 +92,6 @@ impl VM {
         // The tail call's env (arguments) was built before release, so
         // referenced values survive. Only unreferenced temporaries are freed.
         let mut bits;
-        let mut rotation = execute::RotationState::new();
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
             let (b, _ip) = self.execute_bytecode_inner_impl(
@@ -104,7 +103,6 @@ impl VM {
             );
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
-                rotation.advance(tail.rotation_safe);
                 accumulated_squelch_mask |= tail.squelch_mask;
 
                 current_bytecode = tail.bytecode;
@@ -250,7 +248,6 @@ impl VM {
 
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
-                rotation_safe: false,
                 lir_function: None,
                 doc: None,
                 syntax: None,

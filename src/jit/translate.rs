@@ -695,7 +695,6 @@ impl<'a> FunctionTranslator<'a> {
                     capture_locals_mask: func.capture_locals_mask,
                     symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
                     location_map: std::rc::Rc::new(nested_bytecode.location_map),
-                    rotation_safe: func.rotation_safe,
                     lir_function: Some(std::rc::Rc::new(nested_lir)),
                     doc: func.doc,
                     syntax: func.syntax.clone(),

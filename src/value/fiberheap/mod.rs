@@ -135,11 +135,6 @@ pub struct FiberHeap {
     /// True when allocations should route to the outbox (between
     /// `OutboxEnter` and `OutboxExit` bytecodes).
     outbox_active: bool,
-    /// Append-only list of slab pointers for trampoline rotation.
-    /// Unlike `pool.allocs`, this is NOT truncated by scope exits
-    /// (RegionExit/RegionExitCall). The trampoline drains it at each
-    /// tail-call boundary to snapshot one iteration's allocations.
-    pub(crate) rotation_log: Vec<*mut HeapObject>,
 }
 
 impl FiberHeap {
@@ -161,7 +156,6 @@ impl FiberHeap {
             outbox: None,
             old_outboxes: Vec::new(),
             outbox_active: false,
-            rotation_log: Vec::new(),
         }
     }
 
@@ -227,8 +221,6 @@ impl FiberHeap {
 
         // Allocate from the slab pool.
         let v = self.pool.alloc(obj);
-        // Append to rotation log (append-only, not affected by scope exits).
-        self.rotation_log.push(self.pool.last_alloc_ptr());
         if self.pool.alloc_count > self.peak_alloc_count {
             self.peak_alloc_count = self.pool.alloc_count;
         }
@@ -450,36 +442,6 @@ impl FiberHeap {
 
         self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();
-    }
-
-    /// Drain the rotation log and return all slab pointers accumulated
-    /// since the last drain.  This is append-only and not affected by
-    /// scope exits (RegionExit/RegionExitCall).
-    pub fn drain_rotation_log(&mut self) -> Vec<*mut HeapObject> {
-        std::mem::take(&mut self.rotation_log)
-    }
-
-    /// Dealloc a list of slab pointers directly.  Used by the trampoline
-    /// to free a previous iteration's snapshot.  The pointers are removed
-    /// from the internal allocs list by value (O(n) scan).  Objects whose
-    /// refcount is nonzero are skipped — they are pinned by external
-    /// references and must not be freed.
-    pub fn dealloc_ptrs(&mut self, ptrs: &[*mut HeapObject]) {
-        for &ptr in ptrs {
-            if self.pool.is_dropped(ptr as *const _) {
-                continue;
-            }
-            if self.pool.refcount(ptr as *const _) > 0 {
-                continue;
-            }
-            unsafe { self.pool.dealloc_slot(ptr) }
-            // Remove from allocs list so future releases don't double-free.
-            if let Some(pos) = self.pool.allocs.iter().position(|&p| p == ptr) {
-                self.pool.allocs.swap_remove(pos);
-            }
-            // Keep alloc_count accurate: one fewer live object.
-            self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
-        }
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).

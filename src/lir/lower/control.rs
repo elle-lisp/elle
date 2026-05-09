@@ -60,10 +60,16 @@ impl<'a> Lowerer<'a> {
 
             if is_tail {
                 // DropSlot: free dead parameters before self-tail-calls.
-                // Only for self-recursion where we know the callee's signature.
                 if self.is_self_tail_call(func) {
                     self.emit_drop_slots_for_tail_call(args);
                 }
+
+                // NOTE: we do NOT DropSlot the discard slot here.
+                // Mutating primitives (put, push, del) return their first
+                // argument, so the discard slot can alias a live collection.
+                // Freeing it would corrupt the referenced object.
+                // Intermediate begin-block values are freed inline via
+                // discard_and_drop for provably-fresh allocations.
 
                 // Emit pending RegionExits before TailCall — the scope's
                 // allocations must be freed before the frame is replaced.

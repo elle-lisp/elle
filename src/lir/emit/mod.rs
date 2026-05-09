@@ -409,8 +409,6 @@ impl Emitter {
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
                     spirv: std::cell::OnceCell::new(),
-
-                    rotation_safe: func.rotation_safe,
                 };
                 let template_rc = Rc::new(template);
                 let closure = Closure {

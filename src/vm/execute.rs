@@ -63,62 +63,6 @@ use std::rc::Rc;
 
 use super::core::VM;
 
-use crate::value::HeapObject;
-
-/// Trampoline rotation state.
-///
-/// Snapshots slab pointers allocated during each tail-call iteration.
-/// Two snapshots are kept (double-buffer): the previous iteration's
-/// pointers are freed when the next-next iteration begins, giving a
-/// one-iteration lag that keeps tail-call arguments alive.
-pub(super) struct RotationState {
-    /// Slab pointers from iteration N-2 (freed at iteration N).
-    prev_ptrs: Vec<*mut HeapObject>,
-    /// Slab pointers from iteration N-1.
-    curr_ptrs: Vec<*mut HeapObject>,
-    /// Whether the prev iteration's function was rotation-safe.
-    prev_safe: bool,
-}
-
-impl RotationState {
-    pub fn new() -> Self {
-        // Drain any pre-existing entries from the rotation log so we
-        // don't capture stdlib allocations in the first snapshot.
-        crate::value::fiberheap::with_current_heap_mut(|h| {
-            h.drain_rotation_log();
-        });
-        Self {
-            prev_ptrs: Vec::new(),
-            curr_ptrs: Vec::new(),
-            prev_safe: false,
-        }
-    }
-
-    /// Advance rotation at a tail-call boundary.
-    ///
-    /// 1. If prev_safe, dealloc prev_ptrs (from 2 iterations ago).
-    /// 2. Drain the rotation log to snapshot this iteration's allocs.
-    /// 3. Shift: curr → prev, fresh snapshot → curr.
-    pub fn advance(&mut self, tail_rotation_safe: bool) {
-        // 1. Free the oldest snapshot if rotation-safe.
-        if self.prev_safe && !self.prev_ptrs.is_empty() {
-            crate::value::fiberheap::with_current_heap_mut(|h| {
-                h.dealloc_ptrs(&self.prev_ptrs);
-            });
-        }
-
-        // 2. Drain the append-only rotation log.
-        let new_ptrs = crate::value::fiberheap::with_current_heap_mut(|h| {
-            h.drain_rotation_log()
-        })
-        .unwrap_or_default();
-
-        // 3. Shift buffers.
-        self.prev_ptrs = std::mem::replace(&mut self.curr_ptrs, new_ptrs);
-        self.prev_safe = tail_rotation_safe;
-    }
-}
-
 /// Result of `execute_bytecode_saving_stack`.
 ///
 /// Contains the signal, IP, the active bytecode/constants/env at exit, and
@@ -171,7 +115,6 @@ impl VM {
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        let mut rotation = RotationState::new();
 
         loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -207,7 +150,6 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
-                rotation.advance(tail.rotation_safe);
                 accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;

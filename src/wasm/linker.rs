@@ -238,7 +238,6 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
 
                 symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
                 location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
-                rotation_safe: false,
                 lir_function: None,
                 doc: None,
                 syntax: None,
