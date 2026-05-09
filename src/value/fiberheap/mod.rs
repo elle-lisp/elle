@@ -224,6 +224,17 @@ impl FiberHeap {
         if self.pool.alloc_count > self.peak_alloc_count {
             self.peak_alloc_count = self.pool.alloc_count;
         }
+        // Incref all heap children so they're protected from
+        // release_refcounted when the parent binding is decref'd.
+        if let Some(ptr) = v.as_heap_ptr() {
+            let typed = ptr as *const HeapObject;
+            let obj_ref = unsafe { &*typed };
+            let mut children = Vec::new();
+            Self::collect_heap_children(obj_ref, &mut children);
+            for child in children {
+                self.incref_value(child);
+            }
+        }
         v
     }
 
@@ -354,29 +365,10 @@ impl FiberHeap {
             );
         }
 
-        let mut worklist: Vec<*mut HeapObject> = scope_ptrs
-            .iter()
-            .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
-            .copied()
-            .collect();
-        while let Some(ptr) = worklist.pop() {
-            let obj = unsafe { &*ptr };
-            let mut children = Vec::new();
-            Self::collect_heap_children(obj, &mut children);
-            for child_val in children {
-                if let Some(child_ptr) = child_val.as_heap_ptr() {
-                    if self.pool.slab_owns(child_ptr) {
-                        let child_typed = child_ptr as *mut HeapObject;
-                        if self.pool.refcount(child_typed as *const HeapObject) == 0 {
-                            self.pool.incref(child_typed as *const HeapObject);
-                            worklist.push(child_typed);
-                        }
-                    }
-                }
-            }
-        }
+        // With alloc-time child incref, children of pinned objects already
+        // have rc>0. No worklist propagation needed.
 
-        // Phase 2: Free unprotected objects (rc still == 0 after phase 1).
+        // Free unprotected objects (rc == 0).
         // Run dtors in reverse order for refcount-0 objects.
         for i in (mark.dtor_len()..self.pool.dtors.len()).rev() {
             let ptr = self.pool.dtors[i];
@@ -401,6 +393,13 @@ impl FiberHeap {
             let ptr = scope_ptrs[i];
             let flat = scope_flats[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
+                // Decref children before dealloc (symmetric with alloc incref).
+                let obj_ref = unsafe { &*ptr };
+                let mut children = Vec::new();
+                Self::collect_heap_children(obj_ref, &mut children);
+                for child in children {
+                    self.pool.decref_if_owned(child);
+                }
                 self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
             }
@@ -1226,25 +1225,11 @@ impl FiberHeap {
     /// by any collection; if no other collection holds it (refcount 0),
     /// it can be freed immediately.
     pub fn decref_and_free(&mut self, val: Value) {
-        if !val.is_heap() {
-            return;
-        }
-        let ptr = match val.as_heap_ptr() {
-            Some(p) => p,
-            None => return,
-        };
-        if !self.pool.slab_owns(ptr) {
-            return;
-        }
-        let typed = ptr as *mut HeapObject;
-        let new_rc = self.pool.decref(typed as *const HeapObject);
-        if new_rc == 0 {
-            // Transitively decref the entire subtree to undo temporary
-            // increfs from release_refcounted's protection phase.
-            // Slot deallocation is deferred to release_refcounted to
-            // avoid corrupting scope-mark-partitioned allocs/dtors lists.
-            self.recursive_decref_contents(typed);
-        }
+        // Just decref. With alloc-time child incref, children are
+        // managed by their own refcounts — no recursive traversal.
+        // The old value will be freed by release_refcounted when its
+        // rc reaches 0 (from this decref or a subsequent DecrefLocal).
+        self.decref_value(val);
     }
 
     /// Transitively decref all descendants of a dead object (rc==0).
@@ -1273,7 +1258,7 @@ impl FiberHeap {
     }
 
     /// Collect all heap-typed child Values from a HeapObject into `out`.
-    fn collect_heap_children(obj: &HeapObject, out: &mut Vec<Value>) {
+    pub(crate) fn collect_heap_children(obj: &HeapObject, out: &mut Vec<Value>) {
         // Helper: push traits if heap-allocated (permanent traitsets
         // won't match slab_owns, but user-attached traits will).
         let push_traits = |traits: &Value, out: &mut Vec<Value>| {

@@ -214,6 +214,22 @@ impl SlabPool {
         self.dtors.retain(|&p| p != ptr);
     }
 
+    /// Decref a value if it's owned by this pool's slab.
+    /// Used when freeing a parent object to decref its children.
+    pub fn decref_if_owned(&mut self, val: Value) {
+        if !val.is_heap() {
+            return;
+        }
+        if let Some(ptr) = val.as_heap_ptr() {
+            if self.slab.owns(ptr) {
+                let old_rc = self.slab.refcount(ptr as *const HeapObject);
+                if old_rc > 0 {
+                    self.slab.decref(ptr as *const HeapObject);
+                }
+            }
+        }
+    }
+
     pub fn live_count(&self) -> usize {
         self.slab.live_count()
     }

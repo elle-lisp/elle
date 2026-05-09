@@ -276,6 +276,15 @@ pub fn drop_slot_value(val: crate::value::Value) {
         if super::FiberHeap::trace_rc() {
             eprintln!("[trace:rc] drop_slot_value {:?} FREED", heap_ptr);
         }
+        // Decref all heap children (symmetric with incref in alloc).
+        {
+            let obj_ref = &*obj_ptr;
+            let mut children = Vec::new();
+            super::FiberHeap::collect_heap_children(obj_ref, &mut children);
+            for child in children {
+                heap.decref_value(child);
+            }
+        }
         // Run destructor if needed.
         if super::needs_drop((*obj_ptr).tag()) {
             std::ptr::drop_in_place(obj_ptr);
