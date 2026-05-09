@@ -14,9 +14,17 @@ impl<'a> Lowerer<'a> {
         // analysis validates all safety conditions (captures, suspension,
         // result safety, outward mutations, breaks).
         let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
-        if scoped {
+        // Allocate result-protection slot BEFORE RegionEnter so it's
+        // outside the region. StoreLocal to this slot increfs the result,
+        // keeping it alive through DecrefLocal + release at scope exit.
+        let result_protect_slot = if scoped {
+            let slot = self.current_func.num_locals;
+            self.current_func.num_locals += 1;
             self.emit_region_enter();
-        }
+            Some(slot)
+        } else {
+            None
+        };
 
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
@@ -89,15 +97,24 @@ impl<'a> Lowerer<'a> {
         }
         let result = self.lower_expr(body)?;
         if tail_scoped {
-            // The raw RegionExits were emitted by lower_call — adjust our
-            // bookkeeping to match. Don't use emit_region_exit() here because
-            // no actual instruction needs emitting at this point.
             self.pending_region_exits -= 1;
             self.region_depth -= 1;
             self.region_refcounted_stack.pop();
             self.region_slots.pop();
-        } else if scoped {
+        } else if let Some(protect_slot) = result_protect_slot {
+            // Protect the result: store to the pre-region slot (increfs),
+            // then DecrefLocal + RegionExit, then reload.
+            self.emit(LirInstr::StoreLocal {
+                slot: protect_slot,
+                src: result,
+            });
             self.emit_region_exit();
+            let reloaded = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal {
+                dst: reloaded,
+                slot: protect_slot,
+            });
+            return Ok(reloaded);
         }
         Ok(result)
     }
@@ -109,9 +126,14 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
     ) -> Result<Reg, String> {
         let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
-        if scoped {
+        let result_protect_slot = if scoped {
+            let slot = self.current_func.num_locals;
+            self.current_func.num_locals += 1;
             self.emit_region_enter();
-        }
+            Some(slot)
+        } else {
+            None
+        };
 
         // First allocate all slots with nil (or cells containing nil)
         for (binding, _) in bindings.iter() {
@@ -209,8 +231,18 @@ impl<'a> Lowerer<'a> {
             self.region_depth -= 1;
             self.region_refcounted_stack.pop();
             self.region_slots.pop();
-        } else if scoped {
+        } else if let Some(protect_slot) = result_protect_slot {
+            self.emit(LirInstr::StoreLocal {
+                slot: protect_slot,
+                src: result,
+            });
             self.emit_region_exit();
+            let reloaded = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal {
+                dst: reloaded,
+                slot: protect_slot,
+            });
+            return Ok(reloaded);
         }
         Ok(result)
     }

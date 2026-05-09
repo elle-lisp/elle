@@ -299,54 +299,12 @@ impl FiberHeap {
         if Self::trace_rc() {
             eprintln!("[trace:rc] release mark={}", mark.position());
         }
-        self.pool.run_dtors(mark.dtor_len());
-        self.pool.dtors.truncate(mark.dtor_len());
 
-        // Walk the linked list from mark.alloc_list_tail.next to current tail,
-        // deallocating each slot.
-        let start = if mark.alloc_list_tail() == ALLOC_NIL {
-            self.pool.alloc_head
-        } else {
-            self.pool.slab.alloc_next[mark.alloc_list_tail() as usize]
-        };
-        let mut n_freed: usize = 0;
-        let mut cur = start;
-        while cur != ALLOC_NIL {
-            let next = self.pool.slab.alloc_next[cur as usize];
-            let ptr = self.pool.slab.flat_to_ptr(cur as usize);
-            self.pool.slab.dealloc(ptr);
-            n_freed += 1;
-            cur = next;
-        }
-        // Truncate the list at the mark point.
-        self.pool.alloc_tail = mark.alloc_list_tail();
-        if self.pool.alloc_tail == ALLOC_NIL {
-            self.pool.alloc_head = ALLOC_NIL;
-        } else {
-            self.pool.slab.alloc_next[self.pool.alloc_tail as usize] = ALLOC_NIL;
-        }
-
-        if let Some(state) = self.custom_alloc_stack.last_mut() {
-            let start = mark.custom_ptrs_len();
-            for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
-                state.allocator.inner.dealloc(ptr, size, align);
-            }
-            state.custom_ptrs.truncate(start);
-        }
-
-        // Rewind bump arena for inline data (strings, arrays, bytes).
-        // Only rewind when slab slots were actually freed — their inline
-        // data is dead. When n_freed == 0, the call-site scope freed no
-        // objects but the bump may contain live inline data from the
-        // callee's return value.
-        if n_freed > 0 {
-            if let Some(bm) = mark.bump_mark() {
-                self.pool.release_bump_to(bm);
-            }
-        }
-
-        self.pool.alloc_count = mark.position();
-        self.shared_alloc_count = mark.shared_alloc_count();
+        // With universal incref, use the refcounted path: only free
+        // rc=0 objects, keep rc>0 pinned. This prevents freeing objects
+        // that are still reachable through the scope's result value or
+        // through parent structs/collections.
+        self.release_refcounted(mark);
     }
 
     /// Refcount-aware release: free objects with refcount == 0, skip
