@@ -74,7 +74,8 @@ impl Syntax {
                 Value::symbol(id.0)
             }
             SyntaxKind::Keyword(s) => Value::keyword(s),
-            SyntaxKind::String(s) | SyntaxKind::StringMut(s) => Value::string(s.clone()),
+            SyntaxKind::String(s) => Value::string(s.clone()),
+            SyntaxKind::StringMut(s) => Value::string_mut(s.as_bytes().to_vec()),
             SyntaxKind::List(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 crate::value::list(values)
@@ -203,6 +204,11 @@ impl Syntax {
             SyntaxKind::Keyword(name.to_string())
         } else if let Some(s) = value.with_string(|s| s.to_string()) {
             SyntaxKind::String(s)
+        } else if let Some(data) = value.as_string_mut() {
+            let bytes = data.borrow();
+            let s = String::from_utf8(bytes.clone())
+                .map_err(|_| "Cannot convert non-UTF-8 @string to Syntax")?;
+            SyntaxKind::StringMut(s)
         } else if value.is_empty_list() {
             SyntaxKind::List(vec![])
         } else if value.as_pair().is_some() {
@@ -225,6 +231,32 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::ArrayMut(syntaxes?)
+        } else if let Some(data) = value.as_bytes() {
+            let syntaxes: Vec<Syntax> = data
+                .iter()
+                .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span.clone()))
+                .collect();
+            SyntaxKind::Bytes(syntaxes)
+        } else if let Some(data) = value.as_bytes_mut() {
+            let bytes = data.borrow();
+            let syntaxes: Vec<Syntax> = bytes
+                .iter()
+                .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span.clone()))
+                .collect();
+            SyntaxKind::BytesMut(syntaxes)
+        } else if let Some(elems) = value.as_set() {
+            let syntaxes: Result<Vec<Syntax>, String> = elems
+                .iter()
+                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .collect();
+            SyntaxKind::Set(syntaxes?)
+        } else if let Some(set_ref) = value.as_set_mut() {
+            let items = set_ref.borrow();
+            let syntaxes: Result<Vec<Syntax>, String> = items
+                .iter()
+                .map(|v| Syntax::from_value(v, symbols, span.clone()))
+                .collect();
+            SyntaxKind::SetMut(syntaxes?)
         } else if let Some(struct_ref) = value.as_struct() {
             let mut syntaxes = Vec::with_capacity(struct_ref.len() * 2);
             for (k, v) in struct_ref.iter() {
