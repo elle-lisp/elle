@@ -470,6 +470,7 @@ impl ThreadPoolBackend {
 
     /// Blocking wait for at least one completion.
     /// `timeout_ms`: None = wait forever, Some(0) = poll, Some(n) = wait up to n ms.
+    #[allow(dead_code)]
     pub(super) fn wait(&mut self, timeout_ms: Option<u64>) -> Result<Vec<PoolCompletion>, String> {
         let mut results = Vec::new();
 

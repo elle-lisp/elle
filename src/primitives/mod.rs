@@ -54,6 +54,7 @@ pub mod string;
 pub mod structs;
 pub mod subprocess;
 pub mod time;
+pub mod traitregistry;
 pub mod traits;
 pub mod types;
 pub mod unix;

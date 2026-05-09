@@ -36,14 +36,18 @@ pub(crate) fn prim_with_traits(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Validate: table must be an immutable struct (LStruct)
-    if !table.is_heap() || unsafe { deref(table) }.tag() != crate::value::heap::HeapTag::LStruct {
+    // Validate: table must be a struct (LStruct or LStructMut)
+    if !table.is_heap() || {
+        let tag = unsafe { deref(table) }.tag();
+        tag != crate::value::heap::HeapTag::LStruct
+            && tag != crate::value::heap::HeapTag::LStructMut
+    } {
         return (
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                    "with-traits: trait table must be an immutable struct, got {}",
+                    "with-traits: trait table must be a struct, got {}",
                     table.type_name()
                 ),
             ),
@@ -171,41 +175,14 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
 
 /// (traits value) → trait table or nil
 ///
-/// Returns the trait table attached to value, or nil if none.
-/// For immediate values and infrastructure types, returns nil (no error).
+/// Returns the trait table attached to value. Since traits are stamped at
+/// allocation for collection types, this simply reads the traits field.
+/// Returns nil for immediates and infrastructure types.
 pub(crate) fn prim_traits(args: &[Value]) -> (SignalBits, Value) {
-    let value = args[0];
-    if !value.is_heap() {
-        return (SIG_OK, Value::NIL);
-    }
-    let table = unsafe {
-        match deref(value) {
-            HeapObject::LString { traits, .. }
-            | HeapObject::LArray { traits, .. }
-            | HeapObject::LArrayMut { traits, .. }
-            | HeapObject::LStruct { traits, .. }
-            | HeapObject::LStructMut { traits, .. }
-            | HeapObject::LStringMut { traits, .. }
-            | HeapObject::LBytes { traits, .. }
-            | HeapObject::LBytesMut { traits, .. }
-            | HeapObject::LSet { traits, .. }
-            | HeapObject::LSetMut { traits, .. }
-            | HeapObject::Closure { traits, .. }
-            | HeapObject::LBox { traits, .. }
-            | HeapObject::CaptureCell { traits, .. }
-            | HeapObject::Fiber { traits, .. }
-            | HeapObject::Syntax { traits, .. }
-            | HeapObject::ManagedPointer { traits, .. }
-            | HeapObject::External { traits, .. }
-            | HeapObject::Parameter { traits, .. }
-            | HeapObject::ThreadHandle { traits, .. } => *traits,
-            // Pair is a named struct variant — different access
-            HeapObject::Pair(pair) => pair.traits,
-            // Infrastructure types — no trait field
-            _ => Value::NIL,
-        }
-    };
-    (SIG_OK, table)
+    (
+        SIG_OK,
+        crate::primitives::traitregistry::get_traitset(&args[0]),
+    )
 }
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
@@ -214,7 +191,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_with_traits,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Attach a trait table to a value. Returns a new value with the same data and the given trait table. The table must be an immutable struct.",
+        doc: "Attach a trait table to a value. Returns a new value with the same data and the given trait table. The table must be a struct (immutable or mutable).",
         params: &["value", "table"],
         category: "traits",
         example: "(with-traits [1 2 3] {:Seq {:first (fn (v) (get v 0))}})",

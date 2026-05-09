@@ -156,6 +156,9 @@ impl VM {
         // Install the root fiber heap before any allocation can happen.
         crate::value::fiberheap::install_root_heap();
 
+        // Initialize default trait tables for collection/sequence types.
+        crate::primitives::traitregistry::init_default_traits();
+
         let mut fiber = Fiber::new(root_closure(), SIG_OK);
         // Root fiber starts alive (it's the currently executing context)
         fiber.status = crate::value::FiberStatus::Alive;

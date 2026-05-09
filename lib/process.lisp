@@ -96,7 +96,17 @@
         sub-runnable @[]  # @array of @struct {:fiber :pid} — child fibers to resume
         sub-completed @{}  # fiber → :ok | :error
         join-waiting @{}  # target-fiber → @[pid ...] — who's joining
-        select-sets @{}]
+        select-sets @{}
+        futex-parked @{}]  # futex-key → @[{:fiber f :pid pid :val cell :expected E} ...]
+    # Shared spawn function: sub-fibers created by ev/spawn inside any
+    # process or sub-fiber register with this scheduler, not the outer one.
+    # The :pid is set to 0 initially; updated per-process when needed.
+    (def @current-spawn-pid @[0])
+    (def @sched-spawn-fn
+      (fn [fiber]
+        (push sub-runnable @{:fiber fiber :pid (get current-spawn-pid 0)})
+        fiber))
+
     (def @sched-spawn
       (fn [closure]
         (let [pid (length procs)
@@ -206,10 +216,25 @@
           (del io-pending id)
           (io/cancel backend id))))
 
+    # Remove futex-parked sub-fibers owned by a process
+    (def @cancel-process-futex
+      (fn [pid]
+        (each [key waiters] in (pairs futex-parked)
+          (let [@keep @[]]
+            (each w in (->list waiters)
+              (if (and (get w :is-sub) (= w:pid pid))
+                nil  # drop — owning process is dead
+                (push keep w)))
+            (if (= (length keep) 0)
+              (del futex-parked key)
+              (when (< (length keep) (length waiters))
+                (put futex-parked key (->array keep))))))))
+
     (def @process-exit
       (fn [pid reason]
         (put (proc-get pid) :status :dead)
         (cancel-process-io pid)
+        (cancel-process-futex pid)
         (unregister-name pid)
         (notify-links pid reason)
         (notify-monitors pid reason)))
@@ -336,6 +361,55 @@
                     (begin
                       (fiber/abort fiber result)
                       (handle-sub-fiber-after-resume fiber pid))))
+                (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (futex ops from sub-fibers)
+                (let [request (fiber/value fiber)
+                      op (get request :op)]
+                  (case op
+                    :park
+                      (let [key (get request :key)
+                            expected (get request :expected)
+                            cell (get request :val)]
+                        (if (not (= (get cell 0) expected))
+                          (when (= (fiber/status fiber) :paused)
+                            (fiber/resume fiber nil)
+                            (handle-sub-fiber-after-resume fiber pid))
+                          (let [waiters (or (get futex-parked key)
+                                            (let [w @[]]
+                                              (put futex-parked key w)
+                                              w))]
+                            (push waiters @{:fiber fiber :pid pid
+                                            :val cell :expected expected
+                                            :is-sub true}))))
+                    :notify
+                      (let [key (get request :key)
+                            count (get request :count)
+                            waiters (get futex-parked key)
+                            @woken 0]
+                        (when waiters
+                          (let [@i 0 @keep @[]]
+                            (while (< i (length waiters))
+                              (let [w (get waiters i)]
+                                (if (< woken count)
+                                  (begin
+                                    (if (get w :is-sub)
+                                      (when (= (fiber/status w:fiber) :paused)
+                                        (fiber/resume w:fiber nil)
+                                        (handle-sub-fiber-after-resume w:fiber w:pid))
+                                      (when (alive? w:pid)
+                                        (put (proc-get w:pid) :resume nil)
+                                        (push ready w:pid)))
+                                    (assign woken (+ woken 1)))
+                                  (push keep w)))
+                              (assign i (+ i 1)))
+                            (if (> (length keep) 0)
+                              (put futex-parked key keep)
+                              (del futex-parked key))))
+                        ## Resume the notifying sub-fiber (if still alive)
+                        (when (= (fiber/status fiber) :paused)
+                          (fiber/resume fiber woken)
+                          (handle-sub-fiber-after-resume fiber pid)))
+                    ## Unknown wait op — re-queue
+                    (push sub-runnable @{:fiber fiber :pid pid})))
                 (push sub-runnable @{:fiber fiber :pid pid}))))))
 
     # Drain sub-fiber runnable queue
@@ -412,6 +486,53 @@
                     (handle-sub-fiber-after-resume target pid)
                     (put (proc-get pid) :resume nil)
                     (push ready pid)))))
+          :park
+            ## ev/futex-wait: park until cell[0] != expected
+            (let [key (get request :key)
+                  expected (get request :expected)
+                  cell (get request :val)]
+              ## Check immediately — condition might already be met
+              (if (not (= (get cell 0) expected))
+                (begin
+                  (put (proc-get pid) :resume nil)
+                  (push ready pid))
+                (let [waiters (or (get futex-parked key)
+                                  (let [w @[]]
+                                    (put futex-parked key w)
+                                    w))]
+                  (push waiters @{:pid pid :val cell :expected expected}))))
+
+          :notify
+            ## ev/futex-wake: wake up to :count parked fibers on :key
+            (let [key (get request :key)
+                  count (get request :count)
+                  waiters (get futex-parked key)
+                  @woken 0]
+              (when waiters
+                (let [@i 0 @keep @[]]
+                  (while (< i (length waiters))
+                    (let [w (get waiters i)]
+                      (if (< woken count)
+                        (begin
+                          (if (get w :is-sub)
+                            ## Sub-fiber waiter: resume the fiber directly
+                            (when (= (fiber/status w:fiber) :paused)
+                              (fiber/resume w:fiber nil)
+                              (handle-sub-fiber-after-resume w:fiber w:pid))
+                            ## Process waiter: schedule process
+                            (when (alive? w:pid)
+                              (put (proc-get w:pid) :resume nil)
+                              (push ready w:pid)))
+                          (assign woken (+ woken 1)))
+                        (push keep w)))
+                    (assign i (+ i 1)))
+                  (if (> (length keep) 0)
+                    (put futex-parked key keep)
+                    (del futex-parked key))))
+              ## Resume the notifier immediately
+              (put (proc-get pid) :resume woken)
+              (push ready pid))
+
           (error {:error :protocol-error
                   :message (string "unknown :wait op: " (get request :op))}))))
 
@@ -631,6 +752,7 @@
                  f (get p :fiber)
                  resume-val (get p :resume)]
             (put p :resume nil)
+            (put current-spawn-pid 0 pid)
             (fiber/set-fuel f quantum)
             (fiber/resume f resume-val)
             (dispatch-signal pid f)))))
@@ -648,7 +770,7 @@
               (let [pid (get entry :pid)
                     sub-fiber (get entry :fiber)]
                 (if (not (nil? sub-fiber))  # Sub-fiber I/O completion
-                  (begin
+                  (when (= (fiber/status sub-fiber) :paused)
                     (if (nil? (get completion :error))
                       (fiber/resume sub-fiber (get completion :value))
                       (fiber/abort sub-fiber (get completion :error)))
@@ -656,6 +778,7 @@
                   (when (alive? pid)
                     (let* [p (proc-get pid)
                            f (get p :fiber)]
+                      (put current-spawn-pid 0 pid)
                       (fiber/set-fuel f quantum)
                       (if (nil? (get completion :error))
                         (fiber/resume f (get completion :value))
@@ -668,21 +791,49 @@
 
     # ---- main loop ----
 
+    ## Wake futex-parked fibers whose condition is already met
+    (def @wake-futex-ready
+      (fn []
+        (each [key waiters] in (pairs futex-parked)
+          (let [@keep @[] @changed false]
+            (each w in (->list waiters)
+              (if (not (= (get w:val 0) w:expected))
+                (begin
+                  (assign changed true)
+                  (if (get w :is-sub)
+                    (when (= (fiber/status w:fiber) :paused)
+                      (fiber/resume w:fiber nil)
+                      (handle-sub-fiber-after-resume w:fiber w:pid))
+                    (when (alive? w:pid)
+                      (put (proc-get w:pid) :resume nil)
+                      (push ready w:pid))))
+                (push keep w)))
+            (when changed
+              (if (> (length keep) 0)
+                (put futex-parked key (->array keep))
+                (del futex-parked key)))))))
+
     (def @has-work?
       (fn []
         (or (not (empty? ready)) (not (empty? waiting))
             (> (length io-pending) 0) (> (length sub-runnable) 0)
-            (> (length join-waiting) 0) (> (length select-sets) 0))))
+            (> (length join-waiting) 0) (> (length select-sets) 0)
+            (> (length futex-parked) 0))))
 
     (def @sched-run
       (fn [init]
         (sched-spawn init)
 
+        # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
+        # registers fibers with THIS scheduler. Parameter inheritance happens
+        # at fiber resume time, so this must wrap the entire scheduler loop.
+        (parameterize ((*spawn* sched-spawn-fn))
         (while (has-work?)
           (assign tick (box (+ (unbox tick) 1)))
           (fire-timers)
           (reap-io)
           (drain-sub-runnable)
+          (wake-futex-ready)
           (wake-waiting)
 
           (when (empty? ready)
@@ -716,7 +867,7 @@
           (let [batch ready]
             (assign ready @[])
             (each pid in batch
-              (run-one pid))))))
+              (run-one pid)))))))  # close parameterize
 
     # ---- external API ----
 

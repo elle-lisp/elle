@@ -9,7 +9,7 @@
 //!
 //! The solution: SendValue stores owned copies of heap data, not raw pointers.
 
-use super::heap::{alloc, deref, HeapObject, Pair};
+use super::heap::{alloc, deref, HeapObject, HeapTag, Pair};
 use super::repr::Value;
 use crate::error::LocationMap;
 use crate::hir::VarargKind;
@@ -17,6 +17,34 @@ use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
 use crate::value::types::Arity;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+/// Send a traits field. Default traitsets (from the registry) are
+/// skipped (sent as NIL) since the receiving thread has its own registry.
+/// User-attached traits are deep-copied normally.
+fn send_traits(traits: Value, tag: HeapTag, ctx: &mut SerContext) -> Result<SendValue, String> {
+    if traits.is_nil() {
+        return Ok(SendValue::Immediate(Value::NIL));
+    }
+    // Check pointer identity against the registry default for this tag.
+    // This correctly distinguishes registry defaults (skip) from user-attached
+    // @struct traits (send faithfully).
+    let default = crate::primitives::traitregistry::default_traits_for(tag);
+    if !default.is_nil() && traits.payload == default.payload {
+        return Ok(SendValue::Immediate(Value::NIL));
+    }
+    // User-attached traits — send normally
+    from_value_inner(traits, ctx)
+}
+
+/// Resolve a received traits value: if NIL, stamp the receiving thread's
+/// default traitset for the given heap tag.
+fn recv_traits(traits_val: Value, tag: HeapTag) -> Value {
+    if traits_val.is_nil() {
+        crate::primitives::traitregistry::default_traits_for(tag)
+    } else {
+        traits_val
+    }
+}
 
 /// Sendable snapshot of a closure.
 ///
@@ -78,6 +106,12 @@ pub enum SendValue {
 
     /// Deep copy of structs (immutable maps, with traits)
     Struct(
+        BTreeMap<crate::value::heap::TableKey, SendValue>,
+        Box<SendValue>,
+    ),
+
+    /// Deep copy of @structs (mutable maps, with traits)
+    StructMut(
         BTreeMap<crate::value::heap::TableKey, SendValue>,
         Box<SendValue>,
     ),
@@ -194,7 +228,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         HeapObject::Pair(pair) => {
             let first = from_value_inner(pair.first, ctx)?;
             let rest = from_value_inner(pair.rest, ctx)?;
-            let traits = from_value_inner(pair.traits, ctx)?;
+            let traits = send_traits(pair.traits, HeapTag::Pair, ctx)?;
             Ok(SendValue::Pair(
                 Box::new(first),
                 Box::new(rest),
@@ -213,7 +247,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 .map_err(|_| "Cannot borrow array for sending".to_string())?;
             let copied: Result<Vec<SendValue>, String> =
                 borrowed.iter().map(|v| from_value_inner(*v, ctx)).collect();
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LArrayMut, ctx)?;
             Ok(SendValue::Array(copied?, Box::new(traits_sv)))
         }
 
@@ -228,7 +262,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 }
                 copied.insert(k.clone(), from_value_inner(*v, ctx)?);
             }
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LStruct, ctx)?;
             Ok(SendValue::Struct(copied, Box::new(traits_sv)))
         }
 
@@ -240,7 +274,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         } => {
             let copied: Result<Vec<SendValue>, String> =
                 elems.iter().map(|v| from_value_inner(*v, ctx)).collect();
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LArray, ctx)?;
             Ok(SendValue::Tuple(copied?, Box::new(traits_sv)))
         }
 
@@ -253,7 +287,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
             let borrowed = buf_ref
                 .try_borrow()
                 .map_err(|_| "Cannot borrow @string for sending".to_string())?;
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LStringMut, ctx)?;
             Ok(SendValue::Buffer(borrowed.clone(), Box::new(traits_sv)))
         }
 
@@ -267,7 +301,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 .try_borrow()
                 .map_err(|_| "Cannot borrow box for sending".to_string())?;
             let contents = from_value_inner(*borrowed, ctx)?;
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LBox, ctx)?;
             Ok(SendValue::LBox(Box::new(contents), Box::new(traits_sv)))
         }
 
@@ -281,7 +315,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 .try_borrow()
                 .map_err(|_| "Cannot borrow capture cell for sending".to_string())?;
             let contents = from_value_inner(*borrowed, ctx)?;
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::CaptureCell, ctx)?;
             Ok(SendValue::CaptureCell(
                 Box::new(contents),
                 Box::new(traits_sv),
@@ -291,8 +325,25 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         // Float values that couldn't be stored inline
         HeapObject::Float(f) => Ok(SendValue::Float(*f)),
 
-        // Unsafe: mutable @structs
-        HeapObject::LStructMut { .. } => Err("Cannot send mutable @struct".to_string()),
+        // Mutable @structs — deep copy all values, plus traits
+        HeapObject::LStructMut {
+            data: map_ref,
+            traits,
+            ..
+        } => {
+            let borrowed = map_ref
+                .try_borrow()
+                .map_err(|_| "Cannot borrow @struct for sending".to_string())?;
+            let mut copied = BTreeMap::new();
+            for (k, v) in borrowed.iter() {
+                if !k.is_sendable() {
+                    return Err("Cannot send @struct with identity keys".to_string());
+                }
+                copied.insert(k.clone(), from_value_inner(*v, ctx)?);
+            }
+            let traits_sv = send_traits(*traits, HeapTag::LStructMut, ctx)?;
+            Ok(SendValue::StructMut(copied, Box::new(traits_sv)))
+        }
 
         // Closures: intern into the table, with cycle detection via pre-insertion
         HeapObject::Closure {
@@ -433,7 +484,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         HeapObject::LBytes {
             data: b, traits, ..
         } => {
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LBytes, ctx)?;
             Ok(SendValue::Bytes(b.as_slice().to_vec(), Box::new(traits_sv)))
         }
 
@@ -446,7 +497,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
             let borrowed = blob_ref
                 .try_borrow()
                 .map_err(|_| "Cannot borrow @bytes for sending".to_string())?;
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LBytesMut, ctx)?;
             Ok(SendValue::Blob(borrowed.clone(), Box::new(traits_sv)))
         }
 
@@ -456,7 +507,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         } => {
             let copied: Result<Vec<SendValue>, String> =
                 s.iter().map(|v| from_value_inner(*v, ctx)).collect();
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LSet, ctx)?;
             Ok(SendValue::LSet(copied?, Box::new(traits_sv)))
         }
 
@@ -471,7 +522,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 .map_err(|_| "Cannot borrow mutable set for sending".to_string())?;
             let copied: Result<Vec<SendValue>, String> =
                 borrowed.iter().map(|v| from_value_inner(*v, ctx)).collect();
-            let traits_sv = from_value_inner(*traits, ctx)?;
+            let traits_sv = send_traits(*traits, HeapTag::LSetMut, ctx)?;
             Ok(SendValue::LSetMut(copied?, Box::new(traits_sv)))
         }
     }
@@ -506,7 +557,7 @@ impl SendValue {
             SendValue::Pair(first, rest, traits) => {
                 let first_val = first.into_value();
                 let rest_val = rest.into_value();
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::Pair);
                 let pair = Pair {
                     first: first_val,
                     rest: rest_val,
@@ -516,7 +567,7 @@ impl SendValue {
             }
             SendValue::Array(items, traits) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LArrayMut);
                 alloc(HeapObject::LArrayMut {
                     data: std::rc::Rc::new(std::cell::RefCell::new(values)),
                     traits: traits_val,
@@ -528,15 +579,26 @@ impl SendValue {
                     .into_iter()
                     .map(|(k, sv)| (k, sv.into_value()))
                     .collect();
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LStruct);
                 alloc(HeapObject::LStruct {
                     data: entries,
                     traits: traits_val,
                 })
             }
+            SendValue::StructMut(map, traits) => {
+                let entries: BTreeMap<_, _> = map
+                    .into_iter()
+                    .map(|(k, sv)| (k, sv.into_value()))
+                    .collect();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LStructMut);
+                alloc(HeapObject::LStructMut {
+                    data: std::rc::Rc::new(std::cell::RefCell::new(entries)),
+                    traits: traits_val,
+                })
+            }
             SendValue::Tuple(items, traits) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LArray);
                 let slice = crate::value::arena::alloc_inline_slice::<Value>(&values);
                 alloc(HeapObject::LArray {
                     elements: slice,
@@ -544,14 +606,14 @@ impl SendValue {
                 })
             }
             SendValue::Buffer(bytes, traits) => {
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LStringMut);
                 alloc(HeapObject::LStringMut {
                     data: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
                     traits: traits_val,
                 })
             }
             SendValue::Bytes(bytes, traits) => {
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LBytes);
                 let slice = crate::value::arena::alloc_inline_slice::<u8>(&bytes);
                 alloc(HeapObject::LBytes {
                     data: slice,
@@ -559,7 +621,7 @@ impl SendValue {
                 })
             }
             SendValue::Blob(bytes, traits) => {
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LBytesMut);
                 alloc(HeapObject::LBytesMut {
                     data: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
                     traits: traits_val,
@@ -585,7 +647,7 @@ impl SendValue {
             SendValue::FFIType(desc) => alloc(HeapObject::FFIType(desc)),
             SendValue::LSet(items, traits) => {
                 let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LSet);
                 // BTreeSet iterates in sorted order; collect into Vec and copy into arena.
                 let sorted: Vec<Value> = set.into_iter().collect();
                 let slice = crate::value::arena::alloc_inline_slice::<Value>(&sorted);
@@ -596,7 +658,7 @@ impl SendValue {
             }
             SendValue::LSetMut(items, traits) => {
                 let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                let traits_val = traits.into_value();
+                let traits_val = recv_traits(traits.into_value(), HeapTag::LSetMut);
                 alloc(HeapObject::LSetMut {
                     data: std::rc::Rc::new(std::cell::RefCell::new(set)),
                     traits: traits_val,
@@ -651,7 +713,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
         SendValue::Pair(first, rest, traits) => {
             let f = into_value_inner(*first, ctx);
             let r = into_value_inner(*rest, ctx);
-            let t = into_value_inner(*traits, ctx);
+            let t = recv_traits(into_value_inner(*traits, ctx), HeapTag::Pair);
             alloc(HeapObject::Pair(Pair {
                 first: f,
                 rest: r,
@@ -663,7 +725,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LArrayMut);
             alloc(HeapObject::LArrayMut {
                 data: std::rc::Rc::new(RefCell::new(values)),
                 traits: traits_val,
@@ -675,9 +737,20 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .into_iter()
                 .map(|(k, sv)| (k, into_value_inner(sv, ctx)))
                 .collect();
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LStruct);
             alloc(HeapObject::LStruct {
                 data: entries,
+                traits: traits_val,
+            })
+        }
+        SendValue::StructMut(map, traits) => {
+            let entries: BTreeMap<_, _> = map
+                .into_iter()
+                .map(|(k, sv)| (k, into_value_inner(sv, ctx)))
+                .collect();
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LStructMut);
+            alloc(HeapObject::LStructMut {
+                data: std::rc::Rc::new(RefCell::new(entries)),
                 traits: traits_val,
             })
         }
@@ -686,7 +759,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LArray);
             let slice = crate::value::arena::alloc_inline_slice::<Value>(&values);
             alloc(HeapObject::LArray {
                 elements: slice,
@@ -694,14 +767,14 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             })
         }
         SendValue::Buffer(bytes, traits) => {
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LStringMut);
             alloc(HeapObject::LStringMut {
                 data: std::rc::Rc::new(RefCell::new(bytes)),
                 traits: traits_val,
             })
         }
         SendValue::Bytes(bytes, traits) => {
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LBytes);
             let slice = crate::value::arena::alloc_inline_slice::<u8>(&bytes);
             alloc(HeapObject::LBytes {
                 data: slice,
@@ -709,7 +782,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             })
         }
         SendValue::Blob(bytes, traits) => {
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LBytesMut);
             alloc(HeapObject::LBytesMut {
                 data: std::rc::Rc::new(RefCell::new(bytes)),
                 traits: traits_val,
@@ -769,7 +842,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LSet);
             // BTreeSet iterates in sorted order; collect into Vec and copy into arena.
             let sorted: Vec<Value> = set.into_iter().collect();
             let slice = crate::value::arena::alloc_inline_slice::<Value>(&sorted);
@@ -783,7 +856,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
-            let traits_val = into_value_inner(*traits, ctx);
+            let traits_val = recv_traits(into_value_inner(*traits, ctx), HeapTag::LSetMut);
             alloc(HeapObject::LSetMut {
                 data: std::rc::Rc::new(RefCell::new(set)),
                 traits: traits_val,

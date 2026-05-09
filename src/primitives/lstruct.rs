@@ -1,7 +1,6 @@
 //! Struct operations primitives (mutable hash tables)
 //!
 //! Polymorphic collection access (get, put) is in `access.rs`.
-use crate::primitives::collection::coll_has;
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -298,8 +297,5 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
 /// Polymorphic has? - works on structs, sets, and strings
 /// `(has? collection key-or-value)`
 pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
-    match coll_has(&args[0], &args[1]) {
-        Ok(found) => (SIG_OK, if found { Value::TRUE } else { Value::FALSE }),
-        Err(e) => (SIG_ERROR, e),
-    }
+    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Collection", "has?", args)
 }

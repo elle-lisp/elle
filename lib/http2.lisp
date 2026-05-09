@@ -19,17 +19,16 @@
 
   ## ── Import submodules ──────────────────────────────────────────────────
 
-  (def sync ((import "std/sync")))
   (def huffman ((import "std/http2/huffman")))
   (def hpack ((import "std/http2/hpack") :huffman huffman))
   (def frame ((import "std/http2/frame")))
-  (def stream ((import "std/http2/stream") :sync sync :frame frame))
+  (def stream ((import "std/http2/stream") :frame frame))
   (def transport ((import "std/http2/transport") :tls tls))
   (def session
-    ((import "std/http2/session") :sync sync :frame frame :stream stream
+    ((import "std/http2/session") :frame frame :stream stream
                                   :hpack hpack))
   (def server
-    ((import "std/http2/server") :sync sync :hpack hpack :frame frame
+    ((import "std/http2/server") :hpack hpack :frame frame
                                  :stream stream :session session :tls tls
                                  :transport transport))
 
@@ -219,6 +218,7 @@
                       :message (concat "stream reset: " (string msg:code))})
             :error (error msg:error)
             _ (assign done true))))
+      (del sess:streams sid)
       (let* [status-pair (first (filter (fn [h] (= (get h 0) ":status"))
                                         resp-headers))
              status (if status-pair (parse-int (get status-pair 1)) 0)
@@ -318,7 +318,15 @@
 
   ## ── Tests ──────────────────────────────────────────────────────────────
 
-  (defn run-tests []  # ── URL parsing ──
+  (defn run-tests []  # ── Submodule tests ──
+    (huffman:test)
+    (hpack:test)
+    (frame:test)
+    (stream:test)
+    (session:test)
+    (server:test)
+
+    # ── URL parsing ──
     (let [p (parse-url "https://example.com:8443/path?q=1")]
       (assert (= p:scheme "https") "url: scheme")
       (assert (= p:host "example.com") "url: host")

@@ -1109,10 +1109,15 @@ impl FiberHeap {
             HeapObject::Pair(c) => {
                 let head = c.first;
                 let tail = c.rest;
+                let traits = c.traits;
                 // Drop the borrow on self before recursing.
                 let head = self.deep_copy_to_outbox(head);
                 let tail = self.deep_copy_to_outbox(tail);
-                let new_obj = HeapObject::Pair(crate::value::heap::Pair::new(head, tail));
+                let new_obj = HeapObject::Pair(crate::value::heap::Pair {
+                    first: head,
+                    rest: tail,
+                    traits,
+                });
                 self.outbox.as_mut().unwrap().alloc(new_obj)
             }
             HeapObject::LString { s, traits } => {
@@ -1385,28 +1390,43 @@ impl FiberHeap {
 
     /// Collect all heap-typed child Values from a HeapObject into `out`.
     fn collect_heap_children(obj: &HeapObject, out: &mut Vec<Value>) {
+        // Helper: push traits if heap-allocated (permanent traitsets
+        // won't match slab_owns, but user-attached traits will).
+        let push_traits = |traits: &Value, out: &mut Vec<Value>| {
+            if traits.is_heap() {
+                out.push(*traits);
+            }
+        };
         match obj {
-            HeapObject::LArrayMut { data, .. } => {
+            HeapObject::LArrayMut { data, traits, .. } => {
                 out.extend(data.borrow().iter().filter(|v| v.is_heap()).copied());
+                push_traits(traits, out);
             }
-            HeapObject::LStructMut { data, .. } => {
+            HeapObject::LStructMut { data, traits, .. } => {
                 out.extend(data.borrow().values().filter(|v| v.is_heap()).copied());
+                push_traits(traits, out);
             }
-            HeapObject::LArray { elements, .. } => {
+            HeapObject::LArray {
+                elements, traits, ..
+            } => {
                 out.extend(elements.as_slice().iter().filter(|v| v.is_heap()).copied());
+                push_traits(traits, out);
             }
-            HeapObject::LStruct { data, .. } => {
+            HeapObject::LStruct { data, traits, .. } => {
                 out.extend(data.iter().map(|(_, v)| *v).filter(|v| v.is_heap()));
+                push_traits(traits, out);
             }
             HeapObject::Pair(pair) => {
                 out.extend(
-                    [pair.first, pair.rest]
+                    [pair.first, pair.rest, pair.traits]
                         .iter()
                         .filter(|v| v.is_heap())
                         .copied(),
                 );
             }
-            HeapObject::Closure { closure, .. } => {
+            HeapObject::Closure {
+                closure, traits, ..
+            } => {
                 out.extend(
                     closure
                         .env
@@ -1415,21 +1435,40 @@ impl FiberHeap {
                         .filter(|v| v.is_heap())
                         .copied(),
                 );
+                push_traits(traits, out);
             }
-            HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
+            HeapObject::LBox { cell, traits, .. }
+            | HeapObject::CaptureCell { cell, traits, .. } => {
                 let v = *cell.borrow();
                 if v.is_heap() {
                     out.push(v);
                 }
+                push_traits(traits, out);
             }
-            HeapObject::LSet { data, .. } => {
+            HeapObject::LSet { data, traits, .. } => {
                 out.extend(data.as_slice().iter().filter(|v| v.is_heap()).copied());
+                push_traits(traits, out);
             }
-            HeapObject::LSetMut { data, .. } => {
+            HeapObject::LSetMut { data, traits, .. } => {
                 out.extend(data.borrow().iter().filter(|v| v.is_heap()).copied());
+                push_traits(traits, out);
             }
-            HeapObject::Parameter { default, .. } => {
+            HeapObject::LString { traits, .. }
+            | HeapObject::LStringMut { traits, .. }
+            | HeapObject::LBytes { traits, .. }
+            | HeapObject::LBytesMut { traits, .. }
+            | HeapObject::Syntax { traits, .. }
+            | HeapObject::ManagedPointer { traits, .. }
+            | HeapObject::External { traits, .. }
+            | HeapObject::Fiber { traits, .. }
+            | HeapObject::ThreadHandle { traits, .. } => {
+                push_traits(traits, out);
+            }
+            HeapObject::Parameter {
+                default, traits, ..
+            } => {
                 out.extend(std::iter::once(*default).filter(|v| v.is_heap()));
+                push_traits(traits, out);
             }
             _ => {}
         }
