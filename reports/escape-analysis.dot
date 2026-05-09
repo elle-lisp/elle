@@ -1,0 +1,183 @@
+digraph escape_analysis {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+    compound=true;
+    newrank=true;
+
+    // ════════════════════════════════════════════════════════════════
+    // LEGEND
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_legend {
+        label="Legend";
+        style=dashed;
+        color=gray60;
+        fontsize=10;
+        leg_map [label="Per-binding map\n(HashMap<Binding,bool>)" shape=box style=filled fillcolor="#E8F4FD"];
+        leg_fix [label="Fixpoint pass\n(iterate until stable)" shape=box style=filled fillcolor="#FFF3E0"];
+        leg_widen [label="Widen pass\n(non-lambda bindings)" shape=box style=filled fillcolor="#E8F5E9"];
+        leg_decision [label="Runtime decision\n(per call-site / loop)" shape=diamond style=filled fillcolor="#FCE4EC"];
+        leg_cross [label="Cross-module\nprojection" shape=hexagon style=filled fillcolor="#F3E5F5"];
+        leg_analysis [label="Analysis function\n(body walker)" shape=ellipse style=filled fillcolor="#FFFDE7"];
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // PHASE 1: PRECOMPUTE (Fixpoint iterations over lambda defs)
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_precompute {
+        label="Phase 1: Precompute (fixpoint over lambda defs)";
+        style=filled;
+        color="#F5F5F5";
+        fontsize=12;
+
+        result_imm [label="precompute_result_immediate\n→ callee_result_immediate" shape=box style=filled fillcolor="#FFF3E0"];
+        return_params [label="precompute_return_params\n→ callee_return_params" shape=box style=filled fillcolor="#FFF3E0"];
+        rest_index [label="precompute_rest_index\n→ callee_rest_index" shape=box style=filled fillcolor="#FFF3E0"];
+        return_safe [label="precompute_return_safe\n→ callee_return_safe" shape=box style=filled fillcolor="#FFF3E0"];
+        param_safe [label="precompute_param_safety\n→ callee_param_safe" shape=box style=filled fillcolor="#FFF3E0"];
+        rotation_safe [label="precompute_rotation_safety\n→ callee_rotation_safe" shape=box style=filled fillcolor="#FFF3E0"];
+        outward_safe [label="precompute_outward_safety\n→ callee_outward_safe" shape=box style=filled fillcolor="#FFF3E0"];
+        returns_rot [label="precompute_returns_rotation_safe\n→ callee_returns_rotation_safe" shape=box style=filled fillcolor="#FFF3E0"];
+        returns_param [label="precompute_returns_param_safe\n→ callee_returns_param_safe" shape=box style=filled fillcolor="#FFF3E0"];
+    }
+
+    // Ordering constraints
+    result_imm -> return_params -> rest_index -> return_safe [style=invis];
+    return_safe -> param_safe -> rotation_safe -> outward_safe [style=invis];
+    outward_safe -> returns_rot -> returns_param [style=invis];
+
+    // Data dependencies
+    return_safe -> rotation_safe [label="tail_arg_is_safe\nextended" color=blue constraint=false];
+    result_imm -> rotation_safe [label="callee_result\nimmediate" color=blue constraint=false];
+    rotation_safe -> outward_safe [label="callee_is_rotation_safe\n⊂ outward_safe" color=blue constraint=false];
+    param_safe -> outward_safe [label="callee_is_param_safe\n(non-tail calls)" color=blue constraint=false];
+
+    // ════════════════════════════════════════════════════════════════
+    // PHASE 2: WIDEN (resolve non-lambda bindings via value flow)
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_widen {
+        label="Phase 2: Widen (non-lambda bindings)";
+        style=filled;
+        color="#E8F5E9";
+        fontsize=12;
+
+        widen_rot [label="widen_rotation_safety\n(Call→returns_rot, Var→rot)" shape=box style=filled fillcolor="#E8F5E9"];
+        widen_param [label="widen_param_safety\n(Call→returns_param, Var→param)" shape=box style=filled fillcolor="#E8F5E9"];
+    }
+
+    returns_rot -> widen_rot [label="factory pattern:\n(def f (make-f))" color=darkgreen];
+    returns_param -> widen_param [color=darkgreen];
+    rotation_safe -> widen_rot [color=darkgreen];
+    param_safe -> widen_param [color=darkgreen];
+
+    // ════════════════════════════════════════════════════════════════
+    // PHASE 3: STRUCT FIELDS (module-pattern: struct of closures)
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_struct {
+        label="Phase 3: Struct-field safety (module pattern)";
+        style=filled;
+        color="#F3E5F5";
+        fontsize=12;
+
+        struct_rot [label="struct_fields_rotation_safe\n(fixpoint)" shape=box style=filled fillcolor="#FFF3E0"];
+        struct_param [label="struct_fields_param_safe\n(fixpoint)" shape=box style=filled fillcolor="#FFF3E0"];
+        struct_outward [label="struct_fields_outward_safe\n(fixpoint)" shape=box style=filled fillcolor="#FFF3E0"];
+        widen_struct [label="widen_struct_fields_safety\n(Call/Var propagation)" shape=box style=filled fillcolor="#E8F5E9"];
+    }
+
+    widen_rot -> struct_rot [color=purple];
+    widen_param -> struct_param [color=purple];
+    outward_safe -> struct_outward [color=purple];
+    struct_rot -> widen_struct;
+    struct_param -> widen_struct;
+    struct_outward -> widen_struct;
+
+    // ════════════════════════════════════════════════════════════════
+    // CROSS-MODULE PROJECTION
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_cross {
+        label="Cross-module plumbing";
+        style=filled;
+        color="#F3E5F5";
+        fontsize=12;
+
+        escape_proj [label="compute_escape_projection\n→ FieldEscapeInfo per field\n{rotation_safe, outward_safe}" shape=hexagon style=filled fillcolor="#F3E5F5"];
+        seed [label="seed_import_escape_projection\n(importing file seeds\nstruct_fields_* maps)" shape=hexagon style=filled fillcolor="#F3E5F5"];
+        cache [label="ESCAPE_PROJECTION_CACHE\n(pipeline/cache.rs)" shape=cylinder style=filled fillcolor="#F3E5F5"];
+    }
+
+    widen_struct -> escape_proj [label="struct literal\nin return pos"];
+    rotation_safe -> escape_proj [label="value_is_rotation_safe\n_closure_or_non_closure"];
+    param_safe -> escape_proj;
+    outward_safe -> escape_proj [label="value_is_outward_safe\n_closure_or_non_closure"];
+    escape_proj -> cache [label="stored on\nBytecode"];
+    cache -> seed [label="loaded by\nimporting file"];
+    seed -> widen_struct [label="seeds maps\nbefore fixpoint" style=dashed color=purple];
+
+    // ════════════════════════════════════════════════════════════════
+    // ANALYSIS FUNCTIONS (body walkers)
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_analysis {
+        label="Analysis functions (recursive body walkers)";
+        style=filled;
+        color="#FFFDE7";
+        fontsize=12;
+
+        body_escapes [label="body_escapes_heap_values\n\n• assign with heap value → unsafe\n• mutating prim with non-imm arg → unsafe\n• tail-call: per-param analysis + arg check\n• non-tail: callee must be rotation_safe\n• emit with heap value → unsafe" shape=ellipse style=filled fillcolor="#FFFDE7"];
+        body_outward [label="body_has_outward_side_effects\n(body_has_outward_effects_ext)\n\n• assign to NON-LOCAL binding → unsafe\n• mutating prim to NON-LOCAL target → unsafe\n• tail-call: callee must be outward_safe\n  (NO arg check — args are return values)\n• non-tail: callee must be outward_safe\n• tracks locally-defined bindings\n• SetCell to local → safe" shape=ellipse style=filled fillcolor="#FFFDE7"];
+        body_stores [label="body_stores_params_externally\n\n• tracks param-derived bindings\n• assign/emit/put/push if refs param → unsafe\n• call to non-param-safe fn with param arg → unsafe" shape=ellipse style=filled fillcolor="#FFFDE7"];
+        walk_outward [label="walk_for_outward_set\n(scope-relative)\n\n• assign to OUTER binding with heap val → unsafe\n• push/put: skip target (arg0), check val args\n• non-tail call to unknown callee → unsafe\n• respects scope_bindings (while-loop locals)" shape=ellipse style=filled fillcolor="#FFFDE7"];
+    }
+
+    rotation_safe -> body_escapes [label="fixpoint\niterates" style=dashed dir=back];
+    outward_safe -> body_outward [label="fixpoint\niterates" style=dashed dir=back];
+    param_safe -> body_stores [label="fixpoint\niterates" style=dashed dir=back];
+
+    // Analysis function dependencies on maps
+    body_escapes -> rotation_safe [label="callee_is_rotation_safe\n(transitive)" style=dotted color=gray40 constraint=false];
+    body_outward -> outward_safe [label="callee_is_outward_safe\n(transitive)" style=dotted color=gray40 constraint=false];
+    body_outward -> param_safe [label="callee_is_param_safe\n(non-tail)" style=dotted color=gray40 constraint=false];
+    body_stores -> param_safe [label="callee_is_param_safe\n(transitive)" style=dotted color=gray40 constraint=false];
+
+    // ════════════════════════════════════════════════════════════════
+    // CONSUMERS: Runtime decisions
+    // ════════════════════════════════════════════════════════════════
+    subgraph cluster_decisions {
+        label="Consumers (per-site decisions during lowering)";
+        style=filled;
+        color="#FCE4EC";
+        fontsize=12;
+
+        can_flip [label="can_flip_while_loop\n\n1. !body_contains_dangerous_outward_set\n2. all_breaks_have_safe_values\n\n→ enables RegionEnter/FlipSwap/RegionExit\n→ per-iteration arena rotation" shape=diamond style=filled fillcolor="#FCE4EC"];
+        can_flip_rc [label="can_flip_while_loop_refcounted\n\n1. !body.signal.may_suspend()\n2. all_breaks_have_safe_values\n3. !dangerous_outward_assign\n4. has_arg_escaping_call (put/push)\n\n→ enables refcounted scope marks" shape=diamond style=filled fillcolor="#FCE4EC"];
+        can_scope [label="can_scope_allocate_call\n(let-scope region insertion)\n\n• result_is_safe (conditions 3/4)\n• callee_return_params\n• callee_rest_index" shape=diamond style=filled fillcolor="#FCE4EC"];
+        fiber_shared [label="LirFunction flags\n\n• rotation_safe\n• result_is_immediate\n• has_outward_heap_set\n\n→ fiber shared-alloc decision" shape=diamond style=filled fillcolor="#FCE4EC"];
+    }
+
+    walk_outward -> can_flip [label="body_contains\n_dangerous_outward_set"];
+    walk_outward -> can_flip_rc [label="body_contains\n_dangerous_outward_assign"];
+    body_escapes -> fiber_shared [label="!body_escapes\n= rotation_safe"];
+
+    // What walk_for_outward_set checks
+    rotation_safe -> walk_outward [label="callee_is_rotation_safe" color=red];
+    outward_safe -> walk_outward [label="callee_is_outward_safe" color=red];
+    param_safe -> walk_outward [label="callee_is_param_safe" color=red];
+    struct_rot -> walk_outward [label="callee_from_struct_get\n_is_rotation_safe" color=red];
+    struct_outward -> walk_outward [label="callee_from_struct_get\n_is_outward_safe" color=red];
+
+    result_imm -> can_scope [color=orange];
+    return_params -> can_scope [color=orange];
+    rest_index -> can_scope [color=orange];
+    return_safe -> can_scope [label="result_is_safe\nextended" color=orange];
+
+    // ════════════════════════════════════════════════════════════════
+    // THE NQUEENS PROBLEM PATH (highlighted)
+    // ════════════════════════════════════════════════════════════════
+    // When can_flip=false for a while loop, no scope marks are inserted,
+    // arena memory grows linearly.
+
+    nqueens_leak [label="LEAK PATH (nqueens)\n\nwhile-loop body calls f\n→ f is not rotation_safe\n→ f is not outward_safe\n→ f is not param_safe\n→ walk_for_outward_set returns true\n→ can_flip = false\n→ no scope marks\n→ 25GB memory" shape=box3d style=filled fillcolor="#FFCDD2" fontcolor=darkred];
+
+    can_flip -> nqueens_leak [label="false" color=red penwidth=2];
+}

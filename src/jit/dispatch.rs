@@ -390,6 +390,37 @@ pub extern "C" fn elle_jit_region_rotate_dealloc() -> JitValue {
     JitValue::nil()
 }
 
+/// Increment the durable reference count for a heap value.
+/// Called by JIT `StoreLocal` to track binding references.
+#[no_mangle]
+pub extern "C" fn elle_jit_incref(tag: u64, payload: u64) -> JitValue {
+    let val = crate::value::Value { tag, payload };
+    crate::value::fiberheap::incref(val);
+    JitValue::nil()
+}
+
+/// Decrement refcount only (no drop). Called by JIT `StoreLocalRefcounted`
+/// to release the old binding's reference. The old value may still be
+/// reachable through collections or other bindings — actual freeing is
+/// deferred to scope exit.
+#[no_mangle]
+pub extern "C" fn elle_jit_decref(tag: u64, payload: u64) -> JitValue {
+    let val = crate::value::Value { tag, payload };
+    crate::value::fiberheap::decref(val);
+    JitValue::nil()
+}
+
+/// Decref and free if rc reaches 0. Called by JIT `DropSlot`.
+/// Safe because DropSlot is only emitted where escape analysis proves
+/// the value hasn't escaped to collections.
+#[no_mangle]
+pub extern "C" fn elle_jit_drop_slot(tag: u64, payload: u64) -> JitValue {
+    let val = crate::value::Value { tag, payload };
+    crate::value::fiberheap::decref(val);
+    crate::value::fiberheap::drop_slot_value(val);
+    JitValue::nil()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

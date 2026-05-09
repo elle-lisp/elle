@@ -94,6 +94,8 @@ impl<'a> Lowerer<'a> {
             // no actual instruction needs emitting at this point.
             self.pending_region_exits -= 1;
             self.region_depth -= 1;
+            self.region_refcounted_stack.pop();
+            self.region_slots.pop();
         } else if scoped {
             self.emit_region_exit();
         }
@@ -205,6 +207,8 @@ impl<'a> Lowerer<'a> {
         if tail_scoped {
             self.pending_region_exits -= 1;
             self.region_depth -= 1;
+            self.region_refcounted_stack.pop();
+            self.region_slots.pop();
         } else if scoped {
             self.emit_region_exit();
         }
@@ -271,10 +275,21 @@ impl<'a> Lowerer<'a> {
             });
             Ok(result)
         } else if self.in_lambda {
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: value_reg,
-            });
+            let is_mutable = !self.arena.get(binding).is_immutable;
+            if is_mutable {
+                // Mutable binding: incref so the value is protected
+                // from release_refcounted. StoreLocalRefcounted does
+                // decref(old) [safe: clamps at 0] + incref(new).
+                self.emit(LirInstr::StoreLocalRefcounted {
+                    slot,
+                    src: value_reg,
+                });
+            } else {
+                self.emit(LirInstr::StoreLocal {
+                    slot,
+                    src: value_reg,
+                });
+            }
             let result = self.fresh_reg();
             self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
@@ -302,10 +317,18 @@ impl<'a> Lowerer<'a> {
             });
             Ok(result)
         } else {
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: value_reg,
-            });
+            let is_mutable = !self.arena.get(binding).is_immutable;
+            if is_mutable {
+                self.emit(LirInstr::StoreLocalRefcounted {
+                    slot,
+                    src: value_reg,
+                });
+            } else {
+                self.emit(LirInstr::StoreLocal {
+                    slot,
+                    src: value_reg,
+                });
+            }
             let result = self.fresh_reg();
             self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
@@ -360,8 +383,10 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(result)
             } else {
-                // For simple local variables, store directly
-                self.emit(LirInstr::StoreLocal {
+                // Drop-on-overwrite: decref_and_free the old value,
+                // incref the new value. Aliasing is safe because
+                // aliased values have refcount > 0 and won't be freed.
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: value_reg,
                 });

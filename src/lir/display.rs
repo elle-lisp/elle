@@ -106,6 +106,7 @@ impl fmt::Display for LirInstr {
             // === Variables ===
             LirInstr::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
             LirInstr::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
+            LirInstr::StoreLocalRefcounted { slot, src } => write!(f, "local[{}] ←rc {}", slot, src),
             LirInstr::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
             LirInstr::LoadCaptureRaw { dst, index } => {
                 write!(f, "{} ← cap[{}] (raw)", dst, index)
@@ -258,6 +259,7 @@ impl fmt::Display for LirInstr {
             LirInstr::RegionRotateRefcounted => f.write_str("region-rotate-refcounted"),
             LirInstr::RegionExitRefcounted => f.write_str("region-exit-refcounted"),
             LirInstr::DropSlot { slot } => write!(f, "drop-slot {slot}"),
+            LirInstr::DecrefLocal { slot } => write!(f, "decref-local {slot}"),
             LirInstr::OutboxEnter => f.write_str("outbox-enter"),
             LirInstr::OutboxExit => f.write_str("outbox-exit"),
             LirInstr::FlipEnter => f.write_str("flip-enter"),

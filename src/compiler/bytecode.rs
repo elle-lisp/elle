@@ -336,6 +336,17 @@ pub enum Instruction {
     /// free list, marks it dropped, and sets the register to nil.
     /// Idempotent: re-dropping a nil slot is a no-op.
     DropSlot,
+
+    /// Store to local variable with refcount bookkeeping (index u16).
+    /// Pops the new value, reads the old value from the slot,
+    /// calls decref(old) + incref(new), then stores new.
+    /// Used for mutable binding assignment (def @var / assign).
+    StoreLocalRefcounted,
+
+    /// Decrement refcount of a local slot (index u16).
+    /// Emitted before RegionExit/RegionExitRefcounted for each
+    /// in-scope binding, so release_refcounted can free rc=0 objects.
+    DecrefLocal,
 }
 
 /// Compiled bytecode with constants
@@ -512,7 +523,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (offset={}, target={})", offset, target));
                 i += 4;
             }
-            Instruction::LoadLocal | Instruction::StoreLocal if i + 1 < instructions.len() => {
+            Instruction::LoadLocal | Instruction::StoreLocal | Instruction::StoreLocalRefcounted if i + 1 < instructions.len() => {
                 let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (index={})", index));
                 i += 2;
@@ -606,6 +617,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 // No operands — pop one, push one
             }
             Instruction::DropSlot if i + 1 < instructions.len() => {
+                let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (slot={})", slot));
+                i += 2;
+            }
+            Instruction::DecrefLocal if i + 1 < instructions.len() => {
                 let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (slot={})", slot));
                 i += 2;

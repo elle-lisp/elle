@@ -17,7 +17,37 @@ pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         }
     }
     vm.fiber.stack[abs_idx] = value;
+    crate::value::fiberheap::incref(value);
     // Push the value back so it can be used as the result of set!
+    vm.fiber.stack.push(value);
+}
+
+/// Store to a local slot with refcount bookkeeping.
+/// decref(old), drop_slot_value(old), incref(new).
+/// Used for mutable binding assignment (assign var).
+pub(crate) fn handle_store_local_refcounted(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    let idx = vm.read_u16(bytecode, ip) as usize;
+    let value = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on StoreLocalRefcounted");
+    let frame_base = vm.current_frame_base();
+    let abs_idx = frame_base + idx;
+    if abs_idx >= vm.fiber.stack.len() {
+        while vm.fiber.stack.len() <= abs_idx {
+            vm.fiber.stack.push(Value::NIL);
+        }
+    }
+    let old = vm.fiber.stack[abs_idx];
+    vm.fiber.stack[abs_idx] = value;
+    // Decref the old value (clamps at 0 if never increfd).
+    // Do NOT call drop_slot_value — the old value may be reachable
+    // through collections or other bindings. Actual freeing is
+    // deferred to scope exit (release/release_refcounted).
+    crate::value::fiberheap::decref(old);
+    crate::value::fiberheap::incref(value);
+    // Push back so caller can auto-pop.
     vm.fiber.stack.push(value);
 }
 

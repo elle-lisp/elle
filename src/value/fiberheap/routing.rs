@@ -269,16 +269,27 @@ pub fn drop_slot_value(val: crate::value::Value) {
         if heap.pool.is_dropped(obj_ptr as *const _) {
             return;
         }
-        if heap.pool.refcount(obj_ptr as *const _) > 0 {
+        let rc = heap.pool.refcount(obj_ptr as *const _);
+        if rc > 0 {
+            if super::FiberHeap::trace_rc() {
+                eprintln!("[trace:rc] drop_slot_value {:?} SKIPPED rc={}", heap_ptr, rc);
+            }
             return;
+        }
+        if super::FiberHeap::trace_rc() {
+            eprintln!("[trace:rc] drop_slot_value {:?} FREED", heap_ptr);
         }
         // Run destructor if needed.
         if super::needs_drop((*obj_ptr).tag()) {
             std::ptr::drop_in_place(obj_ptr);
         }
-        // Return slab slot to free list and mark as dropped.
+        // Remove from pool.allocs and pool.dtors to prevent double-dealloc
+        // when release() later processes the range. O(n) scan — acceptable
+        // because DropSlot targets are determined at compile time and the
+        // typical pool.allocs size is small (5-50 entries per scope).
+        heap.pool.remove_from_allocs_and_dtors(obj_ptr);
+        // Return slab slot to free list.
         heap.pool.dealloc_slot(obj_ptr);
-        heap.pool.mark_dropped(obj_ptr as *const _);
         heap.pool.alloc_count = heap.pool.alloc_count.saturating_sub(1);
     }
 }

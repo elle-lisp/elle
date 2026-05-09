@@ -188,7 +188,7 @@ impl MlirPolicy {
 /// silently (forward compat for :spirv, :mlir, :gpu).
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode",
+    "macro", "wasm", "capture", "arena", "escape", "bytecode", "rc",
     // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
@@ -255,7 +255,8 @@ pub mod trace_bits {
     pub const ARENA: u32 = 1 << 14;
     pub const ESCAPE: u32 = 1 << 15;
     pub const BYTECODE: u32 = 1 << 16;
-    pub const ALL: u32 = (1 << 17) - 1;
+    pub const RC: u32 = 1 << 17;
+    pub const ALL: u32 = (1 << 18) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -277,7 +278,7 @@ pub mod trace_bits {
             "arena" => ARENA,
             "escape" => ESCAPE,
             "bytecode" => BYTECODE,
-            // Future keywords — accepted but no bit (traced via HashSet)
+            "rc" => RC,
             _ => 0,
         }
     }
@@ -476,6 +477,15 @@ impl Config {
     /// Check if a trace keyword is set.
     pub fn has_trace(&self, keyword: &str) -> bool {
         self.trace_keywords.iter().any(|k| k == keyword)
+    }
+
+    /// Compute trace bits for this config (bitfield of enabled trace keywords).
+    pub fn trace_bits(&self) -> u32 {
+        let mut bits = 0u32;
+        for kw in &self.trace_keywords {
+            bits |= trace_bits::from_name(kw);
+        }
+        bits
     }
 
     /// Whether JIT compilation is enabled.

@@ -82,9 +82,7 @@ impl<'a> Lowerer<'a> {
                 // Emit raw instructions (not emit_region_exit()) — region_depth
                 // must not change because both branches of an `if` emit the
                 // same exits but only one executes at runtime.
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
+                self.emit_pending_region_exits();
 
                 self.emit(LirInstr::TailCall {
                     func: func_reg,
@@ -189,9 +187,7 @@ impl<'a> Lowerer<'a> {
             });
 
             if is_tail {
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
+                self.emit_pending_region_exits();
                 self.emit(LirInstr::TailCallArrayMut {
                     func: func_reg,
                     args: final_args,

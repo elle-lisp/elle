@@ -1,0 +1,33 @@
+digraph refcount_protocol {
+    rankdir=TB;
+    node [shape=box, style=filled, fontname="monospace", fontsize=10];
+    edge [fontname="monospace", fontsize=9];
+
+    // ── Completed ────────────────────────────────────────────────
+    step1 [label="1. StoreLocal: incref(new) ✓", fillcolor="#99ff99"];
+    step2 [label="2. DecrefLocal bytecode ✓", fillcolor="#99ff99"];
+    step3 [label="3. emit DecrefLocal before\nRegionExit/Rotate ✓\nper-region slot tracking", fillcolor="#99ff99"];
+    step4 [label="4. relax refcounted rotation\nto accept suspension ✓\nbody_contains_dangerous_outward_assign\nnow accepts mutable binding assign", fillcolor="#99ff99"];
+
+    // ── Test results ─────────────────────────────────────────────
+    leak_pass [label="leak.lisp: ALL tiers pass ✓\nincluding t14 (suspend+mutate)\nand t10 push-accum (was regression)", fillcolor="#99ff99"];
+
+    // ── Current blocker ──────────────────────────────────────────
+    blocker [label="BLOCKER: resource.lisp\nlive_count underflow in slab::dealloc\nafter tco-alloc-10000\n\nCaused by re-entrant VM calls\n(arena/allocs → execute_bytecode_saving_stack)\nincref'd locals not decref'd when\nre-entrant frame is torn down", fillcolor="#ff9999", penwidth=3];
+
+    // ── Root cause ───────────────────────────────────────────────
+    cause [label="execute_bytecode_saving_stack\nrestores operand stack on exit\nbut does NOT emit DecrefLocal\nfor the thunk's local bindings\n\n→ incref'd values keep rc>0\n→ alloc_count/live_count mismatch\n→ double-dealloc → underflow", fillcolor="#ffcccc"];
+
+    // ── Fix options ──────────────────────────────────────────────
+    fix [label="FIX: on re-entrant return,\ndecref all values in the\nthunk's stack frame region\nbefore restoring the saved stack", fillcolor="#cce5ff"];
+
+    // ── Remaining work ───────────────────────────────────────────
+    step5 [label="5. closure capture incref\n(not needed for leak.lisp\nbut needed for correctness\nwhen captures cross scope exit)", fillcolor="#ffffcc"];
+
+    // ── Edges ────────────────────────────────────────────────────
+    step1 -> step2 -> step3 -> step4;
+    step4 -> leak_pass;
+    step4 -> blocker;
+    blocker -> cause -> fix;
+    fix -> step5 [style=dashed];
+}

@@ -140,6 +140,14 @@ impl SlabPool {
         self.dtors.len()
     }
 
+    /// Remove a pointer from pool.allocs (O(n) scan).
+    /// Called by drop_slot_value to prevent double-dealloc when
+    /// release() later processes the stale entry.
+    pub fn remove_from_allocs_and_dtors(&mut self, ptr: *mut HeapObject) {
+        self.allocs.retain(|&p| p != ptr);
+        self.dtors.retain(|&p| p != ptr);
+    }
+
     pub fn live_count(&self) -> usize {
         self.slab.live_count()
     }

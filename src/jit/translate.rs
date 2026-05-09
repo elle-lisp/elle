@@ -181,6 +181,29 @@ impl<'a> FunctionTranslator<'a> {
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.incref, builder.func);
+                builder.ins().call(func_ref, &[tag, payload]);
+            }
+
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                let base = self.local_slot_to_var(*slot);
+                // Read old value before overwriting.
+                let (old_tag, old_payload) = self.use_var_pair(builder, base);
+                // Write new value.
+                let (tag, payload) = self.use_var_pair(builder, src.0);
+                self.def_var_pair(builder, base, tag, payload);
+                // Decref old (no drop — old may be reachable through
+                // collections/aliases; freeing deferred to scope exit).
+                let decref_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.decref, builder.func);
+                builder.ins().call(decref_ref, &[old_tag, old_payload]);
+                let incref_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.incref, builder.func);
+                builder.ins().call(incref_ref, &[tag, payload]);
             }
 
             LirInstr::LoadCapture { dst, index } => {
@@ -1127,10 +1150,26 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
-            LirInstr::DropSlot { .. } => {
-                // TODO: JIT DropSlot — for now, fall back to interpreter.
-                // The JIT only compiles silent functions; DropSlot is emitted
-                // at tail-call sites which the JIT handles differently.
+            LirInstr::DropSlot { slot } => {
+                let base = self.local_slot_to_var(*slot);
+                let (tag, payload) = self.use_var_pair(builder, base);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.drop_slot, builder.func);
+                builder.ins().call(func_ref, &[tag, payload]);
+                let nil_tag = builder.ins().iconst(cranelift_codegen::ir::types::I64,
+                    crate::value::Value::NIL.tag as i64);
+                let nil_payload = builder.ins().iconst(cranelift_codegen::ir::types::I64, 0);
+                self.def_var_pair(builder, base, nil_tag, nil_payload);
+            }
+
+            LirInstr::DecrefLocal { slot } => {
+                let base = self.local_slot_to_var(*slot);
+                let (tag, payload) = self.use_var_pair(builder, base);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.decref, builder.func);
+                builder.ins().call(func_ref, &[tag, payload]);
             }
 
             LirInstr::PushParamFrame { pairs } => {

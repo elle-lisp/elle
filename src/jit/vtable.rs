@@ -108,6 +108,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) region_rotate: FuncId,
     pub(crate) region_rotate_dealloc: FuncId,
     pub(crate) rotate_pools: FuncId,
+    pub(crate) incref: FuncId,
+    pub(crate) decref: FuncId,
+    pub(crate) drop_slot: FuncId,
     // New intrinsic helpers
     pub(crate) is_empty: FuncId,
     pub(crate) is_bool: FuncId,
@@ -349,6 +352,18 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
+    builder.symbol(
+        "elle_jit_incref",
+        dispatch::elle_jit_incref as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_decref",
+        dispatch::elle_jit_decref as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_drop_slot",
+        dispatch::elle_jit_drop_slot as *const u8,
+    );
     // New intrinsic helpers
     builder.symbol("elle_jit_is_empty", runtime::elle_jit_is_empty as *const u8);
     builder.symbol("elle_jit_is_bool", runtime::elle_jit_is_bool as *const u8);
@@ -557,6 +572,9 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         region_rotate: declare(module, "elle_jit_region_rotate", &void_to_value)?,
         region_rotate_dealloc: declare(module, "elle_jit_region_rotate_dealloc", &void_to_value)?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
+        incref: declare(module, "elle_jit_incref", &value_unary)?,
+        decref: declare(module, "elle_jit_decref", &value_unary)?,
+        drop_slot: declare(module, "elle_jit_drop_slot", &value_unary)?,
         // New intrinsic helpers
         is_empty: declare(module, "elle_jit_is_empty", &value_unary)?,
         is_bool: declare(module, "elle_jit_is_bool", &value_unary)?,

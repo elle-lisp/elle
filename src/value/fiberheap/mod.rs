@@ -294,6 +294,10 @@ impl FiberHeap {
     /// gated by Tofte-Talpin region analysis — only scopes where no
     /// values escape get this call.
     pub fn release(&mut self, mark: ArenaMark) {
+        if Self::trace_rc() {
+            let n = self.pool.allocs.len() - mark.root_allocs_len();
+            eprintln!("[trace:rc] release mark={} n_allocs={}", mark.position(), n);
+        }
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
 
@@ -339,6 +343,20 @@ impl FiberHeap {
     /// escape analysis cannot prove all values are dead but refcounting
     /// tracks which values are pinned by mutable collections/bindings.
     pub fn release_refcounted(&mut self, mark: ArenaMark) {
+        let trace = Self::trace_rc();
+        if trace {
+            let n_total = self.pool.allocs.len() - mark.root_allocs_len();
+            let n_pinned = self.pool.allocs[mark.root_allocs_len()..]
+                .iter()
+                .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
+                .count();
+            eprintln!(
+                "[trace:rc] release_refcounted mark={} n_allocs={} n_pinned={}",
+                mark.position(),
+                n_total,
+                n_pinned
+            );
+        }
         // Phase 1: Propagate protection from pinned objects (rc > 0)
         // to their transitive children. This uses temporary increfs so
         // that children reachable from surviving objects are not freed.
@@ -389,7 +407,6 @@ impl FiberHeap {
         for i in mark.root_allocs_len()..self.pool.allocs.len() {
             let ptr = self.pool.allocs[i];
             if self.pool.is_dropped(ptr as *const _) {
-                // Already freed by DropSlot — skip.
                 continue;
             }
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
@@ -1099,6 +1116,12 @@ impl FiberHeap {
 
     // ── Refcounting ───────────────────────────────────────────────────
 
+    /// Check if `--trace=rc` is active (zero-cost when off: one static read + AND).
+    #[inline(always)]
+    pub(crate) fn trace_rc() -> bool {
+        crate::config::get().trace_bits() & crate::config::trace_bits::RC != 0
+    }
+
     /// Increment the durable reference count for a heap value.
     /// No-op for non-heap values (int, float, bool, nil, keyword, symbol).
     #[inline]
@@ -1109,6 +1132,10 @@ impl FiberHeap {
         if let Some(ptr) = val.as_heap_ptr() {
             if self.pool.slab_owns(ptr) {
                 self.pool.incref(ptr as *const HeapObject);
+                if Self::trace_rc() {
+                    let rc = self.pool.refcount(ptr as *const HeapObject);
+                    eprintln!("[trace:rc] incref {:?} → rc={}", ptr, rc);
+                }
             }
         }
     }
@@ -1125,7 +1152,11 @@ impl FiberHeap {
                 if old_rc == 0 {
                     return 0; // Already at 0, no transition.
                 }
-                return self.pool.decref(ptr as *const HeapObject);
+                let new_rc = self.pool.decref(ptr as *const HeapObject);
+                if Self::trace_rc() {
+                    eprintln!("[trace:rc] decref {:?} → rc={}", ptr, new_rc);
+                }
+                return new_rc;
             }
         }
         0

@@ -164,6 +164,7 @@ impl<'a> Lowerer<'a> {
         let saved_pending_region_exits = self.pending_region_exits;
         let saved_region_depth = self.region_depth;
         let saved_region_refcounted_stack = std::mem::take(&mut self.region_refcounted_stack);
+        let saved_region_slots = std::mem::take(&mut self.region_slots);
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
         // self-tail-calls. We save it here and restore it for the
@@ -310,6 +311,7 @@ impl<'a> Lowerer<'a> {
         self.pending_region_exits = saved_pending_region_exits;
         self.region_depth = saved_region_depth;
         self.region_refcounted_stack = saved_region_refcounted_stack;
+        self.region_slots = saved_region_slots;
 
         Ok(func)
     }

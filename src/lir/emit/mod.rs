@@ -298,6 +298,14 @@ impl Emitter {
                 self.pop();
             }
 
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::StoreLocalRefcounted);
+                self.bytecode.emit_u16(*slot);
+                self.bytecode.emit(Instruction::Pop);
+                self.pop();
+            }
+
             LirInstr::LoadCapture { dst, index } => {
                 if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
                     // Non-cell locally-defined variable: use stack
@@ -945,7 +953,11 @@ impl Emitter {
             LirInstr::DropSlot { slot } => {
                 self.bytecode.emit(Instruction::DropSlot);
                 self.bytecode.emit_u16(*slot);
-                // No stack effect — operates on a local slot directly.
+            }
+
+            LirInstr::DecrefLocal { slot } => {
+                self.bytecode.emit(Instruction::DecrefLocal);
+                self.bytecode.emit_u16(*slot);
             }
 
             LirInstr::OutboxEnter => {

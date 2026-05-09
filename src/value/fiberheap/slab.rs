@@ -124,6 +124,8 @@ impl Slab {
             let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
             self.clear_dropped(flat as usize);
+            // Reset refcount for reused slot — previous occupant's refcount is stale.
+            self.refcounts[flat as usize] = 0;
             unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
             slot as *mut HeapObject
         } else {
@@ -153,7 +155,7 @@ impl Slab {
             std::ptr::write(slot as *mut Option<u32>, self.free_head);
         }
         self.free_head = Some(flat as u32);
-        self.live_count -= 1;
+        self.live_count = self.live_count.saturating_sub(1);
         // Reset refcount for the freed slot.
         if flat < self.refcounts.len() {
             self.refcounts[flat] = 0;

@@ -248,6 +248,9 @@ pub struct Lowerer<'a> {
     /// `emit_region_exit_refcounted`. Used by `lower_break` to emit
     /// the correct exit type for each compensating exit.
     region_refcounted_stack: Vec<bool>,
+    /// Stack of slot sets at each RegionEnter. Tracks which local slots
+    /// were allocated within each region for DecrefLocal emission.
+    region_slots: Vec<Vec<u16>>,
     pending_region_exits: u32,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
@@ -313,6 +316,7 @@ impl<'a> Lowerer<'a> {
             block_lower_contexts: Vec::new(),
             region_depth: 0,
             region_refcounted_stack: Vec::new(),
+            region_slots: Vec::new(),
             pending_region_exits: 0,
             scope_stats: ScopeStats::default(),
             discard_slot: None,
@@ -637,6 +641,13 @@ impl<'a> Lowerer<'a> {
         };
         self.current_func.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
+        // Track slot in the current region for DecrefLocal emission.
+        // Upvalue slots (needs_capture inside lambda) use the capture
+        // env, not the stack — they're managed by StoreCapture/LoadCapture
+        // and don't need DecrefLocal.
+        if !needs_capture || !self.in_lambda {
+            self.record_region_slot(slot);
+        }
         slot
     }
 
@@ -714,6 +725,7 @@ impl<'a> Lowerer<'a> {
         self.emit(LirInstr::RegionEnter);
         self.region_depth += 1;
         self.region_refcounted_stack.push(false);
+        self.region_slots.push(Vec::new());
     }
 
     /// Emit `RegionEnter` for a refcounted region.
@@ -721,35 +733,83 @@ impl<'a> Lowerer<'a> {
         self.emit(LirInstr::RegionEnter);
         self.region_depth += 1;
         self.region_refcounted_stack.push(true);
+        self.region_slots.push(Vec::new());
+    }
+
+    /// Record that a slot was allocated in the current region.
+    fn record_region_slot(&mut self, slot: u16) {
+        if let Some(slots) = self.region_slots.last_mut() {
+            slots.push(slot);
+        }
+    }
+
+    /// Emit pending RegionExits with DecrefLocal for each region.
+    /// Called at tail-call sites where region exits are deferred.
+    fn emit_pending_region_exits(&mut self) {
+        let n = self.pending_region_exits as usize;
+        let stack_len = self.region_slots.len();
+        for i in 0..n {
+            let region_idx = stack_len.checked_sub(1 + i);
+            if let Some(idx) = region_idx {
+                if idx < self.region_slots.len() {
+                    let slots = self.region_slots[idx].clone();
+                    for slot in slots {
+                        self.emit(LirInstr::DecrefLocal { slot });
+                    }
+                }
+            }
+            self.emit(LirInstr::RegionExit);
+        }
+    }
+
+    /// Emit DecrefLocal for all bindings allocated within the current region.
+    fn emit_decrefs_for_region(&mut self) {
+        let slots: Vec<u16> = self
+            .region_slots
+            .last()
+            .map(|s| s.clone())
+            .unwrap_or_default();
+        for slot in slots {
+            self.emit(LirInstr::DecrefLocal { slot });
+        }
     }
 
     /// Emit `RegionExit` and decrement the region depth counter.
     fn emit_region_exit(&mut self) {
+        self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionExit);
         self.region_depth -= 1;
         self.region_refcounted_stack.pop();
+        self.region_slots.pop();
     }
+
 
     /// Emit `RegionRotate` for double-buffered loop scope rotation.
     /// Does not change region_depth — the mark count stays the same
     /// (pop prev + push new = net zero change from the 2-mark state).
     fn emit_region_rotate(&mut self) {
+        self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionRotate);
     }
 
     fn emit_region_rotate_dealloc(&mut self) {
+        self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionRotateDealloc);
     }
 
     fn emit_region_rotate_refcounted(&mut self) {
+        self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionRotateRefcounted);
     }
 
     fn emit_region_exit_refcounted(&mut self) {
+        self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionExitRefcounted);
         self.region_depth -= 1;
         self.region_refcounted_stack.pop();
+        self.region_slots.pop();
     }
+
 
     /// Check if the callee is the current function (self-tail-call).
     fn is_self_tail_call(&self, func: &Hir) -> bool {

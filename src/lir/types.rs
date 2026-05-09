@@ -448,6 +448,13 @@ pub enum LirInstr {
         slot: u16,
         src: Reg,
     },
+    /// Store to local slot with refcount bookkeeping.
+    /// decref_and_free(old), incref(new), then store.
+    /// Used for mutable binding init and assignment.
+    StoreLocalRefcounted {
+        slot: u16,
+        src: Reg,
+    },
     /// Load from capture (auto-unwraps LocalCell)
     LoadCapture {
         dst: Reg,
@@ -757,6 +764,13 @@ pub enum LirInstr {
         slot: u16,
     },
 
+    /// Decrement refcount of a local slot (paired with incref in StoreLocal).
+    /// Emitted before RegionExit/RegionExitRefcounted so release_refcounted
+    /// can free objects whose only reference was the local binding.
+    DecrefLocal {
+        slot: u16,
+    },
+
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.
     /// All param/value registers are consumed from the stack.
@@ -1044,6 +1058,8 @@ fn is_gpu_instruction(i: &LirInstr) -> bool {
         | LirInstr::Convert { .. }
         | LirInstr::LoadLocal { .. }
         | LirInstr::StoreLocal { .. }
+        | LirInstr::StoreLocalRefcounted { .. }
+        | LirInstr::DecrefLocal { .. }
         | LirInstr::LoadCapture { .. }
         | LirInstr::LoadCaptureRaw { .. }
         // Flip instructions are arena-rotation no-ops on GPU (no heap).

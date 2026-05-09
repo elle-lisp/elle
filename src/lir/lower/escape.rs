@@ -2861,25 +2861,24 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         loop_bindings: &[(Binding, &Hir)],
     ) -> bool {
-        // Loop body must not suspend: suspended fibers hold references to
-        // loop-scope objects on their stack. Refcounted rotation at the
-        // back-edge would free those objects (rc=0, not in any collection),
-        // causing use-after-free when the fiber resumes.
-        if body.signal.may_suspend() {
-            return false;
-        }
+        // Suspension is safe with universal incref: all bindings on the
+        // fiber's stack are incref'd (rc > 0), so release_refcounted
+        // pins them. When the fiber resumes, the values are still live.
         if !self.all_breaks_have_safe_values(body) {
             return false;
         }
-        // The body must not have dangerous outward assigns.
+        // The body must not have dangerous outward assigns (heap values
+        // assigned to outer bindings that aren't tracked by refcounting).
         if self.body_contains_dangerous_outward_assign(body, loop_bindings) {
             return false;
         }
-        // The body MUST have an arg-escaping primitive (put/push) that
-        // blocked flip eligibility — otherwise flip would have accepted.
-        // This prevents enabling refcounted scope marks for patterns
-        // we haven't analyzed.
-        self.body_has_arg_escaping_call(body, loop_bindings)
+        // With universal incref + DecrefLocal, refcounted rotation is
+        // safe for any body that flip rejected. The incref on every
+        // StoreLocal ensures release_refcounted pins live values.
+        // Accept if the body has outward mutations (put/push/assign)
+        // that blocked flip eligibility.
+        self.body_contains_dangerous_outward_set(body, loop_bindings)
+            || self.body_has_arg_escaping_call(body, loop_bindings)
     }
 
     /// Check if the body contains at least one call to an arg-escaping
@@ -2926,6 +2925,12 @@ impl<'a> Lowerer<'a> {
     /// Like `body_contains_dangerous_outward_set` but only checks for
     /// `assign` to outer bindings, not calls to arg-escaping primitives
     /// (put/push). Those are handled by refcounting.
+    ///
+    /// With universal incref + StoreLocalRefcounted, outward assigns to
+    /// mutable bindings are also handled: StoreLocalRefcounted does
+    /// decref(old) + incref(new), and DecrefLocal at scope exit ensures
+    /// release_refcounted can free dead values. So assign to a mutable
+    /// binding is NOT dangerous for refcounted rotation.
     fn body_contains_dangerous_outward_assign(
         &self,
         hir: &Hir,
@@ -2934,7 +2939,12 @@ impl<'a> Lowerer<'a> {
         match &hir.kind {
             HirKind::Assign { target, value } => {
                 let in_scope = scope_bindings.iter().any(|(b, _)| b == target);
+                // Assign to an outer mutable binding is safe under
+                // refcounted rotation: StoreLocalRefcounted handles the
+                // old/new value lifecycle via decref/incref.
+                let is_mutable = !self.arena.get(*target).is_immutable;
                 if !in_scope
+                    && !is_mutable
                     && !self.result_is_safe(value, scope_bindings)
                     && !self.value_is_non_allocating_accessor(value)
                 {

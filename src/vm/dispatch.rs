@@ -130,6 +130,9 @@ impl VM {
                 Instruction::StoreLocal => {
                     variables::handle_store_local(self, bc, &mut ip);
                 }
+                Instruction::StoreLocalRefcounted => {
+                    variables::handle_store_local_refcounted(self, bc, &mut ip);
+                }
                 Instruction::LoadUpvalue => {
                     variables::handle_load_upvalue(self, bc, &mut ip, Some(closure_env));
                 }
@@ -476,8 +479,23 @@ impl VM {
                     let abs_idx = frame_base + slot;
                     let val = self.fiber.stack[abs_idx];
                     if val.is_heap() {
+                        // Decref the binding's incref (from StoreLocal),
+                        // then free if rc reaches 0. Safe because DropSlot
+                        // is only emitted where escape analysis proves the
+                        // value hasn't escaped to collections.
+                        crate::value::fiberheap::decref(val);
                         crate::value::fiberheap::drop_slot_value(val);
                         self.fiber.stack[abs_idx] = Value::NIL;
+                    }
+                }
+
+                Instruction::DecrefLocal => {
+                    let slot = self.read_u16(bc, &mut ip) as usize;
+                    let frame_base = self.current_frame_base();
+                    let abs_idx = frame_base + slot;
+                    if abs_idx < self.fiber.stack.len() {
+                        let val = self.fiber.stack[abs_idx];
+                        crate::value::fiberheap::decref(val);
                     }
                 }
 

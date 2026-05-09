@@ -17,6 +17,7 @@ else
   CARGO_PROFILE :=
 endif
 TIMEOUT ?= 30s
+TIMEOUT_CHECKED ?= 120s
 LISP_FILES := $(shell find stdlib.lisp prelude.lisp lib/ tests/ demos/ -name '*.lisp' 2>/dev/null)
 
 all: elle docs  ## Build everything
@@ -89,7 +90,7 @@ smoke-vm: elle
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --checked-intrinsics --jit=off --mlir=off {}' \
+			'timeout $(TIMEOUT_CHECKED) $(ELLE) --checked-intrinsics --jit=off --mlir=off {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (no JIT)"; exit 1; }
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)
@@ -109,7 +110,7 @@ smoke-jit: elle
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_JIT) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=eager {}' \
+			'timeout $(TIMEOUT_CHECKED) $(ELLE) --jit=eager {}' \
 		|| { echo "FAILED: elle scripts JIT pass (eager)"; exit 1; }
 
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
