@@ -173,7 +173,7 @@ pub(crate) fn prim_arena_reset(args: &[Value]) -> (SignalBits, Value) {
             mark.position(),
             mark.dtor_len(),
             mark.custom_ptrs_len(),
-            mark.root_allocs_len(),
+            mark.alloc_list_tail(),
             mark.shared_alloc_count(),
             mark.bump_mark(),
         );

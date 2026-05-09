@@ -281,7 +281,7 @@ impl FiberHeap {
             self.pool.alloc_count,
             self.pool.dtors.len(),
             custom_ptrs_len,
-            self.pool.allocs.len(),
+            self.pool.alloc_tail,
             self.shared_alloc_count,
             Some(self.pool.mark().arena_mark),
         )
@@ -294,24 +294,37 @@ impl FiberHeap {
     /// gated by Tofte-Talpin region analysis — only scopes where no
     /// values escape get this call.
     pub fn release(&mut self, mark: ArenaMark) {
+        use super::fiberheap::slab::ALLOC_NIL;
+
         if Self::trace_rc() {
-            let n = self.pool.allocs.len() - mark.root_allocs_len();
-            eprintln!("[trace:rc] release mark={} n_allocs={}", mark.position(), n);
+            eprintln!("[trace:rc] release mark={}", mark.position());
         }
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
 
-        let n_freed = self.pool.allocs.len() - mark.root_allocs_len();
-        for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
-            let ptr = self.pool.allocs[i];
-            // Skip slots already freed by DropSlot.
-            if !self.pool.is_dropped(ptr as *const _) {
-                unsafe {
-                    self.pool.dealloc_slot(ptr);
-                }
-            }
+        // Walk the linked list from mark.alloc_list_tail.next to current tail,
+        // deallocating each slot.
+        let start = if mark.alloc_list_tail() == ALLOC_NIL {
+            self.pool.alloc_head
+        } else {
+            self.pool.slab.alloc_next[mark.alloc_list_tail() as usize]
+        };
+        let mut n_freed: usize = 0;
+        let mut cur = start;
+        while cur != ALLOC_NIL {
+            let next = self.pool.slab.alloc_next[cur as usize];
+            let ptr = self.pool.slab.flat_to_ptr(cur as usize);
+            self.pool.slab.dealloc(ptr);
+            n_freed += 1;
+            cur = next;
         }
-        self.pool.allocs.truncate(mark.root_allocs_len());
+        // Truncate the list at the mark point.
+        self.pool.alloc_tail = mark.alloc_list_tail();
+        if self.pool.alloc_tail == ALLOC_NIL {
+            self.pool.alloc_head = ALLOC_NIL;
+        } else {
+            self.pool.slab.alloc_next[self.pool.alloc_tail as usize] = ALLOC_NIL;
+        }
 
         if let Some(state) = self.custom_alloc_stack.last_mut() {
             let start = mark.custom_ptrs_len();
@@ -343,25 +356,47 @@ impl FiberHeap {
     /// escape analysis cannot prove all values are dead but refcounting
     /// tracks which values are pinned by mutable collections/bindings.
     pub fn release_refcounted(&mut self, mark: ArenaMark) {
+        use super::fiberheap::slab::ALLOC_NIL;
+
         let trace = Self::trace_rc();
+
+        // Phase 1: Collect scope allocs and propagate protection from
+        // pinned objects (rc > 0) to their transitive children.
+        // First, collect all scope alloc flat indices.
+        let start = if mark.alloc_list_tail() == ALLOC_NIL {
+            self.pool.alloc_head
+        } else {
+            self.pool.slab.alloc_next[mark.alloc_list_tail() as usize]
+        };
+
+        // Collect scope alloc pointers for worklist phase.
+        let mut scope_ptrs: Vec<*mut HeapObject> = Vec::new();
+        let mut scope_flats: Vec<u32> = Vec::new();
+        {
+            let mut cur = start;
+            while cur != ALLOC_NIL {
+                let next = self.pool.slab.alloc_next[cur as usize];
+                let ptr = self.pool.slab.flat_to_ptr(cur as usize);
+                scope_ptrs.push(ptr);
+                scope_flats.push(cur);
+                cur = next;
+            }
+        }
+
         if trace {
-            let n_total = self.pool.allocs.len() - mark.root_allocs_len();
-            let n_pinned = self.pool.allocs[mark.root_allocs_len()..]
+            let n_pinned = scope_ptrs
                 .iter()
                 .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
                 .count();
             eprintln!(
                 "[trace:rc] release_refcounted mark={} n_allocs={} n_pinned={}",
                 mark.position(),
-                n_total,
+                scope_ptrs.len(),
                 n_pinned
             );
         }
-        // Phase 1: Propagate protection from pinned objects (rc > 0)
-        // to their transitive children. This uses temporary increfs so
-        // that children reachable from surviving objects are not freed.
-        let scope_allocs = &self.pool.allocs[mark.root_allocs_len()..];
-        let mut worklist: Vec<*mut HeapObject> = scope_allocs
+
+        let mut worklist: Vec<*mut HeapObject> = scope_ptrs
             .iter()
             .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
             .copied()
@@ -402,21 +437,17 @@ impl FiberHeap {
         }
         self.pool.dtors.truncate(kept);
 
-        // Dealloc refcount-0 slab slots, keep pinned. Skip dropped slots.
-        let mut allocs_kept = mark.root_allocs_len();
-        for i in mark.root_allocs_len()..self.pool.allocs.len() {
-            let ptr = self.pool.allocs[i];
-            if self.pool.is_dropped(ptr as *const _) {
-                continue;
-            }
+        // Dealloc refcount-0 slab slots, keep pinned (re-link survivors).
+        // Walk the scope allocs and unlink+dealloc rc==0 nodes.
+        for i in 0..scope_ptrs.len() {
+            let ptr = scope_ptrs[i];
+            let flat = scope_flats[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
+                self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
-            } else {
-                self.pool.allocs[allocs_kept] = ptr;
-                allocs_kept += 1;
             }
+            // Pinned nodes stay linked — they remain in the list.
         }
-        self.pool.allocs.truncate(allocs_kept);
 
         // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
@@ -439,9 +470,33 @@ impl FiberHeap {
     /// are dead. Only runs destructors and truncates tracking vecs.
     /// Slab slots are reclaimed later by teardown or RegionExit.
     pub fn release_no_dealloc(&mut self, mark: ArenaMark) {
+        use super::fiberheap::slab::ALLOC_NIL;
+
         self.pool.run_dtors(mark.dtor_len());
         self.pool.dtors.truncate(mark.dtor_len());
-        self.pool.allocs.truncate(mark.root_allocs_len());
+
+        // Walk the linked list from mark tail to current tail and
+        // unlink all nodes (but do NOT dealloc slab slots).
+        let start = if mark.alloc_list_tail() == ALLOC_NIL {
+            self.pool.alloc_head
+        } else {
+            self.pool.slab.alloc_next[mark.alloc_list_tail() as usize]
+        };
+        let mut cur = start;
+        while cur != ALLOC_NIL {
+            let next = self.pool.slab.alloc_next[cur as usize];
+            // Clear links but don't dealloc.
+            self.pool.slab.alloc_prev[cur as usize] = ALLOC_NIL;
+            self.pool.slab.alloc_next[cur as usize] = ALLOC_NIL;
+            cur = next;
+        }
+        // Truncate the list at the mark point.
+        self.pool.alloc_tail = mark.alloc_list_tail();
+        if self.pool.alloc_tail == ALLOC_NIL {
+            self.pool.alloc_head = ALLOC_NIL;
+        } else {
+            self.pool.slab.alloc_next[self.pool.alloc_tail as usize] = ALLOC_NIL;
+        }
 
         // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
@@ -594,6 +649,8 @@ impl FiberHeap {
     ///
     /// Panics if fewer than two marks are on the stack.
     pub fn pop_call_scope_marks_and_release(&mut self) {
+        use super::fiberheap::slab::ALLOC_NIL;
+
         let mark2 = self
             .scope_marks
             .pop()
@@ -613,15 +670,42 @@ impl FiberHeap {
         self.pool.dtors.drain(mark1.dtor_len()..mark2.dtor_len());
         self.scope_dtors_run += dtors_freed;
 
-        // Dealloc slab slots for the range, then drain the entries.
-        for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
-            unsafe {
-                self.pool.dealloc_slot(self.pool.allocs[i]);
-            }
+        // Walk the linked list from mark1.tail.next to mark2.tail,
+        // unlinking and deallocating each node in the range.
+        let range_start = if mark1.alloc_list_tail() == ALLOC_NIL {
+            self.pool.alloc_head
+        } else {
+            self.pool.slab.alloc_next[mark1.alloc_list_tail() as usize]
+        };
+        // We need to stop after mark2.alloc_list_tail().
+        let range_end_next = if mark2.alloc_list_tail() == ALLOC_NIL {
+            ALLOC_NIL
+        } else {
+            self.pool.slab.alloc_next[mark2.alloc_list_tail() as usize]
+        };
+
+        let mut cur = range_start;
+        while cur != ALLOC_NIL && cur != range_end_next {
+            let next = self.pool.slab.alloc_next[cur as usize];
+            let ptr = self.pool.slab.flat_to_ptr(cur as usize);
+            // Clear links before dealloc.
+            self.pool.slab.alloc_prev[cur as usize] = ALLOC_NIL;
+            self.pool.slab.alloc_next[cur as usize] = ALLOC_NIL;
+            unsafe { self.pool.dealloc_slot(ptr) };
+            cur = next;
         }
-        self.pool
-            .allocs
-            .drain(mark1.root_allocs_len()..mark2.root_allocs_len());
+
+        // Stitch the list: connect mark1.tail to mark2.tail.next (range_end_next).
+        if mark1.alloc_list_tail() != ALLOC_NIL {
+            self.pool.slab.alloc_next[mark1.alloc_list_tail() as usize] = range_end_next;
+        } else {
+            self.pool.alloc_head = range_end_next;
+        }
+        if range_end_next != ALLOC_NIL {
+            self.pool.slab.alloc_prev[range_end_next as usize] = mark1.alloc_list_tail();
+        } else {
+            self.pool.alloc_tail = mark1.alloc_list_tail();
+        }
 
         self.pool.alloc_count -= mark2.position() - mark1.position();
     }
@@ -708,7 +792,7 @@ impl FiberHeap {
 
     /// Number of root allocations tracked for release().
     pub(crate) fn root_alloc_count(&self) -> usize {
-        self.pool.allocs.len()
+        self.pool.alloc_count
     }
 
     /// Number of owned shared allocators.
@@ -1354,7 +1438,6 @@ impl FiberHeap {
         }
 
         // Clear pool slab tracking and reset slab (keeps first chunk).
-        self.pool.allocs.clear();
         // SAFETY: all dtors have been run above.
         unsafe { self.pool.clear_slab() };
 

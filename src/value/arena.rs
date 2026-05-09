@@ -39,9 +39,9 @@ pub struct ArenaMark {
     /// `RegionExit` may dealloc from a popped allocator (use-after-free).
     /// **These primitives must only be used via the `with-allocator` macro.**
     custom_ptrs_len: usize,
-    /// Length of `FiberHeap.root_allocs` at mark time.
-    /// Used by `release()` to dealloc root-slab slots allocated after the mark.
-    root_allocs_len: usize,
+    /// Tail of the pool's alloc linked list at mark time.
+    /// Used by `release()` to walk and dealloc slots allocated after the mark.
+    alloc_list_tail: u32,
     /// Bump arena position at mark time. Used by `release()` to reset the
     /// bump pointer and free pages allocated after the mark.
     bump_mark: Option<BumpMark>,
@@ -52,7 +52,7 @@ impl ArenaMark {
         position: usize,
         dtor_len: usize,
         custom_ptrs_len: usize,
-        root_allocs_len: usize,
+        alloc_list_tail: u32,
         shared_alloc_count: usize,
         bump_mark: Option<BumpMark>,
     ) -> Self {
@@ -61,7 +61,7 @@ impl ArenaMark {
             dtor_len,
             shared_alloc_count,
             custom_ptrs_len,
-            root_allocs_len,
+            alloc_list_tail,
             bump_mark,
         }
     }
@@ -82,8 +82,8 @@ impl ArenaMark {
         self.custom_ptrs_len
     }
 
-    pub(crate) fn root_allocs_len(&self) -> usize {
-        self.root_allocs_len
+    pub(crate) fn alloc_list_tail(&self) -> u32 {
+        self.alloc_list_tail
     }
 
     pub(crate) fn bump_mark(&self) -> Option<BumpMark> {

@@ -10,17 +10,25 @@
 //! - **Bump arena** (`BumpArena`): variable-size data for `InlineSlice`
 //!   payloads attached to HeapObjects. Reclaimed in bulk by scope marks
 //!   or teardown. Backed by mmap'd pages.
+//!
+//! ## Allocation tracking
+//!
+//! Live allocations are tracked via an intrusive doubly-linked list
+//! threaded through the slab's `alloc_prev`/`alloc_next` parallel arrays.
+//! `alloc_head` and `alloc_tail` are the list endpoints. This replaces the
+//! former `Vec<*mut HeapObject>` — unlinking is O(1), so DropSlot no
+//! longer leaves stale entries that cause double-free on release().
 
 use super::bump::{BumpArena, BumpMark};
 use super::needs_drop;
-use super::slab::Slab;
+use super::slab::{Slab, ALLOC_NIL};
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
 /// Position snapshot for mark/release within a `SlabPool`.
 #[derive(Clone)]
 pub(crate) struct SlabMark {
-    pub(crate) allocs_len: usize,
+    pub(crate) alloc_tail: u32,
     pub(crate) dtor_len: usize,
     pub(crate) alloc_count: usize,
     /// Bump arena position at mark time; used to reset for inline data.
@@ -28,11 +36,12 @@ pub(crate) struct SlabMark {
 }
 
 pub(crate) struct SlabPool {
-    slab: Slab,
+    pub(crate) slab: Slab,
     arena: BumpArena,
-    /// Every allocation's pointer, in allocation order. Used by rotation
-    /// and scope-release paths that inspect allocation order.
-    pub(crate) allocs: Vec<*mut HeapObject>,
+    /// Head of the allocation-order doubly-linked list (oldest allocation).
+    pub(crate) alloc_head: u32,
+    /// Tail of the allocation-order doubly-linked list (newest allocation).
+    pub(crate) alloc_tail: u32,
     /// Pointers to HeapObjects that need Drop, in allocation order.
     pub(crate) dtors: Vec<*mut HeapObject>,
     /// Total number of objects allocated since creation/clear.
@@ -44,18 +53,63 @@ impl SlabPool {
         SlabPool {
             slab: Slab::new(),
             arena: BumpArena::new(),
-            allocs: Vec::new(),
+            alloc_head: ALLOC_NIL,
+            alloc_tail: ALLOC_NIL,
             dtors: Vec::new(),
             alloc_count: 0,
         }
     }
+
+    // ── Linked list operations ──────────────────────────────────────
+
+    /// Link a flat slot index at the tail of the allocation list.
+    fn link_alloc_tail(&mut self, flat: u32) {
+        let fi = flat as usize;
+        self.slab.alloc_prev[fi] = self.alloc_tail;
+        self.slab.alloc_next[fi] = ALLOC_NIL;
+        if self.alloc_tail != ALLOC_NIL {
+            self.slab.alloc_next[self.alloc_tail as usize] = flat;
+        } else {
+            self.alloc_head = flat;
+        }
+        self.alloc_tail = flat;
+    }
+
+    /// Unlink a flat slot index from the allocation list.
+    pub fn unlink_alloc(&mut self, flat: u32) {
+        let fi = flat as usize;
+        let prev = self.slab.alloc_prev[fi];
+        let next = self.slab.alloc_next[fi];
+        if prev != ALLOC_NIL {
+            self.slab.alloc_next[prev as usize] = next;
+        } else {
+            self.alloc_head = next;
+        }
+        if next != ALLOC_NIL {
+            self.slab.alloc_prev[next as usize] = prev;
+        } else {
+            self.alloc_tail = prev;
+        }
+        // Clear the links on the unlinked node.
+        self.slab.alloc_prev[fi] = ALLOC_NIL;
+        self.slab.alloc_next[fi] = ALLOC_NIL;
+    }
+
+    /// Unlink a pointer from the allocation list by computing its flat index.
+    pub fn unlink_alloc_ptr(&mut self, ptr: *mut HeapObject) {
+        let flat = self.slab.ptr_to_flat(ptr) as u32;
+        self.unlink_alloc(flat);
+    }
+
+    // ── Allocation ──────────────────────────────────────────────────
 
     /// Allocate a `HeapObject` into the slab, track it, and return a Value.
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         let value_tag = obj.value_tag();
         let drop = needs_drop(obj.tag());
         let ptr = self.slab.alloc(obj);
-        self.allocs.push(ptr);
+        let flat = self.slab.ptr_to_flat(ptr) as u32;
+        self.link_alloc_tail(flat);
         if drop {
             self.dtors.push(ptr);
         }
@@ -80,7 +134,7 @@ impl SlabPool {
     /// Capture the current position for later release.
     pub fn mark(&self) -> SlabMark {
         SlabMark {
-            allocs_len: self.allocs.len(),
+            alloc_tail: self.alloc_tail,
             dtor_len: self.dtors.len(),
             alloc_count: self.alloc_count,
             arena_mark: self.arena.mark(),
@@ -90,28 +144,41 @@ impl SlabPool {
     /// Run destructors in reverse order from `self.dtors[start..]`.
     pub fn run_dtors(&self, start: usize) {
         for i in (start..self.dtors.len()).rev() {
-            // Skip slots already freed by DropSlot.
-            if !self.slab.is_dropped(self.dtors[i] as *const _) {
-                unsafe {
-                    std::ptr::drop_in_place(self.dtors[i]);
-                }
+            unsafe {
+                std::ptr::drop_in_place(self.dtors[i]);
             }
         }
     }
 
     /// Release allocations back to a mark: run destructors, return slab
-    /// slots to the free list, reset the bump arena, truncate tracking vecs.
+    /// slots to the free list, reset the bump arena.
+    ///
+    /// Walks the linked list from mark.alloc_tail.next to self.alloc_tail,
+    /// unlinking and deallocating each node.
     pub fn release(&mut self, mark: &SlabMark) {
         self.run_dtors(mark.dtor_len);
         self.dtors.truncate(mark.dtor_len);
 
-        // Return slab slots to the free list. Skip dropped slots.
-        for i in (mark.allocs_len..self.allocs.len()).rev() {
-            if !self.slab.is_dropped(self.allocs[i] as *const _) {
-                self.slab.dealloc(self.allocs[i]);
-            }
+        // Walk the linked list from mark.alloc_tail.next to current tail.
+        let start = if mark.alloc_tail == ALLOC_NIL {
+            self.alloc_head
+        } else {
+            self.slab.alloc_next[mark.alloc_tail as usize]
+        };
+        let mut cur = start;
+        while cur != ALLOC_NIL {
+            let next = self.slab.alloc_next[cur as usize];
+            let ptr = self.slab.flat_to_ptr(cur as usize);
+            self.slab.dealloc(ptr);
+            cur = next;
         }
-        self.allocs.truncate(mark.allocs_len);
+        // Truncate the list at the mark point.
+        self.alloc_tail = mark.alloc_tail;
+        if self.alloc_tail == ALLOC_NIL {
+            self.alloc_head = ALLOC_NIL;
+        } else {
+            self.slab.alloc_next[self.alloc_tail as usize] = ALLOC_NIL;
+        }
 
         // Rewind bump arena for inline data.
         self.arena.release_to(mark.arena_mark);
@@ -122,7 +189,8 @@ impl SlabPool {
     pub fn teardown(&mut self) {
         self.run_dtors(0);
         self.dtors.clear();
-        self.allocs.clear();
+        self.alloc_head = ALLOC_NIL;
+        self.alloc_tail = ALLOC_NIL;
         self.slab.clear();
         self.arena.clear();
         self.alloc_count = 0;
@@ -140,11 +208,9 @@ impl SlabPool {
         self.dtors.len()
     }
 
-    /// Remove a pointer from pool.allocs (O(n) scan).
-    /// Called by drop_slot_value to prevent double-dealloc when
-    /// release() later processes the stale entry.
-    pub fn remove_from_allocs_and_dtors(&mut self, ptr: *mut HeapObject) {
-        self.allocs.retain(|&p| p != ptr);
+    /// Remove a pointer from pool.dtors (O(n) scan).
+    /// Called by drop_slot_value. The allocs list is handled by unlink_alloc_ptr.
+    pub fn remove_from_dtors(&mut self, ptr: *mut HeapObject) {
         self.dtors.retain(|&p| p != ptr);
     }
 
@@ -185,20 +251,6 @@ impl SlabPool {
         self.slab.dealloc(ptr);
     }
 
-    // ── Dropped bitmap ─────────────────────────────────────────────
-
-    /// Mark a slot as dropped by DropSlot.
-    #[inline]
-    pub fn mark_dropped(&mut self, ptr: *const HeapObject) {
-        self.slab.mark_dropped(ptr);
-    }
-
-    /// Check if a slot was already dropped.
-    #[inline]
-    pub fn is_dropped(&self, ptr: *const HeapObject) -> bool {
-        self.slab.is_dropped(ptr)
-    }
-
     // ── Refcounting ───────────────────────────────────────────────────
 
     /// Increment the durable reference count for a slab slot.
@@ -233,9 +285,11 @@ impl SlabPool {
     /// vecs — caller must handle those first.
     ///
     /// # Safety
-    /// The caller must have run all destructors and cleared `dtors`/`allocs`
+    /// The caller must have run all destructors and cleared `dtors`
     /// before calling this.
     pub unsafe fn clear_slab(&mut self) {
+        self.alloc_head = ALLOC_NIL;
+        self.alloc_tail = ALLOC_NIL;
         self.slab.clear();
         self.arena.clear();
     }

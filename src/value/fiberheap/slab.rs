@@ -84,6 +84,9 @@ impl Drop for Chunk {
 // SAFETY: Chunk owns its mmap'd memory exclusively.
 unsafe impl Send for Chunk {}
 
+/// Sentinel value for "no link" in the alloc linked list.
+pub(crate) const ALLOC_NIL: u32 = u32::MAX;
+
 pub(crate) struct Slab {
     chunks: Vec<Chunk>,
     /// Head of the intrusive free list, as a flat slot index.
@@ -96,10 +99,12 @@ pub(crate) struct Slab {
     /// bindings. NOT tracked: stack, let bindings, function parameters
     /// (transient — handled by scope marks).
     refcounts: Vec<u32>,
-    /// Per-slot dropped bitmap. 1 bit per slot (4 u64s per 256-slot chunk).
-    /// Set by DropSlot; checked by release() to skip already-freed slots;
-    /// cleared by alloc() on slot reuse.
-    dropped: Vec<u64>,
+    /// Per-slot previous link in the allocation-order doubly-linked list.
+    /// Indexed by flat slot index. ALLOC_NIL means "no previous".
+    pub(crate) alloc_prev: Vec<u32>,
+    /// Per-slot next link in the allocation-order doubly-linked list.
+    /// Indexed by flat slot index. ALLOC_NIL means "no next".
+    pub(crate) alloc_next: Vec<u32>,
 }
 
 impl Slab {
@@ -110,7 +115,8 @@ impl Slab {
             bump_cursor: 0,
             live_count: 0,
             refcounts: Vec::new(),
-            dropped: Vec::new(),
+            alloc_prev: Vec::new(),
+            alloc_next: Vec::new(),
         }
     }
 
@@ -123,7 +129,6 @@ impl Slab {
             let slot = self.chunks[chunk_idx].slot(slot_idx);
             let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
-            self.clear_dropped(flat as usize);
             // Reset refcount for reused slot — previous occupant's refcount is stale.
             self.refcounts[flat as usize] = 0;
             unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
@@ -172,7 +177,8 @@ impl Slab {
         self.bump_cursor = 0;
         self.live_count = 0;
         self.refcounts.clear();
-        self.dropped.clear();
+        self.alloc_prev.clear();
+        self.alloc_next.clear();
         self.chunks.truncate(1);
         if let Some(chunk) = self.chunks.first() {
             unsafe {
@@ -247,51 +253,17 @@ impl Slab {
         }
     }
 
-    // ── Dropped bitmap ─────────────────────────────────────────────
-
-    /// Mark a slot as dropped. Used by DropSlot to prevent double-free
-    /// when release() later iterates the allocs list.
-    pub fn mark_dropped(&mut self, ptr: *const HeapObject) {
-        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
-        let word = flat / 64;
-        let bit = flat % 64;
-        if word >= self.dropped.len() {
-            self.dropped.resize(word + 1, 0);
-        }
-        self.dropped[word] |= 1u64 << bit;
-    }
-
-    /// Check if a slot was already dropped by DropSlot.
-    pub fn is_dropped(&self, ptr: *const HeapObject) -> bool {
-        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
-        let word = flat / 64;
-        let bit = flat % 64;
-        if word >= self.dropped.len() {
-            return false;
-        }
-        (self.dropped[word] & (1u64 << bit)) != 0
-    }
-
-    /// Clear the dropped bit for a slot (on alloc reuse).
-    fn clear_dropped(&mut self, flat: usize) {
-        let word = flat / 64;
-        let bit = flat % 64;
-        if word < self.dropped.len() {
-            self.dropped[word] &= !(1u64 << bit);
-        }
-    }
-
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {
         let chunk = Chunk::new().expect("slab: mmap chunk failed");
         self.chunks.push(chunk);
         self.bump_cursor = 0;
-        // Grow refcount and dropped arrays for the new chunk.
-        self.refcounts.resize(self.chunks.len() * CHUNK_SIZE, 0);
-        // Dropped bitmap: ceil(CHUNK_SIZE / 64) u64s per chunk.
-        self.dropped
-            .resize((self.chunks.len() * CHUNK_SIZE).div_ceil(64), 0);
+        let total_slots = self.chunks.len() * CHUNK_SIZE;
+        // Grow refcount and alloc link arrays for the new chunk.
+        self.refcounts.resize(total_slots, 0);
+        self.alloc_prev.resize(total_slots, ALLOC_NIL);
+        self.alloc_next.resize(total_slots, ALLOC_NIL);
     }
 
     /// Convert a flat slot index to `(chunk_index, slot_within_chunk)`.
@@ -299,11 +271,20 @@ impl Slab {
         (flat / CHUNK_SIZE, flat % CHUNK_SIZE)
     }
 
+    /// Convert a flat slot index back to a `*mut HeapObject`.
+    ///
+    /// Inverse of `ptr_to_flat`. The returned pointer is valid as long as
+    /// the chunk exists (i.e., until `clear()` or `Drop`).
+    pub(crate) fn flat_to_ptr(&mut self, flat: usize) -> *mut HeapObject {
+        let (chunk_idx, slot_idx) = self.split_flat(flat);
+        self.chunks[chunk_idx].slot(slot_idx) as *mut HeapObject
+    }
+
     /// Convert a `*mut HeapObject` back to its flat slot index.
     ///
     /// # Panics
     /// Panics if `ptr` does not point into any chunk (would indicate a bug).
-    fn ptr_to_flat(&self, ptr: *mut HeapObject) -> usize {
+    pub(crate) fn ptr_to_flat(&self, ptr: *mut HeapObject) -> usize {
         let addr = ptr as usize;
         for (chunk_idx, chunk) in self.chunks.iter().enumerate() {
             let base = chunk.base() as usize;

@@ -140,7 +140,7 @@ mod tests {
         let mut sa = SharedAllocator::new();
         sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 1);
-        assert_eq!(sa.pool.allocs.len(), 1);
+        assert_eq!(sa.pool.alloc_count, 1);
     }
 
     #[test]
@@ -152,7 +152,7 @@ mod tests {
         alloc_str(&mut sa, "tracked");
         sa.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
-        assert_eq!(sa.pool.allocs.len(), 2);
+        assert_eq!(sa.pool.alloc_count, 2);
     }
 
     #[test]
@@ -166,7 +166,7 @@ mod tests {
         sa.teardown();
         assert_eq!(sa.len(), 0);
         assert!(sa.is_empty());
-        assert_eq!(sa.pool.allocs.len(), 0);
+        assert_eq!(sa.pool.alloc_count, 0);
     }
 
     #[test]
