@@ -178,13 +178,14 @@
     (assert (%lt (m :peak) 10)
             "tco-loop-10000: peak must be bounded (no per-iteration allocs)")))
 
-# TCO with per-iteration struct + pair: rotation keeps this bounded at
-# function-entry scope. tco-alloc replaces `prev` each iteration; the
-# rotation pool frees the previous iteration's struct (and its inner
-# pair) before the next iteration lives long enough to accumulate.
+# TCO with per-iteration struct + pair: DropSlot frees the dead `prev`
+# struct each iteration, but the inner pair is NOT freed (shallow drop
+# only — recursive child freeing is unsound without refcounting).
+# Net allocs ≈ N leaked pairs + small overhead.
 (let [m (find-result "tco-alloc-10000")]
   (when (not checked?)
-    (assert (%lt (m :allocs) 10) "tco-alloc-10000: allocs bounded by rotation")))
+    (assert (%lt (m :allocs) 10100)
+            "tco-alloc-10000: structs freed, inner pairs leak")))
 
 # TCO replace: struct replaced each iteration, no sub-expression allocs.
 # Rotation frees the prev struct → allocs and peak bounded.
@@ -195,14 +196,13 @@
     (assert (%lt (m :peak) 10)
             "tco-replace-10000: peak bounded (rotation working)")))
 
-# TCO mixed: both `prev` and `acc` are replaced each iteration.
-# `acc` aliases via `(pair i acc)` — trampoline rotation considered
-# this unsafe, but function-level flip rotation (now on by default)
-# resets alloc_count at each tail call, keeping net allocs bounded.
+# TCO mixed: `prev` (struct) is freed by DropSlot each iteration.
+# `acc` grows via (pair i acc) — all pairs are live (the result is a
+# 10000-element linked list). Net allocs = N pairs + small overhead.
 (let [m (find-result "tco-mixed-10000")]
   (when (not checked?)
-    (assert (%lt (m :allocs) 100)
-            "tco-mixed-10000: flip rotation keeps allocs bounded")))
+    (assert (%lt (m :allocs) 10010)
+            "tco-mixed-10000: dead struct freed, live pair chain is O(N)")))
 
 # fib: pure arithmetic, no heap objects expected
 (let [m (find-result "fib-15")]
@@ -210,12 +210,11 @@
     (assert (= (m :allocs) 0)
             "fib-15: pure arithmetic should allocate 0 heap objects")))
 
-# pair-build-100: tail-recursive build-list gets flip rotation,
-# so net allocs (visible_len delta) is bounded, not 100.
+# pair-build-100: builds a 100-element linked list via tail recursion.
+# All 100 pairs are live in the return value — allocs = N.
 (let [m (find-result "pair-build-100")]
   (when (not checked?)
-    (assert (%lt (m :allocs) 10)
-            "pair-build-100: flip rotation keeps allocs bounded")))
+    (assert (= (m :allocs) 100) "pair-build-100: 100 live pairs in result")))
 
 # string-build-100: flip rotation resets alloc_count at each tail call,
 # so net allocs may be 0 despite actual heap activity. Check peak instead.

@@ -766,40 +766,46 @@ impl<'a> Lowerer<'a> {
             .is_some_and(|b| b == binding)
     }
 
-    /// Emit DropSlot instructions for dead parameters at a tail-call site.
+    /// Emit DropSlot instructions for dead locals at a tail-call site.
     ///
     /// Collects all Var bindings referenced by the tail-call arguments,
-    /// then emits DropSlot for each function parameter that:
+    /// then emits DropSlot for each local binding (parameters AND let
+    /// bindings) that:
     /// 1. Is NOT referenced by any tail-call argument
     /// 2. Has a local slot (not an upvalue/capture)
-    /// 3. Is in the current function's parameter list
-    fn emit_drop_slots_for_tail_call(&mut self, args: &[CallArg]) {
-        let params = match &self.current_function_params {
-            Some(p) => p.clone(),
-            None => return,
-        };
-        if params.is_empty() {
+    /// 3. Is NOT captured by any closure
+    fn emit_drop_slots_for_tail_call(&mut self, func: &Hir, args: &[CallArg]) {
+        // Inside a scope region (while loop with RegionRotate),
+        // DropSlot causes double-free: freed slot gets reused,
+        // stale allocs-list entry survives into the next rotation.
+        if self.region_depth > 0 {
             return;
         }
 
-        // Collect all Var bindings transitively referenced by args.
+        // Collect all Var bindings referenced by args AND the function.
+        // The function closure is already in a register, but its slab
+        // slot must not be freed (the register is a raw pointer copy).
         let mut referenced = std::collections::HashSet::new();
+        Self::collect_var_refs(func, &mut referenced);
         for arg in args {
             Self::collect_var_refs(&arg.expr, &mut referenced);
         }
 
-        // Emit DropSlot for unreferenced parameters (reverse order).
-        for param in params.iter().rev() {
-            if referenced.contains(param) {
-                continue;
-            }
-            // Only drop local-slot params, not upvalues.
-            if self.upvalue_bindings.contains(param) {
-                continue;
-            }
-            if let Some(&slot) = self.binding_to_slot.get(param) {
-                self.emit(LirInstr::DropSlot { slot });
-            }
+        // Emit DropSlot for all unreferenced local-slot bindings.
+        // This covers both dead parameters and dead let bindings.
+        let mut slots: Vec<_> = self.binding_to_slot.iter()
+            .filter(|(binding, _)| {
+                !referenced.contains(binding)
+                    && !self.upvalue_bindings.contains(binding)
+                    && !self.arena.get(**binding).is_captured
+            })
+            .map(|(_, &slot)| slot)
+            .collect();
+
+        // Emit in reverse slot order (higher slots first).
+        slots.sort_unstable();
+        for slot in slots.into_iter().rev() {
+            self.emit(LirInstr::DropSlot { slot });
         }
     }
 

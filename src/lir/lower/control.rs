@@ -59,9 +59,14 @@ impl<'a> Lowerer<'a> {
             };
 
             if is_tail {
-                // DropSlot: free dead parameters before self-tail-calls.
+                // DropSlot: free dead locals before self-tail-calls.
+                // Only safe for self-tail-calls: we know the param
+                // layout and can verify which bindings are dead.
+                // For non-self tail calls, dead locals may hold
+                // shared values whose children are aliased — freeing
+                // them corrupts live references.
                 if self.is_self_tail_call(func) {
-                    self.emit_drop_slots_for_tail_call(args);
+                    self.emit_drop_slots_for_tail_call(func, args);
                 }
 
                 // NOTE: we do NOT DropSlot the discard slot here.

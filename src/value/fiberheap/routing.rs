@@ -247,23 +247,25 @@ pub fn region_rotate_dealloc() {
 
 /// Drop a single heap value: if owned by the current pool with refcount == 0,
 /// run its destructor, return the slab slot to the free list, and mark it
-/// as dropped in the bitmap. Does NOT modify pool.allocs — release() checks
-/// the bitmap to skip already-dropped slots.
+/// as dropped in the bitmap. Does NOT walk children — values are freely
+/// copyable and may be aliased by other live containers or closure envs.
+/// Without local refcounting, recursive child freeing causes use-after-free.
 pub fn drop_slot_value(val: crate::value::Value) {
+    use crate::value::heap::HeapObject;
+
     let ptr = current_heap_ptr();
     if ptr.is_null() {
         return;
     }
-    let Some(heap_ptr) = val.as_heap_ptr() else {
-        return;
-    };
     unsafe {
         let heap = &mut *ptr;
+        let Some(heap_ptr) = val.as_heap_ptr() else {
+            return;
+        };
         if !heap.pool.slab_owns(heap_ptr) {
             return;
         }
-        let obj_ptr = heap_ptr as *mut crate::value::heap::HeapObject;
-        // Skip if already dropped or refcount > 0.
+        let obj_ptr = heap_ptr as *mut HeapObject;
         if heap.pool.is_dropped(obj_ptr as *const _) {
             return;
         }
