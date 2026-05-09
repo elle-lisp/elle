@@ -1343,7 +1343,7 @@
           (let [fiber (q 0)]
             (remove q 0)
             (fiber/resume fiber true)
-            (push runnable fiber))
+            (handle-fiber-after-resume fiber))
           (assign i (inc i)))
         (assign woken i)  # Remove empty queue
         (when (= (length q) 0) (del park-queues key))  # Resume caller immediately with woken count

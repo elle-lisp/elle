@@ -3,7 +3,7 @@
 ##
 ## Loaded via:
 ##   (def session ((import "std/http2/session")
-##                 :sync sync :frame frame :stream stream :hpack hpack))
+##                 :frame frame :stream stream :hpack hpack))
 ##
 ## Exports: {:make-session :writer-loop :read-loop :send-frame :send-settings
 ##           :send-settings-ack :send-window-update :send-goaway
@@ -12,7 +12,9 @@
 ##           :send-data-with-flow-control :ack-settings-received
 ##           :default-settings :initial-window :max-frame :test}
 
-(fn [&named sync frame stream hpack]
+(def @*session-futex-id* 1000000)
+
+(fn [&named frame stream hpack]
   (def C frame:constants)
   (def has-flag? frame:has-flag?)
 
@@ -46,7 +48,7 @@
                          :max-frame-size 16384
                          :max-concurrent-streams 100}
       :conn-flow (stream:make-flow-control 65535)
-      :write-queue (sync:make-queue 256)
+      :write-queue (stream:make-channel)
       :reader-fiber nil
       :writer-fiber nil
       :closed? false
@@ -101,12 +103,15 @@
     "Send SETTINGS and start a 30s timeout for the ACK."
     (let [[ftype flags sid payload] (frame:make-settings-frame settings)]
       (send-frame session ftype flags sid payload))
-    (let [latch (sync:make-latch)]
-      (put session :settings-ack-latch latch)
+    (assign *session-futex-id* (inc *session-futex-id*))
+    (let [latch-key *session-futex-id*
+          latch-cell @[0]]
+      (put session :settings-ack-latch @{:key latch-key :cell latch-cell})
       (ev/spawn (fn []
                   (let [result (ev/timeout 30
                         (fn []
-                          (latch:wait)
+                          (while (= (get latch-cell 0) 0)
+                            (ev/futex-wait latch-key latch-cell 0))
                           :acked))]
                     (when (nil? result)
                       (when (not session:closed?)
@@ -121,7 +126,9 @@
   (defn ack-settings-received [session]
     "Called when SETTINGS ACK is received. Opens the latch if pending."
     (when session:settings-ack-latch
-      (session:settings-ack-latch:open)
+      (let [l session:settings-ack-latch]
+        (put l:cell 0 1)
+        (ev/futex-wake l:key 1))
       (put session :settings-ack-latch nil)))
 
   (defn send-window-update [session stream-id increment]

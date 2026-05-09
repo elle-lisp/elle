@@ -2,33 +2,64 @@
 ## lib/http2/stream.lisp — HTTP/2 stream state machine + flow control
 ##
 ## Loaded via:
-##   (def sync   ((import "std/sync")))
 ##   (def frame  ((import "std/http2/frame")))
-##   (def stream ((import "std/http2/stream") :sync sync :frame frame))
+##   (def stream ((import "std/http2/stream") :frame frame))
 ##
-## Exports: {:make-stream :transition :make-flow-control :test}
+## No sync dependency — uses bare ev/futex-wait and ev/futex-wake.
+##
+## Exports: {:make-stream :make-channel :transition :make-flow-control :test}
 
-(fn [&named sync frame]
+(def @*chan-id* 0)
+
+(fn [&named frame]
+
+  ## ── Channel: unbounded cooperative FIFO ──────────────────────────────
+  ## put never blocks. take blocks only when empty. No lock — this is a
+  ## single-threaded cooperative runtime.
+
+  (defn make-channel []
+    (assign *chan-id* (inc *chan-id*))
+    (let [key *chan-id* cell @[0] buf @[] @closed false @waiting false]
+      {:put (fn [val]
+              (push buf val)
+              (when waiting
+                (put cell 0 (inc (get cell 0)))
+                (ev/futex-wake key 1))
+              nil)
+       :take (fn []
+               (while (and (not closed) (= (length buf) 0))
+                 (assign waiting true)
+                 (let [gen (get cell 0)]
+                   (when (= (length buf) 0)
+                     (ev/futex-wait key cell gen)))
+                 (assign waiting false))
+               (when (> (length buf) 0)
+                 (let [val (get buf 0)]
+                   (remove buf 0)
+                   val)))
+       :close (fn []
+                (assign closed true)
+                (put cell 0 (inc (get cell 0)))
+                (ev/futex-wake key 999999999)
+                nil)
+       :closed? (fn [] closed)
+       :size (fn [] (length buf))}))
 
   ## ── Stream constructor ─────────────────────────────────────────────────
 
   (defn make-stream [id initial-window]
-    "Create a new stream with the given ID and initial flow-control window."
     @{:id id
       :state :idle
       :flow (make-flow-control initial-window)
       :recv-window initial-window
-      :data-queue (sync:make-queue 64)
+      :data-queue (make-channel)
       :headers nil
       :pending-headers nil
       :error-code nil})
 
   ## ── State transitions ──────────────────────────────────────────────────
-  ## Events: :send-headers :recv-headers :send-end-stream :recv-end-stream
-  ##         :send-rst :recv-rst :send-push-promise :recv-push-promise
 
   (defn tx-key [state event]
-    "Build a transition lookup key from two keywords using their hashes."
     (bit/xor (hash state) (bit/shl (hash event) 1)))
 
   (def transitions
@@ -52,7 +83,6 @@
      (tx-key :reserved-remote :send-rst) :closed})
 
   (defn stream-transition [stream event]
-    "Apply a state transition to a stream. Signals :h2-error on invalid transitions."
     (let* [current stream:state
            key (tx-key current event)
            next-state (get transitions key)]
@@ -69,54 +99,45 @@
   ## ── Flow control ───────────────────────────────────────────────────────
 
   (defn make-flow-control [initial-window]
-    "Create a flow control tracker. Returns mutable struct with
-     send-window, recv-window, lock, and condvar for blocking."
-    (let [lock (sync:make-lock)
-          cv (sync:make-condvar)]
+    (assign *chan-id* (inc *chan-id*))
+    (let [key *chan-id* cell @[0]]
       @{:send-window initial-window
         :recv-window initial-window
-        :lock lock
-        :cv cv}))
+        :futex-key key
+        :futex-cell cell
+        :waiting false}))
 
   (defn consume-send-window [fc amount]
-    "Block until enough send window is available, then consume it.
-     Returns the actual amount consumed (may be less than requested
-     if max-frame-size limits apply, but never 0)."
-    (let [lock fc:lock
-          cv fc:cv]
-      (lock:acquire)
-      (while (<= fc:send-window 0) (cv:wait lock))
-      (let [actual (min amount fc:send-window)]
-        (put fc :send-window (- fc:send-window actual))
-        (lock:release)
-        actual)))
+    (while (<= fc:send-window 0)
+      (put fc :waiting true)
+      (let [gen (get fc:futex-cell 0)]
+        (when (<= fc:send-window 0)
+          (ev/futex-wait fc:futex-key fc:futex-cell gen)))
+      (put fc :waiting false))
+    (let [actual (min amount fc:send-window)]
+      (put fc :send-window (- fc:send-window actual))
+      actual))
 
   (defn apply-window-update [fc increment]
-    "Apply a WINDOW_UPDATE increment to the send window. Wakes blocked senders."
-    (let [lock fc:lock
-          cv fc:cv]
-      (lock:acquire)
-      (let [new-window (+ fc:send-window increment)]
-        (when (> new-window 2147483647)
-          (lock:release)
-          (error {:error :h2-error
-                  :reason :flow-control-error
-                  :message "flow control window overflow"}))
-        (put fc :send-window new-window))
-      (cv:broadcast)
-      (lock:release)))
+    (let [new-window (+ fc:send-window increment)]
+      (when (> new-window 2147483647)
+        (error {:error :h2-error
+                :reason :flow-control-error
+                :message "flow control window overflow"}))
+      (put fc :send-window new-window))
+    (when fc:waiting
+      (put fc:futex-cell 0 (inc (get fc:futex-cell 0)))
+      (ev/futex-wake fc:futex-key 999999999)))
 
   (defn consume-recv-window [fc amount]
-    "Consume recv window (for tracking). Does not block."
     (put fc :recv-window (- fc:recv-window amount)))
 
   (defn replenish-recv-window [fc amount]
-    "Replenish recv window after consuming data."
     (put fc :recv-window (+ fc:recv-window amount)))
 
   ## ── Tests ──────────────────────────────────────────────────────────────
 
-  (defn run-tests []  # ── State transitions ──
+  (defn run-tests []
     (let [s (make-stream 1 65535)]
       (assert (= s:state :idle) "stream: initial state")
       (stream-transition s :send-headers)
@@ -126,30 +147,25 @@
       (stream-transition s :recv-end-stream)
       (assert (= s:state :closed) "stream: half-closed-local->closed"))
 
-    # ── Server-side transitions ──
     (let [s (make-stream 1 65535)]
       (stream-transition s :recv-headers)
       (assert (= s:state :open) "stream server: idle->open")
       (stream-transition s :recv-end-stream)
-      (assert (= s:state :half-closed-remote)
-              "stream server: open->half-closed-remote")
+      (assert (= s:state :half-closed-remote) "stream server: open->half-closed-remote")
       (stream-transition s :send-end-stream)
       (assert (= s:state :closed) "stream server: half-closed-remote->closed"))
 
-    # ── RST_STREAM ──
     (let [s (make-stream 3 65535)]
       (stream-transition s :send-headers)
       (stream-transition s :recv-rst)
       (assert (= s:state :closed) "stream: RST closes"))
 
-    # ── Invalid transition ──
     (let [s (make-stream 5 65535)]
       (stream-transition s :send-headers)
-      (stream-transition s :send-end-stream)  # half-closed-local: cannot send end-stream again
+      (stream-transition s :send-end-stream)
       (let [[ok? err] (protect (stream-transition s :send-end-stream))]
         (assert (not ok?) "stream: invalid transition errors")))
 
-    # ── Per-stream flow control struct ──
     (let [s (make-stream 1 65535)]
       (assert (= s:flow:send-window 65535) "stream: flow control initial window")
       (let [consumed (consume-send-window s:flow 1000)]
@@ -158,27 +174,23 @@
       (apply-window-update s:flow 1000)
       (assert (= s:flow:send-window 65535) "stream: flow after update"))
 
-    # ── Pending headers field ──
     (let [s (make-stream 1 65535)]
       (assert (nil? s:pending-headers) "stream: pending-headers nil initially"))
 
-    # ── Connection-level flow control ──
     (let [fc (make-flow-control 100)]
       (assert (= fc:send-window 100) "fc: initial send window")
       (let [consumed (consume-send-window fc 50)]
         (assert (= consumed 50) "fc: consumed 50")
-        (assert (= fc:send-window 50) "fc: window after consume"))  # Consume rest
+        (assert (= fc:send-window 50) "fc: window after consume"))
       (consume-send-window fc 50)
-      (assert (= fc:send-window 0) "fc: window at 0")  # Window update
+      (assert (= fc:send-window 0) "fc: window at 0")
       (apply-window-update fc 200)
       (assert (= fc:send-window 200) "fc: window after update"))
 
-    # ── Flow control overflow ──
     (let [fc (make-flow-control 2147483647)]
       (let [[ok? err] (protect (apply-window-update fc 1))]
         (assert (not ok?) "fc: overflow detection")))
 
-    # ── Recv window tracking ──
     (let [fc (make-flow-control 65535)]
       (consume-recv-window fc 1000)
       (assert (= fc:recv-window 64535) "fc: recv consumed")
@@ -187,9 +199,8 @@
 
     true)
 
-  ## ── Exports ────────────────────────────────────────────────────────────
-
   {:make-stream make-stream
+   :make-channel make-channel
    :transition stream-transition
    :make-flow-control make-flow-control
    :consume-send-window consume-send-window

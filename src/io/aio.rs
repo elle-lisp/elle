@@ -1241,32 +1241,12 @@ impl AsyncBackend {
                         // Nothing to wait for.
                     } else if !pool_active && !net_active {
                         // Only stdin — handled by drain_stdin_completions below.
-                    } else if !has_stdin_pending && pool_active && !net_active {
-                        // Single source fast path — platform pool only.
-                        for pc in pool.wait(timeout)? {
-                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
-                            {
-                                completions.push_back(c);
-                            }
-                        }
-                    } else if !has_stdin_pending && !pool_active && net_active {
-                        // Single source fast path — network pool only.
-                        for pc in network_pool.wait(timeout)? {
-                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
-                            {
-                                completions.push_back(c);
-                            }
-                        }
                     } else {
-                        // Multiple sources — select across all active.
-                        let wait_ms = timeout.unwrap_or(100).min(100);
-                        let wait_dur = std::time::Duration::from_millis(wait_ms);
-
-                        let stdin_rx = if has_stdin_pending {
-                            stdin_thread.as_ref().unwrap().receiver().clone()
-                        } else {
-                            crossbeam_channel::never()
-                        };
+                        // Select across all active channel sources.
+                        // Uses never() for inactive sources so those arms
+                        // are never chosen.  Respects the caller's timeout:
+                        // None = block until a completion arrives, Some(ms) =
+                        // bounded wait.
                         let pool_rx = if pool_active {
                             pool.receiver().clone()
                         } else {
@@ -1274,6 +1254,11 @@ impl AsyncBackend {
                         };
                         let net_rx = if net_active {
                             network_pool.receiver().clone()
+                        } else {
+                            crossbeam_channel::never()
+                        };
+                        let stdin_rx = if has_stdin_pending {
+                            stdin_thread.as_ref().unwrap().receiver().clone()
                         } else {
                             crossbeam_channel::never()
                         };
@@ -1302,31 +1287,63 @@ impl AsyncBackend {
                         }
 
                         if !got {
-                            crossbeam_channel::select! {
-                                recv(stdin_rx) -> msg => {
-                                    if let Ok(sc) = msg {
-                                        if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
-                                            completions.push_back(c);
+                            match timeout {
+                                Some(ms) => {
+                                    let dur = std::time::Duration::from_millis(ms);
+                                    crossbeam_channel::select! {
+                                        recv(pool_rx) -> msg => {
+                                            if let Ok(pc) = msg {
+                                                pool.record_completion();
+                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                                    completions.push_back(c);
+                                                }
+                                            }
+                                        }
+                                        recv(net_rx) -> msg => {
+                                            if let Ok(pc) = msg {
+                                                network_pool.record_completion();
+                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                                    completions.push_back(c);
+                                                }
+                                            }
+                                        }
+                                        recv(stdin_rx) -> msg => {
+                                            if let Ok(sc) = msg {
+                                                if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
+                                                    completions.push_back(c);
+                                                }
+                                            }
+                                        }
+                                        default(dur) => {}
+                                    }
+                                }
+                                None => {
+                                    crossbeam_channel::select! {
+                                        recv(pool_rx) -> msg => {
+                                            if let Ok(pc) = msg {
+                                                pool.record_completion();
+                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                                    completions.push_back(c);
+                                                }
+                                            }
+                                        }
+                                        recv(net_rx) -> msg => {
+                                            if let Ok(pc) = msg {
+                                                network_pool.record_completion();
+                                                if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                                    completions.push_back(c);
+                                                }
+                                            }
+                                        }
+                                        recv(stdin_rx) -> msg => {
+                                            if let Ok(sc) = msg {
+                                                if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
+                                                    completions.push_back(c);
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                recv(pool_rx) -> msg => {
-                                    if let Ok(pc) = msg {
-                                        pool.record_completion();
-                                        if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                            completions.push_back(c);
-                                        }
-                                    }
-                                }
-                                recv(net_rx) -> msg => {
-                                    if let Ok(pc) = msg {
-                                        network_pool.record_completion();
-                                        if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
-                                            completions.push_back(c);
-                                        }
-                                    }
-                                }
-                                default(wait_dur) => {}
                             }
                         }
                     }

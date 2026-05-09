@@ -3,12 +3,12 @@
 ##
 ## Loaded via:
 ##   (def server ((import "std/http2/server")
-##                :sync sync :hpack hpack :frame frame :stream stream
+##                :hpack hpack :frame frame :stream stream
 ##                :session session :tls tls :transport transport))
 ##
 ## Exports: {:serve :test}
 
-(fn [&named sync hpack frame stream session tls transport]
+(fn [&named hpack frame stream session tls transport]
   (def C frame:constants)
 
   ## ── Server request handler ─────────────────────────────────────────────
