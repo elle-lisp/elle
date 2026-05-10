@@ -363,8 +363,19 @@ impl FiberHeap {
         // With alloc-time child incref, children of pinned objects already
         // have rc>0. No worklist propagation needed.
 
-        // Free unprotected objects (rc == 0).
-        // Run dtors in reverse order for refcount-0 objects.
+        // Collect children of rc=0 objects BEFORE running dtors.
+        // dtors free internal data (RefCells, Vecs), making
+        // collect_heap_children unsafe after drop_in_place.
+        let mut children_to_decref: Vec<Value> = Vec::new();
+        for i in 0..scope_ptrs.len() {
+            let ptr = scope_ptrs[i];
+            if self.pool.refcount(ptr as *const HeapObject) == 0 {
+                let obj_ref = unsafe { &*ptr };
+                Self::collect_heap_children(obj_ref, &mut children_to_decref);
+            }
+        }
+
+        // Run dtors in reverse order for rc=0 objects.
         for i in (mark.dtor_len()..self.pool.dtors.len()).rev() {
             let ptr = self.pool.dtors[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
@@ -382,20 +393,17 @@ impl FiberHeap {
         }
         self.pool.dtors.truncate(kept);
 
-        // Dealloc refcount-0 slab slots, keep pinned (re-link survivors).
-        // Walk the scope allocs and unlink+dealloc rc==0 nodes.
+        // Decref collected children.
+        for child in children_to_decref {
+            self.pool.decref_if_owned(child);
+        }
+
+        // Dealloc rc=0 slab slots, keep pinned.
         let mut any_pinned = false;
         for i in 0..scope_ptrs.len() {
             let ptr = scope_ptrs[i];
             let flat = scope_flats[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
-                // Decref children before dealloc (symmetric with alloc incref).
-                let obj_ref = unsafe { &*ptr };
-                let mut children = Vec::new();
-                Self::collect_heap_children(obj_ref, &mut children);
-                for child in children {
-                    self.pool.decref_if_owned(child);
-                }
                 self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
             } else {
@@ -1273,11 +1281,15 @@ impl FiberHeap {
         };
         match obj {
             HeapObject::LArrayMut { data, traits, .. } => {
-                out.extend(data.borrow().iter().filter(|v| v.is_heap()).copied());
+                if let Ok(d) = data.try_borrow() {
+                    out.extend(d.iter().filter(|v| v.is_heap()).copied());
+                }
                 push_traits(traits, out);
             }
             HeapObject::LStructMut { data, traits, .. } => {
-                out.extend(data.borrow().values().filter(|v| v.is_heap()).copied());
+                if let Ok(d) = data.try_borrow() {
+                    out.extend(d.values().filter(|v| v.is_heap()).copied());
+                }
                 push_traits(traits, out);
             }
             HeapObject::LArray {
@@ -1313,9 +1325,10 @@ impl FiberHeap {
             }
             HeapObject::LBox { cell, traits, .. }
             | HeapObject::CaptureCell { cell, traits, .. } => {
-                let v = *cell.borrow();
-                if v.is_heap() {
-                    out.push(v);
+                if let Ok(v) = cell.try_borrow() {
+                    if v.is_heap() {
+                        out.push(*v);
+                    }
                 }
                 push_traits(traits, out);
             }
@@ -1324,7 +1337,9 @@ impl FiberHeap {
                 push_traits(traits, out);
             }
             HeapObject::LSetMut { data, traits, .. } => {
-                out.extend(data.borrow().iter().filter(|v| v.is_heap()).copied());
+                if let Ok(d) = data.try_borrow() {
+                    out.extend(d.iter().filter(|v| v.is_heap()).copied());
+                }
                 push_traits(traits, out);
             }
             HeapObject::LString { traits, .. }

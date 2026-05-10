@@ -779,6 +779,27 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Emit DecrefLocal + nil for slots (rotation path).
+    /// After rotation frees objects, the slots hold stale pointers.
+    /// Nil them so the next iteration's StoreLocalRefcounted doesn't
+    /// decref a freed value.
+    fn emit_decrefs_and_nil_for_region(&mut self) {
+        let slots: Vec<u16> = self
+            .region_slots
+            .last()
+            .map(|s| s.clone())
+            .unwrap_or_default();
+        for slot in &slots {
+            self.emit(LirInstr::DecrefLocal { slot: *slot });
+        }
+        // Nil the slots after decref. StoreLocal (no incref) writes NIL.
+        if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
+            for slot in slots {
+                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+            }
+        }
+    }
+
     /// Emit `RegionExit` and decrement the region depth counter.
     fn emit_region_exit(&mut self) {
         self.emit_decrefs_for_region();
@@ -790,18 +811,19 @@ impl<'a> Lowerer<'a> {
 
 
     /// Emit `RegionRotate` for double-buffered loop scope rotation.
+    /// Uses decref+nil so stale slot pointers don't cause UAF on next iteration.
     fn emit_region_rotate(&mut self) {
-        self.emit_decrefs_for_region();
+        self.emit_decrefs_and_nil_for_region();
         self.emit(LirInstr::RegionRotate);
     }
 
     fn emit_region_rotate_dealloc(&mut self) {
-        self.emit_decrefs_for_region();
+        self.emit_decrefs_and_nil_for_region();
         self.emit(LirInstr::RegionRotateDealloc);
     }
 
     fn emit_region_rotate_refcounted(&mut self) {
-        self.emit_decrefs_for_region();
+        self.emit_decrefs_and_nil_for_region();
         self.emit(LirInstr::RegionRotateRefcounted);
     }
 
