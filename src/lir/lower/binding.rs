@@ -102,8 +102,6 @@ impl<'a> Lowerer<'a> {
             self.region_refcounted_stack.pop();
             self.region_slots.pop();
         } else if let Some(protect_slot) = result_protect_slot {
-            // Protect the result: store to the pre-region slot (increfs),
-            // then DecrefLocal + RegionExit, then reload.
             self.emit(LirInstr::StoreLocal {
                 slot: protect_slot,
                 src: result,
@@ -232,7 +230,7 @@ impl<'a> Lowerer<'a> {
             self.region_refcounted_stack.pop();
             self.region_slots.pop();
         } else if let Some(protect_slot) = result_protect_slot {
-            self.emit(LirInstr::StoreLocal {
+            self.emit(LirInstr::StoreLocalRefcounted {
                 slot: protect_slot,
                 src: result,
             });

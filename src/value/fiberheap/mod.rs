@@ -298,13 +298,14 @@ impl FiberHeap {
         )
     }
 
-    /// Release allocations back to a mark: run destructors for rc=0
-    /// objects, dealloc their slab slots, rewind bump arena if nothing
-    /// is pinned.
+    /// Release allocations back to a mark: run destructors, dealloc slab
+    /// slots, rewind bump arena.
     ///
     /// Called by `pop_scope_mark_and_release()` (RegionExit), which is
-    /// gated by Tofte-Talpin region analysis. Uses refcount-aware path
-    /// so values pinned by collection membership (push incref) survive.
+    /// gated by Tofte-Talpin region analysis — only scopes where no
+    /// values escape get this call. Uses refcount-aware path so values
+    /// pinned by collection membership (push/put incref) or mutable
+    /// binding incref (StoreLocalRefcounted) survive scope exit.
     pub fn release(&mut self, mark: ArenaMark) {
         if Self::trace_rc() {
             eprintln!("[trace:rc] release mark={}", mark.position());

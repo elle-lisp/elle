@@ -785,8 +785,6 @@ impl<'a> Lowerer<'a> {
 
 
     /// Emit `RegionRotate` for double-buffered loop scope rotation.
-    /// Does not change region_depth — the mark count stays the same
-    /// (pop prev + push new = net zero change from the 2-mark state).
     fn emit_region_rotate(&mut self) {
         self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionRotate);
@@ -904,6 +902,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Discard an unused value by storing it to a scratch slot.
+    /// StoreLocal does not incref, so no refcount tracking needed.
     fn discard(&mut self, src: Reg) {
         let slot = match self.discard_slot {
             Some(s) => s,
