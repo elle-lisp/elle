@@ -916,13 +916,17 @@ impl<'a> Lowerer<'a> {
             Self::collect_var_refs(&arg.expr, &mut referenced);
         }
 
-        // Emit DropSlot for all unreferenced local-slot bindings.
-        // This covers both dead parameters and dead let bindings.
+        // Emit DropSlot for unreferenced local-slot bindings.
+        // ONLY for parameters — let bindings may hold values obtained
+        // from collections (via get, first, etc.) that are aliased and
+        // must not be freed. Parameters are safe because they receive
+        // their values from the caller (fresh copies on the stack).
         let mut slots: Vec<_> = self.binding_to_slot.iter()
             .filter(|(binding, _)| {
                 !referenced.contains(binding)
                     && !self.upvalue_bindings.contains(binding)
                     && !self.arena.get(**binding).is_captured
+                    && self.arena.get(**binding).scope == crate::hir::arena::BindingScope::Parameter
             })
             .map(|(_, &slot)| slot)
             .collect();
