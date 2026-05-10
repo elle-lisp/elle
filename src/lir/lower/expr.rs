@@ -544,7 +544,7 @@ impl<'a> Lowerer<'a> {
         for (binding, init) in bindings {
             let init_reg = self.lower_expr(init)?;
             let slot = self.allocate_slot(*binding);
-            self.emit(LirInstr::StoreLocal {
+            self.emit(LirInstr::StoreLocalRefcounted {
                 slot,
                 src: init_reg,
             });

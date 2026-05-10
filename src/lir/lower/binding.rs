@@ -62,7 +62,7 @@ impl<'a> Lowerer<'a> {
                     src: init_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocal {
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: init_reg,
                 });
@@ -74,12 +74,12 @@ impl<'a> Lowerer<'a> {
                         dst: cell_reg,
                         value: init_reg,
                     });
-                    self.emit(LirInstr::StoreLocal {
+                    self.emit(LirInstr::StoreLocalRefcounted {
                         slot,
                         src: cell_reg,
                     });
                 } else {
-                    self.emit(LirInstr::StoreLocal {
+                    self.emit(LirInstr::StoreLocalRefcounted {
                         slot,
                         src: init_reg,
                     });
@@ -102,7 +102,7 @@ impl<'a> Lowerer<'a> {
             self.region_refcounted_stack.pop();
             self.region_slots.pop();
         } else if let Some(protect_slot) = result_protect_slot {
-            self.emit(LirInstr::StoreLocal {
+            self.emit(LirInstr::StoreLocalRefcounted {
                 slot: protect_slot,
                 src: result,
             });
@@ -148,19 +148,19 @@ impl<'a> Lowerer<'a> {
                     src: nil_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                self.emit(LirInstr::StoreLocalRefcounted { slot, src: nil_reg });
             } else if needs_capture {
                 let cell_reg = self.fresh_reg();
                 self.emit(LirInstr::MakeCaptureCell {
                     dst: cell_reg,
                     value: nil_reg,
                 });
-                self.emit(LirInstr::StoreLocal {
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: cell_reg,
                 });
             } else {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                self.emit(LirInstr::StoreLocalRefcounted { slot, src: nil_reg });
             }
         }
         // Then initialize
@@ -198,7 +198,7 @@ impl<'a> Lowerer<'a> {
                     src: init_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocal {
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: init_reg,
                 });
@@ -213,7 +213,7 @@ impl<'a> Lowerer<'a> {
                     value: init_reg,
                 });
             } else {
-                self.emit(LirInstr::StoreLocal {
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: init_reg,
                 });
@@ -315,7 +315,7 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
             } else {
-                self.emit(LirInstr::StoreLocal {
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: value_reg,
                 });
@@ -354,7 +354,7 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
             } else {
-                self.emit(LirInstr::StoreLocal {
+                self.emit(LirInstr::StoreLocalRefcounted {
                     slot,
                     src: value_reg,
                 });
@@ -846,7 +846,7 @@ impl<'a> Lowerer<'a> {
                 src: value_reg,
             });
         } else if self.in_lambda {
-            self.emit(LirInstr::StoreLocal {
+            self.emit(LirInstr::StoreLocalRefcounted {
                 slot,
                 src: value_reg,
             });
@@ -862,7 +862,7 @@ impl<'a> Lowerer<'a> {
                 value: value_reg,
             });
         } else {
-            self.emit(LirInstr::StoreLocal {
+            self.emit(LirInstr::StoreLocalRefcounted {
                 slot,
                 src: value_reg,
             });

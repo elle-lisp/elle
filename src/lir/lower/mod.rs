@@ -647,6 +647,11 @@ impl<'a> Lowerer<'a> {
         // and don't need DecrefLocal.
         if !needs_capture || !self.in_lambda {
             self.record_region_slot(slot);
+            // Initialize slot to NIL so StoreLocalRefcounted's decref(old)
+            // always finds a valid value, even on recursive/repeated calls.
+            if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
+                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+            }
         }
         slot
     }

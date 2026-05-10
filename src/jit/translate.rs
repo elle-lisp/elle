@@ -181,10 +181,6 @@ impl<'a> FunctionTranslator<'a> {
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.incref, builder.func);
-                builder.ins().call(func_ref, &[tag, payload]);
             }
 
             LirInstr::StoreLocalRefcounted { slot, src } => {

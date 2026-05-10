@@ -17,8 +17,6 @@ pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         }
     }
     vm.fiber.stack[abs_idx] = value;
-    crate::value::fiberheap::incref(value);
-    // Push the value back so it can be used as the result of set!
     vm.fiber.stack.push(value);
 }
 
