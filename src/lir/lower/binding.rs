@@ -62,27 +62,17 @@ impl<'a> Lowerer<'a> {
                     src: init_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: init_reg,
-                });
+                self.emit_binding_store(slot, init_reg);
             } else {
-                // Outside lambdas, use stack-based locals
                 if needs_capture {
                     let cell_reg = self.fresh_reg();
                     self.emit(LirInstr::MakeCaptureCell {
                         dst: cell_reg,
                         value: init_reg,
                     });
-                    self.emit(LirInstr::StoreLocalRefcounted {
-                        slot,
-                        src: cell_reg,
-                    });
+                    self.emit_binding_store(slot, cell_reg);
                 } else {
-                    self.emit(LirInstr::StoreLocalRefcounted {
-                        slot,
-                        src: init_reg,
-                    });
+                    self.emit_binding_store(slot, init_reg);
                 }
             }
         }
@@ -148,19 +138,16 @@ impl<'a> Lowerer<'a> {
                     src: nil_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocalRefcounted { slot, src: nil_reg });
+                self.emit_binding_store(slot, nil_reg);
             } else if needs_capture {
                 let cell_reg = self.fresh_reg();
                 self.emit(LirInstr::MakeCaptureCell {
                     dst: cell_reg,
                     value: nil_reg,
                 });
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: cell_reg,
-                });
+                self.emit_binding_store(slot, cell_reg);
             } else {
-                self.emit(LirInstr::StoreLocalRefcounted { slot, src: nil_reg });
+                self.emit_binding_store(slot, nil_reg);
             }
         }
         // Then initialize
@@ -198,10 +185,7 @@ impl<'a> Lowerer<'a> {
                     src: init_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: init_reg,
-                });
+                self.emit_binding_store(slot, init_reg);
             } else if needs_capture {
                 let cell_reg = self.fresh_reg();
                 self.emit(LirInstr::LoadLocal {
@@ -213,10 +197,7 @@ impl<'a> Lowerer<'a> {
                     value: init_reg,
                 });
             } else {
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: init_reg,
-                });
+                self.emit_binding_store(slot, init_reg);
             }
         }
         let tail_scoped = scoped && Self::body_is_tail_call(body);
@@ -305,21 +286,7 @@ impl<'a> Lowerer<'a> {
             });
             Ok(result)
         } else if self.in_lambda {
-            let is_mutable = !self.arena.get(binding).is_immutable;
-            if is_mutable {
-                // Mutable binding: incref so the value is protected
-                // from release_refcounted. StoreLocalRefcounted does
-                // decref(old) [safe: clamps at 0] + incref(new).
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: value_reg,
-                });
-            } else {
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: value_reg,
-                });
-            }
+            self.emit_binding_store(slot, value_reg);
             let result = self.fresh_reg();
             self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
@@ -347,18 +314,7 @@ impl<'a> Lowerer<'a> {
             });
             Ok(result)
         } else {
-            let is_mutable = !self.arena.get(binding).is_immutable;
-            if is_mutable {
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: value_reg,
-                });
-            } else {
-                self.emit(LirInstr::StoreLocalRefcounted {
-                    slot,
-                    src: value_reg,
-                });
-            }
+            self.emit_binding_store(slot, value_reg);
             let result = self.fresh_reg();
             self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
@@ -846,10 +802,7 @@ impl<'a> Lowerer<'a> {
                 src: value_reg,
             });
         } else if self.in_lambda {
-            self.emit(LirInstr::StoreLocalRefcounted {
-                slot,
-                src: value_reg,
-            });
+            self.emit_binding_store(slot, value_reg);
         } else if needs_capture {
             // cell was already created in Begin pre-pass
             let cell_reg = self.fresh_reg();
@@ -862,10 +815,7 @@ impl<'a> Lowerer<'a> {
                 value: value_reg,
             });
         } else {
-            self.emit(LirInstr::StoreLocalRefcounted {
-                slot,
-                src: value_reg,
-            });
+            self.emit_binding_store(slot, value_reg);
         }
         Ok(value_reg)
     }

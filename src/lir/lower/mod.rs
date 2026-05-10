@@ -645,7 +645,8 @@ impl<'a> Lowerer<'a> {
         // Upvalue slots (needs_capture inside lambda) use the capture
         // env, not the stack — they're managed by StoreCapture/LoadCapture
         // and don't need DecrefLocal.
-        if !needs_capture || !self.in_lambda {
+        let in_region = !self.region_slots.is_empty();
+        if in_region && (!needs_capture || !self.in_lambda) {
             self.record_region_slot(slot);
             // Initialize slot to NIL so StoreLocalRefcounted's decref(old)
             // always finds a valid value, even on recursive/repeated calls.
@@ -739,6 +740,22 @@ impl<'a> Lowerer<'a> {
         self.region_depth += 1;
         self.region_refcounted_stack.push(true);
         self.region_slots.push(Vec::new());
+    }
+
+    /// Whether we're inside a scoped region (DecrefLocal will be emitted).
+    fn in_scoped_region(&self) -> bool {
+        !self.region_slots.is_empty()
+    }
+
+    /// Emit the right store for a named binding: StoreLocalRefcounted
+    /// if inside a scoped region (DecrefLocal will balance), plain
+    /// StoreLocal otherwise.
+    fn emit_binding_store(&mut self, slot: u16, src: Reg) {
+        if self.in_scoped_region() {
+            self.emit(LirInstr::StoreLocalRefcounted { slot, src });
+        } else {
+            self.emit(LirInstr::StoreLocal { slot, src });
+        }
     }
 
     /// Record that a slot was allocated in the current region.

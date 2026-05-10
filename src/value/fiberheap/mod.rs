@@ -298,14 +298,12 @@ impl FiberHeap {
         )
     }
 
-    /// Release allocations back to a mark: run destructors, dealloc slab
-    /// slots, rewind bump arena.
+    /// Release allocations back to a mark: free rc=0 objects, keep
+    /// rc>0 pinned.
     ///
-    /// Called by `pop_scope_mark_and_release()` (RegionExit), which is
-    /// gated by Tofte-Talpin region analysis — only scopes where no
-    /// values escape get this call. Uses refcount-aware path so values
-    /// pinned by collection membership (push/put incref) or mutable
-    /// binding incref (StoreLocalRefcounted) survive scope exit.
+    /// Called by `pop_scope_mark_and_release()` (RegionExit). Uses
+    /// release_refcounted so values pinned by push/put incref or
+    /// StoreLocalRefcounted survive scope exit.
     pub fn release(&mut self, mark: ArenaMark) {
         if Self::trace_rc() {
             eprintln!("[trace:rc] release mark={}", mark.position());
@@ -411,14 +409,10 @@ impl FiberHeap {
             }
         }
 
-        // Rewind bump arena only if no objects are pinned. Pinned objects
-        // may have inline data (strings, arrays) in the arena after the
-        // mark — rewinding would free that data while the object is alive.
-        if !any_pinned {
-            if let Some(bm) = mark.bump_mark() {
-                self.pool.release_bump_to(bm);
-            }
-        }
+        // NOTE: do NOT rewind the bump arena here. Pinned objects from
+        // OTHER scopes may have inline data (closure envs, strings) in
+        // the arena region after this mark. Arena rewind is only safe
+        // in pool.release() (unconditional, escape-analysis-proven safe).
 
         // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
