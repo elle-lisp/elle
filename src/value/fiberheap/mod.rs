@@ -298,24 +298,18 @@ impl FiberHeap {
         )
     }
 
-    /// Release allocations back to a mark: run destructors, dealloc slab
-    /// slots to the free list, rewind bump arena.
+    /// Release allocations back to a mark: run destructors for rc=0
+    /// objects, dealloc their slab slots, rewind bump arena if nothing
+    /// is pinned.
     ///
     /// Called by `pop_scope_mark_and_release()` (RegionExit), which is
-    /// gated by Tofte-Talpin region analysis — only scopes where no
-    /// values escape get this call. Since escape analysis proved safety,
-    /// all objects can be freed unconditionally (ignoring refcounts).
+    /// gated by Tofte-Talpin region analysis. Uses refcount-aware path
+    /// so values pinned by collection membership (push incref) survive.
     pub fn release(&mut self, mark: ArenaMark) {
         if Self::trace_rc() {
             eprintln!("[trace:rc] release mark={}", mark.position());
         }
-        self.pool.release(&pool::SlabMark {
-            alloc_tail: mark.alloc_list_tail(),
-            dtor_len: mark.dtor_len(),
-            alloc_count: mark.position(),
-            arena_mark: mark.bump_mark().unwrap_or_default(),
-        });
-        self.shared_alloc_count = mark.shared_alloc_count();
+        self.release_refcounted(mark);
     }
 
     /// Refcount-aware release: free objects with refcount == 0, skip
@@ -550,11 +544,10 @@ impl FiberHeap {
             .scope_marks
             .pop()
             .expect("RegionRotate: missing previous scope mark");
-        // Use release_no_dealloc: run dtors and reset alloc_count, but
-        // don't free slab slots. Loop iteration values may chain across
-        // generations (cons lists, etc.), making slot freeing unsafe.
-        // Let-scope RegionExit still uses release() with dealloc.
-        self.release_no_dealloc(prev);
+        // With universal incref, use release_refcounted: free rc=0 objects,
+        // keep rc>0 pinned (protected by push/put incref or binding incref).
+        // DecrefLocal before rotation brings dead bindings to rc=0.
+        self.release_refcounted(prev);
         self.scope_dtors_run += dtors_before - self.pool.dtors.len();
         self.scope_marks.push(curr);
         self.scope_marks.push(self.mark());
