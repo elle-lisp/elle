@@ -96,13 +96,13 @@
 
       ## Read output size: total_out is at offset 40 (after avail_out at 32 + padding)
       ## Offsets: next_out 24:8, avail_out 32:4, pad 36:4, total_out 40:8
-      (def avail-out (ffi/read (ptr/add stream 32) :u32))
-      (def compressed-len (- out-size avail-out))
-      (def compress-result (ptr->bytes out-buf compressed-len))
-      (z-deflateEnd stream)
-      (ffi/free stream)
-      (ffi/free out-buf)
-      compress-result))
+      (let* [avail-out (ffi/read (ptr/add stream 32) :u32)
+             compressed-len (- out-size avail-out)
+             result (ptr->bytes out-buf compressed-len)]
+        (z-deflateEnd stream)
+        (ffi/free stream)
+        (ffi/free out-buf)
+        result)))
 
   (defn deflate-decompress [data window-bits]
     "Decompress data using zlib's inflate with the given windowBits."
@@ -150,11 +150,11 @@
                   (ffi/free out-buf)
                   (error {:error :compress-error
                           :message (string "inflate failed: " rc)}))))))
-      (def decomp-result (ptr->bytes out-buf total-out))
-      (z-inflateEnd stream)
-      (ffi/free stream)
-      (ffi/free out-buf)
-      decomp-result))
+      (let [result (ptr->bytes out-buf total-out)]
+        (z-inflateEnd stream)
+        (ffi/free stream)
+        (ffi/free out-buf)
+        result)))
 
   ## windowBits: 15+16=31 for gzip, 15 for zlib, -15 for raw deflate
   (defn gzip [data & opts]
