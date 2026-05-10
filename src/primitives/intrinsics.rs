@@ -455,6 +455,7 @@ fn prim_push(args: &[Value]) -> (SignalBits, Value) {
     let collection = &args[0];
     let value = args[1];
     if let Some(vec_ref) = collection.as_array_mut() {
+        crate::value::fiberheap::incref(value);
         vec_ref.borrow_mut().push(value);
         (SIG_OK, *collection)
     } else if let Some(elems) = collection.as_array() {
@@ -469,7 +470,10 @@ fn prim_push(args: &[Value]) -> (SignalBits, Value) {
 fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
     match args[0].as_array_mut() {
         Some(arr) => match arr.borrow_mut().pop() {
-            Some(v) => (SIG_OK, v),
+            Some(v) => {
+                crate::value::fiberheap::decref(v);
+                (SIG_OK, v)
+            }
             None => (SIG_ERROR, error_val("type-error", "%pop: empty @array")),
         },
         None => type_err("%pop", "@array", &args[0]),

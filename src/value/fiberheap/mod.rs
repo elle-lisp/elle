@@ -299,23 +299,23 @@ impl FiberHeap {
     }
 
     /// Release allocations back to a mark: run destructors, dealloc slab
-    /// slots to the free list, and truncate tracking vecs.
+    /// slots to the free list, rewind bump arena.
     ///
     /// Called by `pop_scope_mark_and_release()` (RegionExit), which is
     /// gated by Tofte-Talpin region analysis — only scopes where no
-    /// values escape get this call.
+    /// values escape get this call. Since escape analysis proved safety,
+    /// all objects can be freed unconditionally (ignoring refcounts).
     pub fn release(&mut self, mark: ArenaMark) {
-        use super::fiberheap::slab::ALLOC_NIL;
-
         if Self::trace_rc() {
             eprintln!("[trace:rc] release mark={}", mark.position());
         }
-
-        // With universal incref, use the refcounted path: only free
-        // rc=0 objects, keep rc>0 pinned. This prevents freeing objects
-        // that are still reachable through the scope's result value or
-        // through parent structs/collections.
-        self.release_refcounted(mark);
+        self.pool.release(&pool::SlabMark {
+            alloc_tail: mark.alloc_list_tail(),
+            dtor_len: mark.dtor_len(),
+            alloc_count: mark.position(),
+            arena_mark: mark.bump_mark().unwrap_or_default(),
+        });
+        self.shared_alloc_count = mark.shared_alloc_count();
     }
 
     /// Refcount-aware release: free objects with refcount == 0, skip
@@ -389,6 +389,7 @@ impl FiberHeap {
 
         // Dealloc refcount-0 slab slots, keep pinned (re-link survivors).
         // Walk the scope allocs and unlink+dealloc rc==0 nodes.
+        let mut any_pinned = false;
         for i in 0..scope_ptrs.len() {
             let ptr = scope_ptrs[i];
             let flat = scope_flats[i];
@@ -402,8 +403,18 @@ impl FiberHeap {
                 }
                 self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
+            } else {
+                any_pinned = true;
             }
-            // Pinned nodes stay linked — they remain in the list.
+        }
+
+        // Rewind bump arena only if no objects are pinned. Pinned objects
+        // may have inline data (strings, arrays) in the arena after the
+        // mark — rewinding would free that data while the object is alive.
+        if !any_pinned {
+            if let Some(bm) = mark.bump_mark() {
+                self.pool.release_bump_to(bm);
+            }
         }
 
         // Dealloc custom-allocated objects from the exiting scope.

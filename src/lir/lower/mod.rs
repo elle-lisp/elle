@@ -802,6 +802,23 @@ impl<'a> Lowerer<'a> {
         self.emit(LirInstr::RegionRotateRefcounted);
     }
 
+    /// Emit RegionExit without DecrefLocal. Used at while-loop exit for
+    /// the iteration region, which was already DecrefLocal'd by rotation.
+    fn emit_region_exit_no_decref(&mut self) {
+        self.emit(LirInstr::RegionExit);
+        self.region_depth -= 1;
+        self.region_refcounted_stack.pop();
+        self.region_slots.pop();
+    }
+
+    /// Emit RegionExitRefcounted without DecrefLocal.
+    fn emit_region_exit_refcounted_no_decref(&mut self) {
+        self.emit(LirInstr::RegionExitRefcounted);
+        self.region_depth -= 1;
+        self.region_refcounted_stack.pop();
+        self.region_slots.pop();
+    }
+
     fn emit_region_exit_refcounted(&mut self) {
         self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionExitRefcounted);

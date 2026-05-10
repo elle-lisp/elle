@@ -330,6 +330,7 @@ pub(crate) fn handle_intr_push(vm: &mut VM) {
     let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     if let Some(vec_ref) = collection.as_array_mut() {
+        crate::value::fiberheap::incref(value);
         vec_ref.borrow_mut().push(value);
         vm.fiber.stack.push(collection);
     } else if let Some(elems) = collection.as_array() {
@@ -345,6 +346,7 @@ pub(crate) fn handle_intr_pop(vm: &mut VM) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let arr = val.as_array_mut().expect("%pop: expected @array");
     let popped = arr.borrow_mut().pop().expect("%pop: empty @array");
+    crate::value::fiberheap::decref(popped);
     vm.fiber.stack.push(popped);
 }
 

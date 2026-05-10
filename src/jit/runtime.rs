@@ -733,6 +733,7 @@ pub extern "C" fn elle_jit_push(
         payload: val_pay,
     };
     if let Some(vec_ref) = arr.as_array_mut() {
+        crate::value::fiberheap::incref(val);
         vec_ref.borrow_mut().push(val);
         JitValue::from_value(arr)
     } else if let Some(elems) = arr.as_array() {
@@ -750,6 +751,7 @@ pub extern "C" fn elle_jit_pop(tag: u64, payload: u64) -> JitValue {
     let v = Value { tag, payload };
     let arr = v.as_array_mut().expect("%pop: expected @array");
     let popped = arr.borrow_mut().pop().expect("%pop: empty @array");
+    crate::value::fiberheap::decref(popped);
     JitValue::from_value(popped)
 }
 

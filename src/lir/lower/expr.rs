@@ -500,14 +500,16 @@ impl<'a> Lowerer<'a> {
         // the body (body lowering may have created intermediate blocks).
         self.terminate(Terminator::Jump(cond_label));
         self.finish_block();
-        // Done block — release both scope marks (curr + prev)
+        // Done block — release both scope marks (curr + prev).
+        // The curr (iteration) region was already DecrefLocal'd by rotation,
+        // so use the no-decref variant to avoid double-decref.
         self.current_block = BasicBlock::new(done_label);
         if scope_eligible {
             if refcount_eligible {
-                self.emit_region_exit_refcounted(); // curr
+                self.emit_region_exit_refcounted_no_decref(); // curr (rotation handled decrefs)
                 self.emit_region_exit_refcounted(); // prev
             } else {
-                self.emit_region_exit(); // curr
+                self.emit_region_exit_no_decref(); // curr (rotation handled decrefs)
                 self.emit_region_exit(); // prev
             }
         }
@@ -595,13 +597,14 @@ impl<'a> Lowerer<'a> {
             src: body_reg,
         });
 
-        // Release both scope marks (curr + prev)
+        // Release both scope marks (curr + prev).
+        // Curr (iteration) was already DecrefLocal'd by rotation.
         if scope_eligible {
             if refcount_eligible {
-                self.emit_region_exit_refcounted(); // curr
+                self.emit_region_exit_refcounted_no_decref(); // curr
                 self.emit_region_exit_refcounted(); // prev
             } else {
-                self.emit_region_exit(); // curr
+                self.emit_region_exit_no_decref(); // curr
                 self.emit_region_exit(); // prev
             }
         }
