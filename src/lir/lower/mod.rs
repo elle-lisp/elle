@@ -646,12 +646,14 @@ impl<'a> Lowerer<'a> {
         // env, not the stack — they're managed by StoreCapture/LoadCapture
         // and don't need DecrefLocal.
         let in_region = !self.region_slots.is_empty();
-        if in_region && (!needs_capture || !self.in_lambda) {
-            self.record_region_slot(slot);
-            // Initialize slot to NIL so StoreLocalRefcounted's decref(old)
-            // always finds a valid value, even on recursive/repeated calls.
+        if !needs_capture || !self.in_lambda {
+            // Initialize slot to NIL unconditionally so StoreLocalRefcounted's
+            // decref(old) always finds a valid value on repeated calls.
             if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
                 self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+            }
+            if in_region {
+                self.record_region_slot(slot);
             }
         }
         slot
