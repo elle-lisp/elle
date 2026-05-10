@@ -812,8 +812,12 @@ impl<'a> Lowerer<'a> {
             self.emit(LirInstr::DecrefLocal { slot: *slot });
         }
         // Nil the slots after decref. StoreLocal (no incref) writes NIL.
-        if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
-            for slot in slots {
+        // Each slot needs its own fresh Const nil — the emitter's stack
+        // tracker removes the register after StoreLocal+Pop, so reusing
+        // a single nil_reg causes the second StoreLocal to pop a local
+        // slot value instead of nil, corrupting the stack.
+        for slot in slots {
+            if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
                 self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
             }
         }
