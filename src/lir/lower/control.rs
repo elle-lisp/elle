@@ -78,10 +78,7 @@ impl<'a> Lowerer<'a> {
 
                 // Emit pending RegionExits before TailCall — the scope's
                 // allocations must be freed before the frame is replaced.
-                // Args are already in registers, so they're not affected.
-                // Emit raw instructions (not emit_region_exit()) — region_depth
-                // must not change because both branches of an `if` emit the
-                // same exits but only one executes at runtime.
+                //
                 self.emit_pending_region_exits();
 
                 self.emit(LirInstr::TailCall {
