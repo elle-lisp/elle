@@ -1127,16 +1127,14 @@ impl<'a> FnCtx<'a> {
             cond_exprs.push(new_cond);
 
             self.renames = saved.clone();
-            let (new_body, versions) =
-                self.transform_branch_extracting_assigns(body, assigned);
+            let (new_body, versions) = self.transform_branch_extracting_assigns(body, assigned);
             bodies.push(new_body);
             all_versions.push(versions);
         }
 
         let new_else = if let Some(e) = else_branch {
             self.renames = saved.clone();
-            let (new_e, versions) =
-                self.transform_branch_extracting_assigns(e, assigned);
+            let (new_e, versions) = self.transform_branch_extracting_assigns(e, assigned);
             all_versions.push(versions);
             Some(new_e)
         } else {
@@ -1145,17 +1143,13 @@ impl<'a> FnCtx<'a> {
         self.renames = saved.clone();
 
         // 2. Create condition temporaries
-        let cond_temps: Vec<Binding> = (0..clauses.len())
-            .map(|_| self.gensym())
-            .collect();
+        let cond_temps: Vec<Binding> = (0..clauses.len()).map(|_| self.gensym()).collect();
 
         // 3. Build the cond using temps as conditions
         let new_clauses: Vec<(Hir, Hir)> = cond_temps
             .iter()
             .zip(bodies)
-            .map(|(&t, body)| {
-                (Hir::silent(HirKind::Var(t), span.clone()), body)
-            })
+            .map(|(&t, body)| (Hir::silent(HirKind::Var(t), span.clone()), body))
             .collect();
         let cond_node = Hir::new(
             HirKind::Cond {
@@ -1196,10 +1190,7 @@ impl<'a> FnCtx<'a> {
 
                     phi_val = Hir::new(
                         HirKind::If {
-                            cond: Box::new(Hir::silent(
-                                HirKind::Var(cond_temps[i]),
-                                span.clone(),
-                            )),
+                            cond: Box::new(Hir::silent(HirKind::Var(cond_temps[i]), span.clone())),
                             then_branch: Box::new(clause_val),
                             else_branch: Box::new(phi_val),
                         },
@@ -1236,7 +1227,11 @@ impl<'a> FnCtx<'a> {
         //    t3 = (if t1 false (if t2 false test3))
         //    ...
         let inner = if has_continuation {
-            Hir::new(HirKind::Begin(vec![cond_node, result]), span.clone(), signal)
+            Hir::new(
+                HirKind::Begin(vec![cond_node, result]),
+                span.clone(),
+                signal,
+            )
         } else {
             // Last expression: capture cond result in a temp
             let result_binding = self.gensym();
@@ -1271,14 +1266,8 @@ impl<'a> FnCtx<'a> {
                 for j in (0..i).rev() {
                     short_circuit = Hir::new(
                         HirKind::If {
-                            cond: Box::new(Hir::silent(
-                                HirKind::Var(cond_temps[j]),
-                                span.clone(),
-                            )),
-                            then_branch: Box::new(Hir::silent(
-                                HirKind::Bool(false),
-                                span.clone(),
-                            )),
+                            cond: Box::new(Hir::silent(HirKind::Var(cond_temps[j]), span.clone())),
+                            then_branch: Box::new(Hir::silent(HirKind::Bool(false), span.clone())),
                             else_branch: Box::new(short_circuit),
                         },
                         span.clone(),
@@ -1331,8 +1320,7 @@ impl<'a> FnCtx<'a> {
         for (pat, guard, body) in arms {
             self.renames = saved.clone();
             let new_guard = guard.as_ref().map(|g| self.transform(g));
-            let (new_body, versions) =
-                self.transform_branch_extracting_assigns(body, assigned);
+            let (new_body, versions) = self.transform_branch_extracting_assigns(body, assigned);
             new_arms.push((pat.clone(), new_guard, new_body));
             all_versions.push(versions);
         }
@@ -1402,7 +1390,11 @@ impl<'a> FnCtx<'a> {
 
         // 6. Wrap with match and value binding
         let inner = if has_continuation {
-            Hir::new(HirKind::Begin(vec![match_node, result]), span.clone(), signal)
+            Hir::new(
+                HirKind::Begin(vec![match_node, result]),
+                span.clone(),
+                signal,
+            )
         } else {
             let result_binding = self.gensym();
             let result_var = Hir::silent(HirKind::Var(result_binding), span.clone());
