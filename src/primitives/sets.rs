@@ -66,18 +66,6 @@ pub(crate) fn prim_at_set(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::set_mut(set))
 }
 
-/// Check if a value is a set
-///
-/// (set? value) -> bool
-///
-/// Returns true for both immutable and mutable sets. Use (type-of x) to distinguish.
-pub(crate) fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_set() || args[0].is_set_mut()),
-    )
-}
-
 /// Check if a value is in a set, or if a string contains a substring
 ///
 /// (contains? set value) -> bool
@@ -375,17 +363,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "set",
         example: "(@set 1 2 3)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "set?",
-        func: prim_is_set,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is a set (immutable or mutable). Use (type-of x) to distinguish.",
-        params: &["value"],
-        category: "set",
-        example: "(set? (set 1 2)) #=> true\n(set? 42) #=> false",
         aliases: &[],
     },
     // contains? is an alias of has? (defined in lstruct.rs).

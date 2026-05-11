@@ -55,15 +55,6 @@ pub(crate) fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Check if a value is a box
-///
-/// (box? value) -> bool
-///
-/// Returns true if the value is a box, false otherwise
-pub(crate) fn prim_box_p(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_lbox()))
-}
-
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "box",
@@ -96,17 +87,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["box", "value"],
         category: "box",
         example: "(let [c (box 1)] (rebox c 2) (unbox c)) #=> 2",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "box?",
-        func: prim_box_p,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Check if a value is a box.",
-        params: &["value"],
-        category: "predicate",
-        example: "(box? (box 1)) #=> true\n(box? 42) #=> false",
         aliases: &[],
     },
 ];

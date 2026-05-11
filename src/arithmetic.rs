@@ -142,11 +142,13 @@ pub(crate) fn abs_value(a: &Value) -> Result<Value, Value> {
 /// Used by both the VM's Eq instruction and the `=` primitive.
 #[inline]
 pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {
-    // Fast path: bitwise identical (covers same-type immediates)
-    if *a == *b {
+    // Fast path: bitwise identical (covers same-type immediates).
+    // Excludes floats so IEEE 754 NaN ≠ NaN is respected.
+    if *a == *b && !a.is_float() {
         return true;
     }
-    // Numeric coercion: int-int stays exact, mixed promotes to f64
+    // Numeric coercion: int-int stays exact, mixed promotes to f64.
+    // Rust's f64 == f64 follows IEEE 754 (NaN != NaN).
     if a.is_number() && b.is_number() {
         if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
             return x == y;

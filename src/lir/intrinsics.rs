@@ -56,26 +56,12 @@ pub(crate) fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, Int
 /// - `first`, `rest`, `get`, `last`, `butlast`: return arbitrary values.
 /// - `number->string`, `int->string`, `symbol->string`: return strings.
 const IMMEDIATE_PRIMITIVES: &[&str] = &[
-    // Type predicates → bool
-    "nil?",
-    "pair?",
-    "list?",
-    "number?",
-    "symbol?",
-    "string?",
-    "boolean?",
-    "keyword?",
-    "array?",
-    "struct?",
-    "bytes?",
+    // Type predicates → bool (only Rust-side predicates remain)
     "ptr?",
     "pointer?",
-    "fiber?",
-    "closure?",
     "jit?",
     "silent?",
     "coro?",
-    "box?",
     // Collection predicates → bool
     "empty?",
     "has?",
@@ -87,9 +73,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "string-starts-with?",
     "string/ends-with?",
     "string-ends-with?",
-    // Numeric predicates → bool
-    "integer?",
-    "float?",
+    // Numeric predicates → bool (only Rust-side remain)
     "even?",
     "odd?",
     // Closure introspection predicates → bool (canonical + aliases)
@@ -132,8 +116,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     // Port predicates → bool
     "port?",
     "port/open?",
-    // Parameter predicate → bool
-    "parameter?",
     // Math constants → float
     "math/pi",
     "pi",
@@ -170,13 +152,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "bit/not",
     "bit/shift-left",
     "bit/shift-right",
-    // Numeric → bool
-    "zero?",
-    "positive?",
-    "negative?",
-    "nan?",
-    "infinite?",
-    "finite?",
     // Numeric → number
     "negate",
     "inc",

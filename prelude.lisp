@@ -32,7 +32,7 @@
     val
     (let* [form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,(first form) ,val ,;(rest form))
                       `(,form ,val))]
       `(-> ,threaded
@@ -45,7 +45,7 @@
     val
     (let* [form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,;form ,val)
                       `(,form ,val))]
       `(->> ,threaded
@@ -70,7 +70,7 @@
     (let* [g (gensym)
            form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,(first form) ,g ,;(rest form))
                       `(,form ,g))]
       `(let [,g ,val]
@@ -87,7 +87,7 @@
     (let* [g (gensym)
            form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,;form ,g)
                       `(,form ,g))]
       `(let [,g ,val]

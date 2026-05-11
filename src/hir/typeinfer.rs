@@ -560,9 +560,7 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], interner: &TypeInterner
         "length" => TypeInterner::INT,
         "type" => TypeInterner::KEYWORD,
         "has?" | "empty?" | "contains?" => TypeInterner::BOOL,
-        "string?" | "int?" | "integer?" | "float?" | "number?" | "nil?" | "boolean?"
-        | "keyword?" | "symbol?" | "pair?" | "list?" | "array?" | "struct?" | "bytes?"
-        | "even?" | "odd?" | "closure?" | "fiber?" | "box?" | "ptr?" | "pointer?" => {
+        "even?" | "odd?" | "ptr?" | "pointer?" => {
             TypeInterner::BOOL
         }
         "string/contains?"

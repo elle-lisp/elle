@@ -17,6 +17,131 @@
 ## - Stream ports: port/lines, port/chunks, port/writer
 ## - Subprocess convenience: subprocess/system
 
+## ── Type predicates ──────────────────────────────────────────────────
+
+(defn nil? [x]
+  (match (type-of x)
+    :nil true
+    _ false))
+(defn integer? [x]
+  (match (type-of x)
+    :integer true
+    _ false))
+(defn float? [x]
+  (match (type-of x)
+    :float true
+    _ false))
+(defn boolean? [x]
+  (match (type-of x)
+    :boolean true
+    _ false))
+(defn keyword? [x]
+  (match (type-of x)
+    :keyword true
+    _ false))
+(defn native-fn? [x]
+  (match (type-of x)
+    :native-fn true
+    _ false))
+(defn closure? [x]
+  (match (type-of x)
+    :closure true
+    _ false))
+(defn fiber? [x]
+  (match (type-of x)
+    :fiber true
+    _ false))
+(defn box? [x]
+  (match (type-of x)
+    :box true
+    _ false))
+(defn parameter? [x]
+  (match (type-of x)
+    :parameter true
+    _ false))
+(defn number? [x]
+  (match (type-of x)
+    :integer true
+    :float true
+    _ false))
+(defn string? [x]
+  (match (type-of x)
+    :string true
+    :@string true
+    _ false))
+(defn bytes? [x]
+  (match (type-of x)
+    :bytes true
+    :@bytes true
+    _ false))
+(defn array? [x]
+  (match (type-of x)
+    :array true
+    :@array true
+    _ false))
+(defn struct? [x]
+  (match (type-of x)
+    :struct true
+    :@struct true
+    _ false))
+(defn set? [x]
+  (match (type-of x)
+    :set true
+    :@set true
+    _ false))
+(defn fn? [x]
+  (match (type-of x)
+    :closure true
+    :native-fn true
+    _ false))
+(defn mutable? [x]
+  (match (type-of x)
+    :@array true
+    :@struct true
+    :@string true
+    :@bytes true
+    :@set true
+    :box true
+    _ false))
+(defn immutable? [x]
+  (not (mutable? x)))
+(defn pair? [x]
+  (match (type-of x)
+    :list (not (empty? x))
+    :syntax (pair? (syntax->datum x))
+    _ false))
+(defn list? [x]
+  (match (type-of x)
+    :list true
+    :syntax (list? (syntax->datum x))
+    _ false))
+(defn symbol? [x]
+  (match (type-of x)
+    :symbol true
+    :syntax (symbol? (syntax->datum x))
+    _ false))
+(defn zero? [x]
+  (= x 0))
+(defn nonzero? [x]
+  (not (= x 0)))
+(defn nan? [x]
+  (and (float? x) (not (= x x))))
+(defn finite? [x]
+  (and (number? x) (not (nan? x)) (< (abs x) (math/inf))))
+(defn inf? [x]
+  (and (float? x) (not (finite? x)) (not (nan? x))))
+(defn pos? [x]
+  (> x 0))
+(defn neg? [x]
+  (< x 0))
+(def int? integer?)
+(def bool? boolean?)
+(def native? native-fn?)
+(def primitive? native-fn?)
+(def positive? pos?)
+(def negative? neg?)
+(def infinite? inf?)
+
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
 (defn + [& args]
@@ -2003,4 +2128,40 @@
    :update update
    :get-in get-in
    :put-in put-in
-   :update-in update-in})
+   :update-in update-in
+   :nil? nil?
+   :integer? integer?
+   :float? float?
+   :boolean? boolean?
+   :keyword? keyword?
+   :native-fn? native-fn?
+   :closure? closure?
+   :fiber? fiber?
+   :box? box?
+   :parameter? parameter?
+   :number? number?
+   :string? string?
+   :bytes? bytes?
+   :array? array?
+   :struct? struct?
+   :set? set?
+   :fn? fn?
+   :mutable? mutable?
+   :immutable? immutable?
+   :pair? pair?
+   :list? list?
+   :symbol? symbol?
+   :zero? zero?
+   :nonzero? nonzero?
+   :nan? nan?
+   :finite? finite?
+   :inf? inf?
+   :pos? pos?
+   :neg? neg?
+   :int? int?
+   :bool? bool?
+   :native? native?
+   :primitive? primitive?
+   :positive? positive?
+   :negative? negative?
+   :infinite? infinite?})

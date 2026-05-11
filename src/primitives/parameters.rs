@@ -12,12 +12,6 @@ pub(crate) fn prim_make_parameter(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::parameter(args[0]))
 }
 
-/// Check if a value is a parameter.
-/// (parameter? value) → boolean
-pub(crate) fn prim_is_parameter(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_parameter()))
-}
-
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "parameter",
@@ -29,16 +23,5 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "parameter",
         example: "(def p (parameter 42))\n(p) #=> 42",
         aliases: &["make-parameter"],
-    },
-    PrimitiveDef {
-        name: "parameter?",
-        func: prim_is_parameter,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Check if value is a dynamic parameter.",
-        params: &["value"],
-        category: "predicate",
-        example: "(parameter? (make-parameter 0)) #=> true\n(parameter? 42) #=> false",
-        aliases: &[],
     },
 ];

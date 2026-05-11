@@ -61,13 +61,6 @@ pub(crate) fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(mask.raw() as i64))
 }
 
-/// (fiber? value) → bool
-///
-/// Type predicate: returns true if the value is a fiber.
-pub(crate) fn prim_is_fiber(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_fiber()))
-}
-
 /// (fiber/parent fiber) → fiber | nil
 ///
 /// Returns the parent fiber, or nil if the fiber has no parent
@@ -338,17 +331,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/mask f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber?",
-        func: prim_is_fiber,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Check if a value is a fiber",
-        params: &["value"],
-        category: "fiber",
-        example: "(fiber? f)",
         aliases: &[],
     },
     PrimitiveDef {

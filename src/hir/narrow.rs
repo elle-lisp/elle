@@ -70,9 +70,7 @@ fn should_narrow_error(
 ) -> bool {
     match name {
         // Type predicates: never error
-        "string?" | "int?" | "integer?" | "float?" | "number?" | "nil?" | "boolean?"
-        | "keyword?" | "symbol?" | "pair?" | "list?" | "array?" | "struct?" | "bytes?"
-        | "even?" | "odd?" | "closure?" | "fiber?" | "box?" | "ptr?" | "pointer?" => true,
+        "even?" | "odd?" | "ptr?" | "pointer?" => true,
 
         // type: never errors
         "type" => true,

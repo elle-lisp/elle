@@ -6,11 +6,6 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// (closure? value) — true if value is a bytecode closure
-pub(crate) fn prim_is_closure(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].as_closure().is_some()))
-}
-
 /// (jit? value) — true if closure has JIT-compiled code
 pub(crate) fn prim_is_jit(args: &[Value]) -> (SignalBits, Value) {
     // SIG_QUERY to the VM, which checks jit_cache by bytecode pointer.
@@ -278,17 +273,6 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
 
 /// Declarative primitive definitions for introspection operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "closure?",
-        func: prim_is_closure,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Returns true if value is a bytecode closure",
-        params: &["value"],
-        category: "predicate",
-        example: "(closure? (fn (x) x))",
-        aliases: &[],
-    },
     PrimitiveDef {
         name: "jit?",
         func: prim_is_jit,
