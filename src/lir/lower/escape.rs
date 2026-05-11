@@ -3008,10 +3008,13 @@ impl<'a> Lowerer<'a> {
     /// across iterations.
     pub(super) fn can_dealloc_in_loop(
         &self,
-        body: &Hir,
-        loop_bindings: &[(Binding, &Hir)],
+        _body: &Hir,
+        _loop_bindings: &[(Binding, &Hir)],
     ) -> bool {
-        !self.loop_param_chains(body, loop_bindings)
+        // Always false: wholesale release (RegionRotateDealloc) ignores
+        // refcounts, freeing objects with rc>0 from alloc-time child incref.
+        // All loops use refcounted rotation instead. See memory-take-five F11.
+        false
     }
 
     /// Check if a loop param is assigned a value that chains across iterations.

@@ -373,23 +373,33 @@ impl FiberHeap {
             }
         }
 
-        // Run dtors in reverse order for rc=0 objects.
+        // Build a set of scope-alloc flat indices for dtor validation.
+        // Dtors must only run for objects that are in the scope's alloc range.
+        // After rotation reuses freed slots, dtors may contain entries for
+        // objects that were freed and whose slots were reused — those entries
+        // point to different objects that must not be dropped here.
+        let scope_flat_set: std::collections::HashSet<u32> =
+            scope_flats.iter().copied().collect();
+
+        // Run dtors in reverse order for rc=0 objects that are in scope.
+        // Null out processed entries so nested scope marks remain valid.
+        // Track which flats have been dropped to prevent double-drop when
+        // the same slot appears in multiple dtor entries (from slot reuse).
+        let mut dropped_flats: std::collections::HashSet<u32> =
+            std::collections::HashSet::new();
         for i in (mark.dtor_len()..self.pool.dtors.len()).rev() {
             let ptr = self.pool.dtors[i];
-            if self.pool.refcount(ptr as *const HeapObject) == 0 {
-                unsafe { std::ptr::drop_in_place(ptr) };
+            if !ptr.is_null() {
+                let flat = self.pool.slab.ptr_to_flat(ptr) as u32;
+                if scope_flat_set.contains(&flat)
+                    && self.pool.refcount(ptr as *const HeapObject) == 0
+                    && dropped_flats.insert(flat)
+                {
+                    unsafe { std::ptr::drop_in_place(ptr) };
+                    self.pool.dtors[i] = std::ptr::null_mut();
+                }
             }
         }
-        // Compact dtors: keep pinned, remove dead.
-        let mut kept = mark.dtor_len();
-        for i in mark.dtor_len()..self.pool.dtors.len() {
-            let ptr = self.pool.dtors[i];
-            if self.pool.refcount(ptr as *const HeapObject) > 0 {
-                self.pool.dtors[kept] = ptr;
-                kept += 1;
-            }
-        }
-        self.pool.dtors.truncate(kept);
 
         // Decref collected children.
         for child in children_to_decref {
@@ -397,15 +407,12 @@ impl FiberHeap {
         }
 
         // Dealloc rc=0 slab slots, keep pinned.
-        let mut any_pinned = false;
         for i in 0..scope_ptrs.len() {
             let ptr = scope_ptrs[i];
             let flat = scope_flats[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
                 self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
-            } else {
-                any_pinned = true;
             }
         }
 
@@ -625,12 +632,14 @@ impl FiberHeap {
             .expect("RegionExitCall: missing region mark");
 
         // Run dtors in reverse for objects allocated between mark1 and mark2.
+        let mut dtors_freed = 0;
         for i in (mark1.dtor_len()..mark2.dtor_len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.pool.dtors[i]);
+            let ptr = self.pool.dtors[i];
+            if !ptr.is_null() {
+                unsafe { std::ptr::drop_in_place(ptr) };
+                dtors_freed += 1;
             }
         }
-        let dtors_freed = mark2.dtor_len() - mark1.dtor_len();
         self.pool.dtors.drain(mark1.dtor_len()..mark2.dtor_len());
         self.scope_dtors_run += dtors_freed;
 

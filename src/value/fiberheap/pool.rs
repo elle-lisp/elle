@@ -142,10 +142,12 @@ impl SlabPool {
     }
 
     /// Run destructors in reverse order from `self.dtors[start..]`.
+    /// Skips null entries (nulled by release_refcounted for freed objects).
     pub fn run_dtors(&self, start: usize) {
         for i in (start..self.dtors.len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.dtors[i]);
+            let ptr = self.dtors[i];
+            if !ptr.is_null() {
+                unsafe { std::ptr::drop_in_place(ptr) };
             }
         }
     }
