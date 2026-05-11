@@ -14,7 +14,7 @@ use crate::value::error_val;
 use crate::value::fiber::{CallFrame, MAX_CALL_DEPTH};
 use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
-    SIG_HALT, SIG_OK,
+    SIG_FUEL, SIG_HALT, SIG_OK,
 };
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
@@ -480,6 +480,25 @@ impl VM {
                     });
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
+
+                    // When the callee was interrupted mid-execution by a
+                    // non-yield signal (e.g. SIG_FUEL), the callee's inner
+                    // frame lives in result.stack — not in fiber.suspended
+                    // (only SIG_YIELD's handle_yield populates that).
+                    // Without this, the callee's state is lost and resume
+                    // injects nil as the Call's return value.
+                    if frames.is_empty() && !result.stack.is_empty() {
+                        frames.push(SuspendedFrame::Bytecode(BytecodeFrame {
+                            bytecode: result.bytecode,
+                            constants: result.constants,
+                            env: result.env,
+                            ip: result.ip,
+                            stack: result.stack,
+                            location_map: result.location_map,
+                            push_resume_value: !bits.contains(SIG_FUEL),
+                        }));
+                    }
+
                     if self
                         .runtime_config
                         .has_trace_bit(crate::config::trace_bits::FIBER)
