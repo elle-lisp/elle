@@ -365,8 +365,7 @@ impl FiberHeap {
         // dtors free internal data (RefCells, Vecs), making
         // collect_heap_children unsafe after drop_in_place.
         let mut children_to_decref: Vec<Value> = Vec::new();
-        for i in 0..scope_ptrs.len() {
-            let ptr = scope_ptrs[i];
+        for &ptr in &scope_ptrs {
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
                 let obj_ref = unsafe { &*ptr };
                 Self::collect_heap_children(obj_ref, &mut children_to_decref);
@@ -557,53 +556,6 @@ impl FiberHeap {
         // With universal incref, use release_refcounted: free rc=0 objects,
         // keep rc>0 pinned (protected by push/put incref or binding incref).
         // DecrefLocal before rotation brings dead bindings to rc=0.
-        self.release_refcounted(prev);
-        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
-        self.scope_marks.push(curr);
-        self.scope_marks.push(self.mark());
-        self.scope_enters += 1;
-    }
-
-    /// Like `rotate_scope_marks` but also deallocates slab slots.
-    /// Only safe when no loop param's value references a previous
-    /// iteration's alloc (no cons-chain pattern).
-    pub fn rotate_scope_marks_dealloc(&mut self) {
-        if self.scope_marks.len() < 2 {
-            return;
-        }
-        if !self.shared_alloc.is_null() {
-            unsafe { &mut *self.shared_alloc }.rotate_marks();
-        }
-        let curr = self.scope_marks.pop().unwrap();
-        let dtors_before = self.pool.dtors.len();
-        let prev = self
-            .scope_marks
-            .pop()
-            .expect("RegionRotateDealloc: missing previous scope mark");
-        self.release(prev);
-        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
-        self.scope_marks.push(curr);
-        self.scope_marks.push(self.mark());
-        self.scope_enters += 1;
-    }
-
-    /// Refcount-aware rotation: like `rotate_scope_marks` but uses
-    /// `release_refcounted` to skip pinned values (refcount > 0).
-    /// Used by while loops with outward mutations that pass refcount
-    /// eligibility but not escape-analysis eligibility.
-    pub fn rotate_scope_marks_refcounted(&mut self) {
-        if self.scope_marks.len() < 2 {
-            return;
-        }
-        if !self.shared_alloc.is_null() {
-            unsafe { &mut *self.shared_alloc }.rotate_marks();
-        }
-        let curr = self.scope_marks.pop().unwrap();
-        let dtors_before = self.pool.dtors.len();
-        let prev = self
-            .scope_marks
-            .pop()
-            .expect("RegionRotateRefcounted: missing previous scope mark");
         self.release_refcounted(prev);
         self.scope_dtors_run += dtors_before - self.pool.dtors.len();
         self.scope_marks.push(curr);
@@ -952,6 +904,29 @@ impl FiberHeap {
         self.pool.owns(ptr)
     }
 
+    /// Check if a value is owned by this fiber (in private pool, outbox,
+    /// or old outboxes). Returns false for values from foreign heaps.
+    pub fn value_owned_by_fiber(&self, value: Value) -> bool {
+        let ptr = match value.as_heap_ptr() {
+            Some(p) => p,
+            None => return false,
+        };
+        if self.pool.owns(ptr) {
+            return true;
+        }
+        if let Some(ref outbox) = self.outbox {
+            if outbox.owns(ptr) {
+                return true;
+            }
+        }
+        for ob in &self.old_outboxes {
+            if ob.owns(ptr) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Deep-copy a value from the private pool to the outbox.
     /// Returns the new value (pointing into the outbox). If the value
     /// is immediate or already in the outbox, returns it unchanged.
@@ -1246,31 +1221,6 @@ impl FiberHeap {
         // The old value will be freed by release_refcounted when its
         // rc reaches 0 (from this decref or a subsequent DecrefLocal).
         self.decref_value(val);
-    }
-
-    /// Transitively decref all descendants of a dead object (rc==0).
-    /// Does NOT free/dealloc any slots — children remain in allocs/dtors
-    /// and will be collected by release_refcounted on the next rotation.
-    fn recursive_decref_contents(&mut self, typed: *mut HeapObject) {
-        let obj = unsafe { &*typed };
-        let mut children = Vec::new();
-        Self::collect_heap_children(obj, &mut children);
-        for child_val in children {
-            if let Some(child_ptr) = child_val.as_heap_ptr() {
-                if self.pool.slab_owns(child_ptr) {
-                    let child_typed = child_ptr as *mut HeapObject;
-                    let old_rc = self.pool.refcount(child_typed as *const HeapObject);
-                    if old_rc > 0 {
-                        let new_rc = self.pool.decref(child_typed as *const HeapObject);
-                        if new_rc == 0 {
-                            // Child reached 0 — propagate decref to its
-                            // children too (undoes their temporary increfs).
-                            self.recursive_decref_contents(child_typed);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     /// Collect all heap-typed child Values from a HeapObject into `out`.

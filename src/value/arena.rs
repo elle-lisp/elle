@@ -78,10 +78,6 @@ impl ArenaMark {
         self.dtor_len
     }
 
-    /// Update the dtor_len after compaction by a nested release.
-    pub(crate) fn set_dtor_len(&mut self, len: usize) {
-        self.dtor_len = len;
-    }
 
     pub(crate) fn custom_ptrs_len(&self) -> usize {
         self.custom_ptrs_len

@@ -940,12 +940,6 @@ impl Emitter {
             LirInstr::RegionRotate => {
                 self.bytecode.emit(Instruction::RegionRotate);
             }
-            LirInstr::RegionRotateDealloc => {
-                self.bytecode.emit(Instruction::RegionRotateDealloc);
-            }
-            LirInstr::RegionRotateRefcounted => {
-                self.bytecode.emit(Instruction::RegionRotateRefcounted);
-            }
             LirInstr::RegionExitRefcounted => {
                 self.bytecode.emit(Instruction::RegionExitRefcounted);
             }

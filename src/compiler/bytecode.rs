@@ -217,17 +217,8 @@ pub enum Instruction {
     /// frees only the range between them (arg temporaries).
     RegionExitCall,
 
-    /// Rotate loop scope marks (soft — no slot deallocation).
-    /// Resets alloc_count, runs dtors, truncates tracking vecs.
-    /// Used when loop params may chain across iterations.
+    /// Rotate loop scope marks: free rc=0 objects, keep rc>0 pinned.
     RegionRotate,
-
-    /// Rotate loop scope marks (hard — with slot deallocation).
-    /// Same as RegionRotate but returns slab slots to the free list.
-    /// Used when no loop param references previous iteration's allocs.
-    RegionRotateDealloc,
-    /// Rotate loop scope marks (refcount-aware — skip pinned values).
-    RegionRotateRefcounted,
     /// Pop scope mark and release refcount-0 objects only.
     RegionExitRefcounted,
 
@@ -603,8 +594,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::RegionExit
             | Instruction::RegionExitCall
             | Instruction::RegionRotate
-            | Instruction::RegionRotateDealloc
-            | Instruction::RegionRotateRefcounted
             | Instruction::RegionExitRefcounted
             | Instruction::OutboxEnter
             | Instruction::OutboxExit

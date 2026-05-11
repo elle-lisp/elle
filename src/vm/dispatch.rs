@@ -463,12 +463,6 @@ impl VM {
                 Instruction::RegionRotate => {
                     crate::value::fiberheap::region_rotate();
                 }
-                Instruction::RegionRotateDealloc => {
-                    crate::value::fiberheap::region_rotate_dealloc();
-                }
-                Instruction::RegionRotateRefcounted => {
-                    crate::value::fiberheap::region_rotate_refcounted();
-                }
                 Instruction::RegionExitRefcounted => {
                     crate::value::fiberheap::region_exit_refcounted();
                 }
@@ -508,7 +502,7 @@ impl VM {
                 }
 
                 // FlipEnter/FlipSwap/FlipExit are legacy no-ops.
-                // While/loop reclamation uses RegionRotate/RegionRotateDealloc.
+                // While/loop reclamation uses RegionRotate.
                 // Self-tail-call reclamation uses mark/release in the trampoline.
                 Instruction::FlipEnter | Instruction::FlipSwap | Instruction::FlipExit => {}
 

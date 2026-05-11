@@ -245,13 +245,6 @@ impl SlabPool {
     }
 
     /// Rewind the bump arena to a saved position, freeing pages after the mark.
-    ///
-    /// Called by `FiberHeap::release()` and friends to reclaim inline data
-    /// (strings, arrays, bytes) allocated after the scope mark.
-    pub fn release_bump_to(&mut self, mark: BumpMark) {
-        self.arena.release_to(mark);
-    }
-
     /// Return a slab slot to the free list for reuse by a future allocation.
     ///
     /// Called by RegionExit paths (`FiberHeap::release`,

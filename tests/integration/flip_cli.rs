@@ -4,7 +4,7 @@
 // FlipEnter/FlipSwap/FlipExit. The `--flip=on/off` flag is still
 // accepted for backwards compatibility but is a no-op.
 //
-// While/loop reclamation uses RegionRotate/RegionRotateDealloc.
+// While/loop reclamation uses RegionRotate.
 // Self-tail-call reclamation uses mark/release in the trampoline.
 
 use std::process::Command;

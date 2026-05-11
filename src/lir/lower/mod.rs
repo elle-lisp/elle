@@ -120,10 +120,6 @@ struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
     scope_eligible: bool,
-    /// Whether RegionRotate should also dealloc slab slots.
-    dealloc_eligible: bool,
-    /// Whether to use refcount-aware rotate/exit instead of standard.
-    refcount_eligible: bool,
 }
 
 /// Tracks an active block during lowering so `break` can find its
@@ -736,13 +732,6 @@ impl<'a> Lowerer<'a> {
         self.region_slots.push(Vec::new());
     }
 
-    /// Emit `RegionEnter` for a refcounted region.
-    fn emit_region_enter_refcounted(&mut self) {
-        self.emit(LirInstr::RegionEnter);
-        self.region_depth += 1;
-        self.region_refcounted_stack.push(true);
-        self.region_slots.push(Vec::new());
-    }
 
     /// Whether we're inside a scoped region (DecrefLocal will be emitted).
     fn in_scoped_region(&self) -> bool {
@@ -791,7 +780,7 @@ impl<'a> Lowerer<'a> {
         let slots: Vec<u16> = self
             .region_slots
             .last()
-            .map(|s| s.clone())
+            .cloned()
             .unwrap_or_default();
         for slot in slots {
             self.emit(LirInstr::DecrefLocal { slot });
@@ -806,7 +795,7 @@ impl<'a> Lowerer<'a> {
         let slots: Vec<u16> = self
             .region_slots
             .last()
-            .map(|s| s.clone())
+            .cloned()
             .unwrap_or_default();
         for slot in &slots {
             self.emit(LirInstr::DecrefLocal { slot: *slot });
@@ -840,16 +829,6 @@ impl<'a> Lowerer<'a> {
         self.emit(LirInstr::RegionRotate);
     }
 
-    fn emit_region_rotate_dealloc(&mut self) {
-        self.emit_decrefs_and_nil_for_region();
-        self.emit(LirInstr::RegionRotateDealloc);
-    }
-
-    fn emit_region_rotate_refcounted(&mut self) {
-        self.emit_decrefs_and_nil_for_region();
-        self.emit(LirInstr::RegionRotateRefcounted);
-    }
-
     /// Emit RegionExit without DecrefLocal. Used at while-loop exit for
     /// the iteration region, which was already DecrefLocal'd by rotation.
     fn emit_region_exit_no_decref(&mut self) {
@@ -859,21 +838,6 @@ impl<'a> Lowerer<'a> {
         self.region_slots.pop();
     }
 
-    /// Emit RegionExitRefcounted without DecrefLocal.
-    fn emit_region_exit_refcounted_no_decref(&mut self) {
-        self.emit(LirInstr::RegionExitRefcounted);
-        self.region_depth -= 1;
-        self.region_refcounted_stack.pop();
-        self.region_slots.pop();
-    }
-
-    fn emit_region_exit_refcounted(&mut self) {
-        self.emit_decrefs_for_region();
-        self.emit(LirInstr::RegionExitRefcounted);
-        self.region_depth -= 1;
-        self.region_refcounted_stack.pop();
-        self.region_slots.pop();
-    }
 
 
     /// Check if the callee is the current function (self-tail-call).

@@ -447,10 +447,7 @@ impl<'a> Lowerer<'a> {
         let result_reg = self.fresh_reg();
         let flip_eligible = self.can_flip_while_loop(body, &[]);
         let refcount_eligible = !flip_eligible && self.can_flip_while_loop_refcounted(body, &[]);
-        // All flip-eligible or refcount-eligible loops get double-buffered scope marks.
         let scope_eligible = flip_eligible || refcount_eligible;
-        let dealloc_eligible =
-            scope_eligible && !refcount_eligible && self.can_dealloc_in_loop(body, &[]);
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
@@ -458,13 +455,8 @@ impl<'a> Lowerer<'a> {
 
         // Double-buffered scope marks: push prev (guard) + curr before loop.
         if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_enter_refcounted(); // prev (guard mark)
-                self.emit_region_enter_refcounted(); // curr (first iteration)
-            } else {
-                self.emit_region_enter(); // prev (guard mark)
-                self.emit_region_enter(); // curr (first iteration)
-            }
+            self.emit_region_enter(); // prev (guard mark)
+            self.emit_region_enter(); // curr (first iteration)
         }
 
         // Jump to condition check
@@ -487,13 +479,7 @@ impl<'a> Lowerer<'a> {
 
         // Back-edge: rotate scope marks (free prev iteration, start new curr)
         if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_rotate_refcounted();
-            } else if dealloc_eligible {
-                self.emit_region_rotate_dealloc();
-            } else {
-                self.emit_region_rotate();
-            }
+            self.emit_region_rotate();
         }
 
         // The back-edge block is whatever block we're in after lowering
@@ -505,13 +491,8 @@ impl<'a> Lowerer<'a> {
         // so use the no-decref variant to avoid double-decref.
         self.current_block = BasicBlock::new(done_label);
         if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_exit_refcounted_no_decref(); // curr (rotation handled decrefs)
-                self.emit_region_exit_refcounted(); // prev
-            } else {
-                self.emit_region_exit_no_decref(); // curr (rotation handled decrefs)
-                self.emit_region_exit(); // prev
-            }
+            self.emit_region_exit_no_decref(); // curr (rotation handled decrefs)
+            self.emit_region_exit(); // prev
         }
         self.emit(LirInstr::Const {
             dst: result_reg,
@@ -531,10 +512,7 @@ impl<'a> Lowerer<'a> {
         let flip_eligible = self.can_flip_while_loop(body, &loop_scope);
         let refcount_eligible =
             !flip_eligible && self.can_flip_while_loop_refcounted(body, &loop_scope);
-        // All flip-eligible or refcount-eligible loops get double-buffered scope marks.
         let scope_eligible = flip_eligible || refcount_eligible;
-        let dealloc_eligible =
-            scope_eligible && !refcount_eligible && self.can_dealloc_in_loop(body, &loop_scope);
 
         let loop_label = self.fresh_label();
         let done_label = self.fresh_label();
@@ -550,13 +528,8 @@ impl<'a> Lowerer<'a> {
 
         // Double-buffered scope marks: push prev (guard) + curr before loop.
         if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_enter_refcounted(); // prev (guard mark)
-                self.emit_region_enter_refcounted(); // curr (first iteration)
-            } else {
-                self.emit_region_enter(); // prev (guard mark)
-                self.emit_region_enter(); // curr (first iteration)
-            }
+            self.emit_region_enter(); // prev (guard mark)
+            self.emit_region_enter(); // curr (first iteration)
         }
 
         // Jump to loop header
@@ -575,8 +548,6 @@ impl<'a> Lowerer<'a> {
             loop_label,
             binding_slots: binding_slots.clone(),
             scope_eligible,
-            dealloc_eligible,
-            refcount_eligible,
         });
 
         let body_reg = self.lower_expr(body)?;
@@ -597,13 +568,8 @@ impl<'a> Lowerer<'a> {
         // Release both scope marks (curr + prev).
         // Curr (iteration) was already DecrefLocal'd by rotation.
         if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_exit_refcounted_no_decref(); // curr
-                self.emit_region_exit_refcounted(); // prev
-            } else {
-                self.emit_region_exit_no_decref(); // curr
-                self.emit_region_exit(); // prev
-            }
+            self.emit_region_exit_no_decref(); // curr
+            self.emit_region_exit(); // prev
         }
 
         self.terminate(Terminator::Jump(done_label));
@@ -627,8 +593,6 @@ impl<'a> Lowerer<'a> {
         let loop_label = ctx.loop_label;
         let binding_slots = ctx.binding_slots.clone();
         let scope_eligible = ctx.scope_eligible;
-        let dealloc_eligible = ctx.dealloc_eligible;
-        let refcount_eligible = ctx.refcount_eligible;
 
         if args.len() != binding_slots.len() {
             return Err(format!(
@@ -654,13 +618,7 @@ impl<'a> Lowerer<'a> {
 
         // Rotate scope marks: free prev iteration, start new curr
         if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_rotate_refcounted();
-            } else if dealloc_eligible {
-                self.emit_region_rotate_dealloc();
-            } else {
-                self.emit_region_rotate();
-            }
+            self.emit_region_rotate();
         }
 
         // Jump back to loop header

@@ -748,12 +748,8 @@ pub enum LirInstr {
     /// objects between the two marks (arg temporaries), leaving the
     /// callee's allocations intact.
     RegionExitCall,
-    /// Rotate loop scope marks (soft — no slot deallocation).
+    /// Rotate loop scope marks: free rc=0 objects, keep rc>0 pinned.
     RegionRotate,
-    /// Rotate loop scope marks (hard — with slot deallocation).
-    RegionRotateDealloc,
-    /// Rotate loop scope marks (refcount-aware — skip pinned values).
-    RegionRotateRefcounted,
     /// Pop scope mark and release refcount-0 objects only.
     RegionExitRefcounted,
 

@@ -211,14 +211,6 @@ pub fn decref_and_free(val: crate::value::Value) {
     }
 }
 
-/// Refcount-aware rotation (`RegionRotateRefcounted`).
-pub fn region_rotate_refcounted() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).rotate_scope_marks_refcounted() };
-    }
-}
-
 /// Refcount-aware scope exit: pops scope mark and releases only
 /// refcount-0 objects. Pinned objects (refcount > 0) survive.
 pub fn region_exit_refcounted() {
@@ -237,13 +229,6 @@ pub fn region_exit_refcounted() {
     }
 }
 
-/// Rotate loop scope marks with dealloc (`RegionRotateDealloc`).
-pub fn region_rotate_dealloc() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).rotate_scope_marks_dealloc() };
-    }
-}
 
 /// Drop a single heap value: if owned by the current pool with refcount == 0,
 /// run its destructor, return the slab slot to the free list, and mark it

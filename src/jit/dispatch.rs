@@ -384,12 +384,6 @@ pub extern "C" fn elle_jit_region_rotate() -> JitValue {
     JitValue::nil()
 }
 
-#[no_mangle]
-pub extern "C" fn elle_jit_region_rotate_dealloc() -> JitValue {
-    crate::value::fiberheap::region_rotate_dealloc();
-    JitValue::nil()
-}
-
 /// Increment the durable reference count for a heap value.
 /// Called by JIT `StoreLocal` to track binding references.
 #[no_mangle]
