@@ -120,6 +120,52 @@
     :symbol true
     :syntax (symbol? (syntax->datum x))
     _ false))
+(defn even? [x]
+  (when (not (integer? x))
+    (error {:error :type-error
+            :message (string "even?: expected integer, got " (type x))}))
+  (= (%rem x 2) 0))
+(defn odd? [x]
+  (not (even? x)))
+(defn abs [x]
+  (cond
+    (integer? x)
+      (if (>= x 0)
+        x
+        (let [r (%sub 0 x)]
+          (when (< r 0)
+            (error {:error :overflow :message "abs: integer overflow"}))
+          r))
+    (float? x) (if (< x 0.0) (%sub 0.0 x) x)
+    true
+      (error {:error :type-error
+              :message (string "abs: expected number, got " (type x))})))
+(defn floor [x]
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (< x (float t)) (%sub t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "floor: expected number, got " (type x))})))
+(defn ceil [x]
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (> x (float t)) (%add t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "ceil: expected number, got " (type x))})))
+(defn round [x]
+  (cond
+    (integer? x) x
+    (float? x)
+      (if (>= x 0.0) (floor (%add x 0.5)) (ceil (%sub x 0.5)))
+    true
+      (error {:error :type-error
+              :message (string "round: expected number, got " (type x))})))
 (defn zero? [x]
   (= x 0))
 (defn nonzero? [x]
@@ -2164,4 +2210,10 @@
    :primitive? primitive?
    :positive? positive?
    :negative? negative?
-   :infinite? infinite?})
+   :infinite? infinite?
+   :even? even?
+   :odd? odd?
+   :abs abs
+   :floor floor
+   :ceil ceil
+   :round round})

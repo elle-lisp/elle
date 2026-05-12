@@ -23,23 +23,6 @@ fn unary_float(name: &str, args: &[Value], op: fn(f64) -> f64) -> (SignalBits, V
     }
 }
 
-/// Unary op: number → int (floor, ceil, round — ints pass through)
-fn unary_to_int(name: &str, args: &[Value], op: fn(f64) -> f64) -> (SignalBits, Value) {
-    if let Some(n) = args[0].as_int() {
-        return (SIG_OK, Value::int(n));
-    }
-    match args[0].as_float() {
-        Some(f) => (SIG_OK, Value::int(op(f) as i64)),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("{name}: expected number, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
 /// Extract a single numeric arg as f64, or return a type error.
 fn require_number(name: &str, v: &Value) -> Result<f64, (SignalBits, Value)> {
     v.as_number().ok_or_else(|| {
@@ -104,20 +87,6 @@ fn prim_cbrt(args: &[Value]) -> (SignalBits, Value) {
 }
 fn prim_exp2(args: &[Value]) -> (SignalBits, Value) {
     unary_float("exp2", args, f64::exp2)
-}
-
-// ---------------------------------------------------------------------------
-// Unary int-returning ops (int passthrough, float → int)
-// ---------------------------------------------------------------------------
-
-fn prim_floor(args: &[Value]) -> (SignalBits, Value) {
-    unary_to_int("floor", args, f64::floor)
-}
-fn prim_ceil(args: &[Value]) -> (SignalBits, Value) {
-    unary_to_int("ceil", args, f64::ceil)
-}
-fn prim_round(args: &[Value]) -> (SignalBits, Value) {
-    unary_to_int("round", args, f64::round)
 }
 
 // ---------------------------------------------------------------------------
@@ -287,26 +256,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &["pow"],
     },
     PrimitiveDef {
-        name: "math/floor", func: prim_floor, signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Returns the largest integer less than or equal to x.",
-        params: &["x"], category: "math", example: "(math/floor 3.7)",
-        aliases: &["floor"],
-    },
-    PrimitiveDef {
-        name: "math/ceil", func: prim_ceil, signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Returns the smallest integer greater than or equal to x.",
-        params: &["x"], category: "math", example: "(math/ceil 3.2)",
-        aliases: &["ceil"],
-    },
-    PrimitiveDef {
-        name: "math/round", func: prim_round, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the nearest integer to x.",
-        params: &["x"], category: "math", example: "(math/round 3.5)",
-        aliases: &["round"],
-    },
-    PrimitiveDef {
         name: "math/pi", func: prim_pi, signal: Signal::silent(),
         arity: Arity::Exact(0), doc: "The mathematical constant pi (π).",
         params: &[], category: "math", example: "(math/pi)",
@@ -460,38 +409,6 @@ mod tests {
         let args = [Value::string("hello")];
         let (sig, _) = prim_sqrt(&args);
         assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn floor_passthrough_int() {
-        let args = [Value::int(5)];
-        let (sig, val) = prim_floor(&args);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val.as_int(), Some(5));
-    }
-
-    #[test]
-    fn floor_truncates_float() {
-        let args = [Value::float(3.7)];
-        let (sig, val) = prim_floor(&args);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val.as_int(), Some(3));
-    }
-
-    #[test]
-    fn ceil_rounds_up() {
-        let args = [Value::float(3.2)];
-        let (sig, val) = prim_ceil(&args);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val.as_int(), Some(4));
-    }
-
-    #[test]
-    fn round_rounds() {
-        let (_, v1) = prim_round(&[Value::float(3.5)]);
-        assert_eq!(v1.as_int(), Some(4));
-        let (_, v2) = prim_round(&[Value::float(3.4)]);
-        assert_eq!(v2.as_int(), Some(3));
     }
 
     #[test]

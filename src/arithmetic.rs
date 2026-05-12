@@ -120,23 +120,6 @@ pub(crate) fn remainder_values(a: &Value, b: &Value) -> Result<Value, Value> {
     }
 }
 
-/// Absolute value of a numeric value
-pub(crate) fn abs_value(a: &Value) -> Result<Value, Value> {
-    if let Some(n) = a.as_int() {
-        return match n.checked_abs() {
-            Some(r) => Ok(Value::int(r)),
-            None => Err(error_val("overflow", "abs: integer overflow")),
-        };
-    }
-    match a.as_float() {
-        Some(f) => Ok(Value::float(f.abs())),
-        None => Err(error_val(
-            "type-error",
-            format!("abs: expected number, got {}", a.type_name()),
-        )),
-    }
-}
-
 /// Numeric-aware equality: int-int stays exact, mixed promotes to f64.
 /// Returns true if both values are bitwise equal or numerically equal.
 /// Used by both the VM's Eq instruction and the `=` primitive.
@@ -216,12 +199,6 @@ mod tests {
         let a = Value::int(5);
         let b = Value::int(0);
         assert!(div_values(&a, &b).is_err());
-    }
-
-    #[test]
-    fn test_abs_value() {
-        let a = Value::int(-5);
-        assert_eq!(abs_value(&a).unwrap(), Value::int(5));
     }
 
     #[test]

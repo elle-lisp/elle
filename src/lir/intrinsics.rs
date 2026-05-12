@@ -73,9 +73,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "string-starts-with?",
     "string/ends-with?",
     "string-ends-with?",
-    // Numeric predicates → bool (only Rust-side remain)
-    "even?",
-    "odd?",
     // Closure introspection predicates → bool (canonical + aliases)
     "fn/mutates-params?",
     "mutates-params?",
@@ -83,11 +80,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "coroutine?",
     // Collection → int
     "length",
-    // Numeric → int or float
-    "abs",
-    "floor",
-    "ceil",
-    "round",
     // Type conversion → int or float
     "float",
     "integer",
