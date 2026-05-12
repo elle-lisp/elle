@@ -40,7 +40,7 @@ mod suspend;
 use crate::value::Value;
 
 /// Standard library source, embedded at compile time.
-const STDLIB: &str = include_str!("../../stdlib.lisp");
+const STDLIB: &str = include_str!("../stdlib.lisp");
 
 /// Maximum number of top-level forms per user-code thunk.
 /// Balances WASM function size (Wasmtime compile time) against

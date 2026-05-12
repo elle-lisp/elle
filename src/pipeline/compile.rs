@@ -29,10 +29,11 @@ pub fn compile(
     let syntax = read_syntax(source, source_name)?;
 
     // Phase 2: Macro expansion (cached VM for macro bodies)
-    let (expanded, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-        let expanded = expander.expand(syntax, symbols, macro_vm)?;
-        Ok::<_, String>((expanded, meta))
-    })?;
+    let (expanded, meta, core_env) =
+        cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+            let expanded = expander.expand(syntax, symbols, macro_vm)?;
+            Ok::<_, String>((expanded, meta, expander.core_env.clone()))
+        })?;
 
     // Phase 3: Analyze to HIR with interprocedural signal and arity tracking
     let mut arena = BindingArena::new();
@@ -43,6 +44,9 @@ pub fn compile(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if !core_env.is_empty() {
+        analyzer.bind_compile_time_env(&core_env);
+    }
     let mut analysis = analyzer.analyze(&expanded)?;
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
@@ -127,18 +131,19 @@ pub fn compile_file_to_lir(
     }
 
     // Expand all forms, splicing include/include-file inline
-    let (expanded_forms, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-        let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-        let mut expanded_forms = Vec::new();
-        let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
-        while let Some(syntax) = pending.pop_front() {
-            if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
-                continue;
+    let (expanded_forms, meta, core_env) =
+        cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
+            let mut expanded_forms = Vec::new();
+            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+            while let Some(syntax) = pending.pop_front() {
+                if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
+                    continue;
+                }
+                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
-            expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
-        }
-        Ok::<_, String>((expanded_forms, meta))
-    })?;
+            Ok::<_, String>((expanded_forms, meta, expander.core_env.clone()))
+        })?;
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
 
@@ -160,6 +165,9 @@ pub fn compile_file_to_lir(
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
+    if !core_env.is_empty() {
+        analyzer.bind_compile_time_env(&core_env);
+    }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let errors = analyzer.take_errors();
@@ -275,6 +283,9 @@ fn compile_file_frontend(
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let signal_projection = analyzer.take_signal_projection();

@@ -208,3 +208,44 @@
 (def [ok err] (protect (assert nil)))
 (assert (not ok) "assert nil signals")
 (assert (= err:error :failed-assertion) "assert nil error type")
+
+# ── xor ───────────────────────────────────────────────────────────────
+(assert (xor true) "xor single true")
+(assert (not (xor false)) "xor single false")
+(assert (xor true false) "xor true false")
+(assert (not (xor true true)) "xor true true")
+(assert (not (xor false false)) "xor false false")
+(assert (not (xor true false true false)) "xor even truthy 4-arg")
+(assert (xor true true true false) "xor odd truthy 4-arg")
+(assert (not (xor)) "xor empty")
+
+# ── last ──────────────────────────────────────────────────────────────
+(assert (= (last [1 2 3]) 3) "last array")
+(assert (= (last (list 1 2 3)) 3) "last list")
+(assert (= (last "abc") "c") "last string")
+(def [ok _] (protect (last [])))
+(assert (not ok) "last empty array errors")
+(def [ok _] (protect (last 42)))
+(assert (not ok) "last rejects non-sequence")
+
+# ── butlast ───────────────────────────────────────────────────────────
+(assert (= (butlast [1 2 3]) [1 2]) "butlast array")
+(assert (= (butlast (list 1 2 3)) (list 1 2)) "butlast list")
+(assert (= (butlast [1]) []) "butlast single")
+(assert (= (butlast []) []) "butlast empty")
+
+# ── take ──────────────────────────────────────────────────────────────
+(assert (= (take 2 (list 1 2 3)) (list 1 2)) "take 2")
+(assert (= (take 0 (list 1 2 3)) ()) "take 0")
+(assert (= (take 5 (list 1 2 3)) (list 1 2 3)) "take more than length")
+(assert (= (take 0 ()) ()) "take 0 empty")
+(def [ok _] (protect (take -1 (list 1 2))))
+(assert (not ok) "take negative errors")
+
+# ── drop ──────────────────────────────────────────────────────────────
+(assert (= (drop 1 (list 1 2 3)) (list 2 3)) "drop 1")
+(assert (= (drop 0 (list 1 2 3)) (list 1 2 3)) "drop 0")
+(assert (= (drop 5 (list 1 2 3)) ()) "drop more than length")
+(assert (= (drop 0 ()) ()) "drop 0 empty")
+(def [ok _] (protect (drop -1 (list 1 2))))
+(assert (not ok) "drop negative errors")

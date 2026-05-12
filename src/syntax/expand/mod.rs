@@ -43,6 +43,10 @@ pub struct Expander {
     /// Always starts empty — the manual `Clone` impl resets it so that
     /// compile-time defs never leak between pipeline calls via the cache.
     pub(crate) compile_time_env: HashMap<String, crate::value::Value>,
+    /// Pre-prelude exports from core.lisp. Persists across clones so
+    /// that macro bodies compiled via `eval_syntax` can reference
+    /// core functions like `last` and `butlast`.
+    pub(crate) core_env: HashMap<String, crate::value::Value>,
     next_scope_id: u32,
     expansion_depth: usize,
 }
@@ -52,6 +56,7 @@ impl Clone for Expander {
         Expander {
             macros: self.macros.clone(),
             compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
+            core_env: self.core_env.clone(),   // persists — needed by macro bodies
             next_scope_id: self.next_scope_id,
             expansion_depth: self.expansion_depth,
         }
@@ -63,6 +68,7 @@ impl Expander {
         Expander {
             macros: HashMap::new(),
             compile_time_env: HashMap::new(),
+            core_env: HashMap::new(),
             next_scope_id: 1, // 0 is reserved for top-level
             expansion_depth: 0,
         }
@@ -99,7 +105,7 @@ impl Expander {
     /// definitions in this Expander. Must be called after the VM
     /// has primitives registered but before user code expansion.
     pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
-        const PRELUDE: &str = include_str!("../../../prelude.lisp");
+        const PRELUDE: &str = include_str!("../../prelude.lisp");
         let syntaxes = crate::reader::read_syntax_all(PRELUDE, "<internal>")?;
         // Use ScopeId(0) — the reserved primitive scope — so that
         // prelude symbols match primitive bindings (which are also

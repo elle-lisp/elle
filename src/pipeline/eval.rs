@@ -35,7 +35,10 @@ pub fn eval_syntax(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
-    // Make compile-time defs (from begin-for-syntax) visible in macro bodies.
+    // Make core.lisp exports and compile-time defs visible in macro bodies.
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     if !expander.compile_time_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.compile_time_env);
     }

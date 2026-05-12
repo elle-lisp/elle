@@ -265,6 +265,40 @@
             :message (if (empty? args) "assertion failed" (string (first args)))}))
   value)
 
+(defn xor [& args]
+  "Logical XOR. True if odd number of truthy values."
+  (letrec [go (fn [n xs]
+                (if (empty? xs)
+                  (odd? n)
+                  (go (if (first xs) (+ n 1) n) (rest xs))))]
+    (go 0 args)))
+(defn take [n coll]
+  "Take the first n elements of a list."
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "take: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "take: count must be non-negative, got " n)}))
+  (letrec [go (fn [i xs]
+                (if (or (= i 0) (empty? xs))
+                  ()
+                  (pair (first xs) (go (- i 1) (rest xs)))))]
+    (go n coll)))
+(defn drop [n coll]
+  "Drop the first n elements of a list."
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "drop: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "drop: count must be non-negative, got " n)}))
+  (letrec [go (fn [i xs]
+                (if (or (= i 0) (empty? xs))
+                  xs
+                  (go (- i 1) (rest xs))))]
+    (go n coll)))
+
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
 (defn + [& args]
@@ -1651,7 +1685,7 @@
               (not (= 0 (bit/and bits 1)))  # SIG_ERROR
                (complete-fiber fiber :error)
               (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [[ok? result] (protect (io/submit backend (fiber/value fiber)))]
+              (let [[ok? result] (protect (io/submit backend (fiber/value fiber) fiber))]
                 (if ok?
                   (begin
                     (put pending result fiber)
@@ -2300,4 +2334,7 @@
    :nonempty? nonempty?
    :compare compare
    :range range
-   :assert assert})
+   :assert assert
+   :xor xor
+   :take take
+   :drop drop})

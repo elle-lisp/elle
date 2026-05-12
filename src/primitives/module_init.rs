@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Standard library source, embedded at compile time.
-const STDLIB: &str = include_str!("../../stdlib.lisp");
+const STDLIB: &str = include_str!("../stdlib.lisp");
 
 /// Initialize the standard library by evaluating stdlib.lisp.
 ///
