@@ -127,23 +127,6 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
     crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Collection", "empty?", args)
 }
 
-/// Check if a collection is non-empty (negation of empty?)
-pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
-    let (sig, val) = prim_empty(args);
-    if sig != SIG_OK {
-        return (sig, val);
-    }
-    // Negate the boolean result
-    (
-        SIG_OK,
-        if val == Value::TRUE {
-            Value::FALSE
-        } else {
-            Value::TRUE
-        },
-    )
-}
-
 /// Declarative primitive definitions for list operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -210,17 +193,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
          params: &["collection"],
          category: "predicate",
          example: "(empty? (list))",
-         aliases: &[],
-     },
-     PrimitiveDef {
-         name: "nonempty?",
-         func: prim_nonempty,
-         signal: Signal::errors(),
-         arity: Arity::Exact(1),
-         doc: "Check if a collection is non-empty (negation of empty?)",
-         params: &["collection"],
-         category: "predicate",
-         example: "(nonempty? (list 1 2 3))",
          aliases: &[],
      },
     PrimitiveDef {

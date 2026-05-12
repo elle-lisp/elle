@@ -188,6 +188,83 @@
 (def negative? neg?)
 (def infinite? inf?)
 
+(defn min [x & args]
+  "Minimum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "min: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "min: expected number, got "
+                              (type b))}))
+                    (go (if (< b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn max [x & args]
+  "Maximum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "max: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "max: expected number, got "
+                              (type b))}))
+                    (go (if (> b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn not= [a b]
+  "Test inequality. Numeric-aware: (not= 1 1.0) is false."
+  (not (= a b)))
+
+(defn nonempty? [x]
+  "Return true if collection is non-empty."
+  (not (empty? x)))
+
+(defn compare [a b]
+  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b."
+  (cond
+    (< a b) -1
+    (= a b) 0
+    true 1))
+
+(defn range [start-or-end & args]
+  "Generate a range of integers as an array."
+  (let [start (if (empty? args) 0 start-or-end)
+        end (if (empty? args) start-or-end (first args))
+        step (if (< (length args) 2) 1 (second args))]
+    (when (= step 0)
+      (error {:error :argument-error :message "range: step cannot be zero"}))
+    (let [acc @[]]
+      (if (> step 0)
+        (begin
+          (def @i start)
+          (while (< i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step))))
+        (begin
+          (def @i start)
+          (while (> i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step)))))
+      (freeze acc))))
+
+(defn assert [value & args]
+  "Assert that value is truthy. Signals error if not."
+  (when (not value)
+    (error {:error :failed-assertion
+            :message (if (empty? args) "assertion failed" (string (first args)))}))
+  value)
+
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
 (defn + [& args]
@@ -2216,4 +2293,11 @@
    :abs abs
    :floor floor
    :ceil ceil
-   :round round})
+   :round round
+   :min min
+   :max max
+   :not= not=
+   :nonempty? nonempty?
+   :compare compare
+   :range range
+   :assert assert})

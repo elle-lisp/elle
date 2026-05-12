@@ -143,38 +143,6 @@ pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {
     false
 }
 
-/// Get minimum of two numeric values
-pub(crate) fn min_values(a: &Value, b: &Value) -> Value {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Value::int(x.min(y)),
-        _ => {
-            let af = a.as_number().unwrap();
-            let bf = b.as_number().unwrap();
-            if af <= bf {
-                *a
-            } else {
-                *b
-            }
-        }
-    }
-}
-
-/// Get maximum of two numeric values
-pub(crate) fn max_values(a: &Value, b: &Value) -> Value {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Value::int(x.max(y)),
-        _ => {
-            let af = a.as_number().unwrap();
-            let bf = b.as_number().unwrap();
-            if af >= bf {
-                *a
-            } else {
-                *b
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

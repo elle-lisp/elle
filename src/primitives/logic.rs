@@ -1,8 +1,8 @@
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 /// Logical AND operation
 /// (and) => true
@@ -56,27 +56,6 @@ pub(crate) fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(truthy_count % 2 == 1))
 }
 
-/// Assert that a value is truthy
-/// (assert value) => value if truthy, else signal error
-/// (assert value message) => value if truthy, else signal error with message
-pub(crate) fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
-    let value = args[0];
-    let message = if args.len() == 2 { args[1] } else { Value::NIL };
-
-    if value.is_truthy() {
-        (SIG_OK, value)
-    } else {
-        let msg_str = if message.is_nil() {
-            "assertion failed".to_string()
-        } else if let Some(s) = message.with_string(|s| s.to_string()) {
-            s
-        } else {
-            format!("{}", message)
-        };
-        (SIG_ERROR, error_val("failed-assertion", msg_str))
-    }
-}
-
 /// Declarative primitive definitions for logic operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -111,17 +90,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "logic",
         example: "(xor true false)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "assert",
-        func: prim_assert,
-        signal: Signal::errors(),
-        arity: Arity::Range(1, 2),
-        doc: "Assert that value is truthy. Signals {:error :failed-assertion :message msg} if not. Returns value if truthy.",
-        params: &["value", "message?"],
-        category: "control",
-        example: "(assert true)\n(assert (> x 0) \"x must be positive\")",
         aliases: &[],
     },
 ];

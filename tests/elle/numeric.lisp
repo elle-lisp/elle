@@ -150,3 +150,61 @@
 (assert (= (round -0.5) -1) "round -0.5")
 (def [ok _] (protect (round "x")))
 (assert (not ok) "round rejects string")
+
+# ── not= ──────────────────────────────────────────────────────────────
+(assert (not= 1 2) "not= different ints")
+(assert (not (not= 1 1)) "not= equal ints")
+(assert (not (not= 1 1.0)) "not= int float coercion")
+(assert (not= "a" "b") "not= different strings")
+(assert (not (not= "a" "a")) "not= equal strings")
+
+# ── nonempty? ─────────────────────────────────────────────────────────
+(assert (nonempty? [1]) "nonempty? array")
+(assert (not (nonempty? [])) "nonempty? empty array")
+(assert (nonempty? "x") "nonempty? string")
+(assert (not (nonempty? "")) "nonempty? empty string")
+(assert (nonempty? {:a 1}) "nonempty? struct")
+(assert (not (nonempty? {})) "nonempty? empty struct")
+
+# ── min / max ─────────────────────────────────────────────────────────
+(assert (= (min 3) 3) "min single")
+(assert (= (min 3 1 4 1 5) 1) "min variadic")
+(assert (= (min -5 -3 -1) -5) "min negative")
+(assert (= (min 1 0.5) 0.5) "min int float")
+(assert (= (max 3) 3) "max single")
+(assert (= (max 3 1 4 1 5) 5) "max variadic")
+(assert (= (max -5 -3 -1) -1) "max negative")
+(assert (= (max 1 0.5) 1) "max int float")
+(def [ok _] (protect (min "a" 1)))
+(assert (not ok) "min rejects non-number")
+(def [ok _] (protect (max 1 "a")))
+(assert (not ok) "max rejects non-number")
+
+# ── compare ───────────────────────────────────────────────────────────
+(assert (= (compare 1 2) -1) "compare less")
+(assert (= (compare 2 2) 0) "compare equal")
+(assert (= (compare 3 2) 1) "compare greater")
+(assert (= (compare "a" "b") -1) "compare strings")
+(assert (= (compare :x :x) 0) "compare keywords")
+
+# ── range ─────────────────────────────────────────────────────────────
+(assert (= (range 5) [0 1 2 3 4]) "range end")
+(assert (= (range 2 5) [2 3 4]) "range start end")
+(assert (= (range 0 10 3) [0 3 6 9]) "range step")
+(assert (= (range 5 0 -1) [5 4 3 2 1]) "range negative step")
+(assert (= (range 0) []) "range empty")
+(assert (= (range 5 5) []) "range start=end")
+(def [ok _] (protect (range 0 10 0)))
+(assert (not ok) "range zero step")
+
+# ── assert ────────────────────────────────────────────────────────────
+(assert true "assert true")
+(assert 1 "assert truthy int")
+(assert "x" "assert truthy string")
+(def [ok err] (protect (assert false "boom")))
+(assert (not ok) "assert false signals")
+(assert (= err:error :failed-assertion) "assert error type")
+(assert (= err:message "boom") "assert error message")
+(def [ok err] (protect (assert nil)))
+(assert (not ok) "assert nil signals")
+(assert (= err:error :failed-assertion) "assert nil error type")

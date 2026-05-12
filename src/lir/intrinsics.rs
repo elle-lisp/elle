@@ -128,8 +128,6 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "/",
     "mod",
     "rem",
-    "min",
-    "max",
     // Comparison → bool
     "=",
     "!=",
@@ -272,7 +270,6 @@ const NON_ESCAPING_STDLIB: &[&str] = &[
     "reverse",
     "sort",
     "sort-by",
-    "range",
     "repeat",
     "interleave",
     "partition",
