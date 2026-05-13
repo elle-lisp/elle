@@ -1,83 +1,87 @@
-# Bug: Heap-Use-After-Free in HTTP Test During Scope Cleanup
+# Bug: Heap-Use-After-Free in HTTP Test During Fiber Abort
 
-## Status: ROOT CAUSE FOUND, FIX IMPLEMENTED
+## Status: ROOT CAUSE CONFIRMED, FIX PENDING
+
+## Summary
+
+The http.lisp test crashes with a SEGV in `prim_get` → `as_struct` when
+accessing a `:status` key on a freed immutable struct. The struct was allocated
+on a shared allocator owned by a child fiber. When the child fiber's
+`FiberHandle` Rc dropped to 0 during a scope exit, the Fiber was dropped,
+its `FiberHeap` was torn down (including the shared allocator), and the struct
+was freed while the parent still held a `Value` pointing to it.
 
 ## Root Cause
 
-**`release_refcounted` frees slab slots whose dtor entries it skipped.**
-
-The three phases in `release_refcounted` execute in this order:
-
-1. **Dtor loop** — iterates `dtors[mark.dtor_len()..]`, checks `refcount == 0`,
-   calls `drop_in_place` and nulls the entry for eligible objects.
-2. **Children decref** — decrefs heap children of rc=0 objects.
-3. **Dealloc loop** — iterates `scope_ptrs`, frees slab slots where
-   `refcount == 0`.
-
-The dtor loop checks refcount BEFORE children are decref'd. A parent object
-with rc > 0 (pinned by a child's incref) is skipped — its dtor entry stays
-**non-null**. Then the children decref phase decrefs those children, which can
-bring the parent's refcount to 0. The dealloc loop sees rc == 0 and frees the
-parent's slab slot. The non-null dtor entry now points to a freed slot.
-
-When that slab slot is reused by a new allocation (also `needs_drop`), `alloc`
-pushes the same pointer to `dtors` again. The list now has two non-null entries
-for the same pointer. When `run_dtors` eventually processes the list,
-`drop_in_place` runs twice on the same pointer → double-free → UAF.
-
-### Instrumented trace confirming the root cause
+### The crash sequence
 
 ```
-[release_refcounted] SKIPPED dtor[1804] flat 20994 ptr 0x… tag=LString:
-    in_scope=true rc_zero=false first_flat=true. Entry stays non-null.
-[release_refcounted] DEALLOC slot 0x… (flat 20994) still has non-null
-    dtor entry at index 1804. This entry will become STALE.
+do_fiber_abort
+  → with_child_fiber {                        # swap: parent runs as self
+      resume_suspended                         # resume parent's suspended frames
+        → dispatch loop                        # parent executes its bytecode
+          → RegionExit                         # parent exits a scope
+            → pop_scope_mark_and_release
+              → release_refcounted             # free rc=0 objects in scope
+                → drop_in_place(Fiber)         # FiberHandle Rc hits 0
+                  → Rc::drop_slow              # Rc deallocates the Fiber
+                    → FiberHeap::drop          # child's heap teardown
+                      → teardown shared alloc  # frees shared allocator objects
+                        → SlabPool::teardown   # frees the struct with :status
+
+        → dispatch loop (continued)            # parent's NEXT instruction
+          → prim_get response :status          # dereferences freed struct → SEGV
 ```
 
-Flat 20994 had `rc_zero=false` at dtor-loop time (child held an incref on it).
-After children decref brought rc to 0, the dealloc loop freed the slot. The
-dtor entry at index 1804 was never nulled.
+The struct at the crash address was allocated on the child's shared allocator
+pool. The shared allocator is a `SlabPool` inside a `SharedAllocator` owned by
+the parent's `FiberHeap.owned_shared`. When the child `FiberHandle` (an
+`Rc<RefCell<Option<Fiber>>>`) is dropped, the `Rc` deallocates the `Fiber`,
+which drops its `Box<FiberHeap>`, which calls `FiberHeap::drop()`, which tears
+down owned shared allocators. The 5 objects on the shared allocator are freed.
 
-### Why the old Approach B hypothesis (Rc sharing) was wrong
+But the parent is still executing — its suspended frames hold `Value`s pointing
+to those objects. The next instruction after the scope exit accesses the freed
+struct.
 
-The ASAN trace showed two `Rc<RefCell<Value>>` drops on the same `RcInner`.
-This was NOT two different slab slots sharing an `Rc`. It was the SAME slab
-slot being dropped twice — because the duplicate dtor entry caused
-`drop_in_place` to run twice on the same `HeapObject`.
+### Why the FiberHandle's Rc drops to 0
 
-## The Fix
+The branch introduced `StoreLocalRefcounted`, `DropSlot`, and `DecrefLocal`
+bytecodes that changed the refcount model. The FiberHandle was stored in a
+local variable via `StoreLocalRefcounted` (incref to 1). When the scope exits,
+the `release_refcounted` worklist sees the FiberHandle at rc=1 (pinned), but
+it's a child Fiber that the parent is aborting. The parent no longer needs
+the Fiber — the abort path already extracted the error value. But the
+FiberHandle's incref from `StoreLocalRefcounted` keeps it alive until the
+scope exits. When the scope exits, the worklist doesn't protect the Fiber
+(it has no children that are also scope allocs), and it ends up at rc=0 after
+some decref path, so it gets dropped.
 
-In the dealloc loop, after freeing a slab slot, null its dtor entry. This
-ensures no stale dtor entry survives after dealloc, regardless of why the
-dtor loop skipped it.
+### Why origin/main doesn't crash
 
-```rust
-// Dealloc rc=0 slab slots, keep pinned.
-for i in 0..scope_ptrs.len() {
-    let ptr = scope_ptrs[i];
-    let flat = scope_flats[i];
-    if self.pool.refcount(ptr as *const HeapObject) == 0 {
-        self.pool.unlink_alloc(flat);
-        // Null any surviving dtor entry for this slot. The dtor loop
-        // above may have skipped it (rc > 0 at dtor time), but children
-        // decref can bring rc to 0 before we reach here.
-        for di in mark.dtor_len()..self.pool.dtors.len() {
-            if self.pool.dtors[di] == ptr {
-                self.pool.dtors[di] = std::ptr::null_mut();
-                break; // at most one non-null entry per pointer
-            }
-        }
-        unsafe { self.pool.dealloc_slot(ptr) };
-    }
-}
-```
+Origin/main's `release_refcounted` uses the same worklist approach. The
+difference is the branch's refcounting changes:
+- New `StoreLocalRefcounted` bytecode increfs values stored in local bindings
+- New `DecrefLocal` bytecode decrefs before scope exit
+- New `DropSlot` bytecode decrefs and frees immediately
 
-This is safe because:
-- The dtor loop already ran `drop_in_place` for entries it nulled. We're only
-  nulling entries it SKIPPED (which were not dropped).
-- The skipped objects had rc > 0 at dtor time, so they were NOT collected as
-  children-to-decref. Their inner data is still valid (not dropped).
-- We null the entry before `dealloc_slot` returns the slot to the free list.
+These changed WHEN and HOW FiberHandle refcounts are managed. At origin/main,
+the FiberHandle either had rc>0 throughout the scope or was never stored via
+`StoreLocalRefcounted`. On the branch, the decref path brings it to rc=0
+during the scope exit, triggering the drop cascade.
+
+### Previous (incorrect) hypothesis: three-phase dtor/dealloc ordering
+
+The original hypothesis was that `release_refcounted`'s three-phase approach
+(dtor loop → children decref → dealloc) caused the bug because objects skipped
+in the dtor loop (rc > 0) could reach rc=0 after children decref, and the
+dealloc loop would free them while dtor entries survived. This was a REAL bug
+(slots were freed with stale dtor entries), but fixing it did not resolve the
+crash because the actual crash has a different root cause (Fiber Drop cascade).
+
+The three-phase code was replaced with the origin/main worklist approach
+(adapted to the linked-list data structures), which is correct and does not
+have the stale-dtor-entry problem.
 
 ## What Has Been Eliminated
 
@@ -87,45 +91,115 @@ This is safe because:
   (traits=NIL, no Rc sharing)
 - **io_uring vs thread pool**: bug reproduces without io_uring
 - **Simple TCP echo test**: passes with ASAN — only leaks, no UAF.
-  Bug requires the full HTTP module's loop pattern
-- **Latest I/O buffer commit**: bug is pre-existing, confirmed on commits
-  5+ back
+  Bug requires the full HTTP module's fiber abort pattern
 - **Approach B (Rc sharing)**: the duplicate RcInner drops were a symptom
   of double-dropping the same slab slot, not two slots sharing an Rc
 - **remove_from_dtors retain shifting scope marks**: not the cause;
   `drop_slot_value` was not in the failing path
+- **Three-phase dtor/dealloc ordering**: was a real bug (stale dtor entries)
+  but not the cause of the SEGV; fixed by reverting to worklist approach
+- **Second dtor pass after children decref**: segfaults because it drops
+  objects still referenced by pinned closures (closure envs are not tracked
+  by slab refcounts)
+- **Deferred dealloc (skip slots with non-null dtors)**: prevents stale
+  entries but the crash happens because the Fiber Drop cascade frees objects
+  on a different pool entirely (shared allocator)
 
 ## Reproduction
 
 ```bash
-make smoke  # fails on http.lisp
+cargo build --release && ./target/release/elle tests/elle/http.lisp  # SEGV
+```
+
+ASAN trace:
+```
+SEGV on unknown address in <Value>::as_struct (accessors.rs:376)
+  prim_get (access.rs:265)
+  call_inner → handle_call → dispatch → trampoline_loop
+  execute_bytecode_from_ip → resume_suspended
+  do_fiber_abort::{closure#1} → with_child_fiber
+  do_fiber_abort → handle_fiber_abort_signal_jit
 ```
 
 ## Instrumentation Added (debug_assertions only)
 
-All instrumentation is gated behind `#[cfg(debug_assertions)]` and will be
-removed after the fix is confirmed stable:
+All instrumentation is gated behind `#[cfg(debug_assertions)]`:
 
-- **`SlabPool::alloc`**: panics if pushing a pointer already present in dtors
-- **`SlabPool::dealloc_slot`**: panics if deallocating a slot with a
-  non-null dtor entry
-- **`SlabPool::remove_from_dtors`**: logs when `retain` shifts entries
-  (potential scope-mark staleness)
-- **`SlabPool::run_dtors`**: Approach A (duplicate pointer detection with
-  flat/tag diagnostics), Approach B (RcInner sharing detection across
-  different slab slots), flat dedup tracking
-- **`release_refcounted` dtor loop**: logs which condition caused each skip
-  (in_scope, rc_zero, first_flat) with tag and pointer info
-- **`release_refcounted` dealloc loop**: logs when deallocating a slot with
-  a surviving non-null dtor entry (the smoking gun)
-- **`push_scope_mark`**: validates no duplicates exist in dtors at scope entry
+- **`release_refcounted`**: logs ENTER (mark, dtor_len, n_allocs, n_pinned,
+  scope_depth), PHASE1 (children protected via worklist), each DROP/KEEP dtor
+  entry with tag/flat/rc, PHASE2 summary (dtors run, kept), each FREE/PIN
+  slot with tag/flat/rc, DONE summary (slots freed, pinned)
+- **`SlabPool::alloc`**: panics on duplicate dtor push
+- **`SlabPool::dealloc_slot`**: panics on dealloc with non-null dtor entry
+- **`SlabPool::teardown`**: logs dtors.len, alloc_count, and full backtrace
+  to identify which teardown frees the victim object
+- **`SlabPool::release`**: logs dtor_len, dtors.len, number of slots freed
+- **`SharedAllocator::teardown`**: logs pool.alloc_count, marks.len
+- **`FiberHeap::Drop`**: cross-pool Rc sharing assertion BEFORE any teardown;
+  checks shared allocator pools; full backtrace would show Fiber drop cascade
 - **`drop_slot_value`**: logs dtor indices and scope mark dtor_lens before
-  `remove_from_dtors` to detect scope-mark invalidation
-- **`FiberHeap::Drop`**: cross-pool Rc sharing assertion moved BEFORE any
-  teardown (was previously after outbox/shared teardown, making it a no-op);
-  now also checks shared allocator pools
+  `remove_from_dtors`; logs FREEING with flat/tag/rc
+- **`push_scope_mark`**: validates no duplicates in dtors at scope entry
+- **`prim_get`** (access.rs): logs heap pointer and key for struct accesses
+
+## Fix Options
+
+### Option A: Don't drop the Fiber during release_refcounted
+
+Prevent `drop_in_place` from running on Fiber/FiberHandle objects during
+`release_refcounted`. Instead, queue them for deferred drop after the scope
+exit completes and the parent has finished using the shared allocator contents.
+
+Pros: Minimal change; isolates the fix to `release_refcounted`.
+Cons: Fibers still need to be dropped eventually; deferred drops accumulate
+if the FiberHandle Rc is shared.
+
+### Option B: Detach shared allocator before Fiber Drop
+
+When a child fiber's FiberHandle Rc drops to 0, before dropping the Fiber,
+unlink the shared allocator from the child's FiberHeap so it survives the
+drop. The shared allocator is already owned by the PARENT's `owned_shared`,
+so the child's FiberHeap shouldn't be tearing it down at all.
+
+Wait — the backtrace shows `FiberHeap::drop` at line 1744, which tears
+down the outbox, not `owned_shared`. The child's `owned_shared` is empty
+(the parent owns the shared allocator). The 5 freed objects were on the
+child's **outbox** pool — a `Box<SlabPool>` installed by the parent for
+yield-bound allocations. When the child Fiber's Rc drops to 0, the child's
+FiberHeap tears down the outbox, freeing the struct that the parent still
+references. This is an outbox lifecycle bug, not a shared allocator bug.
+
+If the child's `owned_shared` IS empty, then the 5-object teardown comes
+from the child's outbox. The outbox is a `Box<SlabPool>` installed by the
+parent during `with_child_fiber`. Values yielded to the parent are allocated
+on this outbox so they survive the child's private pool. But the outbox is
+owned by the child's FiberHeap and torn down when the child dies — which
+is too early if the parent hasn't finished using the values.
+
+### Option C: Deep-copy values during fiber abort
+
+During `do_fiber_abort`, before resuming the parent's suspended frames,
+deep-copy all values that might reference the child's pools. The outbox
+mechanism already does this for yielded values, but the abort path doesn't
+go through the outbox.
+
+Pros: Defensive; catches all cases regardless of refcount state.
+Cons: Expensive (deep copy on every abort); may not be needed if the real
+issue is that values escape to the parent without going through the outbox.
+
+### Option D: Fix the refcount so the Fiber stays alive
+
+Ensure the FiberHandle's slab refcount stays >0 until the parent is done
+with the shared allocator contents. This would be an incref at the right
+place (e.g., when the parent stores the response struct from the child).
+
+Pros: Correct by design — the refcount accurately reflects liveness.
+Cons: Requires identifying the exact point where the incref should happen,
+which depends on the fiber abort lifecycle.
 
 ## Reference Documents
 
 - `/dev/shm/memory-take-five.md` — memory system design doc
 - `docs/io-completion-heap.md` — I/O completion heap routing spec
+- `src/value/fiberheap/AGENTS.md` — FiberHeap design and invariants
+- `src/vm/AGENTS.md` — Fiber swap protocol and shared allocator provisioning
