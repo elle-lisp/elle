@@ -486,7 +486,7 @@ the operand stack.
 
 Flip* bytecodes (`FlipEnter`, `FlipSwap`, `FlipExit`) are no-ops in both
 the interpreter and JIT. The flip injection pass has been removed.
-While/loop reclamation uses `RegionRotate`/`RegionRotateDealloc`.
+While/loop reclamation uses `RegionRotate` (refcounted release).
 Self-tail-call reclamation uses `mark()`/`release()` in both the
 interpreter trampoline and the JIT self-tail-call loop
 (`elle_jit_rotate_pools` → `rotate_pools_jit`).
