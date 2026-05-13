@@ -83,14 +83,25 @@ impl VM {
         // routing those allocations to the outbox. The parent reads
         // yielded values directly from the outbox (zero-copy).
         //
+        // The outbox pool is owned by the PARENT's FiberHeap (via
+        // `install_outbox`). The child receives a borrowed raw pointer
+        // (`set_outbox_borrow`). This ensures the outbox outlives the child:
+        // when the child's FiberHandle Rc drops to 0 (e.g. during the
+        // parent's `release_refcounted`), the child's FiberHeap is dropped
+        // but the outbox is not torn down — it lives on the parent's heap
+        // until the parent decides it's safe.
+        //
         // Default allocation target is the child's private heap. Only
         // allocations between OutboxEnter/OutboxExit go to the outbox.
-        // install_outbox tears down the previous outbox (reset-on-resume).
         let tmpl = &self.fiber.closure.template;
         if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
-            self.fiber
+            // After swap: child_fiber = parent, self.fiber = child.
+            // Install on parent, borrow on child.
+            child_fiber
                 .heap
                 .install_outbox(crate::value::fiberheap::pool::SlabPool::new());
+            let ptr = child_fiber.heap.outbox_ptr();
+            self.fiber.heap.set_outbox_borrow(ptr);
         }
 
         // 4. Execute the closure

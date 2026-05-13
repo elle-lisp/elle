@@ -544,8 +544,8 @@
 
 (assert (= (let [a @[1 2]]
              (let [a2 (concat a @[3 4])]
-               (list a a2))) (list @[1 2] @[1 2 3 4]))
-        "concat @arrays original unchanged")
+               (list a a2))) (list @[1 2 3 4] @[1 2 3 4]))
+        "concat @arrays mutates first argument")
 
 ## === concat - Arrays ===
 

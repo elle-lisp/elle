@@ -80,6 +80,14 @@ impl SharedAllocator {
 
     /// Run destructors, return all slots to the slab free list, and reset.
     pub fn teardown(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            eprintln!(
+                "[SharedAllocator::teardown] pool.alloc_count={} marks.len={}",
+                self.pool.alloc_count,
+                self.marks.len(),
+            );
+        }
         self.pool.teardown();
         self.marks.clear();
     }

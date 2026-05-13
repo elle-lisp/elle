@@ -271,6 +271,14 @@ impl SlabPool {
     /// Walks the linked list from mark.alloc_tail.next to self.alloc_tail,
     /// unlinking and deallocating each node.
     pub fn release(&mut self, mark: &SlabMark) {
+        #[cfg(debug_assertions)]
+        {
+            eprintln!(
+                "[SlabPool::release] dtor_len={} dtors.len={}",
+                mark.dtor_len,
+                self.dtors.len(),
+            );
+        }
         self.run_dtors(mark.dtor_len);
         self.dtors.truncate(mark.dtor_len);
 
@@ -280,6 +288,19 @@ impl SlabPool {
         } else {
             self.slab.alloc_next[mark.alloc_tail as usize]
         };
+        #[cfg(debug_assertions)]
+        {
+            let mut count = 0u32;
+            let mut cur = start;
+            while cur != ALLOC_NIL {
+                count += 1;
+                cur = self.slab.alloc_next[cur as usize];
+            }
+            eprintln!(
+                "[SlabPool::release] freeing {} slab slots from mark tail",
+                count,
+            );
+        }
         let mut cur = start;
         while cur != ALLOC_NIL {
             let next = self.slab.alloc_next[cur as usize];
@@ -302,6 +323,16 @@ impl SlabPool {
 
     /// Run all destructors and reset both allocators.
     pub fn teardown(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            let bt = std::backtrace::Backtrace::capture();
+            eprintln!(
+                "[SlabPool::teardown] dtors.len={} alloc_count={}\n{:?}",
+                self.dtors.len(),
+                self.alloc_count,
+                bt,
+            );
+        }
         self.run_dtors(0);
         self.dtors.clear();
         self.alloc_head = ALLOC_NIL;
