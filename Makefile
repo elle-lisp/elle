@@ -62,7 +62,7 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~3min docs + elle scripts, VM, JIT, WASM (parallel, debug build)
+#   make smoke    ~3min docs + elle tests, VM, JIT, WASM (parallel, debug build)
 #   make test     ~4min smoke + rust unit + integration tests
 #   cargo test    ~60min full suite (unit + integration + property)
 #
@@ -86,56 +86,64 @@ ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.
 WASM_SKIP := -e eval.lisp -e eval-env.lisp
 
 smoke-vm: elle
-	@echo "=== elle scripts (VM, no JIT) ==="
+	@echo "=== elle tests (VM, no JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT_CHECKED) $(ELLE) --checked-intrinsics --jit=off --mlir=off {}' \
-		|| { echo "FAILED: elle scripts VM-only pass (no JIT)"; exit 1; }
+			'timeout $(TIMEOUT_CHECKED) $(ELLE) --jit=off --mlir=off {}' \
+		|| { echo "FAILED: elle tests VM-only pass (no JIT)"; exit 1; }
+
+smoke-checked: elle
+	@echo "=== elle tests (checked intrinsics) ==="
+	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_JIT) | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT_CHECKED) $(ELLE) --checked-intrinsics {}' \
+		|| { echo "FAILED: elle tests checked-intrinsics pass"; exit 1; }
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)
 	@echo "=== build elle with no features ==="
 	cargo build $(CARGO_PROFILE) -p elle --no-default-features -q
 
 smoke-noffi: elle-noffi
-	@echo "=== elle scripts (VM, no features) ==="
+	@echo "=== elle tests (VM, no features) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
-		|| { echo "FAILED: elle scripts VM-only pass (no features)"; exit 1; }
+		|| { echo "FAILED: elle tests VM-only pass (no features)"; exit 1; }
 
 smoke-jit: elle
-	@echo "=== elle scripts (eager JIT) ==="
+	@echo "=== elle tests (eager JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_JIT) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT_CHECKED) $(ELLE) --jit=eager {}' \
-		|| { echo "FAILED: elle scripts JIT pass (eager)"; exit 1; }
+		|| { echo "FAILED: elle tests JIT pass (eager)"; exit 1; }
 
 elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
 	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
 
 smoke-mlir: elle-mlir
-	@echo "=== elle scripts (eager MLIR) ==="
+	@echo "=== elle tests (eager MLIR) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_MLIR) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
-		|| { echo "FAILED: elle scripts MLIR pass (eager)"; exit 1; }
+		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
 
 elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
 	@echo "=== build elle with WASM ==="
 	cargo build $(CARGO_PROFILE) -p elle --features wasm -q
 
 smoke-wasm: elle-wasm
-	@echo "=== elle scripts (WASM) ==="
+	@echo "=== elle tests (WASM) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j $(WASM_JOBS) --halt now,fail=1 --tag \
 			'timeout 300s $(ELLE) --wasm=full {}' \
-		|| { echo "FAILED: elle scripts WASM pass (full)"; exit 1; }
+		|| { echo "FAILED: elle tests WASM pass (full)"; exit 1; }
 
 doctest:   ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
@@ -159,7 +167,7 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
-smoke: smoke-vm smoke-jit doctest smoke-diff embedding  ## Run docs, elle tests
+smoke: smoke-vm smoke-jit smoke-checked doctest smoke-diff embedding
 	@echo "=== all smoke tests passed ==="
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install
