@@ -732,7 +732,6 @@ impl<'a> Lowerer<'a> {
         self.region_slots.push(Vec::new());
     }
 
-
     /// Whether we're inside a scoped region (DecrefLocal will be emitted).
     fn in_scoped_region(&self) -> bool {
         !self.region_slots.is_empty()
@@ -777,11 +776,7 @@ impl<'a> Lowerer<'a> {
 
     /// Emit DecrefLocal for all bindings allocated within the current region.
     fn emit_decrefs_for_region(&mut self) {
-        let slots: Vec<u16> = self
-            .region_slots
-            .last()
-            .cloned()
-            .unwrap_or_default();
+        let slots: Vec<u16> = self.region_slots.last().cloned().unwrap_or_default();
         for slot in slots {
             self.emit(LirInstr::DecrefLocal { slot });
         }
@@ -792,11 +787,7 @@ impl<'a> Lowerer<'a> {
     /// Nil them so the next iteration's StoreLocalRefcounted doesn't
     /// decref a freed value.
     fn emit_decrefs_and_nil_for_region(&mut self) {
-        let slots: Vec<u16> = self
-            .region_slots
-            .last()
-            .cloned()
-            .unwrap_or_default();
+        let slots: Vec<u16> = self.region_slots.last().cloned().unwrap_or_default();
         for slot in &slots {
             self.emit(LirInstr::DecrefLocal { slot: *slot });
         }
@@ -821,7 +812,6 @@ impl<'a> Lowerer<'a> {
         self.region_slots.pop();
     }
 
-
     /// Emit `RegionRotate` for double-buffered loop scope rotation.
     /// Uses decref+nil so stale slot pointers don't cause UAF on next iteration.
     fn emit_region_rotate(&mut self) {
@@ -837,8 +827,6 @@ impl<'a> Lowerer<'a> {
         self.region_refcounted_stack.pop();
         self.region_slots.pop();
     }
-
-
 
     /// Check if the callee is the current function (self-tail-call).
     fn is_self_tail_call(&self, func: &Hir) -> bool {
@@ -885,7 +873,9 @@ impl<'a> Lowerer<'a> {
         // from collections (via get, first, etc.) that are aliased and
         // must not be freed. Parameters are safe because they receive
         // their values from the caller (fresh copies on the stack).
-        let mut slots: Vec<_> = self.binding_to_slot.iter()
+        let mut slots: Vec<_> = self
+            .binding_to_slot
+            .iter()
             .filter(|(binding, _)| {
                 !referenced.contains(binding)
                     && !self.upvalue_bindings.contains(binding)
@@ -963,7 +953,13 @@ impl<'a> Lowerer<'a> {
     /// heap allocation (never an alias of an argument).
     fn callee_is_fresh_allocator(&self, func: &Hir) -> bool {
         static FRESH_PRIMS: &[&str] = &[
-            "struct", "struct-mut", "string", "array", "bytes", "set", "set-mut",
+            "struct",
+            "struct-mut",
+            "string",
+            "array",
+            "bytes",
+            "set",
+            "set-mut",
         ];
 
         let binding = match &func.kind {
@@ -1623,9 +1619,7 @@ impl<'a> Lowerer<'a> {
                             // in the closure env → param flows to return
                             HirKind::Lambda { captures, .. } => {
                                 for cap in captures {
-                                    if let Some(k) =
-                                        params.iter().position(|p| *p == cap.binding)
-                                    {
+                                    if let Some(k) = params.iter().position(|p| *p == cap.binding) {
                                         if k < 64 {
                                             mask |= 1u64 << k;
                                         }
@@ -1635,9 +1629,7 @@ impl<'a> Lowerer<'a> {
                             // DerefCell(Var): letrec self-ref
                             HirKind::DerefCell { cell } => {
                                 if let HirKind::Var(b) = &cell.kind {
-                                    if let Some(k) =
-                                        params.iter().position(|p| p == b)
-                                    {
+                                    if let Some(k) = params.iter().position(|p| p == b) {
                                         if k < 64 {
                                             mask |= 1u64 << k;
                                         }

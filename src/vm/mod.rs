@@ -139,10 +139,7 @@ impl VM {
                 return Err("Unexpected yield outside fiber context".to_string());
             } else {
                 self.fiber.signal.take();
-                return Err(format!(
-                    "Unexpected signal outside fiber context: {}",
-                    bits
-                ));
+                return Err(format!("Unexpected signal outside fiber context: {}", bits));
             }
         }
     }

@@ -692,7 +692,11 @@ mod tests {
         // (coro/new (fn [] (yield 1))) → (fiber/new (fn [] (yield 1)) |:yield|)
         let mut forms = vec![list(vec![
             sym("coro/new"),
-            list(vec![sym("fn"), list(vec![]), list(vec![sym("yield"), int(1)])]),
+            list(vec![
+                sym("fn"),
+                list(vec![]),
+                list(vec![sym("yield"), int(1)]),
+            ]),
         ])];
         let count = migrate(&mut forms, 10, 11).unwrap();
         assert!(count >= 1);

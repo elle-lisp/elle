@@ -559,9 +559,7 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], interner: &TypeInterner
         "length" => TypeInterner::INT,
         "type" => TypeInterner::KEYWORD,
         "has?" | "empty?" | "contains?" => TypeInterner::BOOL,
-        "ptr?" | "pointer?" => {
-            TypeInterner::BOOL
-        }
+        "ptr?" | "pointer?" => TypeInterner::BOOL,
         "string/contains?"
         | "string-contains?"
         | "string/starts-with?"

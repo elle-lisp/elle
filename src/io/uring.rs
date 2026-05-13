@@ -770,9 +770,8 @@ pub(super) fn drain_cqes(
                     let total_in_fiber = *filled + result_code as usize;
                     // Check for newline in the fiber's buffer content
                     let buf_bytes = buffer.as_bytes().unwrap();
-                    let has_newline = buf_bytes[..total_in_fiber.min(buf_bytes.len())]
-                        .iter()
-                        .any(|&b| b == b'\n');
+                    let has_newline =
+                        buf_bytes[..total_in_fiber.min(buf_bytes.len())].contains(&b'\n');
                     if !has_newline {
                         // No newline found — advance filled cursor for re-submission.
                         *filled = total_in_fiber;

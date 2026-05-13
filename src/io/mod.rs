@@ -57,7 +57,11 @@ impl Completion {
 /// Implemented by `AsyncBackend` (real I/O via io_uring or thread pool)
 /// and `MockBackend` (in-memory, deterministic).
 pub(crate) trait IoBackend {
-    fn submit(&self, request: &IoRequest, origin_heap: *mut crate::value::fiberheap::FiberHeap) -> Result<u64, String>;
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String>;
     fn poll(&self) -> Vec<Completion>;
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
     fn cancel(&self, id: u64) -> Result<(), String>;

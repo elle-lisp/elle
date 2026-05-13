@@ -294,7 +294,7 @@ pub(super) fn process_raw_completion(
         PendingOp::Port {
             op,
             port_key,
-            port,
+            port: _,
             listener_kind,
             ..
         } => {

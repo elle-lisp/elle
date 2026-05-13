@@ -78,7 +78,6 @@ impl ArenaMark {
         self.dtor_len
     }
 
-
     pub(crate) fn custom_ptrs_len(&self) -> usize {
         self.custom_ptrs_len
     }
@@ -90,7 +89,6 @@ impl ArenaMark {
     pub(crate) fn bump_mark(&self) -> Option<BumpMark> {
         self.bump_mark
     }
-
 }
 
 /// RAII guard that releases the arena to a saved mark on drop.

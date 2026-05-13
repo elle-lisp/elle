@@ -78,8 +78,7 @@ fn compile_core(
 
     intern_primitive_names(symbols);
 
-    let syntaxes =
-        read_syntax_all(CORE, "<core>").expect("core.lisp parsing must succeed");
+    let syntaxes = read_syntax_all(CORE, "<core>").expect("core.lisp parsing must succeed");
 
     // Expand with bare expander (no prelude)
     let mut bare_expander = Expander::new();

@@ -448,4 +448,3 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => (SIG_ERROR, e),
     }
 }
-

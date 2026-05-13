@@ -461,10 +461,10 @@ pub(crate) fn prim_string_mut(args: &[Value]) -> (SignalBits, Value) {
                         error_val(
                             "type-error",
                             format!(
-                                "@string: expected integer, string, or @string, got {} at position {}",
-                                arg.type_name(),
-                                i
-                            ),
+                            "@string: expected integer, string, or @string, got {} at position {}",
+                            arg.type_name(),
+                            i
+                        ),
                         ),
                     )
                 }

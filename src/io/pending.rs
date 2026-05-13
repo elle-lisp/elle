@@ -98,6 +98,7 @@ impl PendingOp {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn set_filled(&mut self, val: usize) {
         if let PendingOp::Port { filled, .. } = self {
             *filled = val;

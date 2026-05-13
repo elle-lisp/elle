@@ -106,7 +106,9 @@ impl fmt::Display for LirInstr {
             // === Variables ===
             LirInstr::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
             LirInstr::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
-            LirInstr::StoreLocalRefcounted { slot, src } => write!(f, "local[{}] ←rc {}", slot, src),
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                write!(f, "local[{}] ←rc {}", slot, src)
+            }
             LirInstr::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
             LirInstr::LoadCaptureRaw { dst, index } => {
                 write!(f, "{} ← cap[{}] (raw)", dst, index)

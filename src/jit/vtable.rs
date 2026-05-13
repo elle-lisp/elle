@@ -347,14 +347,8 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
-    builder.symbol(
-        "elle_jit_incref",
-        dispatch::elle_jit_incref as *const u8,
-    );
-    builder.symbol(
-        "elle_jit_decref",
-        dispatch::elle_jit_decref as *const u8,
-    );
+    builder.symbol("elle_jit_incref", dispatch::elle_jit_incref as *const u8);
+    builder.symbol("elle_jit_decref", dispatch::elle_jit_decref as *const u8);
     builder.symbol(
         "elle_jit_drop_slot",
         dispatch::elle_jit_drop_slot as *const u8,

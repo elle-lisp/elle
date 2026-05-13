@@ -344,7 +344,10 @@ fn write_value_to_string(val: Value, out: &mut String) -> Result<(), (SignalBits
     } else {
         return Err((
             SIG_ERROR,
-            error_val("internal-error", "to-string: internal conversion failure".to_string()),
+            error_val(
+                "internal-error",
+                "to-string: internal conversion failure".to_string(),
+            ),
         ));
     }
     Ok(())

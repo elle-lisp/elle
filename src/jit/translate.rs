@@ -1137,8 +1137,10 @@ impl<'a> FunctionTranslator<'a> {
                     .module
                     .declare_func_in_func(self.helpers.drop_slot, builder.func);
                 builder.ins().call(func_ref, &[tag, payload]);
-                let nil_tag = builder.ins().iconst(cranelift_codegen::ir::types::I64,
-                    crate::value::Value::NIL.tag as i64);
+                let nil_tag = builder.ins().iconst(
+                    cranelift_codegen::ir::types::I64,
+                    crate::value::Value::NIL.tag as i64,
+                );
                 let nil_payload = builder.ins().iconst(cranelift_codegen::ir::types::I64, 0);
                 self.def_var_pair(builder, base, nil_tag, nil_payload);
             }

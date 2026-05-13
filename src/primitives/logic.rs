@@ -80,7 +80,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(or false true)",
         aliases: &[],
     },
-
     PrimitiveDef {
         name: "xor",
         func: prim_xor,

@@ -56,7 +56,7 @@ impl Clone for Expander {
         Expander {
             macros: self.macros.clone(),
             compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
-            core_env: self.core_env.clone(),   // persists — needed by macro bodies
+            core_env: self.core_env.clone(),  // persists — needed by macro bodies
             next_scope_id: self.next_scope_id,
             expansion_depth: self.expansion_depth,
         }

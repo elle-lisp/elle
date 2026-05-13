@@ -529,7 +529,7 @@ impl VM {
             }
         }
 
-        let result = self.with_child_fiber(child_handle, child_value, |vm| {
+        self.with_child_fiber(child_handle, child_value, |vm| {
             vm.fiber.status = FiberStatus::Alive;
 
             if is_first_resume {
@@ -537,9 +537,7 @@ impl VM {
             } else {
                 vm.do_fiber_subsequent_resume(resume_value)
             }
-        });
-
-        result
+        })
     }
 
     /// First resume of a New fiber — build env and execute closure bytecode.

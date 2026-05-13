@@ -430,11 +430,11 @@ impl FiberHeap {
         }
 
         // Dealloc rc=0 slab slots, keep pinned.
-        // Also null any surviving dtor entries for freed slots. The dtor
+        // Also handle surviving dtor entries for freed slots. The dtor
         // loop above may have skipped an entry because rc > 0 at dtor time,
         // but children decref can bring rc to 0 before we reach here.
-        // Without nulling, the stale entry survives and causes a duplicate
-        // when the slot is reused.
+        // Run drop_in_place for any skipped-but-now-dead entries, then
+        // null them before freeing the slot.
         for i in 0..scope_ptrs.len() {
             let ptr = scope_ptrs[i];
             let flat = scope_flats[i];
@@ -449,7 +449,7 @@ impl FiberHeap {
                             eprintln!(
                                 "[release_refcounted] DEALLOC slot {:?} (flat {}) \
                                  still has non-null dtor entry at index {}. \
-                                 Nulling before dealloc. di={}, mark.dtor_len={}",
+                                 Running drop_in_place before dealloc. di={}, mark.dtor_len={}",
                                 ptr,
                                 flat,
                                 di,
@@ -459,9 +459,10 @@ impl FiberHeap {
                         }
                     }
                 }
-                // Null any surviving dtor entry for this slot.
+                // Run drop and null any surviving dtor entry for this slot.
                 for di in mark.dtor_len()..self.pool.dtors.len() {
                     if self.pool.dtors[di] == ptr {
+                        unsafe { std::ptr::drop_in_place(ptr) };
                         self.pool.dtors[di] = std::ptr::null_mut();
                         break; // at most one non-null entry per pointer
                     }
@@ -1162,7 +1163,7 @@ impl FiberHeap {
                 traits: *traits,
             },
             HeapObject::Float(f) => HeapObject::Float(*f),
-            HeapObject::NativeFn(f) => HeapObject::NativeFn(*f),
+            HeapObject::NativeFn(f) => HeapObject::NativeFn(f),
             HeapObject::Parameter {
                 id,
                 default,
@@ -1175,10 +1176,8 @@ impl FiberHeap {
             // External, Fiber, LibHandle, etc. — Rc-backed, survive
             // independently of the slab.  Return the original value.
             _ => {
-                return unsafe {
-                    let tag = obj.value_tag();
-                    Value::from_heap_ptr(obj as *const HeapObject as *const (), tag)
-                }
+                let tag = obj.value_tag();
+                return Value::from_heap_ptr(obj as *const HeapObject as *const (), tag);
             }
         };
         crate::value::fiberheap::routing::with_current_heap_mut(|heap| heap.pool.alloc(new_obj))
@@ -1661,6 +1660,7 @@ impl Drop for FiberHeap {
             }
 
             let mut seen: HashSet<usize> = HashSet::new();
+            #[allow(clippy::type_complexity)]
             let mut duplicates: Vec<(
                 (usize, super::heap::HeapTag, *mut HeapObject),
                 (usize, super::heap::HeapTag, *mut HeapObject),
@@ -1689,9 +1689,9 @@ impl Drop for FiberHeap {
 
             let all_entries: Vec<_> = private_entries
                 .into_iter()
-                .chain(outbox_entries.into_iter())
-                .chain(old_entries.into_iter())
-                .chain(shared_entries.into_iter())
+                .chain(outbox_entries)
+                .chain(old_entries)
+                .chain(shared_entries)
                 .collect();
 
             for entry @ (addr, _, ptr) in &all_entries {
