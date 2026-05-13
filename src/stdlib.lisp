@@ -229,11 +229,24 @@
   (not (empty? x)))
 
 (defn compare [a b]
-  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b."
-  (cond
-    (< a b) -1
-    (= a b) 0
-    true 1))
+  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
+   For non-comparable types (nil, bool), falls back to type-rank ordering."
+  (if (= a b)
+    0
+    (let [rank (fn [x]
+                 (match (type-of x)
+                   :nil 0
+                   :boolean 1
+                   :integer 2
+                   :float 2
+                   :string 3
+                   :keyword 4
+                   _ 5))
+          ra (rank a)
+          rb (rank b)]
+      (if (not= ra rb)
+        (if (%lt ra rb) -1 1)
+        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
 
 (defn range [start-or-end & args]
   "Generate a range of integers as an array."
@@ -280,11 +293,11 @@
   (when (< n 0)
     (error {:error :argument-error
             :message (string "take: count must be non-negative, got " n)}))
-  (letrec [go (fn [i xs]
+  (letrec [go (fn [i xs acc]
                 (if (or (= i 0) (empty? xs))
-                  ()
-                  (pair (first xs) (go (- i 1) (rest xs)))))]
-    (go n coll)))
+                  (reverse acc)
+                  (go (- i 1) (rest xs) (pair (first xs) acc))))]
+    (go n coll ())))
 (defn drop [n coll]
   "Drop the first n elements of a list."
   (when (not (integer? n))
@@ -293,10 +306,7 @@
   (when (< n 0)
     (error {:error :argument-error
             :message (string "drop: count must be non-negative, got " n)}))
-  (letrec [go (fn [i xs]
-                (if (or (= i 0) (empty? xs))
-                  xs
-                  (go (- i 1) (rest xs))))]
+  (letrec [go (fn [i xs] (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
     (go n coll)))
 
 ## ── Arithmetic ────────────────────────────────────────────────────────
@@ -501,13 +511,6 @@
                  :reason :not-a-sequence
                  :message "not a sequence"})))
 
-(defn fold [f init lst]
-  "Reduce lst by applying (f accumulator element) left to right, starting from init. Alias: reduce."
-  (if (empty? lst)
-    init
-    (fold f (f init (first lst)) (rest lst))))
-
-(def reduce fold)
 (def keep filter)
 
 ## ── Functional combinators ──────────────────────────────────────────
@@ -1685,7 +1688,8 @@
               (not (= 0 (bit/and bits 1)))  # SIG_ERROR
                (complete-fiber fiber :error)
               (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [[ok? result] (protect (io/submit backend (fiber/value fiber) fiber))]
+              (let [[ok? result] (protect (io/submit backend (fiber/value fiber)
+                    fiber))]
                 (if ok?
                   (begin
                     (put pending result fiber)

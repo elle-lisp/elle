@@ -944,8 +944,14 @@ impl FiberHeap {
             Some(p) => p,
             None => return value,
         };
-        // If outbox exists and owns it, already safe.
+        // If outbox exists and owns it, recurse into children to relocate
+        // any nested private-pool references (e.g. yield [:send target msg]
+        // where the outer array is in the outbox but msg is in the private pool).
         if self.outbox.as_ref().is_some_and(|ob| ob.owns(ptr)) {
+            let heap_obj = unsafe { &*(ptr as *const HeapObject) };
+            if self.outbox_value_has_private_children(heap_obj) {
+                return self.rebuild_in_outbox(heap_obj);
+            }
             return value;
         }
         // If not in private pool either, return as-is (constant pool, etc.).
@@ -955,6 +961,169 @@ impl FiberHeap {
         // Read the HeapObject and rebuild it in the outbox.
         let heap_obj = unsafe { &*(ptr as *const HeapObject) };
         self.rebuild_in_outbox(heap_obj)
+    }
+
+    /// Deep-copy a value out of this fiber's outbox/private-pool into the
+    /// current (parent) heap.  Called by `fiber/value` so the parent can
+    /// store the value safely across subsequent resumes (which tear down
+    /// the outbox).
+    ///
+    /// Values that are not owned by this fiber (immediates, constant pool,
+    /// other heaps) are returned as-is.
+    pub fn deep_copy_out_of_outbox(&self, value: Value) -> Value {
+        if !value.is_heap() {
+            return value;
+        }
+        let ptr = match value.as_heap_ptr() {
+            Some(p) => p,
+            None => return value,
+        };
+        let owned_by_child = self.pool.owns(ptr)
+            || self.outbox.as_ref().is_some_and(|ob| ob.owns(ptr));
+        if !owned_by_child {
+            return value;
+        }
+        let heap_obj = unsafe { &*(ptr as *const HeapObject) };
+        self.rebuild_on_current_heap(heap_obj)
+    }
+
+    /// Rebuild a HeapObject on the current (parent) heap.
+    /// Recursively copies children that belong to this fiber.
+    fn rebuild_on_current_heap(&self, obj: &HeapObject) -> Value {
+        // Snapshot children that need recursive copying before we
+        // borrow the parent heap for allocation.
+        let new_obj = match obj {
+            HeapObject::Pair(c) => {
+                let head = self.deep_copy_out_of_outbox(c.first);
+                let tail = self.deep_copy_out_of_outbox(c.rest);
+                HeapObject::Pair(crate::value::heap::Pair {
+                    first: head,
+                    rest: tail,
+                    traits: c.traits,
+                })
+            }
+            HeapObject::LArray { elements, traits } => {
+                let elems: Vec<Value> = elements
+                    .as_slice()
+                    .iter()
+                    .map(|v| self.deep_copy_out_of_outbox(*v))
+                    .collect();
+                // Allocate inline slice on parent heap inside the alloc call below.
+                // For now, use a temporary; the pool.alloc will intern it.
+                return crate::value::fiberheap::routing::with_current_heap_mut(|heap| {
+                    let slice = heap.pool.alloc_inline_slice::<Value>(&elems);
+                    heap.pool.alloc(HeapObject::LArray {
+                        elements: slice,
+                        traits: *traits,
+                    })
+                })
+                .expect("rebuild_on_current_heap: no current heap");
+            }
+            HeapObject::LStruct { data, traits } => {
+                let entries: Vec<_> = data
+                    .iter()
+                    .map(|(k, v)| (k.clone(), self.deep_copy_out_of_outbox(*v)))
+                    .collect();
+                HeapObject::LStruct {
+                    data: entries,
+                    traits: *traits,
+                }
+            }
+            HeapObject::LSet { data, traits } => {
+                let elems: Vec<Value> = data
+                    .as_slice()
+                    .iter()
+                    .map(|v| self.deep_copy_out_of_outbox(*v))
+                    .collect();
+                return crate::value::fiberheap::routing::with_current_heap_mut(|heap| {
+                    let slice = heap.pool.alloc_inline_slice::<Value>(&elems);
+                    heap.pool.alloc(HeapObject::LSet {
+                        data: slice,
+                        traits: *traits,
+                    })
+                })
+                .expect("rebuild_on_current_heap: no current heap");
+            }
+            // Rc-backed types: clone the Rc to share the backing store.
+            HeapObject::LBox { cell, traits } => HeapObject::LBox {
+                cell: cell.clone(),
+                traits: *traits,
+            },
+            HeapObject::CaptureCell { cell, traits } => HeapObject::CaptureCell {
+                cell: cell.clone(),
+                traits: *traits,
+            },
+            HeapObject::Closure { closure, traits } => HeapObject::Closure {
+                closure: closure.clone(),
+                traits: *traits,
+            },
+            HeapObject::LArrayMut { data, traits } => HeapObject::LArrayMut {
+                data: data.clone(),
+                traits: *traits,
+            },
+            HeapObject::LStructMut { data, traits } => HeapObject::LStructMut {
+                data: data.clone(),
+                traits: *traits,
+            },
+            HeapObject::LStringMut { data, traits } => HeapObject::LStringMut {
+                data: data.clone(),
+                traits: *traits,
+            },
+            HeapObject::LBytesMut { data, traits } => HeapObject::LBytesMut {
+                data: data.clone(),
+                traits: *traits,
+            },
+            HeapObject::LSetMut { data, traits } => HeapObject::LSetMut {
+                data: data.clone(),
+                traits: *traits,
+            },
+            // Inline data types: copy the inline slice/value.
+            HeapObject::LString { s, traits } => HeapObject::LString {
+                s: *s,
+                traits: *traits,
+            },
+            HeapObject::LBytes { data, traits } => HeapObject::LBytes {
+                data: *data,
+                traits: *traits,
+            },
+            HeapObject::Float(f) => HeapObject::Float(*f),
+            HeapObject::NativeFn(f) => HeapObject::NativeFn(*f),
+            HeapObject::Parameter { id, default, traits } => HeapObject::Parameter {
+                id: *id,
+                default: *default,
+                traits: *traits,
+            },
+            // External, Fiber, LibHandle, etc. — Rc-backed, survive
+            // independently of the slab.  Return the original value.
+            _ => return unsafe {
+                let tag = obj.value_tag();
+                Value::from_heap_ptr(obj as *const HeapObject as *const (), tag)
+            },
+        };
+        crate::value::fiberheap::routing::with_current_heap_mut(|heap| {
+            heap.pool.alloc(new_obj)
+        })
+        .expect("rebuild_on_current_heap: no current heap")
+    }
+
+    /// Check whether a heap object (already in the outbox) contains any
+    /// child values that live in the private pool.
+    fn outbox_value_has_private_children(&self, obj: &HeapObject) -> bool {
+        let check = |v: &Value| -> bool {
+            if let Some(p) = v.as_heap_ptr() {
+                self.pool.owns(p)
+            } else {
+                false
+            }
+        };
+        match obj {
+            HeapObject::Pair(c) => check(&c.first) || check(&c.rest),
+            HeapObject::LArray { elements, .. } => elements.as_slice().iter().any(check),
+            HeapObject::LStruct { data, .. } => data.iter().any(|(_, v)| check(v)),
+            HeapObject::LBox { cell, .. } => check(&cell.borrow()),
+            HeapObject::LSet { data, .. } => data.as_slice().iter().any(check),
+            _ => false,
+        }
     }
 
     /// Allocate a copy of `obj` into the outbox. For Pair, recursively

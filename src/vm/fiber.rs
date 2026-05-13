@@ -77,6 +77,7 @@ impl VM {
                 &mut *self.fiber.heap as *mut crate::value::FiberHeap,
             );
         }
+
         // 3b. Install outbox for yield-bound allocations. The compiler
         // emits OutboxEnter/OutboxExit around yield/emit value expressions,
         // routing those allocations to the outbox. The parent reads
@@ -109,9 +110,13 @@ impl VM {
         };
 
         // 6. Extract the result before swapping back.
-        //    Safety net: if the value is heap-allocated in the child's
-        //    private pool (not in the outbox), deep-copy to the outbox
-        //    so the parent doesn't read a dangling pointer.
+        //    Deep-copy any private-pool values to the outbox so the parent
+        //    doesn't read dangling pointers.  Two cases:
+        //      a) result_value itself is in the private pool — deep-copy it.
+        //      b) result_value is in the outbox but contains nested references
+        //         to the private pool (e.g. yield [:send target msg] where
+        //         msg was allocated before OutboxEnter) — deep-copy it so
+        //         nested values are relocated too.
         let mut result_value = self
             .fiber
             .signal
@@ -120,10 +125,10 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-        if result_value.is_heap()
-            && self.fiber.heap.has_outbox()
-            && self.fiber.heap.value_in_private_pool(result_value)
-        {
+        if result_value.is_heap() && self.fiber.heap.has_outbox() {
+            // deep_copy_to_outbox handles both cases: it recursively copies
+            // any private-pool values it finds, and returns outbox values as-is
+            // (except it recurses into their children).
             result_value = self.fiber.heap.deep_copy_to_outbox(result_value);
             // Update the signal with the new value so the parent reads the copy.
             if let Some(ref mut sig) = self.fiber.signal {
@@ -524,7 +529,7 @@ impl VM {
             }
         }
 
-        self.with_child_fiber(child_handle, child_value, |vm| {
+        let result = self.with_child_fiber(child_handle, child_value, |vm| {
             vm.fiber.status = FiberStatus::Alive;
 
             if is_first_resume {
@@ -532,7 +537,9 @@ impl VM {
             } else {
                 vm.do_fiber_subsequent_resume(resume_value)
             }
-        })
+        });
+
+        result
     }
 
     /// First resume of a New fiber — build env and execute closure bytecode.
