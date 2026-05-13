@@ -42,19 +42,7 @@ pub(crate) fn prim_or(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, args[args.len() - 1])
 }
 
-/// Logical XOR operation
-/// (xor) => false
-/// (xor x) => x as bool
-/// (xor x y z) => true if odd number of truthy values, else false
-pub(crate) fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
-    if args.is_empty() {
-        return (SIG_OK, Value::bool(false));
-    }
-
-    // Count truthy values, return true if odd
-    let truthy_count = args.iter().filter(|v| v.is_truthy()).count();
-    (SIG_OK, Value::bool(truthy_count % 2 == 1))
-}
+// xor — now implemented in Elle (src/stdlib.lisp)
 
 /// Declarative primitive definitions for logic operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
@@ -63,7 +51,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_and,
         signal: Signal::silent(),
         arity: Arity::AtLeast(0),
-        doc: "Logical AND operation",
+        doc: "Logical AND operation (non-short-circuiting function form)",
         params: &[],
         category: "logic",
         example: "(and true false)",
@@ -74,21 +62,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_or,
         signal: Signal::silent(),
         arity: Arity::AtLeast(0),
-        doc: "Logical OR operation",
+        doc: "Logical OR operation (non-short-circuiting function form)",
         params: &[],
         category: "logic",
         example: "(or false true)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "xor",
-        func: prim_xor,
-        signal: Signal::silent(),
-        arity: Arity::AtLeast(0),
-        doc: "Logical XOR operation",
-        params: &[],
-        category: "logic",
-        example: "(xor true false)",
         aliases: &[],
     },
 ];

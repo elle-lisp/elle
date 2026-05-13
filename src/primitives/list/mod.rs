@@ -9,9 +9,6 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, list, Value};
 
-// Re-export advanced functions for use in PRIMITIVES array
-pub(crate) use advanced::{prim_append, prim_concat, prim_reverse};
-
 /// Get the first element of a sequence (list, array, @array, string)
 pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     // Syntax (existing behavior, preserved)
@@ -193,40 +190,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
          example: "(empty? (list))",
          aliases: &[],
      },
-    PrimitiveDef {
-        name: "append",
-        func: prim_append,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Append two collections. For arrays: mutates first arg, returns it. For strings: returns new value.",
-        params: &["collection1", "collection2"],
-        category: "list",
-        example: "(append @[1 2] @[3 4])",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "concat",
-        func: prim_concat,
-        signal: Signal::errors(),
-        arity: Arity::AtLeast(1),
-        doc: "Concatenate one or more collections of the same type. Supports: list, array, @array, string, @string, bytes, @bytes, set, @set, struct, @struct. For sets, performs union. For structs, merges left-to-right (right wins on key conflict). Returns a new value.",
-        params: &["collections"],
-        category: "list",
-        example: "(concat [1 2] [3 4]) #=> [1 2 3 4]",
-        aliases: &[],
-    },
-
-    PrimitiveDef {
-        name: "reverse",
-        func: prim_reverse,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Reverse a sequence (list, array, string). Returns same type.",
-        params: &["sequence"],
-        category: "list",
-        example: "(reverse (list 1 2 3))",
-        aliases: &[],
-    },
+    // append, concat, reverse — now implemented in Elle (src/core.lisp)
     PrimitiveDef {
         name: "->array",
         func: prim_to_array,

@@ -204,31 +204,7 @@ pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Convert a set to an array or @array
-///
-/// (set->array set) -> array or @array
-///
-/// Immutable set → array, mutable set → @array. Elements in sorted order.
-pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(s) = args[0].as_set() {
-        let items: Vec<Value> = s.to_vec();
-        (SIG_OK, Value::array(items))
-    } else if let Some(s) = args[0].as_set_mut() {
-        let items: Vec<Value> = s.borrow().iter().copied().collect();
-        (SIG_OK, Value::array_mut(items))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "set->array: expected set or mutable set, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
-    }
-}
+// set->array — now an alias for ->array (defined in src/stdlib.lisp)
 
 /// Convert any sequence to a set
 ///
@@ -433,17 +409,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(difference (set 1 2 3) (set 2)) #=> |1 3|",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "set->array",
-        func: prim_set_to_array,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Convert a set to an array/tuple. Immutable set → tuple, mutable set → array.",
-        params: &["set"],
-        category: "set",
-        example: "(set->array (set 3 1 2)) #=> [1 2 3]",
-        aliases: &[],
-    },
+    // set->array — now (def set->array ->array) in stdlib
     PrimitiveDef {
         name: "seq->set",
         func: prim_seq_to_set,

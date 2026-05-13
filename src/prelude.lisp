@@ -252,7 +252,7 @@
                  ,;body)
                (assign idx (%add idx 1))))
          (or :set :@set)
-           (let [items (set->array seq)]
+           (let [items (->array seq)]
              (def @idx 0)
              (def @len (length items))
              (while (%lt idx len)

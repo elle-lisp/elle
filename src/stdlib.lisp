@@ -468,7 +468,7 @@
           (assign i (+ i 1)))
         (if (mutable? coll) acc (freeze acc)))
     (set? coll)
-      (let* [items (set->array coll)
+      (let* [items (->array coll)
              acc @||]
         (each item in items
           (add acc (f item)))
@@ -496,7 +496,7 @@
           (assign i (+ i 1)))
         (if (mutable? coll) acc (freeze acc)))
     (set? coll)
-      (let* [items (set->array coll)
+      (let* [items (->array coll)
              acc (if (mutable? coll) (@set) (set))]
         (each item in items
           (when (p item) (add acc item)))
@@ -2341,4 +2341,5 @@
    :assert assert
    :xor xor
    :take take
-   :drop drop})
+   :drop drop
+   :set->array (fn [s] (->array s))})
