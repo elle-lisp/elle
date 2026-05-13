@@ -15,7 +15,7 @@ use super::access::{prim_get, prim_put};
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@struct",
-        func: prim_table,
+        func: prim_struct_mut,
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable struct from key-value pairs",
@@ -94,7 +94,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
 
 /// Create a mutable struct from key-value pairs
 /// (@struct key1 val1 key2 val2 ...)
-pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_struct_mut(args: &[Value]) -> (SignalBits, Value) {
     if !args.len().is_multiple_of(2) {
         return (
             SIG_ERROR,

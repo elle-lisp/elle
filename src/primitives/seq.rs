@@ -306,51 +306,6 @@ pub fn seq_nth(val: &Value, n: i64) -> Result<Value, Value> {
     Err(seq_type_error("nth", val))
 }
 
-/// All elements except the last (type-preserving).
-pub fn seq_butlast(val: &Value) -> Result<Value, Value> {
-    if val.is_empty_list() {
-        return Ok(Value::EMPTY_LIST);
-    }
-    if val.is_pair() {
-        let vec = val
-            .list_to_vec()
-            .map_err(|e| error_val("type-error", e.to_string()))?;
-        if vec.is_empty() {
-            return Ok(Value::EMPTY_LIST);
-        }
-        return Ok(list(vec[..vec.len() - 1].to_vec()));
-    }
-    if let Some(r) = with_array(val, |elems, m| {
-        if elems.is_empty() {
-            make_array(vec![], m)
-        } else {
-            make_array(elems[..elems.len() - 1].to_vec(), m)
-        }
-    }) {
-        return Ok(r);
-    }
-    if let Some(r) = with_text(val, |s, m| {
-        let graphemes: Vec<&str> = s.graphemes(true).collect();
-        if graphemes.is_empty() {
-            make_string(String::new(), m)
-        } else {
-            make_string(graphemes[..graphemes.len() - 1].concat(), m)
-        }
-    }) {
-        return Ok(r);
-    }
-    if let Some(r) = with_raw_bytes(val, |b, m| {
-        if b.is_empty() {
-            make_bytes(vec![], m)
-        } else {
-            make_bytes(b[..b.len() - 1].to_vec(), m)
-        }
-    }) {
-        return Ok(r);
-    }
-    Err(seq_type_error("butlast", val))
-}
-
 /// Reverse a sequence (type-preserving).
 pub fn seq_reverse(val: &Value) -> Result<Value, Value> {
     if val.is_empty_list() {

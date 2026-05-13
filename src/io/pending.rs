@@ -19,9 +19,14 @@ pub(crate) enum PendingOp {
         op: IoOp,
         port_key: PortKey,
         port: Value,
-        buffer_handle: BufferHandle,
+        /// BufferPool handle for non-read operations. `None` for Read/ReadLine
+        /// (which use pre-allocated fiber-heap buffers instead).
+        buffer_handle: Option<BufferHandle>,
         /// For Accept: which kind of listener (TcpListener or UnixListener).
         listener_kind: Option<PortKind>,
+        /// Bytes written into the fiber's pre-allocated buffer so far.
+        /// Used for short-read re-submission. Zero for non-read ops.
+        filled: usize,
     },
     /// Connect to a remote address. Creates a new port on completion.
     Connect {
@@ -69,31 +74,33 @@ pub(crate) enum PendingOp {
 }
 
 impl PendingOp {
-    pub(crate) fn buffer_handle(&self) -> BufferHandle {
+    /// Get the BufferHandle, if any. Returns `None` for read operations
+    /// (which use pre-allocated fiber-heap buffers) and `Some(handle)` for
+    /// all other operations.
+    pub(crate) fn buffer_handle(&self) -> Option<BufferHandle> {
         match self {
             PendingOp::Port { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Open { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Task { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
-            PendingOp::WatchNext { buffer_handle, .. } => *buffer_handle,
-            PendingOp::PollFd { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Connect { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Sleep { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::PollFd { buffer_handle, .. } => Some(*buffer_handle),
         }
     }
 
-    pub(super) fn buffer_handle_mut(&mut self) -> &mut BufferHandle {
+    pub(super) fn filled(&self) -> usize {
         match self {
-            PendingOp::Port { buffer_handle, .. } => buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => buffer_handle,
-            PendingOp::Open { buffer_handle, .. } => buffer_handle,
-            PendingOp::Task { buffer_handle, .. } => buffer_handle,
-            PendingOp::Resolve { buffer_handle, .. } => buffer_handle,
-            PendingOp::WatchNext { buffer_handle, .. } => buffer_handle,
-            PendingOp::PollFd { buffer_handle, .. } => buffer_handle,
+            PendingOp::Port { filled, .. } => *filled,
+            _ => 0,
+        }
+    }
+
+    pub(super) fn set_filled(&mut self, val: usize) {
+        if let PendingOp::Port { filled, .. } = self {
+            *filled = val;
         }
     }
 }

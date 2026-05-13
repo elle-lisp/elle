@@ -1,52 +1,8 @@
-//! Advanced list operations: append, concat, take, drop, butlast, reverse, last
+//! Advanced list operations: append, concat, reverse
 use crate::primitives::collection::coll_combine;
-use crate::primitives::seq::{seq_butlast, seq_reverse};
+use crate::primitives::seq::seq_reverse;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
-use crate::value::{error_val, list, Value};
-
-/// Take the first n elements of a list
-pub(crate) fn prim_take(args: &[Value]) -> (SignalBits, Value) {
-    let count = match args[0].as_int() {
-        Some(n) if n < 0 => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!("take: count must be non-negative, got {}", n),
-                ),
-            );
-        }
-        Some(n) => n as usize,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("take: expected integer, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-    let vec = match args[1].list_to_vec() {
-        Ok(v) => v,
-        Err(e) => return (SIG_ERROR, error_val("type-error", format!("take: {}", e))),
-    };
-
-    let taken: Vec<Value> = vec.into_iter().take(count).collect();
-    (SIG_OK, list(taken))
-}
-
-/// Get all elements of a sequence except the last.
-///
-/// butlast doesn't have a trait method — it's defined in terms of
-/// the underlying seq/collection implementations. User-defined Sequence
-/// types that only implement the trait protocol won't support butlast.
-pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
-    match seq_butlast(&args[0]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
+use crate::value::{error_val, Value};
 
 /// Append two collections
 pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
@@ -493,39 +449,3 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Get the last element of a sequence
-pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
-    crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Sequence", "last", args)
-}
-
-/// Drop the first n elements of a list
-pub(crate) fn prim_drop(args: &[Value]) -> (SignalBits, Value) {
-    let count = match args[0].as_int() {
-        Some(n) if n < 0 => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!("drop: count must be non-negative, got {}", n),
-                ),
-            );
-        }
-        Some(n) => n as usize,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("drop: expected integer, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-    let vec = match args[1].list_to_vec() {
-        Ok(v) => v,
-        Err(e) => return (SIG_ERROR, error_val("type-error", format!("drop: {}", e))),
-    };
-
-    let dropped: Vec<Value> = vec.into_iter().skip(count).collect();
-    (SIG_OK, list(dropped))
-}

@@ -32,9 +32,8 @@
     (println "  about to port/read 7...")
     (let [body (port/read p 7)]
       (assert (not (nil? body)) "read returned data")
-      (assert (= (string/size-of body) 7)
-              (string/join ["expected 7 bytes, got "
-                            (string (string/size-of body))] ""))
+      (assert (= (length body) 7)
+              (string/join ["expected 7 bytes, got " (string (length body))] ""))
       (assert (= (string body) "hello\r\n") "read body content"))))
 
 (println "  single read-after-readline: ok")
@@ -67,7 +66,7 @@
       (let [header (port/read-line p)]
         (assert (not (nil? header))
                 (string/join ["round " (string i) ": header is nil"] ""))
-        (let [expected-len (parse-int (slice header 1))]
+        (let [expected-len (parse-int (slice (string header) 1))]
           (let [body (port/read p (+ expected-len 2))]
             (let [val (slice (string body) 0 expected-len)]
               (assert (= val (string i))

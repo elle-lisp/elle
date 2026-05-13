@@ -432,35 +432,42 @@ pub(crate) fn prim_uri_encode(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Create an @string from byte arguments
+/// Create an @string from byte integers, strings, or @strings.
 /// (@string) => empty @string
 /// (@string 72 101 108) => @string with those bytes
-pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
+/// (@string "hello" " " "world") => @string with concatenated UTF-8 bytes
+pub(crate) fn prim_string_mut(args: &[Value]) -> (SignalBits, Value) {
     let mut bytes = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
-        match arg.as_int() {
-            Some(n) if (0..=255).contains(&n) => bytes.push(n as u8),
-            Some(n) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        format!("@string: byte {} out of range 0-255: {}", i, n),
-                    ),
-                )
-            }
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "@string: expected integer, got {} at position {}",
-                            arg.type_name(),
-                            i
+        if let Some(s) = arg.with_string(|s| s.as_bytes().to_vec()) {
+            bytes.extend(s);
+        } else if let Some(buf_ref) = arg.as_string_mut() {
+            bytes.extend(buf_ref.borrow().iter());
+        } else {
+            match arg.as_int() {
+                Some(n) if (0..=255).contains(&n) => bytes.push(n as u8),
+                Some(n) => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "argument-error",
+                            format!("@string: byte {} out of range 0-255: {}", i, n),
                         ),
-                    ),
-                )
+                    )
+                }
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "@string: expected integer, string, or @string, got {} at position {}",
+                                arg.type_name(),
+                                i
+                            ),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -533,7 +540,7 @@ pub(crate) fn prim_string_repeat(args: &[Value]) -> (SignalBits, Value) {
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@string",
-        func: prim_buffer,
+        func: prim_string_mut,
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable string from byte arguments.",

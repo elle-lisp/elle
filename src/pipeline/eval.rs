@@ -93,6 +93,9 @@ pub fn eval(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();

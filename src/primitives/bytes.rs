@@ -71,7 +71,7 @@ pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
 /// With integer arguments: each must be 0-255, assembled into a byte sequence.
 /// With a single string argument: encodes as UTF-8 bytes.
 /// With a single keyword argument: converts keyword name to UTF-8 bytes.
-pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes_mut(args: &[Value]) -> (SignalBits, Value) {
     // Single-argument coercion: string/keyword → @bytes, bytes → passthrough
     if args.len() == 1 {
         // @bytes → @bytes (idempotent)
@@ -315,7 +315,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     },
     PrimitiveDef {
         name: "@bytes",
-        func: prim_blob,
+        func: prim_bytes_mut,
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create mutable bytes. Accepts integers (0-255), or a single string/keyword.",

@@ -244,6 +244,18 @@ pub fn lookup_stdlib_value(sym_id: crate::value::SymbolId) -> Option<crate::valu
     })
 }
 
+/// Get the core.lisp exports (name → Value) from the compilation cache.
+///
+/// Used by the runtime eval instruction to seed the expander's core_env
+/// so that macros referencing core functions (last, butlast, etc.) work.
+pub fn get_cached_core_env() -> std::collections::HashMap<String, crate::value::Value> {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        let c = cache_ref.get_or_insert_with(CompilationCache::new);
+        c.expander.core_env.clone()
+    })
+}
+
 /// Register a REPL binding in the compilation cache.
 ///
 /// After the REPL evaluates a `def`, the binding's value, signal, and

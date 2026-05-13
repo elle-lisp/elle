@@ -138,7 +138,7 @@
   (assert (= result 1) "spawned @struct preserves data"))
 
 # spawn_rejects_native_function
-(let [[ok? _] (protect ((fn () (spawn abs))))]
+(let [[ok? _] (protect ((fn () (spawn length))))]
   (assert (not ok?) "spawn rejects native function"))
 
 # spawn_wrong_arity

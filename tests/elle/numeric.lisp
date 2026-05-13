@@ -249,3 +249,73 @@
 (assert (= (drop 0 ()) ()) "drop 0 empty")
 (def [ok _] (protect (drop -1 (list 1 2))))
 (assert (not ok) "drop negative errors")
+
+# ── @string constructor with string args ─────────────────────────────
+(assert (= (string (@string "hello")) "hello") "@string from string")
+(assert (= (string (@string "a" "b" "c")) "abc") "@string concat strings")
+(assert (= (string (@string "hi" 33)) "hi!") "@string mixed string+byte")
+(assert (= (length (@string)) 0) "@string empty")
+
+# ── reverse ──────────────────────────────────────────────────────────
+(assert (= (reverse (list 1 2 3)) (list 3 2 1)) "reverse list")
+(assert (= (reverse ()) ()) "reverse empty list")
+(assert (= (reverse [1 2 3]) [3 2 1]) "reverse array")
+(assert (= (reverse []) []) "reverse empty array")
+(assert (= (reverse "abc") "cba") "reverse string")
+(assert (= (reverse "") "") "reverse empty string")
+(assert (= (reverse (bytes 1 2 3)) (bytes 3 2 1)) "reverse bytes")
+(assert (= (reverse (bytes)) (bytes)) "reverse empty bytes")
+(let [ma (@array 1 2 3)]
+  (def rev-ma (reverse ma))
+  (assert (= rev-ma @[3 2 1]) "reverse @array"))
+(let [ms (@string 97 98 99)]
+  (def rev-ms (reverse ms))
+  (assert (= (string rev-ms) "cba") "reverse @string"))
+(let [mb (@bytes 1 2 3)]
+  (def rev-mb (reverse mb))
+  (assert (= rev-mb (@bytes 3 2 1)) "reverse @bytes"))
+(def [ok _] (protect (reverse |1 2 3|)))
+(assert (not ok) "reverse rejects set")
+(def [ok _] (protect (reverse {:a 1})))
+(assert (not ok) "reverse rejects struct")
+
+# ── append ───────────────────────────────────────────────────────────
+(assert (= (append (list 1 2) (list 3 4)) (list 1 2 3 4)) "append lists")
+(assert (= (append () (list 1)) (list 1)) "append empty list left")
+(assert (= (append (list 1) ()) (list 1)) "append empty list right")
+(assert (= (append [1 2] [3 4]) [1 2 3 4]) "append arrays")
+(assert (= (append [] [1]) [1]) "append empty array left")
+(assert (= (append "ab" "cd") "abcd") "append strings")
+(assert (= (append "" "x") "x") "append empty string left")
+(assert (= (append (bytes 1 2) (bytes 3 4)) (bytes 1 2 3 4)) "append bytes")
+(let [ma @[1 2]]
+  (append ma @[3 4])
+  (assert (= ma @[1 2 3 4]) "append @array mutates"))
+(let [ms (@string 97 98)]
+  (append ms (@string 99 100))
+  (assert (= (string ms) "abcd") "append @string mutates"))
+(let [mb (@bytes 1 2)]
+  (append mb (@bytes 3 4))
+  (assert (= mb (@bytes 1 2 3 4)) "append @bytes mutates"))
+(assert (= (append |1 2| |2 3|) |1 2 3|) "append sets = union")
+(assert (= (append {:a 1} {:b 2}) {:a 1 :b 2}) "append structs = merge")
+(def [ok _] (protect (append 42 43)))
+(assert (not ok) "append rejects non-collection")
+
+# ── concat ───────────────────────────────────────────────────────────
+(assert (= (concat) ()) "concat no args")
+(assert (= (concat [1 2]) [1 2]) "concat single arg")
+(assert (= (concat [1 2] [3] [4 5]) [1 2 3 4 5]) "concat arrays")
+(assert (= (concat "a" "b" "c") "abc") "concat strings")
+(assert (= (concat (list 1) (list 2) (list 3)) (list 1 2 3)) "concat lists")
+
+# ── fold / reduce ───────────────────────────────────────────────────
+(assert (= (fold + 0 [1 2 3]) 6) "fold sum")
+(assert (= (fold + 0 ()) 0) "fold empty")
+(assert (= (reduce + 0 [1 2 3]) 6) "reduce sum (3-arg alias for fold)")
+(assert (= (reduce + 0 ()) 0) "reduce empty returns init")
+
+# ── quasiquote splice ───────────────────────────────────────────────
+(defmacro splice-test [& items]
+  `(list ,;items))
+(assert (= (splice-test 10 20 30) (list 10 20 30)) "quasiquote splice")

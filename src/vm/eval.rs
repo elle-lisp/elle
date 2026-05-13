@@ -75,7 +75,11 @@ fn eval_inner(
     let syntax = Syntax::from_value(&expr_value, symbols, span)?;
 
     // Get-or-create Expander (cached on VM)
-    let mut expander = vm.eval_expander.take().unwrap_or_default();
+    let mut expander = vm.eval_expander.take().unwrap_or_else(|| {
+        let mut e = crate::syntax::Expander::new();
+        e.core_env = crate::pipeline::get_cached_core_env();
+        e
+    });
 
     // Save the caller's stack before macro expansion. load_prelude and
     // expand both execute VM bytecode (via eval_syntax → vm.execute)
@@ -129,6 +133,11 @@ fn eval_inner(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if let Some(ref exp) = vm.eval_expander {
+        if !exp.core_env.is_empty() {
+            analyzer.bind_compile_time_env(&exp.core_env);
+        }
+    }
     if let Some(ref env_map) = env_map {
         analyzer.bind_compile_time_env(env_map);
     }

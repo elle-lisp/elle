@@ -99,13 +99,17 @@ impl MockBackend {
 }
 
 impl crate::io::IoBackend for MockBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String> {
+    fn submit(
+        &self,
+        request: &IoRequest,
+        _origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
 
         let op_name = match &request.op {
-            IoOp::ReadLine => "read-line",
+            IoOp::ReadLine { .. } => "read-line",
             IoOp::Read { .. } => "read",
             IoOp::ReadAll => "read-all",
             IoOp::Write { .. } => "write",
@@ -139,7 +143,7 @@ impl crate::io::IoBackend for MockBackend {
             ))
         } else {
             match &request.op {
-                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll => {
+                IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadAll => {
                     if inner.read_cursor < inner.read_data.len() {
                         let data = inner.read_data[inner.read_cursor].clone();
                         inner.read_cursor += 1;
@@ -291,7 +295,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        let id = mock.submit(&req).unwrap();
+        let id = mock.submit(&req, std::ptr::null_mut()).unwrap();
         assert_eq!(id, 1);
 
         let completions = mock.poll();
@@ -310,7 +314,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        let id = mock.submit(&req).unwrap();
+        let id = mock.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
@@ -328,7 +332,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        mock.submit(&req).unwrap();
+        mock.submit(&req, std::ptr::null_mut()).unwrap();
 
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
@@ -340,16 +344,22 @@ mod tests {
         let mock = MockBackend::new();
         mock.seed_read(b"data".to_vec());
 
-        let _ = mock.submit(&IoRequest {
-            op: IoOp::ReadAll,
-            port: Value::NIL,
-            timeout: None,
-        });
-        let _ = mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        });
+        let _ = mock.submit(
+            &IoRequest {
+                op: IoOp::ReadAll,
+                port: Value::NIL,
+                timeout: None,
+            },
+            std::ptr::null_mut(),
+        );
+        let _ = mock.submit(
+            &IoRequest {
+                op: IoOp::Flush,
+                port: Value::NIL,
+                timeout: None,
+            },
+            std::ptr::null_mut(),
+        );
 
         let log = mock.take_log();
         assert_eq!(log, vec!["read-all", "flush"]);
@@ -359,11 +369,13 @@ mod tests {
     fn test_mock_eof_no_data() {
         let mock = MockBackend::new();
         let req = IoRequest {
-            op: IoOp::ReadLine,
+            op: IoOp::ReadLine {
+                buffer: Value::bytes(vec![0u8; 64]),
+            },
             port: Value::NIL,
             timeout: None,
         };
-        mock.submit(&req).unwrap();
+        mock.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = mock.poll();
         assert_eq!(completions.len(), 1);
         assert_eq!(*completions[0].result.as_ref().unwrap(), Value::NIL);
@@ -373,18 +385,24 @@ mod tests {
     fn test_mock_monotonic_ids() {
         let mock = MockBackend::new();
         let id1 = mock
-            .submit(&IoRequest {
-                op: IoOp::Flush,
-                port: Value::NIL,
-                timeout: None,
-            })
+            .submit(
+                &IoRequest {
+                    op: IoOp::Flush,
+                    port: Value::NIL,
+                    timeout: None,
+                },
+                std::ptr::null_mut(),
+            )
             .unwrap();
         let id2 = mock
-            .submit(&IoRequest {
-                op: IoOp::Flush,
-                port: Value::NIL,
-                timeout: None,
-            })
+            .submit(
+                &IoRequest {
+                    op: IoOp::Flush,
+                    port: Value::NIL,
+                    timeout: None,
+                },
+                std::ptr::null_mut(),
+            )
             .unwrap();
         assert!(id2 > id1);
     }
@@ -394,11 +412,14 @@ mod tests {
         let mock = MockBackend::new();
         mock.set_latency(Duration::from_millis(100));
 
-        mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        })
+        mock.submit(
+            &IoRequest {
+                op: IoOp::Flush,
+                port: Value::NIL,
+                timeout: None,
+            },
+            std::ptr::null_mut(),
+        )
         .unwrap();
 
         // Poll immediately — should be empty (latency not elapsed)
@@ -411,11 +432,14 @@ mod tests {
         let mock = MockBackend::new();
         mock.set_latency(Duration::from_millis(10));
 
-        mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        })
+        mock.submit(
+            &IoRequest {
+                op: IoOp::Flush,
+                port: Value::NIL,
+                timeout: None,
+            },
+            std::ptr::null_mut(),
+        )
         .unwrap();
 
         // Wait should sleep until deadline and return the completion
@@ -428,11 +452,14 @@ mod tests {
         let mock = MockBackend::new();
         mock.set_latency(Duration::from_secs(10)); // very long
 
-        mock.submit(&IoRequest {
-            op: IoOp::Flush,
-            port: Value::NIL,
-            timeout: None,
-        })
+        mock.submit(
+            &IoRequest {
+                op: IoOp::Flush,
+                port: Value::NIL,
+                timeout: None,
+            },
+            std::ptr::null_mut(),
+        )
         .unwrap();
 
         // Wait with short timeout — should return empty
@@ -446,11 +473,14 @@ mod tests {
         mock.set_latency(Duration::from_secs(10));
 
         let id = mock
-            .submit(&IoRequest {
-                op: IoOp::Flush,
-                port: Value::NIL,
-                timeout: None,
-            })
+            .submit(
+                &IoRequest {
+                    op: IoOp::Flush,
+                    port: Value::NIL,
+                    timeout: None,
+                },
+                std::ptr::null_mut(),
+            )
             .unwrap();
 
         mock.cancel(id).unwrap();
@@ -471,7 +501,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        mock.submit(&req).unwrap();
+        mock.submit(&req, std::ptr::null_mut()).unwrap();
 
         // Poll immediately — Sleep's 10ms hasn't elapsed
         let completions = mock.poll();

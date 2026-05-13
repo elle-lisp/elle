@@ -26,13 +26,14 @@
 (defn resp-read [port]
   "Read a single RESP2 reply from port. Signals on error replies.
    Returns Elle values: string, integer, array, or nil."
-  (let [line (port/read-line port)]
-    (when (nil? line)
+  (let [raw (port/read-line port)]
+    (when (nil? raw)
       (error {:error :redis-error
               :reason :unexpected-eof
               :message "unexpected EOF"}))
-    (let [prefix (get line 0)
-          body (slice line 1)]
+    (let [line raw]
+      (let [prefix (get line 0)
+            body (slice line 1)]
       (case
         prefix  # Simple string
         "+" body

@@ -60,7 +60,11 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (io/submit backend request) → submission-id
+/// (io/submit backend request [fiber]) → submission-id
+///
+/// Optional third arg: the fiber that issued the I/O request. When present,
+/// spawn results are allocated on the fiber's heap (eliminating cross-heap
+/// references). Without a fiber arg, the current heap is used.
 fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
     let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
@@ -89,7 +93,16 @@ fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    match backend.0.submit(request) {
+    let origin_heap = if args.len() > 2 {
+        if let Some(handle) = args[2].as_fiber() {
+            handle.with(|f| &*f.heap as *const _ as *mut crate::value::fiberheap::FiberHeap)
+        } else {
+            std::ptr::null_mut()
+        }
+    } else {
+        std::ptr::null_mut()
+    };
+    match backend.0.submit(request, origin_heap) {
         Ok(id) => (SIG_OK, Value::int(id as i64)),
         Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
     }
@@ -348,8 +361,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "io/submit",
         func: prim_io_submit,
         signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Submit an I/O request to an async backend. Returns submission ID.",
+        arity: Arity::Range(2, 3),
+        doc: "Submit an I/O request to an async backend. Optional third arg is the origin fiber for heap-correct spawn allocation. Returns submission ID.",
         params: &["backend", "request"],
         category: "io",
         example: "(io/submit backend request)",

@@ -27,7 +27,7 @@ fn extract_port_value(value: &Value, prim_name: &str) -> Result<Value, (SignalBi
     Ok(*value)
 }
 
-/// (port/read-line port [:timeout ms]) → string | nil
+/// (port/read-line port [:timeout ms]) → bytes | nil
 fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
     let port = match extract_port_value(&args[0], "port/read-line") {
         Ok(p) => p,
@@ -37,11 +37,17 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
         Ok(t) => t,
         Err(e) => return e,
     };
+    let buffer = Value::bytes(vec![0u8; READ_LINE_BUF_SIZE]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::ReadLine, port, timeout),
+        IoRequest::with_timeout(IoOp::ReadLine { buffer }, port, timeout),
     )
 }
+
+/// Default buffer size for ReadLine operations (64KB).
+/// Covers every real protocol line. If a line exceeds this, the fiber
+/// receives a partial result and can re-issue the read.
+const READ_LINE_BUF_SIZE: usize = 65536;
 
 /// (port/read port n [:timeout ms]) → bytes | nil
 fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
@@ -78,9 +84,10 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
         Ok(t) => t,
         Err(e) => return e,
     };
+    let buffer = Value::bytes(vec![0u8; count]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::Read { count }, port, timeout),
+        IoRequest::with_timeout(IoOp::Read { count, buffer }, port, timeout),
     )
 }
 
@@ -150,7 +157,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
             propagates: 0,
         },
         arity: Arity::AtLeast(1),
-        doc: "Read one line from port. Returns string or nil (EOF).",
+        doc: "Read one line from port. Returns bytes or nil (EOF).",
         params: &["port"],
         category: "port",
         example: "(port/read-line (port/open \"file.txt\" :read))",

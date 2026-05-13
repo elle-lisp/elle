@@ -23,20 +23,76 @@ fn stdin_to_completion(
     buffer_pool: &mut BufferPool,
 ) -> Option<Completion> {
     let pending_op = pending.remove(&sc.id)?;
-    buffer_pool.release(pending_op.buffer_handle());
+    // Release BufferPool handle if present
+    if let Some(bh) = pending_op.buffer_handle() {
+        buffer_pool.release(bh);
+    }
     Some(match sc.result {
         Ok(data) if data.is_empty() => Completion {
             id: sc.id,
             result: Ok(Value::NIL),
         },
-        Ok(data) => Completion {
-            id: sc.id,
-            result: Ok(Value::string(
-                String::from_utf8_lossy(&data)
-                    .trim_end_matches('\n')
-                    .trim_end_matches('\r'),
-            )),
-        },
+        Ok(data) => {
+            // For Read/ReadLine, copy data into the pre-allocated buffer
+            if let PendingOp::Port {
+                op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+                ..
+            } = &pending_op
+            {
+                unsafe {
+                    let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                    let copy_len = data.len().min(dst_cap);
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_len);
+                    // For ReadLine, trim trailing \r\n
+                    let final_len = if matches!(
+                        &pending_op,
+                        PendingOp::Port {
+                            op: IoOp::ReadLine { .. },
+                            ..
+                        }
+                    ) {
+                        let mut end = copy_len;
+                        if end > 0 && data[end - 1] == b'\n' {
+                            end -= 1;
+                            if end > 0 && data[end - 1] == b'\r' {
+                                end -= 1;
+                            }
+                        }
+                        end
+                    } else {
+                        copy_len
+                    };
+                    crate::io::request::truncate_buffer(buffer, final_len);
+                }
+                if let PendingOp::Port {
+                    op: IoOp::ReadLine { buffer } | IoOp::Read { buffer, .. },
+                    ..
+                } = &pending_op
+                {
+                    // ReadLine: transmute LBytes → LString (zero-copy)
+                    let result = if matches!(
+                        &pending_op,
+                        PendingOp::Port {
+                            op: IoOp::ReadLine { .. },
+                            ..
+                        }
+                    ) {
+                        unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
+                    } else {
+                        Ok(*buffer)
+                    };
+                    Completion { id: sc.id, result }
+                } else {
+                    unreachable!()
+                }
+            } else {
+                // ReadAll or other — construct bytes (legacy path)
+                Completion {
+                    id: sc.id,
+                    result: Ok(Value::bytes(data)),
+                }
+            }
+        }
         Err(e) => Completion {
             id: sc.id,
             result: Err(error_val("io-error", e)),
@@ -60,6 +116,28 @@ fn pool_to_completion(
             *connect_fd = Some(pc.result_code);
         }
     }
+
+    // For read operations on the thread pool, copy data into the
+    // pre-allocated fiber buffer before processing the completion.
+    if let PendingOp::Port {
+        op: IoOp::Read { ref buffer, .. } | IoOp::ReadLine { ref buffer },
+        filled,
+        ..
+    } = &pending_op
+    {
+        if pc.result_code > 0 && !pc.data.is_empty() {
+            unsafe {
+                let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                let offset = *filled;
+                let remaining = dst_cap.saturating_sub(offset);
+                let copy_len = pc.data.len().min(remaining);
+                std::ptr::copy_nonoverlapping(pc.data.as_ptr(), dst.add(offset), copy_len);
+                let total = offset + copy_len;
+                crate::io::request::truncate_buffer(buffer, total);
+            }
+        }
+    }
+
     let bh = pending_op.buffer_handle();
     Some(completion::process_raw_completion(
         pc.id,
@@ -150,7 +228,14 @@ impl AsyncBackend {
     }
 
     /// Submit an I/O request. Returns a submission ID.
-    pub(crate) fn submit(&self, request: &IoRequest) -> Result<u64, String> {
+    ///
+    /// `origin_heap`: when non-null, spawn results are allocated on this heap
+    /// (the requesting fiber's heap) instead of the current thread-local heap.
+    pub(crate) fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
         // Portless operations — handle before port extraction.
         if let IoOp::Connect { ref addr } = request.op {
             return self.submit_connect(addr, request.timeout);
@@ -161,7 +246,7 @@ impl AsyncBackend {
 
         // Subprocess ops: portless (Spawn) or ProcessHandle-in-port (ProcessWait).
         if let IoOp::Spawn(ref req) = request.op {
-            return self.submit_spawn(req);
+            return self.submit_spawn(req, origin_heap);
         }
         if let IoOp::ProcessWait = request.op {
             return self.submit_process_wait(&request.port);
@@ -286,7 +371,10 @@ impl AsyncBackend {
             PortKey::Stdin => unreachable!(),
         };
 
-        let buf_handle = inner.buffer_pool.alloc(4096);
+        let buf_handle = match &request.op {
+            IoOp::ReadLine { .. } | IoOp::Read { .. } => None,
+            _ => Some(inner.buffer_pool.alloc(4096)),
+        };
 
         // Flush on socket/pipe/stdio ports is a no-op: fsync(2) returns EINVAL on
         // non-file fds (sockets, pipes, and stdio when redirected to pipes in subprocesses).
@@ -302,7 +390,9 @@ impl AsyncBackend {
                     | PortKind::Stderr
             )
         {
-            inner.buffer_pool.release(buf_handle);
+            if let Some(bh) = buf_handle {
+                inner.buffer_pool.release(bh);
+            }
             inner.completions.push_back(Completion {
                 id,
                 result: Ok(Value::NIL),
@@ -325,39 +415,58 @@ impl AsyncBackend {
                 .entry(port_key.clone())
                 .or_insert_with(FdState::new);
             match &request.op {
-                IoOp::ReadLine => {
+                IoOp::ReadLine { buffer } => {
                     if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
                         let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                        let s = String::from_utf8_lossy(&line_bytes);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        inner.buffer_pool.release(buf_handle);
-                        inner.completions.push_back(Completion {
-                            id,
-                            result: Ok(Value::string(trimmed)),
-                        });
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = line_bytes.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(line_bytes.as_ptr(), dst, copy_len);
+                            let final_len = if copy_len > 0 && line_bytes[copy_len - 1] == b'\n' {
+                                let mut end = copy_len - 1;
+                                if end > 0 && line_bytes[end - 1] == b'\r' {
+                                    end -= 1;
+                                }
+                                end
+                            } else {
+                                copy_len
+                            };
+                            crate::io::request::truncate_buffer(buffer, final_len);
+                        }
+                        // Transmute LBytes → LString (zero-copy)
+                        let result =
+                            unsafe { crate::io::request::bytes_to_string_in_place(*buffer) };
+                        inner.completions.push_back(Completion { id, result });
                         return Ok(id);
+                    }
+                    // No newline found in state.buffer, but there IS buffered data.
+                    // Copy it into the fiber buffer at offset 0 so the completion
+                    // handler can prepend it to the kernel/thread-pool data.
+                    if !state.buffer.is_empty() {
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = state.buffer.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
+                        }
+                        read_buffered = state.buffer.len();
+                        state.buffer.clear();
                     }
                 }
-                IoOp::Read { count } => {
+                IoOp::Read { count, buffer } => {
                     if state.buffer.len() >= *count {
-                        // Buffer has enough — serve entirely from buffer.
                         let chunk: Vec<u8> = state.buffer.drain(..*count).collect();
-                        let value = match port.encoding() {
-                            Encoding::Text => {
-                                Value::string(String::from_utf8_lossy(&chunk).as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(chunk),
-                        };
-                        inner.buffer_pool.release(buf_handle);
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = chunk.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, copy_len);
+                            crate::io::request::truncate_buffer(buffer, copy_len);
+                        }
                         inner.completions.push_back(Completion {
                             id,
-                            result: Ok(value),
+                            result: Ok(*buffer),
                         });
                         return Ok(id);
                     }
-                    // Buffer has partial data — leave it in place and submit
-                    // a read for the remaining bytes. The completion handler
-                    // will prepend the buffered bytes.
                     read_buffered = state.buffer.len();
                 }
                 _ => {}
@@ -397,6 +506,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -457,6 +567,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -496,6 +607,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -535,6 +647,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -565,9 +678,9 @@ impl AsyncBackend {
                     PlatformBackend::ThreadPool(pool) => {
                         let _ = buffer_pool;
                         let pool_op = match &request.op {
-                            IoOp::ReadLine => PoolOp::ReadLine { fd },
+                            IoOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             IoOp::ReadAll => PoolOp::ReadAll { fd },
-                            IoOp::Read { count } => PoolOp::Read {
+                            IoOp::Read { count, .. } => PoolOp::Read {
                                 fd,
                                 size: *count - read_buffered,
                             },
@@ -586,8 +699,11 @@ impl AsyncBackend {
                     id,
                     PendingOp::Port {
                         op: match &request.op {
-                            IoOp::ReadLine => IoOp::ReadLine,
-                            IoOp::Read { count } => IoOp::Read { count: *count },
+                            IoOp::ReadLine { buffer } => IoOp::ReadLine { buffer: *buffer },
+                            IoOp::Read { count, buffer } => IoOp::Read {
+                                count: *count,
+                                buffer: *buffer,
+                            },
                             IoOp::ReadAll => IoOp::ReadAll,
                             IoOp::Write { data } => IoOp::Write { data: *data },
                             IoOp::Flush => IoOp::Flush,
@@ -597,6 +713,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: read_buffered,
                     },
                 );
                 Ok(id)
@@ -913,15 +1030,31 @@ impl AsyncBackend {
         Ok(id)
     }
 
-    fn submit_spawn(&self, req: &SpawnRequest) -> Result<u64, String> {
+    fn submit_spawn(
+        &self,
+        req: &SpawnRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
         let buf_handle = inner.buffer_pool.alloc(0);
 
-        let result = req.spawn_to_struct();
+        // Allocate the spawn result on the requesting fiber's heap (if
+        // provided) so there are no cross-heap references. The requesting
+        // fiber receives this value via fiber/resume, so the value lives
+        // on the same heap that will manage its lifetime.
+        let result = if !origin_heap.is_null() {
+            let saved = crate::value::fiberheap::save_current_heap();
+            unsafe { crate::value::fiberheap::install_fiber_heap(origin_heap) };
+            let r = req.spawn_to_struct();
+            unsafe { crate::value::fiberheap::restore_saved_heap(saved) };
+            r
+        } else {
+            req.spawn_to_struct()
+        };
 
-        inner.completions.push_back(Completion { id, result });
+        inner.completions.push_back(Completion::new(id, result));
 
         // Spawn is an immediate completion — no CQE will arrive.
         // Release the placeholder buffer (was alloc(0), nothing stored).
@@ -1381,8 +1514,12 @@ impl AsyncBackend {
 }
 
 impl crate::io::IoBackend for AsyncBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String> {
-        self.submit(request)
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
+        self.submit(request, origin_heap)
     }
 
     fn poll(&self) -> Vec<Completion> {
@@ -1414,23 +1551,13 @@ impl AsyncBackendInner {
             }
             PlatformBackend::ThreadPool(pool) => {
                 let raw = pool.poll();
-                for PoolCompletion {
-                    id,
-                    result_code,
-                    data,
-                } in raw
-                {
-                    if let Some(pending) = self.pending.remove(&id) {
-                        let buf_handle = pending.buffer_handle();
-                        let c = completion::process_raw_completion(
-                            id,
-                            result_code,
-                            data,
-                            &pending,
-                            &mut self.fd_states,
-                            &mut self.buffer_pool,
-                            buf_handle,
-                        );
+                for pc in raw {
+                    if let Some(c) = pool_to_completion(
+                        pc,
+                        &mut self.pending,
+                        &mut self.fd_states,
+                        &mut self.buffer_pool,
+                    ) {
                         self.completions.push_back(c);
                     }
                 }
@@ -1480,8 +1607,8 @@ impl AsyncBackendInner {
     fn submit_stdin(&mut self, id: u64, op: &IoOp) -> Result<u64, String> {
         let stdin_thread = self.stdin_thread.get_or_insert_with(StdinThread::new);
         let op_kind = match op {
-            IoOp::ReadLine => StdinOpKind::ReadLine,
-            IoOp::Read { count } => StdinOpKind::Read { count: *count },
+            IoOp::ReadLine { .. } => StdinOpKind::ReadLine,
+            IoOp::Read { count, .. } => StdinOpKind::Read { count: *count },
             IoOp::ReadAll => StdinOpKind::ReadAll,
             IoOp::Write { .. }
             | IoOp::Flush
@@ -1503,21 +1630,24 @@ impl AsyncBackendInner {
             | IoOp::PollFd { .. } => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
-        // No buffer needed for stdin (thread manages its own)
         let buf_handle = self.buffer_pool.alloc(0);
         self.pending.insert(
             id,
             PendingOp::Port {
                 op: match op {
-                    IoOp::ReadLine => IoOp::ReadLine,
-                    IoOp::Read { count } => IoOp::Read { count: *count },
+                    IoOp::ReadLine { buffer } => IoOp::ReadLine { buffer: *buffer },
+                    IoOp::Read { count, buffer } => IoOp::Read {
+                        count: *count,
+                        buffer: *buffer,
+                    },
                     IoOp::ReadAll => IoOp::ReadAll,
                     _ => unreachable!(),
                 },
                 port_key: PortKey::Stdin,
-                port: Value::NIL, // stdin has no port Value
-                buffer_handle: buf_handle,
+                port: Value::NIL,
+                buffer_handle: Some(buf_handle),
                 listener_kind: None,
+                filled: 0,
             },
         );
         Ok(id)
@@ -1685,8 +1815,8 @@ mod tests {
             timeout: None,
         };
 
-        let id1 = backend.submit(&req1).unwrap();
-        let id2 = backend.submit(&req2).unwrap();
+        let id1 = backend.submit(&req1, std::ptr::null_mut()).unwrap();
+        let id2 = backend.submit(&req2, std::ptr::null_mut()).unwrap();
         assert!(id2 > id1, "IDs must be monotonically increasing");
 
         std::fs::remove_file(&path).ok();
@@ -1705,7 +1835,7 @@ mod tests {
             port: port_val,
             timeout: None,
         };
-        let result = backend.submit(&req);
+        let result = backend.submit(&req, std::ptr::null_mut());
         assert!(result.is_err());
 
         std::fs::remove_file(&path).ok();
@@ -1729,7 +1859,7 @@ mod tests {
             port,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
@@ -1752,7 +1882,7 @@ mod tests {
             port,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
@@ -1877,13 +2007,16 @@ mod tests {
 
         let backend = AsyncBackend::new().unwrap();
         let accept_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Accept {
-                    options: Default::default(),
+            .submit(
+                &IoRequest {
+                    op: IoOp::Accept {
+                        options: Default::default(),
+                    },
+                    port: listener_port,
+                    timeout: None,
                 },
-                port: listener_port,
-                timeout: None,
-            })
+                std::ptr::null_mut(),
+            )
             .unwrap();
 
         // Use a barrier so the connect happens only after we're about to call wait().
@@ -1977,7 +2110,7 @@ mod tests {
             port: listener_port,
             timeout: None,
         };
-        let accept_id = backend.submit(&accept_req).unwrap();
+        let accept_id = backend.submit(&accept_req, std::ptr::null_mut()).unwrap();
 
         // Connect from a background thread
         let port_copy = bound_port;
@@ -2040,7 +2173,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        let connect_id = backend.submit(&connect_req).unwrap();
+        let connect_id = backend.submit(&connect_req, std::ptr::null_mut()).unwrap();
 
         // Wait for the connect completion
         let completions = backend.wait(5000).unwrap();
@@ -2112,27 +2245,33 @@ mod tests {
         let backend = AsyncBackend::new().unwrap();
 
         let accept_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Accept {
-                    options: Default::default(),
+            .submit(
+                &IoRequest {
+                    op: IoOp::Accept {
+                        options: Default::default(),
+                    },
+                    port: listener_port,
+                    timeout: None,
                 },
-                port: listener_port,
-                timeout: None,
-            })
+                std::ptr::null_mut(),
+            )
             .unwrap();
 
         let connect_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Connect {
-                    addr: crate::io::request::ConnectAddr::Tcp {
-                        addr: "127.0.0.1".to_string(),
-                        port: bound_port,
-                        options: Default::default(),
+            .submit(
+                &IoRequest {
+                    op: IoOp::Connect {
+                        addr: crate::io::request::ConnectAddr::Tcp {
+                            addr: "127.0.0.1".to_string(),
+                            port: bound_port,
+                            options: Default::default(),
+                        },
                     },
+                    port: Value::NIL,
+                    timeout: None,
                 },
-                port: Value::NIL,
-                timeout: None,
-            })
+                std::ptr::null_mut(),
+            )
             .unwrap();
 
         // Collect completions — may arrive in 1 or 2 wait calls.
@@ -2183,7 +2322,7 @@ mod tests {
             port,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
         // Seek is immediate — no wait needed
         let completions = backend.poll();
@@ -2206,7 +2345,7 @@ mod tests {
             port,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
         let completions = backend.poll();
         assert_eq!(completions.len(), 1);
@@ -2231,7 +2370,7 @@ mod tests {
             timeout: None,
         };
         // stdin has PortKind::Stdin — seek must fail immediately
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = backend.poll();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
@@ -2255,7 +2394,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
@@ -2289,7 +2428,7 @@ mod tests {
             port: handle_val,
             timeout: None,
         };
-        let id = backend.submit(&req);
+        let id = backend.submit(&req, std::ptr::null_mut());
 
         match id {
             Err(e) if e.contains("thread-pool") => {
@@ -2339,7 +2478,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
@@ -2374,7 +2513,7 @@ mod tests {
             port: Value::NIL,
             timeout: None,
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);
@@ -2401,7 +2540,7 @@ mod tests {
             port: Value::NIL,
             timeout: Some(std::time::Duration::from_millis(5000)),
         };
-        let id = backend.submit(&req).unwrap();
+        let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
         let completions = backend.wait(-1).unwrap();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, id);

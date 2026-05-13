@@ -25,32 +25,46 @@ pub(super) fn submit_uring_stream(
     op: &IoOp,
     timeout: Option<Duration>,
     buffer_pool: &mut BufferPool,
-    buf_handle: BufferHandle,
+    buf_handle: Option<BufferHandle>,
     read_buffered: usize,
 ) -> Result<(), String> {
     use io_uring::opcode;
     use io_uring::types::Fd;
 
     let entry = match op {
-        IoOp::ReadLine | IoOp::ReadAll => {
-            let buf = buffer_pool.get_mut(buf_handle);
+        IoOp::ReadLine { buffer } => {
+            let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
+            let read_size = (dst_cap - read_buffered).min(4096);
+            unsafe {
+                opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
+                    .offset(u64::MAX)
+                    .build()
+                    .user_data(id)
+            }
+        }
+        IoOp::ReadAll => {
+            let bh = buf_handle.expect("ReadAll requires BufferHandle");
+            let buf = buffer_pool.get_mut(bh);
             buf.resize(4096, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
                 .offset(u64::MAX)
                 .build()
                 .user_data(id)
         }
-        IoOp::Read { count } => {
-            let buf = buffer_pool.get_mut(buf_handle);
-            buf.resize(*count - read_buffered, 0);
-            opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
-                .offset(u64::MAX)
-                .build()
-                .user_data(id)
+        IoOp::Read { count, buffer } => {
+            let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
+            let read_size = (*count - read_buffered).min(dst_cap - read_buffered);
+            unsafe {
+                opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
+                    .offset(u64::MAX)
+                    .build()
+                    .user_data(id)
+            }
         }
         IoOp::Write { data } => {
             let bytes = crate::io::aio::AsyncBackend::extract_write_bytes(data);
-            let buf = buffer_pool.get_mut(buf_handle);
+            let bh = buf_handle.expect("Write requires BufferHandle");
+            let buf = buffer_pool.get_mut(bh);
             buf.clear();
             buf.extend_from_slice(&bytes);
             opcode::Write::new(Fd(fd), buf.as_ptr(), buf.len() as u32)
@@ -703,7 +717,7 @@ pub(super) fn drain_cqes(
                         let msghdr_size = std::mem::size_of::<libc::msghdr>();
                         let iovec_size = std::mem::size_of::<libc::iovec>();
                         let sockaddr_size = std::mem::size_of::<libc::sockaddr_storage>();
-                        let buf = buffer_pool.get_mut(buf_handle);
+                        let buf = buffer_pool.get_mut(buf_handle.unwrap());
 
                         // Read actual address length from msghdr (kernel updates msg_namelen)
                         let addr_len = unsafe {
@@ -726,44 +740,48 @@ pub(super) fn drain_cqes(
                         encoded.extend_from_slice(&payload);
                         encoded
                     }
-                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll if result_code > 0 => {
-                        let buf = buffer_pool.get_mut(buf_handle);
+                    IoOp::ReadLine { .. } | IoOp::Read { .. } if result_code > 0 => {
+                        // Data was written directly into the fiber buffer by the kernel.
+                        Vec::new()
+                    }
+                    IoOp::ReadAll if result_code > 0 => {
+                        let buf = buffer_pool.get_mut(buf_handle.unwrap());
                         buf[..result_code as usize].to_vec()
                     }
                     _ => Vec::new(),
                 },
                 PendingOp::WatchNext { .. } if result_code > 0 => {
-                    let buf = buffer_pool.get_mut(buf_handle);
+                    let buf = buffer_pool.get_mut(buf_handle.unwrap());
                     buf[..result_code as usize].to_vec()
                 }
                 _ => Vec::new(),
             };
 
             // ReadLine re-submission: if the read returned data but no newline
-            // was found (combined with any previously buffered bytes), buffer
-            // the data and schedule another read instead of returning a
-            // truncated line.
+            // was found in the fiber's buffer, resubmit for more data.
             if let PendingOp::Port {
-                op: IoOp::ReadLine,
+                op: IoOp::ReadLine { ref buffer },
                 ref port_key,
+                ref mut filled,
                 ..
             } = pending_op
             {
                 if result_code > 0 {
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
-                    let has_newline = state.buffer.iter().chain(data.iter()).any(|&b| b == b'\n');
+                    let total_in_fiber = *filled + result_code as usize;
+                    // Check for newline in the fiber's buffer content
+                    let buf_bytes = buffer.as_bytes().unwrap();
+                    let has_newline = buf_bytes[..total_in_fiber.min(buf_bytes.len())]
+                        .iter()
+                        .any(|&b| b == b'\n');
                     if !has_newline {
-                        state.buffer.extend_from_slice(&data);
-                        buffer_pool.release(buf_handle);
+                        // No newline found — advance filled cursor for re-submission.
+                        *filled = total_in_fiber;
                         let fd = match port_key {
                             PortKey::Fd(raw) => *raw,
                             PortKey::Stdout => 1,
                             PortKey::Stderr => 2,
                             PortKey::Stdin => unreachable!(),
                         };
-                        // size=4096 for ReadLine (variable-length read)
                         read_resubmits.push((id, fd, 4096, pending_op));
                         continue;
                     }
@@ -776,9 +794,10 @@ pub(super) fn drain_cqes(
             // are excluded — port/read returns "up to N bytes" per POSIX
             // semantics, so a short read is a normal completion.
             if let PendingOp::Port {
-                op: IoOp::Read { count },
+                op: IoOp::Read { count, ref buffer },
                 ref port_key,
                 ref port,
+                ref mut filled,
                 ..
             } = pending_op
             {
@@ -791,11 +810,18 @@ pub(super) fn drain_cqes(
                     let state = fd_states
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
-                    let total = state.buffer.len() + got;
+                    let total_in_fiber = *filled + got;
+                    let total = state.buffer.len() + total_in_fiber;
                     if total < count {
-                        // Short read — buffer and resubmit for remainder.
-                        state.buffer.extend_from_slice(&data);
-                        buffer_pool.release(buf_handle);
+                        // Short read — copy from fiber buffer into state.buffer and resubmit.
+                        unsafe {
+                            let (dst, _) = crate::io::request::writeable_buffer_ptr(buffer);
+                            state
+                                .buffer
+                                .extend_from_slice(std::slice::from_raw_parts(dst, total_in_fiber));
+                        }
+                        // Reset filled for re-submission (data moved to state.buffer)
+                        *filled = 0;
                         let fd = match port_key {
                             PortKey::Fd(raw) => *raw,
                             PortKey::Stdout => 1,
@@ -822,7 +848,9 @@ pub(super) fn drain_cqes(
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
                     state.buffer.extend_from_slice(&data);
-                    buffer_pool.release(buf_handle);
+                    if let Some(bh) = buf_handle {
+                        buffer_pool.release(bh);
+                    }
                     let fd = match port_key {
                         PortKey::Fd(raw) => *raw,
                         PortKey::Stdout => 1,
@@ -833,6 +861,11 @@ pub(super) fn drain_cqes(
                     continue;
                 }
             }
+
+            // Note: filled is NOT updated here. Re-submissions update filled in
+            // the re-submit block below. For final completions, process_raw_completion
+            // computes total = filled + result_code, which is correct because filled
+            // was set at submission time (read_buffered) or by a previous re-submission.
 
             let completion = process_raw_completion(
                 id,
@@ -848,24 +881,62 @@ pub(super) fn drain_cqes(
     }
 
     // Re-submit ReadLine and short-Read ops that need more data.
-    for (id, fd, size, pending_op) in read_resubmits {
-        let new_buf = buffer_pool.alloc(size);
-        let buf = buffer_pool.get_mut(new_buf);
-        buf.resize(size, 0);
-        let sqe = io_uring::opcode::Read::new(
-            io_uring::types::Fd(fd),
-            buf.as_mut_ptr(),
-            buf.len() as u32,
-        )
-        .offset(u64::MAX)
-        .build()
-        .user_data(id);
-        // Re-insert pending op with new buffer handle.
-        let mut reinserted: PendingOp = pending_op;
-        *reinserted.buffer_handle_mut() = new_buf;
-        pending.insert(id, reinserted);
-        unsafe {
-            let _ = ring.submission().push(&sqe);
+    // For reads with pre-allocated buffers, re-submit into the remaining
+    // space in the fiber's buffer (advance past filled bytes).
+    for (id, fd, _size, mut pending_op) in read_resubmits {
+        if let PendingOp::Port {
+            op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+            ref mut filled,
+            ..
+        } = pending_op
+        {
+            let buf_bytes = buffer.as_bytes().unwrap();
+            let remaining = buf_bytes.len().saturating_sub(*filled);
+            if remaining == 0 {
+                // Buffer full — return what we have as a partial result.
+                // Don't re-submit; let process_raw_completion handle it.
+                // Push back into completions via process_raw_completion.
+                continue;
+            }
+            unsafe {
+                let (dst, _) = crate::io::request::writeable_buffer_ptr(buffer);
+                let sqe = io_uring::opcode::Read::new(
+                    io_uring::types::Fd(fd),
+                    dst.add(*filled),
+                    remaining as u32,
+                )
+                .offset(u64::MAX)
+                .build()
+                .user_data(id);
+                pending.insert(id, pending_op);
+                let _ = ring.submission().push(&sqe);
+            }
+        } else {
+            // Non-read re-submission (shouldn't happen, but handle defensively)
+            let new_buf = buffer_pool.alloc(4096);
+            let buf = buffer_pool.get_mut(new_buf);
+            buf.resize(4096, 0);
+            let sqe = io_uring::opcode::Read::new(
+                io_uring::types::Fd(fd),
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+            )
+            .offset(u64::MAX)
+            .build()
+            .user_data(id);
+            if let PendingOp::Port {
+                ref mut buffer_handle,
+                ref mut filled,
+                ..
+            } = pending_op
+            {
+                *buffer_handle = Some(new_buf);
+                *filled = 0;
+            }
+            pending.insert(id, pending_op);
+            unsafe {
+                let _ = ring.submission().push(&sqe);
+            }
         }
     }
     if !ring.submission().is_empty() {

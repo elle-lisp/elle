@@ -10,9 +10,7 @@ use crate::value::types::Arity;
 use crate::value::{error_val, list, Value};
 
 // Re-export advanced functions for use in PRIMITIVES array
-pub(crate) use advanced::{
-    prim_append, prim_butlast, prim_concat, prim_drop, prim_last, prim_reverse, prim_take,
-};
+pub(crate) use advanced::{prim_append, prim_concat, prim_reverse};
 
 /// Get the first element of a sequence (list, array, @array, string)
 pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
@@ -227,50 +225,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["sequence"],
         category: "list",
         example: "(reverse (list 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "last",
-        func: prim_last,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Get the last element of a list",
-        params: &["list"],
-        category: "list",
-        example: "(last (list 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "butlast",
-        func: prim_butlast,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Get all elements of a list except the last",
-        params: &["list"],
-        category: "list",
-        example: "(butlast (list 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "take",
-        func: prim_take,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Take the first n elements of a list",
-        params: &["count", "list"],
-        category: "list",
-        example: "(take 2 (list 1 2 3 4))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "drop",
-        func: prim_drop,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Drop the first n elements of a list",
-        params: &["count", "list"],
-        category: "list",
-        example: "(drop 2 (list 1 2 3 4))",
         aliases: &[],
     },
     PrimitiveDef {
