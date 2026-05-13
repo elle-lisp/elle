@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## compile/primitives — verify Rust primitive metadata is accessible
 
 (def prims (compile/primitives))

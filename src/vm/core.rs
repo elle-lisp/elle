@@ -36,7 +36,7 @@ pub struct VM {
     /// Accessible from Elle via `(vm/config)`.
     pub runtime_config: crate::config::RuntimeConfig,
     /// The current fiber holding all per-execution state:
-    /// operand stack, call frames, exception handlers, coroutine state.
+    /// operand stack, call frames, exception handlers, fiber state.
     pub fiber: Fiber,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives

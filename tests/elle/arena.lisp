@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Integration tests for arena/stats, arena/count, arena/allocs, and fiber heap isolation
 #
 # Migrated from tests/integration/arena.rs

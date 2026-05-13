@@ -61,7 +61,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "pointer?",
     "jit?",
     "silent?",
-    "coro?",
+    "fiber?",
     // Collection predicates → bool
     "empty?",
     "has?",
@@ -77,7 +77,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "fn/mutates-params?",
     "mutates-params?",
     "fn/errors?",
-    "coroutine?",
+    // coroutine? removed in epoch 11 — fiber? is above
     // Collection → int
     "length",
     // Type conversion → int or float

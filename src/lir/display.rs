@@ -228,7 +228,7 @@ impl fmt::Display for LirInstr {
                 write!(f, "{} ← {}[{}]?", dst, src, index)
             }
 
-            // === Coroutines ===
+            // === Fibers ===
             LirInstr::LoadResumeValue { dst } => write!(f, "{} ← resume-val", dst),
 
             // === Runtime Eval ===

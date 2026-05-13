@@ -95,7 +95,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_CANCEL` → inject error into target fiber
 - `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats` (0-arg: current fiber; 1-arg: suspended fiber; includes scope-enter/dtor counts), `call-count`, `doc`, `global?`, `fiber/self`, `jit/rejections`, `list-primitives`, `primitive-meta`
 
-All SIG_RESUME primitives (including coroutine wrappers) return
+All SIG_RESUME primitives (including fiber wrappers) return
 `(SIG_RESUME, fiber_value)`. The VM uses `FiberHandle::take()`/`put()` to swap
 the child fiber into `vm.fiber`, executes the child, then swaps back.
 
@@ -190,7 +190,7 @@ and runs on the same fiber (same heap, parameter frames).
 | Non-yielding `fiber/resume` | `call.rs` | Runs a child fiber inline on the current thread |
 | `arena/allocs` SIG_QUERY handler | `signal.rs` | Runs a thunk to measure its allocations |
 | JIT trampolines | `call.rs` | Re-enters interpreter for uncompiled hot paths |
-| Coroutine resume | `call.rs` | Resumes a suspended coroutine |
+| Fiber resume | `call.rs` | Resumes a suspended fiber |
 
 ### Yield hazard
 

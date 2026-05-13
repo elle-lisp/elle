@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## String and @string Type Tests
 ##
 ## Tests for immutable string and mutable @string types.

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Type predicate tests
 ## Tests all type predicates moved from Rust to Elle.
 

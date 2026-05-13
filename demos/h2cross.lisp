@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## infra/h2cross.lisp — differential h2 echo-amplify crosstest
 ##
 ## Tests all 4 permutations: {elle,rust} × {client,server} to isolate

@@ -690,7 +690,7 @@ pub enum LirInstr {
         index: u16,
     },
 
-    // === Coroutines ===
+    // === Fibers ===
     /// Load the resume value after a yield.
     /// This is the first instruction in a yield's resume block.
     /// At runtime, the resume value is on top of the operand stack

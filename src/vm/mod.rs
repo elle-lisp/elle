@@ -136,11 +136,11 @@ impl VM {
             } else if bits == SIG_SWITCH {
                 bits = self.handle_sig_switch();
             } else if bits.contains(SIG_YIELD) {
-                return Err("Unexpected yield outside coroutine context".to_string());
+                return Err("Unexpected yield outside fiber context".to_string());
             } else {
                 self.fiber.signal.take();
                 return Err(format!(
-                    "Unexpected signal outside coroutine context: {}",
+                    "Unexpected signal outside fiber context: {}",
                     bits
                 ));
             }

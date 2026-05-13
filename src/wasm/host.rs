@@ -77,7 +77,7 @@ pub struct ElleHost {
     /// frame; PopParamFrame pops.
     pub param_frames: Vec<Vec<(u32, Value)>>,
     /// Per-fiber suspension frames. Keyed by fiber ID (FiberHandle pointer
-    /// address). Each fiber's frames are independent — nested coroutine
+    /// address). Each fiber's frames are independent — nested fiber
     /// resumes don't interfere with the parent fiber's frames.
     ///
     /// Frames are pushed to the back (innermost first during yield-through-call)

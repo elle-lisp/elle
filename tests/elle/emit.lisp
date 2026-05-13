@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # ── emit special form tests ───────────────────────────────────────────
 #
 # (emit <signal> <value>) is a special form when the first argument is

@@ -40,7 +40,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
 - **Fibers are the concurrency primitive.** ([docs/concurrency.md](docs/concurrency.md)) A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. The parent drives execution by calling `fiber/resume`. When a fiber emits a signal, it suspends and the parent decides what to do next.
 
-  Fibers run as coroutines. A parent spawns a child, drives it step by step, and reads each yielded value:
+  A parent spawns a child fiber, drives it step by step, and reads each yielded value:
 
   ```lisp
   (defn produce []
@@ -147,7 +147,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
 - **Functions are colorless.** Any function can be called from a fiber. There is no `async`/`await` annotation that marks a function as suspending and forces all its callers to be marked too. Whether something runs concurrently is decided at the call site, not baked into the function definition. In Rust/JS/Python, a suspending `fetch` forces every caller to be `async` too; in Elle, the signal is inferred by the compiler and callers are unaffected.
 
-- **Erlang-style processes fall out of the fiber model.** ([docs/processes.md](docs/processes.md)) The same fibers that drive coroutines and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
+- **Erlang-style processes fall out of the fiber model.** ([docs/processes.md](docs/processes.md)) The same fibers that drive generators and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
 
   ```lisp
   (def process ((import "std/process")))
@@ -778,11 +778,11 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `git` | Git repository operations (FFI to libgit2) |
   | `glob` | Filesystem glob pattern matching |
   | `gtk4` | GTK4 bindings via FFI (pure Elle, no plugin) |
-  | `hash` | Streaming hash helpers (ports, coroutines) |
+  | `hash` | Streaming hash helpers (ports, fibers) |
   | `grpc` | gRPC client over HTTP/2 with length-prefixed framing |
   | `http` | Pure Elle HTTP/1.1 client and server |
   | `http2` | HTTP/2 client and server (h2 over TLS + h2c cleartext) |
-  | `irc` | Coroutine-based IRCv3 client with SASL |
+  | `irc` | Fiber-based IRCv3 client with SASL |
   | `lua` | Lua compatibility prelude |
   | `mqtt` | MQTT client (uses the `mqtt` plugin for packet codec) |
   | `portrait` | Semantic portraits from `compile/analyze` |

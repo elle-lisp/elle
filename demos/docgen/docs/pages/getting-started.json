@@ -169,7 +169,7 @@
           "type": "list",
           "items": [
             "[Language Guide](language-guide.html) — data types, functions, control flow, pattern matching",
-            "[Concurrency](concurrency.html) — fibers, coroutines, signals, and threads",
+            "[Concurrency](concurrency.html) — fibers, signals, and threads",
             "[Examples](examples.html) — 20+ runnable programs covering every major feature",
             "[Documentation](documentation.html) — design documents and contributor guides"
           ],

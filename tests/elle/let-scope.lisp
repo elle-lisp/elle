@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Tests: let binding value preservation
 ## Verifies that (let [x (f)] ... x) preserves x through the body.
 

@@ -55,10 +55,10 @@ pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (coroutine? val) / (coro? val) → bool
+/// (fiber? val) → bool
 ///
-/// Returns true if the value is a fiber (coroutines are fibers).
-pub(crate) fn prim_is_coroutine(args: &[Value]) -> (SignalBits, Value) {
+/// Returns true if the value is a fiber.
+pub(crate) fn prim_is_fiber(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_fiber()))
 }
 
@@ -296,15 +296,15 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "coroutine?",
-        func: prim_is_coroutine,
+        name: "fiber?",
+        func: prim_is_fiber,
         signal: Signal::silent(),
         arity: Arity::Exact(1),
-        doc: "Returns true if value is a fiber (coroutines are fibers)",
+        doc: "Returns true if value is a fiber",
         params: &["value"],
         category: "predicate",
-        example: "(coroutine? (fiber/new (fn () 42) |:yield|))",
-        aliases: &["coro?"],
+        example: "(fiber? (fiber/new (fn () 42) |:yield|))",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "fn/mutates-params?",

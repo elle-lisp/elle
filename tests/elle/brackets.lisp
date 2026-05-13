@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Bracket syntax tests
 #
 # Migrated from tests/integration/bracket_errors.rs

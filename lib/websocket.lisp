@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/websocket.lisp — WebSocket client and server (RFC 6455)
 ##
 ## Parameterized module:

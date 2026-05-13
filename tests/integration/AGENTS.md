@@ -7,7 +7,7 @@ Full-pipeline integration tests: end-to-end behavior verification.
 Test end-to-end pipeline behavior by evaluating Elle source code through the full pipeline (Reader → Expander → Analyzer → Lowerer → Emitter → VM) and checking the result. Cover:
 - Core language features (arithmetic, conditionals, lists, functions)
 - Advanced features (closures, recursion, higher-order functions, match)
-- Concurrency (fibers, coroutines, thread transfer)
+- Concurrency (fibers, thread transfer)
 - Signal enforcement (interprocedural signal tracking)
 - Error reporting (error messages include correct source locations)
 - Destructuring, blocks, splice, booleans, dispatch
@@ -69,7 +69,7 @@ Tests are organized by feature area in separate files:
 |------|----------|
 | `core.rs` | Basic arithmetic, conditionals, lists, functions |
 | `advanced.rs` | Closures, recursion, higher-order functions |
-| `concurrency.rs` | Fibers, coroutines, thread transfer |
+| `concurrency.rs` | Fibers, thread transfer |
 | `error_reporting.rs` | Error messages with source locations |
 | `repl_exit_codes.rs` | REPL exit code behavior |
 | ~~`coroutines.rs`~~ | Migrated to `tests/elle/coroutines.lisp` |

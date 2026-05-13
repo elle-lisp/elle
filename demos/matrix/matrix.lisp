@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Heat Diffusion Simulation — Matrix Operations Demo
 #
 # Simulates heat spreading across a 2D grid using the discrete Laplacian.

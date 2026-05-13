@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 
 # Fibonacci benchmark — naive recursive, fib(30) = 832040
 # Tests raw function call overhead: ~2.7M calls

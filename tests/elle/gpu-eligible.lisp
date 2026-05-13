@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # GPU eligibility tests
 #
 # Tests the fn/gpu-eligible? predicate which checks signal and structural

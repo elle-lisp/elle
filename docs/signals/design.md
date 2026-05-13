@@ -13,7 +13,7 @@ signals. The compiler infers signal bits at compile time. See
 
 ### Janet
 
-Janet unifies coroutines, error handling, generators, dynamic scoping, and
+Janet unifies generators, error handling, dynamic scoping, and
 green threads into a single primitive: the **fiber**. Every control flow event
 is a **signal** (an integer 0–13) propagating up a chain of fibers. A fiber's
 **signal mask** (a bitmask set at creation time) determines which signals it
@@ -114,7 +114,7 @@ programming.
 
 **Fiber**: An execution context with its own stack, status, signal mask, and
 dynamic bindings. The runtime representation that makes all control flow
-patterns possible. A fiber is a *thing*# patterns like coroutines, generators,
+patterns possible. A fiber is a *thing*; patterns like generators
 and green threads are *ways to use it*.
 
 **Signal**: A value emitted by a fiber to its parent. Classified by type
@@ -140,10 +140,9 @@ handle, not the callee.
 process is a green thread. Implies cooperative or preemptive scheduling by a
 runtime. The long-term goal for Elle.
 
-**Coroutine**: A use pattern of fibers — specifically, a fiber that yields
-values and can be resumed. Less general than the fiber primitive. We may keep
-the word "coroutine" as sugar in the surface language, but the mechanism is
-fibers.
+**Generator**: A use pattern of fibers — specifically, a fiber that yields
+values and can be resumed. Less general than the fiber primitive. The
+mechanism is fibers; the separate `coro/*` API was removed in epoch 11.
 
 
 

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Fiber escape analysis: shared allocator is installed only when needed.
 ##
 ## Tests that child fibers correctly handle heap values that escape to

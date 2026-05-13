@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 
 ## Regex plugin integration tests
 ## Tests the regex plugin (.so loaded via import-file)

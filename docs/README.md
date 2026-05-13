@@ -45,7 +45,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 [functions](functions.md) [named-args](named-args.md) [arrays](arrays.md)
 [structs](structs.md) [sets](sets.md) [strings](strings.md) [bytes](bytes.md)
 [control](control.md) [loops](loops.md) [match](match.md) [errors](errors.md)
-[concurrency](concurrency.md) [threads](threads.md) [coroutines](coroutines.md)
+[concurrency](concurrency.md) [threads](threads.md)
 [parameters](parameters.md) [traits](traits.md) [io](io.md) [lua](lua.md)
 [epochs](epochs.md) [intrinsics](intrinsics.md)
 

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # %-intrinsic tests
 #
 # Raw bytecode operations with known type/alloc/escape behavior.

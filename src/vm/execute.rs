@@ -11,7 +11,7 @@
 //! | Non-yielding `fiber/resume` | Runs a child fiber inline on the current thread |
 //! | `arena/allocs` SIG_QUERY handler | Runs a thunk to measure its allocations |
 //! | JIT trampolines | Re-enters interpreter for uncompiled hot paths |
-//! | Coroutine resume in `call.rs` | Resumes a suspended coroutine |
+//! | Fiber resume in `call.rs` | Resumes a suspended fiber |
 //!
 //! ### What `execute_bytecode_saving_stack` preserves
 //!

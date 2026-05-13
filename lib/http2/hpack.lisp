@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/http2/hpack.lisp — HPACK header compression (RFC 7541)
 ##
 ## Loaded via:

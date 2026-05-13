@@ -32,7 +32,7 @@
             ["[collections.lisp](https://github.com/elle-lisp/elle/blob/main/examples/collections.lisp)", "A contact book app exercising literal syntax, get/put, destructuring, each, threading, splice, string ops, grapheme clusters"],
             ["[destructuring.lisp](https://github.com/elle-lisp/elle/blob/main/examples/destructuring.lisp)", "Unpacking data: silent nil semantics, wildcards, & rest, nested patterns, struct/table by-key, match dispatch on struct tags"],
             ["[errors.lisp](https://github.com/elle-lisp/elle/blob/main/examples/errors.lisp)", "Error handling: error, try/catch, protect, defer, with, propagation, safe wrappers, validation"],
-            ["[coroutines.lisp](https://github.com/elle-lisp/elle/blob/main/examples/coroutines.lisp)", "Cooperative sequences: coro/new, yield, lifecycle, Fibonacci generator, interleaving, nesting, yield* delegation"],
+            ["[generators.lisp](https://github.com/elle-lisp/elle/blob/main/examples/generators.lisp)", "Cooperative sequences: fiber/new with yield, lifecycle, Fibonacci generator, interleaving, nesting, yield* delegation"],
             ["[meta.lisp](https://github.com/elle-lisp/elle/blob/main/examples/meta.lisp)", "Macros and hygiene: defmacro, quasiquote/unquote, gensym, datum->syntax, syntax->datum"],
             ["[concurrency.lisp](https://github.com/elle-lisp/elle/blob/main/examples/concurrency.lisp)", "Parallel threads: spawn, join, closure capture across threads, parallel computation"],
             ["[processes.lisp](https://github.com/elle-lisp/elle/blob/main/examples/processes.lisp)", "Erlang-style actors: fiber-based scheduler, message passing with send/recv, links, trap-exit, crash propagation"],
@@ -86,12 +86,12 @@
       ]
     },
     {
-      "heading": "Coroutines",
+      "heading": "Generators",
       "level": 2,
       "content": [
         {
           "type": "paragraph",
-          "text": "From [coroutines.lisp](https://github.com/elle-lisp/elle/blob/main/examples/coroutines.lisp) — cooperative sequences with `coro/new`, `yield`, and lifecycle tracking:"
+          "text": "From [generators.lisp](https://github.com/elle-lisp/elle/blob/main/examples/generators.lisp) — cooperative sequences with yielding fibers and lifecycle tracking:"
         },
         {
           "type": "details",
@@ -100,7 +100,7 @@
             {
               "type": "code",
               "language": "lisp",
-              "text": "# coro/new wraps a zero-arg function into a coroutine.\n# coro/resume steps it forward; yield suspends and returns a value.\n(def co (coro/new (fn [] (yield 42))))\n(assert (coro? co) \"coro/new returns a coroutine\")\n(assert (= (coro/status co) :new) \"initial status is :new\")\n\n(def v (coro/resume co))\n(print \"  first resume: \") (println v)\n(assert (= v 42) \"first resume returns yielded value\")\n(assert (= (coro/status co) :paused) \"status after yield is :paused\")\n\n(coro/resume co)\n(assert (= (coro/status co) :dead) \"status after body completes is :dead\")"
+              "text": "# fiber/new with |:yield| creates a yielding fiber (generator).\n# fiber/resume steps it forward; yield suspends and returns a value.\n(def co (fiber/new (fn [] (yield 42)) |:yield|))\n(assert (fiber? co) \"fiber/new returns a fiber\")\n(assert (= (fiber/status co) :new) \"initial status is :new\")\n\n(def v (fiber/resume co))\n(print \"  first resume: \") (println v)\n(assert (= v 42) \"first resume returns yielded value\")\n(assert (= (fiber/status co) :paused) \"status after yield is :paused\")\n\n(fiber/resume co)\n(assert (= (fiber/status co) :dead) \"status after body completes is :dead\")"
             }
           ]
         }

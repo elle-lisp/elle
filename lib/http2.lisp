@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/http2.lisp — HTTP/2 client and server for Elle
 ##
 ## Plain h2c (cleartext):
@@ -25,12 +25,10 @@
   (def stream ((import "std/http2/stream") :frame frame))
   (def transport ((import "std/http2/transport") :tls tls))
   (def session
-    ((import "std/http2/session") :frame frame :stream stream
-                                  :hpack hpack))
+    ((import "std/http2/session") :frame frame :stream stream :hpack hpack))
   (def server
-    ((import "std/http2/server") :hpack hpack :frame frame
-                                 :stream stream :session session :tls tls
-                                 :transport transport))
+    ((import "std/http2/server") :hpack hpack :frame frame :stream stream
+                                 :session session :tls tls :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 

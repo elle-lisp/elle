@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Memory leak test suite
 #
 # Verifies that heap allocations stay bounded across the runtime's
@@ -1035,9 +1035,9 @@
 # These don't genuinely escape heap values but are rejected by
 # escape analysis conservatism. When fixed, flip to bounded?.
 
-# each over lists: the each macro desugars to coroutines. QW2
+# each over lists: the each macro desugars to fibers. QW2
 # recognizes internal stdlib calls as non-escaping, enabling FlipSwap
-# on the outer while loop. The coroutine is fully drained within
+# on the outer while loop. The fiber is fully drained within
 # each iteration, so FlipSwap at the back-edge is safe.
 (defn leak-each-list [n]
   (def before (arena/count))

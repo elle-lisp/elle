@@ -1,8 +1,8 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/irc.lisp -- IRCv3 client for Elle
 ##
-## Coroutine-based IRC client with IRCv3 capability negotiation and SASL.
-## The connection struct carries a read stream (coroutine yielding parsed
+## Fiber-based IRC client with IRCv3 capability negotiation and SASL.
+## The connection struct carries a read stream (fiber yielding parsed
 ## messages with auto-PONG) and a send function.
 ##
 ## Usage:
@@ -18,7 +18,7 @@
 ##   (conn:close)
 ##
 ## Connection struct:
-##   {:messages <coroutine>  -- yields parsed messages (auto-PONG)
+##   {:messages <fiber>  -- yields parsed messages (auto-PONG)
 ##    :send     <function>   -- (conn:send "COMMAND" "param1" ...)
 ##    :close    <function>   -- sends QUIT, closes transport
 ##    :nick     "nick"       -- resolved nick after registration

@@ -246,7 +246,7 @@ impl SignalBits {
     ///
     /// Uses overlap (any shared bit) for semantic bits, but requires full
     /// containment of infrastructure bits (specifically SIG_IO). This
-    /// ensures that a coroutine with mask SIG_YIELD does not accidentally
+    /// ensures that a fiber with mask SIG_YIELD does not accidentally
     /// swallow SIG_YIELD|SIG_IO signals that must reach the scheduler,
     /// while still allowing user-defined compound signals (e.g. |:log :audit|)
     /// to be caught by a partial mask (e.g. |:log|).
@@ -494,7 +494,7 @@ pub struct Fiber {
     ///
     /// - Signal suspension (`fiber/signal`): single frame, empty stack
     /// - Yield suspension (`yield`): chain of frames from yielder to
-    ///   coroutine boundary, each with its operand stack captured
+    ///   fiber boundary, each with its operand stack captured
     ///
     /// On resume, frames are replayed from innermost (index 0) to
     /// outermost (last index).

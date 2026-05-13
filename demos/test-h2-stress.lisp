@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## infra/test-h2-stress.lisp — h2 stress tests for grace usage patterns
 ##
 ## Pure h2 loopback tests — no grace code, no grace server dependency.

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Vulkan compute plugin tests
 ##
 ## Tests that we can:

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Traits test suite
 ##
 ## Tests for the per-value trait table mechanism: `with-traits` and `traits`.

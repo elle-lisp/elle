@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/telemetry.lisp — OpenTelemetry metrics (OTLP/HTTP JSON export)
 ##
 ## Loaded via: (def telemetry ((import "std/telemetry")))

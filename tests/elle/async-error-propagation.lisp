@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Async error propagation tests
 #
 # These tests document the expected behavior of error propagation through

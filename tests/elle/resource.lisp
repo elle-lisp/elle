@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Resource consumption measurement tests
 #
 # Uses lib/resource.lisp to measure deterministic resource counters

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/base64.lisp — Base64 encoding/decoding (pure Elle)
 ##
 ## Implements RFC 4648 standard and URL-safe alphabets.

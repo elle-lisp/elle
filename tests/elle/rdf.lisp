@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## tests/elle/rdf.lisp — verify lib/rdf.lisp triple generation
 
 (def rdf ((import "std/rdf/elle")))

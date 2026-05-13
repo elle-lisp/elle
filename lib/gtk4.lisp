@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/gtk4.lisp — GTK4 bindings for Elle via FFI
 ##
 ## Pure Elle module. No plugin, no subprocess. Calls GTK4's C API

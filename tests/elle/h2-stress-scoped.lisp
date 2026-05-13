@@ -1,9 +1,9 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # h2 stress test — scoped version
 #
 # Demonstrates bounded memory under repeated HTTP/2 request loops
 # by using while loops (not each) so escape analysis can insert
-# scope marks. The key insight: `each` desugars to a coroutine,
+# scope marks. The key insight: `each` desugars to a fiber,
 # which blocks escape analysis. `while` with let-bound loop vars
 # keeps allocations within reclaimable scopes.
 

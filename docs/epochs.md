@@ -282,3 +282,28 @@ Classic Lisp pair操作 names are replaced with descriptive alternatives:
 | `cons` | `pair` |
 | `car` | `first` |
 | `cdr` | `rest` |
+
+### Epoch 11 — remove coroutine API, use fibers directly
+
+Coroutines were always trivial wrappers over yield-masking fibers and have
+been removed. All `coro/*` and legacy `coroutine-*` / `make-coroutine`
+forms are rewritten to their `fiber/*` equivalents.
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `coro/new fn` | `(fiber/new fn \|:yield\|)` | Adds yield capability |
+| `make-coroutine fn` | `(fiber/new fn \|:yield\|)` | Gen-1 alias |
+| `coro/resume` | `fiber/resume` | Rename |
+| `coro/status` | `fiber/status` | Rename |
+| `coro/done?` | `fiber/done?` | Rename |
+| `coro/value` | `fiber/value` | Rename |
+| `coroutine-resume` | `fiber/resume` | Gen-1 rename |
+| `coroutine-status` | `fiber/status` | Gen-1 rename |
+| `coroutine-done?` | `fiber/done?` | Gen-1 rename |
+| `coroutine-value` | `fiber/value` | Gen-1 rename |
+| `coroutine?` | `fiber?` | Rename |
+| `coro?` | `fiber?` | Rename |
+| `yield-from` | `yield*` | Rename |
+| `coro/>iterator` | — | Removed (fibers are natively iterable) |
+| `coroutine->iterator` | — | Removed |
+| `coroutine-next` | — | Removed (use `fiber/resume`) |
