@@ -377,25 +377,49 @@ impl FiberHeap {
         // After rotation reuses freed slots, dtors may contain entries for
         // objects that were freed and whose slots were reused — those entries
         // point to different objects that must not be dropped here.
-        let scope_flat_set: std::collections::HashSet<u32> =
-            scope_flats.iter().copied().collect();
+        let scope_flat_set: std::collections::HashSet<u32> = scope_flats.iter().copied().collect();
 
         // Run dtors in reverse order for rc=0 objects that are in scope.
         // Null out processed entries so nested scope marks remain valid.
         // Track which flats have been dropped to prevent double-drop when
         // the same slot appears in multiple dtor entries (from slot reuse).
-        let mut dropped_flats: std::collections::HashSet<u32> =
-            std::collections::HashSet::new();
+        let mut dropped_flats: std::collections::HashSet<u32> = std::collections::HashSet::new();
         for i in (mark.dtor_len()..self.pool.dtors.len()).rev() {
             let ptr = self.pool.dtors[i];
             if !ptr.is_null() {
                 let flat = self.pool.slab.ptr_to_flat(ptr) as u32;
-                if scope_flat_set.contains(&flat)
-                    && self.pool.refcount(ptr as *const HeapObject) == 0
-                    && dropped_flats.insert(flat)
-                {
+                let in_scope = scope_flat_set.contains(&flat);
+                let rc_zero = self.pool.refcount(ptr as *const HeapObject) == 0;
+                let first_flat = dropped_flats.insert(flat);
+                if in_scope && rc_zero && first_flat {
                     unsafe { std::ptr::drop_in_place(ptr) };
                     self.pool.dtors[i] = std::ptr::null_mut();
+                } else if in_scope && rc_zero && !first_flat {
+                    // CRITICAL: The dtor was skipped because this flat was
+                    // already dropped. The entry stays non-null. If the
+                    // dealloc loop below frees this slot, the non-null entry
+                    // becomes stale. On slot reuse → duplicate dtor entry.
+                    #[cfg(debug_assertions)]
+                    {
+                        let tag = unsafe { (*ptr).tag() };
+                        eprintln!(
+                            "[release_refcounted] SKIPPED dtor[{}] flat {} ptr {:?} \
+                             tag={:?}: dropped_flats dedup. \
+                             Entry stays non-null → stale if dealloc follows.",
+                            i, flat, ptr, tag
+                        );
+                    }
+                } else if !in_scope || !rc_zero {
+                    #[cfg(debug_assertions)]
+                    {
+                        let tag = unsafe { (*ptr).tag() };
+                        eprintln!(
+                            "[release_refcounted] SKIPPED dtor[{}] flat {} ptr {:?} \
+                             tag={:?}: in_scope={} rc_zero={} first_flat={}. \
+                             Entry stays non-null.",
+                            i, flat, ptr, tag, in_scope, rc_zero, first_flat
+                        );
+                    }
                 }
             }
         }
@@ -406,10 +430,42 @@ impl FiberHeap {
         }
 
         // Dealloc rc=0 slab slots, keep pinned.
+        // Also null any surviving dtor entries for freed slots. The dtor
+        // loop above may have skipped an entry because rc > 0 at dtor time,
+        // but children decref can bring rc to 0 before we reach here.
+        // Without nulling, the stale entry survives and causes a duplicate
+        // when the slot is reused.
         for i in 0..scope_ptrs.len() {
             let ptr = scope_ptrs[i];
             let flat = scope_flats[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
+                #[cfg(debug_assertions)]
+                {
+                    // Check: is this slot still in dtors with a non-null entry?
+                    // If so, the dtor loop above skipped it (rc>0 at dtor time
+                    // but rc=0 now after children decref). Log for diagnostics.
+                    for (di, &entry) in self.pool.dtors.iter().enumerate() {
+                        if entry == ptr {
+                            eprintln!(
+                                "[release_refcounted] DEALLOC slot {:?} (flat {}) \
+                                 still has non-null dtor entry at index {}. \
+                                 Nulling before dealloc. di={}, mark.dtor_len={}",
+                                ptr,
+                                flat,
+                                di,
+                                di,
+                                mark.dtor_len()
+                            );
+                        }
+                    }
+                }
+                // Null any surviving dtor entry for this slot.
+                for di in mark.dtor_len()..self.pool.dtors.len() {
+                    if self.pool.dtors[di] == ptr {
+                        self.pool.dtors[di] = std::ptr::null_mut();
+                        break; // at most one non-null entry per pointer
+                    }
+                }
                 self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
             }
@@ -496,6 +552,25 @@ impl FiberHeap {
     pub fn push_scope_mark(&mut self) {
         if !self.shared_alloc.is_null() {
             unsafe { &mut *self.shared_alloc }.push_mark();
+        }
+        #[cfg(debug_assertions)]
+        {
+            // Verify no duplicates exist in dtors at scope entry time.
+            // If this fires, a duplicate was introduced within the PARENT
+            // scope (before this RegionEnter).
+            use std::collections::HashSet;
+            let mut seen: HashSet<*mut HeapObject> = HashSet::new();
+            for &ptr in &self.pool.dtors {
+                if !ptr.is_null() {
+                    assert!(
+                        seen.insert(ptr),
+                        "push_scope_mark: duplicate slab slot {:?} in dtors at scope entry. \
+                         dtors.len={}",
+                        ptr,
+                        self.pool.dtors.len()
+                    );
+                }
+            }
         }
         self.scope_marks.push(self.mark());
         self.scope_enters += 1;
@@ -978,8 +1053,8 @@ impl FiberHeap {
             Some(p) => p,
             None => return value,
         };
-        let owned_by_child = self.pool.owns(ptr)
-            || self.outbox.as_ref().is_some_and(|ob| ob.owns(ptr));
+        let owned_by_child =
+            self.pool.owns(ptr) || self.outbox.as_ref().is_some_and(|ob| ob.owns(ptr));
         if !owned_by_child {
             return value;
         }
@@ -1088,22 +1163,26 @@ impl FiberHeap {
             },
             HeapObject::Float(f) => HeapObject::Float(*f),
             HeapObject::NativeFn(f) => HeapObject::NativeFn(*f),
-            HeapObject::Parameter { id, default, traits } => HeapObject::Parameter {
+            HeapObject::Parameter {
+                id,
+                default,
+                traits,
+            } => HeapObject::Parameter {
                 id: *id,
                 default: *default,
                 traits: *traits,
             },
             // External, Fiber, LibHandle, etc. — Rc-backed, survive
             // independently of the slab.  Return the original value.
-            _ => return unsafe {
-                let tag = obj.value_tag();
-                Value::from_heap_ptr(obj as *const HeapObject as *const (), tag)
-            },
+            _ => {
+                return unsafe {
+                    let tag = obj.value_tag();
+                    Value::from_heap_ptr(obj as *const HeapObject as *const (), tag)
+                }
+            }
         };
-        crate::value::fiberheap::routing::with_current_heap_mut(|heap| {
-            heap.pool.alloc(new_obj)
-        })
-        .expect("rebuild_on_current_heap: no current heap")
+        crate::value::fiberheap::routing::with_current_heap_mut(|heap| heap.pool.alloc(new_obj))
+            .expect("rebuild_on_current_heap: no current heap")
     }
 
     /// Check whether a heap object (already in the outbox) contains any
@@ -1539,6 +1618,107 @@ impl FiberHeap {
 
 impl Drop for FiberHeap {
     fn drop(&mut self) {
+        // ── Approach B: cross-pool Rc sharing assertion ──────────────
+        //
+        // Check for RcInner sharing across ALL pools BEFORE any teardown.
+        // If two objects (possibly on different pools: private, outbox,
+        // shared alloc) share an RcInner, tearing down one pool drops
+        // one object (freeing the RcInner) and the other pool's dtor
+        // hits freed memory → UAF.
+        #[cfg(debug_assertions)]
+        {
+            use std::cell::RefCell;
+            use std::collections::HashSet;
+
+            fn extract_rc_inner(
+                ptr: *mut HeapObject,
+            ) -> Option<(usize, super::heap::HeapTag, *mut HeapObject)> {
+                let obj = unsafe { &*ptr };
+                match obj {
+                    HeapObject::LBox { cell, .. } => {
+                        Some((&**cell as *const RefCell<Value> as usize, obj.tag(), ptr))
+                    }
+                    HeapObject::CaptureCell { cell, .. } => {
+                        Some((&**cell as *const RefCell<Value> as usize, obj.tag(), ptr))
+                    }
+                    _ => None,
+                }
+            }
+
+            fn collect_pool_rc_inners(
+                dtors: &[*mut HeapObject],
+            ) -> Vec<(usize, super::heap::HeapTag, *mut HeapObject)> {
+                dtors
+                    .iter()
+                    .filter_map(|&ptr| {
+                        if ptr.is_null() {
+                            None
+                        } else {
+                            extract_rc_inner(ptr)
+                        }
+                    })
+                    .collect()
+            }
+
+            let mut seen: HashSet<usize> = HashSet::new();
+            let mut duplicates: Vec<(
+                (usize, super::heap::HeapTag, *mut HeapObject),
+                (usize, super::heap::HeapTag, *mut HeapObject),
+            )> = Vec::new();
+
+            let private_entries = collect_pool_rc_inners(&self.pool.dtors);
+
+            let outbox_entries: Vec<_> = self
+                .outbox
+                .as_ref()
+                .map(|ob| collect_pool_rc_inners(&ob.dtors))
+                .unwrap_or_default();
+
+            let old_entries: Vec<_> = self
+                .old_outboxes
+                .iter()
+                .flat_map(|ob| collect_pool_rc_inners(&ob.dtors))
+                .collect();
+
+            // Shared allocators also have their own pools.
+            let shared_entries: Vec<_> = self
+                .owned_shared
+                .iter()
+                .flat_map(|sa| collect_pool_rc_inners(&sa.pool.dtors))
+                .collect();
+
+            let all_entries: Vec<_> = private_entries
+                .into_iter()
+                .chain(outbox_entries.into_iter())
+                .chain(old_entries.into_iter())
+                .chain(shared_entries.into_iter())
+                .collect();
+
+            for entry @ (addr, _, ptr) in &all_entries {
+                if !seen.insert(*addr) {
+                    if let Some(prev) = all_entries
+                        .iter()
+                        .find(|(a, _, p)| *a == *addr && !std::ptr::eq(*p, *ptr))
+                    {
+                        duplicates.push((*prev, *entry));
+                    }
+                }
+            }
+
+            if !duplicates.is_empty() {
+                for ((addr_a, tag_a, ptr_a), (_addr_b, tag_b, ptr_b)) in &duplicates {
+                    eprintln!(
+                        "[invariant] DUPLICATE RcInner 0x{:x}: {:?} at {:?} and {:?} at {:?}",
+                        addr_a, tag_a, ptr_a, tag_b, ptr_b
+                    );
+                }
+                panic!(
+                    "FiberHeap::drop invariant violated: {} duplicate RcInner(s) across pools",
+                    duplicates.len()
+                );
+            }
+        }
+
         // Tear down all outboxes (current and old).
         if let Some(mut outbox) = self.outbox.take() {
             outbox.teardown();

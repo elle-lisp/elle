@@ -22,7 +22,7 @@ struct SharedMark {
 }
 
 pub(crate) struct SharedAllocator {
-    pool: SlabPool,
+    pub(crate) pool: SlabPool,
     /// Stack of scope marks for RegionEnter/RegionExit on child fibers.
     marks: Vec<SharedMark>,
 }

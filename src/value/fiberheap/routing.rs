@@ -229,7 +229,6 @@ pub fn region_exit_refcounted() {
     }
 }
 
-
 /// Drop a single heap value: if owned by the current pool with refcount == 0,
 /// run its destructor, return the slab slot to the free list, and mark it
 /// as dropped in the bitmap. Does NOT walk children — values are freely
@@ -254,7 +253,10 @@ pub fn drop_slot_value(val: crate::value::Value) {
         let rc = heap.pool.refcount(obj_ptr as *const _);
         if rc > 0 {
             if super::FiberHeap::trace_rc() {
-                eprintln!("[trace:rc] drop_slot_value {:?} SKIPPED rc={}", heap_ptr, rc);
+                eprintln!(
+                    "[trace:rc] drop_slot_value {:?} SKIPPED rc={}",
+                    heap_ptr, rc
+                );
             }
             return;
         }
@@ -277,6 +279,29 @@ pub fn drop_slot_value(val: crate::value::Value) {
         // Unlink from the allocation linked list (O(1)) and remove from
         // dtors (O(n) on dtors, which is typically short).
         heap.pool.unlink_alloc_ptr(obj_ptr);
+        #[cfg(debug_assertions)]
+        {
+            let dtor_len_before = heap.pool.dtors.len();
+            let scope_depth = heap.scope_marks.len();
+            let dtor_indices: Vec<usize> = heap
+                .pool
+                .dtors
+                .iter()
+                .enumerate()
+                .filter(|(_, &p)| p == obj_ptr)
+                .map(|(i, _)| i)
+                .collect();
+            if !dtor_indices.is_empty() {
+                // Log scope mark dtor_lens to see if any will be invalidated.
+                let mark_dtor_lens: Vec<usize> =
+                    heap.scope_marks.iter().map(|m| m.dtor_len()).collect();
+                eprintln!(
+                    "[drop_slot_value] {:?} in dtors at indices {:?}, \
+                     dtors.len={}, scope_depth={}, mark_dtor_lens={:?}",
+                    obj_ptr, dtor_indices, dtor_len_before, scope_depth, mark_dtor_lens
+                );
+            }
+        }
         heap.pool.remove_from_dtors(obj_ptr);
         // Return slab slot to free list.
         heap.pool.dealloc_slot(obj_ptr);

@@ -1,12 +1,12 @@
 (elle/epoch 10)
 ## graph-bench.lisp — measure compile/* query times
 
-(def src (file/read "stdlib.lisp"))
+(def src (file/read "src/stdlib.lisp"))
 
 # ── Analyze ────────────────────────────────────────────────────────────
 
 (def @t0 (clock/monotonic))
-(def a (compile/analyze src {:file "stdlib.lisp"}))
+(def a (compile/analyze src {:file "src/stdlib.lisp"}))
 (def @t1 (clock/monotonic))
 (println (string/format "compile/analyze:      {} ms" (round (* (- t1 t0) 1000))))
 
@@ -125,7 +125,7 @@
                         (round (* (- t1 t0) 1000)) (length pt)))
 
 (assign t0 (clock/monotonic))
-(def ft (rdf:file a "stdlib.lisp"))
+(def ft (rdf:file a "src/stdlib.lisp"))
 (assign t1 (clock/monotonic))
 (println (string/format "rdf:file:             {} ms  ({} bytes)"
                         (round (* (- t1 t0) 1000)) (length ft)))

@@ -111,6 +111,27 @@ impl SlabPool {
         let flat = self.slab.ptr_to_flat(ptr) as u32;
         self.link_alloc_tail(flat);
         if drop {
+            #[cfg(debug_assertions)]
+            {
+                // Catch duplicate dtor entry at the moment it's introduced.
+                // If this fires, the slot was previously freed without its
+                // dtor entry being nulled or removed.
+                for (i, &existing) in self.dtors.iter().enumerate() {
+                    if !existing.is_null() && existing == ptr {
+                        panic!(
+                            "SlabPool::alloc DUPLICATE: slab slot {:?} (flat {}) \
+                             pushed to dtors at index {}, but already present \
+                             at non-null index {}. dtors.len={}. \
+                             Slot was freed without cleaning up its dtor entry.",
+                            ptr,
+                            flat,
+                            self.dtors.len(),
+                            i,
+                            self.dtors.len()
+                        );
+                    }
+                }
+            }
             self.dtors.push(ptr);
         }
         self.alloc_count += 1;
@@ -143,7 +164,99 @@ impl SlabPool {
 
     /// Run destructors in reverse order from `self.dtors[start..]`.
     /// Skips null entries (nulled by release_refcounted for freed objects).
+    ///
+    /// # Invariant
+    ///
+    /// No two non-null entries in the dtor list may point to the same slab
+    /// slot. If they do, `drop_in_place` will run the destructor twice,
+    /// causing a double-free of any `Rc`, `Vec`, or `Box` inside the
+    /// `HeapObject`.
+    ///
+    /// # Approach C: dedup tracking
+    ///
+    /// If a duplicate is detected, we log the duplicate's HeapTag so we can
+    /// determine whether two DIFFERENT slots share the same Rc backing
+    /// (Approach B) vs the same slot appearing twice (Approach A).
     pub fn run_dtors(&self, start: usize) {
+        #[cfg(debug_assertions)]
+        {
+            use std::collections::HashSet;
+            let mut seen: HashSet<*mut crate::value::heap::HeapObject> = HashSet::new();
+            let mut seen_flats: HashSet<u32> = HashSet::new();
+            for i in (start..self.dtors.len()).rev() {
+                let ptr = self.dtors[i];
+                if !ptr.is_null() {
+                    let flat = self.slab.ptr_to_flat(ptr) as u32;
+                    if !seen.insert(ptr) {
+                        // Find the earlier occurrence for diagnostics.
+                        let earlier = self.dtors[start..i]
+                            .iter()
+                            .enumerate()
+                            .find(|(_, &p)| p == ptr)
+                            .map(|(j, _)| start + j);
+                        let tag = unsafe { (*ptr).tag() };
+                        panic!(
+                            "run_dtors DUPLICATE: slab slot {:?} (flat {}) tag={:?} \
+                             appears at indices [{} (earlier), {} (current)] in dtor[{}..{}]. \
+                             dtors.len={}. \
+                             Same pointer = same slab slot reused without dtor cleanup. \
+                             Two different pointers with same RcInner = Approach B (Rc sharing).",
+                            ptr,
+                            flat,
+                            tag,
+                            earlier.unwrap_or(usize::MAX),
+                            i,
+                            start,
+                            self.dtors.len(),
+                            self.dtors.len()
+                        );
+                    }
+                    if !seen_flats.insert(flat) {
+                        // Two different pointers mapping to the same flat.
+                        // This shouldn't happen (ptr_to_flat is injective).
+                        let tag = unsafe { (*ptr).tag() };
+                        eprintln!(
+                            "[run_dtors] WARNING: two different pointers map to \
+                             same flat {} (tag={:?}). One is {:?}.",
+                            flat, tag, ptr
+                        );
+                    }
+                }
+            }
+
+            // Approach B: check for RcInner sharing across DIFFERENT slab
+            // slots. Two LBox/CaptureCell objects with Rc's pointing to the
+            // same RcInner but different slab slots will cause UAF: first
+            // drop frees RcInner, second drop reads freed memory.
+            let mut rc_inner_map: std::collections::HashMap<usize, (*mut HeapObject, u32)> =
+                std::collections::HashMap::new();
+            for i in (start..self.dtors.len()).rev() {
+                let ptr = self.dtors[i];
+                if ptr.is_null() {
+                    continue;
+                }
+                let obj = unsafe { &*ptr };
+                let rc_addr: Option<usize> = match obj {
+                    HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
+                        Some(&**cell as *const std::cell::RefCell<Value> as usize)
+                    }
+                    _ => None,
+                };
+                if let Some(addr) = rc_addr {
+                    let flat = self.slab.ptr_to_flat(ptr) as u32;
+                    if let Some(&(prev_ptr, prev_flat)) = rc_inner_map.get(&addr) {
+                        panic!(
+                            "run_dtors RC-SHARING: RcInner 0x{:x} shared by two \
+                             DIFFERENT slab slots: {:?} (flat {}) and {:?} (flat {}) \
+                             at dtor index {}. Both will drop the same Rc. \
+                             First drop frees RcInner → second drop = UAF.",
+                            addr, prev_ptr, prev_flat, ptr, flat, i
+                        );
+                    }
+                    rc_inner_map.insert(addr, (ptr, flat));
+                }
+            }
+        }
         for i in (start..self.dtors.len()).rev() {
             let ptr = self.dtors[i];
             if !ptr.is_null() {
@@ -212,8 +325,41 @@ impl SlabPool {
 
     /// Remove a pointer from pool.dtors (O(n) scan).
     /// Called by drop_slot_value. The allocs list is handled by unlink_alloc_ptr.
+    ///
+    /// # BUG WARNING
+    ///
+    /// This uses `retain`, which shifts subsequent entries down. Any scope
+    /// mark that captured `dtor_len` before this call now has a stale index:
+    /// entries that were after the removed one shift down by one. If a new
+    /// alloc pushes to dtors, the new entry lands at an index that the scope
+    /// mark considers "before the scope". When the scope exits, its dtor
+    /// range won't cover this entry. The dealloc loop frees the slot. The
+    /// orphaned dtor entry survives. On slot reuse → duplicate.
     pub fn remove_from_dtors(&mut self, ptr: *mut HeapObject) {
-        self.dtors.retain(|&p| p != ptr);
+        #[cfg(debug_assertions)]
+        {
+            let before_len = self.dtors.len();
+            self.dtors.retain(|&p| p != ptr);
+            let removed = self.dtors.len() < before_len;
+            if removed {
+                // The retain shifted entries. Any scope mark that captured
+                // dtor_len before this call now has an index that is one
+                // too high. This is suspected to be the root cause of the
+                // duplicate dtor entry bug.
+                eprintln!(
+                    "[dtor-trace] remove_from_dtors: {:?} removed via retain. \
+                     dtors.len {}→{}. \
+                     SCOPE MARKS MAY BE STALE.",
+                    ptr,
+                    before_len,
+                    self.dtors.len()
+                );
+            }
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            self.dtors.retain(|&p| p != ptr);
+        }
     }
 
     /// Decref a value if it's owned by this pool's slab.
@@ -259,6 +405,27 @@ impl SlabPool {
     /// reference this slot after this call.
     #[inline]
     pub unsafe fn dealloc_slot(&mut self, ptr: *mut HeapObject) {
+        #[cfg(debug_assertions)]
+        {
+            // If the slot still has a non-null dtor entry, the caller forgot
+            // to null/remove it. The slot will be reused by a future alloc,
+            // which will push the same pointer again → duplicate.
+            let flat = self.slab.ptr_to_flat(ptr) as u32;
+            for (i, &entry) in self.dtors.iter().enumerate() {
+                if entry == ptr {
+                    panic!(
+                        "dealloc_slot STALE: slab slot {:?} (flat {}) \
+                         returned to free list but still has non-null dtor \
+                         entry at index {}. dtors.len={}. \
+                         Caller must null or remove dtor entry before dealloc.",
+                        ptr,
+                        flat,
+                        i,
+                        self.dtors.len()
+                    );
+                }
+            }
+        }
         self.slab.dealloc(ptr);
     }
 
