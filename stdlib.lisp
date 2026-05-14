@@ -1216,7 +1216,8 @@
         completed @{}  # fiber → :ok | :error (already-completed fibers)
         joined @||  # set of fibers whose result was observed
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
-        park-queues @{}]
+        park-queues @{}
+        forwarded-pending @{}]  # id → {:queue @[] :wake-box box} (process scheduler I/O)
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
       (del select-sets waiter))
@@ -1316,11 +1317,11 @@
 
     (defn handle-park [caller request]
       "Handle a :park wait request (futex wait).
-       If cell value == expected, park caller. Otherwise resume immediately."
+       If box value == expected, park caller. Otherwise resume immediately."
       (let* [key (request :key)
-             val-cell (request :val)
+             val-box (request :val)
              expected (request :expected)]
-        (if (= (get val-cell 0) expected)  # Value matches — park the fiber (stays suspended)
+        (if (= (unbox val-box) expected)  # Value matches — park the fiber (stays suspended)
           (let [q (or (park-queues key)
                       (let [q @[]]
                         (put park-queues key q)
@@ -1350,6 +1351,32 @@
         (fiber/resume caller woken)
         (handle-fiber-after-resume caller)))
 
+    (defn handle-io-forward [caller request]
+      "Submit I/O to this scheduler's backend on behalf of a child scheduler.
+       Resumes caller immediately with the submission ID. Completion is
+       delivered to the request's :queue and :wake-box (futex)."
+      (let [io-req (request :request)
+            queue (request :queue)
+            wake-box (request :wake-box)
+            [ok? id] (protect (io/submit backend io-req))]
+        (if ok?
+          (begin
+            (put forwarded-pending id {:queue queue :wake-box wake-box})
+            (fiber/resume caller id)
+            (handle-fiber-after-resume caller))
+          (begin
+            (fiber/resume caller [:error id])
+            (handle-fiber-after-resume caller)))))
+
+    (defn handle-io-forward-cancel [caller request]
+      "Cancel a forwarded I/O submission."
+      (let [id (request :id)]
+        (when (get forwarded-pending id)
+          (del forwarded-pending id)
+          (io/cancel backend id))
+        (fiber/resume caller nil)
+        (handle-fiber-after-resume caller)))
+
     (defn handle-wait [caller request]
       "Dispatch a :wait signal based on :op."
       (case (request :op)
@@ -1358,6 +1385,8 @@
         :abort (handle-abort caller (request :fiber))
         :park (handle-park caller request)
         :notify (handle-notify caller request)
+        :io-forward (handle-io-forward caller request)
+        :io-forward-cancel (handle-io-forward-cancel caller request)
         (error {:error :protocol-error
                 :reason :unknown-op
                 :op (request :op)
@@ -1400,21 +1429,41 @@
 
     (defn process-completions [timeout-ms]
       "Wait for I/O completions and route fibers."
-      (let [completions (io/wait backend timeout-ms)]
+      (let [completions (io/wait backend timeout-ms)
+            @has-forwarded false]
+        # Process all completions — push forwarded ones to queue without
+        # waking the process scheduler yet (it would run and miss later
+        # completions in this batch).
         (each c in completions
           (let* [id (get c :id)
                  fiber (get pending id)]
-            (when (not (nil? fiber))
-              (del pending id)
-              (del fiber-io fiber)
-              (if (nil? (get c :error))
-                (begin
-                  (fiber/resume fiber (get c :value))
-                  (handle-fiber-after-resume fiber))  # I/O error: inject error into the fiber so it propagates
-                # through protect/defer correctly.
-                (begin
-                  (fiber/abort fiber (get c :error))
-                  (handle-fiber-after-resume fiber))))))))
+            (if (not (nil? fiber))
+              (begin
+                (del pending id)
+                (del fiber-io fiber)
+                (if (nil? (get c :error))
+                  (begin
+                    (fiber/resume fiber (get c :value))
+                    (handle-fiber-after-resume fiber))
+                  (begin
+                    (fiber/abort fiber (get c :error))
+                    (handle-fiber-after-resume fiber))))
+              (let [fwd (get forwarded-pending id)]
+                (when fwd
+                  (del forwarded-pending id)
+                  (push fwd:queue c)
+                  (rebox fwd:wake-box (+ (unbox fwd:wake-box) 1))
+                  (assign has-forwarded true))))))
+        # After all completions are queued, wake parked process schedulers
+        (when has-forwarded
+          (let [q (get park-queues :io-forward-wakeup)]
+            (when (and q (> (length q) 0))
+              (let [parked (get q 0)]
+                (remove q 0)
+                (when (= (length q) 0)
+                  (del park-queues :io-forward-wakeup))
+                (fiber/resume parked nil)
+                (handle-fiber-after-resume parked)))))))
 
     (defn do-shutdown [timeout-ms]
       "Abort all pending fibers, pump for timeout-ms, cancel stragglers."
@@ -1456,7 +1505,8 @@
       (block :tick
         (drain-runnable)
         (when (and (= (length pending) 0) (= (length waiters) 0)
-                   (= (length select-sets) 0) (= (length park-queues) 0))
+                   (= (length select-sets) 0) (= (length park-queues) 0)
+                   (= (length forwarded-pending) 0))
           (break :tick :done))
         (let [timeout (get shutdown-req 0)]
           (unless (nil? timeout)
@@ -1553,11 +1603,11 @@
             :message (string (get request :op) " requires an async scheduler")}))
   (emit :wait request))
 
-(defn ev/futex-wait [key cell expected]
-  "Park the current fiber if (get cell 0) == expected. Returns when woken
+(defn ev/futex-wait [key bx expected]
+  "Park the current fiber if (unbox bx) == expected. Returns when woken
    or immediately if the value has already changed (spurious wakeup avoidance).
-   key must be a unique hashable value identifying this futex."
-  (emit-wait {:op :park :key key :val cell :expected expected}))
+   bx must be a box. key must be a unique hashable value identifying this futex."
+  (emit-wait {:op :park :key key :val bx :expected expected}))
 
 (defn ev/futex-wake [key count]
   "Wake up to count fibers parked on key. Returns the number actually woken.

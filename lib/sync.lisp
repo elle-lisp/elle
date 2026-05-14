@@ -14,16 +14,16 @@
 (def @*futex-id* 0)
 
 (defn make-futex [initial]
-  "Low-level futex cell. Wraps a mutable array cell with park/notify."
+  "Low-level futex. Wraps a box with park/notify."
   (assign *futex-id* (inc *futex-id*))
   (let [key *futex-id*
-        cell @[initial]]
+        bx (box initial)]
     {:wait (fn [expected]
-             (while (= (get cell 0) expected) (ev/futex-wait key cell expected)))
+             (while (= (unbox bx) expected) (ev/futex-wait key bx expected)))
      :wake (fn [count] (ev/futex-wake key count))
-     :get (fn [] (get cell 0))
-     :set (fn [v] (put cell 0 v))
-     :cell cell}))
+     :get (fn [] (unbox bx))
+     :set (fn [v] (rebox bx v))
+     :box bx}))
 
 ## ── Layer 2: Core primitives ────────────────────────────────────────
 
