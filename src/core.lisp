@@ -115,31 +115,20 @@
   (fn [ta tb]
     (if (%eq ta tb)
       true
-      (if (if (%eq ta :list) (%eq tb :syntax) false)
-        true
-        (if (if (%eq ta :syntax) (%eq tb :list) false)
-          true
-          (if (if (%eq ta :@array) (%eq tb :array) false)
-            true
-            (if (if (%eq ta :array) (%eq tb :@array) false)
-              true
-              (if (if (%eq ta :@string) (%eq tb :string) false)
-                true
-                (if (if (%eq ta :string) (%eq tb :@string) false)
-                  true
-                  (if (if (%eq ta :@bytes) (%eq tb :bytes) false)
-                    true
-                    (if (if (%eq ta :bytes) (%eq tb :@bytes) false)
-                      true
-                      (if (if (%eq ta :@struct) (%eq tb :struct) false)
-                        true
-                        (if (if (%eq ta :struct) (%eq tb :@struct) false)
-                          true
-                          (if (if (%eq ta :@set) (%eq tb :set) false)
-                            true
-                            (if (if (%eq ta :set) (%eq tb :@set) false)
-                              true
-                              false)))))))))))))))
+      (match [ta tb]
+        [:list :syntax] true
+        [:syntax :list] true
+        [:array :@array] true
+        [:@array :array] true
+        [:string :@string] true
+        [:@string :string] true
+        [:bytes :@bytes] true
+        [:@bytes :bytes] true
+        [:struct :@struct] true
+        [:@struct :struct] true
+        [:set :@set] true
+        [:@set :set] true
+        _ false))))
 
 (def append
   (fn [a b]
