@@ -238,11 +238,12 @@ impl RegionInference {
 
             // Let: introduce scope region
             HirKind::Let { bindings, body } => {
-                let may_suspend = hir.signal.may_suspend();
-                let scope_region = if may_suspend {
-                    // Suspension blocks scope introduction
-                    self.current_region
-                } else {
+                // Always create a Scope region. The escape analysis
+                // (can_scope_allocate_let) validates safety conditions
+                // including suspension, outward mutations, and breaks.
+                // Region inference tracks allocation sites and value flow;
+                // it does not duplicate the escape analysis safety checks.
+                let scope_region = {
                     let r = self.fresh_region(self.current_region, RegionKind::Scope);
                     self.scope_region.insert(hir.id, r);
                     r
@@ -277,10 +278,7 @@ impl RegionInference {
 
             // Letrec: same as Let
             HirKind::Letrec { bindings, body } => {
-                let may_suspend = hir.signal.may_suspend();
-                let scope_region = if may_suspend {
-                    self.current_region
-                } else {
+                let scope_region = {
                     let r = self.fresh_region(self.current_region, RegionKind::Scope);
                     self.scope_region.insert(hir.id, r);
                     r
@@ -315,12 +313,9 @@ impl RegionInference {
                 }
             }
 
-            // Loop: introduce loop region (gated on suspension)
+            // Loop: introduce loop region
             HirKind::Loop { bindings, body } => {
-                let may_suspend = hir.signal.may_suspend();
-                let loop_region = if may_suspend {
-                    self.current_region
-                } else {
+                let loop_region = {
                     let r = self.fresh_region(self.current_region, RegionKind::Loop);
                     self.scope_region.insert(hir.id, r);
                     r
@@ -423,16 +418,12 @@ impl RegionInference {
 
             // Block: introduce scope region, record block_regions
             HirKind::Block { block_id, body, .. } => {
-                let may_suspend = body.iter().any(|e| e.signal.may_suspend());
-
                 // Record the enclosing region BEFORE entering the block's
                 // scope. Break targeting this block will constrain its
                 // value to this region (not the block's inner scope).
                 self.block_regions.insert(*block_id, self.current_region);
 
-                let scope_region = if may_suspend {
-                    self.current_region
-                } else {
+                let scope_region = {
                     let r = self.fresh_region(self.current_region, RegionKind::Scope);
                     self.scope_region.insert(hir.id, r);
                     r
@@ -486,13 +477,13 @@ impl RegionInference {
                 if self.call_returns_immediate(func) {
                     None
                 } else {
-                    // Unknown callee: allocates in current region AND
-                    // forces scope to reject. Without interprocedural
-                    // analysis, the callee may perform outward mutations,
-                    // yield, or otherwise escape heap values.
+                    // Non-immediate callee: allocates in current region.
+                    // Do NOT force to GLOBAL — value flow through bindings
+                    // and the Let body_var escape constraint determine
+                    // whether the allocation escapes the scope. Outward
+                    // mutations and suspension are checked by the escape
+                    // analysis (can_scope_allocate_let conditions 2,4,5,6).
                     let var = self.alloc_here(hir.id);
-                    let global_var = self.fresh_var(Region::GLOBAL);
-                    self.constrain(var, global_var, hir.id);
                     Some(var)
                 }
             }
