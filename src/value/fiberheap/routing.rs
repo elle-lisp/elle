@@ -263,15 +263,6 @@ pub fn drop_slot_value(val: crate::value::Value) {
         if super::FiberHeap::trace_rc() {
             eprintln!("[trace:rc] drop_slot_value {:?} FREED", heap_ptr);
         }
-        #[cfg(debug_assertions)]
-        {
-            let tag = (*obj_ptr).tag();
-            let flat = heap.pool.slab.ptr_to_flat(obj_ptr) as u32;
-            eprintln!(
-                "[drop_slot_value] FREEING flat {} ptr {:?} tag={:?} rc={}",
-                flat, obj_ptr, tag, rc,
-            );
-        }
         // Decref all heap children (symmetric with incref in alloc).
         {
             let obj_ref = &*obj_ptr;
@@ -288,29 +279,6 @@ pub fn drop_slot_value(val: crate::value::Value) {
         // Unlink from the allocation linked list (O(1)) and remove from
         // dtors (O(n) on dtors, which is typically short).
         heap.pool.unlink_alloc_ptr(obj_ptr);
-        #[cfg(debug_assertions)]
-        {
-            let dtor_len_before = heap.pool.dtors.len();
-            let scope_depth = heap.scope_marks.len();
-            let dtor_indices: Vec<usize> = heap
-                .pool
-                .dtors
-                .iter()
-                .enumerate()
-                .filter(|(_, &p)| p == obj_ptr)
-                .map(|(i, _)| i)
-                .collect();
-            if !dtor_indices.is_empty() {
-                // Log scope mark dtor_lens to see if any will be invalidated.
-                let mark_dtor_lens: Vec<usize> =
-                    heap.scope_marks.iter().map(|m| m.dtor_len()).collect();
-                eprintln!(
-                    "[drop_slot_value] {:?} in dtors at indices {:?}, \
-                     dtors.len={}, scope_depth={}, mark_dtor_lens={:?}",
-                    obj_ptr, dtor_indices, dtor_len_before, scope_depth, mark_dtor_lens
-                );
-            }
-        }
         heap.pool.remove_from_dtors(obj_ptr);
         // Return slab slot to free list.
         heap.pool.dealloc_slot(obj_ptr);

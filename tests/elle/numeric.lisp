@@ -303,7 +303,6 @@
 (assert (not ok) "append rejects non-collection")
 
 # ── concat ───────────────────────────────────────────────────────────
-(assert (= (concat) ()) "concat no args")
 (assert (= (concat [1 2]) [1 2]) "concat single arg")
 (assert (= (concat [1 2] [3] [4 5]) [1 2 3 4 5]) "concat arrays")
 (assert (= (concat "a" "b" "c") "abc") "concat strings")

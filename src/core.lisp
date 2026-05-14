@@ -109,52 +109,84 @@
                        (build (rest xs) (%pair (first xs) acc))))]
       (build (collect b (collect a ())) ()))))
 
+# Type compatibility for append/concat: same type, list↔syntax,
+# or types differing only in mutability class.
+(def append-types-ok?
+  (fn [ta tb]
+    (if (%eq ta tb)
+      true
+      (if (if (%eq ta :list) (%eq tb :syntax) false)
+        true
+        (if (if (%eq ta :syntax) (%eq tb :list) false)
+          true
+          (if (if (%eq ta :@array) (%eq tb :array) false)
+            true
+            (if (if (%eq ta :array) (%eq tb :@array) false)
+              true
+              (if (if (%eq ta :@string) (%eq tb :string) false)
+                true
+                (if (if (%eq ta :string) (%eq tb :@string) false)
+                  true
+                  (if (if (%eq ta :@bytes) (%eq tb :bytes) false)
+                    true
+                    (if (if (%eq ta :bytes) (%eq tb :@bytes) false)
+                      true
+                      (if (if (%eq ta :@struct) (%eq tb :struct) false)
+                        true
+                        (if (if (%eq ta :struct) (%eq tb :@struct) false)
+                          true
+                          (if (if (%eq ta :@set) (%eq tb :set) false)
+                            true
+                            (if (if (%eq ta :set) (%eq tb :@set) false)
+                              true
+                              false)))))))))))))))
+
 (def append
   (fn [a b]
-    (match (type-of a)
-      :list (append-list a b)
-      :syntax (append-list a b)
-      :array
-        (let [r (@array)]
-          (push-all r a)
-          (push-all r b)
-          (freeze r))
-      :@array (begin
-                (push-all a b)
-                a)
-      :string (string a b)
-      :@string (begin
-                 (push-all a b)
-                 a)
-      :bytes
-        (let [r (@bytes)]
-          (push-all r a)
-          (push-all r b)
-          (freeze r))
-      :@bytes (begin
-                (push-all a b)
-                a)
-      :set (union a b)
-      :@set (union a b)
-      :struct
-        (let [r (@struct)]
-          (merge-into r a)
-          (merge-into r b)
-          (freeze r))
-      :@struct (begin
-                 (merge-into a b)
-                 a)
-      _
-        (emit :error {:error :type-error
-                      :message (string "append: unsupported type " (type-of a))}))))
+    (if (%not (append-types-ok? (type-of a) (type-of b)))
+      (emit :error {:error :type-error
+                    :message (string "append: type mismatch — " (type-of a)
+                                     " vs " (type-of b))})
+      (match (type-of a)
+        :list (append-list a b)
+        :syntax (append-list a b)
+        :array
+          (let [r (@array)]
+            (push-all r a)
+            (push-all r b)
+            (freeze r))
+        :@array (begin
+                  (push-all a b)
+                  a)
+        :string (string a b)
+        :@string (begin
+                   (push-all a b)
+                   a)
+        :bytes
+          (let [r (@bytes)]
+            (push-all r a)
+            (push-all r b)
+            (freeze r))
+        :@bytes (begin
+                  (push-all a b)
+                  a)
+        :set (union a b)
+        :@set (union a b)
+        :struct
+          (let [r (@struct)]
+            (merge-into r a)
+            (merge-into r b)
+            (freeze r))
+        :@struct (begin
+                   (merge-into a b)
+                   a)
+        _
+          (emit :error {:error :type-error
+                        :message (string "append: unsupported type " (type-of a))})))))
 
 ## ── concat ─────────────────────────────────────────────────────────
 
-(def concat
-  (fn [& args]
-    (if (empty? args)
-      ()
-      (if (%eq (length args) 1) (first args) (reduce1 append args)))))
+(def concat (fn [a & rest] (if (empty? rest) a (reduce1 append (%pair a rest)))))
 
 ## ── Module export closure ──────────────────────────────────────────
 

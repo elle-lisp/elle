@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/redis.lisp — Pure Elle Redis client (RESP2)
 ##
 ## Loaded via: (def redis ((import "std/redis")))
@@ -26,14 +26,13 @@
 (defn resp-read [port]
   "Read a single RESP2 reply from port. Signals on error replies.
    Returns Elle values: string, integer, array, or nil."
-  (let [raw (port/read-line port)]
-    (when (nil? raw)
+  (let [line (port/read-line port)]
+    (when (nil? line)
       (error {:error :redis-error
               :reason :unexpected-eof
               :message "unexpected EOF"}))
-    (let [line raw]
-      (let [prefix (get line 0)
-            body (slice line 1)]
+    (let [prefix (get line 0)
+          body (slice line 1)]
       (case
         prefix  # Simple string
         "+" body

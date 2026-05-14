@@ -49,7 +49,8 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
 /// receives a partial result and can re-issue the read.
 const READ_LINE_BUF_SIZE: usize = 65536;
 
-/// (port/read port n [:timeout ms]) → bytes | nil
+/// (port/read port n [:timeout ms]) → string | bytes | nil
+/// Text ports return a string of up to n characters; binary ports return bytes.
 fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
     let port = match extract_port_value(&args[0], "port/read") {
         Ok(p) => p,

@@ -5,7 +5,7 @@ use crate::io::pool::{BufferHandle, BufferPool};
 use crate::io::request::{ConnectAddr, IoOp};
 use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::io::Completion;
-use crate::port::{Port, PortKind};
+use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
 use crate::value::{error_val, Value};
 use std::collections::HashMap;
@@ -294,10 +294,14 @@ pub(super) fn process_raw_completion(
         PendingOp::Port {
             op,
             port_key,
-            port: _,
+            port,
             listener_kind,
             ..
         } => {
+            let encoding = port
+                .as_external::<Port>()
+                .map(|p| p.encoding())
+                .unwrap_or(Encoding::Binary);
             if result_code < 0 {
                 // Error
                 let errno = -result_code;
@@ -401,7 +405,13 @@ pub(super) fn process_raw_completion(
                         }
                         return Completion {
                             id,
-                            result: Ok(*buffer),
+                            result: if encoding == Encoding::Text {
+                                unsafe {
+                                    crate::io::request::bytes_to_string_in_place(*buffer)
+                                }
+                            } else {
+                                Ok(*buffer)
+                            },
                         };
                     }
                     // Check fiber buffer
@@ -412,7 +422,13 @@ pub(super) fn process_raw_completion(
                         }
                         return Completion {
                             id,
-                            result: Ok(*buffer),
+                            result: if encoding == Encoding::Text {
+                                unsafe {
+                                    crate::io::request::bytes_to_string_in_place(*buffer)
+                                }
+                            } else {
+                                Ok(*buffer)
+                            },
                         };
                     }
                     // No data and EOF — return nil (empty read)
@@ -426,9 +442,16 @@ pub(super) fn process_raw_completion(
                 // (empty bytes for empty files, not nil).
                 if matches!(op, IoOp::ReadAll) {
                     let all: Vec<u8> = state.buffer.drain(..).collect();
+                    let val = Value::bytes(all);
                     return Completion {
                         id,
-                        result: Ok(Value::bytes(all)),
+                        result: if encoding == Encoding::Text {
+                            unsafe {
+                                crate::io::request::bytes_to_string_in_place(val)
+                            }
+                        } else {
+                            Ok(val)
+                        },
                     };
                 }
 
@@ -553,6 +576,14 @@ pub(super) fn process_raw_completion(
                     unsafe {
                         crate::io::request::truncate_buffer(buffer, total);
                     }
+                    if encoding == Encoding::Text {
+                        return Completion {
+                            id,
+                            result: unsafe {
+                                crate::io::request::bytes_to_string_in_place(*buffer)
+                            },
+                        };
+                    }
                     *buffer
                 }
                 IoOp::ReadAll => {
@@ -562,9 +593,17 @@ pub(super) fn process_raw_completion(
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
                     state.buffer.extend_from_slice(&data);
-                    // ReadAll returns bytes regardless of port encoding.
                     let all: Vec<u8> = state.buffer.drain(..).collect();
-                    Value::bytes(all)
+                    let val = Value::bytes(all);
+                    if encoding == Encoding::Text {
+                        return Completion {
+                            id,
+                            result: unsafe {
+                                crate::io::request::bytes_to_string_in_place(val)
+                            },
+                        };
+                    }
+                    val
                 }
                 IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
                 IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,

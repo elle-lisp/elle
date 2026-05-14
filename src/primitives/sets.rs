@@ -158,23 +158,20 @@ pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing only elements present in both sets.
 pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
-    if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
-        let sa: BTreeSet<Value> = a.iter().copied().collect();
-        let sb: BTreeSet<Value> = b.iter().copied().collect();
-        let result: BTreeSet<Value> = sa.intersection(&sb).copied().collect();
-        (SIG_OK, Value::set(result))
-    } else if let (Some(a), Some(b)) = (args[0].as_set_mut(), args[1].as_set_mut()) {
-        let result: BTreeSet<Value> = a.borrow().intersection(&*b.borrow()).copied().collect();
-        (SIG_OK, Value::set_mut(result))
-    } else {
-        (
+    use super::collection::{set_elements, is_mutable};
+    match (set_elements(&args[0]), set_elements(&args[1])) {
+        (Some(sa), Some(sb)) => {
+            let result: BTreeSet<Value> = sa.intersection(&sb).copied().collect();
+            if is_mutable(&args[0]) {
+                (SIG_OK, Value::set_mut(result))
+            } else {
+                (SIG_OK, Value::set(result))
+            }
+        }
+        _ => (
             SIG_ERROR,
-            error_val(
-                "type-error",
-                "intersection: both arguments must be sets or both must be mutable sets"
-                    .to_string(),
-            ),
-        )
+            error_val("type-error", "intersection: arguments must be sets".to_string()),
+        ),
     }
 }
 
@@ -185,22 +182,20 @@ pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing elements in set1 but not in set2.
 pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
-    if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
-        let sa: BTreeSet<Value> = a.iter().copied().collect();
-        let sb: BTreeSet<Value> = b.iter().copied().collect();
-        let result: BTreeSet<Value> = sa.difference(&sb).copied().collect();
-        (SIG_OK, Value::set(result))
-    } else if let (Some(a), Some(b)) = (args[0].as_set_mut(), args[1].as_set_mut()) {
-        let result: BTreeSet<Value> = a.borrow().difference(&*b.borrow()).copied().collect();
-        (SIG_OK, Value::set_mut(result))
-    } else {
-        (
+    use super::collection::{set_elements, is_mutable};
+    match (set_elements(&args[0]), set_elements(&args[1])) {
+        (Some(sa), Some(sb)) => {
+            let result: BTreeSet<Value> = sa.difference(&sb).copied().collect();
+            if is_mutable(&args[0]) {
+                (SIG_OK, Value::set_mut(result))
+            } else {
+                (SIG_OK, Value::set(result))
+            }
+        }
+        _ => (
             SIG_ERROR,
-            error_val(
-                "type-error",
-                "difference: both arguments must be sets or both must be mutable sets".to_string(),
-            ),
-        )
+            error_val("type-error", "difference: arguments must be sets".to_string()),
+        ),
     }
 }
 

@@ -221,3 +221,40 @@
 
 # --- Cleanup ---
 (subprocess/system "rm" ["-f" seek-test-path])
+
+# ==============================
+# Encoding-aware port/read
+# ==============================
+
+# Text port read returns string
+(spit "/tmp/elle-test-enc-type-474" "hello")
+(let [ts (port/read (port/open "/tmp/elle-test-enc-type-474" :read) 5)
+      tb (port/read (port/open-bytes "/tmp/elle-test-enc-type-474" :read) 5)]
+  (assert (string? ts) "text port read returns string")
+  (assert (bytes? tb) "binary port read returns bytes")
+  (assert (= ts "hello") "text port read content correct"))
+
+# Multi-byte UTF-8 characters: reading N returns N characters
+(spit "/tmp/elle-test-enc-mb-474" "héllo")
+(let [result (port/read (port/open "/tmp/elle-test-enc-mb-474" :read) 6)]
+  (assert (string? result) "multibyte text read returns string")
+  (assert (= result "héllo") "multibyte text read content correct"))
+
+# Binary port read of same multi-byte file returns bytes
+(let [result (port/read (port/open-bytes "/tmp/elle-test-enc-mb-474" :read) 6)]
+  (assert (bytes? result) "binary port read of multibyte file returns bytes"))
+
+# port/read-all on text port returns string
+(spit "/tmp/elle-test-enc-all-474" "hello world")
+(let [result (port/read-all (port/open "/tmp/elle-test-enc-all-474" :read))]
+  (assert (string? result) "text port read-all returns string")
+  (assert (= result "hello world") "text port read-all content correct"))
+
+# port/read-all on binary port returns bytes
+(let [result (port/read-all (port/open-bytes "/tmp/elle-test-enc-all-474" :read))]
+  (assert (bytes? result) "binary port read-all returns bytes"))
+
+# --- Encoding cleanup ---
+(subprocess/system "rm"
+                   ["-f" "/tmp/elle-test-enc-type-474"
+                    "/tmp/elle-test-enc-mb-474" "/tmp/elle-test-enc-all-474"])

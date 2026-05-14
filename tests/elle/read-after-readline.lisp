@@ -1,6 +1,9 @@
 (elle/epoch 11)
-## tests/elle/read-after-readline.lisp — port/read must return exact byte
-## count after port/read-line buffered excess data from the same fd.
+## tests/elle/read-after-readline.lisp — port/read on a binary port must
+## return exact byte count after port/read-line buffered excess data.
+##
+## Uses binary ports because this tests byte-level RESP protocol behavior
+## where \r\n counts as 2 bytes (not 1 grapheme cluster).
 ##
 ## Regression test for: async backend IoOp::Read returning a short read
 ## when the fd_state buffer has fewer bytes than requested (the buffer
@@ -20,7 +23,7 @@
 
 (spit "/tmp/elle-test-read-after-readline" "+OK\r\n$5\r\nhello\r\n")
 
-(let [p (port/open "/tmp/elle-test-read-after-readline" :read)]
+(let [p (port/open-bytes "/tmp/elle-test-read-after-readline" :read)]
   (defer
     (port/close p)
     (let [line1 (port/read-line p)]
@@ -58,7 +61,7 @@
 
 (spit "/tmp/elle-test-read-after-readline-multi" (make-bulk-sequence 20))
 
-(let [p (port/open "/tmp/elle-test-read-after-readline-multi" :read)]
+(let [p (port/open-bytes "/tmp/elle-test-read-after-readline-multi" :read)]
   (defer
     (port/close p)
     (def @i 0)

@@ -235,7 +235,6 @@ impl Port {
     }
 
     /// The port encoding.
-    #[allow(dead_code)]
     pub fn encoding(&self) -> Encoding {
         self.encoding
     }

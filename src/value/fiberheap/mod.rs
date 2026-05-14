@@ -348,23 +348,6 @@ impl FiberHeap {
             }
         }
 
-        #[cfg(debug_assertions)]
-        {
-            let n_pinned = scope_ptrs
-                .iter()
-                .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
-                .count();
-            eprintln!(
-                "[release_refcounted] ENTER mark={} dtor_len={} n_allocs={} n_pinned={} \
-                 scope_depth={}",
-                mark.position(),
-                mark.dtor_len(),
-                scope_ptrs.len(),
-                n_pinned,
-                self.scope_marks.len(),
-            );
-        }
-
         // Phase 1: Propagate protection from pinned objects (rc > 0)
         // to their transitive children. This uses temporary increfs so
         // that children reachable from surviving objects are not freed.
@@ -373,7 +356,6 @@ impl FiberHeap {
             .filter(|&&ptr| self.pool.refcount(ptr as *const HeapObject) > 0)
             .copied()
             .collect();
-        let mut protection_count = 0usize;
         while let Some(ptr) = worklist.pop() {
             let obj = unsafe { &*ptr };
             let mut children = Vec::new();
@@ -385,63 +367,18 @@ impl FiberHeap {
                         if self.pool.refcount(child_typed as *const HeapObject) == 0 {
                             self.pool.incref(child_typed as *const HeapObject);
                             worklist.push(child_typed);
-                            protection_count += 1;
                         }
                     }
                 }
             }
         }
 
-        #[cfg(debug_assertions)]
-        {
-            eprintln!(
-                "[release_refcounted] PHASE1: protected {} children via worklist",
-                protection_count,
-            );
-        }
-
         // Phase 2: Free unprotected objects (rc still == 0 after phase 1).
         // Run dtors in reverse order for refcount-0 objects.
-        // ASSERT: no null entries in dtor range — origin/main never wrote nulls.
-        #[cfg(debug_assertions)]
-        {
-            for i in mark.dtor_len()..self.pool.dtors.len() {
-                assert!(
-                    !self.pool.dtors[i].is_null(),
-                    "release_refcounted: null dtor entry at index {} (dtor_len={} dtors.len={}). \
-                     Dtor vec should never contain nulls.",
-                    i,
-                    mark.dtor_len(),
-                    self.pool.dtors.len(),
-                );
-            }
-        }
-        let mut dtors_run = 0usize;
         for i in (mark.dtor_len()..self.pool.dtors.len()).rev() {
             let ptr = self.pool.dtors[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
-                #[cfg(debug_assertions)]
-                {
-                    let tag = unsafe { (*ptr).tag() };
-                    let flat = self.pool.slab.ptr_to_flat(ptr) as u32;
-                    eprintln!(
-                        "[release_refcounted] DROP dtor[{}] flat {} ptr {:?} tag={:?}",
-                        i, flat, ptr, tag
-                    );
-                }
                 unsafe { std::ptr::drop_in_place(ptr) };
-                dtors_run += 1;
-            } else {
-                #[cfg(debug_assertions)]
-                {
-                    let tag = unsafe { (*ptr).tag() };
-                    let flat = self.pool.slab.ptr_to_flat(ptr) as u32;
-                    let rc = self.pool.refcount(ptr as *const HeapObject);
-                    eprintln!(
-                        "[release_refcounted] KEEP dtor[{}] flat {} ptr {:?} tag={:?} rc={}",
-                        i, flat, ptr, tag, rc
-                    );
-                }
             }
         }
         // Compact dtors: keep pinned, remove dead.
@@ -455,54 +392,26 @@ impl FiberHeap {
         }
         self.pool.dtors.truncate(kept);
 
-        #[cfg(debug_assertions)]
-        {
-            eprintln!(
-                "[release_refcounted] PHASE2: ran {} dtors, kept {} pinned. dtors.len now={}",
-                dtors_run,
-                kept - mark.dtor_len(),
-                self.pool.dtors.len(),
-            );
-        }
-
         // Dealloc refcount-0 slab slots, unlink from alloc list, keep pinned.
-        let mut slots_freed = 0usize;
         for (i, &ptr) in scope_ptrs.iter().enumerate() {
             let flat = scope_flats[i];
             if self.pool.refcount(ptr as *const HeapObject) == 0 {
-                #[cfg(debug_assertions)]
-                {
-                    let tag = unsafe { (*ptr).tag() };
-                    eprintln!(
-                        "[release_refcounted] FREE flat {} ptr {:?} tag={:?}",
-                        flat, ptr, tag
-                    );
-                }
                 self.pool.unlink_alloc(flat);
                 unsafe { self.pool.dealloc_slot(ptr) };
-                slots_freed += 1;
-            } else {
-                #[cfg(debug_assertions)]
-                {
-                    let tag = unsafe { (*ptr).tag() };
-                    let rc = self.pool.refcount(ptr as *const HeapObject);
-                    eprintln!(
-                        "[release_refcounted] PIN  flat {} ptr {:?} tag={:?} rc={}",
-                        flat, ptr, tag, rc
-                    );
-                }
             }
         }
 
-        #[cfg(debug_assertions)]
-        {
-            eprintln!(
-                "[release_refcounted] DONE: freed {} slots, {} pinned. alloc_count={}",
-                slots_freed,
-                scope_ptrs.len() - slots_freed,
-                mark.position(),
-            );
-        }
+        // NOTE: bump arena is NOT rewound here. Even when all slab objects
+        // in the scope are rc=0 and freed, their InlineSlice data in the
+        // bump arena may still be referenced by Values that escaped the
+        // scope (return values, values pushed to outer collections, etc.).
+        // The escaped Value's HeapObject was freed from the slab but the
+        // Value copy (16-byte tag+pointer) still exists outside the scope,
+        // pointing to InlineSlice data in this bump region. Rewinding
+        // would corrupt those strings/arrays.
+        //
+        // Bump arena reclamation requires region inference: the compiler
+        // must prove that no InlineSlice pointer into the region escapes.
 
         // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {

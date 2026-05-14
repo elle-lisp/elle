@@ -279,31 +279,83 @@ pub fn coll_to_vec(val: &Value) -> Result<Vec<Value>, Value> {
 }
 
 /// Combine two collections (concat for seqs, union for sets, merge for structs).
-pub fn coll_combine(a: &Value, b: &Value) -> Result<Value, Value> {
-    // Sets — union
-    if let (Some(sa), Some(sb)) = (a.as_set(), b.as_set()) {
-        let mut result: std::collections::BTreeSet<Value> = sa.iter().copied().collect();
-        result.extend(sb.iter().copied());
-        return Ok(Value::set(result));
+/// Collect set elements into a BTreeSet regardless of mutability.
+pub fn set_elements(v: &Value) -> Option<std::collections::BTreeSet<Value>> {
+    if let Some(s) = v.as_set() {
+        Some(s.iter().copied().collect())
+    } else if let Some(s) = v.as_set_mut() {
+        Some(s.borrow().iter().copied().collect())
+    } else {
+        None
     }
-    if let (Some(sa), Some(sb)) = (a.as_set_mut(), b.as_set_mut()) {
-        let result: std::collections::BTreeSet<Value> =
-            sa.borrow().union(&*sb.borrow()).copied().collect();
-        return Ok(Value::set_mut(result));
+}
+
+/// Collect struct entries into a BTreeMap regardless of mutability.
+fn struct_entries(v: &Value) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
+    if let Some(s) = v.as_struct() {
+        Some(s.iter().map(|(k, v)| (k.clone(), *v)).collect())
+    } else if let Some(s) = v.as_struct_mut() {
+        Some(s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect())
+    } else {
+        None
+    }
+}
+
+/// Collect array elements into a Vec regardless of mutability.
+fn array_elements(v: &Value) -> Option<Vec<Value>> {
+    if let Some(a) = v.as_array() {
+        Some(a.to_vec())
+    } else if let Some(a) = v.as_array_mut() {
+        Some(a.borrow().clone())
+    } else {
+        None
+    }
+}
+
+/// Collect string content regardless of mutability.
+fn string_content(v: &Value) -> Option<String> {
+    if let Some(s) = v.with_string(|s| s.to_string()) {
+        Some(s)
+    } else if let Some(s) = v.as_string_mut() {
+        Some(String::from_utf8_lossy(&s.borrow()).into_owned())
+    } else {
+        None
+    }
+}
+
+/// Collect bytes content regardless of mutability.
+fn bytes_content(v: &Value) -> Option<Vec<u8>> {
+    if let Some(b) = v.as_bytes() {
+        Some(b.to_vec())
+    } else if let Some(b) = v.as_bytes_mut() {
+        Some(b.borrow().clone())
+    } else {
+        None
+    }
+}
+
+/// Is the value a mutable variant of its base type?
+pub fn is_mutable(v: &Value) -> bool {
+    v.as_set_mut().is_some()
+        || v.as_struct_mut().is_some()
+        || v.as_array_mut().is_some()
+        || v.as_string_mut().is_some()
+        || v.as_bytes_mut().is_some()
+}
+
+pub fn coll_combine(a: &Value, b: &Value) -> Result<Value, Value> {
+    let a_mut = is_mutable(a);
+
+    // Sets — union
+    if let (Some(sa), Some(sb)) = (set_elements(a), set_elements(b)) {
+        let result: std::collections::BTreeSet<Value> = sa.union(&sb).copied().collect();
+        return Ok(if a_mut { Value::set_mut(result) } else { Value::set(result) });
     }
 
     // Structs — merge (right wins)
-    if let (Some(sa), Some(sb)) = (a.as_struct(), b.as_struct()) {
-        let mut result = std::collections::BTreeMap::new();
-        result.extend(sa.iter().map(|(k, v)| (k.clone(), *v)));
-        result.extend(sb.iter().map(|(k, v)| (k.clone(), *v)));
-        return Ok(Value::struct_from(result));
-    }
-    if let (Some(ta), Some(tb)) = (a.as_struct_mut(), b.as_struct_mut()) {
-        let mut result = std::collections::BTreeMap::new();
-        result.extend(ta.borrow().iter().map(|(k, v)| (k.clone(), *v)));
-        result.extend(tb.borrow().iter().map(|(k, v)| (k.clone(), *v)));
-        return Ok(Value::struct_mut_from(result));
+    if let (Some(mut ea), Some(eb)) = (struct_entries(a), struct_entries(b)) {
+        ea.extend(eb);
+        return Ok(if a_mut { Value::struct_mut_from(ea) } else { Value::struct_from(ea) });
     }
 
     // Lists
@@ -323,41 +375,21 @@ pub fn coll_combine(a: &Value, b: &Value) -> Result<Value, Value> {
     }
 
     // Arrays
-    if let (Some(ea), Some(eb)) = (a.as_array(), b.as_array()) {
-        let mut result = ea.to_vec();
-        result.extend(eb.iter().cloned());
-        return Ok(Value::array(result));
-    }
-    if let (Some(ra), Some(rb)) = (a.as_array_mut(), b.as_array_mut()) {
-        let mut result = ra.borrow().clone();
-        result.extend(rb.borrow().iter().cloned());
-        return Ok(Value::array_mut(result));
+    if let (Some(mut ea), Some(eb)) = (array_elements(a), array_elements(b)) {
+        ea.extend(eb);
+        return Ok(if a_mut { Value::array_mut(ea) } else { Value::array(ea) });
     }
 
     // Strings
-    if a.is_string() && b.is_string() {
-        let mut sa = a.with_string(|s| s.to_string()).unwrap();
-        b.with_string(|s| sa.push_str(s));
-        return Ok(Value::string(sa.as_str()));
-    }
-    if a.as_string_mut().is_some() && b.as_string_mut().is_some() {
-        let ba = a.as_string_mut().unwrap();
-        let bb = b.as_string_mut().unwrap();
-        let mut result = ba.borrow().clone();
-        result.extend(bb.borrow().iter());
-        return Ok(Value::string_mut(result));
+    if let (Some(mut sa), Some(sb)) = (string_content(a), string_content(b)) {
+        sa.push_str(&sb);
+        return Ok(if a_mut { Value::string_mut(sa.into_bytes()) } else { Value::string(sa.as_str()) });
     }
 
     // Bytes
-    if let (Some(ba), Some(bb)) = (a.as_bytes(), b.as_bytes()) {
-        let mut result = ba.to_vec();
-        result.extend(bb.iter());
-        return Ok(Value::bytes(result));
-    }
-    if let (Some(ra), Some(rb)) = (a.as_bytes_mut(), b.as_bytes_mut()) {
-        let mut result = ra.borrow().clone();
-        result.extend(rb.borrow().iter());
-        return Ok(Value::bytes_mut(result));
+    if let (Some(mut ba), Some(bb)) = (bytes_content(a), bytes_content(b)) {
+        ba.extend(bb);
+        return Ok(if a_mut { Value::bytes_mut(ba) } else { Value::bytes(ba) });
     }
 
     Err(error_val(

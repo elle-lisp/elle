@@ -36,9 +36,14 @@ fn stdin_to_completion(
             // For Read/ReadLine, copy data into the pre-allocated buffer
             if let PendingOp::Port {
                 op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+                ref port,
                 ..
             } = &pending_op
             {
+                let enc = port
+                    .as_external::<Port>()
+                    .map(|p| p.encoding())
+                    .unwrap_or(Encoding::Binary);
                 unsafe {
                     let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
                     let copy_len = data.len().min(dst_cap);
@@ -69,14 +74,15 @@ fn stdin_to_completion(
                     ..
                 } = &pending_op
                 {
-                    // ReadLine: transmute LBytes → LString (zero-copy)
+                    // ReadLine always returns string; Read depends on encoding
                     let result = if matches!(
                         &pending_op,
                         PendingOp::Port {
                             op: IoOp::ReadLine { .. },
                             ..
                         }
-                    ) {
+                    ) || enc == Encoding::Text
+                    {
                         unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
                     } else {
                         Ok(*buffer)
@@ -408,6 +414,7 @@ impl AsyncBackend {
         // `read_buffered` tracks how many bytes were already in the buffer
         // when a Read request can't be fully served — the completion handler
         // must prepend those bytes to the fd data.
+        let port_encoding = port.encoding();
         let mut read_buffered: usize = 0;
         {
             let state = inner
@@ -461,9 +468,16 @@ impl AsyncBackend {
                             std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, copy_len);
                             crate::io::request::truncate_buffer(buffer, copy_len);
                         }
+                        let result = if port_encoding == Encoding::Text {
+                            unsafe {
+                                crate::io::request::bytes_to_string_in_place(*buffer)
+                            }
+                        } else {
+                            Ok(*buffer)
+                        };
                         inner.completions.push_back(Completion {
                             id,
-                            result: Ok(*buffer),
+                            result,
                         });
                         return Ok(id);
                     }
