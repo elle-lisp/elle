@@ -105,13 +105,13 @@
       (send-frame session ftype flags sid payload))
     (assign *session-futex-id* (inc *session-futex-id*))
     (let [latch-key *session-futex-id*
-          latch-cell @[0]]
-      (put session :settings-ack-latch @{:key latch-key :cell latch-cell})
+          latch-box (box 0)]
+      (put session :settings-ack-latch @{:key latch-key :box latch-box})
       (ev/spawn (fn []
                   (let [result (ev/timeout 30
                         (fn []
-                          (while (= (get latch-cell 0) 0)
-                            (ev/futex-wait latch-key latch-cell 0))
+                          (while (= (unbox latch-box) 0)
+                            (ev/futex-wait latch-key latch-box 0))
                           :acked))]
                     (when (nil? result)
                       (when (not session:closed?)
@@ -127,7 +127,7 @@
     "Called when SETTINGS ACK is received. Opens the latch if pending."
     (when session:settings-ack-latch
       (let [l session:settings-ack-latch]
-        (put l:cell 0 1)
+        (rebox l:box 1)
         (ev/futex-wake l:key 1))
       (put session :settings-ack-latch nil)))
 

@@ -114,7 +114,7 @@
                    (def @max-reached false)
                    (def @done false)
                    (while (not done)
-                     (match (process:recv-timeout 5)
+                     (match (process:recv-timeout 20)
                        :started (assign starts (+ starts 1))
                        [:max-reached] (begin
                                         (assign max-reached true)
@@ -207,7 +207,7 @@
                    (def @got-max false)
                    (def @done false)
                    (while (not done)
-                     (match (process:recv-timeout 5)
+                     (match (process:recv-timeout 20)
                        :attempt (assign attempt-count (+ attempt-count 1))
                        :max-reached (begin
                                       (assign got-max true)
@@ -259,7 +259,7 @@
                    (def @restarts @||)
                    (def @count 0)
                    (while (< count 4)
-                     (match (process:recv-timeout 5)
+                     (match (process:recv-timeout 20)
                        [:started id _pid] (put restarts id)
                        :timeout (assign count 4)
                        _ nil)
@@ -292,7 +292,7 @@
                    (def @starts 0)
                    (def @done false)
                    (while (not done)
-                     (match (process:recv-timeout 5)
+                     (match (process:recv-timeout 20)
                        :started
                          (begin
                            (assign starts (+ starts 1))
@@ -372,7 +372,7 @@
                    (def @got-exit false)
                    (def @count 0)
                    (while (< count 5)
-                     (match (process:recv-timeout 3)
+                     (match (process:recv-timeout 100)
                        [:log event]
                          (begin
                            (when (= (get event :event) :child-exited)

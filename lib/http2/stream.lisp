@@ -19,19 +19,19 @@
 
   (defn make-channel []
     (assign *chan-id* (inc *chan-id*))
-    (let [key *chan-id* cell @[0] buf @[] @closed false @waiting false]
+    (let [key *chan-id* bx (box 0) buf @[] @closed false @waiting false]
       {:put (fn [val]
               (push buf val)
               (when waiting
-                (put cell 0 (inc (get cell 0)))
+                (rebox bx (inc (unbox bx)))
                 (ev/futex-wake key 1))
               nil)
        :take (fn []
                (while (and (not closed) (= (length buf) 0))
                  (assign waiting true)
-                 (let [gen (get cell 0)]
+                 (let [gen (unbox bx)]
                    (when (= (length buf) 0)
-                     (ev/futex-wait key cell gen)))
+                     (ev/futex-wait key bx gen)))
                  (assign waiting false))
                (when (> (length buf) 0)
                  (let [val (get buf 0)]
@@ -39,7 +39,7 @@
                    val)))
        :close (fn []
                 (assign closed true)
-                (put cell 0 (inc (get cell 0)))
+                (rebox bx (inc (unbox bx)))
                 (ev/futex-wake key 999999999)
                 nil)
        :closed? (fn [] closed)
@@ -100,19 +100,19 @@
 
   (defn make-flow-control [initial-window]
     (assign *chan-id* (inc *chan-id*))
-    (let [key *chan-id* cell @[0]]
+    (let [key *chan-id* bx (box 0)]
       @{:send-window initial-window
         :recv-window initial-window
         :futex-key key
-        :futex-cell cell
+        :futex-box bx
         :waiting false}))
 
   (defn consume-send-window [fc amount]
     (while (<= fc:send-window 0)
       (put fc :waiting true)
-      (let [gen (get fc:futex-cell 0)]
+      (let [gen (unbox fc:futex-box)]
         (when (<= fc:send-window 0)
-          (ev/futex-wait fc:futex-key fc:futex-cell gen)))
+          (ev/futex-wait fc:futex-key fc:futex-box gen)))
       (put fc :waiting false))
     (let [actual (min amount fc:send-window)]
       (put fc :send-window (- fc:send-window actual))
@@ -126,7 +126,7 @@
                 :message "flow control window overflow"}))
       (put fc :send-window new-window))
     (when fc:waiting
-      (put fc:futex-cell 0 (inc (get fc:futex-cell 0)))
+      (rebox fc:futex-box (inc (unbox fc:futex-box)))
       (ev/futex-wake fc:futex-key 999999999)))
 
   (defn consume-recv-window [fc amount]

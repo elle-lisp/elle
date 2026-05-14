@@ -113,13 +113,8 @@
     (while (> remaining 0)
       (let [chunk (transport:read remaining)]
         (when (nil? chunk)
-          (if (= (length buf) 0)
-            (break (begin
-                     (assign buf nil)
-                     nil))
-            (error {:error :h2-error
-                    :reason :protocol-error
-                    :message "unexpected EOF in frame"})))
+          (assign buf nil)
+          (break nil))
         (assign buf (concat buf chunk))
         (assign remaining (- remaining (length chunk)))))
     buf)

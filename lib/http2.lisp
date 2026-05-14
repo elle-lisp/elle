@@ -312,8 +312,13 @@
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
       (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
-      (protect (sess:transport:close))
-      (when sess:reader-fiber (ev/join-protected sess:reader-fiber)))
+      # Abort reader before closing transport — the reader may have a pending
+      # read on the socket (started by fuel preemption or concurrent sub-fiber).
+      # Closing the fd while a read is in-flight causes partial-read errors.
+      (when sess:reader-fiber
+        (protect (ev/abort sess:reader-fiber))
+        (ev/join-protected sess:reader-fiber))
+      (protect (sess:transport:close)))
     nil)
 
   ## ── Tests ──────────────────────────────────────────────────────────────
