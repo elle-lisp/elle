@@ -7,16 +7,16 @@
 
 ## === vm/primitive-meta accepts symbols ===
 
-(assert (struct? (vm/primitive-meta (quote abs)))
+(assert (struct? (vm/primitive-meta (quote length)))
         "primitive-meta accepts symbol")
 
 ## === vm/primitive-meta still accepts keywords ===
 
-(assert (struct? (vm/primitive-meta :abs)) "primitive-meta accepts keyword")
+(assert (struct? (vm/primitive-meta :length)) "primitive-meta accepts keyword")
 
 ## === vm/primitive-meta still accepts strings ===
 
-(assert (struct? (vm/primitive-meta "abs")) "primitive-meta accepts string")
+(assert (struct? (vm/primitive-meta "length")) "primitive-meta accepts string")
 
 ## === vm/primitive-meta type error on wrong type ===
 
