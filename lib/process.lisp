@@ -92,12 +92,16 @@
         @timers @[]  # @array of @struct {:ref :fire-at :pid :msg}
         @tick (box 0)  # logical tick (boxed for mutation in closures)
         gen-ref (make-ref-gen)
-        backend (or backend (io/backend :async))  # ---- structured concurrency state ----
+        backend (or backend (io/backend :async))
+        io-completions @[]  # forwarded I/O completions from root scheduler
+        io-wakeup-box (box 0)  # futex box: root reboxes to wake process scheduler
+        # ---- structured concurrency state ----
         sub-runnable @[]  # @array of @struct {:fiber :pid} — child fibers to resume
         sub-completed @{}  # fiber → :ok | :error
         join-waiting @{}  # target-fiber → @[pid ...] — who's joining
         select-sets @{}
-        futex-parked @{}]
+        futex-parked @{}  # futex-key → @[{:fiber f :pid pid :val cell :expected E} ...]
+        @fuel-preempted @[]]
     (def @current-spawn-pid @[0])
     (def @sched-spawn-fn
       (fn [fiber]
@@ -114,6 +118,7 @@
                   :mbox @[]
                   :resume nil
                   :status :alive
+                  :exit-reason nil
                   :links @||
                   :monitors @{}
                   :monitored-by @{}
@@ -121,7 +126,8 @@
                   :name nil
                   :dict @{}
                   :save-queue @[]
-                  :recv-pred nil})
+                  :recv-pred nil
+                  :timer-ref nil})
           (push ready pid)
           pid)))
 
@@ -211,7 +217,7 @@
           (when (= (get entry :pid) pid) (push to-cancel id)))
         (each id in to-cancel
           (del io-pending id)
-          (io/cancel backend id))))
+          (emit :wait {:op :io-forward-cancel :id id}))))
 
     # Remove futex-parked sub-fibers owned by a process
     (def @cancel-process-futex
@@ -230,6 +236,10 @@
     (def @process-exit
       (fn [pid reason]
         (put (proc-get pid) :status :dead)
+        (when (and (array? reason) (= (first reason) :error))
+          (put (proc-get pid)
+               :exit-reason {:error :process-error
+                             :reason (string (get reason 1))}))
         (cancel-process-io pid)
         (cancel-process-futex pid)
         (unregister-name pid)
@@ -244,7 +254,12 @@
               now (unbox tick)]
           (each timer in timers
             (if (>= now (get timer :fire-at))
-              (deliver (get timer :pid) (get timer :msg))
+              (if (= (get timer :msg) :timeout)
+                (let [p (proc-get (get timer :pid))]
+                  (when (= (get p :timer-ref) (get timer :ref))
+                    (put p :timer-ref nil)
+                    (deliver (get timer :pid) :timeout)))
+                (deliver (get timer :pid) (get timer :msg)))
               (push still timer)))
           (assign timers still))))
 
@@ -298,6 +313,7 @@
                     (begin
                       (let [msg (get mbox 0)]
                         (remove mbox 0)
+                        (put p :timer-ref nil)
                         (put p :resume msg)
                         (push ready pid)))
                     (push still pid))  # Selective recv — scan for matching message
@@ -305,6 +321,7 @@
                     (if (not (nil? found))
                       (begin
                         (restore-save-queue pid)
+                        (put p :timer-ref nil)
                         (put p :resume found)
                         (push ready pid))
                       (push still pid)))))))
@@ -317,15 +334,19 @@
         "Record sub-fiber completion, wake join and select waiters."
         (put sub-completed fiber status)
 
-        # Wake join waiters
+        # Wake join waiters (PIDs or sub-fiber entries)
         (let [waiters (get join-waiting fiber)]
           (when (not (nil? waiters))
             (del join-waiting fiber)
             (let [pair [(= status :ok) (fiber/value fiber)]]
-              (each pid in waiters
-                (when (alive? pid)
-                  (put (proc-get pid) :resume pair)
-                  (push ready pid))))))
+              (each w in waiters
+                (if (and (not (integer? w)) (get w :is-sub))  # Sub-fiber waiter: resume the fiber directly
+                  (when (= (fiber/status w:fiber) :paused)
+                    (fiber/resume w:fiber pair)
+                    (handle-sub-fiber-after-resume w:fiber w:pid))  # Process waiter: schedule the process
+                  (when (alive? w)
+                    (put (proc-get w) :resume pair)
+                    (push ready w)))))))
 
         # Wake select waiters
         (each [pid entry] in (pairs select-sets)
@@ -351,13 +372,15 @@
                 (not (= 0 (bit/and bits 1)))  # SIG_ERROR
                  (complete-sub-fiber fiber :error)
                 (not (= 0 (bit/and bits 512)))  # SIG_IO
-                (let [[ok? result] (protect (io/submit backend
-                      (fiber/value fiber) fiber))]
-                  (if ok?
-                    (put io-pending result @{:fiber fiber :pid pid})
+                (let [id (emit :wait {:op :io-forward
+                                      :request (fiber/value fiber)
+                                      :queue io-completions
+                                      :wake-box io-wakeup-box})]
+                  (if (and (array? id) (= (first id) :error))
                     (begin
-                      (fiber/abort fiber result)
-                      (handle-sub-fiber-after-resume fiber pid))))
+                      (fiber/abort fiber (get id 1))
+                      (handle-sub-fiber-after-resume fiber pid))
+                    (put io-pending id @{:fiber fiber :pid pid})))
                 (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (futex ops from sub-fibers)
                 (let [request (fiber/value fiber)
                       op (get request :op)]
@@ -365,8 +388,8 @@
                     :park
                       (let [key (get request :key)
                             expected (get request :expected)
-                            cell (get request :val)]
-                        (if (not (= (unbox cell) expected))
+                            bx (get request :val)]
+                        (if (not (= (unbox bx) expected))
                           (when (= (fiber/status fiber) :paused)
                             (fiber/resume fiber nil)
                             (handle-sub-fiber-after-resume fiber pid))
@@ -377,7 +400,7 @@
                             (push waiters
                                   @{:fiber fiber
                                     :pid pid
-                                    :val cell
+                                    :val bx
                                     :expected expected
                                     :is-sub true}))))
                     :notify
@@ -408,7 +431,55 @@
                               (del futex-parked key))))  ## Resume the notifying sub-fiber (if still alive)
                         (when (= (fiber/status fiber) :paused)
                           (fiber/resume fiber woken)
-                          (handle-sub-fiber-after-resume fiber pid)))  ## Unknown wait op — re-queue
+                          (handle-sub-fiber-after-resume fiber pid)))
+                    :join
+                      (let [target (get request :fiber)]
+                        (let [comp (get sub-completed target)]
+                          (if (not (nil? comp))
+                            (when (= (fiber/status fiber) :paused)
+                              (fiber/resume fiber
+                              [(= comp :ok) (fiber/value target)])
+                              (handle-sub-fiber-after-resume fiber pid))
+                            (let [status (fiber/status target)]
+                              (cond
+                                (= status :dead)
+                                  (when (= (fiber/status fiber) :paused)
+                                    (fiber/resume fiber
+                                    [true (fiber/value target)])
+                                    (handle-sub-fiber-after-resume fiber pid))
+                                (= status :error)
+                                  (when (= (fiber/status fiber) :paused)
+                                    (fiber/resume fiber
+                                    [false (fiber/value target)])
+                                    (handle-sub-fiber-after-resume fiber pid))
+                                (let [ws (or (get join-waiting target)
+                                      (let [w @[]]
+                                        (put join-waiting target w)
+                                        w))]
+                                  (push ws @{:fiber fiber :pid pid :is-sub true})
+                                  (when (nil? (get sub-completed target))
+                                    (push sub-runnable @{:fiber target :pid pid}))))))))
+                    :abort
+                      (let [target (get request :fiber)]
+                        (let [comp (get sub-completed target)]
+                          (if (not (nil? comp))
+                            (when (= (fiber/status fiber) :paused)
+                              (fiber/resume fiber nil)
+                              (handle-sub-fiber-after-resume fiber pid))
+                            (begin  # Cancel any pending I/O for the target sub-fiber
+                              (def @to-cancel @[])
+                              (each [id entry] in (pairs io-pending)
+                                (when (and (get entry :fiber)
+                                  (= (get entry :fiber) target))
+                                  (push to-cancel id)))
+                              (each id in to-cancel
+                                (del io-pending id)
+                                (emit :wait {:op :io-forward-cancel :id id}))
+                              (protect (fiber/abort target {:error :aborted}))
+                              (handle-sub-fiber-after-resume target pid)
+                              (when (= (fiber/status fiber) :paused)
+                                (fiber/resume fiber nil)
+                                (handle-sub-fiber-after-resume fiber pid))))))  ## Unknown wait op — re-queue
                     (push sub-runnable @{:fiber fiber :pid pid})))
                 (push sub-runnable @{:fiber fiber :pid pid}))))))
 
@@ -481,16 +552,24 @@
                   (begin
                     (put (proc-get pid) :resume nil)
                     (push ready pid))
-                  (begin
+                  (begin  # Cancel any pending I/O for the target sub-fiber
+                    (def @to-cancel-abort @[])
+                    (each [id entry] in (pairs io-pending)
+                      (when (and (get entry :fiber)
+                                 (= (get entry :fiber) target))
+                        (push to-cancel-abort id)))
+                    (each id in to-cancel-abort
+                      (del io-pending id)
+                      (emit :wait {:op :io-forward-cancel :id id}))
                     (protect (fiber/abort target {:error :aborted}))
                     (handle-sub-fiber-after-resume target pid)
                     (put (proc-get pid) :resume nil)
                     (push ready pid)))))
-          :park  ## ev/futex-wait: park until (unbox cell) != expected
+          :park  ## ev/futex-wait: park until (unbox bx) != expected
           (let [key (get request :key)
                 expected (get request :expected)
-                cell (get request :val)]
-            (if (not (= (unbox cell) expected))
+                bx (get request :val)]
+            (if (not (= (unbox bx) expected))
               (begin
                 (put (proc-get pid) :resume nil)
                 (push ready pid))
@@ -498,7 +577,7 @@
                                 (let [w @[]]
                                   (put futex-parked key w)
                                   w))]
-                (push waiters @{:pid pid :val cell :expected expected}))))
+                (push waiters @{:pid pid :val bx :expected expected}))))
           :notify  ## ev/futex-wake: wake up to :count parked fibers on :key
           (let [key (get request :key)
                 count (get request :count)
@@ -577,6 +656,7 @@
                       (push ready pid)))
                   (let [ref (fresh-ref)
                         fire-at (+ (unbox tick) ticks)]
+                    (put p :timer-ref ref)
                     (push timers
                           @{:ref ref :fire-at fire-at :pid pid :msg :timeout})
                     (push waiting pid))))
@@ -716,17 +796,22 @@
             (not (= 0 (bit/and bits 1)))
               (process-exit pid [:error (fiber/value f)])
 
-            # Fuel exhaustion — re-queue for next round
-            (not (= 0 (bit/and bits 4096))) (push ready pid)
+            # Fuel exhaustion — re-queue for next round, mark fuel-only
+            (not (= 0 (bit/and bits 4096))) (begin
+              (push ready pid)
+              (push fuel-preempted pid))
 
-            # I/O — submit to async backend, park process
+            # I/O — forward to root scheduler, park process
             (not (= 0 (bit/and bits 512)))
-              (let [[ok? id] (protect (io/submit backend (fiber/value f) f))]
-                (if ok?
-                  (put io-pending id @{:pid pid})
+              (let [id (emit :wait {:op :io-forward
+                                    :request (fiber/value f)
+                                    :queue io-completions
+                                    :wake-box io-wakeup-box})]
+                (if (and (array? id) (= (first id) :error))
                   (begin
-                    (fiber/abort f id)
-                    (dispatch-signal pid f))))
+                    (fiber/abort f (get id 1))
+                    (dispatch-signal pid f))
+                  (put io-pending id @{:pid pid})))
 
             # Wait — structured concurrency (ev/join, ev/select, ev/abort)
             (not (= 0 (bit/and bits 16384))) (handle-wait pid (fiber/value f))
@@ -779,8 +864,13 @@
                       (dispatch-signal pid f))))))))))
 
     # Non-blocking reap: drain any already-completed I/O.
+    # Drain forwarded I/O completions from root scheduler
     (def @reap-io
-      (fn [] (when (> (length io-pending) 0) (complete-io (io/reap backend)))))
+      (fn []
+        (when (> (length io-completions) 0)
+          (let [batch (->list io-completions)]
+            (while (> (length io-completions) 0) (remove io-completions 0))
+            (complete-io batch)))))
 
     # ---- main loop ----
 
@@ -825,8 +915,14 @@
           (while (has-work?)
             (assign tick (box (+ (unbox tick) 1)))
             (fire-timers)
-            (reap-io)
-            (drain-sub-runnable)
+            (reap-io)  # Skip draining sub-fibers when ALL ready processes are just
+            # refueling. Pumping sub-fibers (h2 reader, server connection)
+            # during fuel preemption races with process-level h2 setup and
+            # causes protocol errors on shared TCP connections.
+            (let [fuel-only (and (not (empty? ready))
+                                 (= (length ready) (length fuel-preempted)))]
+              (assign fuel-preempted @[])
+              (unless fuel-only (drain-sub-runnable)))
             (wake-futex-ready)
             (wake-waiting)
 
@@ -834,10 +930,14 @@
               (cond  # Nothing alive anywhere — done
                 (not (has-work?)) nil  # while condition will terminate
 
-                # I/O in flight — block until completions arrive
+                # I/O in flight — park until root delivers completions
                 (> (length io-pending) 0)
                   (begin
-                    (complete-io (io/wait backend (- 0 1)))
+                    (let [expected (unbox io-wakeup-box)]
+                      (reap-io)
+                      (when (empty? ready)
+                        (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
+                        (reap-io)))
                     (drain-sub-runnable))
 
                 # Waiting with timers — fast-forward tick
@@ -850,7 +950,8 @@
                     (assign tick (box min-fire))
                     (fire-timers)
                     (wake-waiting)
-                    (when (and (empty? ready) (not (empty? waiting)))
+                    (when (and (empty? ready) (not (empty? waiting))
+                               (empty? timers))
                       (error {:error :deadlock
                               :message "all processes waiting, no messages pending"})))
 
@@ -861,7 +962,23 @@
             (let [batch ready]
               (assign ready @[])
               (each pid in batch
-                (run-one pid)))))))  # close parameterize
+                (run-one pid)))
+
+            # Yield to root scheduler when I/O is pending but only
+            # spinning (fuel-preempted) processes are ready. Without this,
+            # a spinning process keeps ready non-empty and the idle handler
+            # never parks, starving the root scheduler from delivering
+            # I/O completions.
+            (when (and (> (length io-pending) 0) (= (length io-completions) 0)
+                       (not (empty? ready))
+                       (= (length ready) (length fuel-preempted)))
+              (let [expected (unbox io-wakeup-box)]
+                (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
+                (reap-io))))
+
+          # Propagate PID 0 errors to caller
+          (let [err (get (proc-get 0) :exit-reason)]
+            (when err (error err))))))  # close parameterize
 
     # ---- external API ----
 
@@ -1224,10 +1341,16 @@
                                        (and (>= (length m) 3)
                                        (= (get m 0) :DOWN)
                                        (= (get m 2) child-pid))))))]
-                            (when (= (get signal 0) :$sup-ready)
+                            (if (= (get signal 0) :$sup-ready)
                               (log {:event :child-ready
                                     :id (get spec :id)
-                                    :pid child-pid}))))
+                                    :pid child-pid})
+                              (begin
+                                (log {:event :child-exited
+                                      :id (get spec :id)
+                                      :pid child-pid
+                                      :reason (get signal 3)})
+                                (del kids (get spec :id))))))
                         child-pid)))
 
                   (def @stop-child
