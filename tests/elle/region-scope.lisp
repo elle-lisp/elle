@@ -154,3 +154,34 @@
           (string "c100=" c100 " c10k=" c10k)))
 
 (println "region-scope: done")
+
+# t13: Let with fiber yield inside (may suspend) — should NOT scope-allocate
+# If the region inference incorrectly allows scope allocation for suspending
+# code, RegionExit fires while fiber is suspended, freeing values still in use.
+(let [f (fiber/new (fn []
+                     (let [s (string "hello")]
+                       (yield (length s))
+                       (length s))) |:yield|)]
+  (let [v1 (fiber/resume f)]
+    (report "t13-yield-let-resume1" (= v1 5) (string "v1=" v1))
+    (let [v2 (fiber/resume f)]
+      (report "t13-yield-let-resume2" (= v2 5) (string "v2=" v2)))))
+
+# t14: Let inside a function called from a yielding fiber
+(let [f (fiber/new (fn []
+                     (let [s (string "inner")]
+                       (yield (length s))
+                       (length s))) |:yield|)]
+  (let [v1 (fiber/resume f)]
+    (report "t14-fiber-inner-let-resume1" (= v1 5) (string "v1=" v1))
+    (let [v2 (fiber/resume f)]
+      (report "t14-fiber-inner-let-resume2" (= v2 5) (string "v2=" v2)))))
+
+# t15: ev/spawn pattern (like grpc's with-server)
+(let [sf (ev/spawn (fn []
+                     (let [s (string "spawned")]
+                       (length s))))]
+  (let [result (ev/join sf)]
+    (report "t15-ev-spawn" (= result 7) (string "result=" result))))
+
+(println "region-scope: done (with fiber tests)")

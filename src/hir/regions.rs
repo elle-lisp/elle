@@ -266,10 +266,16 @@ impl RegionInference {
                 let body_var = self.walk(body);
                 self.current_region = saved;
 
-                // Body result escapes to enclosing
+                // Body result escapes to enclosing — UNLESS the body is a
+                // tail call. When the body is a tail call, RegionExit fires
+                // BEFORE the tail call executes, so the result bypasses the
+                // scope entirely. Emitting the constraint would widen the
+                // scope to Global, preventing reclamation.
                 if let Some(bv) = body_var {
-                    let enclosing_var = self.fresh_var(saved);
-                    self.constrain(bv, enclosing_var, hir.id);
+                    if !Self::is_tail_call_body(body) {
+                        let enclosing_var = self.fresh_var(saved);
+                        self.constrain(bv, enclosing_var, hir.id);
+                    }
                     Some(bv)
                 } else {
                     None
@@ -305,8 +311,10 @@ impl RegionInference {
                 self.current_region = saved;
 
                 if let Some(bv) = body_var {
-                    let enclosing_var = self.fresh_var(saved);
-                    self.constrain(bv, enclosing_var, hir.id);
+                    if !Self::is_tail_call_body(body) {
+                        let enclosing_var = self.fresh_var(saved);
+                        self.constrain(bv, enclosing_var, hir.id);
+                    }
                     Some(bv)
                 } else {
                     None
@@ -625,6 +633,40 @@ impl RegionInference {
                 || self.call_class.intrinsic_ops.contains(&sym)
         } else {
             false
+        }
+    }
+
+    /// Check if a HIR body is a tail call (or control flow where all result
+    /// positions are tail calls). When the body is a tail call, RegionExit
+    /// fires BEFORE the tail call executes, so the tail call's result does
+    /// not flow through the scope — skip the body escape constraint.
+    fn is_tail_call_body(hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Call { is_tail: true, .. } => true,
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => Self::is_tail_call_body(then_branch) && Self::is_tail_call_body(else_branch),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, body)| Self::is_tail_call_body(body))
+                    && else_branch
+                        .as_ref()
+                        .is_some_and(|b| Self::is_tail_call_body(b))
+            }
+            HirKind::Begin(exprs) => exprs.last().is_some_and(Self::is_tail_call_body),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                Self::is_tail_call_body(body)
+            }
+            HirKind::Match { arms, .. } => {
+                arms.iter().all(|(_, _, body)| Self::is_tail_call_body(body))
+            }
+            _ => false,
         }
     }
 
@@ -1128,15 +1170,16 @@ mod tests {
     }
 
     #[test]
-    fn let_string_used_locally_is_global_without_classification() {
+    fn let_string_used_locally_stays_scope() {
         // (let [x "hello"] (f x) 42) — f is an unknown call inside the scope.
-        // Without interprocedural analysis, the scope is conservatively Global
-        // because f might perform outward mutations.
+        // Region inference assigns the call's allocation to the scope region.
+        // The escape analysis (not region inference) validates safety.
         let (_, _, info) = analyze("(let [x \"hello\"] (begin (f x) 42))");
-        // The unknown call forces the scope to Global
+        // The inner let should produce a Scope region; the unknown call
+        // allocates within that scope (value flow determines escape).
         assert!(
-            find_scope_kind(&info, RegionKind::Global) >= 1,
-            "expected Global for let with unknown call"
+            find_scope_kind(&info, RegionKind::Scope) >= 1,
+            "expected Scope region for let with local use"
         );
     }
 
@@ -1201,9 +1244,9 @@ mod tests {
 
     #[test]
     fn emit_forces_global() {
-        // Emit operand should be forced to GLOBAL
-        let (_, _, info) = analyze("(emit :yield \"hello\")");
-        // The string should be allocated at GLOBAL
+        // Emit operand should be forced to GLOBAL when it allocates.
+        // Use (f 1) which is a non-immediate call that allocates.
+        let (_, _, info) = analyze("(emit :yield (f 1))");
         let global_allocs: Vec<_> = info
             .alloc_region
             .values()
