@@ -366,7 +366,7 @@
                       (let [key (get request :key)
                             expected (get request :expected)
                             cell (get request :val)]
-                        (if (not (= (get cell 0) expected))
+                        (if (not (= (unbox cell) expected))
                           (when (= (fiber/status fiber) :paused)
                             (fiber/resume fiber nil)
                             (handle-sub-fiber-after-resume fiber pid))
@@ -486,11 +486,11 @@
                     (handle-sub-fiber-after-resume target pid)
                     (put (proc-get pid) :resume nil)
                     (push ready pid)))))
-          :park  ## ev/futex-wait: park until cell[0] != expected
+          :park  ## ev/futex-wait: park until (unbox cell) != expected
           (let [key (get request :key)
                 expected (get request :expected)
                 cell (get request :val)]
-            (if (not (= (get cell 0) expected))
+            (if (not (= (unbox cell) expected))
               (begin
                 (put (proc-get pid) :resume nil)
                 (push ready pid))
@@ -791,7 +791,7 @@
           (let [@keep @[]
                 @changed false]
             (each w in (->list waiters)
-              (if (not (= (get w:val 0) w:expected))
+              (if (not (= (unbox w:val) w:expected))
                 (begin
                   (assign changed true)
                   (if (get w :is-sub)
