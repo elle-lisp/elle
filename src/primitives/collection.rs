@@ -281,57 +281,36 @@ pub fn coll_to_vec(val: &Value) -> Result<Vec<Value>, Value> {
 /// Combine two collections (concat for seqs, union for sets, merge for structs).
 /// Collect set elements into a BTreeSet regardless of mutability.
 pub fn set_elements(v: &Value) -> Option<std::collections::BTreeSet<Value>> {
-    if let Some(s) = v.as_set() {
-        Some(s.iter().copied().collect())
-    } else if let Some(s) = v.as_set_mut() {
-        Some(s.borrow().iter().copied().collect())
-    } else {
-        None
-    }
+    v.as_set()
+        .map(|s| s.iter().copied().collect())
+        .or_else(|| v.as_set_mut().map(|s| s.borrow().iter().copied().collect()))
 }
 
 /// Collect struct entries into a BTreeMap regardless of mutability.
 fn struct_entries(v: &Value) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
-    if let Some(s) = v.as_struct() {
-        Some(s.iter().map(|(k, v)| (k.clone(), *v)).collect())
-    } else if let Some(s) = v.as_struct_mut() {
-        Some(s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect())
-    } else {
-        None
-    }
+    v.as_struct()
+        .map(|s| s.iter().map(|(k, v)| (k.clone(), *v)).collect())
+        .or_else(|| v.as_struct_mut().map(|s| s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect()))
 }
 
 /// Collect array elements into a Vec regardless of mutability.
 fn array_elements(v: &Value) -> Option<Vec<Value>> {
-    if let Some(a) = v.as_array() {
-        Some(a.to_vec())
-    } else if let Some(a) = v.as_array_mut() {
-        Some(a.borrow().clone())
-    } else {
-        None
-    }
+    v.as_array()
+        .map(|a| a.to_vec())
+        .or_else(|| v.as_array_mut().map(|a| a.borrow().clone()))
 }
 
 /// Collect string content regardless of mutability.
 fn string_content(v: &Value) -> Option<String> {
-    if let Some(s) = v.with_string(|s| s.to_string()) {
-        Some(s)
-    } else if let Some(s) = v.as_string_mut() {
-        Some(String::from_utf8_lossy(&s.borrow()).into_owned())
-    } else {
-        None
-    }
+    v.with_string(|s| s.to_string())
+        .or_else(|| v.as_string_mut().map(|s| String::from_utf8_lossy(&s.borrow()).into_owned()))
 }
 
 /// Collect bytes content regardless of mutability.
 fn bytes_content(v: &Value) -> Option<Vec<u8>> {
-    if let Some(b) = v.as_bytes() {
-        Some(b.to_vec())
-    } else if let Some(b) = v.as_bytes_mut() {
-        Some(b.borrow().clone())
-    } else {
-        None
-    }
+    v.as_bytes()
+        .map(|b| b.to_vec())
+        .or_else(|| v.as_bytes_mut().map(|b| b.borrow().clone()))
 }
 
 /// Is the value a mutable variant of its base type?

@@ -136,6 +136,7 @@ pub struct FiberHeap {
     /// on the PARENT's heap). Set on both parent and child:
     ///   - Parent: points into own `owned_outboxes`
     ///   - Child: borrowed pointer into parent's `owned_outboxes`
+    ///
     /// Null when no outbox is active.
     ///
     /// The child NEVER owns the outbox. When the child's FiberHeap is dropped,
@@ -919,10 +920,8 @@ impl FiberHeap {
             None => return false,
         };
         // Check if the pointer is in any outbox (current or old).
-        if !self.outbox_ptr.is_null() {
-            if unsafe { &*self.outbox_ptr }.owns(ptr) {
-                return false;
-            }
+        if !self.outbox_ptr.is_null() && unsafe { &*self.outbox_ptr }.owns(ptr) {
+            return false;
         }
         for ob in &self.owned_outboxes {
             if ob.owns(ptr) {
@@ -942,10 +941,8 @@ impl FiberHeap {
         if self.pool.owns(ptr) {
             return true;
         }
-        if !self.outbox_ptr.is_null() {
-            if unsafe { &*self.outbox_ptr }.owns(ptr) {
-                return true;
-            }
+        if !self.outbox_ptr.is_null() && unsafe { &*self.outbox_ptr }.owns(ptr) {
+            return true;
         }
         for ob in &self.owned_outboxes {
             if ob.owns(ptr) {
