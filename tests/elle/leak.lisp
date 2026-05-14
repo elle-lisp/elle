@@ -1143,9 +1143,9 @@
                             (yield (string "val-" i))
                             (assign i (%add i 1)))) |:yield|)
        vals (do
-              (def @acc [])
+              (def @acc @[])
               (while (not= (fiber/status fiber) :dead)
-                (assign acc (append acc [(fiber/resume fiber)])))
+                (push acc (fiber/resume fiber)))
               acc)]
   (assert (= (get vals 0) "val-0")
           (string "t4 yield-at-scale first: " (get vals 0)))
