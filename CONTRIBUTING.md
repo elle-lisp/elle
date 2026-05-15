@@ -78,6 +78,35 @@ The correct workflow:
 Do not skip tests. Do not add skip lists. Do not mark tests as
 expected failures. Do not rationalize failures away. Fix them.
 
+## Debugging with tests and assertions
+
+Some bugs — especially UAF, race conditions, and timing-dependent crashes
+— require enormous context to fully understand. A single debugging session
+is unlikely to solve them. The correct strategy is **progressive
+constraint**:
+
+1. **Add tests to the test suite.** Every partial reproduction, every
+   minimized case, every boundary condition you discover becomes a
+   permanent test. Even if the bug isn't fixed this session, the test
+   stays. Future sessions inherit a smaller search space.
+
+2. **Add assertions to the code.** Rust `debug_assert!`, runtime checks,
+   invariant guards — anything that turns a silent corruption into a loud
+   panic closer to the site of the bug. Assertions are disposable
+   scaffolding; keep the ones that catch real problems, remove the rest
+   after the fix lands.
+
+3. **Run the tests after every change.** Not at the end. Not after
+   "one more thing." After every change. The tests are the compass.
+
+The goal is not to solve the bug in one pass. The goal is that every
+session leaves the codebase better defended than it was before. Bugs
+have fewer places to live. Incorrect assumptions become asserts. The
+search space shrinks. Eventually the bug has nowhere left to hide.
+
+This is not optional. If you spent a session debugging and added zero
+tests and zero assertions, the session was wasted.
+
 ## Running tests
 
 | Command | Runtime | What it does |
