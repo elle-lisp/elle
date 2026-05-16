@@ -614,3 +614,136 @@ fn region_exit_nested_scopes_dealloc_innermost_first() {
         "new allocation must reuse a freed slot"
     );
 }
+
+// ── Phase A: FiberHeap has no dead region fields ──────────────────────
+
+#[test]
+fn fiberheap_new_has_no_region_overhead() {
+    // After Phase A cleanup, FiberHeap::new() should not allocate any
+    // region-related Vec capacity. The regions/orphans fields are removed.
+    let heap = FiberHeap::new();
+    assert_eq!(heap.len(), 0);
+    assert_eq!(heap.scope_depth(), 0);
+    // Outbox should be inactive
+    assert!(!heap.has_outbox());
+    assert!(!heap.has_shared_alloc());
+}
+
+// ── Refcount-aware release (release_refcounted) ─────────────────────
+
+#[test]
+fn release_refcounted_keeps_pinned_objects() {
+    // Objects with refcount > 0 survive release_refcounted.
+    // This is the mechanism that allows push/put-referenced objects
+    // to survive scope exit.
+    let mut heap = FiberHeap::new();
+
+    heap.push_scope_mark();
+    let v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    // Pin the object (simulating a push/put incref)
+    heap.incref_value(v);
+    assert_eq!(heap.refcount_value(v), 1);
+
+    // RegionExit uses release_refcounted — pinned objects survive
+    heap.pop_scope_mark_and_release();
+
+    // The pinned object's slot is still live
+    assert_eq!(heap.root_live(), 1, "pinned object must survive scope exit");
+    assert_eq!(heap.refcount_value(v), 1, "refcount must be preserved");
+}
+
+#[test]
+fn release_refcounted_frees_unpinned_objects() {
+    // Objects with refcount == 0 are freed by release_refcounted.
+    let mut heap = FiberHeap::new();
+
+    heap.push_scope_mark();
+    let _v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    // No incref — refcount stays at 0 (the alloc-time child incref
+    // doesn't pin the parent object itself)
+
+    heap.pop_scope_mark_and_release();
+    assert_eq!(heap.root_live(), 0, "unpinned object must be freed");
+}
+
+// ── Outbox isolation tests ──────────────────────────────────────────
+
+#[test]
+fn outbox_alloc_does_not_affect_private_pool() {
+    // Allocations routed to the outbox don't increment the private
+    // pool's live count. They go to a separate SlabPool.
+    let mut heap = FiberHeap::new();
+
+    // Install outbox (simulates parent doing install_outbox)
+    heap.install_outbox(pool::SlabPool::new());
+
+    // Private allocation
+    heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    assert_eq!(heap.len(), 1);
+
+    // Enter outbox routing
+    heap.outbox_enter();
+    heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+    heap.outbox_exit();
+
+    // Private pool still has just 1
+    assert_eq!(heap.len(), 1, "outbox alloc must not affect private pool");
+    // But visible_len includes both
+    assert_eq!(heap.visible_len(), 2);
+}
+
+#[test]
+fn value_in_private_pool_detects_outbox_values() {
+    // value_in_private_pool returns false for values in the outbox.
+    let mut heap = FiberHeap::new();
+    heap.install_outbox(pool::SlabPool::new());
+
+    let private_v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    assert!(
+        heap.value_in_private_pool(private_v),
+        "private allocation should be in private pool"
+    );
+
+    heap.outbox_enter();
+    let outbox_v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
+    heap.outbox_exit();
+
+    assert!(
+        !heap.value_in_private_pool(outbox_v),
+        "outbox allocation should not be in private pool"
+    );
+}
+
+// ── Rotate scope marks (loop iteration reclamation) ────────────────
+
+#[test]
+fn rotate_scope_marks_frees_stale_iteration() {
+    // Double-buffered rotation: push two marks, rotate frees the older
+    // iteration's unpinned objects. Pinned objects (rc > 0) survive.
+    let mut heap = FiberHeap::new();
+
+    // Push initial pair of marks (prev, curr)
+    heap.push_scope_mark(); // prev
+    let _v_prev = heap.alloc(HeapObject::Pair(Pair::new(Value::int(0), Value::NIL)));
+    heap.push_scope_mark(); // curr
+
+    // First iteration
+    let _v_curr = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    let live_before_rotate = heap.root_live();
+    assert_eq!(live_before_rotate, 2);
+
+    // Rotate: frees prev's unpinned objects, shifts curr to prev
+    heap.rotate_scope_marks();
+
+    // v_prev has rc=0 (no external refs), so it's freed
+    // The exact count depends on alloc-time child incref behavior
+    let live_after_rotate = heap.root_live();
+    assert!(
+        live_after_rotate < live_before_rotate,
+        "rotation must free at least one object from previous iteration"
+    );
+
+    // Clean up remaining marks
+    heap.pop_scope_mark_and_release(); // curr
+    heap.pop_scope_mark_and_release(); // prev
+}

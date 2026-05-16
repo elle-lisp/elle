@@ -81,6 +81,11 @@ fn grpc() {
 }
 
 #[test]
+fn fiber_resume_stress() {
+    run_elle_script("fiber-resume-stress");
+}
+
+#[test]
 fn websocket() {
     run_elle_script("websocket");
 }
@@ -88,4 +93,9 @@ fn websocket() {
 #[test]
 fn table_key_expand() {
     run_elle_script("table-key-expand");
+}
+
+#[test]
+fn region_basic() {
+    run_elle_script("region-basic");
 }

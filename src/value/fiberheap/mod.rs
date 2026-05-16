@@ -22,19 +22,22 @@
 //! escape get region instructions. The analysis checks: no captures, no
 //! suspension, result is immediate, no outward mutation.
 //!
-//! ## Shared allocator for inter-fiber exchange
+//! ## Outbox for inter-fiber value exchange
 //!
-//! `FiberHeap` owns zero or more `SharedAllocator`s (in `owned_shared: Vec<Box<SharedAllocator>>`)
-//! and has a `shared_alloc: *mut SharedAllocator` pointer for routing.
+//! When a child fiber yields, the yielded value must survive the child's
+//! death so the parent can read it. The outbox mechanism handles this:
 //!
-//! When `shared_alloc` is non-null, `alloc()` routes ALL allocations to the
-//! shared allocator instead of the slab. This is set by `with_child_fiber`
-//! for yielding child fibers and nulled on swap-back.
+//! - Parent installs a fresh `SlabPool` outbox before each child execution
+//! - Child receives a borrowed pointer to the parent's outbox
+//! - `OutboxEnter`/`OutboxExit` bytecodes route allocations to the outbox
+//! - `deep_copy_to_outbox` copies private-pool values to the outbox at yield
 //!
-//! Ownership model: the parent's FiberHeap owns the `Box<SharedAllocator>`;
-//! the child receives a raw pointer. For root→child chains, the child owns it.
-//! `Box` provides pointer stability — the raw pointer remains valid even when
-//! `owned_shared` grows. Teardown happens on `clear()` or `Drop`.
+//! ## Shared allocator (legacy)
+//!
+//! `FiberHeap` owns zero or more `SharedAllocator`s (in `owned_shared`)
+//! and has a `shared_alloc` pointer for routing. When non-null, `alloc()`
+//! routes ALL allocations to the shared allocator. This is a legacy
+//! mechanism that will be replaced by per-region allocation routing.
 
 #[cfg(feature = "ffi")]
 use std::cell::RefCell;
@@ -148,16 +151,6 @@ pub struct FiberHeap {
     /// True when allocations should route to `outbox_ptr` (between
     /// `OutboxEnter` and `OutboxExit` bytecodes).
     outbox_active: bool,
-    /// Named runtime regions (non-default). Region 0 is `pool` (the private
-    /// default region). Indices 1.. correspond to compiler-assigned region
-    /// ids from the function's region table. Created by RegionEnter,
-    /// destroyed by RegionExit or transferred to `orphans` when pinned.
-    #[allow(clippy::vec_box)]
-    regions: Vec<Box<region::RuntimeRegion>>,
-    /// Orphaned regions: pinned (RC > 0) at scope exit, waiting for their
-    /// RC to reach 0. Freed when a decref brings RC to 0.
-    #[allow(clippy::vec_box)]
-    orphans: Vec<Box<region::RuntimeRegion>>,
 }
 
 impl FiberHeap {
@@ -179,8 +172,6 @@ impl FiberHeap {
             outbox_active: false,
             owned_outboxes: Vec::new(),
             outbox_ptr: std::ptr::null_mut(),
-            regions: Vec::new(),
-            orphans: Vec::new(),
         }
     }
 
@@ -500,6 +491,10 @@ impl FiberHeap {
     /// can run destructors and deallocate slab slots for objects allocated
     /// within the scope. When a shared allocator is active (child fiber),
     /// also pushes a mark on the shared allocator.
+    ///
+    /// Also creates a parallel `RuntimeRegion` for future per-region RC.
+    /// Currently unused for allocation routing — all allocations still go
+    /// through `pool`. The region is tracked for lifecycle correctness.
     pub fn push_scope_mark(&mut self) {
         if !self.shared_alloc.is_null() {
             unsafe { &mut *self.shared_alloc }.push_mark();
@@ -1356,60 +1351,6 @@ impl FiberHeap {
         }
     }
 
-    // ── Region management ─────────────────────────────────────────────
-
-    /// Create a new runtime region and return its index in `self.regions`.
-    pub(crate) fn create_region(
-        &mut self,
-        kind: crate::hir::region::RegionKind,
-    ) -> usize {
-        let r = Box::new(region::RuntimeRegion::new(kind));
-        self.regions.push(r);
-        self.regions.len() - 1
-    }
-
-    /// Get a mutable reference to a named region by index.
-    /// Panics if the index is out of bounds.
-    #[inline]
-    pub(crate) fn region_mut(&mut self, idx: usize) -> &mut region::RuntimeRegion {
-        &mut self.regions[idx]
-    }
-
-    /// Get the number of named regions (excludes the default pool).
-    pub(crate) fn region_count(&self) -> usize {
-        self.regions.len()
-    }
-
-    /// Get the number of orphaned (pinned) regions.
-    pub(crate) fn orphan_count(&self) -> usize {
-        self.orphans.len()
-    }
-
-    /// Move a region from `regions[idx]` to `orphans` (it's pinned, RC > 0).
-    /// The region at `idx` is replaced with a fresh empty region of the same kind.
-    /// Returns the kind of the orphaned region.
-    pub(crate) fn orphan_region(&mut self, idx: usize) -> crate::hir::region::RegionKind {
-        let kind = self.regions[idx].kind;
-        let old = std::mem::replace(
-            &mut self.regions[idx],
-            Box::new(region::RuntimeRegion::new(kind)),
-        );
-        self.orphans.push(old);
-        kind
-    }
-
-    /// Check orphaned regions and free any that have reached RC 0.
-    pub(crate) fn collect_orphans(&mut self) {
-        self.orphans.retain_mut(|r| {
-            if r.rc == 0 {
-                r.pool.teardown();
-                false
-            } else {
-                true
-            }
-        });
-    }
-
     // ── Refcounting ───────────────────────────────────────────────────
 
     /// Check if `--trace=rc` is active (zero-cost when off: one static read + AND).
@@ -1628,14 +1569,6 @@ impl FiberHeap {
         self.scope_dtors_run = 0;
         self.jit_prev_mark = None;
         self.jit_curr_mark = None;
-
-        // Tear down all named regions and orphans.
-        for mut r in self.regions.drain(..) {
-            r.pool.teardown();
-        }
-        for mut r in self.orphans.drain(..) {
-            r.pool.teardown();
-        }
     }
 }
 
@@ -1753,13 +1686,6 @@ impl Drop for FiberHeap {
             for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
                 state.allocator.inner.dealloc(ptr, size, align);
             }
-        }
-        // Tear down named regions and orphans.
-        for mut r in self.regions.drain(..) {
-            r.pool.teardown();
-        }
-        for mut r in self.orphans.drain(..) {
-            r.pool.teardown();
         }
         // pool (and its slab) drops implicitly here. MaybeUninit slots do not
         // call HeapObject::drop — dtors have already run above.

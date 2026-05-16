@@ -126,11 +126,6 @@ pub struct LirFunction {
     pub has_outward_heap_set: bool,
     /// True when the function body is safe for tail-call pool rotation.
     pub rotation_safe: bool,
-    /// Per-function region table: maps region id (u16) to the kind of
-    /// region. Region 0 is always the default (private) region and is
-    /// not listed here. Indices 1.. correspond to regions created by
-    /// the compiler's region inference.
-    pub region_table: Vec<crate::hir::region::RegionKind>,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.
@@ -202,7 +197,6 @@ impl LirFunction {
             result_is_immediate: false,
             has_outward_heap_set: false,
             rotation_safe: false,
-            region_table: Vec::new(),
         }
     }
 
@@ -384,33 +378,16 @@ impl LirFunction {
     }
 }
 
-/// An LIR instruction with source location and region.
+/// An LIR instruction with source location.
 #[derive(Debug, Clone)]
 pub struct SpannedInstr {
     pub instr: LirInstr,
     pub span: Span,
-    /// Region id for heap-allocating instructions. 0 = default (private
-    /// region). Non-zero values are indices into the function's region
-    /// table. Non-allocating instructions ignore this field.
-    pub region: u16,
 }
 
 impl SpannedInstr {
     pub fn new(instr: LirInstr, span: Span) -> Self {
-        SpannedInstr {
-            instr,
-            span,
-            region: 0,
-        }
-    }
-
-    /// Create a spanned instruction with a specific region id.
-    pub fn with_region(instr: LirInstr, span: Span, region: u16) -> Self {
-        SpannedInstr {
-            instr,
-            span,
-            region,
-        }
+        SpannedInstr { instr, span }
     }
 }
 

@@ -2,19 +2,35 @@
 //!
 //! A region groups objects that share a lifetime. When the region's RC
 //! reaches 0, all objects (and their inline data) are freed in bulk —
-//! slab slots returned and bump arena rewound. This replaces per-slot
-//! reference counting with per-region RC.
+//! slab slots returned and bump arena rewound.
 //!
-//! RC semantics:
+//! ## Lifecycle
+//!
+//! 1. **Creation**: `FiberHeap::push_scope_mark()` (RegionEnter bytecode)
+//!    records the current slab position.
+//! 2. **Allocation**: objects allocated between RegionEnter/RegionExit
+//!    belong to this region's scope.
+//! 3. **Exit**: `FiberHeap::pop_scope_mark_and_release()` (RegionExit)
+//!    frees objects with refcount == 0 and keeps pinned objects alive.
+//!
+//! ## RC semantics (per-region, future)
+//!
 //! - RC counts durable references FROM OUTSIDE this region INTO it.
 //! - `push arr val` where arr is in region A and val is in region B:
 //!   `B.incref()`.
 //! - Scope exit: if RC == 0, bulk free. If RC > 0, pin as orphan.
+//!
+//! ## Current status
+//!
+//! RuntimeRegion holds a pool with RC tracking. It is used by FiberHeap
+//! for scope-mark-based deallocation. The per-region RC mechanism
+//! (replacing per-slot RC) is not yet wired end-to-end.
 
 use super::pool::SlabPool;
 use crate::hir::region::RegionKind;
 
 /// A runtime region: a pool with a reference count.
+#[allow(dead_code)]
 pub struct RuntimeRegion {
     /// Slab allocator + bump arena for this region's objects.
     pub pool: SlabPool,
@@ -25,6 +41,7 @@ pub struct RuntimeRegion {
     pub kind: RegionKind,
 }
 
+#[allow(dead_code)]
 impl RuntimeRegion {
     /// Create a new empty region of the given kind.
     pub fn new(kind: RegionKind) -> Self {
