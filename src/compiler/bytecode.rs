@@ -548,8 +548,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let num_captures =
                     ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
-                let region_id =
-                    ((instructions[i + 4] as u16) << 8) | (instructions[i + 5] as u16);
+                let region_id = ((instructions[i + 4] as u16) << 8) | (instructions[i + 5] as u16);
                 line.push_str(&format!(
                     " (const_idx={}, num_captures={}, region={})",
                     const_idx, num_captures, region_id
@@ -640,8 +639,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::MakeArrayMut if i + 2 < instructions.len() => {
                 let size = instructions[i];
-                let region_id =
-                    ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
+                let region_id = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
                 line.push_str(&format!(" (size={})", size));
                 if region_id != 0 {
                     line.push_str(&format!(", region={}", region_id));

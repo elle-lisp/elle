@@ -120,7 +120,9 @@ mod tests {
     #[test]
     fn alloc_and_release() {
         let mut r = RuntimeRegion::new(RegionKind::Scope);
-        let _v = r.pool.alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+        let _v = r
+            .pool
+            .alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
         assert_eq!(r.pool.live_count(), 1);
         r.release();
         // region is consumed; pool is torn down

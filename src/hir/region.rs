@@ -130,7 +130,10 @@ impl std::fmt::Display for RegionStats {
         writeln!(
             f,
             "  scope: {}  loop: {}  function: {}  parent: {}  global: {}",
-            self.scopes_scope, self.scopes_loop, self.scopes_function, self.scopes_parent,
+            self.scopes_scope,
+            self.scopes_loop,
+            self.scopes_function,
+            self.scopes_parent,
             self.scopes_global
         )?;
         Ok(())

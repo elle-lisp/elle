@@ -196,9 +196,13 @@ impl SlabPool {
                         panic!(
                             "run_dtors DUPLICATE: slab slot {:?} (flat {}) tag={:?} \
                              at indices [{}, {}] in dtor[{}..{}]",
-                            ptr, flat, tag,
-                            earlier.unwrap_or(usize::MAX), i,
-                            start, self.dtors.len()
+                            ptr,
+                            flat,
+                            tag,
+                            earlier.unwrap_or(usize::MAX),
+                            i,
+                            start,
+                            self.dtors.len()
                         );
                     }
                     if !seen_flats.insert(flat) {
@@ -215,7 +219,9 @@ impl SlabPool {
                 std::collections::HashMap::new();
             for i in (start..self.dtors.len()).rev() {
                 let ptr = self.dtors[i];
-                if ptr.is_null() { continue; }
+                if ptr.is_null() {
+                    continue;
+                }
                 let obj = unsafe { &*ptr };
                 let rc_addr: Option<usize> = match obj {
                     HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
@@ -316,8 +322,6 @@ impl SlabPool {
     pub fn remove_from_dtors(&mut self, ptr: *mut HeapObject) {
         self.dtors.retain(|&p| p != ptr);
     }
-
-
 
     pub fn live_count(&self) -> usize {
         self.slab.live_count()

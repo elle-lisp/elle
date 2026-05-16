@@ -739,7 +739,10 @@ impl<'a> Lowerer<'a> {
         // Look up the RegionKind for this region from scope_kind.
         // The scope_kind maps scope HirIds to RegionKind. We need to
         // find which scope produced this region.
-        let kind = self.region_info.scope_region.iter()
+        let kind = self
+            .region_info
+            .scope_region
+            .iter()
             .find(|(_, r)| **r == region)
             .and_then(|(hir_id, _)| self.region_info.scope_kind.get(hir_id))
             .copied()

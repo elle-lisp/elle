@@ -406,9 +406,7 @@ pub(super) fn process_raw_completion(
                         return Completion {
                             id,
                             result: if encoding == Encoding::Text {
-                                unsafe {
-                                    crate::io::request::bytes_to_string_in_place(*buffer)
-                                }
+                                unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
                             } else {
                                 Ok(*buffer)
                             },
@@ -423,9 +421,7 @@ pub(super) fn process_raw_completion(
                         return Completion {
                             id,
                             result: if encoding == Encoding::Text {
-                                unsafe {
-                                    crate::io::request::bytes_to_string_in_place(*buffer)
-                                }
+                                unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
                             } else {
                                 Ok(*buffer)
                             },
@@ -446,9 +442,7 @@ pub(super) fn process_raw_completion(
                     return Completion {
                         id,
                         result: if encoding == Encoding::Text {
-                            unsafe {
-                                crate::io::request::bytes_to_string_in_place(val)
-                            }
+                            unsafe { crate::io::request::bytes_to_string_in_place(val) }
                         } else {
                             Ok(val)
                         },
@@ -598,9 +592,7 @@ pub(super) fn process_raw_completion(
                     if encoding == Encoding::Text {
                         return Completion {
                             id,
-                            result: unsafe {
-                                crate::io::request::bytes_to_string_in_place(val)
-                            },
+                            result: unsafe { crate::io::request::bytes_to_string_in_place(val) },
                         };
                     }
                     val

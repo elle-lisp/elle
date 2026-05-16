@@ -469,16 +469,11 @@ impl AsyncBackend {
                             crate::io::request::truncate_buffer(buffer, copy_len);
                         }
                         let result = if port_encoding == Encoding::Text {
-                            unsafe {
-                                crate::io::request::bytes_to_string_in_place(*buffer)
-                            }
+                            unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
                         } else {
                             Ok(*buffer)
                         };
-                        inner.completions.push_back(Completion {
-                            id,
-                            result,
-                        });
+                        inner.completions.push_back(Completion { id, result });
                         return Ok(id);
                     }
                     read_buffered = state.buffer.len();

@@ -287,10 +287,15 @@ pub fn set_elements(v: &Value) -> Option<std::collections::BTreeSet<Value>> {
 }
 
 /// Collect struct entries into a BTreeMap regardless of mutability.
-fn struct_entries(v: &Value) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
+fn struct_entries(
+    v: &Value,
+) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
     v.as_struct()
         .map(|s| s.iter().map(|(k, v)| (k.clone(), *v)).collect())
-        .or_else(|| v.as_struct_mut().map(|s| s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect()))
+        .or_else(|| {
+            v.as_struct_mut()
+                .map(|s| s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect())
+        })
 }
 
 /// Collect array elements into a Vec regardless of mutability.
@@ -302,8 +307,10 @@ fn array_elements(v: &Value) -> Option<Vec<Value>> {
 
 /// Collect string content regardless of mutability.
 fn string_content(v: &Value) -> Option<String> {
-    v.with_string(|s| s.to_string())
-        .or_else(|| v.as_string_mut().map(|s| String::from_utf8_lossy(&s.borrow()).into_owned()))
+    v.with_string(|s| s.to_string()).or_else(|| {
+        v.as_string_mut()
+            .map(|s| String::from_utf8_lossy(&s.borrow()).into_owned())
+    })
 }
 
 /// Collect bytes content regardless of mutability.
@@ -328,13 +335,21 @@ pub fn coll_combine(a: &Value, b: &Value) -> Result<Value, Value> {
     // Sets — union
     if let (Some(sa), Some(sb)) = (set_elements(a), set_elements(b)) {
         let result: std::collections::BTreeSet<Value> = sa.union(&sb).copied().collect();
-        return Ok(if a_mut { Value::set_mut(result) } else { Value::set(result) });
+        return Ok(if a_mut {
+            Value::set_mut(result)
+        } else {
+            Value::set(result)
+        });
     }
 
     // Structs — merge (right wins)
     if let (Some(mut ea), Some(eb)) = (struct_entries(a), struct_entries(b)) {
         ea.extend(eb);
-        return Ok(if a_mut { Value::struct_mut_from(ea) } else { Value::struct_from(ea) });
+        return Ok(if a_mut {
+            Value::struct_mut_from(ea)
+        } else {
+            Value::struct_from(ea)
+        });
     }
 
     // Lists
@@ -356,19 +371,31 @@ pub fn coll_combine(a: &Value, b: &Value) -> Result<Value, Value> {
     // Arrays
     if let (Some(mut ea), Some(eb)) = (array_elements(a), array_elements(b)) {
         ea.extend(eb);
-        return Ok(if a_mut { Value::array_mut(ea) } else { Value::array(ea) });
+        return Ok(if a_mut {
+            Value::array_mut(ea)
+        } else {
+            Value::array(ea)
+        });
     }
 
     // Strings
     if let (Some(mut sa), Some(sb)) = (string_content(a), string_content(b)) {
         sa.push_str(&sb);
-        return Ok(if a_mut { Value::string_mut(sa.into_bytes()) } else { Value::string(sa.as_str()) });
+        return Ok(if a_mut {
+            Value::string_mut(sa.into_bytes())
+        } else {
+            Value::string(sa.as_str())
+        });
     }
 
     // Bytes
     if let (Some(mut ba), Some(bb)) = (bytes_content(a), bytes_content(b)) {
         ba.extend(bb);
-        return Ok(if a_mut { Value::bytes_mut(ba) } else { Value::bytes(ba) });
+        return Ok(if a_mut {
+            Value::bytes_mut(ba)
+        } else {
+            Value::bytes(ba)
+        });
     }
 
     Err(error_val(

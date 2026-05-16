@@ -522,8 +522,7 @@ impl RegionInference {
             HirKind::Emit { value, .. } => {
                 let val_var = self.walk(value);
                 if let Some(vv) = val_var {
-                    let parent_region =
-                        self.fresh_region(self.current_region, RegionKind::Parent);
+                    let parent_region = self.fresh_region(self.current_region, RegionKind::Parent);
                     let parent_var = self.fresh_var(parent_region);
                     self.constrain(vv, parent_var, hir.id);
                 }
@@ -668,9 +667,9 @@ impl RegionInference {
             HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
                 Self::is_tail_call_body(body)
             }
-            HirKind::Match { arms, .. } => {
-                arms.iter().all(|(_, _, body)| Self::is_tail_call_body(body))
-            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| Self::is_tail_call_body(body)),
             _ => false,
         }
     }

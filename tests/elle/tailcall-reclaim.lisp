@@ -38,9 +38,14 @@
 # Slab slot reclamation: root-live-count must be bounded.
 # 100 iterations vs 10000 — if slots are reclaimed, live count
 # should not grow proportionally.
+#
+# The base case returns an immediate (n) so that region inference
+# can assign Scope to the let binding. Returning (arena/stats)
+# inside the recursion would create heap allocations that widen
+# the scope region to Global, defeating scope allocation.
 (defn tail-alloc (n)
   (if (%le n 0)
-    (get (arena/stats) :root-live-count)
+    n
     (let* [s (string "iter-" n)]
       (tail-alloc (%sub n 1)))))
 

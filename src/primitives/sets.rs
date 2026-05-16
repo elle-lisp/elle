@@ -158,7 +158,7 @@ pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing only elements present in both sets.
 pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
-    use super::collection::{set_elements, is_mutable};
+    use super::collection::{is_mutable, set_elements};
     match (set_elements(&args[0]), set_elements(&args[1])) {
         (Some(sa), Some(sb)) => {
             let result: BTreeSet<Value> = sa.intersection(&sb).copied().collect();
@@ -170,7 +170,10 @@ pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
         }
         _ => (
             SIG_ERROR,
-            error_val("type-error", "intersection: arguments must be sets".to_string()),
+            error_val(
+                "type-error",
+                "intersection: arguments must be sets".to_string(),
+            ),
         ),
     }
 }
@@ -182,7 +185,7 @@ pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
 /// Both arguments must be the same type (both immutable or both mutable).
 /// Returns a set containing elements in set1 but not in set2.
 pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
-    use super::collection::{set_elements, is_mutable};
+    use super::collection::{is_mutable, set_elements};
     match (set_elements(&args[0]), set_elements(&args[1])) {
         (Some(sa), Some(sb)) => {
             let result: BTreeSet<Value> = sa.difference(&sb).copied().collect();
@@ -194,7 +197,10 @@ pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
         }
         _ => (
             SIG_ERROR,
-            error_val("type-error", "difference: arguments must be sets".to_string()),
+            error_val(
+                "type-error",
+                "difference: arguments must be sets".to_string(),
+            ),
         ),
     }
 }
