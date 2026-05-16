@@ -132,46 +132,47 @@
 
 (def append
   (fn [a b]
-    (if (%not (append-types-ok? (type-of a) (type-of b)))
-      (emit :error {:error :type-error
-                    :message (string "append: type mismatch — " (type-of a)
-                                     " vs " (type-of b))})
-      (match (type-of a)
-        :list (append-list a b)
-        :syntax (append-list a b)
-        :array
-          (let [r (@array)]
-            (push-all r a)
-            (push-all r b)
-            (freeze r))
-        :@array (begin
-                  (push-all a b)
-                  a)
-        :string (string a b)
-        :@string (begin
-                   (push-all a b)
-                   a)
-        :bytes
-          (let [r (@bytes)]
-            (push-all r a)
-            (push-all r b)
-            (freeze r))
-        :@bytes (begin
-                  (push-all a b)
-                  a)
-        :set (union a b)
-        :@set (union a b)
-        :struct
-          (let [r (@struct)]
-            (merge-into r a)
-            (merge-into r b)
-            (freeze r))
-        :@struct (begin
-                   (merge-into a b)
-                   a)
-        _
-          (emit :error {:error :type-error
-                        :message (string "append: unsupported type " (type-of a))})))))
+    (let [ta (type-of a)]
+      (if (%not (append-types-ok? ta (type-of b)))
+        (emit :error {:error :type-error
+                      :message (string "append: type mismatch — " ta " vs "
+                                       (type-of b))})
+        (match ta
+          :list (append-list a b)
+          :syntax (append-list a b)
+          :array
+            (let [r (@array)]
+              (push-all r a)
+              (push-all r b)
+              (freeze r))
+          :@array (begin
+                    (push-all a b)
+                    a)
+          :string (string a b)
+          :@string (begin
+                     (push-all a b)
+                     a)
+          :bytes
+            (let [r (@bytes)]
+              (push-all r a)
+              (push-all r b)
+              (freeze r))
+          :@bytes (begin
+                    (push-all a b)
+                    a)
+          :set (union a b)
+          :@set (union a b)
+          :struct
+            (let [r (@struct)]
+              (merge-into r a)
+              (merge-into r b)
+              (freeze r))
+          :@struct (begin
+                     (merge-into a b)
+                     a)
+          _
+            (emit :error {:error :type-error
+                          :message (string "append: unsupported type " ta)}))))))
 
 ## ── concat ─────────────────────────────────────────────────────────
 
