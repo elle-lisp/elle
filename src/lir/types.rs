@@ -810,15 +810,6 @@ pub enum LirInstr {
         allowed_bits: crate::value::fiber::SignalBits,
     },
 
-    // === Outbox Routing ===
-    /// Enter outbox routing context. Allocations between OutboxEnter and
-    /// OutboxExit go to the fiber's outbox (for yield-bound values).
-    /// No registers produced or consumed.
-    OutboxEnter,
-    /// Exit outbox routing context. Allocations revert to private heap.
-    /// No registers produced or consumed.
-    OutboxExit,
-
     // === Type predicates (intrinsics) ===
     /// Check if value is the empty list
     IsEmpty {

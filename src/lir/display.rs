@@ -260,8 +260,6 @@ impl fmt::Display for LirInstr {
             LirInstr::RegionExitRefcounted => f.write_str("region-exit-refcounted"),
             LirInstr::DropSlot { slot } => write!(f, "drop-slot {slot}"),
             LirInstr::DecrefLocal { slot } => write!(f, "decref-local {slot}"),
-            LirInstr::OutboxEnter => f.write_str("outbox-enter"),
-            LirInstr::OutboxExit => f.write_str("outbox-exit"),
             LirInstr::FlipEnter => f.write_str("flip-enter"),
             LirInstr::FlipSwap => f.write_str("flip-swap"),
             LirInstr::FlipExit => f.write_str("flip-exit"),

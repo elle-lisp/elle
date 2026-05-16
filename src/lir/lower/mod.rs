@@ -273,6 +273,12 @@ pub struct Lowerer<'a> {
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
+    /// Current HIR node being lowered. Set at the top of `lower_expr`.
+    /// Used by `alloc_region_id()` to look up the region for allocations.
+    current_hir_id: Option<HirId>,
+    /// Maps Region(u32) from region inference to u16 index in the
+    /// function's region_table. Lazily populated by `alloc_region_id()`.
+    region_to_table: HashMap<crate::hir::region::Region, u16>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -322,6 +328,8 @@ impl<'a> Lowerer<'a> {
             current_function_binding: None,
             current_function_params: None,
             region_info: RegionInfo::empty(),
+            current_hir_id: None,
+            region_to_table: HashMap::new(),
         }
     }
 
@@ -700,6 +708,54 @@ impl<'a> Lowerer<'a> {
                 self.current_span.clone(),
                 region,
             ));
+    }
+
+    /// Emit a heap-allocating instruction, stamping it with the region
+    /// assigned by region inference for the current HIR node.
+    fn emit_alloc(&mut self, instr: LirInstr) {
+        let rid = self.alloc_region_id();
+        if rid == 0 {
+            self.emit(instr);
+        } else {
+            self.emit_in_region(instr, rid);
+        }
+    }
+
+    /// Look up the region for the current HIR node and return the u16
+    /// index into the function's region_table. Returns 0 (private)
+    /// when there is no region assignment or the region is Global.
+    fn alloc_region_id(&mut self) -> u16 {
+        let hir_id = match self.current_hir_id {
+            Some(id) => id,
+            None => return 0,
+        };
+        let region = match self.region_info.alloc_region.get(&hir_id) {
+            Some(r) => *r,
+            None => return 0,
+        };
+        if region.is_global() {
+            return 0;
+        }
+        // Look up the RegionKind for this region from scope_kind.
+        // The scope_kind maps scope HirIds to RegionKind. We need to
+        // find which scope produced this region.
+        let kind = self.region_info.scope_region.iter()
+            .find(|(_, r)| **r == region)
+            .and_then(|(hir_id, _)| self.region_info.scope_kind.get(hir_id))
+            .copied()
+            .unwrap_or(RegionKind::Global);
+        if matches!(kind, RegionKind::Global) {
+            return 0;
+        }
+        // Map Region → u16, inserting into region_table if new
+        if let Some(&table_id) = self.region_to_table.get(&region) {
+            table_id
+        } else {
+            let table_id = self.current_func.region_table.len() as u16 + 1;
+            self.current_func.region_table.push(kind);
+            self.region_to_table.insert(region, table_id);
+            table_id
+        }
     }
 
     fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {

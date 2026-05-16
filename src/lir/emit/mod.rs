@@ -259,7 +259,7 @@ impl Emitter {
         for spanned in &block.instructions {
             // Record source location before emitting the instruction
             self.bytecode.record_location(&spanned.span);
-            self.emit_instr(&spanned.instr, func);
+            self.emit_instr(&spanned.instr, func, spanned.region);
         }
 
         // Record source location for the terminator
@@ -267,7 +267,7 @@ impl Emitter {
         self.emit_terminator(&block.terminator.terminator);
     }
 
-    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction) {
+    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction, region: u16) {
         match instr {
             LirInstr::Const { dst, value } => {
                 self.emit_const(value, func);
@@ -433,6 +433,7 @@ impl Emitter {
                 self.bytecode.emit(Instruction::MakeClosure);
                 self.bytecode.emit_u16(const_idx);
                 self.bytecode.emit_u16(captures.len() as u16);
+                self.bytecode.emit_u16(region);
 
                 // Pop captures, push closure
                 for _ in captures {
@@ -554,6 +555,7 @@ impl Emitter {
                 self.ensure_on_top(*head);
                 self.ensure_on_top(*tail);
                 self.bytecode.emit(Instruction::Pair);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.pop();
                 self.push_reg(*dst);
@@ -565,6 +567,7 @@ impl Emitter {
                 }
                 self.bytecode.emit(Instruction::MakeArrayMut);
                 self.bytecode.emit_byte(elements.len() as u8);
+                self.bytecode.emit_u16(region);
                 for _ in elements {
                     self.pop();
                 }
@@ -834,6 +837,7 @@ impl Emitter {
             LirInstr::MakeCaptureCell { dst, value } => {
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::MakeCapture);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -953,16 +957,6 @@ impl Emitter {
             LirInstr::DecrefLocal { slot } => {
                 self.bytecode.emit(Instruction::DecrefLocal);
                 self.bytecode.emit_u16(*slot);
-            }
-
-            LirInstr::OutboxEnter => {
-                self.bytecode.emit(Instruction::OutboxEnter);
-                // No stack effect
-            }
-
-            LirInstr::OutboxExit => {
-                self.bytecode.emit(Instruction::OutboxExit);
-                // No stack effect
             }
 
             LirInstr::FlipEnter => {

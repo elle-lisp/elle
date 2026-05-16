@@ -210,10 +210,12 @@ impl VM {
                 // Closures
                 Instruction::MakeClosure => {
                     closure::handle_make_closure(self, bc, &mut ip, consts);
+                    let _region_id = self.read_u16(bc, &mut ip);
                 }
 
                 // Data structures
                 Instruction::Pair => {
+                    let _region_id = self.read_u16(bc, &mut ip);
                     data::handle_list(self);
                 }
                 Instruction::First => {
@@ -224,6 +226,7 @@ impl VM {
                 }
                 Instruction::MakeArrayMut => {
                     data::handle_make_array(self, bc, &mut ip);
+                    let _region_id = self.read_u16(bc, &mut ip);
                 }
                 Instruction::ArrayMutRef => {
                     data::handle_array_ref(self);
@@ -393,6 +396,7 @@ impl VM {
 
                 // Box operations
                 Instruction::MakeCapture => {
+                    let _region_id = self.read_u16(bc, &mut ip);
                     capture::handle_make_capture(self);
                 }
                 Instruction::UnwrapCapture => {
@@ -493,13 +497,12 @@ impl VM {
                     }
                 }
 
-                // Outbox routing: toggle allocation target for yield-bound values.
+                // Legacy no-ops (outbox routing replaced by per-allocation region stamps).
+                // OutboxEnter had a u16 operand; read and discard for format compat.
                 Instruction::OutboxEnter => {
-                    crate::value::fiberheap::outbox_enter();
+                    let _region_id = self.read_u16(bc, &mut ip);
                 }
-                Instruction::OutboxExit => {
-                    crate::value::fiberheap::outbox_exit();
-                }
+                Instruction::OutboxExit => {}
 
                 // FlipEnter/FlipSwap/FlipExit are legacy no-ops.
                 // While/loop reclamation uses RegionRotate.

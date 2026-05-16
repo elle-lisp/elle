@@ -66,7 +66,7 @@ impl<'a> Lowerer<'a> {
             } else {
                 if needs_capture {
                     let cell_reg = self.fresh_reg();
-                    self.emit(LirInstr::MakeCaptureCell {
+                    self.emit_alloc(LirInstr::MakeCaptureCell {
                         dst: cell_reg,
                         value: init_reg,
                     });

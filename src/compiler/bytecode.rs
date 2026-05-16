@@ -249,12 +249,10 @@ pub enum Instruction {
     /// Source struct is popped from the stack; result pushed.
     StructRest,
 
-    /// Enter outbox routing context. No operands.
-    /// Toggles allocation routing to the outbox (for yield-bound values).
+    /// Legacy no-op (was OutboxEnter). Kept for bytecode format compatibility.
     OutboxEnter,
 
-    /// Exit outbox routing context. No operands.
-    /// Reverts allocation routing to the private heap.
+    /// Legacy no-op (was OutboxExit). Kept for bytecode format compatibility.
     OutboxExit,
 
     /// Legacy no-op. Kept for bytecode format compatibility.
@@ -546,15 +544,17 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (offset={})", offset));
                 i += 1;
             }
-            Instruction::MakeClosure if i + 3 < instructions.len() => {
+            Instruction::MakeClosure if i + 5 < instructions.len() => {
                 let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let num_captures =
                     ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                let region_id =
+                    ((instructions[i + 4] as u16) << 8) | (instructions[i + 5] as u16);
                 line.push_str(&format!(
-                    " (const_idx={}, num_captures={})",
-                    const_idx, num_captures
+                    " (const_idx={}, num_captures={}, region={})",
+                    const_idx, num_captures, region_id
                 ));
-                i += 4;
+                i += 6;
             }
             Instruction::ArrayMutRefDestructure
             | Instruction::ArrayMutSliceFrom
@@ -563,6 +563,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             {
                 let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (index={})", idx));
+                i += 2;
+            }
+            Instruction::OutboxEnter if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
                 i += 2;
             }
             Instruction::StructGetOrNil | Instruction::StructGetDestructure
@@ -599,7 +604,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::RegionExitCall
             | Instruction::RegionRotate
             | Instruction::RegionExitRefcounted
-            | Instruction::OutboxEnter
             | Instruction::OutboxExit
             | Instruction::FlipEnter
             | Instruction::FlipSwap
@@ -626,6 +630,23 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::PopParamFrame => {
                 // No operands
+            }
+            Instruction::Pair | Instruction::MakeCapture if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                if region_id != 0 {
+                    line.push_str(&format!(" (region={})", region_id));
+                }
+                i += 2;
+            }
+            Instruction::MakeArrayMut if i + 2 < instructions.len() => {
+                let size = instructions[i];
+                let region_id =
+                    ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
+                line.push_str(&format!(" (size={})", size));
+                if region_id != 0 {
+                    line.push_str(&format!(", region={}", region_id));
+                }
+                i += 3;
             }
             _ => {}
         }

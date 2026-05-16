@@ -7,6 +7,8 @@ impl<'a> Lowerer<'a> {
     pub(super) fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
         // Set the current span for all instructions emitted while lowering this HIR node
         self.current_span = hir.span.clone();
+        // Track current HIR id for region-stamped allocations
+        self.current_hir_id = Some(hir.id);
 
         match &hir.kind {
             HirKind::Nil => self.emit_const(LirConst::Nil),
@@ -282,7 +284,7 @@ impl<'a> Lowerer<'a> {
                     // and updated when the Define is lowered
                     let nil_reg = self.emit_const(LirConst::Nil)?;
                     let cell_reg = self.fresh_reg();
-                    self.emit(LirInstr::MakeCaptureCell {
+                    self.emit_alloc(LirInstr::MakeCaptureCell {
                         dst: cell_reg,
                         value: nil_reg,
                     });
@@ -904,7 +906,7 @@ impl<'a> Lowerer<'a> {
             }
             // List operations
             IntrinsicOp::Pair => {
-                self.emit(LirInstr::List {
+                self.emit_alloc(LirInstr::List {
                     dst,
                     head: arg_regs[0],
                     tail: arg_regs[1],

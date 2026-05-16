@@ -132,7 +132,7 @@ impl<'a> Lowerer<'a> {
                     (None, false) => {
                         // First arg, not spliced: create array with one element
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::MakeArrayMut {
+                        self.emit_alloc(LirInstr::MakeArrayMut {
                             dst,
                             elements: vec![*reg],
                         });
@@ -141,7 +141,7 @@ impl<'a> Lowerer<'a> {
                     (None, true) => {
                         // First arg, spliced: create empty array, then extend
                         let empty = self.fresh_reg();
-                        self.emit(LirInstr::MakeArrayMut {
+                        self.emit_alloc(LirInstr::MakeArrayMut {
                             dst: empty,
                             elements: vec![],
                         });
@@ -176,7 +176,7 @@ impl<'a> Lowerer<'a> {
 
             let final_args = args_reg.unwrap_or_else(|| {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::MakeArrayMut {
+                self.emit_alloc(LirInstr::MakeArrayMut {
                     dst,
                     elements: vec![],
                 });
@@ -371,12 +371,9 @@ impl<'a> Lowerer<'a> {
         signal: crate::value::fiber::SignalBits,
         value: &Hir,
     ) -> Result<Reg, String> {
-        // Wrap value expression in OutboxEnter/OutboxExit so that
-        // yield-bound allocations route to the outbox (for zero-copy
-        // reading by the parent after yield).
-        self.emit(LirInstr::OutboxEnter);
+        // Region inference stamps yield-bound allocations with the Parent
+        // region via alloc_region. No OutboxEnter/OutboxExit toggle needed.
         let value_reg = self.lower_expr(value)?;
-        self.emit(LirInstr::OutboxExit);
 
         let resume_label = self.fresh_label();
 
