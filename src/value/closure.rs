@@ -67,6 +67,10 @@ pub struct ClosureTemplate {
     /// SPIR-V is a property of the code, not the instance — all closures
     /// from the same lambda share the template, so the cache is shared.
     pub spirv: std::cell::OnceCell<Vec<u8>>,
+    /// Per-function region table: maps region id (1-based) to region kind.
+    /// Region 0 is the default (private) region. Empty when the function
+    /// has no non-default regions (the common case).
+    pub region_table: Vec<crate::hir::region::RegionKind>,
 }
 
 impl ClosureTemplate {
@@ -94,6 +98,7 @@ impl ClosureTemplate {
             has_outward_heap_set: false,
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
+            region_table: Vec::new(),
         }
     }
 
