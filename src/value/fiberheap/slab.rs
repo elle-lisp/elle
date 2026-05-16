@@ -28,7 +28,19 @@ use std::mem::{size_of, MaybeUninit};
 
 use crate::value::heap::HeapObject;
 
-/// Number of `HeapObject` slots per chunk.
+pub(crate) const POISON_LO: u32 = 0xDEAD_BEEF;
+pub(crate) const POISON_HI: u32 = 0xCAFE_BABE;
+
+/// Check if a heap pointer points to a poisoned (freed) slot.
+/// The poison is at bytes 8-15 (past the free-list link at bytes 0-7).
+/// Returns true only if both poison words match.
+///
+/// # Safety
+/// Caller must ensure ptr is readable (not unmapped).
+pub unsafe fn is_poisoned(ptr: *const HeapObject) -> bool {
+    let base = ptr as *const u32;
+    std::ptr::read(base.add(2)) == POISON_LO && std::ptr::read(base.add(3)) == POISON_HI
+}
 const CHUNK_SIZE: usize = 256;
 
 /// Bytes per chunk: must hold CHUNK_SIZE HeapObject slots.
@@ -105,6 +117,11 @@ pub(crate) struct Slab {
     /// Per-slot next link in the allocation-order doubly-linked list.
     /// Indexed by flat slot index. ALLOC_NIL means "no next".
     pub(crate) alloc_next: Vec<u32>,
+    /// Per-slot region id. Indexed by flat slot index. 0 = default
+    /// (private region). Non-zero values identify named regions from
+    /// the function's region table. Stamped at allocation time;
+    /// read by `region_of()` to route incref/decref to regions.
+    pub(crate) region_ids: Vec<u16>,
 }
 
 impl Slab {
@@ -117,6 +134,7 @@ impl Slab {
             refcounts: Vec::new(),
             alloc_prev: Vec::new(),
             alloc_next: Vec::new(),
+            region_ids: Vec::new(),
         }
     }
 
@@ -129,8 +147,9 @@ impl Slab {
             let slot = self.chunks[chunk_idx].slot(slot_idx);
             let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
-            // Reset refcount for reused slot — previous occupant's refcount is stale.
+            // Reset refcount and region for reused slot.
             self.refcounts[flat as usize] = 0;
+            self.region_ids[flat as usize] = 0;
             unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
             slot as *mut HeapObject
         } else {
@@ -157,7 +176,14 @@ impl Slab {
         let (chunk_idx, slot_idx) = self.split_flat(flat);
         let slot = self.chunks[chunk_idx].slot(slot_idx);
         unsafe {
+            // Store free-list link at offset 0 (used by alloc on reuse).
             std::ptr::write(slot as *mut Option<u32>, self.free_head);
+            // Poison at offset 8 (past the free-list link). alloc() overwrites
+            // the whole slot, so this poison only catches dangling dereferences
+            // of freed-but-not-yet-reused slots. The pattern is split into two
+            // u32s so we don't collide with the free-list link at offset 0.
+            std::ptr::write((slot as *mut u32).add(2), 0xDEADBEEF);
+            std::ptr::write((slot as *mut u32).add(3), 0xCAFEBABE);
         }
         self.free_head = Some(flat as u32);
         self.live_count = self.live_count.saturating_sub(1);
@@ -178,6 +204,7 @@ impl Slab {
         self.refcounts.clear();
         self.alloc_prev.clear();
         self.alloc_next.clear();
+        self.region_ids.clear();
         self.chunks.truncate(1);
         if let Some(chunk) = self.chunks.first() {
             unsafe {
@@ -252,6 +279,29 @@ impl Slab {
         }
     }
 
+    /// Get the region id for the slot pointed to by `ptr`.
+    /// Returns 0 (default/private region) if the pointer is not in this slab.
+    #[inline]
+    pub fn region_of(&self, ptr: *const HeapObject) -> u16 {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        if flat < self.region_ids.len() {
+            self.region_ids[flat]
+        } else {
+            0
+        }
+    }
+
+    /// Set the region id for a slot. Called at allocation time when the
+    /// active region is non-zero.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn set_region(&mut self, ptr: *const HeapObject, region: u16) {
+        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
+        if flat < self.region_ids.len() {
+            self.region_ids[flat] = region;
+        }
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {
@@ -259,10 +309,11 @@ impl Slab {
         self.chunks.push(chunk);
         self.bump_cursor = 0;
         let total_slots = self.chunks.len() * CHUNK_SIZE;
-        // Grow refcount and alloc link arrays for the new chunk.
+        // Grow refcount, alloc link, and region id arrays for the new chunk.
         self.refcounts.resize(total_slots, 0);
         self.alloc_prev.resize(total_slots, ALLOC_NIL);
         self.alloc_next.resize(total_slots, ALLOC_NIL);
+        self.region_ids.resize(total_slots, 0);
     }
 
     /// Convert a flat slot index to `(chunk_index, slot_within_chunk)`.
@@ -415,5 +466,50 @@ mod tests {
         assert!(slab.owns(ptr));
         let x: i64 = 42;
         assert!(!slab.owns(&x as *const _ as *const ()));
+    }
+
+    #[test]
+    fn test_region_id_default_zero() {
+        let mut slab = Slab::new();
+        let ptr = slab.alloc(cons_obj());
+        assert_eq!(slab.region_of(ptr), 0, "default region should be 0");
+    }
+
+    #[test]
+    fn test_set_region_and_read_back() {
+        let mut slab = Slab::new();
+        let ptr = slab.alloc(cons_obj());
+        slab.set_region(ptr, 3);
+        assert_eq!(slab.region_of(ptr), 3);
+    }
+
+    #[test]
+    fn test_region_id_reset_on_reuse() {
+        let mut slab = Slab::new();
+        let ptr1 = slab.alloc(cons_obj());
+        slab.set_region(ptr1, 5);
+        assert_eq!(slab.region_of(ptr1), 5);
+
+        // Dealloc and realloc — region should reset to 0
+        slab.dealloc(ptr1);
+        let ptr2 = slab.alloc(cons_obj());
+        assert_eq!(ptr1, ptr2, "slot must be reused");
+        assert_eq!(slab.region_of(ptr2), 0, "region must reset on reuse");
+    }
+
+    #[test]
+    fn test_region_id_survives_across_chunks() {
+        let mut slab = Slab::new();
+        // Allocate enough to span multiple chunks
+        let mut ptrs = vec![];
+        for _ in 0..CHUNK_SIZE + 1 {
+            ptrs.push(slab.alloc(cons_obj()));
+        }
+        // Set region on last slot (in second chunk)
+        let last = *ptrs.last().unwrap();
+        slab.set_region(last, 7);
+        assert_eq!(slab.region_of(last), 7);
+        // First slot should still be 0
+        assert_eq!(slab.region_of(ptrs[0]), 0);
     }
 }

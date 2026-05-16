@@ -747,3 +747,22 @@ fn rotate_scope_marks_frees_stale_iteration() {
     heap.pop_scope_mark_and_release(); // curr
     heap.pop_scope_mark_and_release(); // prev
 }
+
+// ── region_of: per-slot region id tracking ─────────────────────────
+
+#[test]
+fn region_of_default_is_zero() {
+    // All allocations start in region 0 (the default/private region).
+    let mut heap = FiberHeap::new();
+    let v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    assert_eq!(heap.region_of(v), 0, "default region should be 0");
+}
+
+#[test]
+fn region_of_immediate_is_zero() {
+    // Non-heap values always return region 0.
+    let heap = FiberHeap::new();
+    assert_eq!(heap.region_of(Value::int(42)), 0);
+    assert_eq!(heap.region_of(Value::NIL), 0);
+    assert_eq!(heap.region_of(Value::TRUE), 0);
+}

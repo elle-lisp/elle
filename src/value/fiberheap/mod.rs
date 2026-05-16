@@ -1413,6 +1413,21 @@ impl FiberHeap {
         0
     }
 
+    /// Get the region id for a heap value. Returns 0 (default region)
+    /// for non-heap values or values not owned by this slab.
+    #[inline]
+    pub fn region_of(&self, val: Value) -> u16 {
+        if !val.is_heap() {
+            return 0;
+        }
+        if let Some(ptr) = val.as_heap_ptr() {
+            if self.pool.slab_owns(ptr) {
+                return self.pool.slab.region_of(ptr as *const HeapObject);
+            }
+        }
+        0
+    }
+
     /// Decrement a value's refcount, and if it reaches 0, run its
     /// destructor and return its slab slot to the free list.
     ///

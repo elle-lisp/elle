@@ -71,6 +71,19 @@ impl RuntimeRegion {
         self.rc > 0
     }
 
+    /// Allocate a heap object in this region's pool.
+    pub fn alloc(&mut self, obj: crate::value::heap::HeapObject) -> crate::value::Value {
+        self.pool.alloc(obj)
+    }
+
+    /// Allocate an inline slice in this region's bump arena.
+    pub fn alloc_inline_slice<T: Copy + 'static>(
+        &mut self,
+        items: &[T],
+    ) -> crate::value::inline_slice::InlineSlice<T> {
+        self.pool.alloc_inline_slice(items)
+    }
+
     /// Bulk-free all objects in this region: run destructors, return
     /// slab slots, and rewind the bump arena. This is the O(1) scope
     /// exit path — no per-object RC check needed.
