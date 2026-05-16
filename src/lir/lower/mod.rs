@@ -690,6 +690,19 @@ impl<'a> Lowerer<'a> {
             .push(SpannedInstr::new(instr, self.current_span.clone()));
     }
 
+    /// Emit an instruction with a specific region id.
+    /// Used for heap-allocating instructions that belong to a non-default region.
+    #[allow(dead_code)]
+    fn emit_in_region(&mut self, instr: LirInstr, region: u16) {
+        self.current_block
+            .instructions
+            .push(SpannedInstr::with_region(
+                instr,
+                self.current_span.clone(),
+                region,
+            ));
+    }
+
     fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {
         let dst = self.fresh_reg();
         self.emit(LirInstr::Const { dst, value: c });
