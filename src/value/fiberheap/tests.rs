@@ -215,141 +215,6 @@ fn test_alloc_without_installed_heap_lazy_inits() {
     uninstall_fiber_heap();
 }
 
-// ── Shared allocator ownership tests ──────────────────────────────
-
-#[test]
-fn test_shared_alloc_routing() {
-    let mut heap = FiberHeap::new();
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-
-    // Allocate via FiberHeap — should route to shared
-    let s = heap.alloc_inline_slice::<u8>(b"routed");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-
-    // Private pool should be untouched
-    assert_eq!(heap.len(), 0);
-
-    // Shared allocator should have the allocation
-    let sa = unsafe { &*sa_ptr };
-    assert_eq!(sa.len(), 1);
-}
-
-#[test]
-fn test_private_alloc_when_no_shared() {
-    let mut heap = FiberHeap::new();
-    // shared_alloc is null by default
-    assert!(heap.shared_alloc().is_null());
-
-    let s = heap.alloc_inline_slice::<u8>(b"private");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 1);
-    assert_eq!(heap.dtor_count(), 1);
-}
-
-#[test]
-fn test_drop_tears_down_owned_shared() {
-    // Create a FiberHeap with a shared allocator containing allocations,
-    // then drop it. If Drop doesn't teardown, we'd leak inner heap allocs.
-    let mut heap = FiberHeap::new();
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-    let s = heap.alloc_inline_slice::<u8>(b"will-be-dropped");
-    heap.alloc(HeapObject::LString {
-        s,
-        traits: Value::NIL,
-    });
-    // Drop runs here — should not leak or panic.
-    drop(heap);
-}
-
-// ── Shared allocator teardown lifecycle ────────────────────────────
-
-#[test]
-fn test_multiple_shared_allocs_all_torn_down() {
-    // Create 3 shared allocators, allocate into each, verify clear()
-    // tears down all three.
-    let mut heap = FiberHeap::new();
-
-    // Create 3 shared allocs, allocate strings into each
-    let sa1 = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa1);
-    let s1 = heap.alloc_inline_slice::<u8>(b"sa1-val");
-    heap.alloc(HeapObject::LString {
-        s: s1,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    let sa2 = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa2);
-    let s2 = heap.alloc_inline_slice::<u8>(b"sa2-val");
-    heap.alloc(HeapObject::LString {
-        s: s2,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    let sa3 = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa3);
-    let s3 = heap.alloc_inline_slice::<u8>(b"sa3-val");
-    heap.alloc(HeapObject::LString {
-        s: s3,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    assert_eq!(heap.shared_count(), 3);
-    assert_eq!(unsafe { &*sa1 }.len(), 1);
-    assert_eq!(unsafe { &*sa2 }.len(), 1);
-    assert_eq!(unsafe { &*sa3 }.len(), 1);
-
-    heap.clear();
-    assert_eq!(heap.shared_count(), 0);
-    assert!(heap.shared_alloc().is_null());
-}
-
-#[test]
-fn test_shared_alloc_survives_private_clear() {
-    // Shared allocs are NOT affected by private pool operations.
-    // Private alloc_count/dtors are separate from shared.
-    let mut heap = FiberHeap::new();
-
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-    let s_shared = heap.alloc_inline_slice::<u8>(b"in-shared");
-    heap.alloc(HeapObject::LString {
-        s: s_shared,
-        traits: Value::NIL,
-    });
-    heap.clear_shared_alloc();
-
-    // Allocate privately
-    let s_private = heap.alloc_inline_slice::<u8>(b"in-private");
-    heap.alloc(HeapObject::LString {
-        s: s_private,
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 1); // private count
-    assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared count
-
-    // Mark/release on private pool does not touch shared
-    let mark = heap.mark();
-    let s_scoped = heap.alloc_inline_slice::<u8>(b"scoped");
-    heap.alloc(HeapObject::LString {
-        s: s_scoped,
-        traits: Value::NIL,
-    });
-    heap.release(mark);
-    assert_eq!(heap.len(), 1); // back to 1
-    assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared unchanged
-}
 
 // ── Trampoline rotation tests ────────────────────────────────────────
 //
@@ -619,13 +484,9 @@ fn region_exit_nested_scopes_dealloc_innermost_first() {
 
 #[test]
 fn fiberheap_new_has_no_region_overhead() {
-    // After Phase A cleanup, FiberHeap::new() should not allocate any
-    // region-related Vec capacity. The regions/orphans fields are removed.
     let heap = FiberHeap::new();
     assert_eq!(heap.len(), 0);
     assert_eq!(heap.scope_depth(), 0);
-    // Outbox should be inactive
-    assert!(!heap.has_outbox());
     assert!(!heap.has_shared_alloc());
 }
 
@@ -666,53 +527,6 @@ fn release_refcounted_frees_unpinned_objects() {
     assert_eq!(heap.root_live(), 0, "unpinned object must be freed");
 }
 
-// ── Outbox isolation tests ──────────────────────────────────────────
-
-#[test]
-fn outbox_alloc_does_not_affect_private_pool() {
-    // Allocations routed to the outbox don't increment the private
-    // pool's live count. They go to a separate SlabPool.
-    let mut heap = FiberHeap::new();
-
-    // Install outbox (simulates parent doing install_outbox)
-    heap.install_outbox(pool::SlabPool::new());
-
-    // Private allocation
-    heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
-    assert_eq!(heap.len(), 1);
-
-    // Enter outbox routing
-    heap.outbox_enter();
-    heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
-    heap.outbox_exit();
-
-    // Private pool still has just 1
-    assert_eq!(heap.len(), 1, "outbox alloc must not affect private pool");
-    // But visible_len includes both
-    assert_eq!(heap.visible_len(), 2);
-}
-
-#[test]
-fn value_in_private_pool_detects_outbox_values() {
-    // value_in_private_pool returns false for values in the outbox.
-    let mut heap = FiberHeap::new();
-    heap.install_outbox(pool::SlabPool::new());
-
-    let private_v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
-    assert!(
-        heap.value_in_private_pool(private_v),
-        "private allocation should be in private pool"
-    );
-
-    heap.outbox_enter();
-    let outbox_v = heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
-    heap.outbox_exit();
-
-    assert!(
-        !heap.value_in_private_pool(outbox_v),
-        "outbox allocation should not be in private pool"
-    );
-}
 
 // ── Rotate scope marks (loop iteration reclamation) ────────────────
 

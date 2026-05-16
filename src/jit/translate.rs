@@ -184,22 +184,10 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::StoreLocalRefcounted { slot, src } => {
+                // Refcounting removed — just store (identical to StoreLocal).
                 let base = self.local_slot_to_var(*slot);
-                // Read old value before overwriting.
-                let (old_tag, old_payload) = self.use_var_pair(builder, base);
-                // Write new value.
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
-                // Decref old (no drop — old may be reachable through
-                // collections/aliases; freeing deferred to scope exit).
-                let decref_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.decref, builder.func);
-                builder.ins().call(decref_ref, &[old_tag, old_payload]);
-                let incref_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.incref, builder.func);
-                builder.ins().call(incref_ref, &[tag, payload]);
             }
 
             LirInstr::LoadCapture { dst, index } => {
@@ -1146,13 +1134,8 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, base, nil_tag, nil_payload);
             }
 
-            LirInstr::DecrefLocal { slot } => {
-                let base = self.local_slot_to_var(*slot);
-                let (tag, payload) = self.use_var_pair(builder, base);
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.decref, builder.func);
-                builder.ins().call(func_ref, &[tag, payload]);
+            LirInstr::DecrefLocal { .. } => {
+                // No-op: refcounting removed.
             }
 
             LirInstr::PushParamFrame { pairs } => {

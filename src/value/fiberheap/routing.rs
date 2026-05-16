@@ -107,17 +107,6 @@ pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
     CURRENT_FIBER_HEAP.with(|cell| cell.set(saved));
 }
 
-/// Check whether the current fiber heap has a shared allocator active.
-pub fn current_heap_has_shared_alloc() -> bool {
-    CURRENT_FIBER_HEAP.with(|cell| {
-        let ptr = cell.get();
-        if ptr.is_null() {
-            false
-        } else {
-            unsafe { (*ptr).has_shared_alloc() }
-        }
-    })
-}
 
 pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R> {
     CURRENT_FIBER_HEAP.with(|cell| {
@@ -128,23 +117,6 @@ pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R
             Some(f(unsafe { &mut *ptr }))
         }
     })
-}
-
-/// Enter outbox routing context on the current FiberHeap.
-/// Allocations between outbox_enter and outbox_exit go to the outbox.
-pub fn outbox_enter() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).outbox_enter() };
-    }
-}
-
-/// Exit outbox routing context on the current FiberHeap.
-pub fn outbox_exit() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).outbox_exit() };
-    }
 }
 
 /// Push a scope mark on the current FiberHeap (called by VM `RegionEnter`).
@@ -181,35 +153,16 @@ pub fn region_rotate() {
     }
 }
 
-// ── Refcounting ───────────────────────────────────────────────────
+// ── Refcounting (no-ops — refcounting removed) ────────────────────
 
-/// Increment the durable reference count for a heap value on the
-/// current FiberHeap. No-op for non-heap values or if no heap installed.
-pub fn incref(val: crate::value::Value) {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).incref_value(val) };
-    }
-}
+/// No-op: refcounting removed.
+pub fn incref(_val: crate::value::Value) {}
 
-/// Decrement the durable reference count for a heap value on the
-/// current FiberHeap. No-op for non-heap values or if no heap installed.
-pub fn decref(val: crate::value::Value) {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).decref_value(val) };
-    }
-}
+/// No-op: refcounting removed.
+pub fn decref(_val: crate::value::Value) {}
 
-/// Decrement the durable reference count for a heap value and free it
-/// immediately if the refcount reaches 0. Called at mutation points
-/// (put/push) when the old value is evicted from a collection.
-pub fn decref_and_free(val: crate::value::Value) {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).decref_and_free(val) };
-    }
-}
+/// No-op: refcounting removed.
+pub fn decref_and_free(_val: crate::value::Value) {}
 
 /// Refcount-aware scope exit: pops scope mark and releases only
 /// refcount-0 objects. Pinned objects (refcount > 0) survive.
@@ -229,11 +182,8 @@ pub fn region_exit_refcounted() {
     }
 }
 
-/// Drop a single heap value: if owned by the current pool with refcount == 0,
-/// run its destructor, return the slab slot to the free list, and mark it
-/// as dropped in the bitmap. Does NOT walk children — values are freely
-/// copyable and may be aliased by other live containers or closure envs.
-/// Without local refcounting, recursive child freeing causes use-after-free.
+/// Drop a single heap value: if owned by the current pool, run its
+/// destructor, return the slab slot to the free list.
 pub fn drop_slot_value(val: crate::value::Value) {
     use crate::value::heap::HeapObject;
 
@@ -250,28 +200,6 @@ pub fn drop_slot_value(val: crate::value::Value) {
             return;
         }
         let obj_ptr = heap_ptr as *mut HeapObject;
-        let rc = heap.pool.refcount(obj_ptr as *const _);
-        if rc > 0 {
-            if super::FiberHeap::trace_rc() {
-                eprintln!(
-                    "[trace:rc] drop_slot_value {:?} SKIPPED rc={}",
-                    heap_ptr, rc
-                );
-            }
-            return;
-        }
-        if super::FiberHeap::trace_rc() {
-            eprintln!("[trace:rc] drop_slot_value {:?} FREED", heap_ptr);
-        }
-        // Decref all heap children (symmetric with incref in alloc).
-        {
-            let obj_ref = &*obj_ptr;
-            let mut children = Vec::new();
-            super::FiberHeap::collect_heap_children(obj_ref, &mut children);
-            for child in children {
-                heap.decref_value(child);
-            }
-        }
         // Run destructor if needed.
         if super::needs_drop((*obj_ptr).tag()) {
             std::ptr::drop_in_place(obj_ptr);

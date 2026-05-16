@@ -93,11 +93,6 @@ pub(crate) struct Slab {
     /// Next slot index to use in the last chunk (bump cursor).
     bump_cursor: usize,
     live_count: usize,
-    /// Per-slot reference counts. Indexed by flat slot index.
-    /// Tracks **durable** references: mutable collection entries + mutable
-    /// bindings. NOT tracked: stack, let bindings, function parameters
-    /// (transient — handled by scope marks).
-    refcounts: Vec<u32>,
     /// Per-slot previous link in the allocation-order doubly-linked list.
     /// Indexed by flat slot index. ALLOC_NIL means "no previous".
     pub(crate) alloc_prev: Vec<u32>,
@@ -118,7 +113,6 @@ impl Slab {
             free_head: None,
             bump_cursor: 0,
             live_count: 0,
-            refcounts: Vec::new(),
             alloc_prev: Vec::new(),
             alloc_next: Vec::new(),
             region_ids: Vec::new(),
@@ -134,8 +128,7 @@ impl Slab {
             let slot = self.chunks[chunk_idx].slot(slot_idx);
             let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
-            // Reset refcount and region for reused slot.
-            self.refcounts[flat as usize] = 0;
+            // Reset region for reused slot.
             self.region_ids[flat as usize] = 0;
             unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
             slot as *mut HeapObject
@@ -174,9 +167,6 @@ impl Slab {
         }
         self.free_head = Some(flat as u32);
         self.live_count = self.live_count.saturating_sub(1);
-        if flat < self.refcounts.len() {
-            self.refcounts[flat] = 0;
-        }
     }
 
     /// Reset the slab: discard free list, keep first chunk, drop (munmap) the rest.
@@ -188,7 +178,6 @@ impl Slab {
         self.free_head = None;
         self.bump_cursor = 0;
         self.live_count = 0;
-        self.refcounts.clear();
         self.alloc_prev.clear();
         self.alloc_next.clear();
         self.region_ids.clear();
@@ -230,40 +219,19 @@ impl Slab {
         false
     }
 
-    // ── Refcounting ───────────────────────────────────────────────────
+    // ── Refcounting (removed — always returns 0) ──────────────────────
 
-    /// Increment the reference count for the slot pointed to by `ptr`.
-    /// No-op if `ptr` is not in this slab (safety: caller checked ownership).
     #[inline]
-    pub fn incref(&mut self, ptr: *const HeapObject) {
-        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
-        if flat < self.refcounts.len() {
-            self.refcounts[flat] = self.refcounts[flat].saturating_add(1);
-        }
+    pub fn incref(&mut self, _ptr: *const HeapObject) {}
+
+    #[inline]
+    pub fn decref(&mut self, _ptr: *const HeapObject) -> u32 {
+        0
     }
 
-    /// Decrement the reference count for the slot pointed to by `ptr`.
-    /// Returns the new refcount. No-op (returns 0) if not in this slab.
     #[inline]
-    pub fn decref(&mut self, ptr: *const HeapObject) -> u32 {
-        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
-        if flat < self.refcounts.len() && self.refcounts[flat] > 0 {
-            self.refcounts[flat] -= 1;
-            self.refcounts[flat]
-        } else {
-            0
-        }
-    }
-
-    /// Get the reference count for the slot pointed to by `ptr`.
-    #[inline]
-    pub fn refcount(&self, ptr: *const HeapObject) -> u32 {
-        let flat = self.ptr_to_flat(ptr as *mut HeapObject);
-        if flat < self.refcounts.len() {
-            self.refcounts[flat]
-        } else {
-            0
-        }
+    pub fn refcount(&self, _ptr: *const HeapObject) -> u32 {
+        0
     }
 
     /// Get the region id for the slot pointed to by `ptr`.
@@ -296,8 +264,7 @@ impl Slab {
         self.chunks.push(chunk);
         self.bump_cursor = 0;
         let total_slots = self.chunks.len() * CHUNK_SIZE;
-        // Grow refcount, alloc link, and region id arrays for the new chunk.
-        self.refcounts.resize(total_slots, 0);
+        // Grow alloc link and region id arrays for the new chunk.
         self.alloc_prev.resize(total_slots, ALLOC_NIL);
         self.alloc_next.resize(total_slots, ALLOC_NIL);
         self.region_ids.resize(total_slots, 0);

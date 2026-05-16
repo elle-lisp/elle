@@ -20,33 +20,9 @@ pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     vm.fiber.stack.push(value);
 }
 
-/// Store to a local slot with refcount bookkeeping.
-/// decref(old), drop_slot_value(old), incref(new).
-/// Used for mutable binding assignment (assign var).
+/// Store to a local slot (refcounting removed — identical to StoreLocal).
 pub(crate) fn handle_store_local_refcounted(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
-    let idx = vm.read_u16(bytecode, ip) as usize;
-    let value = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on StoreLocalRefcounted");
-    let frame_base = vm.current_frame_base();
-    let abs_idx = frame_base + idx;
-    if abs_idx >= vm.fiber.stack.len() {
-        while vm.fiber.stack.len() <= abs_idx {
-            vm.fiber.stack.push(Value::NIL);
-        }
-    }
-    let old = vm.fiber.stack[abs_idx];
-    vm.fiber.stack[abs_idx] = value;
-    // Decref the old value (clamps at 0 if never increfd).
-    // Do NOT call drop_slot_value — the old value may be reachable
-    // through collections or other bindings. Actual freeing is
-    // deferred to scope exit (release/release_refcounted).
-    crate::value::fiberheap::decref(old);
-    crate::value::fiberheap::incref(value);
-    // Push back so caller can auto-pop.
-    vm.fiber.stack.push(value);
+    handle_store_local(vm, bytecode, ip);
 }
 
 pub(crate) fn handle_load_upvalue(
@@ -136,16 +112,10 @@ pub(crate) fn handle_store_upvalue(
     // Upvalues are always cells (LocalCell for mutable captures).
     let env_val = env[idx];
     if let Some(cell_ref) = env_val.as_capture_cell() {
-        let old_val = {
+        {
             let mut cell_mut = cell_ref.borrow_mut();
-            let old = *cell_mut;
             *cell_mut = val;
-            old
-        };
-        // Decref/incref after releasing the borrow_mut — transitive
-        // incref may walk into closures capturing this same cell.
-        crate::value::fiberheap::decref_and_free(old_val);
-        crate::value::fiberheap::incref(val);
+        }
         vm.fiber.stack.push(val);
     } else {
         panic!(

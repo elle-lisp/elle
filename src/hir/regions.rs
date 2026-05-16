@@ -57,9 +57,14 @@ impl RegionTree {
             b = self.parent.get(&b).copied().unwrap_or(Region::GLOBAL);
             db -= 1;
         }
+        let mut guard = 0u32;
         while a != b {
             a = self.parent.get(&a).copied().unwrap_or(Region::GLOBAL);
             b = self.parent.get(&b).copied().unwrap_or(Region::GLOBAL);
+            guard += 1;
+            if guard > 10000 {
+                return Region::GLOBAL;
+            }
         }
         a
     }
@@ -729,10 +734,35 @@ impl RegionInference {
             ..Default::default()
         };
 
-        // Build a map: initial region → solved region for each alloc_var.
-        // An alloc_var that was initially in scope S but solved to an
-        // ancestor of S means a value physically allocated inside S
-        // escapes — S is not safe to reclaim.
+        // Pre-group alloc vars by initial region for O(vars-in-scope)
+        // per-scope checks instead of O(all-vars).
+        let mut vars_by_initial_region: HashMap<Region, Vec<u32>> = HashMap::new();
+        for &var_id in self.alloc_var.values() {
+            let initial = self.var_initial_region[var_id as usize];
+            vars_by_initial_region.entry(initial).or_default().push(var_id);
+        }
+
+        // Helper: check if any alloc physically inside `scope` escaped it.
+        // "Physically inside" = initial region is scope or a descendant.
+        // We check vars whose initial region is `scope` directly, plus vars
+        // in descendant regions (via ancestry check on the initial region).
+        let any_escaped_scope = |scope: &Region, tree: &RegionTree, var_regions: &[Region]| -> bool {
+            for (initial_region, var_ids) in &vars_by_initial_region {
+                let inside = *initial_region == *scope || tree.is_ancestor(*scope, *initial_region);
+                if !inside {
+                    continue;
+                }
+                for &var_id in var_ids {
+                    let solved = var_regions[var_id as usize];
+                    let stayed = solved == *scope || tree.is_ancestor(*scope, solved);
+                    if !stayed {
+                        return true;
+                    }
+                }
+            }
+            false
+        };
+
         for (hir_id, region) in &self.scope_region {
             let kind = self
                 .tree
@@ -742,25 +772,7 @@ impl RegionInference {
                 .unwrap_or(RegionKind::Global);
             let effective_kind = match kind {
                 RegionKind::Scope => {
-                    // A scope is safe to reclaim when no allocation
-                    // physically inside it was widened past it.
-                    //
-                    // "Physically inside" = initial region is this scope
-                    // or a descendant. "Widened past" = solved region is
-                    // an ancestor (or GLOBAL).
-                    let any_escaped = self.alloc_var.values().any(|&var_id| {
-                        let initial = self.var_initial_region[var_id as usize];
-                        let solved = self.var_regions[var_id as usize];
-                        // Was this alloc physically inside this scope?
-                        let inside = initial == *region || self.tree.is_ancestor(*region, initial);
-                        if !inside {
-                            return false;
-                        }
-                        // Did it escape (solved to outside this scope)?
-                        let stayed = solved == *region || self.tree.is_ancestor(*region, solved);
-                        !stayed
-                    });
-                    if any_escaped {
+                    if any_escaped_scope(region, &self.tree, &self.var_regions) {
                         stats.scopes_global += 1;
                         RegionKind::Global
                     } else {
@@ -769,20 +781,7 @@ impl RegionInference {
                     }
                 }
                 RegionKind::Loop => {
-                    // Same escape check as Scope: if any alloc physically
-                    // inside this loop was widened past it, it's not safe
-                    // to reclaim per-iteration.
-                    let any_escaped = self.alloc_var.values().any(|&var_id| {
-                        let initial = self.var_initial_region[var_id as usize];
-                        let solved = self.var_regions[var_id as usize];
-                        let inside = initial == *region || self.tree.is_ancestor(*region, initial);
-                        if !inside {
-                            return false;
-                        }
-                        let stayed = solved == *region || self.tree.is_ancestor(*region, solved);
-                        !stayed
-                    });
-                    if any_escaped {
+                    if any_escaped_scope(region, &self.tree, &self.var_regions) {
                         stats.scopes_global += 1;
                         RegionKind::Global
                     } else {

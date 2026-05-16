@@ -19,7 +19,6 @@ pub mod intern;
 pub mod keyword;
 pub mod repr;
 pub mod send;
-pub mod shared_alloc;
 pub mod types;
 
 // Export the tagged-union Value as the canonical Value type

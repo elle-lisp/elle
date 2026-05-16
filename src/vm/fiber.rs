@@ -78,31 +78,6 @@ impl VM {
             );
         }
 
-        // 3b. Install outbox for yield-bound allocations. The compiler
-        // emits OutboxEnter/OutboxExit around yield/emit value expressions,
-        // routing those allocations to the outbox. The parent reads
-        // yielded values directly from the outbox (zero-copy).
-        //
-        // The outbox pool is owned by the PARENT's FiberHeap (via
-        // `install_outbox`). The child receives a borrowed raw pointer
-        // (`set_outbox_borrow`). This ensures the outbox outlives the child:
-        // when the child's FiberHandle Rc drops to 0 (e.g. during the
-        // parent's `release_refcounted`), the child's FiberHeap is dropped
-        // but the outbox is not torn down — it lives on the parent's heap
-        // until the parent decides it's safe.
-        //
-        // Default allocation target is the child's private heap. Only
-        // allocations between OutboxEnter/OutboxExit go to the outbox.
-        let tmpl = &self.fiber.closure.template;
-        if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
-            // After swap: child_fiber = parent, self.fiber = child.
-            // Install on parent, borrow on child.
-            child_fiber
-                .heap
-                .install_outbox(crate::value::fiberheap::pool::SlabPool::new());
-            let ptr = child_fiber.heap.outbox_ptr();
-            self.fiber.heap.set_outbox_borrow(ptr);
-        }
 
         // 4. Execute the closure
         let bits = execute(self);
@@ -128,7 +103,7 @@ impl VM {
         //         to the private pool (e.g. yield [:send target msg] where
         //         msg was allocated before OutboxEnter) — deep-copy it so
         //         nested values are relocated too.
-        let mut result_value = self
+        let result_value = self
             .fiber
             .signal
             .as_ref()
@@ -136,16 +111,6 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-        if result_value.is_heap() && self.fiber.heap.has_outbox() {
-            // deep_copy_to_outbox handles both cases: it recursively copies
-            // any private-pool values it finds, and returns outbox values as-is
-            // (except it recurses into their children).
-            result_value = self.fiber.heap.deep_copy_to_outbox(result_value);
-            // Update the signal with the new value so the parent reads the copy.
-            if let Some(ref mut sig) = self.fiber.signal {
-                sig.1 = result_value;
-            }
-        }
 
         // 7. Swap back: parent in, child out; restore parent's heap and handle
         unsafe {

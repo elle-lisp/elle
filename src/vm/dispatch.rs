@@ -488,13 +488,8 @@ impl VM {
                 }
 
                 Instruction::DecrefLocal => {
-                    let slot = self.read_u16(bc, &mut ip) as usize;
-                    let frame_base = self.current_frame_base();
-                    let abs_idx = frame_base + slot;
-                    if abs_idx < self.fiber.stack.len() {
-                        let val = self.fiber.stack[abs_idx];
-                        crate::value::fiberheap::decref(val);
-                    }
+                    // No-op: refcounting removed. Skip the u16 operand.
+                    let _slot = self.read_u16(bc, &mut ip);
                 }
 
                 // Legacy no-ops (outbox routing replaced by per-allocation region stamps).
