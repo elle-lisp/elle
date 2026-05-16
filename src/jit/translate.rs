@@ -703,12 +703,9 @@ impl<'a> FunctionTranslator<'a> {
                 nested_lir.call_sites = nested_call_sites;
 
                 let template = crate::value::ClosureTemplate {
-                    bytecode: std::rc::Rc::new(nested_bytecode.instructions),
-                    arity: func.arity,
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     num_params: func.num_params,
-                    constants: std::rc::Rc::new(nested_bytecode.constants),
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask,
@@ -721,8 +718,11 @@ impl<'a> FunctionTranslator<'a> {
                     name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
-                    wasm_func_idx: None,
-                    spirv: std::cell::OnceCell::new(),
+                    ..crate::value::ClosureTemplate::new(
+                        std::rc::Rc::new(nested_bytecode.instructions),
+                        func.arity,
+                        std::rc::Rc::new(nested_bytecode.constants),
+                    )
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),

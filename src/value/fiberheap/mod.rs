@@ -49,6 +49,7 @@ mod routing;
 pub use routing::*;
 
 pub(crate) mod bump;
+pub(crate) mod region;
 pub(crate) mod slab;
 
 pub(crate) mod pool;
@@ -147,6 +148,16 @@ pub struct FiberHeap {
     /// True when allocations should route to `outbox_ptr` (between
     /// `OutboxEnter` and `OutboxExit` bytecodes).
     outbox_active: bool,
+    /// Named runtime regions (non-default). Region 0 is `pool` (the private
+    /// default region). Indices 1.. correspond to compiler-assigned region
+    /// ids from the function's region table. Created by RegionEnter,
+    /// destroyed by RegionExit or transferred to `orphans` when pinned.
+    #[allow(clippy::vec_box)]
+    regions: Vec<Box<region::RuntimeRegion>>,
+    /// Orphaned regions: pinned (RC > 0) at scope exit, waiting for their
+    /// RC to reach 0. Freed when a decref brings RC to 0.
+    #[allow(clippy::vec_box)]
+    orphans: Vec<Box<region::RuntimeRegion>>,
 }
 
 impl FiberHeap {
@@ -168,6 +179,8 @@ impl FiberHeap {
             outbox_active: false,
             owned_outboxes: Vec::new(),
             outbox_ptr: std::ptr::null_mut(),
+            regions: Vec::new(),
+            orphans: Vec::new(),
         }
     }
 
@@ -1343,6 +1356,60 @@ impl FiberHeap {
         }
     }
 
+    // ── Region management ─────────────────────────────────────────────
+
+    /// Create a new runtime region and return its index in `self.regions`.
+    pub(crate) fn create_region(
+        &mut self,
+        kind: crate::hir::region::RegionKind,
+    ) -> usize {
+        let r = Box::new(region::RuntimeRegion::new(kind));
+        self.regions.push(r);
+        self.regions.len() - 1
+    }
+
+    /// Get a mutable reference to a named region by index.
+    /// Panics if the index is out of bounds.
+    #[inline]
+    pub(crate) fn region_mut(&mut self, idx: usize) -> &mut region::RuntimeRegion {
+        &mut self.regions[idx]
+    }
+
+    /// Get the number of named regions (excludes the default pool).
+    pub(crate) fn region_count(&self) -> usize {
+        self.regions.len()
+    }
+
+    /// Get the number of orphaned (pinned) regions.
+    pub(crate) fn orphan_count(&self) -> usize {
+        self.orphans.len()
+    }
+
+    /// Move a region from `regions[idx]` to `orphans` (it's pinned, RC > 0).
+    /// The region at `idx` is replaced with a fresh empty region of the same kind.
+    /// Returns the kind of the orphaned region.
+    pub(crate) fn orphan_region(&mut self, idx: usize) -> crate::hir::region::RegionKind {
+        let kind = self.regions[idx].kind;
+        let old = std::mem::replace(
+            &mut self.regions[idx],
+            Box::new(region::RuntimeRegion::new(kind)),
+        );
+        self.orphans.push(old);
+        kind
+    }
+
+    /// Check orphaned regions and free any that have reached RC 0.
+    pub(crate) fn collect_orphans(&mut self) {
+        self.orphans.retain_mut(|r| {
+            if r.rc == 0 {
+                r.pool.teardown();
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     // ── Refcounting ───────────────────────────────────────────────────
 
     /// Check if `--trace=rc` is active (zero-cost when off: one static read + AND).
@@ -1561,6 +1628,14 @@ impl FiberHeap {
         self.scope_dtors_run = 0;
         self.jit_prev_mark = None;
         self.jit_curr_mark = None;
+
+        // Tear down all named regions and orphans.
+        for mut r in self.regions.drain(..) {
+            r.pool.teardown();
+        }
+        for mut r in self.orphans.drain(..) {
+            r.pool.teardown();
+        }
     }
 }
 
@@ -1678,6 +1753,13 @@ impl Drop for FiberHeap {
             for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
                 state.allocator.inner.dealloc(ptr, size, align);
             }
+        }
+        // Tear down named regions and orphans.
+        for mut r in self.regions.drain(..) {
+            r.pool.teardown();
+        }
+        for mut r in self.orphans.drain(..) {
+            r.pool.teardown();
         }
         // pool (and its slab) drops implicitly here. MaybeUninit slots do not
         // call HeapObject::drop — dtors have already run above.

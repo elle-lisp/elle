@@ -998,28 +998,11 @@ fn test_spawn_primitive() {
 
     // Create a simple closure to spawn
     let closure = Value::closure(Closure {
-        template: std::rc::Rc::new(ClosureTemplate {
-            bytecode: std::rc::Rc::new(vec![0u8]), // dummy bytecode
-            arity: elle::value::Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: std::rc::Rc::new(vec![]),
-            signal: elle::signals::Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: std::rc::Rc::new(ClosureTemplate::new(
+            std::rc::Rc::new(vec![0u8]), // dummy bytecode
+            elle::value::Arity::Exact(0),
+            std::rc::Rc::new(vec![]),
+        )),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -1518,28 +1501,11 @@ fn test_json_serialize_errors() {
     let json_serialize = get_primitive(&meta, &mut symbols, "json-serialize");
 
     let closure = Value::closure(Closure {
-        template: std::rc::Rc::new(ClosureTemplate {
-            bytecode: std::rc::Rc::new(vec![]),
-            arity: elle::value::Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: std::rc::Rc::new(vec![]),
-            signal: elle::signals::Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: std::rc::Rc::new(ClosureTemplate::new(
+            std::rc::Rc::new(vec![]),
+            elle::value::Arity::Exact(0),
+            std::rc::Rc::new(vec![]),
+        )),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });

@@ -117,33 +117,14 @@ pub struct VM {
 /// execution context for top-level bytecode. This closure is never
 /// called; it exists only to satisfy Fiber's constructor.
 fn root_closure() -> Rc<Closure> {
-    use crate::signals::Signal;
     use crate::value::types::Arity;
     use crate::value::ClosureTemplate;
     Rc::new(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(
+            Rc::new(vec![]),
+            Arity::Exact(0),
+            Rc::new(vec![]),
+        )),
         env: crate::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     })

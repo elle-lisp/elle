@@ -437,27 +437,9 @@ mod tests {
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(arity),
             num_locals: arity,
-            num_captures: 0,
             num_params: arity,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(arity), Rc::new(vec![]))
         });
         Rc::new(Closure {
             template,
@@ -543,27 +525,10 @@ mod tests {
         use crate::value::ClosureTemplate;
 
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
             num_locals: 2, // 1 param + 1 local
             num_captures: 1,
             num_params: 1,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
         });
 
         let closure = Rc::new(Closure {

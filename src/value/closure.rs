@@ -67,9 +67,41 @@ pub struct ClosureTemplate {
     /// SPIR-V is a property of the code, not the instance — all closures
     /// from the same lambda share the template, so the cache is shared.
     pub spirv: std::cell::OnceCell<Vec<u8>>,
+    /// Per-function region table: maps region id (index + 1) to the kind
+    /// of region. Region 0 is always the default (private) region. Empty
+    /// when the function has no non-default regions (the common case).
+    pub region_table: Vec<crate::hir::region::RegionKind>,
 }
 
 impl ClosureTemplate {
+    /// Create a new ClosureTemplate with the three required fields;
+    /// all other fields default to zero/empty/None.
+    pub fn new(bytecode: Rc<Vec<u8>>, arity: Arity, constants: Rc<Vec<Value>>) -> Self {
+        ClosureTemplate {
+            bytecode,
+            arity,
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants,
+            signal: Signal::silent(),
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            lir_function: None,
+            doc: None,
+            syntax: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
+            wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
+            region_table: Vec::new(),
+        }
+    }
+
     /// True if signal and structural checks pass for GPU eligibility.
     ///
     /// This is a necessary but not sufficient condition — the full
@@ -177,30 +209,11 @@ mod tests {
     use super::*;
 
     fn make_template() -> Rc<ClosureTemplate> {
-        Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        })
+        Rc::new(ClosureTemplate::new(
+            Rc::new(vec![]),
+            Arity::Exact(0),
+            Rc::new(vec![]),
+        ))
     }
 
     #[test]
@@ -217,28 +230,11 @@ mod tests {
     #[test]
     fn test_closure_env_capacity() {
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
             arity: Arity::Exact(3),
             num_locals: 5,
             num_captures: 2,
             num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(3), Rc::new(vec![]))
         });
         let closure = Closure {
             template,
@@ -248,28 +244,11 @@ mod tests {
         assert_eq!(closure.env_capacity(), 7);
 
         let template2 = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
             arity: Arity::AtLeast(2),
             num_locals: 4,
             num_captures: 1,
             num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::AtLeast(2), Rc::new(vec![]))
         });
         let closure2 = Closure {
             template: template2,
@@ -279,28 +258,11 @@ mod tests {
         assert_eq!(closure2.env_capacity(), 5);
 
         let template3 = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
             arity: Arity::Range(1, 3),
             num_locals: 3,
             num_captures: 0,
             num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Range(1, 3), Rc::new(vec![]))
         });
         let closure3 = Closure {
             template: template3,

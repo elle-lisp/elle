@@ -1,13 +1,10 @@
 use elle::value::fiber::SignalBits;
 // DEFENSE: Unit tests for closure and lambda primitives
 // Tests the basic building blocks of closure and lambda functionality
-use elle::signals::Signal;
-use elle::error::LocationMap;
 use elle::primitives::register_primitives;
 use elle::symbol::SymbolTable;
 use elle::value::{Arity, Closure, ClosureTemplate, Value};
 use elle::vm::VM;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 fn setup() -> (VM, SymbolTable) {
@@ -25,28 +22,7 @@ fn setup() -> (VM, SymbolTable) {
 fn test_closure_type_identification() {
     // Verify closures are properly typed
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -63,26 +39,8 @@ fn test_closure_display() {
     // Closures should have a reasonable string representation
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
             num_locals: 1,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
         }),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
@@ -97,26 +55,8 @@ fn test_closure_clone() {
     // Closures should be cloneable
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![1, 2, 3]),
-            arity: Arity::Exact(2),
             num_locals: 2,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![1, 2, 3]), Arity::Exact(2), Rc::new(vec![]))
         }),
         env: elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(42)]),
         squelch_mask: SignalBits::EMPTY,
@@ -176,28 +116,7 @@ fn test_arity_zero() {
 fn test_closure_empty_environment() {
     // Closure with no captured variables
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -210,26 +129,8 @@ fn test_closure_single_captured_variable() {
     let env = vec![Value::int(42)];
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
             num_locals: 1,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
         }),
         env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
@@ -249,26 +150,8 @@ fn test_closure_multiple_captured_variables() {
     ];
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(2),
             num_locals: 2,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(2), Rc::new(vec![]))
         }),
         env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
@@ -290,26 +173,8 @@ fn test_closure_environment_sharing() {
 
     let closure1 = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![1]),
-            arity: Arity::Exact(1),
             num_locals: 1,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![1]), Arity::Exact(1), Rc::new(vec![]))
         }),
         env: shared_env,
         squelch_mask: SignalBits::EMPTY,
@@ -317,26 +182,8 @@ fn test_closure_environment_sharing() {
 
     let closure2 = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![2]),
-            arity: Arity::Exact(1),
             num_locals: 1,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![2]), Arity::Exact(1), Rc::new(vec![]))
         }),
         env: shared_env,
         squelch_mask: SignalBits::EMPTY,
@@ -356,28 +203,7 @@ fn test_closure_bytecode_storage() {
     // Bytecode should be properly stored and retrievable
     let bytecode = vec![1, 2, 3, 4, 5];
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(bytecode.clone()),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(bytecode.clone()), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -389,28 +215,7 @@ fn test_closure_constants_storage() {
     // Constants should be properly stored
     let constants = vec![Value::int(42), Value::string("hello"), Value::bool(true)];
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(constants.clone()),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(constants.clone()))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -423,29 +228,11 @@ fn test_closure_num_locals() {
     for num_locals in 0..10 {
         let closure = Closure {
             template: Rc::new(ClosureTemplate {
-                bytecode: Rc::new(vec![]),
-                arity: Arity::Exact(0),
                 num_locals,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(vec![]),
-                signal: Signal::silent(),
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-                symbol_names: Rc::new(HashMap::new()),
-                location_map: Rc::new(LocationMap::new()),
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: elle::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+                ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
             }),
             env: elle::value::inline_slice::InlineSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.template.num_locals, num_locals);
     }
@@ -458,28 +245,7 @@ fn test_closure_num_locals() {
 #[test]
 fn test_closure_zero_parameters() {
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -491,26 +257,8 @@ fn test_closure_zero_parameters() {
 fn test_closure_single_parameter() {
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
             num_locals: 1,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
         }),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
@@ -522,26 +270,8 @@ fn test_closure_single_parameter() {
 fn test_closure_multiple_parameters() {
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(3),
             num_locals: 3,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(3), Rc::new(vec![]))
         }),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
@@ -555,26 +285,8 @@ fn test_closure_multiple_parameters() {
 fn test_closure_variadic_parameters() {
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::AtLeast(1),
             num_locals: 1,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::AtLeast(1), Rc::new(vec![]))
         }),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
@@ -592,55 +304,13 @@ fn test_closure_variadic_parameters() {
 fn test_closures_never_equal() {
     // Closures should never compare equal (even with identical contents)
     let closure1 = Value::closure(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
     let closure2 = Value::closure(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -653,28 +323,7 @@ fn test_closures_never_equal() {
 fn test_same_closure_reference_equality() {
     // Same closure reference should be equal via Rc
     let closure_rc = Rc::new(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -697,28 +346,7 @@ fn test_closure_with_nested_captured_values() {
 
     let env = vec![nested_list];
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -730,55 +358,13 @@ fn test_closure_with_nested_captured_values() {
 fn test_closure_with_closure_in_constants() {
     // A closure's constants can contain other closures
     let inner_closure = Value::closure(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![1]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![1]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
     let outer_closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![inner_closure]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![inner_closure]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -792,28 +378,7 @@ fn test_closure_with_many_upvalues() {
     let env: Vec<Value> = (0..100).map(|i| Value::int(i as i64)).collect();
 
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -831,26 +396,8 @@ fn test_closure_as_method() {
 
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(2),
             num_locals: 2,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(2), Rc::new(vec![]))
         }),
         env: elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(10)]),
         squelch_mask: SignalBits::EMPTY,
@@ -870,28 +417,7 @@ fn test_closure_as_method() {
 #[test]
 fn test_closure_type_check() {
     let closure = Value::closure(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -913,55 +439,13 @@ fn test_closure_environment_isolation() {
     let env2 = elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(2)]);
 
     let closure1 = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: env1,
         squelch_mask: SignalBits::EMPTY,
     };
 
     let closure2 = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: env2,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -975,29 +459,11 @@ fn test_closure_local_variables_count() {
     for locals in 0..20 {
         let closure = Closure {
             template: Rc::new(ClosureTemplate {
-                bytecode: Rc::new(vec![]),
-                arity: Arity::Exact(0),
                 num_locals: locals,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(vec![]),
-                signal: Signal::silent(),
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-                symbol_names: Rc::new(HashMap::new()),
-                location_map: Rc::new(LocationMap::new()),
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: elle::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+                ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
             }),
             env: elle::value::inline_slice::InlineSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.template.num_locals, locals);
     }
@@ -1010,28 +476,7 @@ fn test_closure_local_variables_count() {
 #[test]
 fn test_closure_with_empty_bytecode() {
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -1043,28 +488,7 @@ fn test_closure_with_large_bytecode() {
     // Large bytecode should be handled correctly
     let large_code: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(large_code.clone()),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(Rc::new(large_code.clone()), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -1078,28 +502,7 @@ fn test_closure_rc_reference_counting() {
     let bytecode_weak = Rc::downgrade(&bytecode);
 
     let closure = Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: bytecode.clone(),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(bytecode.clone(), Arity::Exact(0), Rc::new(vec![]))),
         env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -1117,26 +520,8 @@ fn test_closure_rc_reference_counting() {
 fn test_closure_debug_format() {
     let closure = Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![1, 2, 3]),
-            arity: Arity::Exact(2),
             num_locals: 2,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![Value::string("test")]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![1, 2, 3]), Arity::Exact(2), Rc::new(vec![Value::string("test")]))
         }),
         env: elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(42)]),
         squelch_mask: SignalBits::EMPTY,

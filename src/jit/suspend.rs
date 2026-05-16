@@ -234,27 +234,8 @@ mod tests {
         let constants = Rc::new(constants);
 
         let template = Rc::new(ClosureTemplate {
-            bytecode: bytecode.clone(),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants,
             signal: Signal::yields(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(bytecode.clone(), Arity::Exact(0), constants)
         });
 
         // VM must exist before allocating the closure env slice so a root
@@ -297,27 +278,11 @@ mod tests {
         let constants = Rc::new(constants);
 
         let template = Rc::new(ClosureTemplate {
-            bytecode: bytecode.clone(),
-            arity: Arity::Exact(num_params),
-            num_locals: 0,
-            num_captures: 0,
             num_params,
-            constants,
             signal: Signal::yields(),
             capture_params_mask,
             capture_locals_mask,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(bytecode.clone(), Arity::Exact(num_params), constants)
         });
 
         // VM must exist before allocating the closure env slice so a root

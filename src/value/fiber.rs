@@ -534,35 +534,18 @@ pub struct NativeIter {
 /// is never actually executed — native iter fibers short-circuit
 /// in the VM's resume path.
 fn noop_closure() -> Rc<Closure> {
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
     use crate::value::arena::alloc_inline_slice;
     use crate::value::closure::ClosureTemplate;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
 
     Rc::new(Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![3, 0, 0, 0]), // Return
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
             result_is_immediate: true,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(
+                Rc::new(vec![3, 0, 0, 0]), // Return
+                Arity::Exact(0),
+                Rc::new(vec![]),
+            )
         }),
         env: alloc_inline_slice(&[]),
         squelch_mask: SignalBits::EMPTY,
@@ -647,37 +630,16 @@ impl std::fmt::Debug for Fiber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
 
     fn test_closure() -> Rc<Closure> {
         use crate::value::ClosureTemplate;
         Rc::new(Closure {
-            template: Rc::new(ClosureTemplate {
-                bytecode: Rc::new(vec![]),
-                arity: Arity::Exact(0),
-                num_locals: 0,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(vec![]),
-                signal: Signal::silent(),
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-
-                symbol_names: Rc::new(HashMap::new()),
-                location_map: Rc::new(LocationMap::new()),
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: None,
-                spirv: std::cell::OnceCell::new(),
-            }),
+            template: Rc::new(ClosureTemplate::new(
+                Rc::new(vec![]),
+                Arity::Exact(0),
+                Rc::new(vec![]),
+            )),
             env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })

@@ -561,11 +561,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
     use crate::value::fiber::{SIG_ERROR as FIBER_SIG_ERROR, SIG_YIELD};
     use crate::value::{Arity, Closure};
-    use std::collections::HashMap;
     use std::rc::Rc;
 
     fn make_test_closure() -> Value {
@@ -578,29 +575,11 @@ mod tests {
             Instruction::Return as u8,
         ];
 
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(bytecode),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![Value::int(42)]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
+        let template = Rc::new(ClosureTemplate::new(
+            Rc::new(bytecode),
+            Arity::Exact(0),
+            Rc::new(vec![Value::int(42)]),
+        ));
 
         Value::closure(Closure {
             template,

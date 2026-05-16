@@ -515,12 +515,17 @@ impl RegionInference {
                 Some(self.alloc_here(hir.id))
             }
 
-            // Emit: operands and result → GLOBAL
+            // Emit: operands escape to the parent's shared region.
+            // Instead of forcing GLOBAL, we create a Parent-kind region.
+            // The solver widens transitively — values reachable from the
+            // yield operand are constrained to outlive the child fiber.
             HirKind::Emit { value, .. } => {
                 let val_var = self.walk(value);
                 if let Some(vv) = val_var {
-                    let global_var = self.fresh_var(Region::GLOBAL);
-                    self.constrain(vv, global_var, hir.id);
+                    let parent_region =
+                        self.fresh_region(self.current_region, RegionKind::Parent);
+                    let parent_var = self.fresh_var(parent_region);
+                    self.constrain(vv, parent_var, hir.id);
                 }
                 None
             }
@@ -798,6 +803,10 @@ impl RegionInference {
                     stats.scopes_function += 1;
                     RegionKind::Function
                 }
+                RegionKind::Parent => {
+                    stats.scopes_parent += 1;
+                    RegionKind::Parent
+                }
                 RegionKind::Global => {
                     stats.scopes_global += 1;
                     RegionKind::Global
@@ -805,6 +814,14 @@ impl RegionInference {
             };
             scope_kind.insert(*hir_id, effective_kind);
         }
+
+        // Count Parent regions from the tree (they're not scope-associated).
+        stats.scopes_parent = self
+            .tree
+            .kind
+            .values()
+            .filter(|k| **k == RegionKind::Parent)
+            .count();
 
         RegionInfo {
             alloc_region,
@@ -1068,6 +1085,7 @@ pub fn format_regions(
                 RegionKind::Scope => "scope",
                 RegionKind::Loop => "loop",
                 RegionKind::Function => "function",
+                RegionKind::Parent => "parent",
                 RegionKind::Global => "global",
             })
             .unwrap_or("?");
@@ -1243,18 +1261,15 @@ mod tests {
     }
 
     #[test]
-    fn emit_forces_global() {
-        // Emit operand should be forced to GLOBAL when it allocates.
-        // Use (f 1) which is a non-immediate call that allocates.
+    fn emit_creates_parent_region() {
+        // Emit operand should escape to a Parent-kind region (not GLOBAL).
+        // The solver widens the yield operand to a Parent region that
+        // survives the child fiber's death.
         let (_, _, info) = analyze("(emit :yield (f 1))");
-        let global_allocs: Vec<_> = info
-            .alloc_region
-            .values()
-            .filter(|r| r.is_global())
-            .collect();
         assert!(
-            !global_allocs.is_empty(),
-            "expected GLOBAL allocation for emit operand"
+            info.stats.scopes_parent >= 1,
+            "expected Parent region for emit operand, got stats: {:?}",
+            info.stats
         );
     }
 

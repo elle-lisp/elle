@@ -227,32 +227,14 @@ mod tests {
 
     /// Build a mock closure Value with the given LIR function.
     fn make_closure_value(lir: LirFunction) -> Value {
-        use crate::error::LocationMap;
         use crate::value::ClosureTemplate;
-        use std::collections::HashMap;
 
+        let arity = lir.arity;
+        let signal = lir.signal;
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: lir.arity,
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: lir.signal,
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
+            signal,
             lir_function: Some(Rc::new(lir)),
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), arity, Rc::new(vec![]))
         });
 
         let closure = crate::value::Closure {
@@ -440,29 +422,11 @@ mod tests {
         let caller = make_caller("f", sym_g);
 
         // Closure with no lir_function
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
+        let template = Rc::new(ClosureTemplate::new(
+            Rc::new(vec![]),
+            Arity::Exact(1),
+            Rc::new(vec![]),
+        ));
 
         let closure = crate::value::Closure {
             template,

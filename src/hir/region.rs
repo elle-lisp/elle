@@ -58,6 +58,10 @@ pub enum RegionKind {
     Loop,
     /// Lambda scope → escapes to caller
     Function,
+    /// Parent-shared region for yield-bound values.
+    /// Created by the parent fiber; the child allocates into it.
+    /// Survives child death because the parent holds a reference.
+    Parent,
     /// No reclamation
     Global,
 }
@@ -111,6 +115,7 @@ pub struct RegionStats {
     pub scopes_scope: usize,
     pub scopes_loop: usize,
     pub scopes_function: usize,
+    pub scopes_parent: usize,
     pub scopes_global: usize,
 }
 
@@ -124,8 +129,9 @@ impl std::fmt::Display for RegionStats {
         )?;
         writeln!(
             f,
-            "  scope: {}  loop: {}  function: {}  global: {}",
-            self.scopes_scope, self.scopes_loop, self.scopes_function, self.scopes_global
+            "  scope: {}  loop: {}  function: {}  parent: {}  global: {}",
+            self.scopes_scope, self.scopes_loop, self.scopes_function, self.scopes_parent,
+            self.scopes_global
         )?;
         Ok(())
     }

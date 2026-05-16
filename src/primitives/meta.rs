@@ -755,39 +755,16 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::LocationMap;
-    use crate::hir::VarargKind;
-    use crate::signals::Signal;
     use crate::syntax::{Span, Syntax, SyntaxKind};
     use crate::value::closure::{Closure, ClosureTemplate};
     use crate::value::sorted_struct_get;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
     use std::rc::Rc;
 
     fn make_closure_with_syntax(syntax: Option<Rc<Syntax>>) -> Value {
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            lir_function: None,
-            doc: None,
             syntax,
-            vararg_kind: VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
         });
         Value::closure(Closure {
             template,

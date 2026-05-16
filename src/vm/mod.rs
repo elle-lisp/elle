@@ -233,27 +233,13 @@ impl VM {
 
         let thunk = Value::closure(crate::value::Closure {
             template: Rc::new(crate::value::ClosureTemplate {
-                bytecode: Rc::new(bytecode.instructions.to_vec()),
-                arity: crate::value::Arity::Exact(0),
-                num_locals: 0,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(bytecode.constants.to_vec()),
                 signal: bytecode.signal,
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-
-                symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: None,
-                spirv: std::cell::OnceCell::new(),
+                ..crate::value::ClosureTemplate::new(
+                    Rc::new(bytecode.instructions.to_vec()),
+                    crate::value::Arity::Exact(0),
+                    Rc::new(bytecode.constants.to_vec()),
+                )
             }),
             env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,

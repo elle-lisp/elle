@@ -398,29 +398,11 @@ mod tests {
 
     #[test]
     fn test_serialize_errors() {
-        let template = Rc::new(crate::value::ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: crate::value::Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: crate::signals::Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(std::collections::HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            syntax: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
+        let template = Rc::new(crate::value::ClosureTemplate::new(
+            Rc::new(vec![]),
+            crate::value::Arity::Exact(0),
+            Rc::new(vec![]),
+        ));
         let closure = Value::closure(crate::value::Closure {
             template,
             env: crate::value::inline_slice::InlineSlice::empty(),
