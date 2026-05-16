@@ -28,19 +28,6 @@ use std::mem::{size_of, MaybeUninit};
 
 use crate::value::heap::HeapObject;
 
-pub(crate) const POISON_LO: u32 = 0xDEAD_BEEF;
-pub(crate) const POISON_HI: u32 = 0xCAFE_BABE;
-
-/// Check if a heap pointer points to a poisoned (freed) slot.
-/// The poison is at bytes 8-15 (past the free-list link at bytes 0-7).
-/// Returns true only if both poison words match.
-///
-/// # Safety
-/// Caller must ensure ptr is readable (not unmapped).
-pub unsafe fn is_poisoned(ptr: *const HeapObject) -> bool {
-    let base = ptr as *const u32;
-    std::ptr::read(base.add(2)) == POISON_LO && std::ptr::read(base.add(3)) == POISON_HI
-}
 const CHUNK_SIZE: usize = 256;
 
 /// Bytes per chunk: must hold CHUNK_SIZE HeapObject slots.
