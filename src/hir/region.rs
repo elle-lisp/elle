@@ -1,14 +1,14 @@
-//! Region types for Tofte-Talpin region inference.
+//! Region types for per-value region inference.
 //!
-//! Every scope (Let, Letrec, Block, Loop, Lambda) introduces a region — a
-//! lifetime bucket. Every allocation site gets a region variable. Constraints
-//! propagate through a lattice where GLOBAL is top and the innermost scope
-//! is bottom. The solver widens variables monotonically toward GLOBAL.
+//! Every allocation site gets a unique region variable. The solver
+//! widens variables through a tree lattice (GLOBAL at the root,
+//! innermost scope at the leaves). After solving, each allocation
+//! knows its death point — the scope whose exit frees it.
 //!
-//! After solving:
-//! - `alloc_region == scope_region` → RegionEnter/RegionExit (scope reclaim)
-//! - `alloc_region ∈ loop_regions` → FlipEnter/FlipSwap/FlipExit (rotation)
-//! - `alloc_region == GLOBAL` → no reclamation (status quo)
+//! `RegionInfo` is the solver's output: per-allocation region
+//! assignments and the set of regions that contain live allocations.
+//! The lowerer queries `scope_has_local_allocs(hir_id)` to decide
+//! whether a scope gets RegionEnter/RegionExit.
 
 use super::binding::Binding;
 use super::expr::HirId;
@@ -49,26 +49,8 @@ impl Region {
     }
 }
 
-/// What kind of region a scope introduces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegionKind {
-    /// Let/Letrec/Block scope → RegionEnter/RegionExit
-    Scope,
-    /// Loop scope → FlipEnter/FlipSwap/FlipExit
-    Loop,
-    /// Lambda scope → escapes to caller
-    Function,
-    /// Parent-shared region for yield-bound values.
-    /// Created by the parent fiber; the child allocates into it.
-    /// Survives child death because the parent holds a reference.
-    Parent,
-    /// No reclamation
-    Global,
-}
-
-/// An outlives constraint: `longer`'s region must outlive `shorter`'s region.
-/// Equivalently, `shorter` must be widened to at least `longer` in the
-/// region tree.
+/// An outlives constraint: `shorter` must be widened to at least
+/// `longer` in the region tree.
 #[derive(Debug)]
 pub struct OutlivesConstraint {
     /// Region variable that must live at least as long
@@ -80,29 +62,41 @@ pub struct OutlivesConstraint {
 }
 
 /// Results of region inference for a compilation unit.
+///
+/// Every allocation site has a solved region in `alloc_region`.
+/// Every scope (Let, Letrec, Block, Loop, Lambda) has a region in
+/// `scope_region`. A scope is reclaimable when its region appears
+/// in `live_regions` (at least one allocation's death point is
+/// that scope's exit).
 pub struct RegionInfo {
-    /// HirId → assigned region for allocation sites
+    /// HirId → solved region for each allocation site.
     pub alloc_region: HashMap<HirId, Region>,
-    /// HirId → region introduced by a scope node (Let, Letrec, Block, Loop, Lambda)
+    /// HirId → region introduced by each scope node.
     pub scope_region: HashMap<HirId, Region>,
-    /// HirId → what kind of scope this is
-    pub scope_kind: HashMap<HirId, RegionKind>,
-    /// Binding → region where binding lives
+    /// Binding → region where the binding lives.
     pub binding_region: HashMap<Binding, Region>,
-    /// Statistics
+    /// Regions that have at least one allocation assigned to them.
+    pub live_regions: FxHashSet<Region>,
+    /// Statistics.
     pub stats: RegionStats,
 }
 
 impl RegionInfo {
-    /// Create an empty RegionInfo (no regions, no scopes).
     pub fn empty() -> Self {
         RegionInfo {
             alloc_region: HashMap::new(),
             scope_region: HashMap::new(),
-            scope_kind: HashMap::new(),
             binding_region: HashMap::new(),
+            live_regions: FxHashSet::default(),
             stats: RegionStats::default(),
         }
+    }
+
+    /// Does this scope have any allocations whose solved region matches it?
+    pub fn scope_has_local_allocs(&self, hir_id: HirId) -> bool {
+        self.scope_region
+            .get(&hir_id)
+            .is_some_and(|r| self.live_regions.contains(r))
     }
 }
 
@@ -112,11 +106,8 @@ pub struct RegionStats {
     pub regions_created: usize,
     pub constraints_generated: usize,
     pub solver_iterations: usize,
-    pub scopes_scope: usize,
-    pub scopes_loop: usize,
-    pub scopes_function: usize,
-    pub scopes_parent: usize,
-    pub scopes_global: usize,
+    pub live_scopes: usize,
+    pub empty_scopes: usize,
 }
 
 impl std::fmt::Display for RegionStats {
@@ -129,12 +120,8 @@ impl std::fmt::Display for RegionStats {
         )?;
         writeln!(
             f,
-            "  scope: {}  loop: {}  function: {}  parent: {}  global: {}",
-            self.scopes_scope,
-            self.scopes_loop,
-            self.scopes_function,
-            self.scopes_parent,
-            self.scopes_global
+            "  live: {}  empty: {}",
+            self.live_scopes, self.empty_scopes
         )?;
         Ok(())
     }

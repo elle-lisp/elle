@@ -11,8 +11,8 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
     ) -> Result<Reg, String> {
         // Region inference provides a conservative first pass; escape
-        // analysis validates all safety conditions (captures, suspension,
-        // result safety, outward mutations, breaks).
+        // analysis validates remaining safety conditions the solver cannot
+        // yet model (outward sets through unknown calls, etc.).
         let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
         // Allocate result-protection slot BEFORE RegionEnter so it's
         // outside the region. StoreLocal to this slot increfs the result,
@@ -89,10 +89,8 @@ impl<'a> Lowerer<'a> {
         if tail_scoped {
             self.pending_region_exits -= 1;
             self.region_depth -= 1;
-            self.region_refcounted_stack.pop();
-            self.region_slots.pop();
         } else if let Some(protect_slot) = result_protect_slot {
-            self.emit(LirInstr::StoreLocalRefcounted {
+            self.emit(LirInstr::StoreLocal {
                 slot: protect_slot,
                 src: result,
             });
@@ -208,10 +206,8 @@ impl<'a> Lowerer<'a> {
         if tail_scoped {
             self.pending_region_exits -= 1;
             self.region_depth -= 1;
-            self.region_refcounted_stack.pop();
-            self.region_slots.pop();
         } else if let Some(protect_slot) = result_protect_slot {
-            self.emit(LirInstr::StoreLocalRefcounted {
+            self.emit(LirInstr::StoreLocal {
                 slot: protect_slot,
                 src: result,
             });
@@ -372,7 +368,7 @@ impl<'a> Lowerer<'a> {
                 // Drop-on-overwrite: decref_and_free the old value,
                 // incref the new value. Aliasing is safe because
                 // aliased values have refcount > 0 and won't be freed.
-                self.emit(LirInstr::StoreLocalRefcounted {
+                self.emit(LirInstr::StoreLocal {
                     slot,
                     src: value_reg,
                 });

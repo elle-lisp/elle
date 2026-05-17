@@ -126,10 +126,10 @@ pub struct LirFunction {
     pub has_outward_heap_set: bool,
     /// True when the function body is safe for tail-call pool rotation.
     pub rotation_safe: bool,
-    /// Per-function region table: maps region id (u16, 1-based) to the
-    /// kind of region. Region 0 is the default (private) region. Built
-    /// by the lowerer from region inference; propagated to ClosureTemplate.
-    pub region_table: Vec<crate::hir::region::RegionKind>,
+    /// Per-function region table: maps region id (u16, 1-based) to
+    /// region. Region 0 is the default (no region). Built by the
+    /// lowerer from region inference; propagated to ClosureTemplate.
+    pub region_table: Vec<u16>,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.

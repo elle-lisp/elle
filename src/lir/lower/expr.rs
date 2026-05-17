@@ -416,18 +416,10 @@ impl<'a> Lowerer<'a> {
 
         // Emit compensating RegionExit for each region entered since the
         // target block was opened. This ensures scope marks are popped
-        // correctly on early exit. Use the refcounted stack to emit the
-        // correct exit type for each region.
+        // correctly on early exit.
         let compensating_exits = (self.region_depth - target_region_depth) as usize;
-        let stack_len = self.region_refcounted_stack.len();
-        for i in 0..compensating_exits {
-            // Pop from top of stack (most recently entered region first)
-            let idx = stack_len - 1 - i;
-            if self.region_refcounted_stack[idx] {
-                self.emit(LirInstr::RegionExitRefcounted);
-            } else {
-                self.emit(LirInstr::RegionExit);
-            }
+        for _ in 0..compensating_exits {
+            self.emit(LirInstr::RegionExit);
         }
         // Note: we emit raw instructions (not emit_region_exit) because we
         // don't want to decrement region_depth — the break jumps out of
@@ -445,11 +437,9 @@ impl<'a> Lowerer<'a> {
         Ok(self.fresh_reg())
     }
 
-    fn lower_while(&mut self, cond: &Hir, body: &Hir, _hir_id: HirId) -> Result<Reg, String> {
+    fn lower_while(&mut self, cond: &Hir, body: &Hir, hir_id: HirId) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let flip_eligible = self.can_flip_while_loop(body, &[]);
-        let refcount_eligible = !flip_eligible && self.can_flip_while_loop_refcounted(body, &[]);
-        let scope_eligible = flip_eligible || refcount_eligible;
+        let scope_eligible = self.region_loop_check(hir_id);
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
@@ -507,14 +497,10 @@ impl<'a> Lowerer<'a> {
         &mut self,
         bindings: &[(Binding, Hir)],
         body: &Hir,
-        _hir_id: HirId,
+        hir_id: HirId,
     ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let loop_scope: Vec<(Binding, &Hir)> = bindings.iter().map(|(b, h)| (*b, h)).collect();
-        let flip_eligible = self.can_flip_while_loop(body, &loop_scope);
-        let refcount_eligible =
-            !flip_eligible && self.can_flip_while_loop_refcounted(body, &loop_scope);
-        let scope_eligible = flip_eligible || refcount_eligible;
+        let scope_eligible = self.region_loop_check(hir_id);
 
         let loop_label = self.fresh_label();
         let done_label = self.fresh_label();

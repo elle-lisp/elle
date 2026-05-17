@@ -12,7 +12,7 @@ mod pattern;
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
-use crate::hir::region::{RegionInfo, RegionKind};
+use crate::hir::region::RegionInfo;
 use crate::hir::{Binding, BlockId, CallArg, Hir, HirId, HirKind, HirPattern};
 use crate::syntax::Span;
 use crate::value::fiber::SignalBits;
@@ -239,14 +239,6 @@ pub struct Lowerer<'a> {
     /// Incremented on `RegionEnter`, decremented on `RegionExit`.
     /// Used by `lower_break` to emit compensating `RegionExit`s.
     region_depth: u32,
-    /// Stack tracking whether each nested region is refcounted.
-    /// Pushed on `emit_region_enter`, popped on `emit_region_exit`/
-    /// `emit_region_exit_refcounted`. Used by `lower_break` to emit
-    /// the correct exit type for each compensating exit.
-    region_refcounted_stack: Vec<bool>,
-    /// Stack of slot sets at each RegionEnter. Tracks which local slots
-    /// were allocated within each region for DecrefLocal emission.
-    region_slots: Vec<Vec<u16>>,
     pending_region_exits: u32,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
@@ -317,8 +309,6 @@ impl<'a> Lowerer<'a> {
             loop_lower_contexts: Vec::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
-            region_refcounted_stack: Vec::new(),
-            region_slots: Vec::new(),
             pending_region_exits: 0,
             scope_stats: ScopeStats::default(),
             discard_slot: None,
@@ -402,21 +392,14 @@ impl<'a> Lowerer<'a> {
         self
     }
 
-    /// Check region inference for a scope node.
+    /// Check if a scope has local allocations (reclaimable).
     fn region_scope_check(&self, hir_id: HirId) -> bool {
-        matches!(
-            self.region_info.scope_kind.get(&hir_id),
-            Some(RegionKind::Scope)
-        )
+        self.region_info.scope_has_local_allocs(hir_id)
     }
 
-    /// Check region inference for a loop node.
-    #[allow(dead_code)]
+    /// Check if a loop has local allocations (rotation-eligible).
     fn region_loop_check(&self, hir_id: HirId) -> bool {
-        matches!(
-            self.region_info.scope_kind.get(&hir_id),
-            Some(RegionKind::Loop | RegionKind::Scope)
-        )
+        self.region_info.scope_has_local_allocs(hir_id)
     }
 
     /// Return compile-time scope allocation statistics.
@@ -645,19 +628,10 @@ impl<'a> Lowerer<'a> {
         };
         self.current_func.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
-        // Track slot in the current region for DecrefLocal emission.
-        // Upvalue slots (needs_capture inside lambda) use the capture
-        // env, not the stack — they're managed by StoreCapture/LoadCapture
-        // and don't need DecrefLocal.
-        let in_region = !self.region_slots.is_empty();
         if !needs_capture || !self.in_lambda {
-            // Initialize slot to NIL unconditionally so StoreLocalRefcounted's
-            // decref(old) always finds a valid value on repeated calls.
+            // Initialize slot to NIL so LoadLocal finds a valid value.
             if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
                 self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
-            }
-            if in_region {
-                self.record_region_slot(slot);
             }
         }
         slot
@@ -722,8 +696,8 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Look up the region for the current HIR node and return the u16
-    /// index into the function's region_table. Returns 0 (private)
-    /// when there is no region assignment or the region is Global.
+    /// index into the function's region_table. Returns 0 when there is
+    /// no region assignment or the region is GLOBAL.
     fn alloc_region_id(&mut self) -> u16 {
         let hir_id = match self.current_hir_id {
             Some(id) => id,
@@ -736,26 +710,11 @@ impl<'a> Lowerer<'a> {
         if region.is_global() {
             return 0;
         }
-        // Look up the RegionKind for this region from scope_kind.
-        // The scope_kind maps scope HirIds to RegionKind. We need to
-        // find which scope produced this region.
-        let kind = self
-            .region_info
-            .scope_region
-            .iter()
-            .find(|(_, r)| **r == region)
-            .and_then(|(hir_id, _)| self.region_info.scope_kind.get(hir_id))
-            .copied()
-            .unwrap_or(RegionKind::Global);
-        if matches!(kind, RegionKind::Global) {
-            return 0;
-        }
-        // Map Region → u16, inserting into region_table if new
         if let Some(&table_id) = self.region_to_table.get(&region) {
             table_id
         } else {
             let table_id = self.current_func.region_table.len() as u16 + 1;
-            self.current_func.region_table.push(kind);
+            self.current_func.region_table.push(table_id);
             self.region_to_table.insert(region, table_id);
             table_id
         }
@@ -799,104 +758,39 @@ impl<'a> Lowerer<'a> {
     fn emit_region_enter(&mut self) {
         self.emit(LirInstr::RegionEnter);
         self.region_depth += 1;
-        self.region_refcounted_stack.push(false);
-        self.region_slots.push(Vec::new());
     }
 
-    /// Whether we're inside a scoped region (DecrefLocal will be emitted).
-    fn in_scoped_region(&self) -> bool {
-        !self.region_slots.is_empty()
-    }
-
-    /// Emit the right store for a named binding: StoreLocalRefcounted
-    /// if inside a scoped region (DecrefLocal will balance), plain
-    /// StoreLocal otherwise.
+    /// Emit a store for a named binding.
     fn emit_binding_store(&mut self, slot: u16, src: Reg) {
-        if self.in_scoped_region() {
-            self.emit(LirInstr::StoreLocalRefcounted { slot, src });
-        } else {
-            self.emit(LirInstr::StoreLocal { slot, src });
-        }
+        self.emit(LirInstr::StoreLocal { slot, src });
     }
 
-    /// Record that a slot was allocated in the current region.
-    fn record_region_slot(&mut self, slot: u16) {
-        if let Some(slots) = self.region_slots.last_mut() {
-            slots.push(slot);
-        }
-    }
 
-    /// Emit pending RegionExits with DecrefLocal for each region.
-    /// Called at tail-call sites where region exits are deferred.
+    /// Emit pending RegionExits. Called at tail-call sites where
+    /// region exits are deferred.
     fn emit_pending_region_exits(&mut self) {
         let n = self.pending_region_exits as usize;
-        let stack_len = self.region_slots.len();
-        for i in 0..n {
-            let region_idx = stack_len.checked_sub(1 + i);
-            if let Some(idx) = region_idx {
-                if idx < self.region_slots.len() {
-                    let slots = self.region_slots[idx].clone();
-                    for slot in slots {
-                        self.emit(LirInstr::DecrefLocal { slot });
-                    }
-                }
-            }
+        for _ in 0..n {
             self.emit(LirInstr::RegionExit);
-        }
-    }
-
-    /// Emit DecrefLocal for all bindings allocated within the current region.
-    fn emit_decrefs_for_region(&mut self) {
-        let slots: Vec<u16> = self.region_slots.last().cloned().unwrap_or_default();
-        for slot in slots {
-            self.emit(LirInstr::DecrefLocal { slot });
-        }
-    }
-
-    /// Emit DecrefLocal + nil for slots (rotation path).
-    /// After rotation frees objects, the slots hold stale pointers.
-    /// Nil them so the next iteration's StoreLocalRefcounted doesn't
-    /// decref a freed value.
-    fn emit_decrefs_and_nil_for_region(&mut self) {
-        let slots: Vec<u16> = self.region_slots.last().cloned().unwrap_or_default();
-        for slot in &slots {
-            self.emit(LirInstr::DecrefLocal { slot: *slot });
-        }
-        // Nil the slots after decref. StoreLocal (no incref) writes NIL.
-        // Each slot needs its own fresh Const nil — the emitter's stack
-        // tracker removes the register after StoreLocal+Pop, so reusing
-        // a single nil_reg causes the second StoreLocal to pop a local
-        // slot value instead of nil, corrupting the stack.
-        for slot in slots {
-            if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
-            }
         }
     }
 
     /// Emit `RegionExit` and decrement the region depth counter.
     fn emit_region_exit(&mut self) {
-        self.emit_decrefs_for_region();
         self.emit(LirInstr::RegionExit);
         self.region_depth -= 1;
-        self.region_refcounted_stack.pop();
-        self.region_slots.pop();
     }
 
     /// Emit `RegionRotate` for double-buffered loop scope rotation.
-    /// Uses decref+nil so stale slot pointers don't cause UAF on next iteration.
     fn emit_region_rotate(&mut self) {
-        self.emit_decrefs_and_nil_for_region();
         self.emit(LirInstr::RegionRotate);
     }
 
-    /// Emit RegionExit without DecrefLocal. Used at while-loop exit for
-    /// the iteration region, which was already DecrefLocal'd by rotation.
+    /// Emit RegionExit without decrefs (used at while-loop exit for
+    /// the iteration region, which was already handled by rotation).
     fn emit_region_exit_no_decref(&mut self) {
         self.emit(LirInstr::RegionExit);
         self.region_depth -= 1;
-        self.region_refcounted_stack.pop();
-        self.region_slots.pop();
     }
 
     /// Check if the callee is the current function (self-tail-call).
@@ -1094,7 +988,6 @@ impl<'a> Lowerer<'a> {
     ///
     /// Increments `scope_stats.scopes_analyzed` and updates rejection counters
     /// for each failed condition (short-circuits on first failure).
-    #[allow(dead_code)]
     fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no captures
@@ -1184,7 +1077,6 @@ impl<'a> Lowerer<'a> {
     /// 2. Body result is provably immediate
     /// 3. All break values targeting this block are safe immediates
     /// 4. No `set!` to non-local bindings (blocks have no own bindings)
-    #[allow(dead_code)]
     fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
         self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no suspension

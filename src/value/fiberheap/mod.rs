@@ -205,20 +205,52 @@ impl FiberHeap {
         )
     }
 
-    /// Release allocations back to a mark: free rc=0 objects, keep
-    /// rc>0 pinned.
-    ///
-    /// Called by `pop_scope_mark_and_release()` (RegionExit). Uses
-    /// release_refcounted so values pinned by push/put incref or
-    /// StoreLocalRefcounted survive scope exit.
+    /// Release all allocations back to a mark unconditionally.
+    /// Called by `pop_scope_mark_and_release()` (RegionExit).
     pub fn release(&mut self, mark: ArenaMark) {
+        use super::fiberheap::slab::ALLOC_NIL;
+
         if Self::trace_rc() {
             eprintln!("[trace:rc] release mark={}", mark.position());
         }
-        self.release_refcounted(mark);
+
+        // Run destructors for objects allocated after the mark.
+        self.pool.run_dtors(mark.dtor_len());
+        self.pool.dtors.truncate(mark.dtor_len());
+
+        // Walk the alloc linked list from mark tail to current tail,
+        // unlinking and deallocating each slot.
+        let start = if mark.alloc_list_tail() == ALLOC_NIL {
+            self.pool.alloc_head
+        } else {
+            self.pool.slab.alloc_next[mark.alloc_list_tail() as usize]
+        };
+        let mut cur = start;
+        while cur != ALLOC_NIL {
+            let next = self.pool.slab.alloc_next[cur as usize];
+            let ptr = self.pool.slab.flat_to_ptr(cur as usize);
+            self.pool.slab.dealloc(ptr);
+            cur = next;
+        }
+        // Truncate the list at the mark point.
+        self.pool.alloc_tail = mark.alloc_list_tail();
+        if self.pool.alloc_tail == ALLOC_NIL {
+            self.pool.alloc_head = ALLOC_NIL;
+        } else {
+            self.pool.slab.alloc_next[self.pool.alloc_tail as usize] = ALLOC_NIL;
+        }
+
+        // Dealloc custom-allocated objects from the exiting scope.
+        if let Some(state) = self.custom_alloc_stack.last_mut() {
+            let start = mark.custom_ptrs_len();
+            for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
+                state.allocator.inner.dealloc(ptr, size, align);
+            }
+            state.custom_ptrs.truncate(start);
+        }
     }
 
-    /// Release all objects in the scope (no refcount filtering).
+    /// Unconditional release (RC stripped — identical to `release`).
     pub fn release_refcounted(&mut self, mark: ArenaMark) {
         self.release(mark);
     }

@@ -39,6 +39,6 @@ pub use expr::{
 pub use lint::HirLinter;
 pub use liveness::BitSet;
 pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
-pub use region::{CallClassification, Region, RegionInfo, RegionKind};
+pub use region::{CallClassification, Region, RegionInfo};
 pub use regions::{analyze_regions, analyze_regions_with, format_regions};
 pub use symbols::extract_symbols_from_hir;

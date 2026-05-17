@@ -163,8 +163,6 @@ impl<'a> Lowerer<'a> {
         let saved_discard_slot = self.discard_slot;
         let saved_pending_region_exits = self.pending_region_exits;
         let saved_region_depth = self.region_depth;
-        let saved_region_refcounted_stack = std::mem::take(&mut self.region_refcounted_stack);
-        let saved_region_slots = std::mem::take(&mut self.region_slots);
         let saved_region_to_table = std::mem::take(&mut self.region_to_table);
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
@@ -311,8 +309,6 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = saved_discard_slot;
         self.pending_region_exits = saved_pending_region_exits;
         self.region_depth = saved_region_depth;
-        self.region_refcounted_stack = saved_region_refcounted_stack;
-        self.region_slots = saved_region_slots;
         self.region_to_table = saved_region_to_table;
 
         Ok(func)
