@@ -153,10 +153,8 @@ fn eval_inner(
 
     // Lower
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let mut lowerer = Lowerer::new(&arena)
         .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbols.all_names());
     let lir_module = lowerer

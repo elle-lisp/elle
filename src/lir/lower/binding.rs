@@ -24,19 +24,6 @@ impl<'a> Lowerer<'a> {
             self.try_seed_immutable(*binding, init);
 
             let init_reg = self.lower_expr(init)?;
-            if matches!(init.kind, HirKind::Lambda { .. }) {
-                if let Some(block) = self.current_func.blocks.last() {
-                    for instr in block.instructions.iter().rev() {
-                        if let LirInstr::MakeClosure { closure_id, .. } = &instr.instr {
-                            self.callee_rotation_safe.insert(
-                                *binding,
-                                self.closures[closure_id.0 as usize].rotation_safe,
-                            );
-                            break;
-                        }
-                    }
-                }
-            }
             let slot = self.allocate_slot(*binding);
             let needs_capture = self.arena.get(*binding).needs_capture();
 
@@ -220,20 +207,6 @@ impl<'a> Lowerer<'a> {
 
         // Seed immutable_values for constant definitions
         self.try_seed_immutable(binding, value);
-
-        // Record rotation_safe for lambda bindings so callers can
-        // check callee safety transitively.
-        if matches!(value.kind, HirKind::Lambda { .. }) {
-            if let Some(lir_instr) = self.current_func.blocks.last() {
-                for instr in lir_instr.instructions.iter().rev() {
-                    if let LirInstr::MakeClosure { closure_id, .. } = &instr.instr {
-                        self.callee_rotation_safe
-                            .insert(binding, self.closures[closure_id.0 as usize].rotation_safe);
-                        break;
-                    }
-                }
-            }
-        }
 
         if self.in_lambda && needs_capture {
             self.emit(LirInstr::StoreCapture {

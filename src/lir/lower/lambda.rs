@@ -283,15 +283,10 @@ impl<'a> Lowerer<'a> {
         // Propagate inferred signal to LIR function
         self.current_func.signal = inferred_signal;
 
-        // Compute escape analysis flags for fiber shared-alloc decisions.
-        // current_function_binding/params are already set (restored before
-        // body lowering above), so body_escapes_heap_values can detect
-        // self-tail-calls with per-parameter analysis.
-        self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
-        self.current_func.has_outward_heap_set =
-            self.body_contains_dangerous_outward_set(body, &[]);
-        self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
-        // Clear function context — will be restored to parent's state below.
+        // Conservative defaults (escape analysis removed).
+        self.current_func.result_is_immediate = false;
+        self.current_func.has_outward_heap_set = false;
+        self.current_func.rotation_safe = false;
         self.current_function_binding = None;
         self.current_function_params = None;
 
