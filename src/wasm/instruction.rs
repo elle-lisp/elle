@@ -196,7 +196,6 @@ impl WasmEmitter {
             // OutboxEnter/OutboxExit removed — region stamps replace toggle.
             // Flip rotation is VM-only (the WASM backend uses its own
             // GC strategy).
-            LirInstr::FlipEnter | LirInstr::FlipSwap | LirInstr::FlipExit => {}
             LirInstr::List { dst, head, tail } => {
                 self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
             }

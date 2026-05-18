@@ -255,10 +255,6 @@ impl fmt::Display for LirInstr {
             // === Allocation Regions ===
             LirInstr::FreeRegion { region_id } => write!(f, "free-region {region_id}"),
             LirInstr::DropSlot { slot } => write!(f, "drop-slot {slot}"),
-            LirInstr::FlipEnter => f.write_str("flip-enter"),
-            LirInstr::FlipSwap => f.write_str("flip-swap"),
-            LirInstr::FlipExit => f.write_str("flip-exit"),
-
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
                 write!(f, "push-param-frame(")?;

@@ -1179,8 +1179,6 @@ impl<'a> FunctionTranslator<'a> {
 
             // Flip rotation is VM-only; the JIT uses `rotate_pools_jit`
             // via its own trampoline path.
-            LirInstr::FlipEnter | LirInstr::FlipSwap | LirInstr::FlipExit => {}
-
             // === New intrinsic type predicates ===
             LirInstr::IsEmpty { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);

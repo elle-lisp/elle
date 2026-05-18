@@ -918,10 +918,6 @@ pub enum LirInstr {
         rhs: Reg,
     },
 
-    // === Legacy no-ops (kept for bytecode format compat) ===
-    FlipEnter,
-    FlipSwap,
-    FlipExit,
 }
 
 /// Binary operations
@@ -1053,10 +1049,7 @@ fn is_gpu_instruction(i: &LirInstr) -> bool {
         | LirInstr::StoreLocalRefcounted { .. }
         | LirInstr::LoadCapture { .. }
         | LirInstr::LoadCaptureRaw { .. }
-        // Flip instructions are arena-rotation no-ops on GPU (no heap).
-        | LirInstr::FlipEnter
-        | LirInstr::FlipSwap
-        | LirInstr::FlipExit => true,
+        => true,
         // ValueConst of numeric/bool/nil types is GPU-safe — these are
         // immutable binding constants inlined by the lowerer.
         LirInstr::ValueConst { value, .. } => {

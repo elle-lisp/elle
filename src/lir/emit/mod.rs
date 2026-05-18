@@ -300,7 +300,7 @@ impl Emitter {
 
             LirInstr::StoreLocalRefcounted { slot, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::StoreLocalRefcounted);
+                self.bytecode.emit(Instruction::StoreLocal);
                 self.bytecode.emit_u16(*slot);
                 self.bytecode.emit(Instruction::Pop);
                 self.pop();
@@ -933,16 +933,6 @@ impl Emitter {
             LirInstr::DropSlot { slot } => {
                 self.bytecode.emit(Instruction::DropSlot);
                 self.bytecode.emit_u16(*slot);
-            }
-
-            LirInstr::FlipEnter => {
-                self.bytecode.emit(Instruction::FlipEnter);
-            }
-            LirInstr::FlipSwap => {
-                self.bytecode.emit(Instruction::FlipSwap);
-            }
-            LirInstr::FlipExit => {
-                self.bytecode.emit(Instruction::FlipExit);
             }
 
             LirInstr::PushParamFrame { pairs } => {

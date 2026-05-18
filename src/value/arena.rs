@@ -19,31 +19,16 @@ use super::Value;
 /// Opaque mark for arena scope management.
 ///
 /// Stores the FiberHeap alloc position and destructor list length at mark time.
+/// Used by JIT trampoline rotation and ArenaGuard for mark/release.
 #[derive(Clone)]
 pub struct ArenaMark {
     position: usize,
     dtor_len: usize,
-    /// Shared-allocator count at mark time, so visible_len() restores correctly.
-    shared_alloc_count: usize,
     /// Length of the active custom allocator's `custom_ptrs` at mark time.
-    /// Zero if no custom allocator is active.
-    ///
-    /// # Safety invariant
-    ///
-    /// This field records the position in the *current* (innermost) custom
-    /// allocator's `custom_ptrs` at `RegionEnter` time. This is safe because
-    /// `with-allocator` desugars to `defer`, which wraps the body in a fiber —
-    /// the body's scope marks live on the child fiber's `FiberHeap`, separate
-    /// from the parent's. If anyone calls `%install-allocator`/`%uninstall-allocator`
-    /// directly without a fiber boundary between install and scope marks,
-    /// `RegionExit` may dealloc from a popped allocator (use-after-free).
-    /// **These primitives must only be used via the `with-allocator` macro.**
     custom_ptrs_len: usize,
     /// Tail of the pool's alloc linked list at mark time.
-    /// Used by `release()` to walk and dealloc slots allocated after the mark.
     alloc_list_tail: u32,
-    /// Bump arena position at mark time. Used by `release()` to reset the
-    /// bump pointer and free pages allocated after the mark.
+    /// Bump arena position at mark time.
     bump_mark: Option<BumpMark>,
 }
 
@@ -53,13 +38,11 @@ impl ArenaMark {
         dtor_len: usize,
         custom_ptrs_len: usize,
         alloc_list_tail: u32,
-        shared_alloc_count: usize,
         bump_mark: Option<BumpMark>,
     ) -> Self {
         ArenaMark {
             position,
             dtor_len,
-            shared_alloc_count,
             custom_ptrs_len,
             alloc_list_tail,
             bump_mark,
@@ -68,10 +51,6 @@ impl ArenaMark {
 
     pub(crate) fn position(&self) -> usize {
         self.position
-    }
-
-    pub(crate) fn shared_alloc_count(&self) -> usize {
-        self.shared_alloc_count
     }
 
     pub(crate) fn dtor_len(&self) -> usize {

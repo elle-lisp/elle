@@ -130,9 +130,6 @@ impl VM {
                 Instruction::StoreLocal => {
                     variables::handle_store_local(self, bc, &mut ip);
                 }
-                Instruction::StoreLocalRefcounted => {
-                    variables::handle_store_local(self, bc, &mut ip);
-                }
                 Instruction::LoadUpvalue => {
                     variables::handle_load_upvalue(self, bc, &mut ip, Some(closure_env));
                 }
@@ -473,13 +470,6 @@ impl VM {
                     }
                 }
 
-                // Legacy scope-mark instructions: no-ops (replaced by FreeRegion).
-                Instruction::RegionEnter
-                | Instruction::RegionExit
-                | Instruction::RegionExitCall
-                | Instruction::RegionRotate
-                | Instruction::RegionExitRefcounted => {}
-
                 Instruction::FreeRegion => {
                     let region_id = self.read_u16(bc, &mut ip);
                     crate::value::fiberheap::free_region(region_id);
@@ -500,21 +490,6 @@ impl VM {
                         self.fiber.stack[abs_idx] = Value::NIL;
                     }
                 }
-
-                Instruction::DecrefLocal => {
-                    // No-op: refcounting removed. Skip the u16 operand.
-                    let _slot = self.read_u16(bc, &mut ip);
-                }
-
-                // Legacy no-ops (outbox routing replaced by per-allocation region stamps).
-                // OutboxEnter had a u16 operand; read and discard for format compat.
-                Instruction::OutboxEnter => {
-                    let _region_id = self.read_u16(bc, &mut ip);
-                }
-                Instruction::OutboxExit => {}
-
-                // FlipEnter/FlipSwap/FlipExit are legacy no-ops.
-                Instruction::FlipEnter | Instruction::FlipSwap | Instruction::FlipExit => {}
 
                 // Dynamic parameter frame management
                 Instruction::PushParamFrame => {

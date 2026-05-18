@@ -178,7 +178,6 @@ impl FiberHeap {
             self.pool.dtors.len(),
             custom_ptrs_len,
             self.pool.alloc_tail,
-            0,
             Some(self.pool.mark().arena_mark),
         )
     }

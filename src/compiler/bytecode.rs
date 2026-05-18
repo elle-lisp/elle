@@ -192,26 +192,6 @@ pub enum Instruction {
     /// Pops args array, pops function, tail calls with array elements.
     TailCallArrayMut,
 
-    /// Enter an allocation region (scope boundary for allocator).
-    /// No operands. Pushes a scope mark on the current FiberHeap.
-    /// Effective for all fibers including root (after issue-525).
-    RegionEnter,
-
-    /// Exit an allocation region (scope boundary for allocator).
-    /// No operands. Pops scope mark and releases scoped objects.
-    /// Effective for all fibers including root (after issue-525).
-    RegionExit,
-
-    /// Exit a call-scoped allocation region.
-    /// No operands. Pops two scope marks (barrier + region start),
-    /// frees only the range between them (arg temporaries).
-    RegionExitCall,
-
-    /// Rotate loop scope marks: free rc=0 objects, keep rc>0 pinned.
-    RegionRotate,
-    /// Pop scope mark and release refcount-0 objects only.
-    RegionExitRefcounted,
-
     /// Push a parameter frame onto the fiber's param_frames stack.
     /// Operand: u8 count (number of (param, value) pairs on the stack).
     /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
@@ -238,19 +218,6 @@ pub enum Instruction {
     /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
     /// Source struct is popped from the stack; result pushed.
     StructRest,
-
-    /// Legacy no-op (was OutboxEnter). Kept for bytecode format compatibility.
-    OutboxEnter,
-
-    /// Legacy no-op (was OutboxExit). Kept for bytecode format compatibility.
-    OutboxExit,
-
-    /// Legacy no-op. Kept for bytecode format compatibility.
-    FlipEnter,
-    /// Legacy no-op. Kept for bytecode format compatibility.
-    FlipSwap,
-    /// Legacy no-op. Kept for bytecode format compatibility.
-    FlipExit,
 
     /// Convert int → float. Pops value, pushes float. Identity on floats.
     IntToFloat,
@@ -315,17 +282,6 @@ pub enum Instruction {
     /// free list, marks it dropped, and sets the register to nil.
     /// Idempotent: re-dropping a nil slot is a no-op.
     DropSlot,
-
-    /// Store to local variable with refcount bookkeeping (index u16).
-    /// Pops the new value, reads the old value from the slot,
-    /// calls decref(old) + incref(new), then stores new.
-    /// Used for mutable binding assignment (def @var / assign).
-    StoreLocalRefcounted,
-
-    /// Decrement refcount of a local slot (index u16).
-    /// Emitted before RegionExit/RegionExitRefcounted for each
-    /// in-scope binding, so release_refcounted can free rc=0 objects.
-    DecrefLocal,
 
     /// Free all objects in a specific region.
     /// Operand: u16 region_id.
@@ -505,9 +461,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 4;
             }
             Instruction::LoadLocal
-            | Instruction::StoreLocal
-            | Instruction::StoreLocalRefcounted
-                if i + 1 < instructions.len() =>
+            | Instruction::StoreLocal                if i + 1 < instructions.len() =>
             {
                 let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (index={})", index));
@@ -556,11 +510,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (index={})", idx));
                 i += 2;
             }
-            Instruction::OutboxEnter if i + 1 < instructions.len() => {
-                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (region={})", region_id));
-                i += 2;
-            }
             Instruction::StructGetOrNil | Instruction::StructGetDestructure
                 if i + 1 < instructions.len() =>
             {
@@ -590,21 +539,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
                 // No operands (arg count is dynamic, determined by array length)
             }
-            Instruction::OutboxExit
-            | Instruction::FlipEnter
-            | Instruction::FlipSwap
-            | Instruction::FlipExit => {
-                // No operands
-            }
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one
             }
             Instruction::DropSlot if i + 1 < instructions.len() => {
-                let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (slot={})", slot));
-                i += 2;
-            }
-            Instruction::DecrefLocal if i + 1 < instructions.len() => {
                 let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (slot={})", slot));
                 i += 2;
@@ -718,21 +656,6 @@ mod tests {
     }
 
     #[test]
-    fn test_region_instruction_roundtrip() {
-        for instr in [Instruction::RegionEnter, Instruction::RegionExit] {
-            let mut bc = Bytecode::new();
-            bc.emit(instr);
-            assert_eq!(
-                bc.instructions.len(),
-                1,
-                "Region instruction should be 1 byte"
-            );
-            let decoded: Instruction = unsafe { std::mem::transmute(bc.instructions[0]) };
-            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
-        }
-    }
-
-    #[test]
     fn test_bytecode_variants_distinct() {
         // Catch accidental duplication of variants (they all get auto-
         // numbered by the compiler, so any duplicate would be a compile
@@ -748,20 +671,5 @@ mod tests {
             Instruction::FirstDestructure as u8,
             Instruction::RestDestructure as u8,
         );
-        assert_ne!(
-            Instruction::OutboxEnter as u8,
-            Instruction::OutboxExit as u8,
-        );
-    }
-
-    #[test]
-    fn test_region_disassembly() {
-        let mut bc = Bytecode::new();
-        bc.emit(Instruction::RegionEnter);
-        bc.emit(Instruction::RegionExit);
-        let lines = disassemble_lines(&bc.instructions);
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("RegionEnter"));
-        assert!(lines[1].contains("RegionExit"));
     }
 }
