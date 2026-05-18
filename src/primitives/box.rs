@@ -1,5 +1,4 @@
 //! Box primitives for mutable storage
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -55,38 +54,29 @@ pub(crate) fn prim_rebox(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "box",
-        func: prim_box,
+primitive! {
+    "box" => prim_box {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a mutable box containing a value.",
         params: &["value"],
         category: "box",
         example: "(box 42) #=> #<box>",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unbox",
-        func: prim_unbox,
+    }
+    "unbox" => prim_unbox {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Extract the value from a box.",
         params: &["box"],
         category: "box",
         example: "(unbox (box 42)) #=> 42",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "rebox",
-        func: prim_rebox,
+    }
+    "rebox" => prim_rebox {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Modify the value in a box and return the new value.",
         params: &["box", "value"],
         category: "box",
         example: "(let [c (box 1)] (rebox c 2) (unbox c)) #=> 2",
-        aliases: &[],
-    },
-];
+    }
+}

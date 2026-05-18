@@ -1,4 +1,3 @@
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -211,174 +210,234 @@ fn prim_f32_from_bits(args: &[Value]) -> (SignalBits, Value) {
 // Registration table
 // ---------------------------------------------------------------------------
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "math/sqrt", func: prim_sqrt, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the square root of a number.",
-        params: &["x"], category: "math", example: "(math/sqrt 16)",
+primitive! {
+    "math/sqrt" => prim_sqrt {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the square root of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/sqrt 16)",
         aliases: &["sqrt"],
-    },
-    PrimitiveDef {
-        name: "math/sin", func: prim_sin, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the sine of a number (in radians).",
-        params: &["x"], category: "math", example: "(math/sin 0)",
+    }
+    "math/sin" => prim_sin {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the sine of a number (in radians).",
+        params: &["x"],
+        category: "math",
+        example: "(math/sin 0)",
         aliases: &["sin"],
-    },
-    PrimitiveDef {
-        name: "math/cos", func: prim_cos, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the cosine of a number (in radians).",
-        params: &["x"], category: "math", example: "(math/cos 0)",
+    }
+    "math/cos" => prim_cos {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the cosine of a number (in radians).",
+        params: &["x"],
+        category: "math",
+        example: "(math/cos 0)",
         aliases: &["cos"],
-    },
-    PrimitiveDef {
-        name: "math/tan", func: prim_tan, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the tangent of a number (in radians).",
-        params: &["x"], category: "math", example: "(math/tan 0)",
+    }
+    "math/tan" => prim_tan {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the tangent of a number (in radians).",
+        params: &["x"],
+        category: "math",
+        example: "(math/tan 0)",
         aliases: &["tan"],
-    },
-    PrimitiveDef {
-        name: "math/log", func: prim_log, signal: Signal::errors(),
+    }
+    "math/log" => prim_log {
+        signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Returns the natural logarithm of x, or logarithm with specified base.",
-        params: &["x", "base"], category: "math", example: "(math/log 2.718281828)",
+        params: &["x", "base"],
+        category: "math",
+        example: "(math/log 2.718281828)",
         aliases: &["log"],
-    },
-    PrimitiveDef {
-        name: "math/exp", func: prim_exp, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns e raised to the power of x.",
-        params: &["x"], category: "math", example: "(math/exp 1)",
+    }
+    "math/exp" => prim_exp {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns e raised to the power of x.",
+        params: &["x"],
+        category: "math",
+        example: "(math/exp 1)",
         aliases: &["exp"],
-    },
-    PrimitiveDef {
-        name: "math/pow", func: prim_pow, signal: Signal::errors(),
-        arity: Arity::Exact(2), doc: "Returns x raised to the power of y.",
-        params: &["x", "y"], category: "math", example: "(math/pow 2 8)",
+    }
+    "math/pow" => prim_pow {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Returns x raised to the power of y.",
+        params: &["x", "y"],
+        category: "math",
+        example: "(math/pow 2 8)",
         aliases: &["pow"],
-    },
-    PrimitiveDef {
-        name: "math/pi", func: prim_pi, signal: Signal::silent(),
-        arity: Arity::Exact(0), doc: "The mathematical constant pi (π).",
-        params: &[], category: "math", example: "(math/pi)",
+    }
+    "math/pi" => prim_pi {
+        doc: "The mathematical constant pi (π).",
+        category: "math",
+        example: "(math/pi)",
         aliases: &["pi"],
-    },
-    PrimitiveDef {
-        name: "math/e", func: prim_e, signal: Signal::silent(),
-        arity: Arity::Exact(0), doc: "The mathematical constant e (Euler's number).",
-        params: &[], category: "math", example: "(math/e)",
+    }
+    "math/e" => prim_e {
+        doc: "The mathematical constant e (Euler's number).",
+        category: "math",
+        example: "(math/e)",
         aliases: &["e"],
-    },
-    PrimitiveDef {
-        name: "math/asin", func: prim_asin, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the arcsine of a number (in radians).",
-        params: &["x"], category: "math", example: "(math/asin 1)",
+    }
+    "math/asin" => prim_asin {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the arcsine of a number (in radians).",
+        params: &["x"],
+        category: "math",
+        example: "(math/asin 1)",
         aliases: &["asin"],
-    },
-    PrimitiveDef {
-        name: "math/acos", func: prim_acos, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the arccosine of a number (in radians).",
-        params: &["x"], category: "math", example: "(math/acos 1)",
+    }
+    "math/acos" => prim_acos {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the arccosine of a number (in radians).",
+        params: &["x"],
+        category: "math",
+        example: "(math/acos 1)",
         aliases: &["acos"],
-    },
-    PrimitiveDef {
-        name: "math/atan", func: prim_atan, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the arctangent of a number (in radians).",
-        params: &["x"], category: "math", example: "(math/atan 1)",
+    }
+    "math/atan" => prim_atan {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the arctangent of a number (in radians).",
+        params: &["x"],
+        category: "math",
+        example: "(math/atan 1)",
         aliases: &["atan"],
-    },
-    PrimitiveDef {
-        name: "math/fmod", func: prim_fmod, signal: Signal::errors(),
+    }
+    "math/fmod" => prim_fmod {
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Floating-point remainder. Returns a - floor(a/b) * b.",
-        params: &["a", "b"], category: "math", example: "(math/fmod 5.5 2.0) #=> 1.5",
+        params: &["a", "b"],
+        category: "math",
+        example: "(math/fmod 5.5 2.0) #=> 1.5",
         aliases: &["fmod"],
-    },
-    PrimitiveDef {
-        name: "math/atan2", func: prim_atan2, signal: Signal::errors(),
+    }
+    "math/atan2" => prim_atan2 {
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Returns the arctangent of y/x (in radians), using the signs of both arguments to determine the quadrant.",
-        params: &["y", "x"], category: "math", example: "(math/atan2 1 1)",
+        params: &["y", "x"],
+        category: "math",
+        example: "(math/atan2 1 1)",
         aliases: &["atan2"],
-    },
-    PrimitiveDef {
-        name: "math/sinh", func: prim_sinh, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the hyperbolic sine of a number.",
-        params: &["x"], category: "math", example: "(math/sinh 1)",
+    }
+    "math/sinh" => prim_sinh {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the hyperbolic sine of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/sinh 1)",
         aliases: &["sinh"],
-    },
-    PrimitiveDef {
-        name: "math/cosh", func: prim_cosh, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the hyperbolic cosine of a number.",
-        params: &["x"], category: "math", example: "(math/cosh 1)",
+    }
+    "math/cosh" => prim_cosh {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the hyperbolic cosine of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/cosh 1)",
         aliases: &["cosh"],
-    },
-    PrimitiveDef {
-        name: "math/tanh", func: prim_tanh, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the hyperbolic tangent of a number.",
-        params: &["x"], category: "math", example: "(math/tanh 1)",
+    }
+    "math/tanh" => prim_tanh {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the hyperbolic tangent of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/tanh 1)",
         aliases: &["tanh"],
-    },
-    PrimitiveDef {
-        name: "math/log2", func: prim_log2, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the base-2 logarithm of a number.",
-        params: &["x"], category: "math", example: "(math/log2 8)",
+    }
+    "math/log2" => prim_log2 {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the base-2 logarithm of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/log2 8)",
         aliases: &["log2"],
-    },
-    PrimitiveDef {
-        name: "math/log10", func: prim_log10, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the base-10 logarithm of a number.",
-        params: &["x"], category: "math", example: "(math/log10 100)",
+    }
+    "math/log10" => prim_log10 {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the base-10 logarithm of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/log10 100)",
         aliases: &["log10"],
-    },
-    PrimitiveDef {
-        name: "math/trunc", func: prim_trunc, signal: Signal::errors(),
+    }
+    "math/trunc" => prim_trunc {
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the integer part of a number, truncating toward zero.",
-        params: &["x"], category: "math", example: "(math/trunc 3.7)",
+        params: &["x"],
+        category: "math",
+        example: "(math/trunc 3.7)",
         aliases: &["trunc"],
-    },
-    PrimitiveDef {
-        name: "math/cbrt", func: prim_cbrt, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns the cube root of a number.",
-        params: &["x"], category: "math", example: "(math/cbrt 27)",
+    }
+    "math/cbrt" => prim_cbrt {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns the cube root of a number.",
+        params: &["x"],
+        category: "math",
+        example: "(math/cbrt 27)",
         aliases: &["cbrt"],
-    },
-    PrimitiveDef {
-        name: "math/exp2", func: prim_exp2, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Returns 2 raised to the power of x.",
-        params: &["x"], category: "math", example: "(math/exp2 3)",
+    }
+    "math/exp2" => prim_exp2 {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns 2 raised to the power of x.",
+        params: &["x"],
+        category: "math",
+        example: "(math/exp2 3)",
         aliases: &["exp2"],
-    },
-    PrimitiveDef {
-        name: "math/inf", func: prim_inf, signal: Signal::silent(),
-        arity: Arity::Exact(0), doc: "Positive infinity (IEEE 754).",
-        params: &[], category: "math", example: "(math/inf)",
+    }
+    "math/inf" => prim_inf {
+        doc: "Positive infinity (IEEE 754).",
+        category: "math",
+        example: "(math/inf)",
         aliases: &["+inf", "inf"],
-    },
-    PrimitiveDef {
-        name: "math/-inf", func: prim_neg_inf, signal: Signal::silent(),
-        arity: Arity::Exact(0), doc: "Negative infinity (IEEE 754).",
-        params: &[], category: "math", example: "(math/-inf)",
+    }
+    "math/-inf" => prim_neg_inf {
+        doc: "Negative infinity (IEEE 754).",
+        category: "math",
+        example: "(math/-inf)",
         aliases: &["-inf"],
-    },
-    PrimitiveDef {
-        name: "math/nan", func: prim_nan, signal: Signal::silent(),
-        arity: Arity::Exact(0), doc: "Not-a-number (IEEE 754 NaN).",
-        params: &[], category: "math", example: "(math/nan)",
+    }
+    "math/nan" => prim_nan {
+        doc: "Not-a-number (IEEE 754 NaN).",
+        category: "math",
+        example: "(math/nan)",
         aliases: &["nan"],
-    },
-    PrimitiveDef {
-        name: "math/f32-bits", func: prim_f32_bits, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Return the IEEE 754 f32 bit pattern of a number as an integer.",
-        params: &["x"], category: "math", example: "(math/f32-bits 1.0)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "math/f32-from-bits", func: prim_f32_from_bits, signal: Signal::errors(),
-        arity: Arity::Exact(1), doc: "Reinterpret an integer as an IEEE 754 f32 bit pattern.",
-        params: &["bits"], category: "math", example: "(math/f32-from-bits 1065353216)",
-        aliases: &[],
-    },
-];
+    }
+    "math/f32-bits" => prim_f32_bits {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the IEEE 754 f32 bit pattern of a number as an integer.",
+        params: &["x"],
+        category: "math",
+        example: "(math/f32-bits 1.0)",
+    }
+    "math/f32-from-bits" => prim_f32_from_bits {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Reinterpret an integer as an IEEE 754 f32 bit pattern.",
+        params: &["bits"],
+        category: "math",
+        example: "(math/f32-from-bits 1065353216)",
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tests

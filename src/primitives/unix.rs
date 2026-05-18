@@ -2,7 +2,6 @@
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
 use crate::port::{Port, PortKind};
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_connect_kwargs;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -156,61 +155,49 @@ pub(crate) fn prim_unix_shutdown(args: &[Value]) -> (SignalBits, Value) {
 // PRIMITIVES table
 // ---------------------------------------------------------------------------
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "unix/listen",
-        func: prim_unix_listen,
-        arity: Arity::Exact(1),
+primitive! {
+    "unix/listen" => prim_unix_listen {
         signal: Signal::errors(),
+        arity: Arity::Exact(1),
         doc: "Listen on a Unix domain socket. Returns a listener port.",
         params: &["path"],
         category: "unix",
         example: "(unix/listen \"/tmp/my.sock\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unix/accept",
-        func: prim_unix_accept,
-        arity: Arity::AtLeast(1),
-        signal: Signal {
+    }
+    "unix/accept" => prim_unix_accept {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(1),
         doc: "Accept a connection on a Unix listener. Returns a stream port.",
         params: &["listener"],
         category: "unix",
         example: "(unix/accept listener)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unix/connect",
-        func: prim_unix_connect,
-        arity: Arity::AtLeast(1),
-        signal: Signal {
+    }
+    "unix/connect" => prim_unix_connect {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(1),
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],
         category: "unix",
         example: "(unix/connect \"/tmp/my.sock\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unix/shutdown",
-        func: prim_unix_shutdown,
-        arity: Arity::Exact(2),
-        signal: Signal {
+    }
+    "unix/shutdown" => prim_unix_shutdown {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::Exact(2),
         doc: "Shutdown a Unix stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "unix",
         example: "(unix/shutdown conn :write)",
-        aliases: &[],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

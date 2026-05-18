@@ -1,5 +1,4 @@
 //! String formatting primitive
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::formatspec::{
     parse_format_spec, spec_type_char, Align, FormatSpec, FormatType,
 };
@@ -512,14 +511,13 @@ pub(crate) fn prim_string_format(args: &[Value]) -> (SignalBits, Value) {
 // Registration
 // ============================================================================
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
-    name: "string/format",
-    func: prim_string_format,
-    signal: Signal::errors(),
-    arity: Arity::AtLeast(1),
-    doc: "Format a template string with positional or named arguments.",
-    params: &["template", "args"],
-    category: "string",
-    example: "(string/format \"{} + {} = {}\" 1 2 3) #=> \"1 + 2 = 3\"",
-    aliases: &[],
-}];
+primitive! {
+    "string/format" => prim_string_format {
+        signal: Signal::errors(),
+        arity: Arity::AtLeast(1),
+        doc: "Format a template string with positional or named arguments.",
+        params: &["template", "args"],
+        category: "string",
+        example: "(string/format \"{} + {} = {}\" 1 2 3) #=> \"1 + 2 = 3\"",
+    }
+}

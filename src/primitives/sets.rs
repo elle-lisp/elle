@@ -2,7 +2,6 @@
 use std::collections::BTreeSet;
 
 use crate::primitives::collection::{coll_combine, coll_has};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -319,107 +318,73 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "set",
-        func: prim_set,
-        signal: Signal::silent(),
+primitive! {
+    "set" => prim_set {
         arity: Arity::AtLeast(0),
         doc: "Create an immutable set from elements (deduplicates, freezes mutable values)",
-        params: &[],
         category: "set",
         example: "(set 1 2 3)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@set",
-        func: prim_at_set,
-        signal: Signal::silent(),
+    }
+    "@set" => prim_at_set {
         arity: Arity::AtLeast(0),
         doc: "Create a mutable set from elements (deduplicates, freezes mutable values)",
-        params: &[],
         category: "set",
         example: "(@set 1 2 3)",
-        aliases: &[],
-    },
-    // contains? is an alias of has? (defined in lstruct.rs).
-    // string-contains? remains registered for old-epoch code; epoch 5 renames it to has?.
-    PrimitiveDef {
-        name: "string-contains?",
-        func: prim_contains,
+    }
+    "string-contains?" => prim_contains {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Deprecated: use has? instead. Check if a string contains a substring.",
         params: &["string", "substring"],
         category: "set",
         example: "(string-contains? \"hello world\" \"world\") #=> true",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "add",
-        func: prim_add,
+    }
+    "add" => prim_add {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Add an element to a set. For immutable sets, returns a new set. For mutable sets, modifies in place.",
         params: &["set", "value"],
         category: "set",
         example: "(add (set 1 2) 3) #=> |1 2 3|",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "del",
-        func: prim_del,
+    }
+    "del" => prim_del {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Remove an element from a set. For immutable sets, returns a new set. For mutable sets, modifies in place.",
         params: &["set", "value"],
         category: "set",
         example: "(del (set 1 2 3) 2) #=> |1 3|",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "union",
-        func: prim_union,
+    }
+    "union" => prim_union {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the union of two sets (both must be the same type)",
         params: &["set1", "set2"],
         category: "set",
         example: "(union (set 1 2) (set 2 3)) #=> |1 2 3|",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "intersection",
-        func: prim_intersection,
+    }
+    "intersection" => prim_intersection {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the intersection of two sets (both must be the same type)",
         params: &["set1", "set2"],
         category: "set",
         example: "(intersection (set 1 2) (set 2 3)) #=> |2|",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "difference",
-        func: prim_difference,
+    }
+    "difference" => prim_difference {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the difference of two sets (both must be the same type)",
         params: &["set1", "set2"],
         category: "set",
         example: "(difference (set 1 2 3) (set 2)) #=> |1 3|",
-        aliases: &[],
-    },
-    // set->array — now (def set->array ->array) in stdlib
-    PrimitiveDef {
-        name: "seq->set",
-        func: prim_seq_to_set,
+    }
+    "seq->set" => prim_seq_to_set {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert any sequence to a set. Immutable inputs (list, tuple, string, bytes, set) → immutable set. Mutable inputs (array, buffer, blob, @set) → mutable set. Freezes mutable values on insertion.",
         params: &["seq"],
         category: "set",
         example: "(seq->set [1 2 3]) #=> |1 2 3|",
-        aliases: &[],
-    },
-];
+    }
+}

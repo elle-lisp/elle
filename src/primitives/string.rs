@@ -1,5 +1,4 @@
 //! String manipulation primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -537,21 +536,15 @@ pub(crate) fn prim_string_repeat(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for string module.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "@string",
-        func: prim_string_mut,
+primitive! {
+    "@string" => prim_string_mut {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable string from byte arguments.",
-        params: &[],
         category: "string",
         example: "(@string 72 101 108 108 111)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string/uppercase",
-        func: prim_string_upcase,
+    }
+    "string/uppercase" => prim_string_upcase {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert string to uppercase.",
@@ -559,10 +552,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/uppercase \"hello\") #=> \"HELLO\"",
         aliases: &["string/upcase", "string-upcase"],
-    },
-    PrimitiveDef {
-        name: "string/lowercase",
-        func: prim_string_downcase,
+    }
+    "string/lowercase" => prim_string_downcase {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert string to lowercase.",
@@ -570,10 +561,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/lowercase \"HELLO\") #=> \"hello\"",
         aliases: &["string/downcase", "string-downcase"],
-    },
-    PrimitiveDef {
-        name: "string/find",
-        func: prim_string_find,
+    }
+    "string/find" => prim_string_find {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Find the grapheme index of a substring, with optional start offset. Returns the index (integer) or nil if not found.",
@@ -586,10 +575,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
             "string-find",
             "string/index-of",
         ],
-    },
-    PrimitiveDef {
-        name: "string/split",
-        func: prim_string_split,
+    }
+    "string/split" => prim_string_split {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Split string by delimiter. Returns an array of substrings (empty strings between consecutive delimiters). Delimiter cannot be empty.",
@@ -597,10 +584,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/split \"a,b,c\" \",\") #=> [\"a\" \"b\" \"c\"]",
         aliases: &["string-split"],
-    },
-    PrimitiveDef {
-        name: "string/replace",
-        func: prim_string_replace,
+    }
+    "string/replace" => prim_string_replace {
         signal: Signal::errors(),
         arity: Arity::Exact(3),
         doc: "Replace all occurrences of old substring with new.",
@@ -608,10 +593,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/replace \"hello\" \"l\" \"L\") #=> \"heLLo\"",
         aliases: &["string-replace"],
-    },
-    PrimitiveDef {
-        name: "string/trim",
-        func: prim_string_trim,
+    }
+    "string/trim" => prim_string_trim {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Remove leading and trailing whitespace.",
@@ -619,21 +602,16 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/trim \"  hello  \") #=> \"hello\"",
         aliases: &["string-trim"],
-    },
-    PrimitiveDef {
-        name: "string/contains?",
-        func: prim_string_contains,
+    }
+    "string/contains?" => prim_string_contains {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if string contains substring.",
         params: &["s", "substr"],
         category: "string",
         example: "(string/contains? \"hello\" \"ell\") #=> true",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string/starts-with?",
-        func: prim_string_starts_with,
+    }
+    "string/starts-with?" => prim_string_starts_with {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if string starts with prefix.",
@@ -641,10 +619,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/starts-with? \"hello\" \"he\") #=> true",
         aliases: &["string-starts-with?"],
-    },
-    PrimitiveDef {
-        name: "string/ends-with?",
-        func: prim_string_ends_with,
+    }
+    "string/ends-with?" => prim_string_ends_with {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if string ends with suffix.",
@@ -652,10 +628,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/ends-with? \"hello\" \"lo\") #=> true",
         aliases: &["string-ends-with?"],
-    },
-    PrimitiveDef {
-        name: "string/join",
-        func: prim_string_join,
+    }
+    "string/join" => prim_string_join {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Join list of strings with separator.",
@@ -663,32 +637,23 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/join (list \"a\" \"b\" \"c\") \",\") #=> \"a,b,c\"",
         aliases: &["string-join"],
-    },
-    PrimitiveDef {
-        name: "uri-encode",
-        func: prim_uri_encode,
+    }
+    "uri-encode" => prim_uri_encode {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Percent-encode a string per RFC 3986.",
         params: &["str"],
         category: "string",
         example: "(uri-encode \"hello world\") ;=> \"hello%20world\"",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string/size-of",
-        func: prim_string_size_of,
-        signal: Signal::silent(),
+    }
+    "string/size-of" => prim_string_size_of {
         arity: Arity::Exact(1),
         doc: "Return the UTF-8 byte length of a string.",
         params: &["s"],
         category: "string",
         example: "(string/size-of \"café\") #=> 5",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string/repeat",
-        func: prim_string_repeat,
+    }
+    "string/repeat" => prim_string_repeat {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Repeat a string N times.",
@@ -696,8 +661,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/repeat \"ab\" 3) #=> \"ababab\"",
         aliases: &["string-repeat"],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

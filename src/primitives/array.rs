@@ -1,5 +1,4 @@
 //! Array operations primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::seq::{seq_pop, seq_push};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -335,82 +334,57 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "array",
-        func: prim_tuple,
-        signal: Signal::silent(),
+primitive! {
+    "array" => prim_tuple {
         arity: Arity::AtLeast(0),
         doc: "Create an immutable array from arguments.",
-        params: &[],
         category: "array",
         example: "(array 1 2 3) #=> [1 2 3]",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@array",
-        func: prim_array,
-        signal: Signal::silent(),
+    }
+    "@array" => prim_array {
         arity: Arity::AtLeast(0),
         doc: "Create a mutable array from arguments.",
-        params: &[],
         category: "array",
         example: "(@array 1 2 3) #=> @[1 2 3]",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "array/new",
-        func: prim_array_new,
+    }
+    "array/new" => prim_array_new {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create array of n elements, all set to fill value.",
         params: &["n", "fill"],
         category: "array",
         example: "(array/new 3 0) #=> [0 0 0]",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "pop",
-        func: prim_pop,
+    }
+    "pop" => prim_pop {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Remove and return last element from array. Mutates in place.",
         params: &["arr"],
         category: "array",
         example: "(pop @[1 2 3]) #=> 3",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "popn",
-        func: prim_popn,
+    }
+    "popn" => prim_popn {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Remove and return last n elements from array as a new array. Mutates original.",
         params: &["arr", "n"],
         category: "array",
         example: "(popn @[1 2 3 4] 2) #=> @[3 4]",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "insert",
-        func: prim_insert,
+    }
+    "insert" => prim_insert {
         signal: Signal::errors(),
         arity: Arity::Exact(3),
         doc: "Insert element at index in array. Mutates in place, returns the same array.",
         params: &["arr", "idx", "val"],
         category: "array",
         example: "(insert @[1 3] 1 2) #=> @[1 2 3]",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "remove",
-        func: prim_remove,
+    }
+    "remove" => prim_remove {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Remove element(s) at index from array. Mutates in place, returns the same array.",
         params: &["arr", "idx", "count"],
         category: "array",
         example: "(remove @[1 2 3] 1) #=> @[1 3]",
-        aliases: &[],
-    },
-];
+    }
+}

@@ -6,7 +6,6 @@
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::Port;
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -149,78 +148,68 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "port/read-line",
-        func: prim_stream_read_line,
-        signal: Signal {
+primitive! {
+    "port/read-line" => prim_stream_read_line {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(1),
         doc: "Read one line from port. Returns bytes or nil (EOF).",
         params: &["port"],
         category: "port",
         example: "(port/read-line (port/open \"file.txt\" :read))",
         aliases: &["port/read-line"],
-    },
-    PrimitiveDef {
-        name: "port/read",
-        func: prim_stream_read,
-        signal: Signal {
+    }
+    "port/read" => prim_stream_read {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
         params: &["port", "n"],
         category: "port",
         example: "(port/read (port/open \"file.txt\" :read) 1024)",
         aliases: &["stream/read"],
-    },
-    PrimitiveDef {
-        name: "port/read-all",
-        func: prim_stream_read_all,
-        signal: Signal {
+    }
+    "port/read-all" => prim_stream_read_all {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(1),
         doc: "Read everything remaining from port.",
         params: &["port"],
         category: "port",
         example: "(port/read-all (port/open \"file.txt\" :read))",
         aliases: &["port/read-all"],
-    },
-    PrimitiveDef {
-        name: "port/write",
-        func: prim_stream_write,
-        signal: Signal {
+    }
+    "port/write" => prim_stream_write {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Write data to port. Returns bytes written.",
         params: &["port", "data"],
         category: "port",
         example: "(port/write (port/stdout) \"hello\")",
         aliases: &["stream/write"],
-    },
-    PrimitiveDef {
-        name: "port/flush",
-        func: prim_stream_flush,
-        signal: Signal {
+    }
+    "port/flush" => prim_stream_flush {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(1),
         doc: "Flush port's write buffer.",
         params: &["port"],
         category: "port",
         example: "(port/flush (port/stdout))",
         aliases: &["stream/flush"],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

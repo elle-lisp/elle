@@ -1,3 +1,6 @@
+#[macro_use]
+pub mod def;
+
 pub mod access;
 pub mod allocator;
 pub mod arena;
@@ -15,8 +18,6 @@ pub mod concurrency;
 pub mod config;
 pub mod convert;
 pub mod debug;
-#[macro_use]
-pub mod def;
 pub mod disassembly;
 pub mod display;
 pub mod docs;

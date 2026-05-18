@@ -4,7 +4,6 @@
 //! value extraction. Introspection and management primitives (bits, mask,
 //! parent, child, propagate, cancel, fiber?) are in `fiber_introspect.rs`.
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{
     Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
@@ -464,10 +463,8 @@ pub(crate) fn prim_fiber_clear_fuel(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for fiber lifecycle operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "fiber/new",
-        func: prim_fiber_new,
+primitive! {
+    "fiber/new" => prim_fiber_new {
         signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Create a fiber with a signal mask. Optional :deny withholds capabilities.",
@@ -475,24 +472,20 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fiber",
         example: "(fiber/new (fn [] 42) |:error| :deny |:io|)",
         aliases: &["fiber"],
-    },
-    PrimitiveDef {
-        name: "fiber/resume",
-        func: prim_fiber_resume,
-        signal: Signal {
+    }
+    "fiber/resume" => prim_fiber_resume {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_RESUME),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(1, 2),
         doc: "Resume a fiber, optionally delivering a value",
         params: &["fiber", "value"],
         category: "fiber",
         example: "(fiber/resume f)",
         aliases: &["resume"],
-    },
-    PrimitiveDef {
-        name: "fiber/emit",
-        func: prim_emit,
+    }
+    "fiber/emit" => prim_emit {
         signal: Signal::yields_errors(),
         arity: Arity::Exact(2),
         doc: "Emit a signal from the current fiber",
@@ -500,63 +493,48 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fiber",
         example: "(emit 2 42)",
         aliases: &["emit"],
-    },
-    PrimitiveDef {
-        name: "fiber/status",
-        func: prim_fiber_status,
+    }
+    "fiber/status" => prim_fiber_status {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's lifecycle status (:new, :alive, :suspended, :dead, :error)",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/status f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/value",
-        func: prim_fiber_value,
+    }
+    "fiber/value" => prim_fiber_value {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the signal payload from the fiber's last signal",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/value f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/set-fuel",
-        func: prim_fiber_set_fuel,
+    }
+    "fiber/set-fuel" => prim_fiber_set_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Set the instruction budget on a fiber. n is a non-negative integer.",
         params: &["fiber", "n"],
         category: "fiber",
         example: "(fiber/set-fuel f 10000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/fuel",
-        func: prim_fiber_fuel,
+    }
+    "fiber/fuel" => prim_fiber_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Read remaining fuel. Returns integer or nil if unlimited.",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/fuel f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/clear-fuel",
-        func: prim_fiber_clear_fuel,
+    }
+    "fiber/clear-fuel" => prim_fiber_clear_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Remove the instruction budget, restoring unlimited execution.",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/clear-fuel f)",
-        aliases: &[],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

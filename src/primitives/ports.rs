@@ -2,7 +2,6 @@
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port, PortKind};
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -456,156 +455,97 @@ fn prim_port_tell(args: &[Value]) -> (SignalBits, Value) {
     (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::Tell, args[0]))
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "port/open",
-        func: prim_port_open,
-        signal: Signal {
+primitive! {
+    "port/open" => prim_port_open {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Open a file as a text (UTF-8) port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
         category: "port",
         example: "(port/open \"data.txt\" :read)\n(port/open \"fifo\" :read :timeout 5000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/open-bytes",
-        func: prim_port_open_bytes,
-        signal: Signal {
+    }
+    "port/open-bytes" => prim_port_open_bytes {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Open a file as a binary port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
         category: "port",
-        example:
-            "(port/open-bytes \"data.bin\" :read)\n(port/open-bytes \"fifo\" :read :timeout 5000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/close",
-        func: prim_port_close,
-        signal: Signal {
+        example: "(port/open-bytes \"data.bin\" :read)\n(port/open-bytes \"fifo\" :read :timeout 5000)",
+    }
+    "port/close" => prim_port_close {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Close a port. Idempotent. Yields to cancel pending I/O before closing the fd.",
         params: &["port"],
         category: "port",
         example: "(port/close p)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/stdin",
-        func: prim_port_stdin,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
-        doc: "Return a port for standard input.",
-        params: &[],
-        category: "port",
-        example: "(port/stdin)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/stdout",
-        func: prim_port_stdout,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
-        doc: "Return a port for standard output.",
-        params: &[],
-        category: "port",
-        example: "(port/stdout)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/stderr",
-        func: prim_port_stderr,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
-        doc: "Return a port for standard error.",
-        params: &[],
-        category: "port",
-        example: "(port/stderr)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port?",
-        func: prim_is_port,
-        signal: Signal::silent(),
+    }
+    "port/stdin" => prim_port_stdin { doc: "Return a port for standard input.", category: "port", example: "(port/stdin)", }
+    "port/stdout" => prim_port_stdout { doc: "Return a port for standard output.", category: "port", example: "(port/stdout)", }
+    "port/stderr" => prim_port_stderr { doc: "Return a port for standard error.", category: "port", example: "(port/stderr)", }
+    "port?" => prim_is_port {
         arity: Arity::Exact(1),
         doc: "Check if value is a port.",
         params: &["value"],
         category: "predicate",
         example: "(port? (port/stdin)) #=> true",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/open?",
-        func: prim_is_port_open,
+    }
+    "port/open?" => prim_is_port_open {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if a port is open. Signals :type-error on non-port.",
         params: &["port"],
         category: "port",
         example: "(port/open? (port/stdout)) #=> true",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/set-options",
-        func: prim_port_set_options,
+    }
+    "port/set-options" => prim_port_set_options {
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Set port options. Currently: :timeout ms (nil clears).",
         params: &["port"],
         category: "port",
         example: "(port/set-options p :timeout 5000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/path",
-        func: prim_port_path,
+    }
+    "port/path" => prim_port_path {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the path or address the port was opened on, or nil for stdio ports.",
         params: &["port"],
         category: "port",
         example: "(port/path (tcp/listen \"127.0.0.1\" 0))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/seek",
-        func: prim_port_seek,
-        signal: Signal {
+    }
+    "port/seek" => prim_port_seek {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(2, 4),
         doc: "Seek to a byte offset in a file port. Returns new absolute position.\nSyntax: (port/seek port offset [:from :start|:current|:end])\nDefault :from is :start (SEEK_SET). Discards the read buffer on seek.",
         params: &["port", "offset"],
         category: "port",
         example: "(port/seek p 0)\n(port/seek p 0 :from :start)\n(port/seek p -1 :from :end)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/tell",
-        func: prim_port_tell,
-        signal: Signal {
+    }
+    "port/tell" => prim_port_tell {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Return current logical byte position in a file port.\nAccounts for per-fd read buffering: position = kernel_offset - buffer.len().",
         params: &["port"],
         category: "port",
         example: "(port/tell p)",
-        aliases: &[],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

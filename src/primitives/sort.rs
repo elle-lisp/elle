@@ -1,5 +1,4 @@
 //! Sort primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::seq::seq_sort;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -17,16 +16,13 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "sort",
-        func: prim_sort,
+primitive! {
+    "sort" => prim_sort {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Sort a collection in ascending order using the built-in value ordering. Type-preserving: @arrays mutated in place, arrays and lists return new sorted values.",
         params: &["coll"],
         category: "collection",
         example: "(sort @[3 1 2]) #=> @[1 2 3]\n(sort [\"b\" \"a\" \"c\"]) #=> [\"a\" \"b\" \"c\"]",
-        aliases: &[],
-    },
-];
+    }
+}

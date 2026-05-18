@@ -2,7 +2,6 @@
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::io::watch::FsWatcher;
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
@@ -119,63 +118,46 @@ fn prim_watch_close(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::NIL)
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "watch",
-        func: prim_watch,
+primitive! {
+    "watch" => prim_watch {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Create a filesystem watcher. Returns a watcher handle for use with watch-add, watch-next, watch-close.",
-        params: &[],
         category: "watch",
         example: "(def w (watch))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-add",
-        func: prim_watch_add,
+    }
+    "watch-add" => prim_watch_add {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Add a path to the watcher. Recursive by default. Optional third arg: {:recursive false}.",
         params: &["watcher", "path", "opts?"],
         category: "watch",
         example: "(watch-add w \"src/\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-remove",
-        func: prim_watch_remove,
+    }
+    "watch-remove" => prim_watch_remove {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Remove a watched path from the watcher.",
         params: &["watcher", "path"],
         category: "watch",
         example: "(watch-remove w \"src/\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-next",
-        func: prim_watch_next,
-        signal: Signal {
+    }
+    "watch-next" => prim_watch_next {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Wait for filesystem events. Yields to the scheduler; resumes with an array of event structs [{:kind :modify :path \"...\"}]. Event kinds: :create, :modify, :remove, :rename. On macOS (kqueue), :create is reported as :modify because kqueue does not distinguish them at the directory level.",
         params: &["watcher"],
         category: "watch",
         example: "(watch-next w)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "watch-close",
-        func: prim_watch_close,
+    }
+    "watch-close" => prim_watch_close {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close the watcher and release its resources.",
         params: &["watcher"],
         category: "watch",
         example: "(watch-close w)",
-        aliases: &[],
-    },
-];
+    }
+}

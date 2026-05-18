@@ -1,7 +1,6 @@
 //! FFI memory management, typed access, and type construction primitives
 
 use crate::ffi::types::TypeDesc;
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -682,148 +681,109 @@ pub fn prim_ptr_from_int(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for FFI memory operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "ffi/size",
-        func: prim_ffi_size,
+primitive! {
+    "ffi/size" => prim_ffi_size {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the size of a C type in bytes.",
         params: &["type"],
         category: "ffi",
         example: "(ffi/size :i32) #=> 4",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/align",
-        func: prim_ffi_align,
+    }
+    "ffi/align" => prim_ffi_align {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the alignment of a C type in bytes.",
         params: &["type"],
         category: "ffi",
         example: "(ffi/align :double) #=> 8",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/malloc",
-        func: prim_ffi_malloc,
+    }
+    "ffi/malloc" => prim_ffi_malloc {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Allocate C memory.",
         params: &["size"],
         category: "ffi",
         example: "(ffi/malloc 100)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/free",
-        func: prim_ffi_free,
+    }
+    "ffi/free" => prim_ffi_free {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Free C memory.",
         params: &["ptr"],
         category: "ffi",
         example: "(ffi/free ptr)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/read",
-        func: prim_ffi_read,
+    }
+    "ffi/read" => prim_ffi_read {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Read a typed value from C memory.",
         params: &["ptr", "type"],
         category: "ffi",
         example: "(ffi/read ptr :i32)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/write",
-        func: prim_ffi_write,
+    }
+    "ffi/write" => prim_ffi_write {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(3),
         doc: "Write a typed value to C memory.",
         params: &["ptr", "type", "value"],
         category: "ffi",
         example: "(ffi/write ptr :i32 42)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/string",
-        func: prim_ffi_string,
+    }
+    "ffi/string" => prim_ffi_string {
         signal: Signal::ffi_errors(),
         arity: Arity::Range(1, 2),
         doc: "Read a null-terminated C string from a pointer.",
         params: &["ptr", "max-len"],
         category: "ffi",
         example: "(ffi/string ptr)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/struct",
-        func: prim_ffi_struct,
+    }
+    "ffi/struct" => prim_ffi_struct {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a struct type descriptor from field types.",
         params: &["fields"],
         category: "ffi",
         example: "(ffi/struct [:i32 :double :ptr])",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/array",
-        func: prim_ffi_array,
+    }
+    "ffi/array" => prim_ffi_array {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create an array type descriptor from element type and count.",
         params: &["elem-type", "count"],
         category: "ffi",
         example: "(ffi/array :i32 10)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ptr/add",
-        func: prim_ptr_add,
+    }
+    "ptr/add" => prim_ptr_add {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Offset a pointer by a byte count. Returns a raw pointer. Offset may be negative.",
         params: &["pointer", "offset"],
         category: "ptr",
         example: "(ptr/add buf 16)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ptr/diff",
-        func: prim_ptr_diff,
+    }
+    "ptr/diff" => prim_ptr_diff {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the signed byte distance between two pointers (a - b).",
         params: &["pointer-a", "pointer-b"],
         category: "ptr",
         example: "(ptr/diff p2 p1)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ptr/to-int",
-        func: prim_ptr_to_int,
+    }
+    "ptr/to-int" => prim_ptr_to_int {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Extract the raw address of a pointer as an integer.",
         params: &["pointer"],
         category: "ptr",
         example: "(ptr/to-int buf)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ptr/from-int",
-        func: prim_ptr_from_int,
+    }
+    "ptr/from-int" => prim_ptr_from_int {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Construct a raw C pointer from an integer address. Returns nil if address is 0.",
         params: &["integer"],
         category: "ptr",
         example: "(ptr/from-int addr)",
-        aliases: &[],
-    },
-];
+    }
+}

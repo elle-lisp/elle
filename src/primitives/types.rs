@@ -1,5 +1,4 @@
 //! Type checking primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
@@ -41,10 +40,8 @@ pub(crate) fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
 
 // ── Primitive table ─────────────────────────────────────────────────
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "type-of",
-        func: prim_type_of,
+primitive! {
+    "type-of" => prim_type_of {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the type of a value as a keyword.",
@@ -52,10 +49,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "predicate",
         example: "(type-of 42) #=> :integer\n(type-of \"hello\") #=> :string",
         aliases: &["type"],
-    },
-    PrimitiveDef {
-        name: "ptr?",
-        func: prim_ptr_predicate,
+    }
+    "ptr?" => prim_ptr_predicate {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a raw C pointer.",
@@ -63,16 +58,12 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "predicate",
         example: "(ptr? ptr) #=> true\n(ptr? 42) #=> false",
         aliases: &["pointer?"],
-    },
-    PrimitiveDef {
-        name: "callable?",
-        func: prim_is_callable,
-        signal: Signal::silent(),
+    }
+    "callable?" => prim_is_callable {
         arity: Arity::Exact(1),
         doc: "Returns true if value can be called: closures, native functions, parameters, structs, arrays, sets, strings, and bytes.",
         params: &["x"],
         category: "types",
         example: "(callable? +) #=> true\n(callable? {:a 1}) #=> true\n(callable? |1 2|) #=> true\n(callable? [1 2]) #=> true\n(callable? 42) #=> false",
-        aliases: &[],
-    },
-];
+    }
+}

@@ -272,43 +272,31 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for introspection operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "jit?",
-        func: prim_is_jit,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+primitive! {
+    "jit?" => prim_is_jit {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
         params: &["value"],
         category: "predicate",
         example: "(jit? (fn (x) x))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "silent?",
-        func: prim_is_silent,
+    }
+    "silent?" => prim_is_silent {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure is silent (does not suspend: no yield, debug, or polymorphic signal). False for non-closures.",
         params: &["value"],
         category: "predicate",
         example: "(silent? (fn (x) x))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber?",
-        func: prim_is_fiber,
-        signal: Signal::silent(),
+    }
+    "fiber?" => prim_is_fiber {
         arity: Arity::Exact(1),
         doc: "Returns true if value is a fiber",
         params: &["value"],
         category: "predicate",
         example: "(fiber? (fiber/new (fn () 42) |:yield|))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/mutates-params?",
-        func: prim_mutates_params,
+    }
+    "fn/mutates-params?" => prim_mutates_params {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure mutates any parameters",
@@ -316,32 +304,24 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/mutates-params? (fn (x) (assign x 1)))",
         aliases: &["mutates-params?"],
-    },
-    PrimitiveDef {
-        name: "fn/gpu-eligible?",
-        func: prim_gpu_eligible,
+    }
+    "fn/gpu-eligible?" => prim_gpu_eligible {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure passes signal and structural checks for GPU compilation",
         params: &["value"],
         category: "fn",
         example: "(fn/gpu-eligible? (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/errors?",
-        func: prim_errors,
+    }
+    "fn/errors?" => prim_errors {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure may error",
         params: &["value"],
         category: "fn",
         example: "(fn/errors? (fn (x) (/ 1 x)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/arity",
-        func: prim_arity,
+    }
+    "fn/arity" => prim_arity {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns closure arity as int, pair, or nil",
@@ -349,10 +329,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/arity (fn (x y) x))",
         aliases: &["arity"],
-    },
-    PrimitiveDef {
-        name: "fn/captures",
-        func: prim_captures,
+    }
+    "fn/captures" => prim_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns number of captured variables, or nil",
@@ -360,10 +338,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/captures (let [x 1] (fn () x)))",
         aliases: &["captures"],
-    },
-    PrimitiveDef {
-        name: "fn/bytecode-size",
-        func: prim_bytecode_size,
+    }
+    "fn/bytecode-size" => prim_bytecode_size {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns size of bytecode in bytes, or nil",
@@ -371,11 +347,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/bytecode-size (fn (x) x))",
         aliases: &["bytecode-size"],
-    },
-    PrimitiveDef {
-        name: "doc",
-        func: prim_doc,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+    }
+    "doc" => prim_doc {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Exact(1),
         doc: "Look up documentation for a value or builtin. \
               Pass a closure (user-defined or stdlib) to extract its docstring. \
@@ -385,55 +359,33 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["target"],
         category: "meta",
         example: "(doc inc)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "vm/query",
-        func: prim_vm_query,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+    }
+    "vm/query" => prim_vm_query {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Exact(2),
         doc: "Query VM state (call-count, doc, global?, fiber/self)",
         params: &["op", "arg"],
         category: "meta",
         example: "(vm/query \"call-count\" some-fn)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "signals",
-        func: prim_signals,
+    }
+    "signals" => prim_signals {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Return the signal registry as a struct mapping keywords to bit positions.",
-        params: &[],
         category: "meta",
         example: "(signals)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "jit/rejections",
-        func: prim_jit_rejections,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
-        arity: Arity::Exact(0),
+    }
+    "jit/rejections" => prim_jit_rejections {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls} structs sorted by call count ascending.",
-        params: &[],
         category: "meta",
         example: "(jit/rejections)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "lir/closure-value-const-count",
-        func: prim_closure_value_const_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "lir/closure-value-const-count" => prim_closure_value_const_count {
         doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. Used by regression tests to assert the ClosureRef LIR-transfer fix fires.",
-        params: &[],
         category: "meta",
         example: "(lir/closure-value-const-count)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "keyword",
-        func: prim_keyword,
+    }
+    "keyword" => prim_keyword {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a string to a keyword.",
@@ -441,14 +393,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(keyword \"foo\")",
         aliases: &["string->keyword"],
-    },
-    #[cfg(feature = "mlir")]
+    }
+}
+
+#[cfg(feature = "mlir")]
+pub(crate) const MLIR_PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mlir/compile-spirv",
         func: prim_compile_spirv,
         signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Range(1, 2),
-        doc: "Compile a GPU-eligible closure to SPIR-V bytes. Optional second arg is workgroup size (default 256).",
+        doc: "Compile a GPU-eligible closure to SPIR-V bytes.",
         params: &["closure", "workgroup-size"],
         category: "mlir",
         example: "(mlir/compile-spirv (fn [a b] (+ a b)))",

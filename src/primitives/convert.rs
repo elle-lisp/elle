@@ -1,5 +1,4 @@
 //! Type conversion primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -535,10 +534,8 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for conversion module.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "integer",
-        func: prim_to_int,
+primitive! {
+    "integer" => prim_to_int {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert number to integer (i64). Accepts int (identity) or float (truncation). Use parse-int for string→int.",
@@ -546,43 +543,32 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(integer 3.7) #=> 3\n(integer 42) #=> 42",
         aliases: &["int"],
-    },
-    PrimitiveDef {
-        name: "float",
-        func: prim_to_float,
+    }
+    "float" => prim_to_float {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert number to float. Accepts int (→ f64) or float (identity). Use parse-float for string→float.",
         params: &["x"],
         category: "conversion",
         example: "(float 42) #=> 42.0\n(float 3.14) #=> 3.14",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "parse-int",
-        func: prim_parse_int,
+    }
+    "parse-int" => prim_parse_int {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Parse string or keyword to integer. Optional radix (2–36) for base conversion.",
         params: &["s", "radix?"],
         category: "conversion",
         example: "(parse-int \"42\") #=> 42\n(parse-int \"ff\" 16) #=> 255\n(parse-int \"1010\" 2) #=> 10",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "parse-float",
-        func: prim_parse_float,
+    }
+    "parse-float" => prim_parse_float {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Parse string or keyword to float.",
         params: &["s"],
         category: "conversion",
         example: "(parse-float \"3.14\") #=> 3.14",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string",
-        func: prim_to_string,
+    }
+    "string" => prim_to_string {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Convert values to string. Multiple arguments are concatenated.",
@@ -590,16 +576,13 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(string \"count: \" 42) #=> \"count: 42\"",
         aliases: &["any->string", "symbol->string"],
-    },
-    PrimitiveDef {
-        name: "number->string",
-        func: prim_number_to_string,
+    }
+    "number->string" => prim_number_to_string {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Convert a number to string. With an optional radix (2–36), converts an integer to the given base (lowercase, no prefix).",
         params: &["n", "radix?"],
         category: "conversion",
         example: "(number->string 42) #=> \"42\"\n(number->string 255 16) #=> \"ff\"\n(number->string -255 16) #=> \"-ff\"",
-        aliases: &[],
-    },
-];
+    }
+}

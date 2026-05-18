@@ -1,6 +1,5 @@
 //! Subprocess-related primitives
 use crate::io::request::{IoOp, IoRequest, ProcessHandle, SpawnRequest, StdioDisposition};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::{Signal, SIG_EXEC};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::heap::TableKey;
@@ -599,10 +598,8 @@ fn prim_subprocess_pid(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for process operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "sys/exit",
-        func: prim_exit,
+primitive! {
+    "sys/exit" => prim_exit {
         signal: Signal::halts(),
         arity: Arity::Range(0, 1),
         doc: "Exit the process with an optional exit code (0-255)",
@@ -610,10 +607,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "sys",
         example: "(sys/exit 0)",
         aliases: &["exit", "os/exit"],
-    },
-    PrimitiveDef {
-        name: "sys/halt",
-        func: prim_halt,
+    }
+    "sys/halt" => prim_halt {
         signal: Signal::halts(),
         arity: Arity::Range(0, 1),
         doc: "Halt the VM gracefully, returning a value to the host",
@@ -621,95 +616,67 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "sys",
         example: "(sys/halt 42)",
         aliases: &["halt", "os/halt"],
-    },
-    PrimitiveDef {
-        name: "sys/args",
-        func: prim_sys_args,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "sys/args" => prim_sys_args {
         doc: "Return command-line arguments as a list (excluding interpreter and script path)",
-        params: &[],
         category: "sys",
         example: "(sys/args)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "sys/argv",
-        func: prim_sys_argv,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "sys/argv" => prim_sys_argv {
         doc: "Return the full argv as a list: script name as element 0 followed by all user args. Element 0 is \"-\" for stdin or the script path for a file. Returns an empty list in REPL mode.",
-        params: &[],
         category: "sys",
         example: "(sys/argv)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "sys/env",
-        func: prim_sys_env,
-        signal: Signal::silent(),
+    }
+    "sys/env" => prim_sys_env {
         arity: Arity::Range(0, 1),
         doc: "Return the process environment as a struct with string keys and string values, or look up a single variable by name. Non-UTF-8 entries are silently skipped.",
         params: &["name"],
         category: "sys",
         example: "(sys/env) ; or (sys/env \"HOME\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/exec",
-        func: prim_subprocess_exec,
-        signal: Signal {
+    }
+    "subprocess/exec" => prim_subprocess_exec {
+        signal: (Signal {
             // SIG_EXEC: capability bit for fiber mask access control.
             // SIG_IO: dispatch bit — routes through the I/O scheduler.
             // Both are emitted; dispatch is IO-based; exec bit enables capability gating.
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(2, 3),
         doc: "Spawn a subprocess. Returns {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <process>}",
         params: &["program", "args", "opts"],
         category: "sys",
         example: "(subprocess/exec \"ls\" [\"-la\"])",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/wait",
-        func: prim_subprocess_wait,
-        signal: Signal {
+    }
+    "subprocess/wait" => prim_subprocess_wait {
+        signal: (Signal {
             // SIG_EXEC: capability bit (same fiber mask semantics as subprocess/exec).
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Wait for a subprocess to exit. Returns exit code (0 = success).",
         params: &["handle"],
         category: "sys",
         example: "(subprocess/wait proc)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/kill",
-        func: prim_subprocess_kill,
+    }
+    "subprocess/kill" => prim_subprocess_kill {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm).",
         params: &["handle", "signal"],
         category: "sys",
         example: "(subprocess/kill proc :sigterm)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/pid",
-        func: prim_subprocess_pid,
+    }
+    "subprocess/pid" => prim_subprocess_pid {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the OS process ID of a subprocess.",
         params: &["handle"],
         category: "sys",
         example: "(subprocess/pid proc)",
-        aliases: &[],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

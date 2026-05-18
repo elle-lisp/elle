@@ -39,6 +39,8 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     format::PRIMITIVES,
     intrinsics::PRIMITIVES,
     introspection::PRIMITIVES,
+    #[cfg(feature = "mlir")]
+    introspection::MLIR_PRIMITIVES,
     io::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,

@@ -8,7 +8,6 @@
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
 use crate::port::{Port, PortKind};
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::{extract_connect_kwargs, extract_keyword_timeout};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -425,117 +424,90 @@ fn prim_sys_resolve(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    // TCP
-    PrimitiveDef {
-        name: "tcp/listen",
-        func: prim_tcp_listen,
-        arity: Arity::Exact(2),
+primitive! {
+    "tcp/listen" => prim_tcp_listen {
         signal: Signal::errors(),
+        arity: Arity::Exact(2),
         doc: "Bind and listen on a TCP address. Returns a listener port.",
         params: &["addr", "port"],
         category: "tcp",
         example: "(tcp/listen \"127.0.0.1\" 8080)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/accept",
-        func: prim_tcp_accept,
-        arity: Arity::AtLeast(1),
-        signal: Signal {
+    }
+    "tcp/accept" => prim_tcp_accept {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(1),
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
         params: &["listener"],
         category: "tcp",
         example: "(tcp/accept listener)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/connect",
-        func: prim_tcp_connect,
-        arity: Arity::AtLeast(2),
-        signal: Signal {
+    }
+    "tcp/connect" => prim_tcp_connect {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(2),
         doc: "Connect to a TCP address. Returns a stream port.",
         params: &["addr", "port"],
         category: "tcp",
         example: "(tcp/connect \"127.0.0.1\" 8080)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/shutdown",
-        func: prim_tcp_shutdown,
-        arity: Arity::Exact(2),
-        signal: Signal {
+    }
+    "tcp/shutdown" => prim_tcp_shutdown {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::Exact(2),
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "tcp",
         example: "(tcp/shutdown conn :write)",
-        aliases: &[],
-    },
-    // UDP
-    PrimitiveDef {
-        name: "udp/bind",
-        func: prim_udp_bind,
-        arity: Arity::Exact(2),
+    }
+    "udp/bind" => prim_udp_bind {
         signal: Signal::errors(),
+        arity: Arity::Exact(2),
         doc: "Bind a UDP socket. Returns a UDP port.",
         params: &["addr", "port"],
         category: "udp",
         example: "(udp/bind \"0.0.0.0\" 9000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "udp/send-to",
-        func: prim_udp_send_to,
-        arity: Arity::AtLeast(4),
-        signal: Signal {
+    }
+    "udp/send-to" => prim_udp_send_to {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(4),
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
         params: &["socket", "data", "addr", "port"],
         category: "udp",
         example: "(udp/send-to sock \"hello\" \"127.0.0.1\" 9000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "udp/recv-from",
-        func: prim_udp_recv_from,
-        arity: Arity::AtLeast(2),
-        signal: Signal {
+    }
+    "udp/recv-from" => prim_udp_recv_from {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(2),
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
         params: &["socket", "count"],
         category: "udp",
         example: "(udp/recv-from sock 1024)",
-        aliases: &[],
-    },
-    // DNS resolution
-    PrimitiveDef {
-        name: "sys/resolve",
-        func: prim_sys_resolve,
-        arity: Arity::Exact(1),
-        signal: Signal {
+    }
+    "sys/resolve" => prim_sys_resolve {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::Exact(1),
         doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",
         params: &["hostname"],
         category: "sys",
         example: "(sys/resolve \"localhost\")",
-        aliases: &[],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

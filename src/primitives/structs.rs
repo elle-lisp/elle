@@ -1,5 +1,4 @@
 //! Struct operations primitives (immutable hash maps)
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -7,63 +6,45 @@ use crate::value::{error_val, TableKey, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Declarative table of struct primitives.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "struct",
-        func: prim_struct,
+primitive! {
+    "struct" => prim_struct {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create an immutable struct from key-value pairs",
-        params: &[],
         category: "struct",
         example: "(struct :a 1 :b 2)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "freeze",
-        func: prim_freeze,
+    }
+    "freeze" => prim_freeze {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a mutable collection to its immutable equivalent. Handles @array, @struct, @set, @string (requires valid UTF-8), @bytes. Returns immutable values as-is.",
         params: &["collection"],
         category: "struct",
         example: "(freeze @{:a 1 :b 2})",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "deep-freeze",
-        func: prim_deep_freeze,
-        signal: Signal::silent(),
+    }
+    "deep-freeze" => prim_deep_freeze {
         arity: Arity::Exact(1),
         doc: "Recursively freeze a value and all its contents. Converts mutable collections to immutable and recurses into elements. Atoms and non-collection types are returned as-is.",
         params: &["value"],
         category: "struct",
         example: "(deep-freeze @[@[1 2] @{:a 3}])",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "thaw",
-        func: prim_thaw,
+    }
+    "thaw" => prim_thaw {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert an immutable collection to its mutable equivalent. Handles array, struct, set, string, bytes. Returns mutable values as-is.",
         params: &["collection"],
         category: "struct",
         example: "(thaw {:a 1 :b 2})",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "pairs",
-        func: prim_pairs,
-        signal: Signal::silent(),
+    }
+    "pairs" => prim_pairs {
         arity: Arity::Exact(1),
         doc: "Iterate over struct key-value pairs as [key value] arrays.",
         params: &["struct"],
         category: "struct",
         example: "(pairs {:a 1 :b 2})",
-        aliases: &[],
-    },
-];
+    }
+}
 
 /// Create an immutable struct from key-value pairs
 /// (struct key1 val1 key2 val2 ...)

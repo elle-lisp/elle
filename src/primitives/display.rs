@@ -1,4 +1,3 @@
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
@@ -405,27 +404,19 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::string("<unknown>"))
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "pp",
-        func: prim_pp,
-        signal: Signal::silent(),
+primitive! {
+    "pp" => prim_pp {
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],
         category: "io",
         example: "(pp (list 1 2 (list 3 4)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "describe",
-        func: prim_describe,
-        signal: Signal::silent(),
+    }
+    "describe" => prim_describe {
         arity: Arity::Exact(1),
         doc: "Return a string describing a value's type and content.",
         params: &["value"],
         category: "io",
         example: "(describe (list 1 2 3)) #=> \"<list (3 elements)>\"",
-        aliases: &[],
-    },
-];
+    }
+}

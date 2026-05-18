@@ -5,7 +5,6 @@
 //!
 //! `traits` returns the trait table attached to a value, or `nil` if none.
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{alloc, deref, HeapObject};
@@ -185,27 +184,21 @@ pub(crate) fn prim_traits(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "with-traits",
-        func: prim_with_traits,
+primitive! {
+    "with-traits" => prim_with_traits {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Attach a trait table to a value. Returns a new value with the same data and the given trait table. The table must be a struct (immutable or mutable).",
         params: &["value", "table"],
         category: "traits",
         example: "(with-traits [1 2 3] {:Seq {:first (fn (v) (get v 0))}})",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "traits",
-        func: prim_traits,
+    }
+    "traits" => prim_traits {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the trait table attached to a value, or nil if none. Usable as boolean: (if (traits v) ...) checks for presence.",
         params: &["value"],
         category: "traits",
         example: "(traits (with-traits [1 2 3] {:Seq {:first (fn (v) (get v 0))}}))",
-        aliases: &[],
-    },
-];
+    }
+}

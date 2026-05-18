@@ -1,6 +1,5 @@
 //! Heap arena and memory management primitives
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
@@ -214,32 +213,24 @@ pub(crate) fn prim_arena_reset_peak(_args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Canonical names are `debug/arena-*`; `arena/*` names are kept as aliases
 /// for backward compatibility and REPL convenience.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "debug/arena-stats",
-        func: prim_arena_stats,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+primitive! {
+    "debug/arena-stats" => prim_arena_stats {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Range(0, 1),
         doc: "Return heap arena statistics. With no args: stats for the current fiber. With a fiber arg: stats for a suspended/dead fiber. Returns a struct with :object-count, :peak-count, :allocated-bytes, :object-limit, :scope-depth, :dtor-count, :root-live-count, :root-alloc-count, :shared-count, :active-allocator, :scope-enter-count, :scope-dtor-count.",
         params: &["fiber?"],
         category: "debug",
         example: "(debug/arena-stats)",
         aliases: &["arena/stats", "vm/arena", "arena-stats"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-count",
-        func: prim_arena_count,
+    }
+    "debug/arena-count" => prim_arena_count {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Return current heap object count.",
-        params: &[],
         category: "debug",
         example: "(debug/arena-count)",
         aliases: &["arena/count", "arena-count"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-set-object-limit",
-        func: prim_arena_set_object_limit,
+    }
+    "debug/arena-set-object-limit" => prim_arena_set_object_limit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Set max heap object count. Pass nil to remove limit. Returns previous limit or nil.",
@@ -247,43 +238,29 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(debug/arena-set-object-limit 10000)",
         aliases: &["arena/set-object-limit"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-object-limit",
-        func: prim_arena_object_limit,
+    }
+    "debug/arena-object-limit" => prim_arena_object_limit {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Get current object limit. Returns int or nil (unlimited).",
-        params: &[],
         category: "debug",
         example: "(debug/arena-object-limit)",
         aliases: &["arena/object-limit"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-bytes",
-        func: prim_arena_bytes,
+    }
+    "debug/arena-bytes" => prim_arena_bytes {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Return bytes consumed by the current FiberHeap.",
-        params: &[],
         category: "debug",
         example: "(debug/arena-bytes)",
         aliases: &["arena/bytes"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-checkpoint",
-        func: prim_arena_checkpoint,
+    }
+    "debug/arena-checkpoint" => prim_arena_checkpoint {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Return an opaque checkpoint for the current arena position. Pass to debug/arena-reset only. The return value is an opaque external — do not treat it as an integer. Dangerous: invalidates all Values allocated after the mark.",
-        params: &[],
         category: "debug",
         example: "(let [m (debug/arena-checkpoint)] (pair 1 2) (debug/arena-reset m))",
         aliases: &["arena/checkpoint"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-reset",
-        func: prim_arena_reset,
+    }
+    "debug/arena-reset" => prim_arena_reset {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Reclaim arena objects allocated after checkpoint mark. Runs destructors for freed objects. Bump memory is not reclaimed. Dangerous: any Value pointing into the freed region is now invalid.",
@@ -291,38 +268,28 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(let [m (debug/arena-checkpoint)] (pair 1 2) (debug/arena-reset m))",
         aliases: &["arena/reset"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-allocs",
-        func: prim_arena_allocs,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+    }
+    "debug/arena-allocs" => prim_arena_allocs {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Exact(1),
         doc: "Run thunk, return (result . net-allocs) where net-allocs is the net heap objects allocated.",
         params: &["thunk"],
         category: "debug",
         example: "(debug/arena-allocs (fn [] (pair 1 2)))",
         aliases: &["arena/allocs"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-peak",
-        func: prim_arena_peak,
+    }
+    "debug/arena-peak" => prim_arena_peak {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Return peak object count (high-water mark).",
-        params: &[],
         category: "debug",
         example: "(debug/arena-peak)",
         aliases: &["arena/peak"],
-    },
-    PrimitiveDef {
-        name: "debug/arena-reset-peak",
-        func: prim_arena_reset_peak,
+    }
+    "debug/arena-reset-peak" => prim_arena_reset_peak {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Reset peak to current count. Returns previous peak.",
-        params: &[],
         category: "debug",
         example: "(debug/arena-reset-peak)",
         aliases: &["arena/reset-peak"],
-    },
-];
+    }
+}

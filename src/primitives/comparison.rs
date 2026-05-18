@@ -1,6 +1,5 @@
 //! Comparison primitives
 use crate::arithmetic::values_eq;
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
@@ -42,10 +41,8 @@ pub(crate) fn prim_hash(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for comparison functions.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "=",
-        func: prim_eq,
+primitive! {
+    "=" => prim_eq {
         signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Test equality of values. Numeric-aware: (= 1 1.0) is true. Chained: (= a b c) means all are equal.",
@@ -53,27 +50,20 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "comparison",
         example: "(= 1 1) #=> true\n(= 1 1.0) #=> true\n(= 1 2 1) #=> false",
         aliases: &["eq?"],
-    },
-    PrimitiveDef {
-        name: "identical?",
-        func: prim_identical,
+    }
+    "identical?" => prim_identical {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Test strict identity. No numeric coercion: (identical? 1 1.0) is false.",
         params: &["a", "b"],
         category: "comparison",
         example: "(identical? 1 1) #=> true\n(identical? 1 1.0) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "hash",
-        func: prim_hash,
-        signal: Signal::silent(),
+    }
+    "hash" => prim_hash {
         arity: Arity::Exact(1),
         doc: "Hash any value to an integer. Equal values produce equal hashes. Uses the same structural hashing as hash-map/hash-set internals.",
         params: &["value"],
         category: "comparison",
         example: "(hash 42) #=> <integer>\n(= (hash :foo) (hash :foo)) #=> true",
-        aliases: &[],
-    },
-];
+    }
+}

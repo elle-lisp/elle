@@ -1,5 +1,4 @@
 use crate::epoch::CURRENT_EPOCH;
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
@@ -34,38 +33,24 @@ pub(crate) fn prim_package_info(_args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for package operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "elle/version",
-        func: prim_package_version,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+primitive! {
+    "elle/version" => prim_package_version {
         doc: "Get the current package version",
-        params: &[],
         category: "elle",
         example: "(elle/version)",
         aliases: &["pkg/version", "package-version"],
-    },
-    PrimitiveDef {
-        name: "elle/epoch",
-        func: prim_epoch,
-        signal: Signal::silent(),
+    }
+    "elle/epoch" => prim_epoch {
         arity: Arity::Range(0, 1),
         doc: "Return the current language epoch. With 1 arg, returns the arg (compile-time declaration form).",
         params: &["n"],
         category: "elle",
         example: "(elle/epoch) #=> 3",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "elle/info",
-        func: prim_package_info,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "elle/info" => prim_package_info {
         doc: "Get package information (name, version, description)",
-        params: &[],
         category: "elle",
         example: "(elle/info)",
         aliases: &["pkg/info", "package-info"],
-    },
-];
+    }
+}

@@ -4,7 +4,6 @@ use crate::io::aio::AsyncBackend;
 use crate::io::mock::MockBackend;
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
@@ -323,110 +322,81 @@ fn prim_ev_poll_fd(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "io-request?",
-        func: prim_is_io_request,
-        signal: Signal::silent(),
+primitive! {
+    "io-request?" => prim_is_io_request {
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O request.",
         params: &["value"],
         category: "predicate",
         example: "(io-request? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io-backend?",
-        func: prim_is_io_backend,
-        signal: Signal::silent(),
+    }
+    "io-backend?" => prim_is_io_backend {
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O backend.",
         params: &["value"],
         category: "predicate",
         example: "(io-backend? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/backend",
-        func: prim_io_backend,
+    }
+    "io/backend" => prim_io_backend {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create an I/O backend. :async for asynchronous, :mock for testing.",
         params: &["kind"],
         category: "io",
         example: "(io/backend :async)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/submit",
-        func: prim_io_submit,
+    }
+    "io/submit" => prim_io_submit {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Submit an I/O request to an async backend. Optional third arg is the origin fiber for heap-correct spawn allocation. Returns submission ID.",
         params: &["backend", "request"],
         category: "io",
         example: "(io/submit backend request)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/reap",
-        func: prim_io_reap,
+    }
+    "io/reap" => prim_io_reap {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking poll for async I/O completions. Returns array of completion structs.",
         params: &["backend"],
         category: "io",
         example: "(io/reap backend)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/wait",
-        func: prim_io_wait,
+    }
+    "io/wait" => prim_io_wait {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Wait for async I/O completions. timeout-ms: negative=forever, 0=poll, positive=ms. Returns array of completion structs.",
         params: &["backend", "timeout-ms"],
         category: "io",
         example: "(io/wait backend 1000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/cancel",
-        func: prim_io_cancel,
+    }
+    "io/cancel" => prim_io_cancel {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",
         params: &["backend", "id"],
         category: "io",
         example: "(io/cancel backend id)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ev/sleep",
-        func: prim_ev_sleep,
-        signal: Signal {
+    }
+    "ev/sleep" => prim_ev_sleep {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
         params: &["seconds"],
         category: "scheduler",
         example: "(ev/sleep 0.5)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ev/poll-fd",
-        func: prim_ev_poll_fd,
-        signal: Signal {
+    }
+    "ev/poll-fd" => prim_ev_poll_fd {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(2, 3),
         doc: "Poll a raw fd for readiness — yields to the scheduler. mode: :read, :write, :read-write. Optional timeout in seconds.",
         params: &["fd", "mode", "timeout?"],
         category: "scheduler",
         example: "(ev/poll-fd 5 :read 1.0)",
-        aliases: &[],
-    },
-];
+    }
+}
