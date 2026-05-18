@@ -110,6 +110,10 @@ pub(crate) struct Slab {
     /// Head of each region's singly-linked list (indexed by region_id).
     /// Grows on demand when `set_region` is called with a new id.
     pub(crate) region_heads: Vec<u32>,
+    /// Bump arena mark captured when the first object in each region
+    /// was allocated. Used by FreeRegion to rewind the bump arena when
+    /// the region's data is at the tail of the arena. Indexed by region_id.
+    pub(crate) region_bump_marks: Vec<Option<super::bump::BumpMark>>,
 }
 
 impl Slab {
@@ -124,6 +128,7 @@ impl Slab {
             region_ids: Vec::new(),
             region_next: Vec::new(),
             region_heads: Vec::new(),
+            region_bump_marks: Vec::new(),
         }
     }
 
@@ -192,6 +197,7 @@ impl Slab {
         self.region_ids.clear();
         self.region_next.clear();
         self.region_heads.clear();
+        self.region_bump_marks.clear();
         self.chunks.truncate(1);
         if let Some(chunk) = self.chunks.first() {
             unsafe {

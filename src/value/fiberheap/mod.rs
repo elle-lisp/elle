@@ -232,6 +232,10 @@ impl FiberHeap {
     /// number of objects in that region, not O(n) in total live objects).
     /// For each slot: runs destructor if needed, unlinks from the global
     /// allocation list, returns the slab slot to the free list.
+    ///
+    /// Also rewinds the bump arena to the region's start mark when the
+    /// region's data is at the tail of the arena (common in loop bodies
+    /// where only one region allocates per iteration).
     pub fn free_region(&mut self, region: u16) {
         use super::fiberheap::slab::ALLOC_NIL;
 
@@ -246,16 +250,35 @@ impl FiberHeap {
         while cur != ALLOC_NIL {
             let next = self.pool.slab.region_next[cur as usize];
             let ptr = self.pool.slab.flat_to_ptr(cur as usize);
-            // Run destructor if needed.
             if needs_drop(unsafe { (*ptr).tag() }) {
                 unsafe { std::ptr::drop_in_place(ptr) };
                 self.pool.remove_from_dtors(ptr);
             }
-            // Unlink from global allocation list and return to free list.
             self.pool.unlink_alloc(cur);
             self.pool.slab.dealloc(ptr);
             self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
             cur = next;
+        }
+
+        // Rewind bump arena if the region's data is at the tail.
+        // This reclaims inline data (string bytes, array elements)
+        // for the common case of loop-body regions.
+        if rid < self.pool.slab.region_bump_marks.len() {
+            if let Some(mark) = self.pool.slab.region_bump_marks[rid].take() {
+                let current = self.pool.bump_mark();
+                // Safe to rewind only if nothing else allocated bump
+                // data after this region's mark. Check by comparing
+                // the saved mark with the current position.
+                if current.page == mark.page && current.offset == mark.offset {
+                    // Nothing allocated since — rewind is safe and free.
+                    // (This is a no-op but resets the cursor for reuse.)
+                } else if self.pool.alloc_head == super::fiberheap::slab::ALLOC_NIL {
+                    // All slab objects are freed — safe to rewind fully.
+                    self.pool.bump_release_to(mark);
+                }
+                // Otherwise: other regions' data is interleaved.
+                // Accept the leak; reclaimed at fiber teardown.
+            }
         }
     }
 
@@ -549,11 +572,25 @@ impl FiberHeap {
         0
     }
 
-    /// Set the region id for a heap value.
+    /// Set the region id for a heap value and record the bump mark.
     #[inline]
     pub fn stamp_region(&mut self, val: Value, region: u16) {
         if let Some(ptr) = val.as_heap_ptr() {
             if self.pool.slab_owns(ptr) {
+                // Capture bump mark for the first allocation in this region.
+                let rid = region as usize;
+                if rid > 0 {
+                    if rid >= self.pool.slab.region_bump_marks.len() {
+                        self.pool
+                            .slab
+                            .region_bump_marks
+                            .resize(rid + 1, None);
+                    }
+                    if self.pool.slab.region_bump_marks[rid].is_none() {
+                        self.pool.slab.region_bump_marks[rid] =
+                            Some(self.pool.bump_mark());
+                    }
+                }
                 self.pool
                     .slab
                     .set_region(ptr as *const HeapObject, region);

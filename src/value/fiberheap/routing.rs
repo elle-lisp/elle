@@ -149,17 +149,8 @@ pub fn stamp_region(val: crate::value::Value, region_id: u16) {
         return;
     }
     let ptr = current_heap_ptr();
-    if ptr.is_null() {
-        return;
-    }
-    if let Some(heap_ptr) = val.as_heap_ptr() {
-        unsafe {
-            let heap = &mut *ptr;
-            heap.pool.slab.set_region(
-                heap_ptr as *const crate::value::heap::HeapObject,
-                region_id,
-            );
-        }
+    if !ptr.is_null() {
+        unsafe { (*ptr).stamp_region(val, region_id) };
     }
 }
 

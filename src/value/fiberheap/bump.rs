@@ -105,11 +105,11 @@ unsafe impl Send for MmapPage {}
 
 // ── BumpMark ──────────────────────────────────────────────────────────
 
-/// Opaque position snapshot within a `BumpArena`.
-#[derive(Clone, Copy, Default)]
+/// Position snapshot within a `BumpArena`.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct BumpMark {
-    page: usize,
-    offset: usize,
+    pub(crate) page: usize,
+    pub(crate) offset: usize,
 }
 
 // ── BumpArena ─────────────────────────────────────────────────────────

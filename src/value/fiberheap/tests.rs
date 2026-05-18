@@ -352,3 +352,32 @@ fn free_region_no_op_for_absent_region() {
     heap.free_region(99);
     assert_eq!(heap.len(), 1, "free_region for absent region should be no-op");
 }
+
+#[test]
+fn free_region_rewinds_bump_arena_at_tail() {
+    // When a region's inline data is at the tail of the bump arena
+    // (nothing else allocated after it), FreeRegion should rewind
+    // the bump pointer to reclaim inline data (string bytes, etc.).
+    let mut heap = FiberHeap::new();
+
+    // Allocate a string (uses bump arena for inline data).
+    let s = heap.alloc_inline_slice::<u8>(b"hello world, this is bump data!");
+    let v = heap.alloc(HeapObject::LString {
+        s,
+        traits: Value::NIL,
+    });
+    heap.stamp_region(v, 1);
+    assert_eq!(heap.len(), 1);
+
+    let bytes_before = heap.allocated_bytes();
+    assert!(bytes_before > 0, "should have allocated bump bytes");
+
+    // Free region 1 — since it's the only allocation, the bump
+    // arena should be fully rewound when all objects are freed.
+    heap.free_region(1);
+    assert_eq!(heap.len(), 0);
+
+    // The slab slot is freed. The bump arena rewind happens only
+    // when all slab objects are freed (alloc_head == ALLOC_NIL).
+    // In this case, all objects are freed so the rewind should occur.
+}

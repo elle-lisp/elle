@@ -152,6 +152,16 @@ impl SlabPool {
         unsafe { crate::value::inline_slice::InlineSlice::from_raw(ptr, items.len() as u32) }
     }
 
+    /// Capture the current bump arena position.
+    pub fn bump_mark(&self) -> super::bump::BumpMark {
+        self.arena.mark()
+    }
+
+    /// Rewind the bump arena to a saved mark.
+    pub fn bump_release_to(&mut self, mark: super::bump::BumpMark) {
+        self.arena.release_to(mark);
+    }
+
     /// Capture the current position for later release.
     pub fn mark(&self) -> SlabMark {
         SlabMark {
