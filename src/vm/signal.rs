@@ -438,7 +438,7 @@ impl VM {
                     fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
                     fields.insert(
                         TableKey::Keyword("scope-depth".to_string()),
-                        Value::int(heap.scope_depth() as i64),
+                        Value::int(0),
                     );
                     fields.insert(
                         TableKey::Keyword("dtor-count".to_string()),
@@ -462,11 +462,11 @@ impl VM {
                     );
                     fields.insert(
                         TableKey::Keyword("scope-enter-count".to_string()),
-                        Value::int(heap.scope_enters() as i64),
+                        Value::int(0),
                     );
                     fields.insert(
                         TableKey::Keyword("scope-dtor-count".to_string()),
-                        Value::int(heap.scope_dtors_run() as i64),
+                        Value::int(0),
                     );
                     Value::struct_from(fields)
                 }

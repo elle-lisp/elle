@@ -16,6 +16,28 @@
     (let [n (length coll)]
       (if (%eq n 0) (slice coll 0 0) (slice coll 0 (%sub n 1))))))
 
+## ── push / put ─────────────────────────────────────────────────────
+## Defined here (not as Rust primitives) so the region solver sees
+## through to %push/%put/%string-push/%bytes-push intrinsics.
+
+(def push
+  (fn [coll val]
+    (match (type-of coll)
+      :array (%push coll val)
+      :@array (%push coll val)
+      :string (%string-push coll val)
+      :@string (%string-push coll val)
+      :bytes (%bytes-push coll val)
+      :@bytes (%bytes-push coll val)
+      _
+        (emit :error {:error :type-error
+                      :message (string "push: expected array, string, or bytes, got "
+                                       (type coll))}))))
+
+(def put
+  (fn [coll key & rest]
+    (if (empty? rest) (add coll key) (%put coll key (first rest)))))
+
 ## ── Helpers (not exported) ─────────────────────────────────────────
 
 (def push-all

@@ -1,27 +1,17 @@
 //! Per-fiber heap ownership and thread-local current-heap routing.
 //!
 //! `FiberHeap` uses a `SlabPool` (slab allocator + allocation tracking +
-//! destructor list) for all allocations. The pool is shared with
-//! `SharedAllocator`, which wraps the same `SlabPool` type for inter-fiber
-//! value exchange.
+//! destructor list) for all allocations.
 //!
 //! `peak_alloc_count` tracks the high-water mark of `alloc_count` since the
 //! last `clear()`. Updated on every `alloc()`. Queryable via `arena/peak`
 //! and `arena/fiber-stats`.
 //!
-//! ## Scope marks
+//! ## Per-value regions (FreeRegion)
 //!
-//! `FiberHeap` maintains a stack of scope marks (`scope_marks: Vec<ArenaMark>`)
-//! for `RegionEnter`/`RegionExit` bytecodes. `RegionEnter` pushes a mark
-//! recording the current slab position; `RegionExit` pops the mark and calls
-//! `release()` to run destructors and deallocate slab slots for objects
-//! allocated within the scope, returning them to the slab free list.
-//!
-//! The lowerer gates `RegionEnter`/`RegionExit` emission on escape analysis
-//! (`src/lir/lower/escape.rs`): only scopes where no allocated values can
-//! escape get region instructions. The analysis checks: no captures, no
-//! suspension, result is immediate, no outward mutation.
-//!
+//! Each allocation is stamped with a region_id by the VM dispatch loop.
+//! `FreeRegion(ρ)` walks the slab linked list and frees every slot whose
+//! region_id matches ρ. No scope marks or scope stacks are needed.
 
 use std::rc::Rc;
 
@@ -73,15 +63,6 @@ pub struct FiberHeap {
     jit_curr_mark: Option<ArenaMark>,
     /// Peak number of objects allocated (high-water mark).
     peak_alloc_count: usize,
-    /// Stack of scope marks pushed by `RegionEnter`, popped by `RegionExit`.
-    /// Each mark records the `(alloc_count, dtors.len())` at scope entry.
-    /// `RegionExit` pops the mark and calls `release()` to run destructors
-    /// for objects allocated within the scope.
-    scope_marks: Vec<ArenaMark>,
-    /// Number of `RegionEnter` instructions executed (scope marks pushed).
-    scope_enters: usize,
-    /// Number of destructors run by `RegionExit` (objects freed at scope exit).
-    scope_dtors_run: usize,
     /// Stack of custom allocators. The top is active.
     /// Pushed by `%install-allocator`, popped by `%uninstall-allocator`.
     custom_alloc_stack: Vec<CustomAllocState>,
@@ -102,9 +83,6 @@ impl FiberHeap {
             jit_prev_mark: None,
             jit_curr_mark: None,
             peak_alloc_count: 0,
-            scope_marks: Vec::new(),
-            scope_enters: 0,
-            scope_dtors_run: 0,
             custom_alloc_stack: Vec::new(),
             object_limit: None,
             alloc_error: None,
@@ -206,7 +184,6 @@ impl FiberHeap {
     }
 
     /// Release all allocations back to a mark unconditionally.
-    /// Called by `pop_scope_mark_and_release()` (RegionExit).
     pub fn release(&mut self, mark: ArenaMark) {
         use super::fiberheap::slab::ALLOC_NIL;
 
@@ -336,167 +313,6 @@ impl FiberHeap {
         self.pool.alloc_count = mark.position();
     }
 
-    /// Push a scope mark onto the scope stack (called by `RegionEnter`).
-    ///
-    /// Records the current slab position so that `pop_scope_mark_and_release`
-    /// can run destructors and deallocate slab slots for objects allocated
-    /// within the scope. When a shared allocator is active (child fiber),
-    /// also pushes a mark on the shared allocator.
-    ///
-    /// Also creates a parallel `RuntimeRegion` for future per-region RC.
-    /// Currently unused for allocation routing — all allocations still go
-    /// through `pool`. The region is tracked for lifecycle correctness.
-    pub fn push_scope_mark(&mut self) {
-        #[cfg(debug_assertions)]
-        {
-            // Verify no duplicates exist in dtors at scope entry time.
-            // If this fires, a duplicate was introduced within the PARENT
-            // scope (before this RegionEnter).
-            use std::collections::HashSet;
-            let mut seen: HashSet<*mut HeapObject> = HashSet::new();
-            for &ptr in &self.pool.dtors {
-                if !ptr.is_null() {
-                    assert!(
-                        seen.insert(ptr),
-                        "push_scope_mark: duplicate slab slot {:?} in dtors at scope entry. \
-                         dtors.len={}",
-                        ptr,
-                        self.pool.dtors.len()
-                    );
-                }
-            }
-        }
-        self.scope_marks.push(self.mark());
-        self.scope_enters += 1;
-    }
-
-    /// Discard the top scope mark without releasing any objects.
-    /// Used by the tail-call trampoline on normal return: the return
-    /// value may reference objects allocated in this iteration.
-    pub fn discard_scope_mark(&mut self) {
-        self.scope_marks.pop();
-    }
-
-    /// Pop the top scope mark and release objects allocated since it
-    /// was pushed (called by `RegionExit`).
-    ///
-    /// Runs destructors for objects allocated within the scope, then
-    /// deallocates their slab slots back to the free list. When a shared
-    /// allocator is active, also pops its mark and releases shared objects.
-    ///
-    /// Panics (debug) if the scope stack is empty.
-    pub fn pop_scope_mark_and_release(&mut self) {
-        let mark = self
-            .scope_marks
-            .pop()
-            .expect("RegionExit without matching RegionEnter");
-        let dtors_before = self.pool.dtors.len();
-        self.release(mark);
-        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
-    }
-
-    /// Rotate loop scope marks for double-buffered deallocation.
-    ///
-    /// The scope mark stack has two marks: [prev, curr]. This operation:
-    /// 1. Pops curr (saves it)
-    /// 2. Pops prev and releases (frees the iteration-before-last's allocs)
-    /// 3. Pushes saved curr as new prev
-    /// 4. Pushes a fresh mark as new curr
-    ///
-    /// This ensures that values from the PREVIOUS iteration survive into
-    /// the CURRENT iteration (recur args, loop params), and only the
-    /// iteration-before-last's allocs are freed.
-    pub fn rotate_scope_marks(&mut self) {
-        if self.scope_marks.len() < 2 {
-            return; // guard: no-op if marks are missing
-        }
-        let curr = self.scope_marks.pop().unwrap();
-        let dtors_before = self.pool.dtors.len();
-        let prev = self
-            .scope_marks
-            .pop()
-            .expect("RegionRotate: missing previous scope mark");
-        // With universal incref, use release_refcounted: free rc=0 objects,
-        // keep rc>0 pinned (protected by push/put incref or binding incref).
-        // DecrefLocal before rotation brings dead bindings to rc=0.
-        self.release_refcounted(prev);
-        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
-        self.scope_marks.push(curr);
-        self.scope_marks.push(self.mark());
-        self.scope_enters += 1;
-    }
-
-    /// Pop two scope marks and release only the range between them.
-    ///
-    /// Used by `RegionExitCall`: mark2 (top) is the barrier pushed
-    /// after arg evaluation; mark1 (below) is the region start.
-    /// Objects in [mark1..mark2) (arg temporaries) are freed.
-    /// Objects after mark2 (callee's allocations) are preserved.
-    ///
-    /// Panics if fewer than two marks are on the stack.
-    pub fn pop_call_scope_marks_and_release(&mut self) {
-        use super::fiberheap::slab::ALLOC_NIL;
-
-        let mark2 = self
-            .scope_marks
-            .pop()
-            .expect("RegionExitCall: missing barrier mark");
-        let mark1 = self
-            .scope_marks
-            .pop()
-            .expect("RegionExitCall: missing region mark");
-
-        // Run dtors in reverse for objects allocated between mark1 and mark2.
-        let mut dtors_freed = 0;
-        for i in (mark1.dtor_len()..mark2.dtor_len()).rev() {
-            let ptr = self.pool.dtors[i];
-            if !ptr.is_null() {
-                unsafe { std::ptr::drop_in_place(ptr) };
-                dtors_freed += 1;
-            }
-        }
-        self.pool.dtors.drain(mark1.dtor_len()..mark2.dtor_len());
-        self.scope_dtors_run += dtors_freed;
-
-        // Walk the linked list from mark1.tail.next to mark2.tail,
-        // unlinking and deallocating each node in the range.
-        let range_start = if mark1.alloc_list_tail() == ALLOC_NIL {
-            self.pool.alloc_head
-        } else {
-            self.pool.slab.alloc_next[mark1.alloc_list_tail() as usize]
-        };
-        // We need to stop after mark2.alloc_list_tail().
-        let range_end_next = if mark2.alloc_list_tail() == ALLOC_NIL {
-            ALLOC_NIL
-        } else {
-            self.pool.slab.alloc_next[mark2.alloc_list_tail() as usize]
-        };
-
-        let mut cur = range_start;
-        while cur != ALLOC_NIL && cur != range_end_next {
-            let next = self.pool.slab.alloc_next[cur as usize];
-            let ptr = self.pool.slab.flat_to_ptr(cur as usize);
-            // Clear links before dealloc.
-            self.pool.slab.alloc_prev[cur as usize] = ALLOC_NIL;
-            self.pool.slab.alloc_next[cur as usize] = ALLOC_NIL;
-            unsafe { self.pool.dealloc_slot(ptr) };
-            cur = next;
-        }
-
-        // Stitch the list: connect mark1.tail to mark2.tail.next (range_end_next).
-        if mark1.alloc_list_tail() != ALLOC_NIL {
-            self.pool.slab.alloc_next[mark1.alloc_list_tail() as usize] = range_end_next;
-        } else {
-            self.pool.alloc_head = range_end_next;
-        }
-        if range_end_next != ALLOC_NIL {
-            self.pool.slab.alloc_prev[range_end_next as usize] = mark1.alloc_list_tail();
-        } else {
-            self.pool.alloc_tail = mark1.alloc_list_tail();
-        }
-
-        self.pool.alloc_count -= mark2.position() - mark1.position();
-    }
 
     /// Private heap object count (used by mark/release scoping).
     pub fn len(&self) -> usize {
@@ -542,24 +358,9 @@ impl FiberHeap {
         self.pool.allocated_bytes()
     }
 
-    /// Number of `RegionEnter` instructions executed (scope regions entered).
-    pub fn scope_enters(&self) -> usize {
-        self.scope_enters
-    }
-
-    /// Number of destructors run by `RegionExit` (objects freed at scope exit).
-    pub fn scope_dtors_run(&self) -> usize {
-        self.scope_dtors_run
-    }
-
     /// Peak number of objects allocated (high-water mark).
     pub fn peak_alloc_count(&self) -> usize {
         self.peak_alloc_count
-    }
-
-    /// Number of active scope marks (scope depth).
-    pub(crate) fn scope_depth(&self) -> usize {
-        self.scope_marks.len()
     }
 
     /// Number of objects in the destructor list.
@@ -906,12 +707,9 @@ impl FiberHeap {
         // SAFETY: all dtors have been run above.
         unsafe { self.pool.clear_slab() };
 
-        self.scope_marks.clear();
         self.alloc_error = None;
         self.pool.alloc_count = 0;
         self.peak_alloc_count = 0;
-        self.scope_enters = 0;
-        self.scope_dtors_run = 0;
         self.jit_prev_mark = None;
         self.jit_curr_mark = None;
     }

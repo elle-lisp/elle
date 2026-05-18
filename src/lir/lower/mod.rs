@@ -172,10 +172,6 @@ pub struct Lowerer<'a> {
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
     /// Current nesting depth of active allocation regions.
-    /// Incremented on `RegionEnter`, decremented on `RegionExit`.
-    /// Used by `lower_break` to emit compensating `RegionExit`s.
-    region_depth: u32,
-    pending_region_exits: u32,
     /// Pending FreeRegion region_ids to emit before tail calls.
     pending_free_regions: Vec<u16>,
     /// Compile-time scope allocation statistics.
@@ -232,8 +228,6 @@ impl<'a> Lowerer<'a> {
             immutable_values: HashMap::new(),
             loop_lower_contexts: Vec::new(),
             block_lower_contexts: Vec::new(),
-            region_depth: 0,
-            pending_region_exits: 0,
             pending_free_regions: Vec::new(),
             scope_stats: ScopeStats::default(),
             discard_slot: None,
@@ -553,14 +547,9 @@ impl<'a> Lowerer<'a> {
     }
 
 
-    /// Emit pending RegionExits and FreeRegions. Called at tail-call
-    /// sites where region cleanup is deferred.
+    /// Emit pending FreeRegions. Called at tail-call sites where
+    /// region cleanup is deferred.
     fn emit_pending_region_exits(&mut self) {
-        let n = self.pending_region_exits as usize;
-        for _ in 0..n {
-            self.emit(LirInstr::RegionExit);
-        }
-        // Emit pending FreeRegions (new per-value region system).
         let pending: Vec<u16> = self.pending_free_regions.clone();
         for region_id in pending {
             self.emit(LirInstr::FreeRegion { region_id });
@@ -591,10 +580,9 @@ impl<'a> Lowerer<'a> {
     /// 2. Has a local slot (not an upvalue/capture)
     /// 3. Is NOT captured by any closure
     fn emit_drop_slots_for_tail_call(&mut self, func: &Hir, args: &[CallArg]) {
-        // Inside a scope region (while loop with RegionRotate),
-        // DropSlot causes double-free: freed slot gets reused,
-        // stale allocs-list entry survives into the next rotation.
-        if self.region_depth > 0 {
+        // Inside an active FreeRegion scope, DropSlot could cause
+        // double-free when FreeRegion later frees the same slot.
+        if !self.active_region_ids.is_empty() {
             return;
         }
 

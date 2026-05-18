@@ -9,7 +9,7 @@ use crate::value::types::Arity;
 use crate::value::{error_val, sorted_struct_remove, TableKey, Value};
 use std::collections::BTreeMap;
 
-use super::access::{prim_get, prim_put};
+use super::access::prim_get;
 
 /// Declarative table of struct primitives.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
@@ -33,17 +33,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["collection", "key", "default"],
         category: "struct",
         example: "(get [1 2 3] 0)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "put",
-        func: prim_put,
-        signal: Signal::errors(),
-        arity: Arity::Range(2, 3),
-        doc: "Put a value into a collection.",
-        params: &["collection", "key-or-value", "value"],
-        category: "struct",
-        example: "(put {:a 1} :b 2) #=> {:a 1 :b 2}",
         aliases: &[],
     },
     PrimitiveDef {

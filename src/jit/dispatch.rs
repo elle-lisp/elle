@@ -354,35 +354,15 @@ pub extern "C" fn elle_jit_check_signal_bound(
 // Region (scope) helpers for JIT
 // =============================================================================
 
-/// Push a scope mark on the current fiber heap (called by JIT `RegionEnter`).
+/// Legacy scope-mark helpers (no-ops — replaced by FreeRegion).
 #[no_mangle]
-pub extern "C" fn elle_jit_region_enter() -> JitValue {
-    crate::value::fiberheap::region_enter();
-    JitValue::nil()
-}
-
-/// Pop a scope mark and release scoped objects (called by JIT `RegionExit`).
+pub extern "C" fn elle_jit_region_enter() -> JitValue { JitValue::nil() }
 #[no_mangle]
-pub extern "C" fn elle_jit_region_exit() -> JitValue {
-    crate::value::fiberheap::region_exit();
-    JitValue::nil()
-}
-
-/// Pop two scope marks and release only the range between them
-/// (called by JIT `RegionExitCall`).
+pub extern "C" fn elle_jit_region_exit() -> JitValue { JitValue::nil() }
 #[no_mangle]
-pub extern "C" fn elle_jit_region_exit_call() -> JitValue {
-    crate::value::fiberheap::region_exit_call();
-    JitValue::nil()
-}
-
-/// Rotate loop scope marks: pop current, release previous, push current
-/// as new previous, push fresh mark as new current.
+pub extern "C" fn elle_jit_region_exit_call() -> JitValue { JitValue::nil() }
 #[no_mangle]
-pub extern "C" fn elle_jit_region_rotate() -> JitValue {
-    crate::value::fiberheap::region_rotate();
-    JitValue::nil()
-}
+pub extern "C" fn elle_jit_region_rotate() -> JitValue { JitValue::nil() }
 
 /// Free all objects in a specific region by walking the slab linked list.
 #[no_mangle]

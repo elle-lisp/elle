@@ -370,17 +370,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "push",
-        func: prim_push,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Append element to end of array. Mutable: mutates in place. Immutable: returns new collection.",
-        params: &["arr", "val"],
-        category: "array",
-        example: "(push @[1 2] 3) #=> @[1 2 3]\n(push [1 2] 3)  #=> [1 2 3]",
-        aliases: &[],
-    },
-    PrimitiveDef {
         name: "pop",
         func: prim_pop,
         signal: Signal::errors(),

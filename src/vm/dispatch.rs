@@ -131,7 +131,6 @@ impl VM {
                     variables::handle_store_local(self, bc, &mut ip);
                 }
                 Instruction::StoreLocalRefcounted => {
-                    // Legacy: identical to StoreLocal (refcounting removed).
                     variables::handle_store_local(self, bc, &mut ip);
                 }
                 Instruction::LoadUpvalue => {
@@ -474,23 +473,12 @@ impl VM {
                     }
                 }
 
-                // Allocation region markers: push/pop scope marks on FiberHeap.
-                // Effective for both root and child fibers.
-                Instruction::RegionEnter => {
-                    crate::value::fiberheap::region_enter();
-                }
-                Instruction::RegionExit => {
-                    crate::value::fiberheap::region_exit();
-                }
-                Instruction::RegionExitCall => {
-                    crate::value::fiberheap::region_exit_call();
-                }
-                Instruction::RegionRotate => {
-                    crate::value::fiberheap::region_rotate();
-                }
-                Instruction::RegionExitRefcounted => {
-                    crate::value::fiberheap::region_exit_refcounted();
-                }
+                // Legacy scope-mark instructions: no-ops (replaced by FreeRegion).
+                Instruction::RegionEnter
+                | Instruction::RegionExit
+                | Instruction::RegionExitCall
+                | Instruction::RegionRotate
+                | Instruction::RegionExitRefcounted => {}
 
                 Instruction::FreeRegion => {
                     let region_id = self.read_u16(bc, &mut ip);
@@ -526,8 +514,6 @@ impl VM {
                 Instruction::OutboxExit => {}
 
                 // FlipEnter/FlipSwap/FlipExit are legacy no-ops.
-                // While/loop reclamation uses RegionRotate.
-                // Self-tail-call reclamation uses mark/release in the trampoline.
                 Instruction::FlipEnter | Instruction::FlipSwap | Instruction::FlipExit => {}
 
                 // Dynamic parameter frame management

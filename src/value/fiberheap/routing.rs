@@ -119,40 +119,6 @@ pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R
     })
 }
 
-/// Push a scope mark on the current FiberHeap (called by VM `RegionEnter`).
-pub fn region_enter() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).push_scope_mark() };
-    }
-}
-
-/// Pop a scope mark and release scoped objects on the current FiberHeap
-/// (called by VM `RegionExit`).
-pub fn region_exit() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).pop_scope_mark_and_release() };
-    }
-}
-
-/// Pop two scope marks and release only the range between them
-/// (called by VM `RegionExitCall`).
-pub fn region_exit_call() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).pop_call_scope_marks_and_release() };
-    }
-}
-
-/// Rotate loop scope marks on the current FiberHeap (`RegionRotate`).
-pub fn region_rotate() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).rotate_scope_marks() };
-    }
-}
-
 // ── Refcounting (no-ops — refcounting removed) ────────────────────
 
 /// No-op: refcounting removed.
@@ -163,24 +129,6 @@ pub fn decref(_val: crate::value::Value) {}
 
 /// No-op: refcounting removed.
 pub fn decref_and_free(_val: crate::value::Value) {}
-
-/// Refcount-aware scope exit: pops scope mark and releases only
-/// refcount-0 objects. Pinned objects (refcount > 0) survive.
-pub fn region_exit_refcounted() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe {
-            let heap = &mut *ptr;
-            let mark = heap
-                .scope_marks
-                .pop()
-                .expect("RegionExitRefcounted without matching RegionEnter");
-            let dtors_before = heap.pool.dtors.len();
-            heap.release_refcounted(mark);
-            heap.scope_dtors_run += dtors_before - heap.pool.dtors.len();
-        };
-    }
-}
 
 /// Free all objects in a specific region on the current FiberHeap.
 pub fn free_region(region_id: u16) {
