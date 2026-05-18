@@ -2196,6 +2196,8 @@
    :>= >=
    :not not
    :pair pair
+   :push push
+   :put put
    :map map
    :filter filter
    :fold fold
