@@ -16,11 +16,12 @@
     (let [n (length coll)]
       (if (%eq n 0) (slice coll 0 0) (slice coll 0 (%sub n 1))))))
 
-## ── push / put ─────────────────────────────────────────────────────
-## Defined here (not as Rust primitives) so the region solver sees
-## through to %array-push/%put/%string-push/%bytes-push intrinsics.
+## ── Helpers (not exported) ─────────────────────────────────────────
+## core.lisp uses %array-push/%put/%string-push/%bytes-push directly
+## (not the user-facing push/put) because push/put are defined in
+## stdlib.lisp for the region solver to inline.
 
-(def push
+(def core-push
   (fn [coll val]
     (match (type-of coll)
       :array (%array-push coll val)
@@ -31,14 +32,7 @@
       :@bytes (%bytes-push coll val)
       _
         (emit :error {:error :type-error
-                      :message (string "push: expected array, string, or bytes, got "
-                                       (type coll))}))))
-
-(def put
-  (fn [coll key & rest]
-    (if (empty? rest) (add coll key) (%put coll key (first rest)))))
-
-## ── Helpers (not exported) ─────────────────────────────────────────
+                      :message (string "push: unsupported type " (type coll))}))))
 
 (def push-all
   (fn [dst src]
@@ -46,7 +40,7 @@
                   (if (empty? xs)
                     dst
                     (begin
-                      (push dst (first xs))
+                      (core-push dst (first xs))
                       (go (rest xs)))))]
       (go (->array src)))))
 
@@ -56,7 +50,7 @@
                   (if (empty? ks)
                     dst
                     (begin
-                      (put dst (first ks) (get src (first ks)))
+                      (%put dst (first ks) (get src (first ks)))
                       (go (rest ks)))))]
       (go (keys src)))))
 
@@ -87,7 +81,7 @@
                         (if (%lt i 0)
                           nil
                           (begin
-                            (push r (get coll i))
+                            (core-push r (get coll i))
                             (go (%sub i 1)))))]
             (go (%sub n 1)))
           (match t

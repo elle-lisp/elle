@@ -454,6 +454,29 @@
   "Construct a pair with head and tail."
   (%pair a b))
 
+## ── Collection mutation ─────────────────────────────────────────────
+## Defined in stdlib (same compilation unit as user code) so the region
+## solver inlines the Lambda body and sees the %array-push/%put
+## intrinsics, generating the correct escape constraints.
+
+(defn push [coll val]
+  "Append val to coll. Mutates @array/@string/@bytes in place; returns new collection for immutable types."
+  (match (type-of coll)
+    :array (%array-push coll val)
+    :@array (%array-push coll val)
+    :string (%string-push coll val)
+    :@string (%string-push coll val)
+    :bytes (%bytes-push coll val)
+    :@bytes (%bytes-push coll val)
+    _
+      (error {:error :type-error
+              :message (string "push: expected array, string, or bytes, got "
+                               (type coll))})))
+
+(defn put [coll key & rest]
+  "Associate key with val in coll. For sets, (put s val) delegates to add."
+  (if (empty? rest) (add coll key) (%put coll key (first rest))))
+
 ## ── Higher-order functions ──────────────────────────────────────────
 
 (defn map [f coll]
@@ -1502,7 +1525,7 @@
         joined @||  # set of fibers whose result was observed
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
         park-queues @{}
-        forwarded-pending @{}]  # id → {:queue @[] :wake-box box} (process scheduler I/O)
+        forwarded-pending @{}]
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
       (del select-sets waiter))
@@ -1717,9 +1740,6 @@
       "Wait for I/O completions and route fibers."
       (let [completions (io/wait backend timeout-ms)
             @has-forwarded false]
-        # Process all completions — push forwarded ones to queue without
-        # waking the process scheduler yet (it would run and miss later
-        # completions in this batch).
         (each c in completions
           (let* [id (get c :id)
                  fiber (get pending id)]
@@ -1739,15 +1759,13 @@
                   (del forwarded-pending id)
                   (push fwd:queue c)
                   (rebox fwd:wake-box (+ (unbox fwd:wake-box) 1))
-                  (assign has-forwarded true))))))
-        # After all completions are queued, wake parked process schedulers
+                  (assign has-forwarded true))))))  # After all completions are queued, wake parked process schedulers
         (when has-forwarded
           (let [q (get park-queues :io-forward-wakeup)]
             (when (and q (> (length q) 0))
               (let [parked (get q 0)]
                 (remove q 0)
-                (when (= (length q) 0)
-                  (del park-queues :io-forward-wakeup))
+                (when (= (length q) 0) (del park-queues :io-forward-wakeup))
                 (fiber/resume parked nil)
                 (handle-fiber-after-resume parked)))))))
 
