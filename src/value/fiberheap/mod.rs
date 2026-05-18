@@ -224,6 +224,8 @@ impl FiberHeap {
             }
             state.custom_ptrs.truncate(start);
         }
+
+        self.pool.alloc_count = mark.position();
     }
 
     /// Free all objects whose region_id matches `region`.
