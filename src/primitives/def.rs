@@ -63,6 +63,42 @@ const fn _default_prim(
     panic!("PrimitiveDef::DEFAULT func called — this is a bug")
 }
 
+/// Declare a `pub(crate) const PRIMITIVES: &[PrimitiveDef]` table.
+///
+/// Each entry is `"name" => func_name { key: value, ... }`.
+/// Only `name` and `func` are required; all other fields default to
+/// the values in `PrimitiveDef::DEFAULT`.
+///
+/// ```ignore
+/// primitive! {
+///     "math/sqrt" => prim_sqrt {
+///         signal: Signal::errors(), arity: Arity::Exact(1),
+///         doc: "Square root.", params: &["x"],
+///         category: "math", example: "(math/sqrt 16)",
+///         aliases: &["sqrt"],
+///     }
+///     "and" => prim_and {
+///         arity: Arity::AtLeast(0),
+///         doc: "Logical AND.",
+///         category: "logic", example: "(and true false)",
+///     }
+/// }
+/// ```
+macro_rules! primitive {
+    ( $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
+        pub(crate) const PRIMITIVES: &[crate::primitives::def::PrimitiveDef] = &[
+            $(
+                crate::primitives::def::PrimitiveDef {
+                    name: $name,
+                    func: $func,
+                    $( $key : $val, )*
+                    ..crate::primitives::def::PrimitiveDef::DEFAULT
+                }
+            ),*
+        ];
+    };
+}
+
 /// No-op primitive: returns (SIG_OK, nil). Used by ad-hoc Value::native_fn
 /// creation in tests and FFI wrappers.
 fn _noop_prim(

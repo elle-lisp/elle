@@ -15,6 +15,7 @@ pub mod concurrency;
 pub mod config;
 pub mod convert;
 pub mod debug;
+#[macro_use]
 pub mod def;
 pub mod disassembly;
 pub mod display;

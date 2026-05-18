@@ -1,5 +1,3 @@
-use crate::primitives::def::PrimitiveDef;
-use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -44,28 +42,15 @@ pub(crate) fn prim_or(args: &[Value]) -> (SignalBits, Value) {
 
 // xor — now implemented in Elle (src/stdlib.lisp)
 
-/// Declarative primitive definitions for logic operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "and",
-        func: prim_and,
-        signal: Signal::silent(),
+primitive! {
+    "and" => prim_and {
         arity: Arity::AtLeast(0),
         doc: "Logical AND operation (non-short-circuiting function form)",
-        params: &[],
-        category: "logic",
-        example: "(and true false)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "or",
-        func: prim_or,
-        signal: Signal::silent(),
+        category: "logic", example: "(and true false)",
+    }
+    "or" => prim_or {
         arity: Arity::AtLeast(0),
         doc: "Logical OR operation (non-short-circuiting function form)",
-        params: &[],
-        category: "logic",
-        example: "(or false true)",
-        aliases: &[],
-    },
-];
+        category: "logic", example: "(or false true)",
+    }
+}
