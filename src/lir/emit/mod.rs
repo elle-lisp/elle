@@ -1112,6 +1112,20 @@ impl Emitter {
                 self.pop(); // array
                 self.push_reg(*dst);
             }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                self.ensure_binary_on_top(*string, *value);
+                self.bytecode.emit(Instruction::IntrStringPush);
+                self.pop(); // value
+                self.pop(); // string
+                self.push_reg(*dst);
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                self.ensure_binary_on_top(*bytes, *value);
+                self.bytecode.emit(Instruction::IntrBytesPush);
+                self.pop(); // value
+                self.pop(); // bytes
+                self.push_reg(*dst);
+            }
             LirInstr::Pop { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrPop);

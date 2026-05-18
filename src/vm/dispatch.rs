@@ -640,6 +640,12 @@ impl VM {
                 Instruction::IntrPush => {
                     types::handle_intr_push(self);
                 }
+                Instruction::IntrStringPush => {
+                    types::handle_intr_string_push(self);
+                }
+                Instruction::IntrBytesPush => {
+                    types::handle_intr_bytes_push(self);
+                }
                 Instruction::IntrPop => {
                     types::handle_intr_pop(self);
                 }

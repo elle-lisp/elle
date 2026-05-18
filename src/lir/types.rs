@@ -915,6 +915,18 @@ pub enum LirInstr {
         array: Reg,
         value: Reg,
     },
+    /// Append string to @string (2 args: string, value)
+    IntrStringPush {
+        dst: Reg,
+        string: Reg,
+        value: Reg,
+    },
+    /// Append byte to @bytes (2 args: bytes, value)
+    IntrBytesPush {
+        dst: Reg,
+        bytes: Reg,
+        value: Reg,
+    },
     /// @array pop (1 arg, returns popped value)
     Pop {
         dst: Reg,

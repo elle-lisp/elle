@@ -814,6 +814,12 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
             assert!(!b.contains(SIG_ERROR), "%push: intrinsic contract violated");
             (SIG_OK, r)
         }
+        x if x == DataOp::IntrStringPushOp as i32 => {
+            panic!("not yet implemented: IntrStringPush in WASM linker");
+        }
+        x if x == DataOp::IntrBytesPushOp as i32 => {
+            panic!("not yet implemented: IntrBytesPush in WASM linker");
+        }
         x if x == DataOp::IntrPopOp as i32 => {
             let (b, r) = crate::primitives::array::prim_pop(&args[..1]);
             assert!(!b.contains(SIG_ERROR), "%pop: intrinsic contract violated");

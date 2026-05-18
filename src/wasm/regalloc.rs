@@ -272,6 +272,8 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::Freeze { dst, .. }
         | LirInstr::Thaw { dst, .. }
         | LirInstr::IntrPush { dst, .. }
+        | LirInstr::IntrStringPush { dst, .. }
+        | LirInstr::IntrBytesPush { dst, .. }
         | LirInstr::Identical { dst, .. } => f(*dst),
 
         LirInstr::StoreLocal { .. }
@@ -392,6 +394,14 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
 
         LirInstr::IntrPush { array, value, .. } => {
             f(*array);
+            f(*value);
+        }
+        LirInstr::IntrStringPush { string, value, .. } => {
+            f(*string);
+            f(*value);
+        }
+        LirInstr::IntrBytesPush { bytes, value, .. } => {
+            f(*bytes);
             f(*value);
         }
         LirInstr::Get { obj, key, .. }

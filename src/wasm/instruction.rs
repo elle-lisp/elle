@@ -394,6 +394,12 @@ impl WasmEmitter {
             LirInstr::IntrPush { dst, array, value } => {
                 self.emit_data_op2(f, *dst, OP_INTR_PUSH, *array, *value);
             }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                self.emit_data_op2(f, *dst, OP_INTR_STRING_PUSH, *string, *value);
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                self.emit_data_op2(f, *dst, OP_INTR_BYTES_PUSH, *bytes, *value);
+            }
             LirInstr::Pop { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_INTR_POP, *src);
             }

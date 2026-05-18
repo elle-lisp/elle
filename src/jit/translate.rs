@@ -1346,6 +1346,12 @@ impl<'a> FunctionTranslator<'a> {
                     self.call_helper_value_binary(builder, self.helpers.intr_push, at, ap, vt, vp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
+            LirInstr::IntrStringPush { .. } => {
+                panic!("not yet implemented: IntrStringPush in JIT");
+            }
+            LirInstr::IntrBytesPush { .. } => {
+                panic!("not yet implemented: IntrBytesPush in JIT");
+            }
             LirInstr::Pop { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.pop, st, sp)?;

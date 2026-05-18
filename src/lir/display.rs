@@ -305,6 +305,12 @@ impl fmt::Display for LirInstr {
             LirInstr::IntrPush { dst, array, value } => {
                 write!(f, "{} ← push({}, {})", dst, array, value)
             }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                write!(f, "{} ← string-push({}, {})", dst, string, value)
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                write!(f, "{} ← bytes-push({}, {})", dst, bytes, value)
+            }
             LirInstr::Pop { dst, src } => write!(f, "{} ← pop({})", dst, src),
 
             // Mutability

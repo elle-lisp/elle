@@ -40,10 +40,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_put,
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
-        doc: "Put a value into a collection. For immutable structs/arrays/strings: returns a new collection. For mutable @struct/@array/@string: mutates in place and returns the same reference. For sets: (put set value) delegates to add.",
+        doc: "Put a value into a collection.",
         params: &["collection", "key-or-value", "value"],
         category: "struct",
-        example: "(put {:a 1} :b 2) #=> {:a 1 :b 2}\n(put |1 2| 3) #=> |1 2 3|",
+        example: "(put {:a 1} :b 2) #=> {:a 1 :b 2}",
         aliases: &[],
     },
     PrimitiveDef {

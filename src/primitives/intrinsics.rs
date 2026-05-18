@@ -480,6 +480,49 @@ fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+fn prim_string_push(args: &[Value]) -> (SignalBits, Value) {
+    let collection = &args[0];
+    let value = args[1];
+    let s = match value.with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => return type_err("%string-push value", "string", &value),
+    };
+    if let Some(buf_ref) = collection.as_string_mut() {
+        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
+        (SIG_OK, *collection)
+    } else if collection.is_string() {
+        let new = collection
+            .with_string(|base| {
+                let mut r = base.to_string();
+                r.push_str(&s);
+                Value::string(r)
+            })
+            .unwrap();
+        (SIG_OK, new)
+    } else {
+        type_err("%string-push", "string", collection)
+    }
+}
+
+fn prim_bytes_push(args: &[Value]) -> (SignalBits, Value) {
+    let collection = &args[0];
+    let value = args[1];
+    let byte = match value.as_int() {
+        Some(i) => i as u8,
+        None => return type_err("%bytes-push value", "integer", &value),
+    };
+    if let Some(buf_ref) = collection.as_bytes_mut() {
+        buf_ref.borrow_mut().push(byte);
+        (SIG_OK, *collection)
+    } else if let Some(data) = collection.as_bytes() {
+        let mut new = data.to_vec();
+        new.push(byte);
+        (SIG_OK, Value::bytes(new))
+    } else {
+        type_err("%bytes-push", "bytes", collection)
+    }
+}
+
 // ── Mutability ──────────────────────────────────────────────────────
 
 fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
@@ -979,6 +1022,24 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Remove/return last element",
         params: &["arr"],
+        category: "intrinsic",
+        ..PrimitiveDef::DEFAULT
+    },
+    PrimitiveDef {
+        name: "%string-push",
+        func: prim_string_push,
+        arity: Arity::Exact(2),
+        doc: "Append string to string/@string",
+        params: &["s", "val"],
+        category: "intrinsic",
+        ..PrimitiveDef::DEFAULT
+    },
+    PrimitiveDef {
+        name: "%bytes-push",
+        func: prim_bytes_push,
+        arity: Arity::Exact(2),
+        doc: "Append byte to bytes/@bytes",
+        params: &["b", "val"],
         category: "intrinsic",
         ..PrimitiveDef::DEFAULT
     },

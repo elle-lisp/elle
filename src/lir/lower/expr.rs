@@ -1242,6 +1242,20 @@ impl<'a> Lowerer<'a> {
                     value: arg_regs[1],
                 });
             }
+            IntrinsicOp::StringPush => {
+                self.emit(LirInstr::IntrStringPush {
+                    dst,
+                    string: arg_regs[0],
+                    value: arg_regs[1],
+                });
+            }
+            IntrinsicOp::BytesPush => {
+                self.emit(LirInstr::IntrBytesPush {
+                    dst,
+                    bytes: arg_regs[0],
+                    value: arg_regs[1],
+                });
+            }
             IntrinsicOp::Pop => {
                 self.emit(LirInstr::Pop {
                     dst,

@@ -339,9 +339,12 @@ pub enum Instruction {
 
     /// Free all objects in a specific region.
     /// Operand: u16 region_id.
-    /// Walks the slab linked list and frees every slot whose
-    /// region_id matches. No scope marks involved.
     FreeRegion,
+
+    /// Append string to @string (pops value, pops string, pushes string)
+    IntrStringPush,
+    /// Append byte to @bytes (pops value, pops bytes, pushes bytes)
+    IntrBytesPush,
 }
 
 /// Compiled bytecode with constants
