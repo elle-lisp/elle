@@ -101,9 +101,15 @@ pub(crate) struct Slab {
     pub(crate) alloc_next: Vec<u32>,
     /// Per-slot region id. Indexed by flat slot index. 0 = default
     /// (private region). Non-zero values identify named regions from
-    /// the function's region table. Stamped at allocation time;
-    /// read by `region_of()` to route incref/decref to regions.
+    /// the function's region table. Stamped at allocation time.
     pub(crate) region_ids: Vec<u16>,
+    /// Per-slot next link in the region's singly-linked list.
+    /// Used by `free_region()` to walk only the slots in a specific
+    /// region in O(k) time instead of O(n) over all live objects.
+    pub(crate) region_next: Vec<u32>,
+    /// Head of each region's singly-linked list (indexed by region_id).
+    /// Grows on demand when `set_region` is called with a new id.
+    pub(crate) region_heads: Vec<u32>,
 }
 
 impl Slab {
@@ -116,6 +122,8 @@ impl Slab {
             alloc_prev: Vec::new(),
             alloc_next: Vec::new(),
             region_ids: Vec::new(),
+            region_next: Vec::new(),
+            region_heads: Vec::new(),
         }
     }
 
@@ -128,8 +136,9 @@ impl Slab {
             let slot = self.chunks[chunk_idx].slot(slot_idx);
             let next: Option<u32> = unsafe { std::ptr::read(slot as *const Option<u32>) };
             self.free_head = next;
-            // Reset region for reused slot.
+            // Reset region and region-list link for reused slot.
             self.region_ids[flat as usize] = 0;
+            self.region_next[flat as usize] = ALLOC_NIL;
             unsafe { std::ptr::write(slot as *mut HeapObject, obj) };
             slot as *mut HeapObject
         } else {
@@ -181,6 +190,8 @@ impl Slab {
         self.alloc_prev.clear();
         self.alloc_next.clear();
         self.region_ids.clear();
+        self.region_next.clear();
+        self.region_heads.clear();
         self.chunks.truncate(1);
         if let Some(chunk) = self.chunks.first() {
             unsafe {
@@ -246,15 +257,26 @@ impl Slab {
         }
     }
 
-    /// Set the region id for a slot. Called at allocation time when the
-    /// active region is non-zero.
+    /// Set the region id for a slot and link it into the region's list.
+    /// Called at allocation time when the active region is non-zero.
     #[inline]
-    #[allow(dead_code)]
     pub fn set_region(&mut self, ptr: *const HeapObject, region: u16) {
         let flat = self.ptr_to_flat(ptr as *mut HeapObject);
-        if flat < self.region_ids.len() {
-            self.region_ids[flat] = region;
+        if flat >= self.region_ids.len() {
+            return;
         }
+        self.region_ids[flat] = region;
+        if region == 0 {
+            return;
+        }
+        // Grow region_heads if needed.
+        let rid = region as usize;
+        if rid >= self.region_heads.len() {
+            self.region_heads.resize(rid + 1, ALLOC_NIL);
+        }
+        // Prepend to the region's singly-linked list.
+        self.region_next[flat] = self.region_heads[rid];
+        self.region_heads[rid] = flat as u32;
     }
 
     // ── Private helpers ──────────────────────────────────────────────
@@ -268,6 +290,7 @@ impl Slab {
         self.alloc_prev.resize(total_slots, ALLOC_NIL);
         self.alloc_next.resize(total_slots, ALLOC_NIL);
         self.region_ids.resize(total_slots, 0);
+        self.region_next.resize(total_slots, ALLOC_NIL);
     }
 
     /// Convert a flat slot index to `(chunk_index, slot_within_chunk)`.

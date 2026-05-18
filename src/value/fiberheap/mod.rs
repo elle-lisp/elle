@@ -228,28 +228,33 @@ impl FiberHeap {
 
     /// Free all objects whose region_id matches `region`.
     ///
-    /// Walks the slab's allocation linked list. For each slot where
-    /// `region_of(slot) == region`, runs the destructor (if needed),
-    /// returns the slot to the free list, and unlinks it from the list.
+    /// Walks the region's per-region singly-linked list (O(k) in the
+    /// number of objects in that region, not O(n) in total live objects).
+    /// For each slot: runs destructor if needed, unlinks from the global
+    /// allocation list, returns the slab slot to the free list.
     pub fn free_region(&mut self, region: u16) {
         use super::fiberheap::slab::ALLOC_NIL;
 
-        let mut cur = self.pool.alloc_head;
+        let rid = region as usize;
+        if rid >= self.pool.slab.region_heads.len() {
+            return; // no slots in this region
+        }
+
+        let mut cur = self.pool.slab.region_heads[rid];
+        self.pool.slab.region_heads[rid] = ALLOC_NIL;
+
         while cur != ALLOC_NIL {
-            let next = self.pool.slab.alloc_next[cur as usize];
-            if self.pool.slab.region_ids[cur as usize] == region {
-                let ptr = self.pool.slab.flat_to_ptr(cur as usize);
-                // Run destructor if needed.
-                if needs_drop(unsafe { (*ptr).tag() }) {
-                    unsafe { std::ptr::drop_in_place(ptr) };
-                    // Null the dtor entry so run_dtors won't double-free.
-                    self.pool.remove_from_dtors(ptr);
-                }
-                // Unlink from allocation list and return to free list.
-                self.pool.unlink_alloc(cur);
-                self.pool.slab.dealloc(ptr);
-                self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
+            let next = self.pool.slab.region_next[cur as usize];
+            let ptr = self.pool.slab.flat_to_ptr(cur as usize);
+            // Run destructor if needed.
+            if needs_drop(unsafe { (*ptr).tag() }) {
+                unsafe { std::ptr::drop_in_place(ptr) };
+                self.pool.remove_from_dtors(ptr);
             }
+            // Unlink from global allocation list and return to free list.
+            self.pool.unlink_alloc(cur);
+            self.pool.slab.dealloc(ptr);
+            self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
             cur = next;
         }
     }
