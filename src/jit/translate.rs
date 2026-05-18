@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{InstBuilder, MemFlags};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
@@ -1117,6 +1117,13 @@ impl<'a> FunctionTranslator<'a> {
                     .declare_func_in_func(self.helpers.region_exit, builder.func);
                 let call = builder.ins().call(func_ref, &[]);
                 let _ = builder.inst_results(call);
+            }
+            LirInstr::FreeRegion { region_id } => {
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.free_region, builder.func);
+                let rid = builder.ins().iconst(I32, *region_id as i64);
+                builder.ins().call(func_ref, &[rid]);
             }
 
             LirInstr::DropSlot { slot } => {

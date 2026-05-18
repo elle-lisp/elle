@@ -18,7 +18,7 @@
 //!   value_binary_vm: (atag, apay, btag, bpay, vm) -> (tag, payload) = 5 params, 2 returns
 //!   call: (ftag, fpay, args_ptr, nargs, vm) -> (tag, payload) = 5 params, 2 returns
 
-use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -106,6 +106,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) region_exit: FuncId,
     pub(crate) region_exit_call: FuncId,
     pub(crate) region_rotate: FuncId,
+    pub(crate) free_region: FuncId,
     pub(crate) rotate_pools: FuncId,
     pub(crate) incref: FuncId,
     pub(crate) decref: FuncId,
@@ -344,6 +345,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_region_rotate as *const u8,
     );
     builder.symbol(
+        "elle_jit_free_region",
+        dispatch::elle_jit_free_region as *const u8,
+    );
+    builder.symbol(
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
@@ -559,6 +564,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
         region_exit_call: declare(module, "elle_jit_region_exit_call", &void_to_value)?,
         region_rotate: declare(module, "elle_jit_region_rotate", &void_to_value)?,
+        free_region: declare(module, "elle_jit_free_region", &make_sig(module, &[I32], &[]))?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
         incref: declare(module, "elle_jit_incref", &value_unary)?,
         decref: declare(module, "elle_jit_decref", &value_unary)?,

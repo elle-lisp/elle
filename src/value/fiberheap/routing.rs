@@ -182,6 +182,39 @@ pub fn region_exit_refcounted() {
     }
 }
 
+/// Free all objects in a specific region on the current FiberHeap.
+pub fn free_region(region_id: u16) {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).free_region(region_id) };
+    }
+}
+
+/// Stamp a region id on a just-allocated heap value.
+///
+/// Called by the VM dispatch loop after each allocating instruction.
+/// No-op when `region_id == 0` (default/global region) or when the
+/// value is not a heap pointer.
+#[inline]
+pub fn stamp_region(val: crate::value::Value, region_id: u16) {
+    if region_id == 0 {
+        return;
+    }
+    let ptr = current_heap_ptr();
+    if ptr.is_null() {
+        return;
+    }
+    if let Some(heap_ptr) = val.as_heap_ptr() {
+        unsafe {
+            let heap = &mut *ptr;
+            heap.pool.slab.set_region(
+                heap_ptr as *const crate::value::heap::HeapObject,
+                region_id,
+            );
+        }
+    }
+}
+
 /// Drop a single heap value: if owned by the current pool, run its
 /// destructor, return the slab slot to the free list.
 pub fn drop_slot_value(val: crate::value::Value) {

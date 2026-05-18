@@ -22,24 +22,11 @@ impl<'a> Lowerer<'a> {
                 return Ok(result);
             }
 
-            // Call-scoped reclamation: wrap the call in two RegionEnters
-            // (before args, after args) + RegionExitCall (after Call).
-            // RegionExitCall pops both marks and frees only the arg range
-            // [mark1..mark2), leaving the callee's allocations intact.
-            let call_scoped = !is_tail && self.can_scope_allocate_call(func, args, call_signals);
-            if call_scoped {
-                self.emit_region_enter(); // mark1: before arg evaluation
-            }
-
             let mut arg_regs = Vec::new();
             for arg in args {
                 arg_regs.push(self.lower_expr(&arg.expr)?);
             }
             let func_reg = self.lower_expr(func)?;
-
-            if call_scoped {
-                self.emit_region_enter(); // mark2: barrier before Call
-            }
 
             // Determine if the compiler verified arity for this call.
             // True when the callee is a primitive binding that hasn't been
@@ -105,11 +92,6 @@ impl<'a> Lowerer<'a> {
                         args: arg_regs,
                         arity_checked,
                     });
-                }
-                if call_scoped {
-                    self.emit(LirInstr::RegionExitCall);
-                    self.region_depth -= 2; // both marks consumed
-                    self.scope_stats.calls_scoped += 1;
                 }
                 Ok(dst)
             }

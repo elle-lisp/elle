@@ -210,13 +210,23 @@ impl VM {
                 // Closures
                 Instruction::MakeClosure => {
                     closure::handle_make_closure(self, bc, &mut ip, consts);
-                    let _region_id = self.read_u16(bc, &mut ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    if region_id != 0 {
+                        if let Some(top) = self.fiber.stack.last() {
+                            crate::value::fiberheap::stamp_region(*top, region_id);
+                        }
+                    }
                 }
 
                 // Data structures
                 Instruction::Pair => {
-                    let _region_id = self.read_u16(bc, &mut ip);
+                    let region_id = self.read_u16(bc, &mut ip);
                     data::handle_list(self);
+                    if region_id != 0 {
+                        if let Some(top) = self.fiber.stack.last() {
+                            crate::value::fiberheap::stamp_region(*top, region_id);
+                        }
+                    }
                 }
                 Instruction::First => {
                     data::handle_first(self);
@@ -226,7 +236,12 @@ impl VM {
                 }
                 Instruction::MakeArrayMut => {
                     data::handle_make_array(self, bc, &mut ip);
-                    let _region_id = self.read_u16(bc, &mut ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    if region_id != 0 {
+                        if let Some(top) = self.fiber.stack.last() {
+                            crate::value::fiberheap::stamp_region(*top, region_id);
+                        }
+                    }
                 }
                 Instruction::ArrayMutRef => {
                     data::handle_array_ref(self);
@@ -396,8 +411,13 @@ impl VM {
 
                 // Box operations
                 Instruction::MakeCapture => {
-                    let _region_id = self.read_u16(bc, &mut ip);
+                    let region_id = self.read_u16(bc, &mut ip);
                     capture::handle_make_capture(self);
+                    if region_id != 0 {
+                        if let Some(top) = self.fiber.stack.last() {
+                            crate::value::fiberheap::stamp_region(*top, region_id);
+                        }
+                    }
                 }
                 Instruction::UnwrapCapture => {
                     capture::handle_unwrap_capture(self);
@@ -469,6 +489,11 @@ impl VM {
                 }
                 Instruction::RegionExitRefcounted => {
                     crate::value::fiberheap::region_exit_refcounted();
+                }
+
+                Instruction::FreeRegion => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::free_region(region_id);
                 }
 
                 Instruction::DropSlot => {

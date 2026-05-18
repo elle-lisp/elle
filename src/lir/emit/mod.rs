@@ -948,6 +948,10 @@ impl Emitter {
             LirInstr::RegionExitRefcounted => {
                 self.bytecode.emit(Instruction::RegionExitRefcounted);
             }
+            LirInstr::FreeRegion { region_id } => {
+                self.bytecode.emit(Instruction::FreeRegion);
+                self.bytecode.emit_u16(*region_id);
+            }
 
             LirInstr::DropSlot { slot } => {
                 self.bytecode.emit(Instruction::DropSlot);

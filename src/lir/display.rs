@@ -258,6 +258,7 @@ impl fmt::Display for LirInstr {
             LirInstr::RegionExitCall => f.write_str("region-exit-call"),
             LirInstr::RegionRotate => f.write_str("region-rotate"),
             LirInstr::RegionExitRefcounted => f.write_str("region-exit-refcounted"),
+            LirInstr::FreeRegion { region_id } => write!(f, "free-region {region_id}"),
             LirInstr::DropSlot { slot } => write!(f, "drop-slot {slot}"),
             LirInstr::DecrefLocal { slot } => write!(f, "decref-local {slot}"),
             LirInstr::FlipEnter => f.write_str("flip-enter"),

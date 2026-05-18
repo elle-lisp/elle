@@ -10,30 +10,20 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         hir_id: HirId,
     ) -> Result<Reg, String> {
-        // Region inference provides a conservative first pass; escape
-        // analysis validates remaining safety conditions the solver cannot
-        // yet model (outward sets through unknown calls, etc.).
-        let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
-        // Allocate result-protection slot BEFORE RegionEnter so it's
-        // outside the region. StoreLocal to this slot increfs the result,
-        // keeping it alive through DecrefLocal + release at scope exit.
-        let result_protect_slot = if scoped {
-            let slot = self.current_func.num_locals;
-            self.current_func.num_locals += 1;
-            self.emit_region_enter();
-            Some(slot)
+        let region_id = if self.region_scope_check(hir_id) {
+            self.scope_region_id(hir_id)
         } else {
-            None
+            0
         };
+        if region_id != 0 {
+            self.active_region_ids.push(region_id);
+        }
 
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
-            // Seed immutable_values for constant bindings before lowering
-            // so nested lambdas can see the constant.
             self.try_seed_immutable(*binding, init);
 
             let init_reg = self.lower_expr(init)?;
-            // Record rotation_safe for lambda bindings.
             if matches!(init.kind, HirKind::Lambda { .. }) {
                 if let Some(block) = self.current_func.blocks.last() {
                     for instr in block.instructions.iter().rev() {
@@ -48,13 +38,8 @@ impl<'a> Lowerer<'a> {
                 }
             }
             let slot = self.allocate_slot(*binding);
-
-            // Check if this binding needs to be wrapped in a cell
             let needs_capture = self.arena.get(*binding).needs_capture();
 
-            // Inside lambdas, only LBox-wrapped locals need upvalue treatment
-            // (StoreCapture assumes LBox indirection). Plain let bindings use
-            // StoreLocal — the slot index from allocate_slot is valid for both.
             if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
                 self.emit(LirInstr::StoreCapture {
@@ -76,31 +61,20 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
-        // When the body is a tail call and the scope is allocated, we can't
-        // emit RegionExit after the body — TailCall replaces the frame, making
-        // any post-body instructions dead code. Instead, increment the pending
-        // counter so that TailCall lowering emits raw RegionExit instructions
-        // between arg computation and the TailCall instruction itself.
-        let tail_scoped = scoped && Self::body_is_tail_call(body);
+        // For tail calls in scoped lets, emit FreeRegion before the
+        // tail call via the pending mechanism.
+        let tail_scoped = region_id != 0 && Self::body_is_tail_call(body);
         if tail_scoped {
-            self.pending_region_exits += 1;
+            self.pending_free_regions.push(region_id);
         }
         let result = self.lower_expr(body)?;
         if tail_scoped {
-            self.pending_region_exits -= 1;
-            self.region_depth -= 1;
-        } else if let Some(protect_slot) = result_protect_slot {
-            self.emit(LirInstr::StoreLocal {
-                slot: protect_slot,
-                src: result,
-            });
-            self.emit_region_exit();
-            let reloaded = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal {
-                dst: reloaded,
-                slot: protect_slot,
-            });
-            return Ok(reloaded);
+            self.pending_free_regions.pop();
+        } else if region_id != 0 {
+            self.emit(LirInstr::FreeRegion { region_id });
+        }
+        if region_id != 0 {
+            self.active_region_ids.pop();
         }
         Ok(result)
     }
@@ -111,15 +85,14 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         hir_id: HirId,
     ) -> Result<Reg, String> {
-        let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
-        let result_protect_slot = if scoped {
-            let slot = self.current_func.num_locals;
-            self.current_func.num_locals += 1;
-            self.emit_region_enter();
-            Some(slot)
+        let region_id = if self.region_scope_check(hir_id) {
+            self.scope_region_id(hir_id)
         } else {
-            None
+            0
         };
+        if region_id != 0 {
+            self.active_region_ids.push(region_id);
+        }
 
         // First allocate all slots with nil (or cells containing nil)
         for (binding, _) in bindings.iter() {
@@ -198,26 +171,18 @@ impl<'a> Lowerer<'a> {
                 self.emit_binding_store(slot, init_reg);
             }
         }
-        let tail_scoped = scoped && Self::body_is_tail_call(body);
+        let tail_scoped = region_id != 0 && Self::body_is_tail_call(body);
         if tail_scoped {
-            self.pending_region_exits += 1;
+            self.pending_free_regions.push(region_id);
         }
         let result = self.lower_expr(body)?;
         if tail_scoped {
-            self.pending_region_exits -= 1;
-            self.region_depth -= 1;
-        } else if let Some(protect_slot) = result_protect_slot {
-            self.emit(LirInstr::StoreLocal {
-                slot: protect_slot,
-                src: result,
-            });
-            self.emit_region_exit();
-            let reloaded = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal {
-                dst: reloaded,
-                slot: protect_slot,
-            });
-            return Ok(reloaded);
+            self.pending_free_regions.pop();
+        } else if region_id != 0 {
+            self.emit(LirInstr::FreeRegion { region_id });
+        }
+        if region_id != 0 {
+            self.active_region_ids.pop();
         }
         Ok(result)
     }

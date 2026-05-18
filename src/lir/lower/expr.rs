@@ -330,16 +330,18 @@ impl<'a> Lowerer<'a> {
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped =
-            self.region_scope_check(hir_id) && self.can_scope_allocate_block(block_id, body);
+        let region_id = if self.region_scope_check(hir_id) {
+            self.scope_region_id(hir_id)
+        } else {
+            0
+        };
 
-        // Record region depth BEFORE emitting RegionEnter so that breaks
-        // targeting this block include the block's own region in their
-        // compensating RegionExit count.
-        let depth_before = self.region_depth;
+        // Record active_region_ids depth before the block so breaks
+        // can emit FreeRegion for regions entered since.
+        let region_stack_depth = self.active_region_ids.len();
 
-        if scoped {
-            self.emit_region_enter();
+        if region_id != 0 {
+            self.active_region_ids.push(region_id);
         }
 
         self.block_lower_contexts.push(BlockLowerContext {
@@ -347,10 +349,10 @@ impl<'a> Lowerer<'a> {
             result_reg,
             result_slot: block_result_slot,
             exit_label,
-            region_depth_at_entry: depth_before,
+            region_depth_at_entry: region_stack_depth as u32,
         });
 
-        // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
+        // Lower body
         if body.is_empty() {
             let nil_reg = self.emit_const(LirConst::Nil)?;
             self.emit(LirInstr::StoreLocal {
@@ -359,7 +361,7 @@ impl<'a> Lowerer<'a> {
             });
         } else {
             let mut last_reg = self.lower_expr(&body[0])?;
-            let can_drop = self.region_depth == 0;
+            let can_drop = self.active_region_ids.is_empty();
             for (i, expr) in body.iter().enumerate().skip(1) {
                 let prev = &body[i - 1];
                 if can_drop && self.expr_is_fresh_allocation(prev) {
@@ -377,8 +379,9 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.pop();
 
-        if scoped {
-            self.emit_region_exit();
+        if region_id != 0 {
+            self.emit(LirInstr::FreeRegion { region_id });
+            self.active_region_ids.pop();
         }
 
         // Normal exit: jump to the exit label
@@ -393,7 +396,6 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_break(&mut self, block_id: &BlockId, value: &Hir) -> Result<Reg, String> {
-        // Find the target block context
         let target = self
             .block_lower_contexts
             .iter()
@@ -403,53 +405,41 @@ impl<'a> Lowerer<'a> {
 
         let target_result_slot = target.result_slot;
         let target_exit_label = target.exit_label;
-        let target_region_depth = target.region_depth_at_entry;
+        let target_region_stack_depth = target.region_depth_at_entry as usize;
 
-        // Lower the value expression
         let value_reg = self.lower_expr(value)?;
 
-        // Store value to the block's result slot
         self.emit(LirInstr::StoreLocal {
             slot: target_result_slot,
             src: value_reg,
         });
 
-        // Emit compensating RegionExit for each region entered since the
-        // target block was opened. This ensures scope marks are popped
-        // correctly on early exit.
-        let compensating_exits = (self.region_depth - target_region_depth) as usize;
-        for _ in 0..compensating_exits {
-            self.emit(LirInstr::RegionExit);
+        // Emit FreeRegion for each region entered since the target block.
+        // Iterate from innermost (current) to the target's depth.
+        let regions_to_free: Vec<u16> = self.active_region_ids[target_region_stack_depth..].to_vec();
+        for &rid in regions_to_free.iter().rev() {
+            self.emit(LirInstr::FreeRegion { region_id: rid });
         }
-        // Note: we emit raw instructions (not emit_region_exit) because we
-        // don't want to decrement region_depth — the break jumps out of
-        // the block entirely, and the dead code after the break is
-        // unreachable. The block's RegionExit at the normal exit path
-        // handles the depth bookkeeping for the normal flow.
 
         self.terminate(Terminator::Jump(target_exit_label));
 
-        // Start a new (unreachable) block for any dead code after the break
         let dead_label = self.fresh_label();
         self.start_new_block(dead_label);
 
-        // Return a dummy register (code after break is dead)
         Ok(self.fresh_reg())
     }
 
     fn lower_while(&mut self, cond: &Hir, body: &Hir, hir_id: HirId) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let scope_eligible = self.region_loop_check(hir_id);
+        let region_id = if self.region_loop_check(hir_id) {
+            self.scope_region_id(hir_id)
+        } else {
+            0
+        };
 
         let cond_label = self.fresh_label();
         let body_label = self.fresh_label();
         let done_label = self.fresh_label();
-
-        // Double-buffered scope marks: push prev (guard) + curr before loop.
-        if scope_eligible {
-            self.emit_region_enter(); // prev (guard mark)
-            self.emit_region_enter(); // curr (first iteration)
-        }
 
         // Jump to condition check
         self.terminate(Terminator::Jump(cond_label));
@@ -469,23 +459,15 @@ impl<'a> Lowerer<'a> {
 
         let _body_reg = self.lower_expr(body)?;
 
-        // Back-edge: rotate scope marks (free prev iteration, start new curr)
-        if scope_eligible {
-            self.emit_region_rotate();
+        // Back-edge: free the loop body's region (objects from this iteration).
+        if region_id != 0 {
+            self.emit(LirInstr::FreeRegion { region_id });
         }
 
-        // The back-edge block is whatever block we're in after lowering
-        // the body (body lowering may have created intermediate blocks).
         self.terminate(Terminator::Jump(cond_label));
         self.finish_block();
-        // Done block — release both scope marks (curr + prev).
-        // The curr (iteration) region was already DecrefLocal'd by rotation,
-        // so use the no-decref variant to avoid double-decref.
+
         self.current_block = BasicBlock::new(done_label);
-        if scope_eligible {
-            self.emit_region_exit_no_decref(); // curr (rotation handled decrefs)
-            self.emit_region_exit(); // prev
-        }
         self.emit(LirInstr::Const {
             dst: result_reg,
             value: LirConst::Nil,
@@ -501,6 +483,11 @@ impl<'a> Lowerer<'a> {
     ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let scope_eligible = self.region_loop_check(hir_id);
+        let region_id = if scope_eligible {
+            self.scope_region_id(hir_id)
+        } else {
+            0
+        };
 
         let loop_label = self.fresh_label();
         let done_label = self.fresh_label();
@@ -514,12 +501,6 @@ impl<'a> Lowerer<'a> {
             binding_slots.push(slot);
         }
 
-        // Double-buffered scope marks: push prev (guard) + curr before loop.
-        if scope_eligible {
-            self.emit_region_enter(); // prev (guard mark)
-            self.emit_region_enter(); // curr (first iteration)
-        }
-
         // Jump to loop header
         self.terminate(Terminator::Jump(loop_label));
         self.finish_block();
@@ -527,23 +508,16 @@ impl<'a> Lowerer<'a> {
         // Loop body
         self.current_block = BasicBlock::new(loop_label);
 
-        // Save depth counters — Recur emits RegionRotate which doesn't
-        // change region_depth, but the normal exit path needs original depths.
-        let saved_region_depth = self.region_depth;
-
-        // Push loop context so Recur can find us
         self.loop_lower_contexts.push(LoopLowerContext {
             loop_label,
             binding_slots: binding_slots.clone(),
             scope_eligible,
+            region_id,
         });
 
         let body_reg = self.lower_expr(body)?;
 
         self.loop_lower_contexts.pop();
-
-        // Restore depth counters for normal exit path
-        self.region_depth = saved_region_depth;
 
         // If we reach here (no Recur), body_reg is the loop result.
         let result_slot = self.current_func.num_locals;
@@ -552,13 +526,6 @@ impl<'a> Lowerer<'a> {
             slot: result_slot,
             src: body_reg,
         });
-
-        // Release both scope marks (curr + prev).
-        // Curr (iteration) was already DecrefLocal'd by rotation.
-        if scope_eligible {
-            self.emit_region_exit_no_decref(); // curr
-            self.emit_region_exit(); // prev
-        }
 
         self.terminate(Terminator::Jump(done_label));
         self.finish_block();
@@ -580,7 +547,7 @@ impl<'a> Lowerer<'a> {
 
         let loop_label = ctx.loop_label;
         let binding_slots = ctx.binding_slots.clone();
-        let scope_eligible = ctx.scope_eligible;
+        let region_id = ctx.region_id;
 
         if args.len() != binding_slots.len() {
             return Err(format!(
@@ -590,23 +557,20 @@ impl<'a> Lowerer<'a> {
             ));
         }
 
-        // Evaluate all args before storing (avoid order-dependent overwrites)
+        // Evaluate all args before storing
         let mut arg_regs = Vec::with_capacity(args.len());
         for arg in args {
             arg_regs.push(self.lower_expr(arg)?);
         }
 
-        // Store new values to loop binding slots BEFORE rotating scope marks.
-        // With double-buffered marks, RegionRotate frees the PREVIOUS
-        // iteration's allocs, not the current one — so recur arg values
-        // survive the rotation even if they reference current-iteration allocs.
+        // Store new values to loop binding slots.
         for (reg, &slot) in arg_regs.iter().zip(&binding_slots) {
             self.emit(LirInstr::StoreLocal { slot, src: *reg });
         }
 
-        // Rotate scope marks: free prev iteration, start new curr
-        if scope_eligible {
-            self.emit_region_rotate();
+        // Free the loop body's region at back-edge (replaces RegionRotate).
+        if region_id != 0 {
+            self.emit(LirInstr::FreeRegion { region_id });
         }
 
         // Jump back to loop header

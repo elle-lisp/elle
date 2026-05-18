@@ -384,6 +384,12 @@ pub extern "C" fn elle_jit_region_rotate() -> JitValue {
     JitValue::nil()
 }
 
+/// Free all objects in a specific region by walking the slab linked list.
+#[no_mangle]
+pub extern "C" fn elle_jit_free_region(region_id: u32) {
+    crate::value::fiberheap::free_region(region_id as u16);
+}
+
 /// Increment the durable reference count for a heap value.
 /// Called by JIT `StoreLocal` to track binding references.
 #[no_mangle]

@@ -120,6 +120,8 @@ struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
     scope_eligible: bool,
+    /// Region id for FreeRegion at recur back-edge. 0 if not scoped.
+    region_id: u16,
 }
 
 /// Tracks an active block during lowering so `break` can find its
@@ -240,6 +242,8 @@ pub struct Lowerer<'a> {
     /// Used by `lower_break` to emit compensating `RegionExit`s.
     region_depth: u32,
     pending_region_exits: u32,
+    /// Pending FreeRegion region_ids to emit before tail calls.
+    pending_free_regions: Vec<u16>,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
     /// Scratch slot for discarding unused intermediate values.
@@ -271,6 +275,9 @@ pub struct Lowerer<'a> {
     /// Maps Region(u32) from region inference to u16 index in the
     /// function's region_table. Lazily populated by `alloc_region_id()`.
     region_to_table: HashMap<crate::hir::region::Region, u16>,
+    /// Stack of active region ids for FreeRegion emission on break.
+    /// Pushed when a scope enters (FreeRegion-style), popped at scope exit.
+    active_region_ids: Vec<u16>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -310,6 +317,7 @@ impl<'a> Lowerer<'a> {
             block_lower_contexts: Vec::new(),
             region_depth: 0,
             pending_region_exits: 0,
+            pending_free_regions: Vec::new(),
             scope_stats: ScopeStats::default(),
             discard_slot: None,
             symbol_names: HashMap::new(),
@@ -320,6 +328,7 @@ impl<'a> Lowerer<'a> {
             region_info: RegionInfo::empty(),
             current_hir_id: None,
             region_to_table: HashMap::new(),
+            active_region_ids: Vec::new(),
         }
     }
 
@@ -720,6 +729,26 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Look up the u16 region table id for a scope's region.
+    /// Returns 0 if the scope has no region or it's global.
+    fn scope_region_id(&mut self, hir_id: HirId) -> u16 {
+        let region = match self.region_info.scope_region.get(&hir_id) {
+            Some(r) => *r,
+            None => return 0,
+        };
+        if region.is_global() {
+            return 0;
+        }
+        if let Some(&table_id) = self.region_to_table.get(&region) {
+            table_id
+        } else {
+            let table_id = self.current_func.region_table.len() as u16 + 1;
+            self.current_func.region_table.push(table_id);
+            self.region_to_table.insert(region, table_id);
+            table_id
+        }
+    }
+
     fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {
         let dst = self.fresh_reg();
         self.emit(LirInstr::Const { dst, value: c });
@@ -760,18 +789,31 @@ impl<'a> Lowerer<'a> {
         self.region_depth += 1;
     }
 
+    /// Emit `FreeRegion` for a scope's region.
+    fn emit_free_region(&mut self, hir_id: HirId) {
+        let region_id = self.scope_region_id(hir_id);
+        if region_id != 0 {
+            self.emit(LirInstr::FreeRegion { region_id });
+        }
+    }
+
     /// Emit a store for a named binding.
     fn emit_binding_store(&mut self, slot: u16, src: Reg) {
         self.emit(LirInstr::StoreLocal { slot, src });
     }
 
 
-    /// Emit pending RegionExits. Called at tail-call sites where
-    /// region exits are deferred.
+    /// Emit pending RegionExits and FreeRegions. Called at tail-call
+    /// sites where region cleanup is deferred.
     fn emit_pending_region_exits(&mut self) {
         let n = self.pending_region_exits as usize;
         for _ in 0..n {
             self.emit(LirInstr::RegionExit);
+        }
+        // Emit pending FreeRegions (new per-value region system).
+        let pending: Vec<u16> = self.pending_free_regions.clone();
+        for region_id in pending {
+            self.emit(LirInstr::FreeRegion { region_id });
         }
     }
 

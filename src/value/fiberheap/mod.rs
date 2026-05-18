@@ -255,6 +255,34 @@ impl FiberHeap {
         self.release(mark);
     }
 
+    /// Free all objects whose region_id matches `region`.
+    ///
+    /// Walks the slab's allocation linked list. For each slot where
+    /// `region_of(slot) == region`, runs the destructor (if needed),
+    /// returns the slot to the free list, and unlinks it from the list.
+    pub fn free_region(&mut self, region: u16) {
+        use super::fiberheap::slab::ALLOC_NIL;
+
+        let mut cur = self.pool.alloc_head;
+        while cur != ALLOC_NIL {
+            let next = self.pool.slab.alloc_next[cur as usize];
+            if self.pool.slab.region_ids[cur as usize] == region {
+                let ptr = self.pool.slab.flat_to_ptr(cur as usize);
+                // Run destructor if needed.
+                if needs_drop(unsafe { (*ptr).tag() }) {
+                    unsafe { std::ptr::drop_in_place(ptr) };
+                    // Null the dtor entry so run_dtors won't double-free.
+                    self.pool.remove_from_dtors(ptr);
+                }
+                // Unlink from allocation list and return to free list.
+                self.pool.unlink_alloc(cur);
+                self.pool.slab.dealloc(ptr);
+                self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
+            }
+            cur = next;
+        }
+    }
+
     /// Release without deallocating slab slots.
     ///
     /// Called by `ArenaGuard::drop()` via `heap_arena_release()`. The

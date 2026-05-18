@@ -775,6 +775,11 @@ pub enum LirInstr {
     RegionRotate,
     /// Pop scope mark and release refcount-0 objects only.
     RegionExitRefcounted,
+    /// Free all objects in a specific region. Walks the slab linked
+    /// list and frees every slot whose region_id matches.
+    FreeRegion {
+        region_id: u16,
+    },
 
     /// Drop a single heap object from a local slot.
     /// If the slot holds a heap value owned by the pool with refcount == 0,

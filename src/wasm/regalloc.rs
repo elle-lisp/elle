@@ -284,6 +284,7 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::RegionExitCall
         | LirInstr::RegionRotate
         | LirInstr::RegionExitRefcounted
+        | LirInstr::FreeRegion { .. }
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
         | LirInstr::CheckSignalBound { .. }
@@ -437,6 +438,7 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::RegionExitCall
         | LirInstr::RegionExitRefcounted
         | LirInstr::RegionRotate
+        | LirInstr::FreeRegion { .. }
         | LirInstr::PopParamFrame
         | LirInstr::FlipEnter
         | LirInstr::FlipSwap

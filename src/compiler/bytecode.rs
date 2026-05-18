@@ -336,6 +336,12 @@ pub enum Instruction {
     /// Emitted before RegionExit/RegionExitRefcounted for each
     /// in-scope binding, so release_refcounted can free rc=0 objects.
     DecrefLocal,
+
+    /// Free all objects in a specific region.
+    /// Operand: u16 region_id.
+    /// Walks the slab linked list and frees every slot whose
+    /// region_id matches. No scope marks involved.
+    FreeRegion,
 }
 
 /// Compiled bytecode with constants
@@ -620,6 +626,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::DecrefLocal if i + 1 < instructions.len() => {
                 let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (slot={})", slot));
+                i += 2;
+            }
+            Instruction::FreeRegion if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
                 i += 2;
             }
             Instruction::PushParamFrame if i < instructions.len() => {
