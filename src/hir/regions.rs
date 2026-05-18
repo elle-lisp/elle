@@ -601,7 +601,7 @@ impl RegionInference {
             HirKind::Intrinsic { op, args } => {
                 let arg_vars: Vec<Option<u32>> = args.iter().map(|a| self.walk(a)).collect();
 
-                // %push(coll, val): val escapes into coll
+                // %array-push(coll, val): val escapes into coll
                 if *op == crate::hir::expr::IntrinsicOp::Push {
                     if let (Some(coll_var), Some(val_var)) =
                         (arg_vars.get(0).copied().flatten(), arg_vars.get(1).copied().flatten())
@@ -1524,25 +1524,25 @@ mod tests {
 
     #[test]
     fn push_widens_value_past_loop() {
-        // acc lives outside the loop. %push constrains the pair to
+        // acc lives outside the loop. %array-push constrains the pair to
         // outlive acc → pair widens past the loop.
         // Without this constraint, the pair would stay in the loop
         // region and be freed at rotation → UAF.
         let (hir, _, info) = pipeline(
             "(def @acc (%pair nil nil))\n(def @i 0)\n\
-             (while (%lt i 10) (begin (%push acc (%pair i i)) (assign i (%add i 1))))",
+             (while (%lt i 10) (begin (%array-push acc (%pair i i)) (assign i (%add i 1))))",
         );
         let loops = find_loops(&hir);
         assert!(!loops.is_empty(), "should have a Loop node");
         let loop_region = info.scope_region.get(&loops[0]).expect("loop has region");
-        // The %pair inside the loop (arg to %push) must have been widened
+        // The %pair inside the loop (arg to %array-push) must have been widened
         // PAST the loop region — its solved region must differ from the loop's.
         let pair_id = find_intrinsic_in_loop(&hir, crate::hir::expr::IntrinsicOp::Pair)
             .expect("should find %pair in loop");
         let pair_region = info.alloc_region.get(&pair_id).expect("pair has alloc");
         assert_ne!(
             pair_region, loop_region,
-            "%push constraint must widen pair past loop (pair=r{}, loop=r{})",
+            "%array-push constraint must widen pair past loop (pair=r{}, loop=r{})",
             pair_region.0, loop_region.0
         );
     }
@@ -1574,7 +1574,7 @@ mod tests {
         // Loop should remain reclaimable.
         let (hir, _, info) = pipeline(
             "(def @i 0)\n\
-             (while (%lt i 10) (begin (%push (%pair nil nil) (%pair i i)) (assign i (%add i 1))))",
+             (while (%lt i 10) (begin (%array-push (%pair nil nil) (%pair i i)) (assign i (%add i 1))))",
         );
         let loops = find_loops(&hir);
         assert!(!loops.is_empty(), "should have a Loop node");

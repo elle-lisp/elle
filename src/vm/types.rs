@@ -338,7 +338,7 @@ pub(crate) fn handle_intr_push(vm: &mut VM) {
         new.push(value);
         vm.fiber.stack.push(Value::array(new));
     } else {
-        panic!("%push: unsupported type {}", collection.type_name())
+        panic!("%array-push: unsupported type {}", collection.type_name())
     }
 }
 

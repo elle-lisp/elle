@@ -741,7 +741,7 @@ pub extern "C" fn elle_jit_push(
         new.push(val);
         JitValue::from_value(Value::array(new))
     } else {
-        panic!("%push: unsupported type {}", arr.type_name())
+        panic!("%array-push: unsupported type {}", arr.type_name())
     }
 }
 

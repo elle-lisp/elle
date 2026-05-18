@@ -18,13 +18,13 @@
 
 ## ── push / put ─────────────────────────────────────────────────────
 ## Defined here (not as Rust primitives) so the region solver sees
-## through to %push/%put/%string-push/%bytes-push intrinsics.
+## through to %array-push/%put/%string-push/%bytes-push intrinsics.
 
 (def push
   (fn [coll val]
     (match (type-of coll)
-      :array (%push coll val)
-      :@array (%push coll val)
+      :array (%array-push coll val)
+      :@array (%array-push coll val)
       :string (%string-push coll val)
       :@string (%string-push coll val)
       :bytes (%bytes-push coll val)

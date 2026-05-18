@@ -1229,7 +1229,7 @@ impl<'a> Lowerer<'a> {
                 });
             }
             IntrinsicOp::Push => {
-                // %push mutates @array in place, returns new array for immutable.
+                // %array-push mutates @array in place, returns new array for immutable.
                 // Distinct from ArrayMutPush which is splice infrastructure.
                 self.emit(LirInstr::IntrPush {
                     dst,

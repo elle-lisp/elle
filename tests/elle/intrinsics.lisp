@@ -364,12 +364,12 @@
 (assert (%has? {:a 1} :a) "%has? struct key exists")
 (assert (not (%has? {:a 1} :b)) "%has? struct key missing")
 
-# %push — mutates @array in place, returns new for immutable
+# %array-push — mutates @array in place, returns new for immutable
 (def arr1 @[1 2])
-(%push arr1 3)
-(assert (= (length arr1) 3) "%push @array mutates in place")
-(def arr1b (%push [1 2] 3))
-(assert (= (length arr1b) 3) "%push immutable returns new array")
+(%array-push arr1 3)
+(assert (= (length arr1) 3) "%array-push @array mutates in place")
+(def arr1b (%array-push [1 2] 3))
+(assert (= (length arr1b) 3) "%array-push immutable returns new array")
 
 # %pop
 (def arr2 @[1 2 3])

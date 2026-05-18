@@ -811,7 +811,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
         }
         x if x == DataOp::IntrPushOp as i32 => {
             let (b, r) = crate::primitives::array::prim_push(&args[..2]);
-            assert!(!b.contains(SIG_ERROR), "%push: intrinsic contract violated");
+            assert!(!b.contains(SIG_ERROR), "%array-push: intrinsic contract violated");
             (SIG_OK, r)
         }
         x if x == DataOp::IntrStringPushOp as i32 => {

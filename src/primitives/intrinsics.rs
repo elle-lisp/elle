@@ -463,7 +463,7 @@ fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         new.push(value);
         (SIG_OK, Value::array(new))
     } else {
-        type_err("%push", "array", collection)
+        type_err("%array-push", "array", collection)
     }
 }
 
@@ -1008,7 +1008,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
-        name: "%push",
+        name: "%array-push",
         func: prim_push,
         arity: Arity::Exact(2),
         doc: "Append element",
