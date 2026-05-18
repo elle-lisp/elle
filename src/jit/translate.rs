@@ -601,9 +601,7 @@ impl<'a> FunctionTranslator<'a> {
                         // skip the rotation entirely — leak-style correctness
                         // matches the VM interpreter's behavior, which also
                         // declines to rotate non-rotation-safe callers.
-                        if self.lir.rotation_safe {
-                            self.call_rotate_pools(builder, vm)?;
-                        }
+                        // rotation_safe removed; skip pool rotation.
 
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
@@ -671,7 +669,6 @@ impl<'a> FunctionTranslator<'a> {
                 let lir_module = crate::lir::LirModule {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
-                    escape_dump: None,
                 };
                 let (nested_bytecode, nested_yield_points, nested_call_sites) =
                     emitter.emit_module(&lir_module);
@@ -704,8 +701,6 @@ impl<'a> FunctionTranslator<'a> {
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
                     name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
-                    result_is_immediate: func.result_is_immediate,
-                    has_outward_heap_set: func.has_outward_heap_set,
                     region_table: func.region_table.clone(),
                     ..crate::value::ClosureTemplate::new(
                         std::rc::Rc::new(nested_bytecode.instructions),
@@ -1083,41 +1078,6 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(true);
             }
 
-            LirInstr::RegionEnter => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_enter, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionExit => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_exit, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionExitCall => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_exit_call, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionRotate => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_rotate, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionExitRefcounted => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_exit, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
             LirInstr::FreeRegion { region_id } => {
                 let func_ref = self
                     .module
@@ -1139,10 +1099,6 @@ impl<'a> FunctionTranslator<'a> {
                 );
                 let nil_payload = builder.ins().iconst(cranelift_codegen::ir::types::I64, 0);
                 self.def_var_pair(builder, base, nil_tag, nil_payload);
-            }
-
-            LirInstr::DecrefLocal { .. } => {
-                // No-op: refcounting removed.
             }
 
             LirInstr::PushParamFrame { pairs } => {

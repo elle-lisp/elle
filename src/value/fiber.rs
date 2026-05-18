@@ -540,7 +540,6 @@ fn noop_closure() -> Rc<Closure> {
 
     Rc::new(Closure {
         template: Rc::new(ClosureTemplate {
-            result_is_immediate: true,
             ..ClosureTemplate::new(
                 Rc::new(vec![3, 0, 0, 0]), // Return
                 Arity::Exact(0),

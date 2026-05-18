@@ -227,11 +227,6 @@ impl FiberHeap {
         }
     }
 
-    /// Unconditional release (RC stripped — identical to `release`).
-    pub fn release_refcounted(&mut self, mark: ArenaMark) {
-        self.release(mark);
-    }
-
     /// Free all objects whose region_id matches `region`.
     ///
     /// Walks the slab's allocation linked list. For each slot where

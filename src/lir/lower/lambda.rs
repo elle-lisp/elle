@@ -279,10 +279,6 @@ impl<'a> Lowerer<'a> {
         // Propagate inferred signal to LIR function
         self.current_func.signal = inferred_signal;
 
-        // Conservative defaults (escape analysis removed).
-        self.current_func.result_is_immediate = false;
-        self.current_func.has_outward_heap_set = false;
-        self.current_func.rotation_safe = false;
         self.current_function_binding = None;
         self.current_function_params = None;
 

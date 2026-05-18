@@ -410,8 +410,6 @@ impl Emitter {
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
                     name: func.name.clone().map(|s| Rc::from(s.as_str())),
-                    result_is_immediate: func.result_is_immediate,
-                    has_outward_heap_set: func.has_outward_heap_set,
                     region_table: func.region_table.clone(),
                     ..crate::value::ClosureTemplate::new(
                         Rc::new(nested_bytecode.instructions),
@@ -927,27 +925,6 @@ impl Emitter {
                 self.pop(); // func
             }
 
-            LirInstr::RegionEnter => {
-                self.bytecode.emit(Instruction::RegionEnter);
-                // No stack effect
-            }
-
-            LirInstr::RegionExit => {
-                self.bytecode.emit(Instruction::RegionExit);
-                // No stack effect
-            }
-
-            LirInstr::RegionExitCall => {
-                self.bytecode.emit(Instruction::RegionExitCall);
-                // No stack effect
-            }
-
-            LirInstr::RegionRotate => {
-                self.bytecode.emit(Instruction::RegionRotate);
-            }
-            LirInstr::RegionExitRefcounted => {
-                self.bytecode.emit(Instruction::RegionExitRefcounted);
-            }
             LirInstr::FreeRegion { region_id } => {
                 self.bytecode.emit(Instruction::FreeRegion);
                 self.bytecode.emit_u16(*region_id);
@@ -955,11 +932,6 @@ impl Emitter {
 
             LirInstr::DropSlot { slot } => {
                 self.bytecode.emit(Instruction::DropSlot);
-                self.bytecode.emit_u16(*slot);
-            }
-
-            LirInstr::DecrefLocal { slot } => {
-                self.bytecode.emit(Instruction::DecrefLocal);
                 self.bytecode.emit_u16(*slot);
             }
 

@@ -2,16 +2,6 @@ use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
 
-/// Per-field escape analysis info for cross-module projection.
-#[derive(Debug, Clone, Copy)]
-pub struct FieldEscapeInfo {
-    /// True when the field's closure is rotation-safe AND param-safe.
-    pub rotation_safe: bool,
-    /// True when the field's closure is outward-safe (no external
-    /// heap stores, even if it returns heap values).
-    pub outward_safe: bool,
-}
-
 /// Bytecode instruction set
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -369,12 +359,6 @@ pub struct Bytecode {
     /// compilation. When an importing file sees `module:field`, the analyzer
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
-    /// Escape projection: maps keyword field names to escape analysis
-    /// properties. Populated during lowering for module-pattern files
-    /// that return a struct of closures. When an importing file sees
-    /// `module:field` as a callee, the lowerer uses this projection to
-    /// determine safety properties.
-    pub escape_projection: Option<std::collections::HashMap<String, FieldEscapeInfo>>,
 }
 
 impl Bytecode {
@@ -386,7 +370,6 @@ impl Bytecode {
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
-            escape_projection: None,
         }
     }
 
@@ -607,12 +590,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
                 // No operands (arg count is dynamic, determined by array length)
             }
-            Instruction::RegionEnter
-            | Instruction::RegionExit
-            | Instruction::RegionExitCall
-            | Instruction::RegionRotate
-            | Instruction::RegionExitRefcounted
-            | Instruction::OutboxExit
+            Instruction::OutboxExit
             | Instruction::FlipEnter
             | Instruction::FlipSwap
             | Instruction::FlipExit => {

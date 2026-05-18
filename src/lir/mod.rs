@@ -16,7 +16,7 @@ mod types;
 
 pub use display::terminator_kind;
 pub use emit::Emitter;
-pub use lower::{Lowerer, ScopeStats};
+pub use lower::Lowerer;
 pub use types::{
     closure_value_const_count, BasicBlock, BinOp, CallSiteInfo, ClosureId, CmpOp, ConvOp, Label,
     LirConst, LirFunction, LirInstr, LirModule, Reg, SpannedInstr, SpannedTerminator, Terminator,

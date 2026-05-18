@@ -14,104 +14,9 @@ use crate::hir::arena::BindingArena;
 use crate::hir::region::RegionInfo;
 use crate::hir::{Binding, BlockId, CallArg, Hir, HirId, HirKind, HirPattern};
 use crate::syntax::Span;
-use crate::value::fiber::SignalBits;
 use crate::value::{Arity, SymbolId, Value};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
-use std::fmt;
-
-/// Compile-time scope allocation statistics.
-///
-/// Tracks how many let/letrec/block scopes were analyzed for scope
-/// allocation, how many qualified, and why the rest were rejected.
-/// The rejection reason is the *first* failing condition (conditions
-/// are checked in order and short-circuit).
-#[derive(Debug, Clone, Default)]
-pub struct ScopeStats {
-    /// Total scopes evaluated for scope allocation
-    pub scopes_analyzed: usize,
-    /// Scopes that passed all conditions (RegionEnter/RegionExit emitted)
-    pub scopes_qualified: usize,
-    /// Scopes rejected because a binding is captured (condition 1)
-    pub rejected_captured: usize,
-    /// Scopes rejected because body may suspend (condition 2)
-    pub rejected_suspends: usize,
-    /// Scopes rejected because result is not provably immediate (condition 3)
-    pub rejected_unsafe_result: usize,
-    /// Scopes rejected because body contains set to outer binding (condition 4)
-    pub rejected_outward_set: usize,
-    /// Scopes rejected because body contains break (condition 5)
-    pub rejected_break: usize,
-    /// Non-tail calls wrapped in RegionEnter/RegionExitCall
-    pub calls_scoped: usize,
-    /// Functions analyzed for rotation safety
-    pub rotation_analyzed: usize,
-    /// Functions that qualified as rotation-safe
-    pub rotation_safe: usize,
-}
-
-impl ScopeStats {
-    /// Total rejected scopes (analyzed - qualified).
-    pub fn scopes_rejected(&self) -> usize {
-        self.scopes_analyzed - self.scopes_qualified
-    }
-
-    /// Merge another ScopeStats into this one (for aggregating across lowerer invocations).
-    pub fn merge(&mut self, other: &ScopeStats) {
-        self.scopes_analyzed += other.scopes_analyzed;
-        self.scopes_qualified += other.scopes_qualified;
-        self.rejected_captured += other.rejected_captured;
-        self.rejected_suspends += other.rejected_suspends;
-        self.rejected_unsafe_result += other.rejected_unsafe_result;
-        self.rejected_outward_set += other.rejected_outward_set;
-        self.rejected_break += other.rejected_break;
-        self.calls_scoped += other.calls_scoped;
-        self.rotation_analyzed += other.rotation_analyzed;
-        self.rotation_safe += other.rotation_safe;
-    }
-}
-
-impl fmt::Display for ScopeStats {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "scope allocation stats:")?;
-        writeln!(
-            f,
-            "  analyzed: {}  qualified: {}  rejected: {}",
-            self.scopes_analyzed,
-            self.scopes_qualified,
-            self.scopes_rejected()
-        )?;
-        if self.scopes_rejected() > 0 {
-            writeln!(f, "  rejection reasons:")?;
-            if self.rejected_captured > 0 {
-                writeln!(f, "    captured:      {}", self.rejected_captured)?;
-            }
-            if self.rejected_suspends > 0 {
-                writeln!(f, "    suspends:      {}", self.rejected_suspends)?;
-            }
-            if self.rejected_unsafe_result > 0 {
-                writeln!(f, "    unsafe-result: {}", self.rejected_unsafe_result)?;
-            }
-            if self.rejected_outward_set > 0 {
-                writeln!(f, "    outward-set:   {}", self.rejected_outward_set)?;
-            }
-            if self.rejected_break > 0 {
-                writeln!(f, "    break:         {}", self.rejected_break)?;
-            }
-        }
-        if self.calls_scoped > 0 {
-            writeln!(f, "  call-scoped:   {}", self.calls_scoped)?;
-        }
-        if self.rotation_analyzed > 0 {
-            writeln!(
-                f,
-                "  rotation:      {}/{} safe",
-                self.rotation_safe, self.rotation_analyzed
-            )?;
-        }
-        Ok(())
-    }
-}
 
 /// Tracks an active Loop during lowering so `Recur` can find its
 /// entry label and binding slots.
@@ -174,8 +79,6 @@ pub struct Lowerer<'a> {
     /// Current nesting depth of active allocation regions.
     /// Pending FreeRegion region_ids to emit before tail calls.
     pending_free_regions: Vec<u16>,
-    /// Compile-time scope allocation statistics.
-    scope_stats: ScopeStats,
     /// Scratch slot for discarding unused intermediate values.
     /// Lazily allocated on first use. Reused across all discards
     /// within the same function, so only one extra local slot.
@@ -186,10 +89,6 @@ pub struct Lowerer<'a> {
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
     closures: Vec<LirFunction>,
-    /// Escape projection: maps struct field names to escape analysis info.
-    /// Computed during lowering for module-pattern files. Consumed by the
-    /// compile pipeline and stored on Bytecode for cross-module propagation.
-    escape_projection: Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>>,
     /// Binding of the current function being analyzed (for self-tail-call
     /// detection in escape analysis and drop insertion).
     current_function_binding: Option<Binding>,
@@ -229,11 +128,9 @@ impl<'a> Lowerer<'a> {
             loop_lower_contexts: Vec::new(),
             block_lower_contexts: Vec::new(),
             pending_free_regions: Vec::new(),
-            scope_stats: ScopeStats::default(),
             discard_slot: None,
             symbol_names: HashMap::new(),
             closures: Vec::new(),
-            escape_projection: None,
             current_function_binding: None,
             current_function_params: None,
             region_info: RegionInfo::empty(),
@@ -291,32 +188,6 @@ impl<'a> Lowerer<'a> {
         self.region_info.scope_has_local_allocs(hir_id)
     }
 
-    /// Return compile-time scope allocation statistics.
-    pub fn scope_stats(&self) -> &ScopeStats {
-        &self.scope_stats
-    }
-
-    /// Format escape analysis maps for `--dump=escape`.
-    pub fn format_escape_analysis(&self) -> String {
-        String::from(";; escape analysis removed — region solver is source of truth\n")
-    }
-
-    /// Take the computed escape projection (if any).
-    pub fn take_escape_projection(
-        &mut self,
-    ) -> Option<HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>> {
-        self.escape_projection.take()
-    }
-
-    /// Seed import escape projection (no-op: escape analysis removed).
-    pub fn seed_import_escape_projection(
-        &mut self,
-        _binding: Binding,
-        _rotation_safe: bool,
-        _outward_safe: bool,
-    ) {
-    }
-
     /// Lower a HIR expression to an LIR module.
     ///
     /// Returns an `LirModule` with the entry function and a flat list of
@@ -340,20 +211,12 @@ impl<'a> Lowerer<'a> {
         // Propagate signal from HIR to top-level LIR function
         self.current_func.signal = hir.signal;
 
-        // Escape analysis removed — region solver is the source of truth.
-        // Conservative defaults for cross-module projection.
-        self.current_func.result_is_immediate = false;
-        self.current_func.has_outward_heap_set = false;
-        self.current_func.rotation_safe = false;
-
         let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
         let closures = std::mem::take(&mut self.closures);
 
-        let escape_dump = Some(self.format_escape_analysis());
         Ok(LirModule {
             entry,
             closures,
-            escape_dump,
         })
     }
 
@@ -549,7 +412,7 @@ impl<'a> Lowerer<'a> {
 
     /// Emit pending FreeRegions. Called at tail-call sites where
     /// region cleanup is deferred.
-    fn emit_pending_region_exits(&mut self) {
+    fn emit_pending_free_regions(&mut self) {
         let pending: Vec<u16> = self.pending_free_regions.clone();
         for region_id in pending {
             self.emit(LirInstr::FreeRegion { region_id });

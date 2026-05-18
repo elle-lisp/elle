@@ -253,14 +253,8 @@ impl fmt::Display for LirInstr {
             }
 
             // === Allocation Regions ===
-            LirInstr::RegionEnter => f.write_str("region-enter"),
-            LirInstr::RegionExit => f.write_str("region-exit"),
-            LirInstr::RegionExitCall => f.write_str("region-exit-call"),
-            LirInstr::RegionRotate => f.write_str("region-rotate"),
-            LirInstr::RegionExitRefcounted => f.write_str("region-exit-refcounted"),
             LirInstr::FreeRegion { region_id } => write!(f, "free-region {region_id}"),
             LirInstr::DropSlot { slot } => write!(f, "drop-slot {slot}"),
-            LirInstr::DecrefLocal { slot } => write!(f, "decref-local {slot}"),
             LirInstr::FlipEnter => f.write_str("flip-enter"),
             LirInstr::FlipSwap => f.write_str("flip-swap"),
             LirInstr::FlipExit => f.write_str("flip-exit"),
@@ -550,7 +544,9 @@ mod tests {
 
     #[test]
     fn test_region_instructions() {
-        assert_eq!(format!("{}", LirInstr::RegionEnter), "region-enter");
-        assert_eq!(format!("{}", LirInstr::RegionExit), "region-exit");
+        assert_eq!(
+            format!("{}", LirInstr::FreeRegion { region_id: 1 }),
+            "free-region 1"
+        );
     }
 }

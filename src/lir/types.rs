@@ -43,8 +43,6 @@ pub struct ClosureId(pub u32);
 pub struct LirModule {
     pub entry: LirFunction,
     pub closures: Vec<LirFunction>,
-    /// Escape analysis dump for `--dump=escape`. Populated by the lowerer.
-    pub escape_dump: Option<String>,
 }
 
 impl Reg {
@@ -118,14 +116,6 @@ pub struct LirFunction {
     /// Only populated for functions where `signal.may_suspend()`.
     /// Indexed by call instruction order (0, 1, 2, ...).
     pub call_sites: Vec<CallSiteInfo>,
-    /// True when the body's final expression is provably not a heap pointer.
-    /// Used by fiber resume to decide whether shared allocation is needed.
-    pub result_is_immediate: bool,
-    /// True when the body contains `set!` to a captured binding with a
-    /// potentially heap-allocated value. Used by fiber resume.
-    pub has_outward_heap_set: bool,
-    /// True when the function body is safe for tail-call pool rotation.
-    pub rotation_safe: bool,
     /// Per-function region table: maps region id (u16, 1-based) to
     /// region. Region 0 is the default (no region). Built by the
     /// lowerer from region inference; propagated to ClosureTemplate.
@@ -198,9 +188,6 @@ impl LirFunction {
             num_local_params: 0,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            rotation_safe: false,
             region_table: Vec::new(),
         }
     }
@@ -760,21 +747,6 @@ pub enum LirInstr {
     },
 
     // === Allocation Regions ===
-    /// Enter an allocation region (scope boundary for allocator).
-    /// No registers produced or consumed.
-    RegionEnter,
-    /// Exit an allocation region (scope boundary for allocator).
-    /// No registers produced or consumed.
-    RegionExit,
-    /// Exit a call-scoped allocation region. Pops two scope marks:
-    /// the barrier (top) and the region start (below). Frees only
-    /// objects between the two marks (arg temporaries), leaving the
-    /// callee's allocations intact.
-    RegionExitCall,
-    /// Rotate loop scope marks: free rc=0 objects, keep rc>0 pinned.
-    RegionRotate,
-    /// Pop scope mark and release refcount-0 objects only.
-    RegionExitRefcounted,
     /// Free all objects in a specific region. Walks the slab linked
     /// list and frees every slot whose region_id matches.
     FreeRegion {
@@ -785,13 +757,6 @@ pub enum LirInstr {
     /// If the slot holds a heap value owned by the pool with refcount == 0,
     /// runs its destructor, frees the slab slot, and sets the slot to nil.
     DropSlot {
-        slot: u16,
-    },
-
-    /// Decrement refcount of a local slot (paired with incref in StoreLocal).
-    /// Emitted before RegionExit/RegionExitRefcounted so release_refcounted
-    /// can free objects whose only reference was the local binding.
-    DecrefLocal {
         slot: u16,
     },
 
@@ -1086,7 +1051,6 @@ fn is_gpu_instruction(i: &LirInstr) -> bool {
         | LirInstr::LoadLocal { .. }
         | LirInstr::StoreLocal { .. }
         | LirInstr::StoreLocalRefcounted { .. }
-        | LirInstr::DecrefLocal { .. }
         | LirInstr::LoadCapture { .. }
         | LirInstr::LoadCaptureRaw { .. }
         // Flip instructions are arena-rotation no-ops on GPU (no heap).

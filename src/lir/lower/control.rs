@@ -66,7 +66,7 @@ impl<'a> Lowerer<'a> {
                 // Emit pending RegionExits before TailCall — the scope's
                 // allocations must be freed before the frame is replaced.
                 //
-                self.emit_pending_region_exits();
+                self.emit_pending_free_regions();
 
                 self.emit(LirInstr::TailCall {
                     func: func_reg,
@@ -166,7 +166,7 @@ impl<'a> Lowerer<'a> {
             });
 
             if is_tail {
-                self.emit_pending_region_exits();
+                self.emit_pending_free_regions();
                 self.emit(LirInstr::TailCallArrayMut {
                     func: func_reg,
                     args: final_args,
