@@ -131,7 +131,8 @@ impl VM {
                     variables::handle_store_local(self, bc, &mut ip);
                 }
                 Instruction::StoreLocalRefcounted => {
-                    variables::handle_store_local_refcounted(self, bc, &mut ip);
+                    // Legacy: identical to StoreLocal (refcounting removed).
+                    variables::handle_store_local(self, bc, &mut ip);
                 }
                 Instruction::LoadUpvalue => {
                     variables::handle_load_upvalue(self, bc, &mut ip, Some(closure_env));
