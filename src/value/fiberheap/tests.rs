@@ -580,3 +580,51 @@ fn region_of_immediate_is_zero() {
     assert_eq!(heap.region_of(Value::NIL), 0);
     assert_eq!(heap.region_of(Value::TRUE), 0);
 }
+
+#[test]
+fn free_region_frees_matching_slots() {
+    let mut heap = FiberHeap::new();
+    // Allocate two objects: one in region 1, one in region 2.
+    let v1 = heap.alloc(HeapObject::Pair(Pair {
+        first: Value::int(1),
+        rest: Value::NIL,
+        traits: Value::NIL,
+    }));
+    heap.stamp_region(v1, 1);
+
+    let v2 = heap.alloc(HeapObject::Pair(Pair {
+        first: Value::int(2),
+        rest: Value::NIL,
+        traits: Value::NIL,
+    }));
+    heap.stamp_region(v2, 2);
+
+    assert_eq!(heap.len(), 2);
+
+    // Free region 1 — only v1 should be freed.
+    heap.free_region(1);
+    assert_eq!(heap.len(), 1, "after free_region(1), one object should remain");
+
+    // v2 (region 2) should still be alive.
+    assert_eq!(heap.region_of(v2), 2);
+
+    // Free region 2 — now everything should be freed.
+    heap.free_region(2);
+    assert_eq!(heap.len(), 0, "after free_region(2), no objects should remain");
+}
+
+#[test]
+fn free_region_no_op_for_absent_region() {
+    let mut heap = FiberHeap::new();
+    let v = heap.alloc(HeapObject::Pair(Pair {
+        first: Value::int(1),
+        rest: Value::NIL,
+        traits: Value::NIL,
+    }));
+    heap.stamp_region(v, 5);
+    assert_eq!(heap.len(), 1);
+
+    // Free region 99 (doesn't exist) — should be a no-op.
+    heap.free_region(99);
+    assert_eq!(heap.len(), 1, "free_region for absent region should be no-op");
+}

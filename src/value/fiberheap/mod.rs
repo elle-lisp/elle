@@ -749,6 +749,18 @@ impl FiberHeap {
         0
     }
 
+    /// Set the region id for a heap value.
+    #[inline]
+    pub fn stamp_region(&mut self, val: Value, region: u16) {
+        if let Some(ptr) = val.as_heap_ptr() {
+            if self.pool.slab_owns(ptr) {
+                self.pool
+                    .slab
+                    .set_region(ptr as *const HeapObject, region);
+            }
+        }
+    }
+
     /// Get the region id for a heap value. Returns 0 (default region)
     /// for non-heap values or values not owned by this slab.
     #[inline]
