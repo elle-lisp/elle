@@ -300,6 +300,17 @@ impl RegionInference {
                 let saved = self.current_region;
                 self.current_region = scope_region;
 
+                // Register the Letrec node as an allocation site if any
+                // binding needs a capture cell. The lowerer's two-pass
+                // init emits MakeCaptureCell(nil) for these bindings;
+                // the solver must have an entry so the region is tracked.
+                let has_cell_bindings = bindings
+                    .iter()
+                    .any(|(b, _)| self.arena().get(*b).needs_capture());
+                if has_cell_bindings {
+                    self.alloc_here(hir.id);
+                }
+
                 // Pre-bind all names (letrec allows mutual reference)
                 for (b, _) in bindings {
                     self.binding_region.insert(*b, scope_region);
@@ -473,11 +484,10 @@ impl RegionInference {
                     // Constrain the break value to the block's enclosing
                     // region. This is sound: the break jumps past the
                     // block's scope, so the value must outlive it.
-                    let target_region = self
+                    let target_region = *self
                         .block_regions
                         .get(block_id)
-                        .copied()
-                        .unwrap_or(Region::GLOBAL);
+                        .expect("Break targets unknown block_id");
                     let target_var = self.fresh_var(target_region);
                     self.constrain(vv, target_var, hir.id);
                 }
@@ -498,23 +508,31 @@ impl RegionInference {
                     return result;
                 }
 
-                // Fallback: opaque call.
+                // Fallback: opaque call. Always alloc_here so the lowerer
+                // can look up the region. Immediate-returning calls still
+                // need a region operand in bytecode.
+                let var = self.alloc_here(hir.id);
                 if self.call_returns_immediate(func) {
                     None
                 } else {
-                    let var = self.alloc_here(hir.id);
                     Some(var)
                 }
             }
 
-            // SetCell: value region ≤ cell's binding region
+            // SetCell: value must outlive the cell's binding scope.
             HirKind::SetCell { cell, value } => {
                 self.walk(cell);
                 let val_var = self.walk(value);
                 if let Some(vv) = val_var {
-                    // Cell contents escape — widen to GLOBAL
-                    let global_var = self.fresh_var(Region::GLOBAL);
-                    self.constrain(vv, global_var, hir.id);
+                    let cell_region = match &cell.kind {
+                        HirKind::Var(b) => *self
+                            .binding_region
+                            .get(b)
+                            .expect("SetCell target has no binding region"),
+                        _ => self.current_region,
+                    };
+                    let target_var = self.fresh_var(cell_region);
+                    self.constrain(vv, target_var, hir.id);
                 }
                 val_var
             }
@@ -540,18 +558,19 @@ impl RegionInference {
                 None
             }
 
-            // Eval: operands escape to GLOBAL (passed to child VM);
-            // result allocated in current region.
+            // Eval: operands passed to a synchronous child VM — they must
+            // outlive the current scope (not GLOBAL, since eval is blocking).
+            // Result allocated in current region.
             HirKind::Eval { expr, env } => {
                 let expr_var = self.walk(expr);
                 if let Some(ev) = expr_var {
-                    let global_var = self.fresh_var(Region::GLOBAL);
-                    self.constrain(ev, global_var, hir.id);
+                    let scope_var = self.fresh_var(self.current_region);
+                    self.constrain(ev, scope_var, hir.id);
                 }
                 let env_var = self.walk(env);
                 if let Some(ev) = env_var {
-                    let global_var = self.fresh_var(Region::GLOBAL);
-                    self.constrain(ev, global_var, hir.id);
+                    let scope_var = self.fresh_var(self.current_region);
+                    self.constrain(ev, scope_var, hir.id);
                 }
                 Some(self.alloc_here(hir.id))
             }
@@ -818,6 +837,11 @@ impl RegionInference {
         let mut live_regions = FxHashSet::default();
         for (hir_id, var_id) in &self.alloc_var {
             let region = self.var_regions[*var_id as usize];
+            assert!(
+                !region.is_global(),
+                "allocation @{} resolved to GLOBAL — synthetic root should prevent this",
+                hir_id.0
+            );
             alloc_region.insert(*hir_id, region);
             live_regions.insert(region);
         }
@@ -1059,6 +1083,10 @@ pub fn analyze_regions_with(
     call_class.user_immediates = user_imm;
 
     let mut ri = RegionInference::new(arena, call_class);
+    // Synthetic program-root region: pushes GLOBAL to unreachable ancestor.
+    // The outermost scope escapes to this root (Region(1)), not GLOBAL.
+    let root = ri.fresh_region(Region::GLOBAL);
+    ri.current_region = root;
     ri.walk(hir);
     let iterations = ri.solve();
     ri.build_info(iterations)
@@ -1727,5 +1755,29 @@ mod tests {
         let lets = find_lets(&hir);
         let any_empty = lets.iter().any(|id| !info.scope_has_local_allocs(*id));
         assert!(any_empty, "let returning its pair binding should NOT be live");
+    }
+
+    #[test]
+    fn no_allocation_resolves_to_global() {
+        // The synthetic root region ensures no allocation ever resolves
+        // to Region::GLOBAL. build_info panics if any does, so this test
+        // verifies the invariant across several programs.
+        for src in &[
+            "(let [x \"hello\"] x)",
+            "(letrec [f (fn [x] x)] (f 1))",
+            "(let [x (%pair 1 2)] x)",
+            "(block :b (break :b \"hello\"))",
+            "(fn () 42)",
+        ] {
+            let (_, _, info) = analyze(src);
+            for (hir_id, region) in &info.alloc_region {
+                assert!(
+                    !region.is_global(),
+                    "allocation @{} resolved to GLOBAL in: {}",
+                    hir_id.0,
+                    src
+                );
+            }
+        }
     }
 }

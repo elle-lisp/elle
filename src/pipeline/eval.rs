@@ -43,6 +43,9 @@ pub fn eval_syntax(
         analyzer.bind_compile_time_env(&expander.compile_time_env);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
+    if !analysis.errors.is_empty() {
+        return Err(analysis.errors[0].description());
+    }
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
@@ -97,6 +100,9 @@ pub fn eval(
         analyzer.bind_compile_time_env(&expander.core_env);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
+    if !analysis.errors.is_empty() {
+        return Err(analysis.errors[0].description());
+    }
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
