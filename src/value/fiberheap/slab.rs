@@ -285,6 +285,36 @@ impl Slab {
         self.region_heads[rid] = flat as u32;
     }
 
+    /// Unlink a slot from its region's singly-linked list and clear its
+    /// region id. Called by `drop_slot_value` so that a subsequent
+    /// `free_region` walk never visits an already-freed slot.
+    pub fn unlink_from_region(&mut self, flat: usize) {
+        if flat >= self.region_ids.len() {
+            return;
+        }
+        let rid = self.region_ids[flat] as usize;
+        self.region_ids[flat] = 0;
+        if rid == 0 || rid >= self.region_heads.len() {
+            return;
+        }
+        // Walk the singly-linked list to find and remove `flat`.
+        let target = flat as u32;
+        if self.region_heads[rid] == target {
+            self.region_heads[rid] = self.region_next[flat];
+        } else {
+            let mut prev = self.region_heads[rid];
+            while prev != ALLOC_NIL {
+                let next = self.region_next[prev as usize];
+                if next == target {
+                    self.region_next[prev as usize] = self.region_next[flat];
+                    break;
+                }
+                prev = next;
+            }
+        }
+        self.region_next[flat] = ALLOC_NIL;
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {

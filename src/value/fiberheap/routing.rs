@@ -222,11 +222,10 @@ pub fn drop_slot_value(val: crate::value::Value) {
         // dtors (O(n) on dtors, which is typically short).
         heap.pool.unlink_alloc_ptr(obj_ptr);
         heap.pool.remove_from_dtors(obj_ptr);
-        // Clear region_id so free_region skips this slot.
+        // Unlink from the region's singly-linked list so that a
+        // subsequent free_region walk never visits this freed slot.
         let flat = heap.pool.slab.ptr_to_flat(obj_ptr);
-        if flat < heap.pool.slab.region_ids.len() {
-            heap.pool.slab.region_ids[flat] = 0;
-        }
+        heap.pool.slab.unlink_from_region(flat);
         // Return slab slot to free list.
         heap.pool.dealloc_slot(obj_ptr);
         heap.pool.alloc_count = heap.pool.alloc_count.saturating_sub(1);

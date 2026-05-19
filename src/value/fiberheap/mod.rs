@@ -191,13 +191,12 @@ impl FiberHeap {
         // instruction that unexpectedly allocated.
         let r = self.alloc_region;
         if r == REGION_POISON_IDLE {
-            // Allocation between instructions inside the dispatch loop.
-            // Either a non-allocating instruction unexpectedly allocated,
-            // or the dispatch loop forgot to set alloc_region.
-            panic!(
-                "alloc() with REGION_POISON_IDLE: allocation outside \
-                 instruction region context"
-            );
+            if self.region_tracking_armed {
+                panic!(
+                    "alloc() with REGION_POISON_IDLE: allocation outside \
+                     instruction region context"
+                );
+            }
         } else if r == REGION_POISON_ZERO {
             if self.region_tracking_armed {
                 panic!(
@@ -346,11 +345,6 @@ impl FiberHeap {
 
         while cur != ALLOC_NIL {
             let next = self.pool.slab.region_next[cur as usize];
-            // Skip slots already freed by DropSlot (region_id cleared to 0).
-            if self.pool.slab.region_ids[cur as usize] != region {
-                cur = next;
-                continue;
-            }
             let ptr = self.pool.slab.flat_to_ptr(cur as usize);
             if needs_drop(unsafe { (*ptr).tag() }) {
                 unsafe { std::ptr::drop_in_place(ptr) };
@@ -407,9 +401,12 @@ impl FiberHeap {
         let mut cur = start;
         while cur != ALLOC_NIL {
             let next = self.pool.slab.alloc_next[cur as usize];
-            // Clear links but don't dealloc.
+            // Clear alloc links but don't dealloc.
             self.pool.slab.alloc_prev[cur as usize] = ALLOC_NIL;
             self.pool.slab.alloc_next[cur as usize] = ALLOC_NIL;
+            // Unlink from region list — run_dtors already dropped this
+            // object, so free_region must not visit it again.
+            self.pool.slab.unlink_from_region(cur as usize);
             cur = next;
         }
         // Truncate the list at the mark point.
