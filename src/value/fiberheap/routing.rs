@@ -138,19 +138,61 @@ pub fn free_region(region_id: u16) {
     }
 }
 
-/// Stamp a region id on a just-allocated heap value.
+/// Set the alloc_region on the current fiber heap.
 ///
-/// Called by the VM dispatch loop after each allocating instruction.
-/// No-op when `region_id == 0` (default/global region) or when the
-/// value is not a heap pointer.
+/// Called by the VM dispatch loop before each allocating instruction
+/// so that `alloc()` stamps every new object with this region.
 #[inline]
-pub fn stamp_region(val: crate::value::Value, region_id: u16) {
-    if region_id == 0 {
-        return;
-    }
+pub fn set_alloc_region(region_id: u16) {
     let ptr = current_heap_ptr();
     if !ptr.is_null() {
-        unsafe { (*ptr).stamp_region(val, region_id) };
+        unsafe { (*ptr).alloc_region = region_id };
+    }
+}
+
+/// Poison alloc_region to IDLE after an allocating instruction.
+///
+/// Any subsequent allocation before the next `set_alloc_region()` call
+/// will panic — catching dispatch bugs and non-allocating instructions
+/// that unexpectedly allocate.
+#[inline]
+pub fn poison_alloc_region() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).alloc_region = super::REGION_POISON_IDLE };
+    }
+}
+
+/// Arm region tracking at dispatch-loop entry.
+///
+/// Sets `alloc_region = REGION_POISON_IDLE` so any allocation before
+/// the first allocating instruction is caught.  Sets
+/// `region_tracking_armed = true` so the ZERO poison is live.
+#[inline]
+pub fn arm_region_tracking() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe {
+            (*ptr).region_tracking_armed = true;
+            (*ptr).alloc_region = super::REGION_POISON_IDLE;
+        }
+    }
+}
+
+/// Reset alloc_region to 0 and disarm tracking on dispatch-loop exit.
+///
+/// Allocations that happen outside the dispatch loop (error
+/// construction, compilation, fiber teardown) must not see IDLE
+/// or trigger the ZERO panic.  The next `arm_region_tracking()`
+/// call re-arms.
+#[inline]
+pub fn reset_alloc_region() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe {
+            (*ptr).alloc_region = 0;
+            (*ptr).region_tracking_armed = false;
+        }
     }
 }
 
@@ -180,6 +222,11 @@ pub fn drop_slot_value(val: crate::value::Value) {
         // dtors (O(n) on dtors, which is typically short).
         heap.pool.unlink_alloc_ptr(obj_ptr);
         heap.pool.remove_from_dtors(obj_ptr);
+        // Clear region_id so free_region skips this slot.
+        let flat = heap.pool.slab.ptr_to_flat(obj_ptr);
+        if flat < heap.pool.slab.region_ids.len() {
+            heap.pool.slab.region_ids[flat] = 0;
+        }
         // Return slab slot to free list.
         heap.pool.dealloc_slot(obj_ptr);
         heap.pool.alloc_count = heap.pool.alloc_count.saturating_sub(1);

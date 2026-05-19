@@ -30,6 +30,24 @@ pub(crate) mod slab;
 pub(crate) mod pool;
 use pool::SlabPool;
 
+/// Poison: set after every allocating instruction completes.  If
+/// `alloc()` sees this, an allocation happened outside any
+/// instruction's region context (dispatch bug or non-allocating
+/// instruction that unexpectedly allocated).
+pub const REGION_POISON_IDLE: u16 = 0xFFFF;
+
+/// Poison: region 0 is never a valid region-id.  If `alloc()` sees 0
+/// while `region_tracking_armed` is true, the lowerer failed to
+/// assign a region to an allocation site.
+pub const REGION_POISON_ZERO: u16 = 0;
+
+/// Reserved region for infrastructure allocations (error structs,
+/// signal-violation diagnostics, etc.) that happen inside the
+/// dispatch loop but outside any instruction's region envelope.
+/// Never passed to FreeRegion — these objects live until fiber
+/// teardown.
+pub const REGION_INFRA: u16 = 0xFFFE;
+
 /// Tracks objects allocated by a single `with-allocator` invocation.
 ///
 /// # Safety invariant
@@ -74,6 +92,26 @@ pub struct FiberHeap {
     /// Replaces the global `ALLOC_ERROR` thread-local — making it per-heap
     /// prevents cross-fiber confusion and eliminates a thread-local.
     alloc_error: Option<(usize, usize)>,
+    /// Region id for the current allocating instruction.
+    ///
+    /// Set by the VM dispatch loop before each allocating instruction,
+    /// poisoned to `REGION_POISON_IDLE` after.  `alloc()` reads this
+    /// to stamp every new slab object with its allocation-site region.
+    ///
+    /// - `REGION_POISON_IDLE` (0xFFFF) — between instructions; any
+    ///   allocation panics.
+    /// - `REGION_POISON_ZERO` (0) — missing region assignment; panics
+    ///   only when `region_tracking_armed` is true.
+    /// - `1..=0xFFFE` — valid region id, stamp the allocation.
+    ///
+    /// Defaults to 0 so that pre-dispatch allocations (startup, stdlib
+    /// init) proceed without panic.
+    pub(crate) alloc_region: u16,
+    /// Once the dispatch loop starts executing bytecode, this flag is
+    /// set to true.  It gates the `REGION_POISON_ZERO` panic so that
+    /// startup/stdlib-init allocations (which happen before any
+    /// bytecode runs) are silently assigned to region 0 (global).
+    pub(crate) region_tracking_armed: bool,
 }
 
 impl FiberHeap {
@@ -86,6 +124,8 @@ impl FiberHeap {
             custom_alloc_stack: Vec::new(),
             object_limit: None,
             alloc_error: None,
+            alloc_region: 0,
+            region_tracking_armed: false,
         }
     }
 
@@ -131,6 +171,61 @@ impl FiberHeap {
         if self.pool.alloc_count > self.peak_alloc_count {
             self.peak_alloc_count = self.pool.alloc_count;
         }
+
+        // ── Region stamping with poison semantics ────────────────────
+        //
+        // Values of alloc_region:
+        //   REGION_POISON_IDLE (0xFFFF) — between instructions; no stamp.
+        //   REGION_POISON_ZERO (0)      — global/startup; no stamp.
+        //   1..=0xFFFE                  — valid region id; stamp the slot.
+        //
+        // The dispatch loop sets alloc_region = region_id before each
+        // allocating instruction and poisons it to IDLE afterward.
+        // Non-allocating instructions leave it at IDLE.  Startup and
+        // global-scope allocations see 0.
+        //
+        // Panics are gated on `region_tracking_armed` so that startup
+        // allocations (alloc_region == 0, armed == false) don't fire.
+        // After the dispatch loop arms tracking, IDLE means "allocation
+        // between instructions" — a dispatch bug or a non-allocating
+        // instruction that unexpectedly allocated.
+        let r = self.alloc_region;
+        if r == REGION_POISON_IDLE {
+            // Allocation between instructions inside the dispatch loop.
+            // Either a non-allocating instruction unexpectedly allocated,
+            // or the dispatch loop forgot to set alloc_region.
+            panic!(
+                "alloc() with REGION_POISON_IDLE: allocation outside \
+                 instruction region context"
+            );
+        } else if r == REGION_POISON_ZERO {
+            if self.region_tracking_armed {
+                panic!(
+                    "alloc() with REGION_POISON_ZERO while tracking is \
+                     armed: lowerer failed to assign a region to this \
+                     allocation site"
+                );
+            }
+            // Pre-dispatch (startup/stdlib init): no stamp, no panic.
+        } else {
+            // Valid region id (1..=0xFFFE) — stamp.
+            if let Some(ptr) = v.as_heap_ptr() {
+                if self.pool.slab_owns(ptr) {
+                    let rid = r as usize;
+                    if rid >= self.pool.slab.region_bump_marks.len() {
+                        self.pool.slab.region_bump_marks.resize(rid + 1, None);
+                    }
+                    if self.pool.slab.region_bump_marks[rid].is_none() {
+                        self.pool.slab.region_bump_marks[rid] =
+                            Some(self.pool.bump_mark());
+                    }
+                    self.pool
+                        .slab
+                        .set_region(ptr as *const HeapObject, r);
+                }
+            }
+        }
+
         v
     }
 
@@ -251,6 +346,11 @@ impl FiberHeap {
 
         while cur != ALLOC_NIL {
             let next = self.pool.slab.region_next[cur as usize];
+            // Skip slots already freed by DropSlot (region_id cleared to 0).
+            if self.pool.slab.region_ids[cur as usize] != region {
+                cur = next;
+                continue;
+            }
             let ptr = self.pool.slab.flat_to_ptr(cur as usize);
             if needs_drop(unsafe { (*ptr).tag() }) {
                 unsafe { std::ptr::drop_in_place(ptr) };
