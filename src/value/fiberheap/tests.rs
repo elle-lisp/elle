@@ -242,25 +242,6 @@ fn release_returns_slots_to_free_list() {
 }
 
 #[test]
-fn release_no_dealloc_preserves_slots() {
-    // mark → alloc → release_no_dealloc → slots NOT freed.
-    let mut heap = FiberHeap::new();
-    let base_live = heap.root_live();
-
-    let mark = heap.mark();
-    heap.alloc(HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
-    heap.alloc(HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
-
-    heap.release_no_dealloc(mark);
-    assert_eq!(
-        heap.root_live(),
-        base_live + 2,
-        "release_no_dealloc must NOT return slots to the free list"
-    );
-    assert_eq!(heap.len(), 0, "alloc_count must be reset to mark position");
-}
-
-#[test]
 fn simulated_trampoline_rotation() {
     // Simulate the trampoline protocol: mark → alloc → release → mark →
     // alloc → release. After each release, live count returns to base.

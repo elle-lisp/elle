@@ -298,6 +298,9 @@ impl FiberHeap {
         let mut cur = start;
         while cur != ALLOC_NIL {
             let next = self.pool.slab.alloc_next[cur as usize];
+            // Unlink from region list before dealloc — prevents free_region
+            // from visiting a freed/reused slot.
+            self.pool.slab.unlink_from_region(cur as usize);
             let ptr = self.pool.slab.flat_to_ptr(cur as usize);
             self.pool.slab.dealloc(ptr);
             cur = next;
@@ -378,61 +381,6 @@ impl FiberHeap {
         }
     }
 
-    /// Release without deallocating slab slots.
-    ///
-    /// Called by `ArenaGuard::drop()` via `heap_arena_release()`. The
-    /// ArenaGuard is a manual mark/release that does NOT go through
-    /// Tofte-Talpin region analysis — it cannot prove which slab slots
-    /// are dead. Only runs destructors and truncates tracking vecs.
-    /// Slab slots are reclaimed later by teardown or RegionExit.
-    pub fn release_no_dealloc(&mut self, mark: ArenaMark) {
-        use super::fiberheap::slab::ALLOC_NIL;
-
-        self.pool.run_dtors(mark.dtor_len());
-        self.pool.dtors.truncate(mark.dtor_len());
-
-        // Walk the linked list from mark tail to current tail and
-        // unlink all nodes (but do NOT dealloc slab slots).
-        let start = if mark.alloc_list_tail() == ALLOC_NIL {
-            self.pool.alloc_head
-        } else {
-            self.pool.slab.alloc_next[mark.alloc_list_tail() as usize]
-        };
-        let mut cur = start;
-        while cur != ALLOC_NIL {
-            let next = self.pool.slab.alloc_next[cur as usize];
-            // Clear alloc links but don't dealloc.
-            self.pool.slab.alloc_prev[cur as usize] = ALLOC_NIL;
-            self.pool.slab.alloc_next[cur as usize] = ALLOC_NIL;
-            // Unlink from region list — run_dtors already dropped this
-            // object, so free_region must not visit it again.
-            self.pool.slab.unlink_from_region(cur as usize);
-            cur = next;
-        }
-        // Truncate the list at the mark point.
-        self.pool.alloc_tail = mark.alloc_list_tail();
-        if self.pool.alloc_tail == ALLOC_NIL {
-            self.pool.alloc_head = ALLOC_NIL;
-        } else {
-            self.pool.slab.alloc_next[self.pool.alloc_tail as usize] = ALLOC_NIL;
-        }
-
-        // Dealloc custom-allocated objects from the exiting scope.
-        if let Some(state) = self.custom_alloc_stack.last_mut() {
-            let start = mark.custom_ptrs_len();
-            for &(ptr, size, align) in state.custom_ptrs[start..].iter().rev() {
-                state.allocator.inner.dealloc(ptr, size, align);
-            }
-            state.custom_ptrs.truncate(start);
-        }
-
-        // NOTE: no bump rewind here. release_no_dealloc keeps slab slots
-        // alive, so their inline data (InlineSlice pointers into the bump
-        // arena) must also stay alive. Bump data is reclaimed later by
-        // teardown or a full release().
-
-        self.pool.alloc_count = mark.position();
-    }
 
 
     /// Private heap object count (used by mark/release scoping).

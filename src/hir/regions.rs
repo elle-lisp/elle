@@ -273,16 +273,13 @@ impl RegionInference {
                 let body_var = self.walk(body);
                 self.current_region = saved;
 
-                // Body result escapes to enclosing — UNLESS the body is a
-                // tail call. When the body is a tail call, RegionExit fires
-                // BEFORE the tail call executes, so the result bypasses the
-                // scope entirely. Emitting the constraint would widen the
-                // scope to Global, preventing reclamation.
+                // Body result escapes to enclosing region. Always
+                // generate this constraint — FreeRegion trusts region
+                // stamps and doesn't check refcounts, so tail-call
+                // results must also be widened past the scope.
                 if let Some(bv) = body_var {
-                    if !Self::is_tail_call_body(body) {
-                        let enclosing_var = self.fresh_var(saved);
-                        self.constrain(bv, enclosing_var, hir.id);
-                    }
+                    let enclosing_var = self.fresh_var(saved);
+                    self.constrain(bv, enclosing_var, hir.id);
                     Some(bv)
                 } else {
                     None
@@ -659,7 +656,20 @@ impl RegionInference {
                 }
 
                 if op.allocates() {
-                    Some(self.alloc_here(hir.id))
+                    let result_var = self.alloc_here(hir.id);
+                    // %pair is a constructor: car and cdr Values are
+                    // stored inside the Pair HeapObject. If the pair
+                    // escapes its scope, its elements must also escape
+                    // — otherwise FreeRegion frees them while the pair
+                    // still references them.
+                    if *op == crate::hir::expr::IntrinsicOp::Pair {
+                        for av in &arg_vars {
+                            if let Some(a) = av {
+                                self.constrain(*a, result_var, hir.id);
+                            }
+                        }
+                    }
+                    Some(result_var)
                 } else {
                     None
                 }
@@ -1782,5 +1792,149 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── tail-call body escape constraints ─────────────────────────
+
+    /// Find the HirId of an Intrinsic node matching `op` inside a Let body.
+    fn find_intrinsic_in_let(hir: &Hir, op: crate::hir::expr::IntrinsicOp) -> Option<HirId> {
+        fn walk(hir: &Hir, op: crate::hir::expr::IntrinsicOp, in_let: bool) -> Option<HirId> {
+            let now_in_let = in_let || matches!(&hir.kind, HirKind::Let { .. });
+            if now_in_let {
+                if let HirKind::Intrinsic { op: o, .. } = &hir.kind {
+                    if *o == op {
+                        return Some(hir.id);
+                    }
+                }
+            }
+            let mut found = None;
+            hir.for_each_child(|child| {
+                if found.is_none() {
+                    found = walk(child, op, now_in_let);
+                }
+            });
+            found
+        }
+        walk(hir, op, false)
+    }
+
+    #[test]
+    fn tail_call_body_pair_escapes_let_scope() {
+        // Defect 1 regression: when the let body is a tail call that
+        // returns a %pair, the pair must be widened past the let scope.
+        // Previously, is_tail_call_body skipped the escape constraint,
+        // leaving the pair in the scope region where FreeRegion freed it.
+        let (hir, _, info) = pipeline("(let [x 1] (%pair x 2))");
+        let lets = find_lets(&hir);
+        let pair_id = find_intrinsic_in_let(&hir, crate::hir::expr::IntrinsicOp::Pair);
+        assert!(pair_id.is_some(), "should find %pair in let body");
+        let pair_region = info.alloc_region.get(&pair_id.unwrap());
+        assert!(pair_region.is_some(), "pair should have region assignment");
+        // The pair must NOT be in any let's scope region — it must
+        // have been widened to the enclosing region.
+        for let_id in &lets {
+            if let Some(scope_r) = info.scope_region.get(let_id) {
+                assert_ne!(
+                    pair_region.unwrap(),
+                    scope_r,
+                    "tail-call %pair must escape let scope (pair=r{}, scope=r{})",
+                    pair_region.unwrap().0,
+                    scope_r.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pair_children_escape_with_pair() {
+        // Defect 2 regression: when a pair escapes a let scope, its
+        // car/cdr children must also escape. Otherwise FreeRegion frees
+        // the children while the pair still references them.
+        //
+        // (let [inner (%pair 1 2)] (%pair inner 3))
+        //   inner is bound in scope, then used as car of the outer pair.
+        //   The outer pair escapes (it's the let body result).
+        //   inner must also escape — it's incorporated in the outer pair.
+        let (hir, _, info) = pipeline("(let [inner (%pair 1 2)] (%pair inner 3))");
+        let lets = find_lets(&hir);
+
+        // Find all %pair intrinsics
+        let mut pairs = Vec::new();
+        fn find_all_pairs(hir: &Hir, out: &mut Vec<HirId>) {
+            if let HirKind::Intrinsic { op, .. } = &hir.kind {
+                if *op == crate::hir::expr::IntrinsicOp::Pair {
+                    out.push(hir.id);
+                }
+            }
+            hir.for_each_child(|child| find_all_pairs(child, out));
+        }
+        find_all_pairs(&hir, &mut pairs);
+        assert!(pairs.len() >= 2, "should have at least 2 %pair nodes");
+
+        // ALL pairs must be outside every let scope region
+        for pair_id in &pairs {
+            if let Some(pair_r) = info.alloc_region.get(pair_id) {
+                for let_id in &lets {
+                    if let Some(scope_r) = info.scope_region.get(let_id) {
+                        assert_ne!(
+                            pair_r, scope_r,
+                            "pair @{} must escape let scope (pair=r{}, scope=r{})",
+                            pair_id.0, pair_r.0, scope_r.0
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn non_escaping_pair_stays_in_scope() {
+        // Sanity check: pairs that DON'T escape should remain in scope.
+        // (let [x (%pair 1 2)] 42) — body is immediate, pair stays local.
+        let (hir, _, info) = pipeline("(let [x (%pair 1 2)] 42)");
+        let pair_id = find_intrinsic_in_let(&hir, crate::hir::expr::IntrinsicOp::Pair);
+        assert!(pair_id.is_some(), "should find %pair in let");
+        let pair_region = info.alloc_region.get(&pair_id.unwrap()).unwrap();
+        // The pair should be in SOME let's scope region (not widened)
+        let in_some_scope = info.scope_region.values().any(|r| r == pair_region);
+        assert!(
+            in_some_scope,
+            "non-escaping pair should stay in a scope region (pair=r{})",
+            pair_region.0
+        );
+    }
+
+    #[test]
+    fn nested_pair_in_tail_call_escapes() {
+        // A pair constructed as an argument to another pair in tail
+        // position — both must escape.
+        // (let [x 1] (%pair (%pair x 2) 3))
+        let (hir, _, info) = pipeline("(let [x 1] (%pair (%pair x 2) 3))");
+        let lets = find_lets(&hir);
+        let mut pairs = Vec::new();
+        find_all_pairs_helper(&hir, &mut pairs);
+        assert!(pairs.len() >= 2, "should have at least 2 %pair nodes");
+        for pair_id in &pairs {
+            if let Some(pair_r) = info.alloc_region.get(pair_id) {
+                for let_id in &lets {
+                    if let Some(scope_r) = info.scope_region.get(let_id) {
+                        assert_ne!(
+                            pair_r, scope_r,
+                            "nested pair @{} must escape let scope",
+                            pair_id.0
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn find_all_pairs_helper(hir: &Hir, out: &mut Vec<HirId>) {
+        if let HirKind::Intrinsic { op, .. } = &hir.kind {
+            if *op == crate::hir::expr::IntrinsicOp::Pair {
+                out.push(hir.id);
+            }
+        }
+        hir.for_each_child(|child| find_all_pairs_helper(child, out));
     }
 }
