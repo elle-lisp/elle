@@ -331,11 +331,10 @@ impl RegionInference {
                 let body_var = self.walk(body);
                 self.current_region = saved;
 
+                // Body result escapes to enclosing region (same as Let).
                 if let Some(bv) = body_var {
-                    if !Self::is_tail_call_body(body) {
-                        let enclosing_var = self.fresh_var(saved);
-                        self.constrain(bv, enclosing_var, hir.id);
-                    }
+                    let enclosing_var = self.fresh_var(saved);
+                    self.constrain(bv, enclosing_var, hir.id);
                     Some(bv)
                 } else {
                     None
