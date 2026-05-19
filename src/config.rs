@@ -256,7 +256,8 @@ pub mod trace_bits {
     pub const ESCAPE: u32 = 1 << 15;
     pub const BYTECODE: u32 = 1 << 16;
     pub const RC: u32 = 1 << 17;
-    pub const ALL: u32 = (1 << 18) - 1;
+    pub const REGIONS: u32 = 1 << 18;
+    pub const ALL: u32 = (1 << 19) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -279,6 +280,7 @@ pub mod trace_bits {
             "escape" => ESCAPE,
             "bytecode" => BYTECODE,
             "rc" => RC,
+            "regions" => REGIONS,
             _ => 0,
         }
     }

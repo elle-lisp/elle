@@ -53,6 +53,11 @@ pub fn eval_syntax(
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!("[trace:regions] eval_syntax:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names));
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -110,6 +115,11 @@ pub fn eval(
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!("[trace:regions] eval:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names));
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)

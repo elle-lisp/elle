@@ -60,6 +60,11 @@ pub fn compile(
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!("[trace:regions] compile:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names));
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -198,6 +203,11 @@ pub fn compile_file_to_lir(
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!("[trace:regions] compile_file_to_lir:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names));
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -369,6 +379,11 @@ fn compile_file_inner(
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!("[trace:regions] compile_file:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names));
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
