@@ -291,7 +291,21 @@ impl RegionInference {
 
             // Letrec: same as Let
             HirKind::Letrec { bindings, body } => {
-                let scope_region = {
+                // If any binding needs a capture cell, cells mediate
+                // escape that the solver can't track (values stored
+                // via UpdateCapture escape through closure captures).
+                // Skip scope creation entirely — all allocations stay
+                // in the enclosing region to prevent premature FreeRegion.
+                let has_cell_bindings = bindings
+                    .iter()
+                    .any(|(b, _)| self.arena().get(*b).needs_capture());
+
+                let scope_region = if has_cell_bindings {
+                    // No scope — cells make it unsafe to reclaim.
+                    // Register cell allocation in the enclosing region.
+                    self.alloc_here(hir.id);
+                    self.current_region
+                } else {
                     let r = self.fresh_region(self.current_region);
                     self.scope_region.insert(hir.id, r);
                     r
@@ -299,17 +313,6 @@ impl RegionInference {
 
                 let saved = self.current_region;
                 self.current_region = scope_region;
-
-                // Register the Letrec node as an allocation site if any
-                // binding needs a capture cell. The lowerer's two-pass
-                // init emits MakeCaptureCell(nil) for these bindings;
-                // the solver must have an entry so the region is tracked.
-                let has_cell_bindings = bindings
-                    .iter()
-                    .any(|(b, _)| self.arena().get(*b).needs_capture());
-                if has_cell_bindings {
-                    self.alloc_here(hir.id);
-                }
 
                 // Pre-bind all names (letrec allows mutual reference)
                 for (b, _) in bindings {
