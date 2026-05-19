@@ -91,6 +91,9 @@ impl<'a> Lowerer<'a> {
             }
         }
 
+        // Save the Lambda node's HirId — body lowering overwrites current_hir_id.
+        let lambda_hir_id = self.current_hir_id;
+
         // Reserve a slot in the module's closure list BEFORE lowering
         // the body. This gives pre-order numbering: parent IDs are lower
         // than children's. Matches collect_nested_functions traversal order.
@@ -120,6 +123,9 @@ impl<'a> Lowerer<'a> {
 
         // Fill the reserved slot
         self.closures[closure_id.0 as usize] = nested_lir;
+
+        // Restore Lambda's HirId for the MakeClosure allocation.
+        self.current_hir_id = lambda_hir_id;
 
         // Create closure referencing it by ID
         let dst = self.fresh_reg();

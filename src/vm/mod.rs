@@ -254,6 +254,8 @@ impl VM {
             1,
             Instruction::Call as u8,
             0,
+            0, // region_id as u16be (0 = global)
+            0,
             1, // arg_count as u16be
             Instruction::Return as u8,
         ];

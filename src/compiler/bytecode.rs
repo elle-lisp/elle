@@ -479,11 +479,16 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::TailCall
             | Instruction::CallChecked
             | Instruction::TailCallChecked
-                if i + 1 < instructions.len() =>
+                if i + 3 < instructions.len() =>
             {
-                let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (args={})", arg_count));
-                i += 2;
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let arg_count = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                line.push_str(&format!(" (args={}", arg_count));
+                if region_id != 0 {
+                    line.push_str(&format!(", region={}", region_id));
+                }
+                line.push(')');
+                i += 4;
             }
             Instruction::DupN if i < instructions.len() => {
                 let offset = instructions[i];
@@ -491,24 +496,37 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 1;
             }
             Instruction::MakeClosure if i + 5 < instructions.len() => {
-                let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let const_idx = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
                 let num_captures =
-                    ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
-                let region_id = ((instructions[i + 4] as u16) << 8) | (instructions[i + 5] as u16);
+                    ((instructions[i + 4] as u16) << 8) | (instructions[i + 5] as u16);
                 line.push_str(&format!(
-                    " (const_idx={}, num_captures={}, region={})",
-                    const_idx, num_captures, region_id
+                    " (const_idx={}, num_captures={}",
+                    const_idx, num_captures
                 ));
+                if region_id != 0 {
+                    line.push_str(&format!(", region={}", region_id));
+                }
+                line.push(')');
                 i += 6;
             }
             Instruction::ArrayMutRefDestructure
-            | Instruction::ArrayMutSliceFrom
             | Instruction::ArrayMutRefOrNil
                 if i + 1 < instructions.len() =>
             {
                 let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (index={})", idx));
                 i += 2;
+            }
+            Instruction::ArrayMutSliceFrom if i + 3 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let idx = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                line.push_str(&format!(" (index={}", idx));
+                if region_id != 0 {
+                    line.push_str(&format!(", region={}", region_id));
+                }
+                line.push(')');
+                i += 4;
             }
             Instruction::StructGetOrNil | Instruction::StructGetDestructure
                 if i + 1 < instructions.len() =>
@@ -517,9 +535,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (const_idx={})", idx));
                 i += 2;
             }
-            Instruction::StructRest if i + 1 < instructions.len() => {
-                let count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                i += 2;
+            Instruction::StructRest if i + 3 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let count = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                i += 4;
                 let mut keys = Vec::new();
                 for _ in 0..count {
                     if i + 1 < instructions.len() {
@@ -530,14 +549,28 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
                 line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
             }
-            Instruction::Eval => {
-                // No operands — pops 2 from stack, pushes 1
-            }
-            Instruction::ArrayMutExtend | Instruction::ArrayMutPush => {
-                // No operands
-            }
-            Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
-                // No operands (arg count is dynamic, determined by array length)
+            Instruction::Eval
+            | Instruction::ArrayMutExtend
+            | Instruction::ArrayMutPush
+            | Instruction::CallArrayMut
+            | Instruction::TailCallArrayMut
+            | Instruction::IntrGet
+            | Instruction::IntrPut
+            | Instruction::IntrDel
+            | Instruction::IntrPush
+            | Instruction::IntrPop
+            | Instruction::IntrFreeze
+            | Instruction::IntrThaw
+            | Instruction::IntrStringPush
+            | Instruction::IntrBytesPush
+            | Instruction::Length
+                if i + 1 < instructions.len() =>
+            {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                if region_id != 0 {
+                    line.push_str(&format!(" (region={})", region_id));
+                }
+                i += 2;
             }
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one
@@ -568,12 +601,13 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 2;
             }
             Instruction::MakeArrayMut if i + 2 < instructions.len() => {
-                let size = instructions[i];
-                let region_id = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
-                line.push_str(&format!(" (size={})", size));
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let size = instructions[i + 2];
+                line.push_str(&format!(" (size={}", size));
                 if region_id != 0 {
                     line.push_str(&format!(", region={}", region_id));
                 }
+                line.push(')');
                 i += 3;
             }
             _ => {}

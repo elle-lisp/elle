@@ -608,9 +608,25 @@ impl Fiber {
     }
 
     /// Set an error signal on this fiber.
-    #[inline]
+    ///
+    /// Temporarily sets `alloc_region = 0` if the current value is
+    /// `REGION_POISON_IDLE`, because error construction allocates and
+    /// may be called from non-allocating instruction handlers.
     pub fn set_error(&mut self, kind: &str, msg: impl Into<String>) {
+        let heap_ptr = crate::value::fiberheap::current_heap_ptr();
+        let saved = if !heap_ptr.is_null() {
+            let r = unsafe { (*heap_ptr).alloc_region };
+            if r == crate::value::fiberheap::REGION_POISON_IDLE {
+                unsafe { (*heap_ptr).alloc_region = crate::value::fiberheap::REGION_INFRA };
+            }
+            r
+        } else {
+            0
+        };
         self.signal = Some((SIG_ERROR, crate::value::error_val(kind, msg)));
+        if !heap_ptr.is_null() {
+            unsafe { (*heap_ptr).alloc_region = saved };
+        }
     }
 }
 

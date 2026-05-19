@@ -835,7 +835,7 @@ impl<'a> Lowerer<'a> {
                     });
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
+                    self.emit_alloc(LirInstr::ArrayMutSliceFrom {
                         dst: slice_reg,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -952,7 +952,7 @@ impl<'a> Lowerer<'a> {
                     });
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
+                    self.emit_alloc(LirInstr::ArrayMutSliceFrom {
                         dst: slice_reg,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -1031,7 +1031,7 @@ impl<'a> Lowerer<'a> {
                             PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                         })
                         .collect();
-                    self.emit(LirInstr::StructRest {
+                    self.emit_alloc(LirInstr::StructRest {
                         dst: rest_reg,
                         src: reloaded,
                         exclude_keys: exclude,
@@ -1109,7 +1109,7 @@ impl<'a> Lowerer<'a> {
                             PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                         })
                         .collect();
-                    self.emit(LirInstr::StructRest {
+                    self.emit_alloc(LirInstr::StructRest {
                         dst: rest_reg,
                         src: reloaded,
                         exclude_keys: exclude,

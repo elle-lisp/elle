@@ -561,6 +561,10 @@ impl IntrinsicOp {
     }
 
     /// Does this intrinsic allocate heap memory?
+    ///
+    /// Must match every intrinsic the lowerer emits via `emit_alloc`.
+    /// Push/StringPush/BytesPush/Pop can allocate at runtime (collection
+    /// mutation may produce new objects).
     pub fn allocates(self) -> bool {
         matches!(
             self,
@@ -572,6 +576,10 @@ impl IntrinsicOp {
                 | Self::TypeOf
                 | Self::Length
                 | Self::Get
+                | Self::Push
+                | Self::StringPush
+                | Self::BytesPush
+                | Self::Pop
         )
     }
 }

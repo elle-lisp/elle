@@ -51,7 +51,7 @@ impl<'a> Lowerer<'a> {
             AccessPath::Slice(inner, start) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutSliceFrom {
+                self.emit_alloc(LirInstr::ArrayMutSliceFrom {
                     dst,
                     src: parent,
                     index: *start as u16,
@@ -82,7 +82,7 @@ impl<'a> Lowerer<'a> {
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     })
                     .collect();
-                self.emit(LirInstr::StructRest {
+                self.emit_alloc(LirInstr::StructRest {
                     dst: rest_reg,
                     src: src_reg,
                     exclude_keys: lir_exclude,

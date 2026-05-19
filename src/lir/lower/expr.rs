@@ -679,11 +679,18 @@ impl<'a> Lowerer<'a> {
     ) -> Result<Reg, String> {
         use crate::hir::IntrinsicOp;
 
+        // Save the Intrinsic node's HirId — sub-expression lowering
+        // overwrites current_hir_id.
+        let saved_hir_id = self.current_hir_id;
+
         // Lower all arguments first
         let mut arg_regs = Vec::with_capacity(args.len());
         for arg in args {
             arg_regs.push(self.lower_expr(arg)?);
         }
+
+        // Restore Intrinsic's HirId for region-stamped allocations.
+        self.current_hir_id = saved_hir_id;
 
         let dst = self.fresh_reg();
         match op {
@@ -1194,20 +1201,20 @@ impl<'a> Lowerer<'a> {
             }
             // Data access
             IntrinsicOp::Length => {
-                self.emit(LirInstr::Length {
+                self.emit_alloc(LirInstr::Length {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::Get => {
-                self.emit(LirInstr::Get {
+                self.emit_alloc(LirInstr::Get {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
                 });
             }
             IntrinsicOp::Put => {
-                self.emit(LirInstr::Put {
+                self.emit_alloc(LirInstr::Put {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
@@ -1215,7 +1222,7 @@ impl<'a> Lowerer<'a> {
                 });
             }
             IntrinsicOp::Del => {
-                self.emit(LirInstr::Del {
+                self.emit_alloc(LirInstr::Del {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
@@ -1231,41 +1238,41 @@ impl<'a> Lowerer<'a> {
             IntrinsicOp::Push => {
                 // %array-push mutates @array in place, returns new array for immutable.
                 // Distinct from ArrayMutPush which is splice infrastructure.
-                self.emit(LirInstr::IntrPush {
+                self.emit_alloc(LirInstr::IntrPush {
                     dst,
                     array: arg_regs[0],
                     value: arg_regs[1],
                 });
             }
             IntrinsicOp::StringPush => {
-                self.emit(LirInstr::IntrStringPush {
+                self.emit_alloc(LirInstr::IntrStringPush {
                     dst,
                     string: arg_regs[0],
                     value: arg_regs[1],
                 });
             }
             IntrinsicOp::BytesPush => {
-                self.emit(LirInstr::IntrBytesPush {
+                self.emit_alloc(LirInstr::IntrBytesPush {
                     dst,
                     bytes: arg_regs[0],
                     value: arg_regs[1],
                 });
             }
             IntrinsicOp::Pop => {
-                self.emit(LirInstr::Pop {
+                self.emit_alloc(LirInstr::Pop {
                     dst,
                     src: arg_regs[0],
                 });
             }
             // Mutability
             IntrinsicOp::Freeze => {
-                self.emit(LirInstr::Freeze {
+                self.emit_alloc(LirInstr::Freeze {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::Thaw => {
-                self.emit(LirInstr::Thaw {
+                self.emit_alloc(LirInstr::Thaw {
                     dst,
                     src: arg_regs[0],
                 });

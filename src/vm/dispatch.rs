@@ -29,6 +29,7 @@ macro_rules! check_fuel {
         if let Some(ref mut fuel) = $self.fiber.fuel {
             if *fuel == 0 {
                 $self.fiber.signal = Some((SIG_FUEL, Value::NIL));
+                crate::value::fiberheap::reset_alloc_region();
                 return (SIG_FUEL, $resume_ip);
             }
             *fuel -= 1;
@@ -59,6 +60,9 @@ impl VM {
         let bc: &[u8] = bytecode;
         let consts: &[Value] = constants;
 
+        // Arm: from here, any allocation with alloc_region == IDLE panics.
+        crate::value::fiberheap::arm_region_tracking();
+
         loop {
             // Check for pre-existing error signal (e.g., from previous Call)
             if let Some((bits, _)) = self.fiber.signal {
@@ -66,6 +70,7 @@ impl VM {
                     if self.error_loc.is_none() {
                         self.error_loc = location_map.get(&instr_ip).cloned();
                     }
+                    crate::value::fiberheap::reset_alloc_region();
                     return (bits, ip);
                 }
             }
@@ -83,6 +88,10 @@ impl VM {
                 };
                 if let Some((count, limit)) = alloc_err {
                     let saved_limit = unsafe { (*heap_ptr).set_object_limit(None) };
+                    // alloc_region is IDLE here (between instructions).
+                    // Temporarily set to 0 so error_val allocation doesn't
+                    // trigger the IDLE panic.
+                    crate::value::fiberheap::set_alloc_region(crate::value::fiberheap::REGION_INFRA);
                     let err = crate::value::error_val(
                         "allocation-error",
                         format!(
@@ -90,11 +99,13 @@ impl VM {
                             count, limit
                         ),
                     );
+                    crate::value::fiberheap::poison_alloc_region();
                     unsafe { (*heap_ptr).set_object_limit(saved_limit) };
                     self.fiber.signal = Some((SIG_ERROR, err));
                     if self.error_loc.is_none() {
                         self.error_loc = location_map.get(&instr_ip).cloned();
                     }
+                    crate::value::fiberheap::reset_alloc_region();
                     return (SIG_ERROR, ip);
                 }
             }
@@ -159,12 +170,15 @@ impl VM {
                 Instruction::Return => {
                     let value = control::handle_return(self);
                     self.fiber.signal = Some((SIG_OK, value));
+                    crate::value::fiberheap::reset_alloc_region();
                     return (SIG_OK, ip);
                 }
 
-                // Call instructions
+                // Call instructions — region u16 precedes arg_count
                 Instruction::Call => {
                     check_fuel!(self, instr_ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     if let Some(bits) = self.handle_call(
                         bytecode,
                         constants,
@@ -174,11 +188,15 @@ impl VM {
                         location_map,
                         false,
                     ) {
+                        crate::value::fiberheap::reset_alloc_region();
                         return (bits, ip);
                     }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::CallChecked => {
                     check_fuel!(self, instr_ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     if let Some(bits) = self.handle_call(
                         bytecode,
                         constants,
@@ -188,42 +206,46 @@ impl VM {
                         location_map,
                         true,
                     ) {
+                        crate::value::fiberheap::reset_alloc_region();
                         return (bits, ip);
                     }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::TailCall => {
                     check_fuel!(self, instr_ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     if let Some(bits) = self.handle_tail_call(&mut ip, bc, false) {
+                        crate::value::fiberheap::reset_alloc_region();
                         return (bits, ip);
                     }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::TailCallChecked => {
                     check_fuel!(self, instr_ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     if let Some(bits) = self.handle_tail_call(&mut ip, bc, true) {
+                        crate::value::fiberheap::reset_alloc_region();
                         return (bits, ip);
                     }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
 
-                // Closures
+                // Closures — region u16 is first operand
                 Instruction::MakeClosure => {
-                    closure::handle_make_closure(self, bc, &mut ip, consts);
                     let region_id = self.read_u16(bc, &mut ip);
-                    if region_id != 0 {
-                        if let Some(top) = self.fiber.stack.last() {
-                            crate::value::fiberheap::stamp_region(*top, region_id);
-                        }
-                    }
+                    crate::value::fiberheap::set_alloc_region(region_id);
+                    closure::handle_make_closure(self, bc, &mut ip, consts);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
 
                 // Data structures
                 Instruction::Pair => {
                     let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     data::handle_list(self);
-                    if region_id != 0 {
-                        if let Some(top) = self.fiber.stack.last() {
-                            crate::value::fiberheap::stamp_region(*top, region_id);
-                        }
-                    }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::First => {
                     data::handle_first(self);
@@ -232,13 +254,10 @@ impl VM {
                     data::handle_rest(self);
                 }
                 Instruction::MakeArrayMut => {
-                    data::handle_make_array(self, bc, &mut ip);
                     let region_id = self.read_u16(bc, &mut ip);
-                    if region_id != 0 {
-                        if let Some(top) = self.fiber.stack.last() {
-                            crate::value::fiberheap::stamp_region(*top, region_id);
-                        }
-                    }
+                    crate::value::fiberheap::set_alloc_region(region_id);
+                    data::handle_make_array(self, bc, &mut ip);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::ArrayMutRef => {
                     data::handle_array_ref(self);
@@ -258,7 +277,10 @@ impl VM {
                     data::handle_array_ref_destructure(self, bc, &mut ip);
                 }
                 Instruction::ArrayMutSliceFrom => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     data::handle_array_slice_from(self, bc, &mut ip);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::StructGetOrNil => {
                     data::handle_struct_get_or_nil(self, bc, &mut ip, constants);
@@ -267,7 +289,10 @@ impl VM {
                     data::handle_struct_get_destructure(self, bc, &mut ip, constants);
                 }
                 Instruction::StructRest => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     data::handle_struct_rest(self, bc, &mut ip, constants);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
 
                 // Silent destructuring (parameter context: absent optional params → nil)
@@ -409,12 +434,9 @@ impl VM {
                 // Box operations
                 Instruction::MakeCapture => {
                     let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     capture::handle_make_capture(self);
-                    if region_id != 0 {
-                        if let Some(top) = self.fiber.stack.last() {
-                            crate::value::fiberheap::stamp_region(*top, region_id);
-                        }
-                    }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::UnwrapCapture => {
                     capture::handle_unwrap_capture(self);
@@ -429,6 +451,8 @@ impl VM {
                 Instruction::Emit => {
                     let bits_raw = self.read_u16(bc, &mut ip) as u64;
                     let signal_bits = crate::value::fiber::SignalBits::new(bits_raw);
+
+                    crate::value::fiberheap::reset_alloc_region();
                     return self.handle_emit(
                         signal_bits,
                         bytecode,
@@ -441,16 +465,27 @@ impl VM {
 
                 // Runtime eval — compile and execute a datum
                 Instruction::Eval => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     super::eval::handle_eval_instruction(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::ArrayMutExtend => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     data::handle_array_extend(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::ArrayMutPush => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     data::handle_array_push(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::CallArrayMut => {
                     check_fuel!(self, instr_ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     if let Some(bits) = self.handle_call_array(
                         bytecode,
                         constants,
@@ -460,14 +495,20 @@ impl VM {
                         location_map,
                         false,
                     ) {
+                        crate::value::fiberheap::reset_alloc_region();
                         return (bits, ip);
                     }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::TailCallArrayMut => {
                     check_fuel!(self, instr_ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     if let Some(bits) = self.handle_tail_call_array(&mut ip, bc, false) {
+                        crate::value::fiberheap::reset_alloc_region();
                         return (bits, ip);
                     }
+                    crate::value::fiberheap::poison_alloc_region();
                 }
 
                 Instruction::FreeRegion => {
@@ -519,6 +560,7 @@ impl VM {
                             frame.push((id, val));
                         } else {
                             use crate::value::error_val;
+                            crate::value::fiberheap::set_alloc_region(crate::value::fiberheap::REGION_INFRA);
                             self.fiber.signal = Some((
                                 SIG_ERROR,
                                 error_val(
@@ -529,6 +571,7 @@ impl VM {
                                     ),
                                 ),
                             ));
+                            crate::value::fiberheap::poison_alloc_region();
                             self.fiber.stack.push(Value::NIL);
                             break;
                         }
@@ -584,37 +627,67 @@ impl VM {
                     types::handle_type_of(self);
                 }
                 Instruction::Length => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_length(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrGet => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_get(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrPut => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_put(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrDel => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_del(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrHas => {
                     types::handle_intr_has(self);
                 }
                 Instruction::IntrPush => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_push(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrStringPush => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_string_push(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrBytesPush => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_bytes_push(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrPop => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_pop(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrFreeze => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_freeze(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::IntrThaw => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::value::fiberheap::set_alloc_region(region_id);
                     types::handle_intr_thaw(self);
+                    crate::value::fiberheap::poison_alloc_region();
                 }
                 Instruction::Identical => {
                     types::handle_identical(self);
@@ -635,6 +708,7 @@ impl VM {
                                 crate::signals::registry::global_registry().lock().unwrap();
                             let excess_str = registry.format_signal_bits(excess);
                             let allowed_str = registry.format_signal_bits(allowed_bits);
+                            crate::value::fiberheap::set_alloc_region(crate::value::fiberheap::REGION_INFRA);
                             let err = crate::value::error_val(
                                 "signal-violation",
                                 format!(
@@ -642,6 +716,7 @@ impl VM {
                                     excess_str, allowed_str
                                 ),
                             );
+                            crate::value::fiberheap::poison_alloc_region();
                             self.fiber.signal = Some((SIG_ERROR, err));
                         }
                     }
@@ -656,6 +731,7 @@ impl VM {
                     if self.error_loc.is_none() {
                         self.error_loc = location_map.get(&instr_ip).cloned();
                     }
+                    crate::value::fiberheap::reset_alloc_region();
                     return (bits, ip);
                 }
             }

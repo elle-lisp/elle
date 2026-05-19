@@ -12,6 +12,10 @@ impl<'a> Lowerer<'a> {
         is_tail: bool,
         call_signals: SignalBits,
     ) -> Result<Reg, String> {
+        // Save the Call node's HirId — sub-expression lowering overwrites
+        // current_hir_id, but emit_alloc needs the Call's HirId for region lookup.
+        let call_hir_id = self.current_hir_id;
+
         let has_splice = args.iter().any(|a| a.spliced);
 
         if !has_splice {
@@ -27,6 +31,9 @@ impl<'a> Lowerer<'a> {
                 arg_regs.push(self.lower_expr(&arg.expr)?);
             }
             let func_reg = self.lower_expr(func)?;
+
+            // Restore Call's HirId for region-stamped allocation.
+            self.current_hir_id = call_hir_id;
 
             // Determine if the compiler verified arity for this call.
             // True when the callee is a primitive binding that hasn't been
@@ -68,7 +75,7 @@ impl<'a> Lowerer<'a> {
                 //
                 self.emit_pending_free_regions();
 
-                self.emit(LirInstr::TailCall {
+                self.emit_alloc(LirInstr::TailCall {
                     func: func_reg,
                     args: arg_regs,
                     arity_checked,
@@ -79,14 +86,14 @@ impl<'a> Lowerer<'a> {
                 if call_signals
                     .intersects(crate::signals::SIG_YIELD.union(crate::signals::SIG_DEBUG))
                 {
-                    self.emit(LirInstr::SuspendingCall {
+                    self.emit_alloc(LirInstr::SuspendingCall {
                         dst,
                         func: func_reg,
                         args: arg_regs,
                         arity_checked,
                     });
                 } else {
-                    self.emit(LirInstr::Call {
+                    self.emit_alloc(LirInstr::Call {
                         dst,
                         func: func_reg,
                         args: arg_regs,
@@ -104,6 +111,9 @@ impl<'a> Lowerer<'a> {
                 lowered.push((reg, arg.spliced));
             }
             let func_reg = self.lower_expr(func)?;
+
+            // Restore Call's HirId for region-stamped allocations.
+            self.current_hir_id = call_hir_id;
 
             // Build the args array incrementally
             // Start with MakeArrayMut of the first run of non-spliced args
@@ -167,14 +177,14 @@ impl<'a> Lowerer<'a> {
 
             if is_tail {
                 self.emit_pending_free_regions();
-                self.emit(LirInstr::TailCallArrayMut {
+                self.emit_alloc(LirInstr::TailCallArrayMut {
                     func: func_reg,
                     args: final_args,
                 });
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::CallArrayMut {
+                self.emit_alloc(LirInstr::CallArrayMut {
                     dst,
                     func: func_reg,
                     args: final_args,
@@ -337,10 +347,12 @@ impl<'a> Lowerer<'a> {
     }
 
     pub(super) fn lower_eval(&mut self, expr: &Hir, env: &Hir) -> Result<Reg, String> {
+        let saved_hir_id = self.current_hir_id;
         let env_reg = self.lower_expr(env)?;
         let expr_reg = self.lower_expr(expr)?;
+        self.current_hir_id = saved_hir_id;
         let dst = self.fresh_reg();
-        self.emit(LirInstr::Eval {
+        self.emit_alloc(LirInstr::Eval {
             dst,
             expr: expr_reg,
             env: env_reg,

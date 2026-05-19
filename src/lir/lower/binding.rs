@@ -81,7 +81,12 @@ impl<'a> Lowerer<'a> {
             self.active_region_ids.push(region_id);
         }
 
-        // First allocate all slots with nil (or cells containing nil)
+        // First allocate all slots with nil (or cells containing nil).
+        // Use the Letrec's HirId for MakeCaptureCell — the solver
+        // registered an alloc_here for the Letrec when any binding
+        // needs a cell.
+        let saved_hir_id = self.current_hir_id;
+        self.current_hir_id = Some(hir_id);
         for (binding, _) in bindings.iter() {
             let nil_reg = self.emit_const(LirConst::Nil)?;
             let slot = self.allocate_slot(*binding);
@@ -99,7 +104,7 @@ impl<'a> Lowerer<'a> {
                 self.emit_binding_store(slot, nil_reg);
             } else if needs_capture {
                 let cell_reg = self.fresh_reg();
-                self.emit(LirInstr::MakeCaptureCell {
+                self.emit_alloc(LirInstr::MakeCaptureCell {
                     dst: cell_reg,
                     value: nil_reg,
                 });
@@ -108,6 +113,7 @@ impl<'a> Lowerer<'a> {
                 self.emit_binding_store(slot, nil_reg);
             }
         }
+        self.current_hir_id = saved_hir_id;
         // Then initialize
         for (binding, init) in bindings.iter() {
             // Set function context for lambdas so that
@@ -470,7 +476,7 @@ impl<'a> Lowerer<'a> {
                         slot: temp_slot,
                     });
                     let slice = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
+                    self.emit_alloc(LirInstr::ArrayMutSliceFrom {
                         dst: slice,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -518,7 +524,7 @@ impl<'a> Lowerer<'a> {
                         slot: temp_slot,
                     });
                     let slice = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
+                    self.emit_alloc(LirInstr::ArrayMutSliceFrom {
                         dst: slice,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -606,7 +612,7 @@ impl<'a> Lowerer<'a> {
                             PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                         })
                         .collect();
-                    self.emit(LirInstr::StructRest {
+                    self.emit_alloc(LirInstr::StructRest {
                         dst: rest_reg,
                         src: reloaded,
                         exclude_keys: exclude,
@@ -665,7 +671,7 @@ impl<'a> Lowerer<'a> {
                             PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                         })
                         .collect();
-                    self.emit(LirInstr::StructRest {
+                    self.emit_alloc(LirInstr::StructRest {
                         dst: rest_reg,
                         src: reloaded,
                         exclude_keys: exclude,

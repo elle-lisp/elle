@@ -427,11 +427,12 @@ impl Emitter {
                 // Add closure template to constants
                 let const_idx = self.bytecode.add_constant(Value::closure(closure));
 
-                // Emit MakeClosure instruction
+                // Emit MakeClosure instruction — region first so dispatch
+                // can set alloc_region before the handler allocates.
                 self.bytecode.emit(Instruction::MakeClosure);
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_u16(const_idx);
                 self.bytecode.emit_u16(captures.len() as u16);
-                self.bytecode.emit_u16(region);
 
                 // Pop captures, push closure
                 for _ in captures {
@@ -485,6 +486,7 @@ impl Emitter {
                 } else {
                     self.bytecode.emit(Instruction::Call);
                 }
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_u16(args.len() as u16);
                 let call_resume_ip = self.bytecode.current_pos();
 
@@ -544,6 +546,7 @@ impl Emitter {
                 } else {
                     self.bytecode.emit(Instruction::TailCall);
                 }
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_u16(args.len() as u16);
             }
 
@@ -564,8 +567,8 @@ impl Emitter {
                     self.ensure_on_top(*elem);
                 }
                 self.bytecode.emit(Instruction::MakeArrayMut);
-                self.bytecode.emit_byte(elements.len() as u8);
                 self.bytecode.emit_u16(region);
+                self.bytecode.emit_byte(elements.len() as u8);
                 for _ in elements {
                     self.pop();
                 }
@@ -611,6 +614,7 @@ impl Emitter {
             LirInstr::ArrayMutSliceFrom { dst, src, index } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::ArrayMutSliceFrom);
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
@@ -659,6 +663,7 @@ impl Emitter {
             } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::StructRest);
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_u16(exclude_keys.len() as u16);
                 for key in exclude_keys {
                     let key_value = match key {
@@ -874,6 +879,7 @@ impl Emitter {
                 self.ensure_on_top(*env);
                 self.ensure_on_top(*expr);
                 self.bytecode.emit(Instruction::Eval);
+                self.bytecode.emit_u16(region);
                 // Eval pops 2 values and pushes 1 result
                 self.pop(); // expr
                 self.pop(); // env
@@ -884,6 +890,7 @@ impl Emitter {
                 // Stack: [array, source] → [extended_array]
                 self.ensure_binary_on_top(*array, *source);
                 self.bytecode.emit(Instruction::ArrayMutExtend);
+                self.bytecode.emit_u16(region);
                 self.pop(); // source
                 self.pop(); // array
                 self.push_reg(*dst);
@@ -893,6 +900,7 @@ impl Emitter {
                 // Stack: [array, value] → [extended_array]
                 self.ensure_binary_on_top(*array, *value);
                 self.bytecode.emit(Instruction::ArrayMutPush);
+                self.bytecode.emit_u16(region);
                 self.pop(); // value
                 self.pop(); // array
                 self.push_reg(*dst);
@@ -902,6 +910,7 @@ impl Emitter {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::CallArrayMut);
+                self.bytecode.emit_u16(region);
                 let call_resume_ip = self.bytecode.current_pos();
                 self.pop(); // args
                 self.pop(); // func
@@ -921,6 +930,7 @@ impl Emitter {
                 // Stack: [func, args_array] → (tail call, no push)
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::TailCallArrayMut);
+                self.bytecode.emit_u16(region);
                 self.pop(); // args
                 self.pop(); // func
             }
@@ -1033,12 +1043,14 @@ impl Emitter {
             LirInstr::Length { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::Length);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }
             LirInstr::Get { dst, obj, key } => {
                 self.ensure_binary_on_top(*obj, *key);
                 self.bytecode.emit(Instruction::IntrGet);
+                self.bytecode.emit_u16(region);
                 self.pop(); // key
                 self.pop(); // obj
                 self.push_reg(*dst);
@@ -1048,6 +1060,7 @@ impl Emitter {
                 self.ensure_on_top(*key);
                 self.ensure_on_top(*val);
                 self.bytecode.emit(Instruction::IntrPut);
+                self.bytecode.emit_u16(region);
                 self.pop(); // val
                 self.pop(); // key
                 self.pop(); // obj
@@ -1056,6 +1069,7 @@ impl Emitter {
             LirInstr::Del { dst, obj, key } => {
                 self.ensure_binary_on_top(*obj, *key);
                 self.bytecode.emit(Instruction::IntrDel);
+                self.bytecode.emit_u16(region);
                 self.pop(); // key
                 self.pop(); // obj
                 self.push_reg(*dst);
@@ -1070,6 +1084,7 @@ impl Emitter {
             LirInstr::IntrPush { dst, array, value } => {
                 self.ensure_binary_on_top(*array, *value);
                 self.bytecode.emit(Instruction::IntrPush);
+                self.bytecode.emit_u16(region);
                 self.pop(); // value
                 self.pop(); // array
                 self.push_reg(*dst);
@@ -1077,6 +1092,7 @@ impl Emitter {
             LirInstr::IntrStringPush { dst, string, value } => {
                 self.ensure_binary_on_top(*string, *value);
                 self.bytecode.emit(Instruction::IntrStringPush);
+                self.bytecode.emit_u16(region);
                 self.pop(); // value
                 self.pop(); // string
                 self.push_reg(*dst);
@@ -1084,6 +1100,7 @@ impl Emitter {
             LirInstr::IntrBytesPush { dst, bytes, value } => {
                 self.ensure_binary_on_top(*bytes, *value);
                 self.bytecode.emit(Instruction::IntrBytesPush);
+                self.bytecode.emit_u16(region);
                 self.pop(); // value
                 self.pop(); // bytes
                 self.push_reg(*dst);
@@ -1091,6 +1108,7 @@ impl Emitter {
             LirInstr::Pop { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrPop);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -1099,12 +1117,14 @@ impl Emitter {
             LirInstr::Freeze { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrFreeze);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }
             LirInstr::Thaw { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrThaw);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }

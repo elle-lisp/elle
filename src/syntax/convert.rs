@@ -273,7 +273,7 @@ impl Syntax {
             }
             SyntaxKind::StructMut(syntaxes)
         } else {
-            return Err(format!("Cannot convert {:?} to Syntax", value));
+            return Err(format!("Cannot convert {} to Syntax", value));
         };
         Ok(Syntax::new(kind, span))
     }

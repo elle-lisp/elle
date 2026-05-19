@@ -317,29 +317,56 @@ impl<'a> Lowerer<'a> {
     /// Emit a heap-allocating instruction, stamping it with the region
     /// assigned by region inference for the current HIR node.
     fn emit_alloc(&mut self, instr: LirInstr) {
-        let rid = self.alloc_region_id();
-        if rid == 0 {
-            self.emit(instr);
-        } else {
-            self.emit_in_region(instr, rid);
-        }
+        let rid = self.alloc_region_id_for(&instr);
+        self.emit_in_region(instr, rid);
     }
 
-    /// Look up the region for the current HIR node and return the u16
-    /// index into the function's region_table. Returns 0 when there is
-    /// no region assignment or the region is GLOBAL.
-    fn alloc_region_id(&mut self) -> u16 {
-        let hir_id = match self.current_hir_id {
-            Some(id) => id,
-            None => return 0,
-        };
-        let region = match self.region_info.alloc_region.get(&hir_id) {
-            Some(r) => *r,
-            None => return 0,
-        };
-        if region.is_global() {
-            return 0;
-        }
+    /// Look up the region for the current HIR node and return a non-zero
+    /// u16 index into the function's region_table.
+    ///
+    /// Panics if:
+    /// - `current_hir_id` is None (emit_alloc called without HIR context)
+    /// - the solver has no entry for this allocation site
+    /// - the solver assigned Region::GLOBAL to this allocation site
+    fn alloc_region_id_for(&mut self, instr: &LirInstr) -> u16 {
+        let hir_id = self
+            .current_hir_id
+            .expect("emit_alloc called without current_hir_id set");
+
+        let region = self
+            .region_info
+            .alloc_region
+            .get(&hir_id)
+            .unwrap_or_else(|| {
+                // Find nearby HirIds for diagnosis
+                let mut nearby: Vec<u32> = self.region_info.alloc_region.keys()
+                    .map(|id| id.0)
+                    .filter(|&id| id.abs_diff(hir_id.0) <= 10)
+                    .collect();
+                nearby.sort();
+                panic!(
+                    "alloc_region_id: no solver entry for @{} \
+                     (instr={:?}, in_lambda={}) — \
+                     every allocating instruction must have a region assignment. \
+                     Nearby entries: {:?}",
+                    hir_id.0,
+                    std::mem::discriminant(instr),
+                    self.in_lambda,
+                    nearby,
+                )
+            });
+
+        assert!(
+            !region.is_global(),
+            "alloc_region_id: solver assigned GLOBAL to @{}",
+            hir_id.0
+        );
+
+        self.region_table_id(*region)
+    }
+
+    /// Map a Region to its u16 region_table index, creating an entry if needed.
+    fn region_table_id(&mut self, region: crate::hir::region::Region) -> u16 {
         if let Some(&table_id) = self.region_to_table.get(&region) {
             table_id
         } else {
@@ -360,14 +387,7 @@ impl<'a> Lowerer<'a> {
         if region.is_global() {
             return 0;
         }
-        if let Some(&table_id) = self.region_to_table.get(&region) {
-            table_id
-        } else {
-            let table_id = self.current_func.region_table.len() as u16 + 1;
-            self.current_func.region_table.push(table_id);
-            self.region_to_table.insert(region, table_id);
-            table_id
-        }
+        self.region_table_id(region)
     }
 
     fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {
