@@ -502,19 +502,26 @@ impl RegionInference {
                 // Walk all arg expressions and collect their region vars.
                 let arg_vars: Vec<Option<u32>> = args.iter().map(|a| self.walk(&a.expr)).collect();
 
+                // Always register the Call node so the lowerer can look
+                // up its region (the bytecode Call instruction needs a
+                // region operand regardless of inlining).
+                let call_var = self.alloc_here(hir.id);
+
                 // Try to inline the callee's Lambda body.
                 if let Some(result) = self.try_inline_call(func, &arg_vars, hir.id) {
+                    // Constrain the inlined result to the call's region
+                    // so that the call var stays in sync.
+                    if let Some(rv) = result {
+                        self.constrain(rv, call_var, hir.id);
+                    }
                     return result;
                 }
 
-                // Fallback: opaque call. Always alloc_here so the lowerer
-                // can look up the region. Immediate-returning calls still
-                // need a region operand in bytecode.
-                let var = self.alloc_here(hir.id);
+                // Fallback: opaque call.
                 if self.call_returns_immediate(func) {
                     None
                 } else {
-                    Some(var)
+                    Some(call_var)
                 }
             }
 

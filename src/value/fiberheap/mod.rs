@@ -671,6 +671,18 @@ impl FiberHeap {
         0
     }
 
+    /// Length of the region_rc vec (for bounds checking).
+    #[inline]
+    pub fn region_rc_len(&self) -> usize {
+        self.region_rc.len()
+    }
+
+    /// Get the rc for a region (no bounds check — caller must verify index).
+    #[inline]
+    pub fn region_rc_get(&self, rid: usize) -> u32 {
+        self.region_rc[rid]
+    }
+
     /// Increment the reference count for a region.
     /// No-op for region 0 (global/untracked).
     #[inline]

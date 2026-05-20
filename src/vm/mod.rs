@@ -29,7 +29,7 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::compiler::bytecode::{Bytecode, Instruction};
+use crate::compiler::bytecode::Bytecode;
 use crate::error::LocationMap;
 use crate::pipeline::lookup_stdlib_value;
 use crate::symbol::SymbolTable;
@@ -245,22 +245,15 @@ impl VM {
             squelch_mask: SignalBits::EMPTY,
         });
 
-        let synthetic_bc = vec![
-            Instruction::LoadConst as u8,
-            0,
-            0,
-            Instruction::LoadConst as u8,
-            0,
-            1,
-            Instruction::Call as u8,
-            0,
-            0, // region_id as u16be (0 = global)
-            0,
-            1, // arg_count as u16be
-            Instruction::Return as u8,
-        ];
-        let synthetic_constants = vec![thunk, ev_run];
-
-        self.execute_bytecode(&synthetic_bc, &synthetic_constants, None)
+        // Call ev/run(thunk) directly via call_closure instead of
+        // constructing synthetic bytecode. This avoids needing a
+        // region assignment for the synthetic Call instruction.
+        let ev_closure = ev_run.as_closure().ok_or_else(|| {
+            "ev/run is not a closure".to_string()
+        })?;
+        match self.call_closure(ev_closure, &[thunk]) {
+            Ok(value) => Ok(value),
+            Err(e) => Err(e),
+        }
     }
 }
