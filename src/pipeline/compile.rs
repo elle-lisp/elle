@@ -57,7 +57,7 @@ pub fn compile(
     crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
     // Phase 4: Lower to LIR with intrinsic specialization
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
@@ -200,7 +200,7 @@ pub fn compile_file_to_lir(
     functionalize(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
@@ -376,7 +376,8 @@ fn compile_file_inner(
         compile_file_frontend(source, symbols, source_name)?;
 
     // Lower to LIR
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let meta = crate::primitives::cached_primitive_meta(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {

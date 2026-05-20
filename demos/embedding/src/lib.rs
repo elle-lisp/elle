@@ -146,6 +146,7 @@ pub unsafe extern "C" fn elle_register_prim(
         category: "host",
         example: "",
         aliases: &[],
+        ..crate::primitives::def::PrimitiveDef::DEFAULT
     }));
 
     elle::plugin_api::register_plugin_fn(def, func);

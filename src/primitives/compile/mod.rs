@@ -992,6 +992,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/analyze "(defn f [x] (+ x 1))")"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/diagnostics",
@@ -1003,6 +1004,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/diagnostics (compile/analyze src))"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/symbols",
@@ -1014,6 +1016,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/symbols (compile/analyze src))"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/signal",
@@ -1025,6 +1028,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/signal analysis :my-fn)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/query-signal",
@@ -1036,6 +1040,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/query-signal analysis :silent)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/bindings",
@@ -1047,6 +1052,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/bindings (compile/analyze src))"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/binding",
@@ -1058,6 +1064,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/binding analysis :x)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/captures",
@@ -1069,6 +1076,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/captures analysis :make-handler)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/captured-by",
@@ -1080,6 +1088,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/captured-by analysis :config)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/callers",
@@ -1091,6 +1100,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/callers analysis :fetch-page)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/callees",
@@ -1102,6 +1112,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/callees analysis :main)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/call-graph",
@@ -1113,6 +1124,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/call-graph (compile/analyze src))"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/primitives",
@@ -1124,6 +1136,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/primitives)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/rename",
@@ -1135,6 +1148,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/rename analysis :old-name :new-name)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/extract",
@@ -1146,6 +1160,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/extract analysis {:from :fn :lines [5 10] :name :new-fn})"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/parallelize",
@@ -1157,6 +1172,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/parallelize analysis [:fetch-a :fetch-b])"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/add-handler",
@@ -1168,6 +1184,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/add-handler analysis :fetch-page :error)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "compile/run-on",
@@ -1179,5 +1196,6 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "compile",
         example: r#"(compile/run-on :bytecode (fn [a b] (+ a b)) 3 4)"#,
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
 ];

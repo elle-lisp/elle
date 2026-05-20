@@ -2,7 +2,6 @@
 mod advanced;
 
 use crate::primitives::collection::{coll_empty, coll_len, coll_to_vec};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -122,95 +121,49 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
     crate::primitives::traitregistry::dispatch_trait_method(&args[0], "Collection", "empty?", args)
 }
 
-/// Declarative primitive definitions for list operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "first",
-        func: prim_first,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+primitive! {
+    "first" => prim_first {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Get the first element of a sequence (list, array, string). Returns nil for empty.",
-        params: &["sequence"],
-        category: "list",
-        example: "(first (list 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "second",
-        func: prim_second,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["sequence"], category: "list", example: "(first (list 1 2 3))",
+    }
+    "second" => prim_second {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Get the second element of a sequence. Returns nil if fewer than 2 elements.",
-        params: &["sequence"],
-        category: "list",
-        example: "(second (list 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "rest",
-        func: prim_rest,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["sequence"], category: "list", example: "(second (list 1 2 3))",
+    }
+    "rest" => prim_rest {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Get the rest of a sequence. Returns type-preserving empty for empty input.",
-        params: &["sequence"],
-        category: "list",
-        example: "(rest (list 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "list",
-        func: prim_list,
-        signal: Signal::silent(),
+        params: &["sequence"], category: "list", example: "(rest (list 1 2 3))",
+    }
+    "list" => prim_list {
         arity: Arity::AtLeast(0),
         doc: "Create a list from arguments",
-        params: &["elements"],
-        category: "list",
-        example: "(list 1 2 3)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "length",
-        func: prim_length,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["elements"], category: "list", example: "(list 1 2 3)",
+    }
+    "length" => prim_length {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Get the length of a collection (list, string, array, table, struct, symbol, or keyword)",
-        params: &["collection"],
-        category: "list",
-        example: "(length (list 1 2 3))",
-        aliases: &[],
-    },
-     PrimitiveDef {
-         name: "empty?",
-         func: prim_empty,
-         signal: Signal::errors(),
-         arity: Arity::Exact(1),
-         doc: "Check if a collection is empty",
-         params: &["collection"],
-         category: "predicate",
-         example: "(empty? (list))",
-         aliases: &[],
-     },
-    // append, concat, reverse — now implemented in Elle (src/core.lisp)
-    PrimitiveDef {
-        name: "->array",
-        func: prim_to_array,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["collection"], category: "list", example: "(length (list 1 2 3))",
+        returns: crate::primitives::def::IMMEDIATE,
+    }
+    "empty?" => prim_empty {
+        signal: Signal::errors(), arity: Arity::Exact(1),
+        doc: "Check if a collection is empty",
+        params: &["collection"], category: "predicate", example: "(empty? (list))",
+        returns: crate::primitives::def::IMMEDIATE,
+    }
+    "->array" => prim_to_array {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Convert any sequence to an immutable array. Lists, @arrays, sets, strings (graphemes), and bytes (integers) are supported.",
-        params: &["coll"],
-        category: "list",
+        params: &["coll"], category: "list",
         example: "(->array (list 1 2 3)) #=> [1 2 3]\n(->array @[1 2]) #=> [1 2]\n(->array |3 1 2|) #=> [1 2 3]",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "->list",
-        func: prim_to_list,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+    }
+    "->list" => prim_to_list {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Convert any sequence to a list. Arrays, @arrays, sets, strings (graphemes), and bytes (integers) are supported.",
-        params: &["coll"],
-        category: "list",
+        params: &["coll"], category: "list",
         example: "(->list [1 2 3]) #=> (1 2 3)\n(->list @[1 2]) #=> (1 2)\n(->list |3 1 2|) #=> (1 2 3)",
-        aliases: &[],
-    },
-];
+    }
+}

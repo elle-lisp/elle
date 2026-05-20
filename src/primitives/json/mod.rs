@@ -9,7 +9,6 @@ mod serializer;
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -83,42 +82,29 @@ pub(crate) fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) 
     (SIG_OK, Value::string(json_str))
 }
 
-/// Declarative primitive definitions for JSON operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "json/parse",
-        func: prim_json_parse,
-        signal: Signal::silent(),
+primitive! {
+    "json/parse" => prim_json_parse {
         arity: Arity::Range(1, 3),
         doc: "Parse a JSON string into Elle values. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
-        params: &["json-string", ":keys", ":keyword"],
-        category: "json",
+        params: &["json-string", ":keys", ":keyword"], category: "json",
         example: r#"(json/parse "{\"name\": \"Alice\", \"age\": 30}" :keys :keyword)"#,
         aliases: &["json-parse"],
-    },
-    PrimitiveDef {
-        name: "json/serialize",
-        func: prim_json_serialize,
-        signal: Signal::silent(),
+    }
+    "json/serialize" => prim_json_serialize {
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to compact JSON",
-        params: &["value"],
-        category: "json",
+        params: &["value"], category: "json",
         example: "(json/serialize (@struct :name \"Bob\" :age 25))",
         aliases: &["json-serialize"],
-    },
-    PrimitiveDef {
-        name: "json/pretty",
-        func: prim_json_serialize_pretty,
-        signal: Signal::silent(),
+    }
+    "json/pretty" => prim_json_serialize_pretty {
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
-        params: &["value"],
-        category: "json",
+        params: &["value"], category: "json",
         example: "(json/pretty (list 1 2 3))",
         aliases: &["json-serialize-pretty"],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {

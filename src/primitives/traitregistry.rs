@@ -100,6 +100,7 @@ fn build_sequence_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_REST: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:rest",
@@ -111,6 +112,7 @@ fn build_sequence_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_LAST: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:last",
@@ -122,6 +124,7 @@ fn build_sequence_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_NTH: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:nth",
@@ -133,6 +136,7 @@ fn build_sequence_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_ITER: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:iter",
@@ -144,6 +148,7 @@ fn build_sequence_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
 
     let mut entries = BTreeMap::new();
@@ -188,6 +193,7 @@ fn build_collection_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_EMPTY: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:empty?",
@@ -199,6 +205,7 @@ fn build_collection_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_HAS: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:has?",
@@ -210,6 +217,7 @@ fn build_collection_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_CONJ: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:conj",
@@ -221,6 +229,7 @@ fn build_collection_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_EMPTY_NEW: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:empty",
@@ -232,6 +241,7 @@ fn build_collection_methods() -> Value {
         category: "trait",
         example: "",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
 
     let mut entries = BTreeMap::new();

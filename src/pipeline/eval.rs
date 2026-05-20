@@ -50,7 +50,7 @@ pub fn eval_syntax(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
@@ -112,7 +112,7 @@ pub fn eval(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {

@@ -433,6 +433,7 @@ pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
         category: "ffi",
         example: "(ffi/call sqrt-ptr sig 2.0)",
         aliases: &[],
+        ..crate::primitives::def::PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "ffi/callback",
@@ -444,6 +445,7 @@ pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
         category: "ffi",
         example: "(ffi/callback (ffi/signature :int [:ptr :ptr]) (fn (a b) 0))",
         aliases: &[],
+        ..crate::primitives::def::PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "ffi/callback-free",
@@ -455,5 +457,6 @@ pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
         category: "ffi",
         example: "(ffi/callback-free cb-ptr)",
         aliases: &[],
+        ..crate::primitives::def::PrimitiveDef::DEFAULT
     },
 ];

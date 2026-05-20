@@ -408,5 +408,6 @@ pub(crate) const MLIR_PRIMITIVES: &[PrimitiveDef] = &[
         category: "mlir",
         example: "(mlir/compile-spirv (fn [a b] (+ a b)))",
         aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
 ];

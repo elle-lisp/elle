@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use crossbeam_channel::{self, TryRecvError, TrySendError};
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -367,82 +366,42 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "chan",
-        func: prim_chan_new,
-        signal: Signal::errors(),
-        arity: Arity::Range(0, 1),
+primitive! {
+    "chan" => prim_chan_new {
+        signal: Signal::errors(), arity: Arity::Range(0, 1),
         doc: "Create a channel. Returns [sender receiver]. Optional capacity for bounded channel.",
-        params: &["&opt capacity"],
-        category: "chan",
-        example: "(chan)",
+        params: &["&opt capacity"], category: "chan", example: "(chan)",
         aliases: &["chan/new"],
-    },
-    PrimitiveDef {
-        name: "chan/send",
-        func: prim_chan_send,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
+    }
+    "chan/send" => prim_chan_send {
+        signal: Signal::errors(), arity: Arity::Exact(2),
         doc: "Non-blocking send. Returns [:ok], [:full], or [:disconnected].",
-        params: &["sender", "msg"],
-        category: "chan",
-        example: "(chan/send sender 42)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/recv",
-        func: prim_chan_recv,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["sender", "msg"], category: "chan", example: "(chan/send sender 42)",
+    }
+    "chan/recv" => prim_chan_recv {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Non-blocking receive. Returns [:ok msg], [:empty], or [:disconnected].",
-        params: &["receiver"],
-        category: "chan",
-        example: "(chan/recv receiver)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/clone",
-        func: prim_chan_clone,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["receiver"], category: "chan", example: "(chan/recv receiver)",
+    }
+    "chan/clone" => prim_chan_clone {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Clone a sender. Multiple senders can feed the same channel.",
-        params: &["sender"],
-        category: "chan",
-        example: "(chan/clone sender)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/close",
-        func: prim_chan_close,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["sender"], category: "chan", example: "(chan/clone sender)",
+    }
+    "chan/close" => prim_chan_close {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Close a sender. Receivers will get :disconnected after buffered messages drain.",
-        params: &["sender"],
-        category: "chan",
-        example: "(chan/close sender)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/close-recv",
-        func: prim_chan_close_recv,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        params: &["sender"], category: "chan", example: "(chan/close sender)",
+    }
+    "chan/close-recv" => prim_chan_close_recv {
+        signal: Signal::errors(), arity: Arity::Exact(1),
         doc: "Close a receiver. Senders will get :disconnected on next send.",
-        params: &["receiver"],
-        category: "chan",
-        example: "(chan/close-recv receiver)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/select",
-        func: prim_chan_select,
-        signal: Signal::errors(),
-        arity: Arity::Range(1, 2),
+        params: &["receiver"], category: "chan", example: "(chan/close-recv receiver)",
+    }
+    "chan/select" => prim_chan_select {
+        signal: Signal::errors(), arity: Arity::Range(1, 2),
         doc: "Block until one receiver has a message. Returns [index msg] or [:timeout].",
-        params: &["receivers", "&opt timeout-ms"],
-        category: "chan",
+        params: &["receivers", "&opt timeout-ms"], category: "chan",
         example: "(chan/select @[r1 r2])",
-        aliases: &[],
-    },
-];
+    }
+}

@@ -219,6 +219,7 @@ primitive! {
         category: "math",
         example: "(math/sqrt 16)",
         aliases: &["sqrt"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/sin" => prim_sin {
         signal: Signal::errors(),
@@ -228,6 +229,7 @@ primitive! {
         category: "math",
         example: "(math/sin 0)",
         aliases: &["sin"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/cos" => prim_cos {
         signal: Signal::errors(),
@@ -237,6 +239,7 @@ primitive! {
         category: "math",
         example: "(math/cos 0)",
         aliases: &["cos"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/tan" => prim_tan {
         signal: Signal::errors(),
@@ -246,6 +249,7 @@ primitive! {
         category: "math",
         example: "(math/tan 0)",
         aliases: &["tan"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/log" => prim_log {
         signal: Signal::errors(),
@@ -255,6 +259,7 @@ primitive! {
         category: "math",
         example: "(math/log 2.718281828)",
         aliases: &["log"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/exp" => prim_exp {
         signal: Signal::errors(),
@@ -264,6 +269,7 @@ primitive! {
         category: "math",
         example: "(math/exp 1)",
         aliases: &["exp"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/pow" => prim_pow {
         signal: Signal::errors(),
@@ -273,18 +279,21 @@ primitive! {
         category: "math",
         example: "(math/pow 2 8)",
         aliases: &["pow"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/pi" => prim_pi {
         doc: "The mathematical constant pi (π).",
         category: "math",
         example: "(math/pi)",
         aliases: &["pi"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/e" => prim_e {
         doc: "The mathematical constant e (Euler's number).",
         category: "math",
         example: "(math/e)",
         aliases: &["e"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/asin" => prim_asin {
         signal: Signal::errors(),
@@ -294,6 +303,7 @@ primitive! {
         category: "math",
         example: "(math/asin 1)",
         aliases: &["asin"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/acos" => prim_acos {
         signal: Signal::errors(),
@@ -303,6 +313,7 @@ primitive! {
         category: "math",
         example: "(math/acos 1)",
         aliases: &["acos"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/atan" => prim_atan {
         signal: Signal::errors(),
@@ -312,6 +323,7 @@ primitive! {
         category: "math",
         example: "(math/atan 1)",
         aliases: &["atan"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/fmod" => prim_fmod {
         signal: Signal::errors(),
@@ -321,6 +333,7 @@ primitive! {
         category: "math",
         example: "(math/fmod 5.5 2.0) #=> 1.5",
         aliases: &["fmod"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/atan2" => prim_atan2 {
         signal: Signal::errors(),
@@ -330,6 +343,7 @@ primitive! {
         category: "math",
         example: "(math/atan2 1 1)",
         aliases: &["atan2"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/sinh" => prim_sinh {
         signal: Signal::errors(),
@@ -339,6 +353,7 @@ primitive! {
         category: "math",
         example: "(math/sinh 1)",
         aliases: &["sinh"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/cosh" => prim_cosh {
         signal: Signal::errors(),
@@ -348,6 +363,7 @@ primitive! {
         category: "math",
         example: "(math/cosh 1)",
         aliases: &["cosh"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/tanh" => prim_tanh {
         signal: Signal::errors(),
@@ -357,6 +373,7 @@ primitive! {
         category: "math",
         example: "(math/tanh 1)",
         aliases: &["tanh"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/log2" => prim_log2 {
         signal: Signal::errors(),
@@ -366,6 +383,7 @@ primitive! {
         category: "math",
         example: "(math/log2 8)",
         aliases: &["log2"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/log10" => prim_log10 {
         signal: Signal::errors(),
@@ -375,6 +393,7 @@ primitive! {
         category: "math",
         example: "(math/log10 100)",
         aliases: &["log10"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/trunc" => prim_trunc {
         signal: Signal::errors(),
@@ -384,6 +403,7 @@ primitive! {
         category: "math",
         example: "(math/trunc 3.7)",
         aliases: &["trunc"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/cbrt" => prim_cbrt {
         signal: Signal::errors(),
@@ -393,6 +413,7 @@ primitive! {
         category: "math",
         example: "(math/cbrt 27)",
         aliases: &["cbrt"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/exp2" => prim_exp2 {
         signal: Signal::errors(),
@@ -402,24 +423,28 @@ primitive! {
         category: "math",
         example: "(math/exp2 3)",
         aliases: &["exp2"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/inf" => prim_inf {
         doc: "Positive infinity (IEEE 754).",
         category: "math",
         example: "(math/inf)",
         aliases: &["+inf", "inf"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/-inf" => prim_neg_inf {
         doc: "Negative infinity (IEEE 754).",
         category: "math",
         example: "(math/-inf)",
         aliases: &["-inf"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/nan" => prim_nan {
         doc: "Not-a-number (IEEE 754 NaN).",
         category: "math",
         example: "(math/nan)",
         aliases: &["nan"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/f32-bits" => prim_f32_bits {
         signal: Signal::errors(),
@@ -428,6 +453,7 @@ primitive! {
         params: &["x"],
         category: "math",
         example: "(math/f32-bits 1.0)",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "math/f32-from-bits" => prim_f32_from_bits {
         signal: Signal::errors(),
@@ -436,6 +462,7 @@ primitive! {
         params: &["bits"],
         category: "math",
         example: "(math/f32-from-bits 1065353216)",
+        returns: crate::primitives::def::IMMEDIATE,
     }
 }
 

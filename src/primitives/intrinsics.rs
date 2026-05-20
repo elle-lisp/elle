@@ -589,90 +589,105 @@ primitive! {
         doc: "Add two numbers",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%sub" => prim_sub {
         arity: Arity::Range(1, 2),
         doc: "Subtract or negate",
         params: &["a", "b?"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%mul" => prim_mul {
         arity: Arity::Exact(2),
         doc: "Multiply two numbers",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%div" => prim_div {
         arity: Arity::Exact(2),
         doc: "Divide two numbers",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%rem" => prim_rem {
         arity: Arity::Exact(2),
         doc: "Remainder (sign follows dividend)",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%mod" => prim_mod {
         arity: Arity::Exact(2),
         doc: "Floored modulus (sign follows divisor)",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%eq" => prim_eq {
         arity: Arity::Exact(2),
         doc: "Equality",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%ne" => prim_ne {
         arity: Arity::Exact(2),
         doc: "Not equal",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%lt" => prim_lt {
         arity: Arity::Exact(2),
         doc: "Less than",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%gt" => prim_gt {
         arity: Arity::Exact(2),
         doc: "Greater than",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%le" => prim_le {
         arity: Arity::Exact(2),
         doc: "Less than or equal",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%ge" => prim_ge {
         arity: Arity::Exact(2),
         doc: "Greater than or equal",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%not" => prim_not {
         arity: Arity::Exact(1),
         doc: "Logical not",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%int" => prim_int {
         arity: Arity::Exact(1),
         doc: "Convert to integer",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%float" => prim_float {
         arity: Arity::Exact(1),
         doc: "Convert to float",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%pair" => prim_pair {
         arity: Arity::Exact(2),
@@ -697,132 +712,154 @@ primitive! {
         doc: "Bitwise AND",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%bit-or" => prim_bit_or {
         arity: Arity::Exact(2),
         doc: "Bitwise OR",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%bit-xor" => prim_bit_xor {
         arity: Arity::Exact(2),
         doc: "Bitwise XOR",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%bit-not" => prim_bit_not {
         arity: Arity::Exact(1),
         doc: "Bitwise complement",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%shl" => prim_shl {
         arity: Arity::Exact(2),
         doc: "Shift left",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%shr" => prim_shr {
         arity: Arity::Exact(2),
         doc: "Shift right",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%nil?" => prim_nil_q {
         arity: Arity::Exact(1),
         doc: "Is nil?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%empty?" => prim_empty_q {
         arity: Arity::Exact(1),
         doc: "Is empty list?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%bool?" => prim_bool_q {
         arity: Arity::Exact(1),
         doc: "Is boolean?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%int?" => prim_int_q {
         arity: Arity::Exact(1),
         doc: "Is integer?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%float?" => prim_float_q {
         arity: Arity::Exact(1),
         doc: "Is float?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%string?" => prim_string_q {
         arity: Arity::Exact(1),
         doc: "Is string?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%keyword?" => prim_keyword_q {
         arity: Arity::Exact(1),
         doc: "Is keyword?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%symbol?" => prim_symbol_q {
         arity: Arity::Exact(1),
         doc: "Is symbol?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%pair?" => prim_pair_q {
         arity: Arity::Exact(1),
         doc: "Is pair?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%array?" => prim_array_q {
         arity: Arity::Exact(1),
         doc: "Is array?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%struct?" => prim_struct_q {
         arity: Arity::Exact(1),
         doc: "Is struct?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%set?" => prim_set_q {
         arity: Arity::Exact(1),
         doc: "Is set?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%bytes?" => prim_bytes_q {
         arity: Arity::Exact(1),
         doc: "Is bytes?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%box?" => prim_box_q {
         arity: Arity::Exact(1),
         doc: "Is box?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%closure?" => prim_closure_q {
         arity: Arity::Exact(1),
         doc: "Is closure?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%fiber?" => prim_fiber_q {
         arity: Arity::Exact(1),
         doc: "Is fiber?",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%type-of" => prim_type_of {
         arity: Arity::Exact(1),
@@ -835,6 +872,7 @@ primitive! {
         doc: "Polymorphic length",
         params: &["x"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%get" => prim_get {
         arity: Arity::Range(2, 3),
@@ -859,6 +897,7 @@ primitive! {
         doc: "Key/element exists?",
         params: &["coll", "key"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "%array-push" => prim_push {
         arity: Arity::Exact(2),
@@ -901,5 +940,6 @@ primitive! {
         doc: "Pointer identity",
         params: &["a", "b"],
         category: "intrinsic",
+        returns: crate::primitives::def::IMMEDIATE,
     }
 }

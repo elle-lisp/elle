@@ -2,7 +2,7 @@ use crate::symbol::SymbolTable;
 use crate::value::Value;
 use crate::vm::VM;
 
-use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
+use super::def::{Doc, PrimitiveDef, PrimitiveMeta, ReturnType};
 use super::{
     allocator, arena, arithmetic, array, bitwise, bytes, chan, comparison, compile, concurrency,
     config, convert, debug, disassembly, display, fiber_introspect, fibers, fileio, format,
@@ -105,6 +105,10 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
             };
             vm.docs.insert(def.name.to_string(), doc.clone());
 
+            if def.returns == ReturnType::Immediate {
+                meta.immediate_primitives.insert(sym_id);
+            }
+
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
                 let alias_val = Value::native_fn(def);
@@ -112,6 +116,9 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, alias_val);
                 vm.docs.insert((*alias).to_string(), doc.clone());
+                if def.returns == ReturnType::Immediate {
+                    meta.immediate_primitives.insert(alias_id);
+                }
             }
         }
     }
@@ -135,12 +142,18 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
             meta.functions.insert(sym_id, Value::native_fn(def));
+            if def.returns == ReturnType::Immediate {
+                meta.immediate_primitives.insert(sym_id);
+            }
 
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, Value::native_fn(def));
+                if def.returns == ReturnType::Immediate {
+                    meta.immediate_primitives.insert(alias_id);
+                }
             }
         }
     }

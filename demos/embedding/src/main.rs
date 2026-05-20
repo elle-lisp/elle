@@ -33,6 +33,7 @@ static HOST_ADD_TEN: PrimitiveDef = PrimitiveDef {
     category: "host",
     example: "(host/add-ten 32)",
     aliases: &[],
+        ..crate::primitives::def::PrimitiveDef::DEFAULT
 };
 
 // ── Main ────────────────────────────────────────────────────────────

@@ -7,7 +7,20 @@
 use crate::signals::Signal;
 use crate::value::types::{Arity, PrimFn};
 use crate::value::{SymbolId, Value};
+use rustc_hash::FxHashSet;
 use std::collections::HashMap;
+
+/// Whether a primitive returns a heap-allocated value or an immediate.
+///
+/// Used by the region solver to skip phantom allocation vars for calls
+/// that never allocate (predicates, arithmetic, comparisons, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnType {
+    /// May return a heap-allocated value (default, conservative).
+    Heap,
+    /// Always returns an immediate (bool, int, float, keyword, nil).
+    Immediate,
+}
 
 /// Declarative definition of a primitive function.
 ///
@@ -38,6 +51,8 @@ pub struct PrimitiveDef {
     /// Aliases — additional names that resolve to the same function.
     /// Registered with identical metadata.
     pub aliases: &'static [&'static str],
+    /// Whether this primitive returns a heap-allocated value or an immediate.
+    pub returns: ReturnType,
 }
 
 impl PrimitiveDef {
@@ -53,6 +68,7 @@ impl PrimitiveDef {
         category: "",
         example: "",
         aliases: &[],
+        returns: ReturnType::Heap,
     };
 }
 
@@ -62,6 +78,9 @@ const fn _default_prim(
 ) -> (crate::value::fiber::SignalBits, crate::value::Value) {
     panic!("PrimitiveDef::DEFAULT func called — this is a bug")
 }
+
+// Re-export for use in primitive modules.
+pub use ReturnType::Immediate as IMMEDIATE;
 
 /// Declare a `pub(crate) const PRIMITIVES: &[PrimitiveDef]` table.
 ///
@@ -122,6 +141,7 @@ pub static NOOP_PRIM: PrimitiveDef = PrimitiveDef {
     category: "",
     example: "",
     aliases: &[],
+    returns: ReturnType::Heap,
 };
 
 /// Documentation info for a named form (primitive, special form, or macro).
@@ -195,6 +215,9 @@ pub struct PrimitiveMeta {
     /// values so the lowerer can emit `LoadConst` instead of
     /// `LoadGlobal`.
     pub functions: HashMap<SymbolId, Value>,
+    /// Primitives that always return immediates (bool, int, float, keyword, nil).
+    /// Used by the region solver to skip phantom allocation vars.
+    pub immediate_primitives: FxHashSet<SymbolId>,
 }
 
 impl PrimitiveMeta {
@@ -204,6 +227,7 @@ impl PrimitiveMeta {
             arities: HashMap::new(),
             docs: HashMap::new(),
             functions: HashMap::new(),
+            immediate_primitives: FxHashSet::default(),
         }
     }
 }

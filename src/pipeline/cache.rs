@@ -126,7 +126,7 @@ fn compile_core(
     functionalize(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, meta);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {

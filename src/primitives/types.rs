@@ -58,6 +58,7 @@ primitive! {
         category: "predicate",
         example: "(ptr? ptr) #=> true\n(ptr? 42) #=> false",
         aliases: &["pointer?"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "callable?" => prim_is_callable {
         arity: Arity::Exact(1),
@@ -65,5 +66,6 @@ primitive! {
         params: &["x"],
         category: "types",
         example: "(callable? +) #=> true\n(callable? {:a 1}) #=> true\n(callable? |1 2|) #=> true\n(callable? [1 2]) #=> true\n(callable? 42) #=> false",
+        returns: crate::primitives::def::IMMEDIATE,
     }
 }

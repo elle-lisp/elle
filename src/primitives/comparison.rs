@@ -50,6 +50,7 @@ primitive! {
         category: "comparison",
         example: "(= 1 1) #=> true\n(= 1 1.0) #=> true\n(= 1 2 1) #=> false",
         aliases: &["eq?"],
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "identical?" => prim_identical {
         signal: Signal::errors(),
@@ -58,6 +59,7 @@ primitive! {
         params: &["a", "b"],
         category: "comparison",
         example: "(identical? 1 1) #=> true\n(identical? 1 1.0) #=> false",
+        returns: crate::primitives::def::IMMEDIATE,
     }
     "hash" => prim_hash {
         arity: Arity::Exact(1),
@@ -65,5 +67,6 @@ primitive! {
         params: &["value"],
         category: "comparison",
         example: "(hash 42) #=> <integer>\n(= (hash :foo) (hash :foo)) #=> true",
+        returns: crate::primitives::def::IMMEDIATE,
     }
 }

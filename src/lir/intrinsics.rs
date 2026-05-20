@@ -39,10 +39,11 @@ pub struct PrimitiveClassification {
 }
 
 impl PrimitiveClassification {
-    pub fn new(symbols: &SymbolTable) -> Self {
+    pub fn new(symbols: &SymbolTable, meta: &crate::primitives::def::PrimitiveMeta) -> Self {
         let intrinsics = build_intrinsics(symbols);
         let call_classification = crate::hir::CallClassification {
             intrinsic_ops: intrinsics.keys().copied().collect(),
+            immediate_primitives: meta.immediate_primitives.clone(),
             ..Default::default()
         };
         PrimitiveClassification {
