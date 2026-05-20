@@ -201,13 +201,6 @@ impl VM {
                 } else {
                     (def.func)(args.as_slice())
                 };
-            // Incref the return value's region (native fn return path).
-            if bits.is_ok() {
-                let region_id = crate::value::fiberheap::region_of_value(value);
-                if region_id != 0 {
-                    crate::value::fiberheap::incref_region(region_id);
-                }
-            }
             return self.handle_primitive_signal(
                 bits,
                 value,
@@ -446,11 +439,6 @@ impl VM {
             }
             if bits.is_ok() {
                 let (_, value) = self.fiber.signal.take().unwrap();
-                // Incref the return value's region (closure return path).
-                let region_id = crate::value::fiberheap::region_of_value(value);
-                if region_id != 0 {
-                    crate::value::fiberheap::incref_region(region_id);
-                }
                 self.fiber.stack.push(value);
                 self.fiber.call_stack.pop();
             } else if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
@@ -673,13 +661,6 @@ impl VM {
                 } else {
                     (def.func)(&args)
                 };
-            // Incref the return value's region (native fn tail-call return path).
-            if bits.is_ok() {
-                let region_id = crate::value::fiberheap::region_of_value(value);
-                if region_id != 0 {
-                    crate::value::fiberheap::incref_region(region_id);
-                }
-            }
             return Some(self.handle_primitive_signal_tail(bits, value));
         }
 
@@ -788,11 +769,6 @@ impl VM {
         let bits = result.bits;
         if bits.is_ok() {
             let (_, value) = self.fiber.signal.take().unwrap();
-            // Incref the return value's region (call_closure path).
-            let region_id = crate::value::fiberheap::region_of_value(value);
-            if region_id != 0 {
-                crate::value::fiberheap::incref_region(region_id);
-            }
             Ok(value)
         } else if bits == crate::value::SIG_HALT {
             let (_, value) = self.fiber.signal.take().unwrap();

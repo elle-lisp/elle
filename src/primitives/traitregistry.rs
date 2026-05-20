@@ -558,11 +558,44 @@ pub fn dispatch_trait_method(
 
     let traits_val = get_traitset(val);
     if traits_val.is_nil() {
+        // DEBUG: catch corrupted values before type_name() crashes
+        let type_str = if val.is_heap() {
+            if let Some(ptr) = val.as_heap_ptr() {
+                let addr = ptr as usize;
+                // HeapObject pointers must be 8-byte aligned and in reasonable address range
+                if (addr % 8 != 0) || addr < 0x10000 || addr > 0x7fff_ffff_ffff {
+                    eprintln!(
+                        "BUG: dispatch_trait_method({}/{}) on corrupted value: tag={:#x} payload={:#x}",
+                        protocol, method, val.tag, val.payload
+                    );
+                    eprintln!(
+                        "  is_heap=true is_int={} is_nil={} is_string={} is_keyword={}",
+                        val.is_int(),
+                        val.is_nil(),
+                        val.is_string(),
+                        val.is_keyword()
+                    );
+                    return (
+                        SIG_ERROR,
+                        crate::value::error_val(
+                            "internal-error",
+                            format!(
+                                "corrupted value in dispatch_trait_method: tag={:#x} payload={:#x}",
+                                val.tag, val.payload
+                            ),
+                        ),
+                    );
+                }
+            }
+            val.type_name()
+        } else {
+            val.type_name()
+        };
         return (
             SIG_ERROR,
-            error_val(
+            crate::value::error_val(
                 "type-error",
-                format!("{}: no trait table on {} value", method, val.type_name()),
+                format!("{}: no trait table on {} value", method, type_str),
             ),
         );
     }

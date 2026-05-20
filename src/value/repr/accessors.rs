@@ -586,6 +586,15 @@ impl Value {
         } else if self.is_pointer() {
             "ptr"
         } else if self.is_heap() {
+            // DEBUG: validate heap pointer before deref to catch UAF/corruption
+            let ptr = self.payload as usize;
+            if ptr % 8 != 0 || ptr < 0x10000 {
+                eprintln!(
+                    "BUG: type_name on corrupted value tag={:#x} payload={:#x}",
+                    self.tag, self.payload
+                );
+                return "CORRUPTED";
+            }
             unsafe { deref(*self).type_name() }
         } else {
             "unknown"

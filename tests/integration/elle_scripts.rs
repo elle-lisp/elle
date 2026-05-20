@@ -86,6 +86,11 @@ fn fiber_resume_stress() {
 }
 
 #[test]
+fn grpc_regression() {
+    run_elle_script("grpc-regression");
+}
+
+#[test]
 fn websocket() {
     run_elle_script("websocket");
 }

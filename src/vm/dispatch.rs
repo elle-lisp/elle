@@ -513,33 +513,7 @@ impl VM {
 
                 Instruction::FreeRegion => {
                     let region_id = self.read_u16(bc, &mut ip);
-                    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
-                    let rc = if heap_ptr.is_null() {
-                        0
-                    } else {
-                        let rid = region_id as usize;
-                        let heap = unsafe { &*heap_ptr };
-                        if rid < heap.region_rc_len() { heap.region_rc_get(rid) } else { 0 }
-                    };
-                    if rc == 0 {
-                        crate::value::fiberheap::free_region(region_id);
-                        if !heap_ptr.is_null() {
-                            unsafe { (*heap_ptr).regions_freed += 1 };
-                        }
-                    } else {
-                        // Region is pinned (rc > 0) — a caller holds a
-                        // reference into this region. Skip the free.
-                        // The region will be freed on final decref_region.
-                        if !heap_ptr.is_null() {
-                            unsafe { (*heap_ptr).regions_pinned += 1 };
-                        }
-                        if self.runtime_config.has_trace_bit(crate::config::trace_bits::REGIONS) {
-                            eprintln!(
-                                "[trace:regions] FreeRegion({}) skipped: rc={} (region pinned)",
-                                region_id, rc,
-                            );
-                        }
-                    }
+                    crate::value::fiberheap::free_region(region_id);
                 }
 
                 Instruction::DropSlot => {

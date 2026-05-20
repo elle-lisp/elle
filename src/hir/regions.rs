@@ -241,11 +241,13 @@ impl RegionInference {
 
             // Let: introduce scope region
             HirKind::Let { bindings, body } => {
-                // Always create a Scope region. The escape analysis
-                // (can_scope_allocate_let) validates safety conditions
-                // including suspension, outward mutations, and breaks.
-                // Region inference tracks allocation sites and value flow;
-                // it does not duplicate the escape analysis safety checks.
+                // Register the Let node if any binding needs a capture
+                // cell. The lowerer uses the Let's HirId for
+                // MakeCaptureCell emissions.
+                if bindings.iter().any(|(b, _)| self.arena().get(*b).needs_capture()) {
+                    self.alloc_here(hir.id);
+                }
+
                 let scope_region = {
                     let r = self.fresh_region(self.current_region);
                     self.scope_region.insert(hir.id, r);
@@ -297,10 +299,12 @@ impl RegionInference {
                     .iter()
                     .any(|(b, _)| self.arena().get(*b).needs_capture());
 
+                // Always register the Letrec so the lowerer can look up
+                // its region for MakeCaptureCell emissions.
+                self.alloc_here(hir.id);
+
                 let scope_region = if has_cell_bindings {
                     // No scope — cells make it unsafe to reclaim.
-                    // Register cell allocation in the enclosing region.
-                    self.alloc_here(hir.id);
                     self.current_region
                 } else {
                     let r = self.fresh_region(self.current_region);
@@ -410,6 +414,10 @@ impl RegionInference {
             }
 
             HirKind::Match { value, arms } => {
+                // Register the Match node so the lowerer can look up
+                // its region for pattern-level allocations
+                // (ArrayMutSliceFrom, StructRest from destructuring).
+                self.alloc_here(hir.id);
                 self.walk(value);
                 let mut branch_vars = Vec::new();
                 for (pat, guard, body) in arms {
@@ -435,8 +443,12 @@ impl RegionInference {
                 self.unify_branches(hir.id, &branch_vars)
             }
 
-            // Begin: last expr's region = node's region
+            // Begin: last expr's region = node's region.
+            // Register the Begin node so the lowerer can look up its
+            // region for pre-allocated capture cells (MakeCaptureCell
+            // in lower_begin for Define bindings with needs_capture).
             HirKind::Begin(exprs) => {
+                self.alloc_here(hir.id);
                 let mut last = None;
                 for e in exprs {
                     last = self.walk(e);

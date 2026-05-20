@@ -138,7 +138,7 @@ impl<'a> Lowerer<'a> {
                             elements: vec![],
                         });
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayMutExtend {
+                        self.emit_alloc(LirInstr::ArrayMutExtend {
                             dst,
                             array: empty,
                             source: *reg,
@@ -147,7 +147,7 @@ impl<'a> Lowerer<'a> {
                     }
                     (Some(arr), false) => {
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayMutPush {
+                        self.emit_alloc(LirInstr::ArrayMutPush {
                             dst,
                             array: arr,
                             value: *reg,
@@ -156,7 +156,7 @@ impl<'a> Lowerer<'a> {
                     }
                     (Some(arr), true) => {
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayMutExtend {
+                        self.emit_alloc(LirInstr::ArrayMutExtend {
                             dst,
                             array: arr,
                             source: *reg,
