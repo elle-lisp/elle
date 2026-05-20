@@ -207,6 +207,128 @@ fn test_alloc_without_installed_heap_lazy_inits() {
 }
 
 
+// ── Region reference counting tests ─────────────────────────────────
+
+#[test]
+fn region_rc_incref_decref_basic() {
+    let mut heap = FiberHeap::new();
+    // Initially rc is 0 (no entry in vec).
+    // Incref region 3.
+    heap.incref_region(3);
+    // Decref should return 0 (went from 1 to 0).
+    // But since there are no objects in region 3, no deferred free.
+    let rc = heap.decref_region(3);
+    assert_eq!(rc, 0);
+}
+
+#[test]
+fn region_rc_multiple_increfs() {
+    let mut heap = FiberHeap::new();
+    heap.incref_region(5);
+    heap.incref_region(5);
+    heap.incref_region(5);
+    let rc = heap.decref_region(5);
+    assert_eq!(rc, 2, "after 3 increfs and 1 decref, rc should be 2");
+    let rc = heap.decref_region(5);
+    assert_eq!(rc, 1);
+    let rc = heap.decref_region(5);
+    assert_eq!(rc, 0);
+}
+
+#[test]
+fn region_rc_zero_is_noop() {
+    let mut heap = FiberHeap::new();
+    // Region 0 is global/untracked — incref/decref should be no-ops.
+    heap.incref_region(0);
+    let rc = heap.decref_region(0);
+    assert_eq!(rc, 0, "region 0 should always return 0");
+}
+
+#[test]
+fn region_rc_pinned_prevents_free() {
+    let mut heap = FiberHeap::new();
+    // Allocate an object in region 1.
+    let v = heap.alloc(HeapObject::Pair(Pair {
+        first: Value::int(42),
+        rest: Value::NIL,
+        traits: Value::NIL,
+    }));
+    heap.stamp_region(v, 1);
+    assert_eq!(heap.len(), 1);
+
+    // Incref region 1 (simulating a return).
+    heap.incref_region(1);
+
+    // Now "FreeRegion" — decref returns 0 only if rc reaches 0.
+    // rc was 1, decref → 0, and deferred free should fire.
+    let rc = heap.decref_region(1);
+    assert_eq!(rc, 0);
+    assert_eq!(heap.len(), 0, "deferred free should have freed the object");
+}
+
+#[test]
+fn region_rc_pinned_skips_free_when_still_live() {
+    let mut heap = FiberHeap::new();
+    let v = heap.alloc(HeapObject::Pair(Pair {
+        first: Value::int(42),
+        rest: Value::NIL,
+        traits: Value::NIL,
+    }));
+    heap.stamp_region(v, 1);
+
+    // Two increfs (e.g., returned from two nested calls).
+    heap.incref_region(1);
+    heap.incref_region(1);
+
+    // First decref → rc=1, object stays alive.
+    let rc = heap.decref_region(1);
+    assert_eq!(rc, 1);
+    assert_eq!(heap.len(), 1, "object should still be alive at rc=1");
+
+    // Second decref → rc=0, deferred free fires.
+    let rc = heap.decref_region(1);
+    assert_eq!(rc, 0);
+    assert_eq!(heap.len(), 0, "deferred free should fire at rc=0");
+}
+
+#[test]
+fn region_rc_free_region_with_zero_rc() {
+    // When rc is 0 (never incref'd), free_region should work normally.
+    let mut heap = FiberHeap::new();
+    let v = heap.alloc(HeapObject::Pair(Pair {
+        first: Value::int(1),
+        rest: Value::NIL,
+        traits: Value::NIL,
+    }));
+    heap.stamp_region(v, 1);
+    assert_eq!(heap.len(), 1);
+
+    // Direct free_region without any incref/decref — should work.
+    heap.free_region(1);
+    assert_eq!(heap.len(), 0);
+}
+
+#[test]
+fn region_rc_counters() {
+    let heap = FiberHeap::new();
+    assert_eq!(heap.regions_freed, 0);
+    assert_eq!(heap.regions_pinned, 0);
+}
+
+#[test]
+fn region_rc_clear_resets() {
+    let mut heap = FiberHeap::new();
+    heap.incref_region(1);
+    heap.incref_region(2);
+    heap.regions_freed = 10;
+    heap.regions_pinned = 5;
+    heap.clear();
+    // After clear, rc vec and counters should be reset.
+    assert_eq!(heap.decref_region(1), 0, "rc should be 0 after clear");
+    assert_eq!(heap.regions_freed, 0);
+    assert_eq!(heap.regions_pinned, 0);
+}
+
 // ── Trampoline rotation tests ────────────────────────────────────────
 //
 // These simulate the trampoline's mark/release protocol: mark at first

@@ -92,6 +92,14 @@ pub struct FiberHeap {
     /// Replaces the global `ALLOC_ERROR` thread-local — making it per-heap
     /// prevents cross-fiber confusion and eliminates a thread-local.
     alloc_error: Option<(usize, usize)>,
+    /// Per-region reference counts. Indexed by region_id, grows on demand.
+    /// Incref'd when a value is returned from a call, decref'd at FreeRegion.
+    /// When rc > 0 at FreeRegion time, the region is pinned (solver misprediction).
+    region_rc: Vec<u32>,
+    /// Counter: FreeRegion where rc == 0 (correct solver prediction).
+    pub(crate) regions_freed: u64,
+    /// Counter: FreeRegion where rc > 0 (solver misprediction, region pinned).
+    pub(crate) regions_pinned: u64,
     /// Region id for the current allocating instruction.
     ///
     /// Set by the VM dispatch loop before each allocating instruction,
@@ -124,6 +132,9 @@ impl FiberHeap {
             custom_alloc_stack: Vec::new(),
             object_limit: None,
             alloc_error: None,
+            region_rc: Vec::new(),
+            regions_freed: 0,
+            regions_pinned: 0,
             alloc_region: 0,
             region_tracking_armed: false,
         }
@@ -660,6 +671,59 @@ impl FiberHeap {
         0
     }
 
+    /// Increment the reference count for a region.
+    /// No-op for region 0 (global/untracked).
+    #[inline]
+    pub fn incref_region(&mut self, region_id: u16) {
+        if region_id == 0 {
+            return;
+        }
+        let rid = region_id as usize;
+        if rid >= self.region_rc.len() {
+            self.region_rc.resize(rid + 1, 0);
+        }
+        self.region_rc[rid] += 1;
+    }
+
+    /// Decrement the reference count for a region. Returns the new rc.
+    /// If the new rc is 0 and the region has live objects, free them now
+    /// (deferred free — the region was pinned, now unpinned).
+    /// No-op for region 0 (returns 0).
+    #[inline]
+    pub fn decref_region(&mut self, region_id: u16) -> u32 {
+        if region_id == 0 {
+            return 0;
+        }
+        let rid = region_id as usize;
+        if rid >= self.region_rc.len() {
+            return 0;
+        }
+        let rc = &mut self.region_rc[rid];
+        if *rc == 0 {
+            return 0;
+        }
+        *rc -= 1;
+        let new_rc = *rc;
+        // Deferred free: region was pinned (rc > 0), now unpinned (rc == 0).
+        // If the region still has live objects, free them.
+        if new_rc == 0 {
+            use super::fiberheap::slab::ALLOC_NIL;
+            let has_objects = rid < self.pool.slab.region_heads.len()
+                && self.pool.slab.region_heads[rid] != ALLOC_NIL;
+            if has_objects {
+                self.free_region(region_id);
+            }
+        }
+        new_rc
+    }
+
+    /// Get the region id for a value and return it.
+    /// Returns 0 for immediates or values not owned by this slab.
+    #[inline]
+    pub fn region_of_value(&self, val: Value) -> u16 {
+        self.region_of(val)
+    }
+
     /// Decrement a value's refcount, and if it reaches 0, run its
     /// destructor and return its slab slot to the free list.
     ///
@@ -791,6 +855,9 @@ impl FiberHeap {
         unsafe { self.pool.clear_slab() };
 
         self.alloc_error = None;
+        self.region_rc.clear();
+        self.regions_freed = 0;
+        self.regions_pinned = 0;
         self.pool.alloc_count = 0;
         self.peak_alloc_count = 0;
         self.jit_prev_mark = None;

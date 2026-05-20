@@ -513,7 +513,28 @@ impl VM {
 
                 Instruction::FreeRegion => {
                     let region_id = self.read_u16(bc, &mut ip);
-                    crate::value::fiberheap::free_region(region_id);
+                    let rc = crate::value::fiberheap::decref_region(region_id);
+                    if rc == 0 {
+                        crate::value::fiberheap::free_region(region_id);
+                        // Track correct prediction
+                        let heap_ptr = crate::value::fiberheap::current_heap_ptr();
+                        if !heap_ptr.is_null() {
+                            unsafe { (*heap_ptr).regions_freed += 1 };
+                        }
+                    } else {
+                        // Solver misprediction: region still live (rc > 0).
+                        // Region is pinned — will be freed on final decref.
+                        let heap_ptr = crate::value::fiberheap::current_heap_ptr();
+                        if !heap_ptr.is_null() {
+                            unsafe { (*heap_ptr).regions_pinned += 1 };
+                        }
+                        if self.runtime_config.has_trace_bit(crate::config::trace_bits::REGIONS) {
+                            eprintln!(
+                                "[trace:regions] FreeRegion({}) skipped: rc={} (solver misprediction)",
+                                region_id, rc,
+                            );
+                        }
+                    }
                 }
 
                 Instruction::DropSlot => {

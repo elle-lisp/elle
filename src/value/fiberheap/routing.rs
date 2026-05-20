@@ -138,6 +138,38 @@ pub fn free_region(region_id: u16) {
     }
 }
 
+/// Return the region_id for a Value on the current FiberHeap.
+/// Returns 0 for immediates or values not owned by this slab.
+#[inline]
+pub fn region_of_value(val: crate::value::Value) -> u16 {
+    let ptr = current_heap_ptr();
+    if ptr.is_null() {
+        return 0;
+    }
+    unsafe { (*ptr).region_of_value(val) }
+}
+
+/// Increment the reference count for a region on the current FiberHeap.
+#[inline]
+pub fn incref_region(region_id: u16) {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).incref_region(region_id) };
+    }
+}
+
+/// Decrement the reference count for a region on the current FiberHeap.
+/// If the rc reaches 0 and the region has live objects, frees them (deferred free).
+/// Returns the new rc (0 if not tracked).
+#[inline]
+pub fn decref_region(region_id: u16) -> u32 {
+    let ptr = current_heap_ptr();
+    if ptr.is_null() {
+        return 0;
+    }
+    unsafe { (*ptr).decref_region(region_id) }
+}
+
 /// Set the alloc_region on the current fiber heap.
 ///
 /// Called by the VM dispatch loop before each allocating instruction
