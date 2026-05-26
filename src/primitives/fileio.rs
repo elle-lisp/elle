@@ -1,5 +1,4 @@
 //! File I/O primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -553,11 +552,9 @@ pub(crate) fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Declarative primitive definitions for file I/O operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "file/read",
-        func: prim_slurp,
+// Declarative primitive definitions for file I/O operations.
+primitive! {
+    "file/read" => prim_slurp {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Read entire file as a string",
@@ -565,10 +562,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/read \"data.txt\")",
         aliases: &["slurp"],
-    },
-    PrimitiveDef {
-        name: "file/write",
-        func: prim_spit,
+    }
+    "file/write" => prim_spit {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Write string content to a file (overwrites if exists)",
@@ -576,10 +571,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/write \"output.txt\" \"hello\")",
         aliases: &["spit"],
-    },
-    PrimitiveDef {
-        name: "file/append",
-        func: prim_append_file,
+    }
+    "file/append" => prim_append_file {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Append string content to a file",
@@ -587,10 +580,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/append \"log.txt\" \"new line\")",
         aliases: &["append-file"],
-    },
-    PrimitiveDef {
-        name: "file/delete",
-        func: prim_delete_file,
+    }
+    "file/delete" => prim_delete_file {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Delete a file",
@@ -598,10 +589,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/delete \"temp.txt\")",
         aliases: &["delete-file"],
-    },
-    PrimitiveDef {
-        name: "file/delete-dir",
-        func: prim_delete_directory,
+    }
+    "file/delete-dir" => prim_delete_directory {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Delete a directory (must be empty)",
@@ -609,10 +598,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/delete-dir \"empty-dir\")",
         aliases: &["delete-directory"],
-    },
-    PrimitiveDef {
-        name: "file/mkdir",
-        func: prim_create_directory,
+    }
+    "file/mkdir" => prim_create_directory {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a directory",
@@ -620,10 +607,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/mkdir \"new-dir\")",
         aliases: &["create-directory"],
-    },
-    PrimitiveDef {
-        name: "file/mkdir-all",
-        func: prim_create_directory_all,
+    }
+    "file/mkdir-all" => prim_create_directory_all {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a directory and all parent directories",
@@ -631,10 +616,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/mkdir-all \"a/b/c\")",
         aliases: &["create-directory-all"],
-    },
-    PrimitiveDef {
-        name: "file/rename",
-        func: prim_rename_file,
+    }
+    "file/rename" => prim_rename_file {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Rename a file",
@@ -642,10 +625,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/rename \"old.txt\" \"new.txt\")",
         aliases: &["rename-file"],
-    },
-    PrimitiveDef {
-        name: "file/copy",
-        func: prim_copy_file,
+    }
+    "file/copy" => prim_copy_file {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Copy a file",
@@ -653,10 +634,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/copy \"source.txt\" \"dest.txt\")",
         aliases: &["copy-file"],
-    },
-    PrimitiveDef {
-        name: "file/size",
-        func: prim_file_size,
+    }
+    "file/size" => prim_file_size {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file size in bytes",
@@ -664,32 +643,24 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/size \"data.txt\")",
         aliases: &["file-size"],
-    },
-    PrimitiveDef {
-        name: "file/stat",
-        func: prim_file_stat,
+    }
+    "file/stat" => prim_file_stat {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get filesystem metadata as a struct (follows symlinks)",
         params: &["path"],
         category: "file",
         example: "(file/stat \"data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "file/lstat",
-        func: prim_file_lstat,
+    }
+    "file/lstat" => prim_file_lstat {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get filesystem metadata as a struct (does not follow symlinks)",
         params: &["path"],
         category: "file",
         example: "(file/lstat \"link.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "file/ls",
-        func: prim_list_directory,
+    }
+    "file/ls" => prim_list_directory {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "List directory contents",
@@ -697,10 +668,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/ls \".\")",
         aliases: &["list-directory"],
-    },
-    PrimitiveDef {
-        name: "file/lines",
-        func: prim_read_lines,
+    }
+    "file/lines" => prim_read_lines {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Read lines from a file and return as a list of strings",
@@ -708,5 +677,5 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/lines \"data.txt\")",
         aliases: &["read-lines"],
-    },
-];
+    }
+}

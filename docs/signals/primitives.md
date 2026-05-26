@@ -26,11 +26,10 @@ to perform the context switch.
 
 
 
-## Coroutines
+## Generators
 
 
-A coroutine is a usage pattern, not a type. It's a fiber whose closure
-yields:
+A generator is a fiber whose closure yields values:
 
 ```text
 (def gen (fiber/new (fn () (yield 1) (yield 2) (yield 3)) |:yield|))
@@ -40,7 +39,7 @@ yields:
 (fiber/resume gen nil)  # → SIG_OK, (fiber/value gen) → nil
 ```
 
-The coroutine pattern — a fiber whose closure yields values — is the
+The generator pattern — a fiber whose closure yields values — is the
 basis of Elle's stream and generator abstractions.
 
 

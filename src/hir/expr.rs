@@ -370,6 +370,10 @@ pub enum IntrinsicOp {
     Has,
     Push,
     Pop,
+    /// Append string to @string (or create new string).
+    StringPush,
+    /// Append byte to @bytes (or create new bytes).
+    BytesPush,
     // Mutability
     Freeze,
     Thaw,
@@ -427,8 +431,10 @@ impl IntrinsicOp {
             Self::Put => "%put",
             Self::Del => "%del",
             Self::Has => "%has?",
-            Self::Push => "%push",
+            Self::Push => "%array-push",
             Self::Pop => "%pop",
+            Self::StringPush => "%string-push",
+            Self::BytesPush => "%bytes-push",
             Self::Freeze => "%freeze",
             Self::Thaw => "%thaw",
             Self::Identical => "%identical?",
@@ -484,8 +490,10 @@ impl IntrinsicOp {
             "%put" => Some(Self::Put),
             "%del" => Some(Self::Del),
             "%has?" => Some(Self::Has),
-            "%push" => Some(Self::Push),
+            "%array-push" => Some(Self::Push),
             "%pop" => Some(Self::Pop),
+            "%string-push" => Some(Self::StringPush),
+            "%bytes-push" => Some(Self::BytesPush),
             "%freeze" => Some(Self::Freeze),
             "%thaw" => Some(Self::Thaw),
             "%identical?" => Some(Self::Identical),
@@ -545,6 +553,8 @@ impl IntrinsicOp {
             | Self::Del
             | Self::Has
             | Self::Push
+            | Self::StringPush
+            | Self::BytesPush
             | Self::Identical => (2, 2),
             Self::Put => (3, 3),
         }

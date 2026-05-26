@@ -35,18 +35,31 @@ pub fn eval_syntax(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
-    // Make compile-time defs (from begin-for-syntax) visible in macro bodies.
+    // Make core.lisp exports and compile-time defs visible in macro bodies.
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     if !expander.compile_time_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.compile_time_env);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
+    if !analysis.errors.is_empty() {
+        return Err(analysis.errors[0].description());
+    }
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] eval_syntax:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -90,14 +103,27 @@ pub fn eval(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     let mut analysis = analyzer.analyze(&expanded)?;
+    if !analysis.errors.is_empty() {
+        return Err(analysis.errors[0].description());
+    }
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] eval:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)

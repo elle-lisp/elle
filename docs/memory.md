@@ -89,27 +89,11 @@ doesn't outlive the iteration:
 (ping 10000)
 ```
 
-### 3. Yielding fibers use flip rotation
+### 3. Yielding fibers use outbox routing
 
 Fibers that yield mid-loop cannot use scope reclamation (the fiber suspends
-before `RegionExit` fires). Instead, `FlipSwap` at the loop back-edge rotates
-pools each iteration:
-
-```lisp
-# Yielding fiber — flip rotation keeps memory bounded
-(defn yield-items (n)
-  (fiber/new (fn []
-    (def @i 0)
-    (while (< i n)
-      (yield (string "item-" i))    # heap allocation + yield
-      (assign i (+ i 1))))
-  |:yield|))
-
-(def f (yield-items 10000))
-(while (not= (fiber/status f) :dead)
-  (fiber/resume f))
-# memory stays bounded despite 10000 string allocations across yields
-```
+before `RegionExit` fires). Instead, yielded values are allocated in an outbox
+owned by the parent fiber. The child's private pool is reclaimed on fiber death.
 
 ## What is automatically reclaimed
 
@@ -147,17 +131,16 @@ The escape analysis is conservative but handles common patterns:
 
 ### Tail-call rotation
 
-Self-tail-calls in the trampoline get implicit pool rotation. On each tail-call
-iteration, the previous iteration's allocations are moved to a swap pool and
-freed on the next rotation (one-iteration lag ensures argument values remain
-valid). This bounds memory at the working-set size, not the iteration count.
+Self-tail-calls in the trampoline use the same `mark()`/`release()` mechanism
+as scope reclamation. At the first tail-call boundary the trampoline captures
+an `ArenaMark`; at each subsequent tail-call it releases to the previous mark
+(running destructors and returning slab slots to the free list) and captures a
+fresh one. This bounds memory at the working-set size, not the iteration count.
 
-### Flip rotation
-
-`while` loops inside yielding fibers get explicit `FlipEnter`/`FlipSwap`/
-`FlipExit` bytecodes. Each `FlipSwap` at the back-edge rotates generations,
-keeping memory bounded even when scope reclamation is blocked by yield
-suspension.
+Release is gated by `rotation_safe` — a per-closure flag set by escape analysis
+(`body_escapes_heap_values`). When the flag is true, `release()` frees slots.
+When false, only `alloc_count` is reset (conservative — objects stay alive until
+fiber death).
 
 ### Fiber death
 
@@ -173,17 +156,18 @@ booleans, nil, floats) fit inline — no allocation. Heap types (strings, arrays
 structs, closures, fibers, cons cells) store a pointer to a `HeapObject` in a
 tracked pool owned by the fiber.
 
-### Per-fiber heaps
+### VM-owned heap
 
-Each fiber owns a `FiberHeap` containing a `SlabPool` — a slab allocator for
-HeapObjects plus a bump arena for inline slice data, both backed by `mmap`
+The VM owns a single `FiberHeap` containing a `SlabPool` — a slab allocator
+for HeapObjects plus a bump arena for inline slice data, both backed by `mmap`
 pages. The slab allocates fixed-size HeapObject slots from 18KB chunks (256
 slots each). The bump arena allocates variable-size data (string bytes, array
 elements) sequentially into 64KB pages. Both use `munmap` to return pages to
-the OS on fiber death — no process-allocator caching, no RSS hoarding.
+the OS on region free — no process-allocator caching, no RSS hoarding.
 
-When a fiber completes, its `FiberHeap` runs all destructors, tears down all
-owned shared allocators and outboxes, and returns all mmap'd pages to the OS.
+All fibers share this single heap. Fiber isolation is through regions: each
+fiber's allocations go to their own RegionIds. When a region's RC drops to 0,
+its pages are freed independently of other fibers' regions.
 
 ### Slab allocator
 
@@ -197,13 +181,10 @@ The slab manages HeapObject slots:
   raw pointers into chunk slots
 - **OS return**: `munmap` on `Drop` returns chunk pages immediately
 
-Slot recycling via the free list is the target mechanism for drop-on-overwrite
-(assign frees the old slot) and scope reclamation (RegionExit frees batches).
-`dealloc_slot` is currently gated — scope eligibility for while/loop forms
-needs to be routed through the region inference system before enabling it.
-Rotation paths use `dealloc_slot_deferred()` (no-op) until Phase 2A enables
-rotation slot recycling. Until then, memory is reclaimed only on fiber death
-(teardown).
+Slot recycling via the free list is used by scope reclamation (`RegionExit`
+frees batches) and tail-call rotation (`release()` at each tail-call boundary).
+Both are gated by Tofte-Talpin escape analysis — only provably dead slots are
+returned to the free list.
 
 ### Bump arena
 
@@ -297,8 +278,8 @@ The memory model exploits two properties that the compiler guarantees:
 
 Together, these give deterministic memory management with no GC pauses, no
 write barriers, no card tables, and no stop-the-world collection. Memory is
-reclaimed at four granularities: scope exit, tail-call rotation, flip
-rotation, and fiber death — all in bounded time.
+reclaimed at three granularities: scope exit, tail-call rotation, and fiber
+death — all in bounded time.
 
 ## Introspection
 

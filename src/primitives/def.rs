@@ -7,7 +7,7 @@
 use crate::signals::Signal;
 use crate::value::types::{Arity, PrimFn};
 use crate::value::{SymbolId, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Declarative definition of a primitive function.
 ///
@@ -38,6 +38,14 @@ pub struct PrimitiveDef {
     /// Aliases — additional names that resolve to the same function.
     /// Registered with identical metadata.
     pub aliases: &'static [&'static str],
+    /// Returns an immediate value (int, float, bool, keyword, nil).
+    /// The region solver uses this to avoid creating allocation-site
+    /// entries for calls that provably don't return heap values.
+    pub returns_immediate: bool,
+    /// Arguments escape the current scope (stored in a collection, fiber,
+    /// or external structure). The region solver widens heap arguments to
+    /// the enclosing region for these calls, preventing use-after-free.
+    pub escapes_args: bool,
 }
 
 impl PrimitiveDef {
@@ -53,6 +61,8 @@ impl PrimitiveDef {
         category: "",
         example: "",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     };
 }
 
@@ -61,6 +71,43 @@ const fn _default_prim(
     _args: &[crate::value::Value],
 ) -> (crate::value::fiber::SignalBits, crate::value::Value) {
     panic!("PrimitiveDef::DEFAULT func called — this is a bug")
+}
+
+/// Declare a `pub(crate) const PRIMITIVES: &[PrimitiveDef]` table.
+///
+/// Each entry is `"name" => func_name { key: value, ... }`.
+/// Only `name` and `func` are required; all other fields default to
+/// the values in `PrimitiveDef::DEFAULT`.
+///
+/// ```ignore
+/// primitive! {
+///     "math/sqrt" => prim_sqrt {
+///         signal: Signal::errors(), arity: Arity::Exact(1),
+///         doc: "Square root.", params: &["x"],
+///         category: "math", example: "(math/sqrt 16)",
+///         aliases: &["sqrt"],
+///     }
+///     "and" => prim_and {
+///         arity: Arity::AtLeast(0),
+///         doc: "Logical AND.",
+///         category: "logic", example: "(and true false)",
+///     }
+/// }
+/// ```
+macro_rules! primitive {
+    ( $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
+        pub(crate) const PRIMITIVES: &[crate::primitives::def::PrimitiveDef] = &[
+            $(
+                #[allow(clippy::needless_update)]
+                crate::primitives::def::PrimitiveDef {
+                    name: $name,
+                    func: $func,
+                    $( $key : $val, )*
+                    ..crate::primitives::def::PrimitiveDef::DEFAULT
+                }
+            ),*
+        ];
+    };
 }
 
 /// No-op primitive: returns (SIG_OK, nil). Used by ad-hoc Value::native_fn
@@ -86,6 +133,8 @@ pub static NOOP_PRIM: PrimitiveDef = PrimitiveDef {
     category: "",
     example: "",
     aliases: &[],
+    returns_immediate: false,
+    escapes_args: false,
 };
 
 /// Documentation info for a named form (primitive, special form, or macro).
@@ -159,6 +208,14 @@ pub struct PrimitiveMeta {
     /// values so the lowerer can emit `LoadConst` instead of
     /// `LoadGlobal`.
     pub functions: HashMap<SymbolId, Value>,
+    /// Primitives that return immediate values (int, float, bool,
+    /// keyword, nil). The region solver uses this to skip allocation
+    /// tracking for their results.
+    pub immediates: HashSet<SymbolId>,
+    /// Primitives whose heap arguments escape the current scope
+    /// (stored in collections, fibers, etc.). The region solver
+    /// widens these arguments to the enclosing region.
+    pub escapers: HashSet<SymbolId>,
 }
 
 impl PrimitiveMeta {
@@ -168,6 +225,8 @@ impl PrimitiveMeta {
             arities: HashMap::new(),
             docs: HashMap::new(),
             functions: HashMap::new(),
+            immediates: HashSet::new(),
+            escapers: HashSet::new(),
         }
     }
 }

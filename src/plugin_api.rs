@@ -699,7 +699,7 @@ pub(crate) unsafe fn raw_def_to_primitive(raw: &PrimDefRaw) -> &'static Primitiv
         params: &[],
         category,
         example,
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     }));
 
     register_plugin_fn(def, raw.func);

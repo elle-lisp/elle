@@ -60,13 +60,10 @@ impl<'a> FunctionTranslator<'a> {
                 let p = builder.ins().iconst(I64, f64::to_bits(*f) as i64);
                 (t, p)
             }
-            LirConst::String(s) => {
-                // Create heap-allocated string at JIT-compile time, embed tag+payload.
-                // The string lives on Rc heap; kept alive by LirFunction's constant pool.
-                let v = crate::value::Value::string(s.clone());
-                let t = builder.ins().iconst(I64, v.tag as i64);
-                let p = builder.ins().iconst(I64, v.payload as i64);
-                (t, p)
+            LirConst::String(_) => {
+                // String constants are pre-resolved to ValueConst in prepare_task()
+                // before crossing the thread boundary to the JIT worker.
+                unreachable!("LirConst::String should be pre-resolved to ValueConst")
             }
             LirConst::Symbol(id) => {
                 let v = crate::value::Value::symbol(id.0);
@@ -251,20 +248,6 @@ impl<'a> FunctionTranslator<'a> {
             .ins()
             .call(func_ref, &[a_tag, a_payload, b_tag, b_payload, vm]);
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
-    }
-
-    /// Call elle_jit_rotate_pools to rotate slab pools at a self-tail-call boundary.
-    /// Signature: (vm) -> void
-    pub(crate) fn call_rotate_pools(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        vm: cranelift_codegen::ir::Value,
-    ) -> Result<(), JitError> {
-        let func_ref = self
-            .module
-            .declare_func_in_func(self.helpers.rotate_pools, builder.func);
-        builder.ins().call(func_ref, &[vm]);
-        Ok(())
     }
 
     /// Call the elle_jit_call helper.

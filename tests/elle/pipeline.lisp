@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 
 ## === Shebang Handling ===
 
@@ -544,8 +544,8 @@
 
 (assert (= (let [a @[1 2]]
              (let [a2 (concat a @[3 4])]
-               (list a a2))) (list @[1 2] @[1 2 3 4]))
-        "concat @arrays original unchanged")
+               (list a a2))) (list @[1 2 3 4] @[1 2 3 4]))
+        "concat @arrays mutates first argument")
 
 ## === concat - Arrays ===
 
@@ -572,8 +572,7 @@
 
 (let [[ok? _] (protect ((fn () (eval '(concat)))))]
   (assert (not ok?) "concat wrong arity no args"))
-(let [[ok? _] (protect ((fn () (concat @[1 2] [3 4]))))]
-  (assert (not ok?) "concat mismatched types error"))
+(assert (= (concat @[1 2] [3 4]) @[1 2 3 4]) "concat @array + array")
 (let [[ok? _] (protect ((fn () (concat 42 99))))]
   (assert (not ok?) "concat unsupported type error"))
 
@@ -654,13 +653,10 @@
 (let [[ok? _] (protect ((fn () (concat |1| [1]))))]
   (assert (not ok?) "concat set/array mismatch"))
 (let [[ok? _] (protect ((fn () (concat {:a 1} [1]))))]
-  (assert (not ok?) "concat struct/array mismatch"))
-(let [[ok? _] (protect ((fn () (concat (bytes 1) (@bytes 2)))))]
-  (assert (not ok?) "concat bytes/@bytes mismatch"))
-(let [[ok? _] (protect ((fn () (concat |1| @|1|))))]
-  (assert (not ok?) "concat set/@set mismatch"))
-(let [[ok? _] (protect ((fn () (concat {:a 1} @{:a 1}))))]
-  (assert (not ok?) "concat struct/@struct mismatch"))
+  (assert (not ok?) "concat struct/array mismatch"))  # bytes/@bytes and set/@set: mutability-compatible
+(assert (bytes? (concat (bytes 1) (@bytes 2))) "concat bytes/@bytes ok")
+(assert (set? (concat |1| @|1|)) "concat set/@set ok")
+(assert (= (concat {:a 1} @{:b 2}) {:a 1 :b 2}) "concat struct/@struct ok")
 
 ## === merge - mutability matching ===
 

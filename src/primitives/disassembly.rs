@@ -1,7 +1,6 @@
 //! Bytecode and JIT disassembly primitives
 
 use crate::lir::{terminator_kind, Terminator};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::heap::TableKey;
@@ -313,11 +312,9 @@ pub(crate) fn prim_fn_flow(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Declarative primitive definitions for disassembly operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "fn/disasm",
-        func: prim_disbit,
+// Declarative primitive definitions for disassembly operations.
+primitive! {
+    "fn/disasm" => prim_disbit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Disassemble a closure's bytecode into a list of instruction strings.",
@@ -325,10 +322,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/disasm (fn (x) x))",
         aliases: &["disbit", "fn/disbit"],
-    },
-    PrimitiveDef {
-        name: "fn/disasm-jit",
-        func: prim_disjit,
+    }
+    "fn/disasm-jit" => prim_disjit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Disassemble a closure's JIT-compiled Cranelift IR, or nil if not JIT'd.",
@@ -336,39 +331,31 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/disasm-jit (fn (x) x))",
         aliases: &["disjit", "fn/disjit"],
-    },
-    PrimitiveDef {
-        name: "fn/flow",
-        func: prim_fn_flow,
+    }
+    "fn/flow" => prim_fn_flow {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the LIR control flow graph of a closure or fiber as structured data.",
         params: &["closure-or-fiber"],
         category: "fn",
         example: "(fn/flow (fn (x y) (+ x y)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "vm/list-primitives",
-        func: prim_list_primitives,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+    }
+    "vm/list-primitives" => prim_list_primitives {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Range(0, 1),
         doc: "List registered names as a sorted list of symbols. Optional category filter.",
         params: &["category?"],
         category: "meta",
         example: "(vm/list-primitives)\n(vm/list-primitives :math)\n(vm/list-primitives :\"special form\")",
         aliases: &["list-primitives"],
-    },
-    PrimitiveDef {
-        name: "vm/primitive-meta",
-        func: prim_primitive_meta,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+    }
+    "vm/primitive-meta" => prim_primitive_meta {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 }),
         arity: Arity::Exact(1),
         doc: "Get structured metadata for a primitive as a struct.",
         params: &["name"],
         category: "meta",
-        example:
-            "(struct-get (vm/primitive-meta \"pair\") \"doc\") #=> \"Construct a pair...\"",
+        example: "(struct-get (vm/primitive-meta \"pair\") \"doc\") #=> \"Construct a pair...\"",
         aliases: &["primitive-meta"],
-    },
-];
+    }
+}

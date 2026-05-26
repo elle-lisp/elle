@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:

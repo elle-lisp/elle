@@ -217,13 +217,15 @@ mod tests {
 
     #[test]
     fn test_lint_simple_code() {
-        let config = LintConfig {
-            min_severity: Severity::Warning,
-            ..Default::default()
-        };
-        let mut linter = Linter::new(config);
+        crate::value::arena::with_test_region(|| {
+            let config = LintConfig {
+                min_severity: Severity::Warning,
+                ..Default::default()
+            };
+            let mut linter = Linter::new(config);
 
-        let result = linter.lint_str("(+ 1 2)", "test.lisp");
-        assert!(result.is_ok());
+            let result = linter.lint_str("(+ 1 2)", "test.lisp");
+            assert!(result.is_ok());
+        });
     }
 }

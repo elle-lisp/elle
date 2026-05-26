@@ -120,33 +120,18 @@ pub(crate) fn remainder_values(a: &Value, b: &Value) -> Result<Value, Value> {
     }
 }
 
-/// Absolute value of a numeric value
-pub(crate) fn abs_value(a: &Value) -> Result<Value, Value> {
-    if let Some(n) = a.as_int() {
-        return match n.checked_abs() {
-            Some(r) => Ok(Value::int(r)),
-            None => Err(error_val("overflow", "abs: integer overflow")),
-        };
-    }
-    match a.as_float() {
-        Some(f) => Ok(Value::float(f.abs())),
-        None => Err(error_val(
-            "type-error",
-            format!("abs: expected number, got {}", a.type_name()),
-        )),
-    }
-}
-
 /// Numeric-aware equality: int-int stays exact, mixed promotes to f64.
 /// Returns true if both values are bitwise equal or numerically equal.
 /// Used by both the VM's Eq instruction and the `=` primitive.
 #[inline]
 pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {
-    // Fast path: bitwise identical (covers same-type immediates)
-    if *a == *b {
+    // Fast path: bitwise identical (covers same-type immediates).
+    // Excludes floats so IEEE 754 NaN ≠ NaN is respected.
+    if *a == *b && !a.is_float() {
         return true;
     }
-    // Numeric coercion: int-int stays exact, mixed promotes to f64
+    // Numeric coercion: int-int stays exact, mixed promotes to f64.
+    // Rust's f64 == f64 follows IEEE 754 (NaN != NaN).
     if a.is_number() && b.is_number() {
         if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
             return x == y;
@@ -156,38 +141,6 @@ pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {
         }
     }
     false
-}
-
-/// Get minimum of two numeric values
-pub(crate) fn min_values(a: &Value, b: &Value) -> Value {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Value::int(x.min(y)),
-        _ => {
-            let af = a.as_number().unwrap();
-            let bf = b.as_number().unwrap();
-            if af <= bf {
-                *a
-            } else {
-                *b
-            }
-        }
-    }
-}
-
-/// Get maximum of two numeric values
-pub(crate) fn max_values(a: &Value, b: &Value) -> Value {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Value::int(x.max(y)),
-        _ => {
-            let af = a.as_number().unwrap();
-            let bf = b.as_number().unwrap();
-            if af >= bf {
-                *a
-            } else {
-                *b
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -207,19 +160,6 @@ mod tests {
         let b = Value::float(3.5);
         let result = add_values(&a, &b).unwrap();
         assert!(result.as_float().is_some_and(|f| (f - 8.5).abs() < 0.001));
-    }
-
-    #[test]
-    fn test_div_by_zero_int() {
-        let a = Value::int(5);
-        let b = Value::int(0);
-        assert!(div_values(&a, &b).is_err());
-    }
-
-    #[test]
-    fn test_abs_value() {
-        let a = Value::int(-5);
-        assert_eq!(abs_value(&a).unwrap(), Value::int(5));
     }
 
     #[test]

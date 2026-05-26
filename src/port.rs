@@ -65,6 +65,7 @@ pub(crate) struct Port {
 
 impl Port {
     /// Create a file port from an owned fd.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_file(fd: OwnedFd, direction: Direction, encoding: Encoding, path: String) -> Self {
         Port {
             fd: RefCell::new(Some(fd)),
@@ -75,6 +76,24 @@ impl Port {
             path: Some(path),
             timeout: Cell::new(None),
         }
+    }
+
+    /// Create an unopened port (fd filled in later by IO completion).
+    pub fn new_unopened(kind: PortKind, direction: Direction, encoding: Encoding, path: String) -> Self {
+        Port {
+            fd: RefCell::new(None),
+            kind,
+            direction,
+            encoding,
+            closed: Cell::new(false),
+            path: Some(path),
+            timeout: Cell::new(None),
+        }
+    }
+
+    /// Set the fd on an unopened port (called by IO completion).
+    pub fn set_fd(&self, fd: OwnedFd) {
+        *self.fd.borrow_mut() = Some(fd);
     }
 
     /// Create a stdin port. Does not own the fd.
@@ -128,6 +147,7 @@ impl Port {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_tcp_stream(fd: OwnedFd, peer_addr: String) -> Self {
         Port {
             fd: RefCell::new(Some(fd)),
@@ -168,6 +188,7 @@ impl Port {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_unix_stream(fd: OwnedFd, peer_path: String) -> Self {
         Port {
             fd: RefCell::new(Some(fd)),

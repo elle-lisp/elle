@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 
 # ============================================================================
 # SECTION 1: Deeply Nested Captures (4+ levels)
@@ -127,7 +127,7 @@
                  (sum)))) 3) "test_multiple_mutable_captures")
 
 # ============================================================================
-# SECTION 4: CPS/Coroutine Captures
+# SECTION 4: CPS/Fiber Captures
 # ============================================================================
 
 (assert (= (let [x 10]

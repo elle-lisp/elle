@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 11)
 
 # Tests for fiber resume through nested FiberResume chains.
 #
@@ -63,9 +63,9 @@
                                   (port/write conn "a\n")
                                   (port/write conn "b\n")
                                   (port/write conn "c\n")
-                                  (let [r1 (string (port/read-line conn))
-                                        r2 (string (port/read-line conn))
-                                        r3 (string (port/read-line conn))]
+                                  (let [r1 (port/read-line conn)
+                                        r2 (port/read-line conn)
+                                        r3 (port/read-line conn)]
                                     [r1 r2 r3]))]
                             (assert ok? "multi-I/O protect succeeded")
                             (put result 0 (get lines 0))

@@ -13,7 +13,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::hir::BindingArena;
 use crate::hir::{Binding, Hir, HirKind};
 use crate::lint::diagnostics::{Diagnostic, Severity};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::registry::with_registry;
 use crate::signals::Signal;
 use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};
@@ -22,6 +21,25 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_QUERY};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::Value;
+
+use query::prim_compile_analyze;
+use query::prim_compile_binding;
+use query::prim_compile_bindings;
+use query::prim_compile_call_graph;
+use query::prim_compile_callees;
+use query::prim_compile_callers;
+use query::prim_compile_captured_by;
+use query::prim_compile_captures;
+use query::prim_compile_diagnostics;
+use query::prim_compile_primitives;
+use query::prim_compile_query_signal;
+use query::prim_compile_signal;
+use query::prim_compile_symbols;
+use transform::prim_compile_add_handler;
+use transform::prim_compile_extract;
+use transform::prim_compile_parallelize;
+use transform::prim_compile_rename;
+use transform::prim_compile_run_on;
 
 // ── Helper ─────────────────────────────────────────────────────────────
 
@@ -981,203 +999,149 @@ pub(super) fn resolve_name(
 
 // ── Registration ───────────────────────────────────────────────────────
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "compile/analyze",
-        func: query::prim_compile_analyze,
+primitive! {
+    "compile/analyze" => prim_compile_analyze {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Analyze Elle source text. Returns an opaque analysis handle for queries.",
         params: &["source", "opts"],
         category: "compile",
         example: r#"(compile/analyze "(defn f [x] (+ x 1))")"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/diagnostics",
-        func: query::prim_compile_diagnostics,
+    }
+    "compile/diagnostics" => prim_compile_diagnostics {
         signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Return diagnostics (warnings, errors) from an analysis.",
         params: &["analysis"],
         category: "compile",
         example: r#"(compile/diagnostics (compile/analyze src))"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/symbols",
-        func: query::prim_compile_symbols,
+    }
+    "compile/symbols" => prim_compile_symbols {
         signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Return all symbol definitions from an analysis.",
         params: &["analysis"],
         category: "compile",
         example: r#"(compile/symbols (compile/analyze src))"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/signal",
-        func: query::prim_compile_signal,
+    }
+    "compile/signal" => prim_compile_signal {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return the inferred signal of a named function.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/signal analysis :my-fn)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/query-signal",
-        func: query::prim_compile_query_signal,
+    }
+    "compile/query-signal" => prim_compile_query_signal {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Find functions matching a signal query (:silent, :io, :yields, :jit-eligible, or signal name).",
         params: &["analysis", "query"],
         category: "compile",
         example: r#"(compile/query-signal analysis :silent)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/bindings",
-        func: query::prim_compile_bindings,
+    }
+    "compile/bindings" => prim_compile_bindings {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return all bindings from an analysis with metadata.",
         params: &["analysis"],
         category: "compile",
         example: r#"(compile/bindings (compile/analyze src))"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/binding",
-        func: query::prim_compile_binding,
+    }
+    "compile/binding" => prim_compile_binding {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return detailed info about a specific binding.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/binding analysis :x)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/captures",
-        func: query::prim_compile_captures,
+    }
+    "compile/captures" => prim_compile_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return what a function captures and how (value, lbox, transitive).",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/captures analysis :make-handler)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/captured-by",
-        func: query::prim_compile_captured_by,
+    }
+    "compile/captured-by" => prim_compile_captured_by {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return functions that capture the named binding.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/captured-by analysis :config)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/callers",
-        func: query::prim_compile_callers,
+    }
+    "compile/callers" => prim_compile_callers {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return functions that call the named function.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/callers analysis :fetch-page)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/callees",
-        func: query::prim_compile_callees,
+    }
+    "compile/callees" => prim_compile_callees {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return functions called by the named function.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/callees analysis :main)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/call-graph",
-        func: query::prim_compile_call_graph,
+    }
+    "compile/call-graph" => prim_compile_call_graph {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the full call graph with nodes, roots, and leaves.",
         params: &["analysis"],
         category: "compile",
         example: r#"(compile/call-graph (compile/analyze src))"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/primitives",
-        func: query::prim_compile_primitives,
+    }
+    "compile/primitives" => prim_compile_primitives {
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return metadata for all Rust-defined primitives as an array of structs.",
         params: &[],
         category: "compile",
         example: r#"(compile/primitives)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/rename",
-        func: transform::prim_compile_rename,
+    }
+    "compile/rename" => prim_compile_rename {
         signal: Signal::errors(),
         arity: Arity::Exact(3),
         doc: "Binding-aware rename. Returns new source with all references updated.",
         params: &["analysis", "old-name", "new-name"],
         category: "compile",
         example: r#"(compile/rename analysis :old-name :new-name)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/extract",
-        func: transform::prim_compile_extract,
+    }
+    "compile/extract" => prim_compile_extract {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Extract a line range into a new function. Returns new source, captures, and signal.",
         params: &["analysis", "opts"],
         category: "compile",
         example: r#"(compile/extract analysis {:from :fn :lines [5 10] :name :new-fn})"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/parallelize",
-        func: transform::prim_compile_parallelize,
+    }
+    "compile/parallelize" => prim_compile_parallelize {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if functions can safely run in parallel. Verifies no shared mutable captures.",
         params: &["analysis", "fn-names"],
         category: "compile",
         example: r#"(compile/parallelize analysis [:fetch-a :fetch-b])"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/add-handler",
-        func: transform::prim_compile_add_handler,
+    }
+    "compile/add-handler" => prim_compile_add_handler {
         signal: Signal::errors(),
         arity: Arity::Exact(3),
         doc: "Wrap call sites of a function with signal handling.",
         params: &["analysis", "fn-name", "signal-kind"],
         category: "compile",
         example: r#"(compile/add-handler analysis :fetch-page :error)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "compile/run-on",
-        func: transform::prim_compile_run_on,
+    }
+    "compile/run-on" => prim_compile_run_on {
         signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::AtLeast(2),
         doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :mlir-cpu). Used by lib/differential.lisp to verify tier agreement. Returns the result, or signals :tier-rejected if the tier doesn't accept the closure.",
         params: &["tier", "f"],
         category: "compile",
         example: r#"(compile/run-on :bytecode (fn [a b] (+ a b)) 3 4)"#,
-        aliases: &[],
-    },
-];
+    }
+}

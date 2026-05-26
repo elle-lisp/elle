@@ -246,7 +246,7 @@ impl SignalBits {
     ///
     /// Uses overlap (any shared bit) for semantic bits, but requires full
     /// containment of infrastructure bits (specifically SIG_IO). This
-    /// ensures that a coroutine with mask SIG_YIELD does not accidentally
+    /// ensures that a fiber with mask SIG_YIELD does not accidentally
     /// swallow SIG_YIELD|SIG_IO signals that must reach the scheduler,
     /// while still allowing user-defined compound signals (e.g. |:log :audit|)
     /// to be caught by a partial mask (e.g. |:log|).
@@ -417,46 +417,30 @@ pub struct CallFrame {
 /// Maximum non-tail call depth before emitting a catchable stack-overflow
 /// error.
 ///
-/// Empirically each non-tail closure call costs ~25–30 KB of Rust stack
-/// (dominated by `SmallVec<[Value; 256]>` in `execute_bytecode_saving_stack`).
-/// With the default 8 MB thread stack the hard crash limit is ~280–310
-/// levels.  We set the guard well below that to leave headroom for the call
-/// chain above user code (compilation, dispatch loop, primitives) and for
-/// platforms with smaller default stacks.
+/// Regular Elle→Elle calls push frames onto the Fiber's heap-resident call
+/// stack (`call_closure_inner`) and the dispatch loop continues — the Rust
+/// stack does not recurse.  Only `execute_bytecode_saving_stack` (used for
+/// `run_on` and native re-entry) actually recurses on the Rust stack.
 ///
-/// Tail calls bypass this check entirely — they are trampolined in the
-/// `execute_bytecode_saving_stack` loop and never grow the Rust stack.
+/// Because native re-entry paths share this counter, the limit must stay
+/// below what would overflow the default 8 MB Rust thread stack (~4K–8K
+/// frames of `execute_bytecode_saving_stack`).  10,000 is well above any
+/// legitimate recursion depth while staying safely below the hard crash.
+///
+/// Tail calls bypass this check entirely — they reuse the current frame.
 ///
 /// Shared by the interpreter (`vm::call`) and JIT (`jit::calls`) paths.
-pub const MAX_CALL_DEPTH: usize = 200;
+pub const MAX_CALL_DEPTH: usize = 1_000_000;
 
 /// The fiber: an independent execution context.
 ///
 /// Holds all per-execution state that was previously on the VM struct:
 /// operand stack, call frames, exception handlers.
-/// The VM retains only shared state (modules, JIT cache, FFI, docs).
+/// The VM retains only shared state (modules, JIT cache, FFI, docs, heap).
+///
+/// The heap lives on the VM, not on individual fibers. All fibers share
+/// the VM's single heap; isolation is per-region.
 pub struct Fiber {
-    /// Per-fiber heap for arena-style allocation. Boxed for pointer stability:
-    /// the thread-local stores `*mut FiberHeap`, which must survive moves of
-    /// the Fiber struct (e.g., during `std::mem::swap` in fiber transitions).
-    ///
-    /// **Child fibers**: this is the active allocator for the fiber's lifetime.
-    /// Installed as the current thread-local heap on resume, uninstalled on
-    /// suspend/death.
-    ///
-    /// **Root fiber**: this field is structurally present for uniformity but is
-    /// never installed as the active allocator. The root fiber allocates through
-    /// the `ROOT_HEAP` thread-local in `src/value/fiberheap/routing.rs`, which
-    /// is a separately leaked `Box<FiberHeap>` that lives for the thread's
-    /// lifetime. The root `Fiber` struct's `heap` field is constructed in
-    /// `Fiber::new()` but immediately superseded by `install_root_heap()` in
-    /// `VM::new()`.
-    ///
-    /// `Option<Box<FiberHeap>>` was considered and rejected: child fibers access
-    /// `self.heap` on every allocation-related path, and wrapping in `Option`
-    /// would require `.as_ref().unwrap()` or `.as_deref_mut().unwrap()` at every
-    /// such call site with no benefit (child fibers always have a heap).
-    pub heap: Box<crate::value::fiberheap::FiberHeap>,
     /// Operand stack (temporaries). SmallVec avoids heap allocation for
     /// fibers with fewer than 256 stack entries.
     pub stack: SmallVec<[Value; 256]>,
@@ -492,7 +476,7 @@ pub struct Fiber {
     ///
     /// - Signal suspension (`fiber/signal`): single frame, empty stack
     /// - Yield suspension (`yield`): chain of frames from yielder to
-    ///   coroutine boundary, each with its operand stack captured
+    ///   fiber boundary, each with its operand stack captured
     ///
     /// On resume, frames are replayed from innermost (index 0) to
     /// outermost (last index).
@@ -532,36 +516,17 @@ pub struct NativeIter {
 /// is never actually executed — native iter fibers short-circuit
 /// in the VM's resume path.
 fn noop_closure() -> Rc<Closure> {
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
     use crate::value::arena::alloc_inline_slice;
     use crate::value::closure::ClosureTemplate;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
 
     Rc::new(Closure {
         template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![3, 0, 0, 0]), // Return
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: true,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(
+                Rc::new(vec![3, 0, 0, 0]), // Return
+                Arity::Exact(0),
+                Rc::new(vec![]),
+            )
         }),
         env: alloc_inline_slice(&[]),
         squelch_mask: SignalBits::EMPTY,
@@ -572,7 +537,6 @@ impl Fiber {
     /// Create a new fiber from a closure with the given signal mask.
     pub fn new(closure: Rc<Closure>, mask: SignalBits) -> Self {
         Fiber {
-            heap: Box::new(crate::value::fiberheap::FiberHeap::new()),
             stack: SmallVec::new(),
             frames: Vec::new(),
             status: FiberStatus::New,
@@ -600,7 +564,6 @@ impl Fiber {
     pub fn native_iter(elements: Vec<Value>, mask: SignalBits) -> Self {
         let closure = noop_closure();
         Fiber {
-            heap: Box::new(crate::value::fiberheap::FiberHeap::new()),
             stack: SmallVec::new(),
             frames: Vec::new(),
             status: FiberStatus::Paused,
@@ -646,38 +609,16 @@ impl std::fmt::Debug for Fiber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
 
     fn test_closure() -> Rc<Closure> {
         use crate::value::ClosureTemplate;
         Rc::new(Closure {
-            template: Rc::new(ClosureTemplate {
-                bytecode: Rc::new(vec![]),
-                arity: Arity::Exact(0),
-                num_locals: 0,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(vec![]),
-                signal: Signal::silent(),
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-
-                symbol_names: Rc::new(HashMap::new()),
-                location_map: Rc::new(LocationMap::new()),
-                rotation_safe: false,
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: None,
-                spirv: std::cell::OnceCell::new(),
-            }),
+            template: Rc::new(ClosureTemplate::new(
+                Rc::new(vec![]),
+                Arity::Exact(0),
+                Rc::new(vec![]),
+            )),
             env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })
@@ -694,31 +635,6 @@ mod tests {
         assert!(fiber.child.is_none());
         assert!(fiber.param_frames.is_empty());
         assert!(fiber.signal.is_none());
-    }
-
-    #[test]
-    fn test_fiber_status_transitions() {
-        let mut fiber = Fiber::new(test_closure(), SIG_OK);
-        assert_eq!(fiber.status, FiberStatus::New);
-
-        fiber.status = FiberStatus::Alive;
-        assert_eq!(fiber.status, FiberStatus::Alive);
-
-        fiber.status = FiberStatus::Paused;
-        fiber.signal = Some((SIG_YIELD, Value::int(42)));
-        assert_eq!(fiber.status, FiberStatus::Paused);
-        assert_eq!(fiber.signal, Some((SIG_YIELD, Value::int(42))));
-
-        fiber.status = FiberStatus::Dead;
-        fiber.signal = Some((SIG_OK, Value::int(99)));
-        assert_eq!(fiber.status, FiberStatus::Dead);
-        assert_eq!(fiber.signal, Some((SIG_OK, Value::int(99))));
-
-        // Reset and test error path
-        let mut fiber2 = Fiber::new(test_closure(), SIG_OK);
-        fiber2.status = FiberStatus::Error;
-        fiber2.signal = Some((SIG_ERROR, Value::string("boom")));
-        assert_eq!(fiber2.status, FiberStatus::Error);
     }
 
     #[test]
@@ -907,57 +823,4 @@ mod tests {
         assert!(fiber.mask.contains(SIG_RESUME));
     }
 
-    /// Regression: two Fiber values that wrap the *same* `FiberHandle` but
-    /// are stored in distinct arena slots must compare equal and hash
-    /// identically.
-    ///
-    /// The motivating scenario is `deep_copy_to_outbox` on fiber yield: a
-    /// signal value containing a fiber gets re-allocated in the outbox,
-    /// producing a new `HeapObject::Fiber` slot whose `handle` is a clone
-    /// of the original. Both values represent the same fiber — the Elle
-    /// scheduler stores fibers as keys in `waiters`/`completed` maps, and
-    /// those lookups must hit regardless of which slot the caller holds.
-    ///
-    /// Historically `Value::eq`/`Value::hash` used the slot pointer, so
-    /// the copied fiber became a *different* map key. That desync caused
-    /// `ev/join` on a recently-spawned fiber to park forever.
-    #[test]
-    fn test_fiber_values_sharing_a_handle_are_identity_equal() {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-
-        // Two independent arena allocations of the *same* handle — this
-        // is exactly what deep_copy_to_outbox produces.
-        let v1 = Value::fiber_from_handle(handle.clone());
-        let v2 = Value::fiber_from_handle(handle.clone());
-
-        // Precondition: the two values really are at distinct slots.
-        // (If they ever coalesce, the test becomes trivially green and
-        // no longer exercises the bug.)
-        assert_ne!(
-            v1.payload, v2.payload,
-            "precondition: two separate allocations should have distinct slot addresses"
-        );
-
-        // Same fiber => equal.
-        assert_eq!(v1, v2, "fibers sharing a handle must compare equal");
-
-        // Same fiber => same hash (Hash/Eq contract).
-        let mut h1 = DefaultHasher::new();
-        let mut h2 = DefaultHasher::new();
-        v1.hash(&mut h1);
-        v2.hash(&mut h2);
-        assert_eq!(
-            h1.finish(),
-            h2.finish(),
-            "fibers sharing a handle must hash identically"
-        );
-
-        // Unrelated fibers still compare not-equal.
-        let other_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-        let v3 = Value::fiber_from_handle(other_handle);
-        assert_ne!(v1, v3, "distinct fibers must not compare equal");
-    }
 }

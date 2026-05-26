@@ -1451,7 +1451,6 @@ impl<'a> FnCtx<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::context::{set_symbol_table, set_vm_context};
     use crate::pipeline::eval_all;
     use crate::primitives::register_primitives;
     use crate::symbol::SymbolTable;
@@ -1463,73 +1462,6 @@ mod tests {
         let mut vm = VM::new();
         register_primitives(&mut vm, &mut symbols);
         eval_all(source, &mut symbols, &mut vm, "<test>")
-    }
-
-    fn eval_with_stdlib(source: &str) -> Result<Value, String> {
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        register_primitives(&mut vm, &mut symbols);
-        set_vm_context(&mut vm as *mut VM);
-        set_symbol_table(&mut symbols as *mut SymbolTable);
-        crate::init_stdlib(&mut vm, &mut symbols);
-        let result = eval_all(source, &mut symbols, &mut vm, "<test>");
-        set_vm_context(std::ptr::null_mut());
-        result
-    }
-
-    #[test]
-    fn if_result_preserved_with_phi_merge_last_in_begin() {
-        // When an `if` containing assigns is the last expression in a begin,
-        // the phi-lets must not discard the if's result value.
-        let result = eval_bare(
-            r#"(do
-                    (var x 0)
-                    (if true
-                        (do (assign x 1) "yes")
-                        (do (assign x 2) "no")))"#,
-        )
-        .unwrap();
-        assert_eq!(result, Value::string("yes"));
-    }
-
-    #[test]
-    fn if_result_preserved_with_phi_merge_else_branch() {
-        // Same as above but the else branch is taken.
-        let result = eval_bare(
-            r#"(do
-                    (var x 0)
-                    (if false
-                        (do (assign x 1) "yes")
-                        (do (assign x 2) "no")))"#,
-        )
-        .unwrap();
-        assert_eq!(result, Value::string("no"));
-    }
-
-    #[test]
-    fn if_result_preserved_with_each_loop() {
-        // The original bug: `each` expands to a match with mutable defines
-        // inside branches, triggering phi insertion that discards the
-        // if's return value.
-        let result = eval_with_stdlib(
-            r#"(do
-                    (defn f [x]
-                      (let [[a b] ["." x]]
-                        (if (= b "")
-                          @[]
-                          (let [acc @[]]
-                            (each i in (list 1 2 3) (push acc i))
-                            acc))))
-                    (f "hello"))"#,
-        )
-        .unwrap();
-        // @[] creates a mutable array — use as_array_mut
-        let arr = result.as_array_mut().expect("expected mutable array");
-        let arr = arr.borrow();
-        assert_eq!(arr.len(), 3);
-        assert_eq!(arr[0], Value::int(1));
-        assert_eq!(arr[1], Value::int(2));
-        assert_eq!(arr[2], Value::int(3));
     }
 
     #[test]

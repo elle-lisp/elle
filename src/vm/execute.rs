@@ -11,7 +11,7 @@
 //! | Non-yielding `fiber/resume` | Runs a child fiber inline on the current thread |
 //! | `arena/allocs` SIG_QUERY handler | Runs a thunk to measure its allocations |
 //! | JIT trampolines | Re-enters interpreter for uncompiled hot paths |
-//! | Coroutine resume in `call.rs` | Resumes a suspended coroutine |
+//! | Fiber resume in `call.rs` | Resumes a suspended fiber |
 //!
 //! ### What `execute_bytecode_saving_stack` preserves
 //!
@@ -62,30 +62,6 @@ use crate::value::{SignalBits, Value, SIG_ERROR};
 use std::rc::Rc;
 
 use super::core::VM;
-
-/// Advance pool rotation state at a tail-call boundary.
-///
-/// If the previous iteration was rotation-safe, either rotate pools
-/// (if a base mark exists) or capture a new base mark. If the previous
-/// iteration was NOT rotation-safe, clear the base mark to prevent
-/// rotating across an unsafe boundary.
-#[inline]
-pub(super) fn advance_rotation(
-    rotation_base: &mut Option<crate::value::fiberheap::RotationBase>,
-    prev_rotation_safe: &mut bool,
-    tail_rotation_safe: bool,
-) {
-    if *prev_rotation_safe {
-        if let Some(ref base) = rotation_base {
-            crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
-        } else {
-            *rotation_base = crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
-        }
-    } else {
-        *rotation_base = None;
-    }
-    *prev_rotation_safe = tail_rotation_safe;
-}
 
 /// Result of `execute_bytecode_saving_stack`.
 ///
@@ -139,8 +115,6 @@ impl VM {
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
-        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
-        let mut prev_rotation_safe = true;
 
         loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -176,11 +150,6 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
-                advance_rotation(
-                    &mut rotation_base,
-                    &mut prev_rotation_safe,
-                    tail.rotation_safe,
-                );
                 accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;

@@ -1,5 +1,4 @@
 //! Bytes and @bytes primitives (binary data)
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::seq::seq_slice;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -71,7 +70,7 @@ pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
 /// With integer arguments: each must be 0-255, assembled into a byte sequence.
 /// With a single string argument: encodes as UTF-8 bytes.
 /// With a single keyword argument: converts keyword name to UTF-8 bytes.
-pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes_mut(args: &[Value]) -> (SignalBits, Value) {
     // Single-argument coercion: string/keyword → @bytes, bytes → passthrough
     if args.len() == 1 {
         // @bytes → @bytes (idempotent)
@@ -301,32 +300,22 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "bytes",
-        func: prim_bytes,
+primitive! {
+    "bytes" => prim_bytes {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create immutable bytes. Accepts integers (0-255), or a single string/keyword.",
-        params: &[],
         category: "bytes",
         example: "(bytes 72 101 108 108 111)\n(bytes \"hello\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "@bytes",
-        func: prim_blob,
+    }
+    "@bytes" => prim_bytes_mut {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create mutable bytes. Accepts integers (0-255), or a single string/keyword.",
-        params: &[],
         category: "bytes",
         example: "(@bytes 72 101 108 108 111)\n(@bytes \"hello\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "seq->hex",
-        func: prim_seq_to_hex,
+    }
+    "seq->hex" => prim_seq_to_hex {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert bytes, @bytes, array, @array, list, or integer to a lowercase hex string. Mutable input (@bytes, @array) produces @string; all other input produces string. Integer input uses big-endian minimal-byte encoding (0 → \"00\"). Aliases: bytes->hex, bytes->hex-string.",
@@ -334,17 +323,13 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "bytes",
         example: "(seq->hex (bytes 72 101 108)) ;=> \"48656c\"\n(seq->hex [72 101 108]) ;=> \"48656c\"\n(seq->hex 255) ;=> \"ff\"",
         aliases: &["bytes->hex", "bytes->hex-string"],
-    },
-    PrimitiveDef {
-        name: "slice",
-        func: prim_slice,
+    }
+    "slice" => prim_slice {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Slice a sequence from start to end index. If end is omitted, slice to end of sequence. Returns same type as input.",
         params: &["coll", "start", "end?"],
         category: "bytes",
         example: "(slice [1 2 3 4 5] 1 3)\n(slice \"hello\" 1)",
-        aliases: &[],
-    },
-
-];
+    }
+}

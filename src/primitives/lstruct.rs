@@ -1,100 +1,69 @@
 //! Struct operations primitives (mutable hash tables)
 //!
 //! Polymorphic collection access (get, put) is in `access.rs`.
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
-use crate::value::fiberheap;
 use crate::value::types::Arity;
 use crate::value::{error_val, sorted_struct_remove, TableKey, Value};
 use std::collections::BTreeMap;
 
-use super::access::{prim_get, prim_put};
+use super::access::prim_get;
 
-/// Declarative table of struct primitives.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "@struct",
-        func: prim_table,
+// Declarative table of struct primitives.
+primitive! {
+    "@struct" => prim_struct_mut {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable struct from key-value pairs",
-        params: &[],
         category: "struct",
         example: "(@struct :a 1 :b 2)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "get",
-        func: prim_get,
+    }
+    "get" => prim_get {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Get a value from a collection (tuple, array, string, struct) by index or key, with optional default",
         params: &["collection", "key", "default"],
         category: "struct",
         example: "(get [1 2 3] 0)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "put",
-        func: prim_put,
-        signal: Signal::errors(),
-        arity: Arity::Range(2, 3),
-        doc: "Put a value into a collection. For immutable structs/arrays/strings: returns a new collection. For mutable @struct/@array/@string: mutates in place and returns the same reference. For sets: (put set value) delegates to add.",
-        params: &["collection", "key-or-value", "value"],
-        category: "struct",
-        example: "(put {:a 1} :b 2) #=> {:a 1 :b 2}\n(put |1 2| 3) #=> |1 2 3|",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "del",
-        func: prim_del,
+    }
+    "del" => prim_del {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Delete a key from a struct or element from a set. For immutable structs: returns a new struct without the key. For mutable @struct: mutates in place and returns the same reference. For sets: delegates to set del.",
         params: &["collection", "key"],
         category: "struct",
         example: "(del (@struct :a 1) :a)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "keys",
-        func: prim_keys,
+    }
+    "keys" => prim_keys {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get all keys from a struct as a list",
         params: &["collection"],
         category: "struct",
         example: "(keys (@struct :a 1 :b 2))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "values",
-        func: prim_values,
+    }
+    "values" => prim_values {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get all values from a struct as a list",
         params: &["collection"],
         category: "struct",
         example: "(values (@struct :a 1 :b 2))",
-        aliases: &[],
-    },
-     PrimitiveDef {
-         name: "has?",
-         func: prim_has_key,
-         signal: Signal::errors(),
-         arity: Arity::Exact(2),
-         doc: "Check if a collection has a key, element, or substring. Works on structs (key lookup), sets (membership), and strings (substring check).",
-         params: &["collection", "key-or-value"],
-         category: "struct",
-         example: "(has? {:a 1} :a) #=> true\n(has? |1 2 3| 2) #=> true\n(has? \"hello\" \"ell\") #=> true",
-         aliases: &["has-key?", "contains?"],
-     },
-];
+    }
+    "has?" => prim_has_key {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Check if a collection has a key, element, or substring. Works on structs (key lookup), sets (membership), and strings (substring check).",
+        params: &["collection", "key-or-value"],
+        category: "struct",
+        example: "(has? {:a 1} :a) #=> true\n(has? |1 2 3| 2) #=> true\n(has? \"hello\" \"ell\") #=> true",
+        aliases: &["has-key?", "contains?"],
+    }
+}
 
 /// Create a mutable struct from key-value pairs
 /// (@struct key1 val1 key2 val2 ...)
-pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_struct_mut(args: &[Value]) -> (SignalBits, Value) {
     if !args.len().is_multiple_of(2) {
         return (
             SIG_ERROR,
@@ -123,7 +92,6 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let value = args[i + 1];
-        fiberheap::incref(value);
         map.insert(key, value);
     }
 
@@ -170,11 +138,10 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        // Decref removed value: it leaves a durable collection reference.
-        if let Some(old_val) = mstruct.borrow().get(&key).copied() {
-            crate::value::fiberheap::decref_and_free(old_val);
+        let old = mstruct.borrow_mut().remove(&key);
+        if let Some(old_val) = old {
+            crate::value::arena::track_remove(old_val);
         }
-        mstruct.borrow_mut().remove(&key);
         (SIG_OK, args[0]) // Return the mutated struct
     } else if args[0].is_struct() {
         let s = match args[0].as_struct() {

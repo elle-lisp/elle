@@ -169,41 +169,49 @@ mod tests {
 
     #[test]
     fn test_compiler_state_creation() {
-        let state = CompilerState::new();
-        assert_eq!(state.documents.len(), 0);
+        crate::value::arena::with_test_region(|| {
+            let state = CompilerState::new();
+            assert_eq!(state.documents.len(), 0);
+        });
     }
 
     #[test]
     fn test_document_open_and_close() {
-        let mut state = CompilerState::new();
-        state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
-        assert_eq!(state.documents.len(), 1);
+        crate::value::arena::with_test_region(|| {
+            let mut state = CompilerState::new();
+            state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
+            assert_eq!(state.documents.len(), 1);
 
-        state.on_document_close("file:///test.l");
-        assert_eq!(state.documents.len(), 0);
+            state.on_document_close("file:///test.l");
+            assert_eq!(state.documents.len(), 0);
+        });
     }
 
     #[test]
     fn test_document_change() {
-        let mut state = CompilerState::new();
-        state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
+        crate::value::arena::with_test_region(|| {
+            let mut state = CompilerState::new();
+            state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
 
-        if let Some(doc) = state.documents.get("file:///test.l") {
-            assert_eq!(doc.source_text, "(+ 1 2)");
-        }
+            if let Some(doc) = state.documents.get("file:///test.l") {
+                assert_eq!(doc.source_text, "(+ 1 2)");
+            }
 
-        state.on_document_change("file:///test.l", "(+ 3 4)".to_string());
-        if let Some(doc) = state.documents.get("file:///test.l") {
-            assert_eq!(doc.source_text, "(+ 3 4)");
-        }
+            state.on_document_change("file:///test.l", "(+ 3 4)".to_string());
+            if let Some(doc) = state.documents.get("file:///test.l") {
+                assert_eq!(doc.source_text, "(+ 3 4)");
+            }
+        });
     }
 
     #[test]
     fn test_compile_simple_expression() {
-        let mut state = CompilerState::new();
-        state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
-        let result = state.compile_document("file:///test.l");
-        assert!(result);
+        crate::value::arena::with_test_region(|| {
+            let mut state = CompilerState::new();
+            state.on_document_open("file:///test.l".to_string(), "(+ 1 2)".to_string());
+            let result = state.compile_document("file:///test.l");
+            assert!(result);
+        });
     }
 
     #[test]
@@ -234,18 +242,20 @@ mod tests {
 
     #[test]
     fn test_compile_syntax_error_has_location() {
-        let mut state = CompilerState::new();
-        state.on_document_open("file:///test.l".to_string(), "((((".to_string());
-        state.compile_document("file:///test.l");
-        let doc = state.get_document("file:///test.l").unwrap();
-        assert!(!doc.diagnostics.is_empty());
-        let diag = &doc.diagnostics[0];
-        assert!(
-            diag.location.is_some(),
-            "parse error diagnostic should have a location"
-        );
-        let loc = diag.location.as_ref().unwrap();
-        assert_eq!(loc.line, 1);
-        assert_eq!(loc.col, 4);
+        crate::value::arena::with_test_region(|| {
+            let mut state = CompilerState::new();
+            state.on_document_open("file:///test.l".to_string(), "((((".to_string());
+            state.compile_document("file:///test.l");
+            let doc = state.get_document("file:///test.l").unwrap();
+            assert!(!doc.diagnostics.is_empty());
+            let diag = &doc.diagnostics[0];
+            assert!(
+                diag.location.is_some(),
+                "parse error diagnostic should have a location"
+            );
+            let loc = diag.location.as_ref().unwrap();
+            assert_eq!(loc.line, 1);
+            assert_eq!(loc.col, 4);
+        });
     }
 }

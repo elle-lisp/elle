@@ -1,6 +1,5 @@
 //! Debug print, trace, and memory usage primitives
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -182,11 +181,9 @@ pub(crate) fn prim_keyword_count(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(count as i64))
 }
 
-/// Declarative primitive definitions for debug operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "debug/print",
-        func: prim_debug_print,
+// Declarative primitive definitions for debug operations.
+primitive! {
+    "debug/print" => prim_debug_print {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Prints a value with debug information to stderr",
@@ -194,10 +191,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(debug/print 42)",
         aliases: &["debug-print"],
-    },
-    PrimitiveDef {
-        name: "debug/trace",
-        func: prim_trace,
+    }
+    "debug/trace" => prim_trace {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Traces execution with a label, prints to stderr, returns value",
@@ -205,38 +200,21 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(debug/trace \"x\" 42)",
         aliases: &["trace"],
-    },
-    PrimitiveDef {
-        name: "debug/memory",
-        func: prim_memory_usage,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "debug/memory" => prim_memory_usage {
         doc: "Returns memory usage statistics as (rss-bytes virtual-bytes)",
-        params: &[],
         category: "debug",
         example: "(debug/memory)",
         aliases: &["memory-usage"],
-    },
-    PrimitiveDef {
-        name: "debug/symbol-count",
-        func: prim_symbol_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "debug/symbol-count" => prim_symbol_count {
         doc: "Returns the number of interned symbols in the symbol table",
-        params: &[],
         category: "debug",
         example: "(debug/symbol-count)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "debug/keyword-count",
-        func: prim_keyword_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "debug/keyword-count" => prim_keyword_count {
         doc: "Returns the number of registered keywords in the global name table",
-        params: &[],
         category: "debug",
         example: "(debug/keyword-count)",
-        aliases: &[],
-    },
-];
+    }
+}

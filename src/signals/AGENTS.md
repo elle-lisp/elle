@@ -148,7 +148,7 @@ Used across the pipeline and the runtime:
 - `pipeline.rs` — builds primitive signals map, passes to Analyzer
 - `jit/compiler.rs` — JIT gate rejects polymorphic (`signal.propagates != 0`)
 - `vm/call.rs` — call dispatch checks `!signal.may_suspend()`
-- `primitives/coroutines.rs` — coroutine warnings check `!signal.may_yield()`
+- `primitives/fibers.rs` — fiber warnings check `!signal.may_yield()`
 - `primitives/stream.rs` — stream primitives use `SIG_ERROR | SIG_YIELD | SIG_IO`
 - `io/backend.rs` — backend execution returns `(SIG_OK, result)` or `(SIG_ERROR, error)`
 

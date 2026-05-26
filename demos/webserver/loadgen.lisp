@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 11)
 
 # Concurrent HTTP load generator with latency stats
 #

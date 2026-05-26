@@ -392,42 +392,33 @@ pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Declarative primitive definitions for FFI loading operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "ffi/native",
-        func: prim_ffi_native,
+// Declarative primitive definitions for FFI loading operations.
+primitive! {
+    "ffi/native" => prim_ffi_native {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Load a shared library. Pass nil for the current process.",
         params: &["path"],
         category: "ffi",
         example: "(ffi/native \"libm.so.6\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/lookup",
-        func: prim_ffi_lookup,
+    }
+    "ffi/lookup" => prim_ffi_lookup {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Look up a symbol in a loaded library.",
         params: &["lib", "name"],
         category: "ffi",
         example: "(ffi/lookup lib \"strlen\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/signature",
-        func: prim_ffi_signature,
+    }
+    "ffi/signature" => prim_ffi_signature {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Create a reified function signature. Optional third arg for variadic functions.",
         params: &["return-type", "arg-types", "fixed-args"],
         category: "ffi",
         example: "(ffi/signature :int [:ptr :size :ptr :int] 3)",
-        aliases: &[],
-    },
-];
+    }
+}
 
 /// FFI call and callback primitives (require libffi).
 #[cfg(feature = "ffi")]
@@ -441,7 +432,7 @@ pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
         params: &["fn-ptr", "sig"],
         category: "ffi",
         example: "(ffi/call sqrt-ptr sig 2.0)",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "ffi/callback",
@@ -452,7 +443,7 @@ pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
         params: &["sig", "closure"],
         category: "ffi",
         example: "(ffi/callback (ffi/signature :int [:ptr :ptr]) (fn (a b) 0))",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
     PrimitiveDef {
         name: "ffi/callback-free",
@@ -463,6 +454,6 @@ pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
         params: &["ptr"],
         category: "ffi",
         example: "(ffi/callback-free cb-ptr)",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     },
 ];

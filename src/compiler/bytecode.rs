@@ -2,16 +2,6 @@ use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
 
-/// Per-field escape analysis info for cross-module projection.
-#[derive(Debug, Clone, Copy)]
-pub struct FieldEscapeInfo {
-    /// True when the field's closure is rotation-safe AND param-safe.
-    pub rotation_safe: bool,
-    /// True when the field's closure is outward-safe (no external
-    /// heap stores, even if it returns heap values).
-    pub outward_safe: bool,
-}
-
 /// Bytecode instruction set
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -202,35 +192,6 @@ pub enum Instruction {
     /// Pops args array, pops function, tail calls with array elements.
     TailCallArrayMut,
 
-    /// Enter an allocation region (scope boundary for allocator).
-    /// No operands. Pushes a scope mark on the current FiberHeap.
-    /// Effective for all fibers including root (after issue-525).
-    RegionEnter,
-
-    /// Exit an allocation region (scope boundary for allocator).
-    /// No operands. Pops scope mark and releases scoped objects.
-    /// Effective for all fibers including root (after issue-525).
-    RegionExit,
-
-    /// Exit a call-scoped allocation region.
-    /// No operands. Pops two scope marks (barrier + region start),
-    /// frees only the range between them (arg temporaries).
-    RegionExitCall,
-
-    /// Rotate loop scope marks (soft — no slot deallocation).
-    /// Resets alloc_count, runs dtors, truncates tracking vecs.
-    /// Used when loop params may chain across iterations.
-    RegionRotate,
-
-    /// Rotate loop scope marks (hard — with slot deallocation).
-    /// Same as RegionRotate but returns slab slots to the free list.
-    /// Used when no loop param references previous iteration's allocs.
-    RegionRotateDealloc,
-    /// Rotate loop scope marks (refcount-aware — skip pinned values).
-    RegionRotateRefcounted,
-    /// Pop scope mark and release refcount-0 objects only.
-    RegionExitRefcounted,
-
     /// Push a parameter frame onto the fiber's param_frames stack.
     /// Operand: u8 count (number of (param, value) pairs on the stack).
     /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
@@ -257,30 +218,6 @@ pub enum Instruction {
     /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
     /// Source struct is popped from the stack; result pushed.
     StructRest,
-
-    /// Enter outbox routing context. No operands.
-    /// Toggles allocation routing to the outbox (for yield-bound values).
-    OutboxEnter,
-
-    /// Exit outbox routing context. No operands.
-    /// Reverts allocation routing to the private heap.
-    OutboxExit,
-
-    /// Push an explicit rotation frame. No operands.
-    /// Captures the current heap state so `FlipSwap` can rotate relative
-    /// to it and `FlipExit` can tear down this frame's swap pool without
-    /// touching the caller's. Emitted at function entry when the function
-    /// wants explicit rotation (e.g., a self-tail-recursive loop).
-    FlipEnter,
-
-    /// Rotate generations using the top flip frame. No operands.
-    /// Equivalent to the trampoline's implicit `rotate_pools` but keyed
-    /// off the flip stack. Emitted before a self-tail-call.
-    FlipSwap,
-
-    /// Pop the top flip frame and tear down its trailing swap pool. No
-    /// operands. Emitted before every Return in a flip-wrapped function.
-    FlipExit,
 
     /// Convert int → float. Pops value, pushes float. Identity on floats.
     IntToFloat,
@@ -337,6 +274,27 @@ pub enum Instruction {
     CallChecked,
     /// Arity-checked tail call (arg_count). Compiler verified arity.
     TailCallChecked,
+
+    /// Free all objects in a specific region.
+    /// Operand: u16 region_id.
+    FreeRegion,
+
+    /// Append string to @string (pops value, pops string, pushes string)
+    IntrStringPush,
+    /// Append byte to @bytes (pops value, pops bytes, pushes bytes)
+    IntrBytesPush,
+
+    /// Increment the reference count of a region.
+    /// Operand: u16 region_id.
+    /// Emitted when a value in region A is stored into a structure in
+    /// region B — region A must outlive region B's free point.
+    IncrefRegion,
+
+    /// Decrement the reference count of a region.
+    /// Operand: u16 region_id.
+    /// Emitted at FreeRegion(B) to release cross-region references
+    /// that were incremented by IncrefRegion.
+    DecrefRegion,
 }
 
 /// Compiled bytecode with constants
@@ -361,12 +319,6 @@ pub struct Bytecode {
     /// compilation. When an importing file sees `module:field`, the analyzer
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
-    /// Escape projection: maps keyword field names to escape analysis
-    /// properties. Populated during lowering for module-pattern files
-    /// that return a struct of closures. When an importing file sees
-    /// `module:field` as a callee, the lowerer uses this projection to
-    /// determine safety properties.
-    pub escape_projection: Option<std::collections::HashMap<String, FieldEscapeInfo>>,
 }
 
 impl Bytecode {
@@ -378,7 +330,6 @@ impl Bytecode {
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
-            escape_projection: None,
         }
     }
 
@@ -513,7 +464,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (offset={}, target={})", offset, target));
                 i += 4;
             }
-            Instruction::LoadLocal | Instruction::StoreLocal if i + 1 < instructions.len() => {
+            Instruction::LoadLocal
+            | Instruction::StoreLocal                if i + 1 < instructions.len() =>
+            {
                 let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 line.push_str(&format!(" (index={})", index));
                 i += 2;
@@ -530,26 +483,28 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::TailCall
             | Instruction::CallChecked
             | Instruction::TailCallChecked
-                if i + 1 < instructions.len() =>
+                if i + 3 < instructions.len() =>
             {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (args={})", arg_count));
-                i += 2;
+                let region_id = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                line.push_str(&format!(" (args={}, region={})", arg_count, region_id));
+                i += 4;
             }
             Instruction::DupN if i < instructions.len() => {
                 let offset = instructions[i];
                 line.push_str(&format!(" (offset={})", offset));
                 i += 1;
             }
-            Instruction::MakeClosure if i + 3 < instructions.len() => {
-                let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+            Instruction::MakeClosure if i + 5 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let const_idx = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
                 let num_captures =
-                    ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                    ((instructions[i + 4] as u16) << 8) | (instructions[i + 5] as u16);
                 line.push_str(&format!(
-                    " (const_idx={}, num_captures={})",
-                    const_idx, num_captures
+                    " (region={}, const_idx={}, num_captures={})",
+                    region_id, const_idx, num_captures
                 ));
-                i += 4;
+                i += 6;
             }
             Instruction::ArrayMutRefDestructure
             | Instruction::ArrayMutSliceFrom
@@ -586,25 +541,30 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::ArrayMutExtend | Instruction::ArrayMutPush => {
                 // No operands
             }
-            Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
-                // No operands (arg count is dynamic, determined by array length)
-            }
-            Instruction::RegionEnter
-            | Instruction::RegionExit
-            | Instruction::RegionExitCall
-            | Instruction::RegionRotate
-            | Instruction::RegionRotateDealloc
-            | Instruction::RegionRotateRefcounted
-            | Instruction::RegionExitRefcounted
-            | Instruction::OutboxEnter
-            | Instruction::OutboxExit
-            | Instruction::FlipEnter
-            | Instruction::FlipSwap
-            | Instruction::FlipExit => {
-                // No operands
+            Instruction::CallArrayMut | Instruction::TailCallArrayMut
+                if i + 1 < instructions.len() =>
+            {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
+                i += 2;
             }
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one
+            }
+            Instruction::FreeRegion if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
+                i += 2;
+            }
+            Instruction::IncrefRegion if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
+                i += 2;
+            }
+            Instruction::DecrefRegion if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
+                i += 2;
             }
             Instruction::PushParamFrame if i < instructions.len() => {
                 let count = instructions[i];
@@ -613,6 +573,19 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::PopParamFrame => {
                 // No operands
+            }
+            Instruction::Pair | Instruction::MakeCapture if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                if region_id != 0 {
+                    line.push_str(&format!(" (region={})", region_id));
+                }
+                i += 2;
+            }
+            Instruction::MakeArrayMut if i + 2 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let size = instructions[i + 2];
+                line.push_str(&format!(" (region={}, size={})", region_id, size));
+                i += 3;
             }
             _ => {}
         }
@@ -694,21 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn test_region_instruction_roundtrip() {
-        for instr in [Instruction::RegionEnter, Instruction::RegionExit] {
-            let mut bc = Bytecode::new();
-            bc.emit(instr);
-            assert_eq!(
-                bc.instructions.len(),
-                1,
-                "Region instruction should be 1 byte"
-            );
-            let decoded: Instruction = unsafe { std::mem::transmute(bc.instructions[0]) };
-            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
-        }
-    }
-
-    #[test]
     fn test_bytecode_variants_distinct() {
         // Catch accidental duplication of variants (they all get auto-
         // numbered by the compiler, so any duplicate would be a compile
@@ -724,20 +682,5 @@ mod tests {
             Instruction::FirstDestructure as u8,
             Instruction::RestDestructure as u8,
         );
-        assert_ne!(
-            Instruction::OutboxEnter as u8,
-            Instruction::OutboxExit as u8,
-        );
-    }
-
-    #[test]
-    fn test_region_disassembly() {
-        let mut bc = Bytecode::new();
-        bc.emit(Instruction::RegionEnter);
-        bc.emit(Instruction::RegionExit);
-        let lines = disassemble_lines(&bc.instructions);
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("RegionEnter"));
-        assert!(lines[1].contains("RegionExit"));
     }
 }

@@ -25,7 +25,6 @@ use std::time::Duration;
 use crossbeam_channel::{self, TryRecvError, TrySendError};
 
 use crate::io::request::{IoOp, IoRequest};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
@@ -858,10 +857,8 @@ fn prim_chan_wait_ready(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "chan",
-        func: prim_chan_new,
+primitive! {
+    "chan" => prim_chan_new {
         signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Create a channel. Returns [sender receiver]. Optional capacity for bounded channel.",
@@ -869,76 +866,56 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         category: "chan",
         example: "(chan)",
         aliases: &["chan/new"],
-    },
-    PrimitiveDef {
-        name: "chan/send",
-        func: prim_chan_send,
+    }
+    "chan/send" => prim_chan_send {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Non-blocking send. Returns [:ok], [:full], or [:disconnected].",
         params: &["sender", "msg"],
         category: "chan",
         example: "(chan/send sender 42)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/recv",
-        func: prim_chan_recv,
+    }
+    "chan/recv" => prim_chan_recv {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking receive. Returns [:ok msg], [:empty], or [:disconnected].",
         params: &["receiver"],
         category: "chan",
         example: "(chan/recv receiver)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/clone",
-        func: prim_chan_clone,
+    }
+    "chan/clone" => prim_chan_clone {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Clone a sender. Multiple senders can feed the same channel.",
         params: &["sender"],
         category: "chan",
         example: "(chan/clone sender)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/close",
-        func: prim_chan_close,
+    }
+    "chan/close" => prim_chan_close {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close a sender. Receivers will get :disconnected after buffered messages drain.",
         params: &["sender"],
         category: "chan",
         example: "(chan/close sender)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/close-recv",
-        func: prim_chan_close_recv,
+    }
+    "chan/close-recv" => prim_chan_close_recv {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close a receiver. Senders will get :disconnected on next send.",
         params: &["receiver"],
         category: "chan",
         example: "(chan/close-recv receiver)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/try-select",
-        func: prim_chan_try_select,
+    }
+    "chan/try-select" => prim_chan_try_select {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking poll over receivers. Returns [index msg], [:empty], or [:disconnected].",
         params: &["receivers"],
         category: "chan",
         example: "(chan/try-select @[r1 r2])",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "chan/wait-ready",
-        func: prim_chan_wait_ready,
+    }
+    "chan/wait-ready" => prim_chan_wait_ready {
         signal: Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
@@ -948,6 +925,5 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["receivers", "&opt timeout-ms"],
         category: "chan",
         example: "(chan/wait-ready @[r1 r2] 1000)",
-        aliases: &[],
-    },
-];
+    }
+}

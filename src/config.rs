@@ -4,23 +4,13 @@
 //! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Separate atomic for runtime-togglable flip; initialized from Config default,
-/// updated by `set_flip`, read by `flip_enabled`.
-static FLIP_OVERRIDE: AtomicBool = AtomicBool::new(true);
-
-/// Check whether flip instructions are enabled (runtime-togglable).
+/// Legacy: flip instructions are always no-ops. Kept for API compat.
 pub fn flip_enabled() -> bool {
-    FLIP_OVERRIDE.load(Ordering::Relaxed)
-}
-
-/// Toggle flip instructions at runtime (from vm/config-set :flip).
-pub fn set_flip(on: bool) {
-    FLIP_OVERRIDE.store(on, Ordering::Relaxed);
+    false
 }
 
 /// Default cache directory.
@@ -48,7 +38,6 @@ pub fn get() -> &'static Config {
 /// Initialize the global config. Must be called before `get` for
 /// CLI-parsed values to take effect. No-op if already initialized.
 pub fn init(config: Config) {
-    FLIP_OVERRIDE.store(config.flip_instructions, Ordering::Relaxed);
     let _ = CONFIG.set(config);
 }
 
@@ -199,7 +188,7 @@ impl MlirPolicy {
 /// silently (forward compat for :spirv, :mlir, :gpu).
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix",
+    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix", "rc", "regions",
     // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
@@ -278,7 +267,9 @@ pub mod trace_bits {
     /// can fire from any thread (including `sys/spawn`'d OS threads)
     /// which has no `&VM` reference.
     pub const CHAN: u32 = 1 << 18;
-    pub const ALL: u32 = (1 << 19) - 1;
+    pub const RC: u32 = 1 << 19;
+    pub const REGIONS: u32 = 1 << 20;
+    pub const ALL: u32 = (1 << 21) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -302,6 +293,8 @@ pub mod trace_bits {
             "bytecode" => BYTECODE,
             "posix" => POSIX,
             "chan" => CHAN,
+            "rc" => RC,
+            "regions" => REGIONS,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }
@@ -440,8 +433,8 @@ pub struct Config {
     /// WASM compilation policy.
     pub wasm: WasmPolicy,
 
-    /// Skip stdlib in full-module WASM mode.
-    pub wasm_no_stdlib: bool,
+    /// Skip stdlib loading entirely (primitives only).
+    pub no_stdlib: bool,
 
     /// Disk cache directory (WASM compilation, future uses).
     /// `None` = caching disabled (explicit `--cache=""`).
@@ -482,12 +475,6 @@ pub struct Config {
     /// BinOp/CmpOp/etc. Implies jit=off, mlir=off.
     pub checked_intrinsics: bool,
 
-    /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
-    /// lowered functions (Phase 4b). On by default — escape-analysis
-    /// gates injection so only safe loops get flip. Disable via
-    /// `--flip=off` to fall back to trampoline-only rotation.
-    pub flip_instructions: bool,
-
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
     /// are listed in `DUMP_KEYWORDS`. When non-empty, the compiler runs up
     /// to each requested stage, prints its artifact, and exits without
@@ -497,6 +484,14 @@ pub struct Config {
     /// Trace keywords from `--trace=kw1,kw2,...`.
     /// Stored here from CLI parsing, then merged into RuntimeConfig on VM init.
     pub trace_keywords: Vec<String>,
+
+    /// Initial page size for region allocation (CLI: --region-page-size).
+    /// Must be a power of two >= 4096. Default: 4096.
+    pub region_page_size: usize,
+
+    /// Maximum bytes to cache in the per-thread page pool
+    /// (CLI: --page-pool-max). Default: 4MB.
+    pub page_pool_max: usize,
 }
 
 impl Default for Config {
@@ -506,7 +501,7 @@ impl Default for Config {
             stats: false,
             mlir: MlirPolicy::Adaptive { threshold: 10 },
             wasm: WasmPolicy::Off,
-            wasm_no_stdlib: false,
+            no_stdlib: false,
             cache: default_cache_dir(),
             no_uring: false,
             home: std::env::var("ELLE_HOME").ok(),
@@ -517,9 +512,10 @@ impl Default for Config {
             wasm_chunk: false,
             wasm_sparse_spill: true,
             checked_intrinsics: false,
-            flip_instructions: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
+            region_page_size: 4096,
+            page_pool_max: 4 * 1024 * 1024,
         }
     }
 }
@@ -528,6 +524,15 @@ impl Config {
     /// Check if a trace keyword is set.
     pub fn has_trace(&self, keyword: &str) -> bool {
         self.trace_keywords.iter().any(|k| k == keyword)
+    }
+
+    /// Compute trace bits for this config (bitfield of enabled trace keywords).
+    pub fn trace_bits(&self) -> u32 {
+        let mut bits = 0u32;
+        for kw in &self.trace_keywords {
+            bits |= trace_bits::from_name(kw);
+        }
+        bits
     }
 
     /// Whether JIT compilation is enabled.
@@ -643,13 +648,13 @@ impl Config {
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--flip=") {
-                config.flip_instructions = match rest {
-                    "on" | "true" | "1" => true,
-                    "off" | "false" | "0" => false,
+                // Legacy: accepted for backwards compat but has no effect.
+                match rest {
+                    "on" | "true" | "1" | "off" | "false" | "0" => {}
                     _ => {
                         return Err(format!("--flip: expected on/off, got '{}'", rest));
                     }
-                };
+                }
                 i += 1;
                 continue;
             }
@@ -702,6 +707,28 @@ impl Config {
                 i += 1;
                 continue;
             }
+            if let Some(rest) = arg.strip_prefix("--region-page-size=") {
+                let n: usize = rest.parse().map_err(|_| {
+                    format!("--region-page-size: expected integer, got '{}'", rest)
+                })?;
+                if n < 4096 || !n.is_power_of_two() {
+                    return Err(format!(
+                        "--region-page-size: must be a power of two >= 4096, got {}",
+                        n
+                    ));
+                }
+                config.region_page_size = n;
+                i += 1;
+                continue;
+            }
+            if let Some(rest) = arg.strip_prefix("--page-pool-max=") {
+                let n: usize = rest.parse().map_err(|_| {
+                    format!("--page-pool-max: expected integer, got '{}'", rest)
+                })?;
+                config.page_pool_max = n;
+                i += 1;
+                continue;
+            }
             if let Some(rest) = arg.strip_prefix("--home=") {
                 config.home = Some(rest.to_string());
                 i += 1;
@@ -717,7 +744,7 @@ impl Config {
             match arg.as_str() {
                 "--json" => config.json = true,
                 "--stats" => config.stats = true,
-                "--wasm-no-stdlib" => config.wasm_no_stdlib = true,
+                "--wasm-no-stdlib" | "--no-stdlib" => config.no_stdlib = true,
                 "--no-uring" => config.no_uring = true,
                 // Old debug flags — kept as aliases for --trace=<kw>
                 "--debug" => config.trace_keywords.push("bytecode".into()),

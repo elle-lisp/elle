@@ -19,7 +19,6 @@ pub(crate) struct TailCallInfo {
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
-    pub rotation_safe: bool,
     pub squelch_mask: SignalBits,
 }
 
@@ -36,8 +35,12 @@ pub struct VM {
     /// Mutable runtime configuration: trace flags, JIT/WASM policy.
     /// Accessible from Elle via `(vm/config)`.
     pub runtime_config: crate::config::RuntimeConfig,
+    /// Pointer to the root heap (leaked Box, never freed).
+    /// The VM does not own this heap — it's shared across all VMs on the
+    /// same thread. Access via `self.heap()` or directly for split borrows.
+    pub(crate) heap_ptr: *mut crate::value::fiberheap::FiberHeap,
     /// The current fiber holding all per-execution state:
-    /// operand stack, call frames, exception handlers, coroutine state.
+    /// operand stack, call frames, exception handlers, fiber state.
     pub fiber: Fiber,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
@@ -118,45 +121,37 @@ pub struct VM {
 /// execution context for top-level bytecode. This closure is never
 /// called; it exists only to satisfy Fiber's constructor.
 fn root_closure() -> Rc<Closure> {
-    use crate::signals::Signal;
     use crate::value::types::Arity;
     use crate::value::ClosureTemplate;
     Rc::new(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
+        template: Rc::new(ClosureTemplate::new(
+            Rc::new(vec![]),
+            Arity::Exact(0),
+            Rc::new(vec![]),
+        )),
         env: crate::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     })
 }
 
 impl VM {
+    /// Access the root heap.
+    #[inline]
+    pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
+        unsafe { &mut *self.heap_ptr }
+    }
+
     pub fn new() -> Self {
-        // Install the root fiber heap before any allocation can happen.
-        crate::value::fiberheap::install_root_heap();
+        // Use the thread-local root heap. All VMs on the same thread share
+        // a single heap; isolation is per-region. Install it as the TLS heap
+        // before any allocation can happen.
+        let heap_ptr = crate::value::fiberheap::ensure_root_heap();
+        unsafe {
+            crate::value::fiberheap::install_fiber_heap(heap_ptr);
+        }
 
         // Initialize default trait tables for collection/sequence types.
+        // These allocate permanent objects on the VM heap we just installed.
         crate::primitives::traitregistry::init_default_traits();
 
         let mut fiber = Fiber::new(root_closure(), SIG_OK);
@@ -179,6 +174,7 @@ impl VM {
 
         VM {
             runtime_config: rc,
+            heap_ptr,
             fiber,
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
@@ -225,12 +221,8 @@ impl VM {
     /// Resets: fiber, call state, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
-        // The root heap is persistent (lives in ROOT_HEAP thread-local).
-        // Do not clear it — root fiber objects accumulate across resets,
-        // so Values returned by execute_bytecode remain valid.
-        // self.fiber.heap is an unused Box<FiberHeap>; it is dropped and
-        // recreated with the new Fiber, costing one allocation. This is
-        // acceptable; making fiber.heap Option<> would add branches everywhere.
+        // The VM heap is persistent — don't clear it. Values from previous
+        // execute_bytecode calls remain valid.
         self.fiber = Fiber::new(root_closure(), SIG_OK);
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;

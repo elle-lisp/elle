@@ -17,7 +17,6 @@ pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         }
     }
     vm.fiber.stack[abs_idx] = value;
-    // Push the value back so it can be used as the result of set!
     vm.fiber.stack.push(value);
 }
 
@@ -108,16 +107,23 @@ pub(crate) fn handle_store_upvalue(
     // Upvalues are always cells (LocalCell for mutable captures).
     let env_val = env[idx];
     if let Some(cell_ref) = env_val.as_capture_cell() {
-        let old_val = {
+        // Track cross-region refs relative to the cell's region.
+        let cell_r = crate::value::arena::region_of(env_val);
+        if cell_r != 0 {
+            let old = *cell_ref.borrow();
+            let old_r = crate::value::arena::region_of(old);
+            let new_r = crate::value::arena::region_of(val);
+            if old_r != 0 && old_r != cell_r {
+                vm.heap().decref_region(old_r);
+            }
+            if new_r != 0 && new_r != cell_r {
+                vm.heap().incref_region(new_r);
+            }
+        }
+        {
             let mut cell_mut = cell_ref.borrow_mut();
-            let old = *cell_mut;
             *cell_mut = val;
-            old
-        };
-        // Decref/incref after releasing the borrow_mut — transitive
-        // incref may walk into closures capturing this same cell.
-        crate::value::fiberheap::decref_and_free(old_val);
-        crate::value::fiberheap::incref(val);
+        }
         vm.fiber.stack.push(val);
     } else {
         panic!(

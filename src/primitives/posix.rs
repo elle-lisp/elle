@@ -323,6 +323,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-send 4242 :sigterm)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-raise",
@@ -334,6 +336,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-raise :sigusr1)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-watch",
@@ -345,6 +349,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-watch |:sigterm :sigint|)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-next",
@@ -359,6 +365,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-next r)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-close",
@@ -370,6 +378,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-close r)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-pending",
@@ -381,6 +391,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-pending)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-mask",
@@ -392,6 +404,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-mask)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
     PrimitiveDef {
         name: "os/sig-watching",
@@ -403,6 +417,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "posix",
         example: "(os/sig-watching)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     },
 ];
 

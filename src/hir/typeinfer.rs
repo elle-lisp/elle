@@ -556,15 +556,10 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], interner: &TypeInterner
             // put returns arg0 type (passthrough)
             arg_types.first().copied().unwrap_or(TypeInterner::TOP)
         }
-        "abs" | "floor" | "ceil" | "round" => TypeInterner::NUMBER,
         "length" => TypeInterner::INT,
         "type" => TypeInterner::KEYWORD,
         "has?" | "empty?" | "contains?" => TypeInterner::BOOL,
-        "string?" | "int?" | "integer?" | "float?" | "number?" | "nil?" | "boolean?"
-        | "keyword?" | "symbol?" | "pair?" | "list?" | "array?" | "struct?" | "bytes?"
-        | "even?" | "odd?" | "closure?" | "fiber?" | "box?" | "ptr?" | "pointer?" => {
-            TypeInterner::BOOL
-        }
+        "ptr?" | "pointer?" => TypeInterner::BOOL,
         "string/contains?"
         | "string-contains?"
         | "string/starts-with?"

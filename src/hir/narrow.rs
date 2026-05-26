@@ -70,9 +70,7 @@ fn should_narrow_error(
 ) -> bool {
     match name {
         // Type predicates: never error
-        "string?" | "int?" | "integer?" | "float?" | "number?" | "nil?" | "boolean?"
-        | "keyword?" | "symbol?" | "pair?" | "list?" | "array?" | "struct?" | "bytes?"
-        | "even?" | "odd?" | "closure?" | "fiber?" | "box?" | "ptr?" | "pointer?" => true,
+        "ptr?" | "pointer?" => true,
 
         // type: never errors
         "type" => true,
@@ -113,11 +111,6 @@ fn should_narrow_error(
         "push" => arg_tys
             .first()
             .is_some_and(|t| *t == TypeInterner::MUTABLE_ARRAY),
-
-        // abs, floor, ceil, round: arg0 must be Number
-        "abs" | "floor" | "ceil" | "round" => arg_tys
-            .first()
-            .is_some_and(|t| interner.subtype(*t, TypeInterner::NUMBER)),
 
         // has?: arg0 must be struct-like
         "has?" => arg_tys.first().is_some_and(|t| interner.is_struct(*t)),

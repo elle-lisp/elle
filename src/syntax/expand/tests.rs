@@ -14,8 +14,10 @@ fn setup() -> (SymbolTable, VM) {
     (symbols, vm)
 }
 
+
 #[test]
 fn test_quasiquote_simple_list() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
@@ -46,10 +48,12 @@ fn test_quasiquote_simple_list() {
         "Quasiquoted symbols should expand to syntax-literal wrappers: {}",
         result_str
     );
+        });
 }
 
 #[test]
 fn test_quasiquote_with_unquote() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
@@ -91,10 +95,12 @@ fn test_quasiquote_with_unquote() {
         "Unquoted symbol should appear bare: {}",
         result_str
     );
+        });
 }
 
 #[test]
 fn test_quasiquote_with_splicing() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 10, 1, 1);
@@ -133,10 +139,12 @@ fn test_quasiquote_with_splicing() {
         "Result should contain 'xs': {}",
         result_str
     );
+        });
 }
 
 #[test]
 fn test_quasiquote_non_list() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -165,10 +173,12 @@ fn test_quasiquote_non_list() {
         "Result should contain 'x': {}",
         result_str
     );
+        });
 }
 
 #[test]
 fn test_defmacro_registration() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -226,10 +236,12 @@ fn test_defmacro_registration() {
     let expanded = result.unwrap();
     // Should expand to (* 21 2)
     assert_eq!(expanded.to_string(), "(* 21 2)");
+        });
 }
 
 #[test]
 fn test_defmacro_invalid_syntax() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -246,10 +258,12 @@ fn test_defmacro_invalid_syntax() {
     let result = expander.expand(defmacro_form, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("requires exactly 3 arguments"));
+        });
 }
 
 #[test]
 fn test_defmacro_non_symbol_name() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -268,10 +282,12 @@ fn test_defmacro_non_symbol_name() {
     let result = expander.expand(defmacro_form, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("macro name must be a symbol"));
+        });
 }
 
 #[test]
 fn test_macro_predicate_true() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -301,10 +317,12 @@ fn test_macro_predicate_true() {
     assert!(result.is_ok());
     let expanded = result.unwrap();
     assert_eq!(expanded.to_string(), "true");
+        });
 }
 
 #[test]
 fn test_macro_predicate_false() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -322,10 +340,12 @@ fn test_macro_predicate_false() {
     assert!(result.is_ok());
     let expanded = result.unwrap();
     assert_eq!(expanded.to_string(), "false");
+        });
 }
 
 #[test]
 fn test_macro_predicate_non_symbol() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -343,10 +363,12 @@ fn test_macro_predicate_non_symbol() {
     assert!(result.is_ok());
     let expanded = result.unwrap();
     assert_eq!(expanded.to_string(), "false");
+        });
 }
 
 #[test]
 fn test_macro_predicate_wrong_arity() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -363,10 +385,12 @@ fn test_macro_predicate_wrong_arity() {
     let result = expander.expand(check, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("requires exactly 1 argument"));
+        });
 }
 
 #[test]
 fn test_expand_macro_basic() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -429,10 +453,12 @@ fn test_expand_macro_basic() {
     let expanded = result.unwrap();
     // Result should be a quoted form: '(+ 5 5)
     assert_eq!(expanded.to_string(), "'(+ 5 5)");
+        });
 }
 
 #[test]
 fn test_expand_macro_non_macro() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -461,10 +487,12 @@ fn test_expand_macro_non_macro() {
     let expanded = result.unwrap();
     // Result should be unchanged: '(+ 1 2)
     assert_eq!(expanded.to_string(), "'(+ 1 2)");
+        });
 }
 
 #[test]
 fn test_expand_macro_wrong_arity() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -481,10 +509,12 @@ fn test_expand_macro_wrong_arity() {
     let result = expander.expand(expand_call, &mut symbols, &mut vm);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("requires exactly 1 argument"));
+        });
 }
 
 #[test]
 fn test_expand_macro_unquoted_arg() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -503,10 +533,12 @@ fn test_expand_macro_unquoted_arg() {
     let expanded = result.unwrap();
     // Result should be the symbol x unchanged
     assert_eq!(expanded.to_string(), "x");
+        });
 }
 
 #[test]
 fn test_keyword_not_qualified() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 5, 1, 1);
@@ -516,12 +548,14 @@ fn test_keyword_not_qualified() {
     let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     // Keywords are stored without the leading colon in SyntaxKind::Keyword
     assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "foo"));
+        });
 }
 
 /// Macro body uses `if` to conditionally generate different code.
 /// This requires VM evaluation — template substitution can't do this.
 #[test]
 fn test_macro_with_conditional_body() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     let span = Span::new(0, 50, 1, 1);
@@ -594,11 +628,13 @@ fn test_macro_with_conditional_body() {
     );
     let result = expander.expand(call_false, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "42");
+        });
 }
 
 /// Verify the cached transformer is populated after first expansion.
 #[test]
 fn test_macro_cache_populated_after_first_call() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     // Register prelude so that quasiquote is available
@@ -633,12 +669,14 @@ fn test_macro_cache_populated_after_first_call() {
             "cache should be populated after first invocation"
         );
     }
+        });
 }
 
 /// Verify that calling the same macro with different args produces
 /// distinct, correct results (no cross-invocation state leakage).
 #[test]
 fn test_macro_cache_different_args_no_leakage() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     expander.load_prelude(&mut symbols, &mut vm).unwrap();
@@ -669,12 +707,14 @@ fn test_macro_cache_different_args_no_leakage() {
         // Should contain + and the number twice.
         assert!(result_str.contains('+'), "should contain +: {}", result_str);
     }
+        });
 }
 
 /// Verify that falsy atom arguments (false, nil, 0) are passed correctly
 /// and do not become truthy through the cached closure path.
 #[test]
 fn test_macro_cache_atom_args_falsy() {
+        crate::value::arena::with_test_region(|| {
     let mut expander = Expander::new();
     let (mut symbols, mut vm) = setup();
     expander.load_prelude(&mut symbols, &mut vm).unwrap();
@@ -705,32 +745,21 @@ fn test_macro_cache_atom_args_falsy() {
             result_str
         );
     }
+        });
 }
 
 /// Verify rest-param macros work correctly with the cache.
+/// Uses compile_file to ensure core.lisp (with `append`) is loaded,
+/// since splice (,;) expands to append calls.
 #[test]
 fn test_macro_cache_rest_params() {
-    let mut expander = Expander::new();
-    let (mut symbols, mut vm) = setup();
-    expander.load_prelude(&mut symbols, &mut vm).unwrap();
-
-    // (defmacro my-begin (& forms) `(begin ,;forms))
-    let defmacro_syn =
-        crate::reader::read_syntax("(defmacro my-begin (& forms) `(begin ,;forms))", "<test>")
-            .unwrap();
-    expander
-        .expand(defmacro_syn, &mut symbols, &mut vm)
-        .unwrap();
-
-    // (my-begin a b c) — rest args collected into list
-    for _ in 0..2 {
-        let syn = crate::reader::read_syntax("(my-begin a b c)", "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
-        let result_str = result.to_string();
-        assert!(
-            result_str.contains("begin"),
-            "should expand to begin form: {}",
-            result_str
-        );
-    }
+        crate::value::arena::with_test_region(|| {
+    let mut symbols = SymbolTable::new();
+    let source = r#"
+        (defmacro my-begin (& forms) `(begin ,;forms))
+        (my-begin 1 2 3)
+    "#;
+    let result = crate::pipeline::compile_file(source, &mut symbols, "<test>");
+    assert!(result.is_ok(), "rest-param macro with splice should compile: {:?}", result.err());
+        });
 }

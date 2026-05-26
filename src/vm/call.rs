@@ -9,6 +9,7 @@
 //! Environment building (closure env population, parameter binding) lives in `env.rs`.
 
 use crate::error::LocationMap;
+use crate::hir::region::RegionId;
 use crate::primitives::access::resolve_index;
 use crate::value::error_val;
 use crate::value::fiber::{CallFrame, MAX_CALL_DEPTH};
@@ -16,6 +17,7 @@ use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
     SIG_FUEL, SIG_HALT, SIG_OK,
 };
+use crate::with_alloc_region;
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
 // full cache line regardless of arg count, and the is-inline branch on
@@ -46,6 +48,7 @@ impl VM {
     ) -> Option<SignalBits> {
         let bc: &[u8] = bytecode;
         let arg_count = self.read_u16(bc, ip) as usize;
+        let region_id = self.read_u16(bc, ip);
         let func = self
             .fiber
             .stack
@@ -73,6 +76,7 @@ impl VM {
             instr_ip,
             location_map,
             checked,
+            region_id,
         )
     }
 
@@ -123,6 +127,8 @@ impl VM {
             return None;
         };
 
+        let bc: &[u8] = bytecode;
+        let region_id = self.read_u16(bc, ip);
         self.call_inner(
             func,
             args,
@@ -133,6 +139,7 @@ impl VM {
             instr_ip,
             location_map,
             checked,
+            region_id,
         )
     }
 
@@ -155,6 +162,7 @@ impl VM {
         instr_ip: usize,
         location_map: &Rc<LocationMap>,
         checked: bool,
+        region_id: RegionId,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             etrace!(
@@ -195,20 +203,13 @@ impl VM {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
-            let (bits, value) =
+            let (bits, value) = with_alloc_region!(region_id => {
                 if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
                     crate::plugin_api::call_plugin(def, args.as_slice())
                 } else {
                     (def.func)(args.as_slice())
-                };
-            // Parameter inheritance: when fiber/new produces a fresh fiber,
-            // snapshot the creating fiber's parameterize bindings into it
-            // so the child sees them regardless of who resumes it later.
-            if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
-                if let Some(handle) = value.as_fiber() {
-                    self.snapshot_param_frames_into(handle);
                 }
-            }
+            });
             return self.handle_primitive_signal(
                 bits,
                 value,
@@ -368,7 +369,7 @@ impl VM {
             }
 
             // Build the new environment
-            let new_env_rc = match self.build_closure_env(closure, &args) {
+            let new_env_rc = match self.build_closure_env(closure, &args, region_id) {
                 Some(env) => env,
                 None => {
                     self.fiber.call_depth -= 1;
@@ -546,6 +547,13 @@ impl VM {
         }
 
         // Cannot call this value
+        eprintln!(
+            "[DEBUG] Cannot call: tag={:#x} payload={:#x} type={} on_fiber_heap={}",
+            func.tag,
+            func.payload,
+            func.type_name(),
+            self.heap().value_in_region_store(func)
+        );
         self.fiber
             .set_error("type-error", format!("Cannot call {:?}", func));
         self.fiber.stack.push(Value::NIL);
@@ -566,6 +574,7 @@ impl VM {
         checked: bool,
     ) -> Option<SignalBits> {
         let arg_count = self.read_u16(bytecode, ip) as usize;
+        let region_id = self.read_u16(bytecode, ip);
         let func = self
             .fiber
             .stack
@@ -583,7 +592,7 @@ impl VM {
         }
         args.reverse();
 
-        self.tail_call_inner(func, args, checked)
+        self.tail_call_inner(func, args, checked, region_id)
     }
 
     /// Handle the TailCallArrayMut instruction.
@@ -596,8 +605,7 @@ impl VM {
         bytecode: &[u8],
         checked: bool,
     ) -> Option<SignalBits> {
-        // Suppress unused warnings — these params match the dispatch signature
-        let _ = (ip, bytecode);
+        let region_id = self.read_u16(bytecode, ip);
 
         let args_val = self
             .fiber
@@ -626,7 +634,7 @@ impl VM {
             return Some(SIG_ERROR);
         };
 
-        self.tail_call_inner(func, args, checked)
+        self.tail_call_inner(func, args, checked, region_id)
     }
 
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
@@ -641,6 +649,7 @@ impl VM {
         func: Value,
         args: Vec<Value>,
         checked: bool,
+        region_id: RegionId,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             let blocked = def
@@ -663,19 +672,13 @@ impl VM {
                 );
                 return Some(SIG_ERROR);
             }
-            let (bits, value) =
+            let (bits, value) = with_alloc_region!(region_id => {
                 if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
                     crate::plugin_api::call_plugin(def, &args)
                 } else {
                     (def.func)(&args)
-                };
-            // Parameter inheritance for fiber/new — see the non-tail call
-            // path above for the rationale.
-            if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
-                if let Some(handle) = value.as_fiber() {
-                    self.snapshot_param_frames_into(handle);
                 }
-            }
+            });
             return Some(self.handle_primitive_signal_tail(bits, value));
         }
 
@@ -702,9 +705,11 @@ impl VM {
             // Build proper environment using cached vector
             if !Self::populate_env(
                 &mut self.tail_call_env_cache,
+                unsafe { &mut *self.heap_ptr },
                 &mut self.fiber,
                 closure,
                 &args,
+                region_id,
             ) {
                 return Some(SIG_ERROR);
             }
@@ -716,7 +721,6 @@ impl VM {
                 constants: closure.template.constants.clone(),
                 env: new_env_rc,
                 location_map: closure.template.location_map.clone(),
-                rotation_safe: closure.template.rotation_safe,
                 squelch_mask: closure.squelch_mask,
             });
 
@@ -739,6 +743,13 @@ impl VM {
         }
 
         // Cannot call this value
+        eprintln!(
+            "[DEBUG tailcall] Cannot call: tag={:#x} payload={:#x} type={} on_fiber_heap={}",
+            func.tag,
+            func.payload,
+            func.type_name(),
+            self.heap().value_in_region_store(func)
+        );
         self.fiber
             .set_error("type-error", format!("Cannot call {:?}", func));
         Some(SIG_ERROR)
@@ -758,6 +769,7 @@ impl VM {
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
+        region_id: RegionId,
     ) -> Result<Value, String> {
         // Arity check — sets fiber.signal on mismatch.
         if !self.check_arity(&closure.template.arity, args.len()) {
@@ -766,7 +778,7 @@ impl VM {
         }
 
         // Build the closure environment (captures + param slots + local slots).
-        let new_env = match self.build_closure_env(closure, args) {
+        let new_env = match self.build_closure_env(closure, args, region_id) {
             Some(env) => env,
             None => {
                 let (_, err) = self.fiber.signal.take().unwrap();
@@ -1087,6 +1099,7 @@ mod tests {
     use crate::primitives::register_primitives;
     use crate::symbol::SymbolTable;
     use crate::value::Value;
+    use crate::with_transient_region;
 
     fn make_vm_with_primitives() -> (VM, SymbolTable) {
         let mut symbols = SymbolTable::new();
@@ -1111,27 +1124,63 @@ mod tests {
         let closure = closure_val.as_closure().expect("should be a closure");
 
         let arg = Value::int(42);
-        let result = vm.call_closure(closure, &[arg]).unwrap();
+        let result = with_transient_region!(vm.heap(), rid => {
+            vm.call_closure(closure, &[arg], rid)
+        })
+        .unwrap();
         assert_eq!(result, Value::int(42));
     }
 
     /// Verify that call_closure propagates errors from the closure body.
     #[test]
     fn test_call_closure_error_propagation() {
-        use crate::pipeline::eval_syntax;
-        use crate::syntax::Expander;
+        crate::value::arena::with_test_region(|| {
+            use crate::pipeline::eval_syntax;
+            use crate::syntax::Expander;
 
-        let (mut vm, mut symbols) = make_vm_with_primitives();
-        let mut expander = Expander::new();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+            let (mut vm, mut symbols) = make_vm_with_primitives();
+            let mut expander = Expander::new();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        // Compile (fn () (error "boom")) — always errors
-        let syntax = crate::reader::read_syntax(r#"(fn () (error "boom"))"#, "<test>").unwrap();
-        let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
-        let closure = closure_val.as_closure().expect("should be a closure");
+            // Compile (fn () (error "boom")) — always errors
+            let syntax = crate::reader::read_syntax(r#"(fn () (error "boom"))"#, "<test>").unwrap();
+            let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
+            let closure = closure_val.as_closure().expect("should be a closure");
 
-        let result = vm.call_closure(closure, &[]);
-        assert!(result.is_err(), "should propagate error from closure body");
+            let result = with_transient_region!(vm.heap(), rid => {
+                vm.call_closure(closure, &[], rid)
+            });
+            assert!(result.is_err(), "should propagate error from closure body");
+        });
+    }
+
+    /// Verify that `vm.heap` and the TLS heap are the same instance (pointer equality).
+    #[test]
+    fn test_vm_heap_is_tls_heap() {
+        let vm = VM::new();
+        let vm_heap_ptr: *const crate::value::fiberheap::FiberHeap = vm.heap_ptr as *const _;
+        let tls_ptr = crate::value::fiberheap::current_heap_ptr();
+        assert_eq!(
+            vm_heap_ptr as usize, tls_ptr as usize,
+            "vm.heap and TLS heap must be the same instance"
+        );
+    }
+
+    /// Verify that a value allocated by NativeFn (via TLS `alloc()`) is visible
+    /// on `vm.heap`'s region store.
+    #[test]
+    fn test_native_alloc_visible_on_vm_heap() {
+        let mut vm = VM::new();
+        // Allocate a string via the TLS path (simulating NativeFn)
+        let region_id = crate::lir::lower::fresh_region_id();
+        let val = crate::with_alloc_region!(region_id => {
+            Value::string("hello from native")
+        });
+        assert!(
+            vm.heap().value_in_region_store(val),
+            "NativeFn-allocated value must be visible on vm.heap"
+        );
+        vm.heap().free_region_physical(region_id);
     }
 
     /// Counterfactual: verify the identity test assertion fires if we break it.
@@ -1149,7 +1198,10 @@ mod tests {
         let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
         let closure = closure_val.as_closure().expect("should be a closure");
 
-        let result = vm.call_closure(closure, &[Value::int(42)]).unwrap();
+        let result = with_transient_region!(vm.heap(), rid => {
+            vm.call_closure(closure, &[Value::int(42)], rid)
+        })
+        .unwrap();
         // This should fail — intentionally wrong:
         assert_eq!(result, Value::int(99), "counterfactual: should fail here");
     }

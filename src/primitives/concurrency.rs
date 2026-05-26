@@ -1,5 +1,4 @@
 use crate::error::{LError, LResult};
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::registration::register_primitives;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -189,11 +188,9 @@ pub(crate) fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(n))
 }
 
-/// Declarative primitive definitions for concurrency operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "sys/spawn",
-        func: prim_spawn,
+// Declarative primitive definitions for concurrency operations
+primitive! {
+    "sys/spawn" => prim_spawn {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a new thread that executes a closure with captured immutable values",
@@ -201,10 +198,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "sys",
         example: "(sys/spawn (fn [] (+ 1 2)))",
         aliases: &["spawn", "os/spawn"],
-    },
-    PrimitiveDef {
-        name: "sys/join",
-        func: prim_join,
+        escapes_args: true,
+    }
+    "sys/join" => prim_join {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Wait for a thread to complete and return its result",
@@ -212,16 +208,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "sys",
         example: "(sys/join thread-handle)",
         aliases: &["join", "os/join"],
-    },
-    PrimitiveDef {
-        name: "sys/thread-id",
-        func: prim_current_thread_id,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "sys/thread-id" => prim_current_thread_id {
         doc: "Return the ID of the current thread",
-        params: &[],
         category: "sys",
         example: "(sys/thread-id)",
         aliases: &["current-thread-id", "os/thread-id"],
-    },
-];
+    }
+}

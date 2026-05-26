@@ -22,7 +22,7 @@
             "**Fibers** — independent execution contexts with their own stack, call frames, signal mask, and heap. Cooperative and explicitly resumed. When a fiber finishes, its heap is freed in O(1) — no GC pause, no reference counting.",
             "**Signals** — typed, cooperative flow-control interrupts. A signal is a keyword (`:error`, `:log`, `:abort`, or user-defined) that a fiber emits to its parent. The compiler infers which functions can emit signals.",
             "**Hygienic Macros** — full metaprogramming with `defmacro`, quasiquote/unquote, `gensym`, and scope sets",
-            "**Colorless Concurrency** — fibers, coroutines, and OS threads from the same primitives",
+            "**Colorless Concurrency** — fibers, generators, and OS threads from the same primitives",
             "**Mutable/Immutable Split** — `[array]` vs `@[array]`, `{struct}` vs `@{struct}`, `\"str\"` vs `@\"str\"`",
             "**Pattern Matching** — `match` with destructuring, struct tags, wildcards, and `& rest`",
             "**FFI** — call C functions directly with `ffi/native` and `ffi/defbind`",
@@ -65,7 +65,7 @@
           "items": [
             "[Getting Started](getting-started.html) — installation and first steps",
             "[Language Guide](language-guide.html) — data types, functions, and control flow",
-            "[Concurrency](concurrency.html) — fibers, coroutines, signals, and threads",
+            "[Concurrency](concurrency.html) — fibers, signals, and threads",
             "[Documentation](documentation.html) — language reference, design documents, and contributor guides",
             "[Examples](examples.html) — 20+ runnable programs covering every major feature",
             "[Standard Library](stdlib-reference.html) — all built-in functions, auto-generated from runtime metadata"

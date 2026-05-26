@@ -206,19 +206,21 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_call_strlen() {
-        extern "C" {
-            fn strlen(s: *const std::ffi::c_char) -> usize;
-        }
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::Size,
-            args: vec![TypeDesc::Str],
-            fixed_args: None,
-        };
-        let cif = prepare_cif(&sig);
-        let hello = Value::string("hello");
-        let result = unsafe { ffi_call(strlen as *const c_void, &[hello], &sig, &cif) };
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().as_int(), Some(5));
+        crate::value::arena::with_test_region(|| {
+            extern "C" {
+                fn strlen(s: *const std::ffi::c_char) -> usize;
+            }
+            let sig = Signature {
+                convention: CallingConvention::Default,
+                ret: TypeDesc::Size,
+                args: vec![TypeDesc::Str],
+                fixed_args: None,
+            };
+            let cif = prepare_cif(&sig);
+            let hello = Value::string("hello");
+            let result = unsafe { ffi_call(strlen as *const c_void, &[hello], &sig, &cif) };
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().as_int(), Some(5));
+        });
     }
 }

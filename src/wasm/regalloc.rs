@@ -272,6 +272,8 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::Freeze { dst, .. }
         | LirInstr::Thaw { dst, .. }
         | LirInstr::IntrPush { dst, .. }
+        | LirInstr::IntrStringPush { dst, .. }
+        | LirInstr::IntrBytesPush { dst, .. }
         | LirInstr::Identical { dst, .. } => f(*dst),
 
         LirInstr::StoreLocal { .. }
@@ -279,21 +281,12 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::StoreCaptureCell { .. }
         | LirInstr::TailCall { .. }
         | LirInstr::TailCallArrayMut { .. }
-        | LirInstr::RegionEnter
-        | LirInstr::RegionExit
-        | LirInstr::RegionExitCall
-        | LirInstr::RegionRotate
-        | LirInstr::RegionRotateDealloc
-        | LirInstr::RegionRotateRefcounted
-        | LirInstr::RegionExitRefcounted
+        | LirInstr::FreeRegion { .. }
+        | LirInstr::IncrefRegion { .. }
+        | LirInstr::DecrefRegion { .. }
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
         | LirInstr::CheckSignalBound { .. }
-        | LirInstr::OutboxEnter
-        | LirInstr::OutboxExit
-        | LirInstr::FlipEnter
-        | LirInstr::FlipSwap
-        | LirInstr::FlipExit => {}
     }
 }
 
@@ -397,6 +390,14 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             f(*array);
             f(*value);
         }
+        LirInstr::IntrStringPush { string, value, .. } => {
+            f(*string);
+            f(*value);
+        }
+        LirInstr::IntrBytesPush { bytes, value, .. } => {
+            f(*bytes);
+            f(*value);
+        }
         LirInstr::Get { obj, key, .. }
         | LirInstr::Del { obj, key, .. }
         | LirInstr::Has { obj, key, .. } => {
@@ -436,19 +437,10 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::RegionEnter
-        | LirInstr::RegionExit
-        | LirInstr::RegionExitCall
-        | LirInstr::RegionExitRefcounted
-        | LirInstr::RegionRotate
-        | LirInstr::RegionRotateDealloc
-        | LirInstr::RegionRotateRefcounted
+        LirInstr::FreeRegion { .. }
+        | LirInstr::IncrefRegion { .. }
+        | LirInstr::DecrefRegion { .. }
         | LirInstr::PopParamFrame
-        | LirInstr::OutboxEnter
-        | LirInstr::OutboxExit
-        | LirInstr::FlipEnter
-        | LirInstr::FlipSwap
-        | LirInstr::FlipExit => {}
     }
 }
 

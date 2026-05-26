@@ -1,7 +1,9 @@
 use super::core::VM;
-use crate::value::{error_val, pair, sorted_struct_get, TableKey, Value, SIG_ERROR};
+use crate::hir::region::RegionId;
+use crate::value::{error_val, sorted_struct_get, TableKey, Value, SIG_ERROR};
 
-pub(crate) fn handle_list(vm: &mut VM) {
+pub(crate) fn handle_list(vm: &mut VM, region_id: RegionId) {
+    use crate::value::heap::{HeapObject, HeapTag, Pair};
     let rest = vm
         .fiber
         .stack
@@ -12,7 +14,26 @@ pub(crate) fn handle_list(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on Pair");
-    vm.fiber.stack.push(pair(first, rest));
+    incref_cross_region(vm, first, region_id);
+    incref_cross_region(vm, rest, region_id);
+    let obj = HeapObject::Pair(Pair {
+        first,
+        rest,
+        traits: crate::primitives::traitregistry::default_traits_for(HeapTag::Pair),
+    });
+    let val = vm.heap().alloc_in_region(obj, region_id);
+    vm.fiber.stack.push(val);
+}
+
+/// Incref the region of `val` if it's a heap value in a different region
+/// than `target_region`. Balances the cascade decref in `do_free`.
+fn incref_cross_region(vm: &mut VM, val: Value, target_region: RegionId) {
+    if val.is_heap() {
+        let rid = crate::value::arena::region_of(val);
+        if rid != 0 && rid != target_region {
+            vm.heap().incref_region(rid);
+        }
+    }
 }
 
 pub(crate) fn handle_first(vm: &mut VM) {
@@ -99,7 +120,10 @@ pub(crate) fn handle_rest(vm: &mut VM) {
     }
 }
 
-pub(crate) fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize, region_id: RegionId) {
+    use crate::value::heap::{HeapObject, HeapTag};
+    use std::cell::RefCell;
+    use std::rc::Rc;
     let size = vm.read_u8(bytecode, ip) as usize;
     let mut vec = Vec::with_capacity(size);
     for _ in 0..size {
@@ -111,7 +135,15 @@ pub(crate) fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         );
     }
     vec.reverse();
-    vm.fiber.stack.push(Value::array_mut(vec));
+    for elem in &vec {
+        incref_cross_region(vm, *elem, region_id);
+    }
+    let obj = HeapObject::LArrayMut {
+        data: Rc::new(RefCell::new(vec)),
+        traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LArrayMut),
+    };
+    let val = vm.heap().alloc_in_region(obj, region_id);
+    vm.fiber.stack.push(val);
 }
 
 pub(crate) fn handle_array_ref(vm: &mut VM) {
@@ -574,7 +606,7 @@ pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usi
 }
 
 /// Extend an @array with all elements from an indexed source (array or @array).
-/// Stack: \[array, source\] → \[extended_array\]
+/// Stack: \[array, source\] → \[array\]
 /// Used by splice: builds the args array incrementally.
 pub(crate) fn handle_array_extend(vm: &mut VM) {
     let source = vm
@@ -623,18 +655,17 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
         return;
     };
 
-    // Get the target array and extend it
-    if let Some(arr) = array.as_array_mut() {
-        let mut vec = arr.borrow().to_vec();
-        vec.extend(source_elems);
-        vm.fiber.stack.push(Value::array_mut(vec));
+    if array.is_array_mut() {
+        vm.fiber
+            .stack
+            .push(crate::value::arena::tracked_extend(array, &source_elems));
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                    "splice: expected array as accumulator, got {}",
+                    "splice: expected @array as accumulator, got {}",
                     array.type_name()
                 ),
             ),
@@ -644,7 +675,7 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
 }
 
 /// Push a single value onto an array.
-/// Stack: \[array, value\] → \[extended_array\]
+/// Stack: \[array, value\] → \[array\]
 /// Used by splice: adds non-spliced args to the args array.
 pub(crate) fn handle_array_push(vm: &mut VM) {
     let value = vm
@@ -658,17 +689,17 @@ pub(crate) fn handle_array_push(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutPush");
 
-    if let Some(arr) = array.as_array_mut() {
-        let mut vec = arr.borrow().to_vec();
-        vec.push(value);
-        vm.fiber.stack.push(Value::array_mut(vec));
+    if array.is_array_mut() {
+        vm.fiber
+            .stack
+            .push(crate::value::arena::tracked_push(array, value));
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                    "splice: expected array as accumulator, got {}",
+                    "splice: expected @array as accumulator, got {}",
                     array.type_name()
                 ),
             ),

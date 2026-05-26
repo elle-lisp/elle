@@ -132,6 +132,8 @@ pub(super) enum DataOp {
     IntrThawOp = 31,
     IntrIdenticalOp = 32,
     IntrPushOp = 33,
+    IntrStringPushOp = 34,
+    IntrBytesPushOp = 35,
 }
 
 // Re-export as i32 constants for backward compat in instruction.rs
@@ -168,6 +170,8 @@ pub(super) const OP_INTR_FREEZE: i32 = DataOp::IntrFreezeOp as i32;
 pub(super) const OP_INTR_THAW: i32 = DataOp::IntrThawOp as i32;
 pub(super) const OP_INTR_IDENTICAL: i32 = DataOp::IntrIdenticalOp as i32;
 pub(super) const OP_INTR_PUSH: i32 = DataOp::IntrPushOp as i32;
+pub(super) const OP_INTR_STRING_PUSH: i32 = DataOp::IntrStringPushOp as i32;
+pub(super) const OP_INTR_BYTES_PUSH: i32 = DataOp::IntrBytesPushOp as i32;
 
 /// Info about a resume state, used to generate the resume prologue.
 pub(super) struct ResumeStateInfo {

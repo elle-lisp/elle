@@ -1,6 +1,9 @@
-(elle/epoch 10)
-## tests/elle/read-after-readline.lisp — port/read must return exact byte
-## count after port/read-line buffered excess data from the same fd.
+(elle/epoch 11)
+## tests/elle/read-after-readline.lisp — port/read on a binary port must
+## return exact byte count after port/read-line buffered excess data.
+##
+## Uses binary ports because this tests byte-level RESP protocol behavior
+## where \r\n counts as 2 bytes (not 1 grapheme cluster).
 ##
 ## Regression test for: async backend IoOp::Read returning a short read
 ## when the fd_state buffer has fewer bytes than requested (the buffer
@@ -20,7 +23,7 @@
 
 (spit "/tmp/elle-test-read-after-readline" "+OK\r\n$5\r\nhello\r\n")
 
-(let [p (port/open "/tmp/elle-test-read-after-readline" :read)]
+(let [p (port/open-bytes "/tmp/elle-test-read-after-readline" :read)]
   (defer
     (port/close p)
     (let [line1 (port/read-line p)]
@@ -32,9 +35,8 @@
     (println "  about to port/read 7...")
     (let [body (port/read p 7)]
       (assert (not (nil? body)) "read returned data")
-      (assert (= (string/size-of body) 7)
-              (string/join ["expected 7 bytes, got "
-                            (string (string/size-of body))] ""))
+      (assert (= (length body) 7)
+              (string/join ["expected 7 bytes, got " (string (length body))] ""))
       (assert (= (string body) "hello\r\n") "read body content"))))
 
 (println "  single read-after-readline: ok")
@@ -59,7 +61,7 @@
 
 (spit "/tmp/elle-test-read-after-readline-multi" (make-bulk-sequence 20))
 
-(let [p (port/open "/tmp/elle-test-read-after-readline-multi" :read)]
+(let [p (port/open-bytes "/tmp/elle-test-read-after-readline-multi" :read)]
   (defer
     (port/close p)
     (def @i 0)
@@ -67,7 +69,7 @@
       (let [header (port/read-line p)]
         (assert (not (nil? header))
                 (string/join ["round " (string i) ": header is nil"] ""))
-        (let [expected-len (parse-int (slice header 1))]
+        (let [expected-len (parse-int (slice (string header) 1))]
           (let [body (port/read p (+ expected-len 2))]
             (let [val (slice (string body) 0 expected-len)]
               (assert (= val (string i))

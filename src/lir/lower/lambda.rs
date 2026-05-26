@@ -123,11 +123,29 @@ impl<'a> Lowerer<'a> {
 
         // Create closure referencing it by ID
         let dst = self.fresh_reg();
-        self.emit(LirInstr::MakeClosure {
+        self.emit_alloc(LirInstr::MakeClosure {
             dst,
             closure_id,
             captures: capture_regs,
         });
+
+        // Emit IncrefRegion for cross-region closure captures.
+        // The closure env stores references to captured values. If a capture
+        // lives in a different region than the closure, cascade at free time
+        // will decref it — so we need a matching incref at creation time.
+        if let Some(hir_id) = self.current_hir_id {
+            if let Some(&closure_region) = self.region_info.alloc_region.get(&hir_id) {
+                for cap in captures {
+                    if let Some(&cap_region) = self.region_info.binding_region.get(&cap.binding) {
+                        if cap_region != closure_region {
+                            let cap_rid = self.region_table_id(cap_region);
+                            self.emit(LirInstr::IncrefRegion { region_id: cap_rid });
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(dst)
     }
 
@@ -161,10 +179,7 @@ impl<'a> Lowerer<'a> {
         let saved_num_local_params = self.num_local_params;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
         let saved_discard_slot = self.discard_slot;
-        let saved_pending_region_exits = self.pending_region_exits;
-        let saved_region_depth = self.region_depth;
-        let saved_region_refcounted_stack = std::mem::take(&mut self.region_refcounted_stack);
-        let saved_flip_depth = self.flip_depth;
+        let saved_region_to_table = std::mem::take(&mut self.region_to_table);
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
         // self-tail-calls. We save it here and restore it for the
@@ -174,6 +189,7 @@ impl<'a> Lowerer<'a> {
 
         self.next_reg = 0;
         self.next_label = 1;
+        self.discard_slot = None;
         // num_locals starts at 0; non-LBox params and let-bound vars
         // will increment it as they're allocated.
         // LBox params go into the env (not counted in num_locals for stack frame).
@@ -183,9 +199,6 @@ impl<'a> Lowerer<'a> {
         self.num_captures = captures.len() as u16;
         self.num_local_params = 0;
         self.discard_slot = None;
-        self.pending_region_exits = 0;
-        self.region_depth = 0;
-        self.flip_depth = 0;
         self.current_func.doc = doc;
         self.current_func.syntax = syntax;
         self.current_func.vararg_kind = vararg_kind.clone();
@@ -284,15 +297,6 @@ impl<'a> Lowerer<'a> {
         // Propagate inferred signal to LIR function
         self.current_func.signal = inferred_signal;
 
-        // Compute escape analysis flags for fiber shared-alloc decisions.
-        // current_function_binding/params are already set (restored before
-        // body lowering above), so body_escapes_heap_values can detect
-        // self-tail-calls with per-parameter analysis.
-        self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
-        self.current_func.has_outward_heap_set =
-            self.body_contains_dangerous_outward_set(body, &[]);
-        self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
-        // Clear function context — will be restored to parent's state below.
         self.current_function_binding = None;
         self.current_function_params = None;
 
@@ -308,10 +312,7 @@ impl<'a> Lowerer<'a> {
         self.num_local_params = saved_num_local_params;
         self.upvalue_bindings = saved_upvalue_bindings;
         self.discard_slot = saved_discard_slot;
-        self.pending_region_exits = saved_pending_region_exits;
-        self.region_depth = saved_region_depth;
-        self.region_refcounted_stack = saved_region_refcounted_stack;
-        self.flip_depth = saved_flip_depth;
+        self.region_to_table = saved_region_to_table;
 
         Ok(func)
     }

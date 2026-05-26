@@ -3,7 +3,6 @@
 //! Seq extends Collection — these operations apply only to types with a
 //! defined element order: list, (), array, @array, string, @string,
 //! bytes, @bytes.  Not sets or structs (unordered).
-use crate::value::fiberheap;
 use crate::value::{error_val, list, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -306,51 +305,6 @@ pub fn seq_nth(val: &Value, n: i64) -> Result<Value, Value> {
     Err(seq_type_error("nth", val))
 }
 
-/// All elements except the last (type-preserving).
-pub fn seq_butlast(val: &Value) -> Result<Value, Value> {
-    if val.is_empty_list() {
-        return Ok(Value::EMPTY_LIST);
-    }
-    if val.is_pair() {
-        let vec = val
-            .list_to_vec()
-            .map_err(|e| error_val("type-error", e.to_string()))?;
-        if vec.is_empty() {
-            return Ok(Value::EMPTY_LIST);
-        }
-        return Ok(list(vec[..vec.len() - 1].to_vec()));
-    }
-    if let Some(r) = with_array(val, |elems, m| {
-        if elems.is_empty() {
-            make_array(vec![], m)
-        } else {
-            make_array(elems[..elems.len() - 1].to_vec(), m)
-        }
-    }) {
-        return Ok(r);
-    }
-    if let Some(r) = with_text(val, |s, m| {
-        let graphemes: Vec<&str> = s.graphemes(true).collect();
-        if graphemes.is_empty() {
-            make_string(String::new(), m)
-        } else {
-            make_string(graphemes[..graphemes.len() - 1].concat(), m)
-        }
-    }) {
-        return Ok(r);
-    }
-    if let Some(r) = with_raw_bytes(val, |b, m| {
-        if b.is_empty() {
-            make_bytes(vec![], m)
-        } else {
-            make_bytes(b[..b.len() - 1].to_vec(), m)
-        }
-    }) {
-        return Ok(r);
-    }
-    Err(seq_type_error("butlast", val))
-}
-
 /// Reverse a sequence (type-preserving).
 pub fn seq_reverse(val: &Value) -> Result<Value, Value> {
     if val.is_empty_list() {
@@ -474,10 +428,8 @@ pub fn seq_sort(val: &Value) -> Result<Value, Value> {
 /// Push an element onto the end of a sequence (type-aware).
 pub fn seq_push(val: &Value, elem: Value) -> Result<Value, Value> {
     // @array — mutate in place
-    if let Some(vec_ref) = val.as_array_mut() {
-        fiberheap::incref(elem);
-        vec_ref.borrow_mut().push(elem);
-        return Ok(*val);
+    if val.is_array_mut() {
+        return Ok(crate::value::arena::tracked_push(*val, elem));
     }
     // @string — append string
     if let Some(buf_ref) = val.as_string_mut() {
@@ -542,16 +494,16 @@ pub fn seq_push(val: &Value, elem: Value) -> Result<Value, Value> {
 
 /// Pop the last element from a mutable sequence.
 pub fn seq_pop(val: &Value) -> Result<Value, Value> {
-    if let Some(vec_ref) = val.as_array_mut() {
-        let mut vec = vec_ref.borrow_mut();
-        match vec.pop() {
-            Some(v) => {
-                drop(vec);
-                fiberheap::decref(v);
-                return Ok(v);
-            }
-            None => return Err(error_val("argument-error", "pop: empty array")),
+    if val.is_array_mut() {
+        let vec_ref = val.as_array_mut().unwrap();
+        let mut buf = vec_ref.borrow_mut();
+        if buf.is_empty() {
+            return Err(error_val("argument-error", "pop: empty @array"));
         }
+        let popped = buf.pop().unwrap();
+        drop(buf);
+        crate::value::arena::track_remove(popped);
+        return Ok(popped);
     }
     if let Some(buf_ref) = val.as_string_mut() {
         let mut buf = buf_ref.borrow_mut();

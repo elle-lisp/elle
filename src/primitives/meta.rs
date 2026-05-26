@@ -1,7 +1,6 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum,
 //! syntax-pair?, syntax-list?, syntax-symbol?, syntax-keyword?, syntax-nil?,
 //! syntax->list, syntax-first, syntax-rest, syntax-e, squelch, meta/origin)
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::signals::SIG_GPU;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -541,11 +540,9 @@ pub(crate) fn prim_disgit(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Declarative primitive definitions for meta-programming operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "meta/gensym",
-        func: prim_gensym,
+// Declarative primitive definitions for meta-programming operations.
+primitive! {
+    "meta/gensym" => prim_gensym {
         signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Generate a unique symbol with optional prefix",
@@ -553,10 +550,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/gensym \"tmp\")",
         aliases: &["gensym"],
-    },
-    PrimitiveDef {
-        name: "meta/datum->syntax",
-        func: prim_datum_to_syntax,
+    }
+    "meta/datum->syntax" => prim_datum_to_syntax {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create a syntax object with lexical context from another syntax object",
@@ -564,10 +559,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/datum->syntax stx 'x)",
         aliases: &["datum->syntax"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax->datum",
-        func: prim_syntax_to_datum,
+    }
+    "meta/syntax->datum" => prim_syntax_to_datum {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Strip scope information from a syntax object, returning the plain value",
@@ -575,65 +568,48 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax->datum stx)",
         aliases: &["syntax->datum"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-pair?",
-        func: prim_syntax_pair,
-        signal: Signal::silent(),
+    }
+    "meta/syntax-pair?" => prim_syntax_pair {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a non-empty list",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-pair? stx)",
         aliases: &["syntax-pair?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-list?",
-        func: prim_syntax_list,
-        signal: Signal::silent(),
+    }
+    "meta/syntax-list?" => prim_syntax_list {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a list (including empty)",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-list? stx)",
         aliases: &["syntax-list?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-symbol?",
-        func: prim_syntax_symbol,
-        signal: Signal::silent(),
+    }
+    "meta/syntax-symbol?" => prim_syntax_symbol {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a symbol",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-symbol? stx)",
         aliases: &["syntax-symbol?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-keyword?",
-        func: prim_syntax_keyword,
-        signal: Signal::silent(),
+    }
+    "meta/syntax-keyword?" => prim_syntax_keyword {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a keyword",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-keyword? stx)",
         aliases: &["syntax-keyword?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-nil?",
-        func: prim_syntax_nil,
-        signal: Signal::silent(),
+    }
+    "meta/syntax-nil?" => prim_syntax_nil {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping nil",
         params: &["stx"],
         category: "meta",
         example: "(meta/syntax-nil? stx)",
         aliases: &["syntax-nil?"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax->list",
-        func: prim_syntax_to_list,
+    }
+    "meta/syntax->list" => prim_syntax_to_list {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a syntax list to an immutable array of syntax objects",
@@ -641,10 +617,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax->list stx)",
         aliases: &["syntax->list"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-first",
-        func: prim_syntax_first,
+    }
+    "meta/syntax-first" => prim_syntax_first {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the first element of a syntax list as a syntax object",
@@ -652,10 +626,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-first stx)",
         aliases: &["syntax-first"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-rest",
-        func: prim_syntax_rest,
+    }
+    "meta/syntax-rest" => prim_syntax_rest {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return a syntax list of all but the first element",
@@ -663,10 +635,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-rest stx)",
         aliases: &["syntax-rest"],
-    },
-    PrimitiveDef {
-        name: "meta/syntax-e",
-        func: prim_syntax_e,
+    }
+    "meta/syntax-e" => prim_syntax_e {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Shallow-unwrap a syntax object: returns atoms as plain values, compounds unchanged",
@@ -674,10 +644,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-e stx)",
         aliases: &["syntax-e"],
-    },
-    PrimitiveDef {
-        name: "squelch",
-        func: prim_squelch,
+    }
+    "squelch" => prim_squelch {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return a new closure that intercepts and converts the specified signals to :error at runtime. \
@@ -685,11 +653,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["closure", "signals"],
         category: "fn",
         example: "(squelch (fn () (yield 1)) |:yield|)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "attune",
-        func: prim_attune,
+    }
+    "attune" => prim_attune {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Return a new closure that permits ONLY the specified signals — all others are \
@@ -698,23 +663,16 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["signals", "closure"],
         category: "fn",
         example: "(attune |:yield :error| (fn () (yield 1)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "meta/origin",
-        func: prim_meta_origin,
-        signal: Signal::silent(),
+    }
+    "meta/origin" => prim_meta_origin {
         arity: Arity::Exact(1),
         doc: "Return the source location of a closure as {:file :line :col}, or nil if unavailable.",
         params: &["f"],
         category: "meta",
         example: r#"(defn foo () 42) (meta/origin foo)"#,
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "git",
-        func: prim_git,
-        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR).union(SIG_GPU), propagates: 0 },
+    }
+    "git" => prim_git {
+        signal: (Signal { bits: SIG_QUERY.union(SIG_ERROR).union(SIG_GPU), propagates: 0 }),
         arity: Arity::Range(1, 2),
         doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache on its template. \
               Returns the closure. All closures sharing the same template see the cached SPIR-V. \
@@ -722,22 +680,15 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["f", "workgroup-size"],
         category: "fn",
         example: "(git (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fn/git?",
-        func: prim_fn_git,
-        signal: Signal::silent(),
+    }
+    "fn/git?" => prim_fn_git {
         arity: Arity::Exact(1),
         doc: "Returns true if the closure has cached SPIR-V bytes (has been GIT'd).",
         params: &["f"],
         category: "fn",
         example: "(fn/git? (fn [a b] (+ a b)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "disgit",
-        func: prim_disgit,
+    }
+    "disgit" => prim_disgit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the cached SPIR-V bytes from a GIT'd closure. \
@@ -746,115 +697,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(disgit (git (fn [a b] (+ a b))))",
         aliases: &["fn/disgit"],
-    },
-];
+    }
+}
 
 // Behavioral tests for the primitives in this module are in
 // tests/elle/syntax-predicates.lisp and tests/elle/macros.lisp.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::LocationMap;
-    use crate::hir::VarargKind;
-    use crate::signals::Signal;
-    use crate::syntax::{Span, Syntax, SyntaxKind};
-    use crate::value::closure::{Closure, ClosureTemplate};
-    use crate::value::sorted_struct_get;
-    use crate::value::types::Arity;
-    use std::collections::HashMap;
-    use std::rc::Rc;
-
-    fn make_closure_with_syntax(syntax: Option<Rc<Syntax>>) -> Value {
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax,
-            vararg_kind: VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        Value::closure(Closure {
-            template,
-            env: crate::value::inline_slice::InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        })
-    }
-
-    #[test]
-    fn meta_origin_closure_returns_struct() {
-        let span = Span::new(0, 10, 3, 5).with_file("/tmp/foo.lisp");
-        let syntax = Rc::new(Syntax::new(SyntaxKind::Nil, span));
-        let closure = make_closure_with_syntax(Some(syntax));
-
-        let (sig, result) = prim_meta_origin(&[closure]);
-        assert_eq!(sig, SIG_OK);
-
-        let fields = result.as_struct().expect("expected struct");
-        let file_val = sorted_struct_get(fields, &TableKey::Keyword("file".to_string()))
-            .expect(":file key missing");
-        let line_val = sorted_struct_get(fields, &TableKey::Keyword("line".to_string()))
-            .expect(":line key missing");
-        let col_val = sorted_struct_get(fields, &TableKey::Keyword("col".to_string()))
-            .expect(":col key missing");
-
-        assert!(
-            file_val
-                .with_string(|s| s.contains("foo.lisp"))
-                .unwrap_or(false),
-            "expected :file to contain 'foo.lisp'"
-        );
-        assert_eq!(line_val.as_int(), Some(3));
-        assert_eq!(col_val.as_int(), Some(5));
-    }
-
-    #[test]
-    fn meta_origin_non_closure_returns_nil() {
-        let (sig, result) = prim_meta_origin(&[Value::int(42)]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-
-    #[test]
-    fn meta_origin_nil_returns_nil() {
-        let (sig, result) = prim_meta_origin(&[Value::NIL]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-
-    #[test]
-    fn meta_origin_closure_without_syntax_returns_nil() {
-        let closure = make_closure_with_syntax(None);
-        let (sig, result) = prim_meta_origin(&[closure]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-
-    #[test]
-    fn meta_origin_closure_with_synthetic_span_returns_nil() {
-        // Span with no file should return nil.
-        let span = Span::new(0, 5, 1, 0); // no file set
-        let syntax = Rc::new(Syntax::new(SyntaxKind::Nil, span));
-        let closure = make_closure_with_syntax(Some(syntax));
-
-        let (sig, result) = prim_meta_origin(&[closure]);
-        assert_eq!(sig, SIG_OK);
-        assert!(result.is_nil());
-    }
-}
+// Tests migrated to tests/elle/prim-meta.lisp

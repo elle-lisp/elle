@@ -279,13 +279,9 @@ impl VM {
             closure.env.as_ptr()
         };
 
-        // Save/restore rotation base so nested self-tail-call loops
-        // don't corrupt the caller's rotation state.
-        let saved_rotation_base =
-            crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
-                .flatten();
+        
 
-        let result = unsafe {
+        unsafe {
             jit_code.call(
                 env_ptr,
                 args.as_ptr(),
@@ -294,12 +290,6 @@ impl VM {
                 func_value.tag,
                 func_value.payload,
             )
-        };
-
-        crate::value::fiberheap::with_current_heap_mut(|h| {
-            h.restore_jit_rotation_base(saved_rotation_base.clone());
-        });
-
-        result
+        }
     }
 }

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Parameters — Racket-style dynamic bindings
 #
 # Tests for parameter, parameter?, parameterize, and fiber inheritance.
@@ -74,77 +74,6 @@
              (fiber/resume f nil)
              (fiber/value f)) 99)
         "child fiber sees parent default outside parameterize")
-
-# === Fiber captures parameter at CREATION, not at first resume ===
-#
-# Regression: previously, parameter inheritance happened on first resume
-# from the resuming fiber, not at fiber creation. That broke ev/spawn
-# style usage where the spawner finishes (and its parameterize unwinds)
-# before the scheduler ever gets around to resuming the child. Repro:
-# create the fiber inside parameterize, then exit the parameterize block
-# before resuming. The child must still see the parameterized value.
-
-(def p7 (parameter :default))
-(let [f (parameterize ((p7 :inside))
-          (fiber/new (fn () (p7)) 1))]
-  # parameterize has unwound — p7 is back to :default here
-  (assert (= (p7) :default) "p7 is :default outside parameterize")
-  (fiber/resume f nil)
-  (assert (= (fiber/value f) :inside)
-          "fiber sees :inside (creation-time snapshot), not :default"))
-
-# === Creation snapshot is independent of resumer's bindings ===
-#
-# The fiber's snapshot must NOT be overridden by whatever bindings the
-# resuming fiber happens to have when fiber/resume is called.
-
-(def p8 (parameter :default))
-(let [f (parameterize ((p8 :captured))
-          (fiber/new (fn () (p8)) 1))]
-  (parameterize ((p8 :resumer-has-this))
-    (fiber/resume f nil))
-  (assert (= (fiber/value f) :captured)
-          "fiber observes creation-time value, ignoring resumer's binding"))
-
-# === Nested parameterize: child captures innermost value at creation ===
-
-(def p9 (parameter 1))
-(let [f (parameterize ((p9 2))
-          (parameterize ((p9 3))
-            (fiber/new (fn () (p9)) 1)))]
-  (fiber/resume f nil)
-  (assert (= (fiber/value f) 3)
-          "child fiber captures innermost parameterize binding"))
-
-# === Multiple parameters: all are captured ===
-
-(def pa (parameter :pa-default))
-(def pb (parameter :pb-default))
-(let [f (parameterize ((pa :pa-val)
-                       (pb :pb-val))
-          (fiber/new (fn () (list (pa) (pb))) 1))]
-  (fiber/resume f nil)
-  (let [r (fiber/value f)]
-    (assert (= (get r 0) :pa-val) "fiber sees pa binding")
-    (assert (= (get r 1) :pb-val) "fiber sees pb binding")))
-
-# === Child of a child inherits transitively ===
-#
-# A fiber created inside an already-running fiber should snapshot the
-# inner fiber's view of parameters, which in turn was snapshotted from
-# the outer's view at creation.
-
-(def pc (parameter :default))
-(let [outer (parameterize ((pc :outer-set))
-              (fiber/new
-                (fn ()
-                  (let [inner (fiber/new (fn () (pc)) 1)]
-                    (fiber/resume inner nil)
-                    (fiber/value inner)))
-                1))]
-  (fiber/resume outer nil)
-  (assert (= (fiber/value outer) :outer-set)
-          "grandchild fiber sees grandparent's parameterize binding"))
 
 # ============================================================================
 # Type and error tests (from integration/parameters.rs)

@@ -6,7 +6,6 @@
 //! Each validates types and returns `(SIG_ERROR, error_val(...))` on mismatch.
 
 use crate::arithmetic;
-use crate::primitives::def::PrimitiveDef;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -462,7 +461,7 @@ fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         new.push(value);
         (SIG_OK, Value::array(new))
     } else {
-        type_err("%push", "array", collection)
+        type_err("%array-push", "array", collection)
     }
 }
 
@@ -473,6 +472,49 @@ fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
             None => (SIG_ERROR, error_val("type-error", "%pop: empty @array")),
         },
         None => type_err("%pop", "@array", &args[0]),
+    }
+}
+
+fn prim_string_push(args: &[Value]) -> (SignalBits, Value) {
+    let collection = &args[0];
+    let value = args[1];
+    let s = match value.with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => return type_err("%string-push value", "string", &value),
+    };
+    if let Some(buf_ref) = collection.as_string_mut() {
+        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
+        (SIG_OK, *collection)
+    } else if collection.is_string() {
+        let new = collection
+            .with_string(|base| {
+                let mut r = base.to_string();
+                r.push_str(&s);
+                Value::string(r)
+            })
+            .unwrap();
+        (SIG_OK, new)
+    } else {
+        type_err("%string-push", "string", collection)
+    }
+}
+
+fn prim_bytes_push(args: &[Value]) -> (SignalBits, Value) {
+    let collection = &args[0];
+    let value = args[1];
+    let byte = match value.as_int() {
+        Some(i) => i as u8,
+        None => return type_err("%bytes-push value", "integer", &value),
+    };
+    if let Some(buf_ref) = collection.as_bytes_mut() {
+        buf_ref.borrow_mut().push(byte);
+        (SIG_OK, *collection)
+    } else if let Some(data) = collection.as_bytes() {
+        let mut new = data.to_vec();
+        new.push(byte);
+        (SIG_OK, Value::bytes(new))
+    } else {
+        type_err("%bytes-push", "bytes", collection)
     }
 }
 
@@ -537,474 +579,323 @@ fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
 
 // ── Registration table ──────────────────────────────────────────────
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    // Arithmetic
-    PrimitiveDef {
-        name: "%add",
-        func: prim_add,
+primitive! {
+    "%add" => prim_add {
         arity: Arity::Exact(2),
         doc: "Add two numbers",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%sub",
-        func: prim_sub,
+    }
+    "%sub" => prim_sub {
         arity: Arity::Range(1, 2),
         doc: "Subtract or negate",
         params: &["a", "b?"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%mul",
-        func: prim_mul,
+    }
+    "%mul" => prim_mul {
         arity: Arity::Exact(2),
         doc: "Multiply two numbers",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%div",
-        func: prim_div,
+    }
+    "%div" => prim_div {
         arity: Arity::Exact(2),
         doc: "Divide two numbers",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%rem",
-        func: prim_rem,
+    }
+    "%rem" => prim_rem {
         arity: Arity::Exact(2),
         doc: "Remainder (sign follows dividend)",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%mod",
-        func: prim_mod,
+    }
+    "%mod" => prim_mod {
         arity: Arity::Exact(2),
         doc: "Floored modulus (sign follows divisor)",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Comparison
-    PrimitiveDef {
-        name: "%eq",
-        func: prim_eq,
+    }
+    "%eq" => prim_eq {
         arity: Arity::Exact(2),
         doc: "Equality",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%ne",
-        func: prim_ne,
+    }
+    "%ne" => prim_ne {
         arity: Arity::Exact(2),
         doc: "Not equal",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%lt",
-        func: prim_lt,
+    }
+    "%lt" => prim_lt {
         arity: Arity::Exact(2),
         doc: "Less than",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%gt",
-        func: prim_gt,
+    }
+    "%gt" => prim_gt {
         arity: Arity::Exact(2),
         doc: "Greater than",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%le",
-        func: prim_le,
+    }
+    "%le" => prim_le {
         arity: Arity::Exact(2),
         doc: "Less than or equal",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%ge",
-        func: prim_ge,
+    }
+    "%ge" => prim_ge {
         arity: Arity::Exact(2),
         doc: "Greater than or equal",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Logical
-    PrimitiveDef {
-        name: "%not",
-        func: prim_not,
+    }
+    "%not" => prim_not {
         arity: Arity::Exact(1),
         doc: "Logical not",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Conversion
-    PrimitiveDef {
-        name: "%int",
-        func: prim_int,
+    }
+    "%int" => prim_int {
         arity: Arity::Exact(1),
         doc: "Convert to integer",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%float",
-        func: prim_float,
+    }
+    "%float" => prim_float {
         arity: Arity::Exact(1),
         doc: "Convert to float",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Data
-    PrimitiveDef {
-        name: "%pair",
-        func: prim_pair,
+    }
+    "%pair" => prim_pair {
         arity: Arity::Exact(2),
         doc: "Construct a pair",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%first",
-        func: prim_first,
+    }
+    "%first" => prim_first {
         arity: Arity::Exact(1),
         doc: "First of pair",
         params: &["p"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%rest",
-        func: prim_rest,
+    }
+    "%rest" => prim_rest {
         arity: Arity::Exact(1),
         doc: "Rest of pair",
         params: &["p"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Bitwise
-    PrimitiveDef {
-        name: "%bit-and",
-        func: prim_bit_and,
+    }
+    "%bit-and" => prim_bit_and {
         arity: Arity::Exact(2),
         doc: "Bitwise AND",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bit-or",
-        func: prim_bit_or,
+    }
+    "%bit-or" => prim_bit_or {
         arity: Arity::Exact(2),
         doc: "Bitwise OR",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bit-xor",
-        func: prim_bit_xor,
+    }
+    "%bit-xor" => prim_bit_xor {
         arity: Arity::Exact(2),
         doc: "Bitwise XOR",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bit-not",
-        func: prim_bit_not,
+    }
+    "%bit-not" => prim_bit_not {
         arity: Arity::Exact(1),
         doc: "Bitwise complement",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%shl",
-        func: prim_shl,
+    }
+    "%shl" => prim_shl {
         arity: Arity::Exact(2),
         doc: "Shift left",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%shr",
-        func: prim_shr,
+    }
+    "%shr" => prim_shr {
         arity: Arity::Exact(2),
         doc: "Shift right",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Type predicates
-    PrimitiveDef {
-        name: "%nil?",
-        func: prim_nil_q,
+    }
+    "%nil?" => prim_nil_q {
         arity: Arity::Exact(1),
         doc: "Is nil?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%empty?",
-        func: prim_empty_q,
+    }
+    "%empty?" => prim_empty_q {
         arity: Arity::Exact(1),
         doc: "Is empty list?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bool?",
-        func: prim_bool_q,
+    }
+    "%bool?" => prim_bool_q {
         arity: Arity::Exact(1),
         doc: "Is boolean?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%int?",
-        func: prim_int_q,
+    }
+    "%int?" => prim_int_q {
         arity: Arity::Exact(1),
         doc: "Is integer?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%float?",
-        func: prim_float_q,
+    }
+    "%float?" => prim_float_q {
         arity: Arity::Exact(1),
         doc: "Is float?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%string?",
-        func: prim_string_q,
+    }
+    "%string?" => prim_string_q {
         arity: Arity::Exact(1),
         doc: "Is string?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%keyword?",
-        func: prim_keyword_q,
+    }
+    "%keyword?" => prim_keyword_q {
         arity: Arity::Exact(1),
         doc: "Is keyword?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%symbol?",
-        func: prim_symbol_q,
+    }
+    "%symbol?" => prim_symbol_q {
         arity: Arity::Exact(1),
         doc: "Is symbol?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%pair?",
-        func: prim_pair_q,
+    }
+    "%pair?" => prim_pair_q {
         arity: Arity::Exact(1),
         doc: "Is pair?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%array?",
-        func: prim_array_q,
+    }
+    "%array?" => prim_array_q {
         arity: Arity::Exact(1),
         doc: "Is array?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%struct?",
-        func: prim_struct_q,
+    }
+    "%struct?" => prim_struct_q {
         arity: Arity::Exact(1),
         doc: "Is struct?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%set?",
-        func: prim_set_q,
+    }
+    "%set?" => prim_set_q {
         arity: Arity::Exact(1),
         doc: "Is set?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bytes?",
-        func: prim_bytes_q,
+    }
+    "%bytes?" => prim_bytes_q {
         arity: Arity::Exact(1),
         doc: "Is bytes?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%box?",
-        func: prim_box_q,
+    }
+    "%box?" => prim_box_q {
         arity: Arity::Exact(1),
         doc: "Is box?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%closure?",
-        func: prim_closure_q,
+    }
+    "%closure?" => prim_closure_q {
         arity: Arity::Exact(1),
         doc: "Is closure?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%fiber?",
-        func: prim_fiber_q,
+    }
+    "%fiber?" => prim_fiber_q {
         arity: Arity::Exact(1),
         doc: "Is fiber?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%type-of",
-        func: prim_type_of,
+    }
+    "%type-of" => prim_type_of {
         arity: Arity::Exact(1),
         doc: "Type as keyword",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Data access
-    PrimitiveDef {
-        name: "%length",
-        func: prim_length,
+    }
+    "%length" => prim_length {
         arity: Arity::Exact(1),
         doc: "Polymorphic length",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%get",
-        func: prim_get,
+    }
+    "%get" => prim_get {
         arity: Arity::Range(2, 3),
         doc: "Indexed/keyed access",
         params: &["coll", "key"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%put",
-        func: prim_put,
+    }
+    "%put" => prim_put {
         arity: Arity::Range(2, 3),
         doc: "Assoc/set element",
         params: &["coll", "key", "val"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%del",
-        func: prim_del,
+    }
+    "%del" => prim_del {
         arity: Arity::Exact(2),
         doc: "Dissoc/delete key",
         params: &["coll", "key"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%has?",
-        func: prim_has,
+    }
+    "%has?" => prim_has {
         arity: Arity::Exact(2),
         doc: "Key/element exists?",
         params: &["coll", "key"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%push",
-        func: prim_push,
+    }
+    "%array-push" => prim_push {
         arity: Arity::Exact(2),
         doc: "Append element",
         params: &["arr", "val"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%pop",
-        func: prim_pop,
+    }
+    "%pop" => prim_pop {
         arity: Arity::Exact(1),
         doc: "Remove/return last element",
         params: &["arr"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Mutability
-    PrimitiveDef {
-        name: "%freeze",
-        func: prim_freeze,
+    }
+    "%string-push" => prim_string_push {
+        arity: Arity::Exact(2),
+        doc: "Append string to string/@string",
+        params: &["s", "val"],
+        category: "intrinsic",
+    }
+    "%bytes-push" => prim_bytes_push {
+        arity: Arity::Exact(2),
+        doc: "Append byte to bytes/@bytes",
+        params: &["b", "val"],
+        category: "intrinsic",
+    }
+    "%freeze" => prim_freeze {
         arity: Arity::Exact(1),
         doc: "Mutable to immutable",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%thaw",
-        func: prim_thaw,
+    }
+    "%thaw" => prim_thaw {
         arity: Arity::Exact(1),
         doc: "Immutable to mutable",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Identity
-    PrimitiveDef {
-        name: "%identical?",
-        func: prim_identical,
+    }
+    "%identical?" => prim_identical {
         arity: Arity::Exact(2),
         doc: "Pointer identity",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-];
+    }
+}

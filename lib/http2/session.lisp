@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/http2/session.lisp — shared HTTP/2 session management
 ##
 ## Loaded via:

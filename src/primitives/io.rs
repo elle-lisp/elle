@@ -4,7 +4,6 @@ use crate::io::aio::AsyncBackend;
 use crate::io::mock::MockBackend;
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
@@ -60,7 +59,11 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (io/submit backend request) → submission-id
+/// (io/submit backend request [fiber]) → submission-id
+///
+/// Optional third arg: the fiber that issued the I/O request. When present,
+/// spawn results are allocated on the fiber's heap (eliminating cross-heap
+/// references). Without a fiber arg, the current heap is used.
 fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
     let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
@@ -89,7 +92,13 @@ fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    match backend.0.submit(request) {
+    let origin_heap = if args.len() > 2 && args[2].as_fiber().is_some() {
+        // All fibers share the VM's single heap; use the current TLS pointer.
+        crate::value::fiberheap::current_heap_ptr()
+    } else {
+        std::ptr::null_mut()
+    };
+    match backend.0.submit(request, origin_heap) {
         Ok(id) => (SIG_OK, Value::int(id as i64)),
         Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
     }
@@ -310,110 +319,81 @@ fn prim_ev_poll_fd(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "io-request?",
-        func: prim_is_io_request,
-        signal: Signal::silent(),
+primitive! {
+    "io-request?" => prim_is_io_request {
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O request.",
         params: &["value"],
         category: "predicate",
         example: "(io-request? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io-backend?",
-        func: prim_is_io_backend,
-        signal: Signal::silent(),
+    }
+    "io-backend?" => prim_is_io_backend {
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O backend.",
         params: &["value"],
         category: "predicate",
         example: "(io-backend? 42) #=> false",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/backend",
-        func: prim_io_backend,
+    }
+    "io/backend" => prim_io_backend {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create an I/O backend. :async for asynchronous, :mock for testing.",
         params: &["kind"],
         category: "io",
         example: "(io/backend :async)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/submit",
-        func: prim_io_submit,
+    }
+    "io/submit" => prim_io_submit {
         signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Submit an I/O request to an async backend. Returns submission ID.",
+        arity: Arity::Range(2, 3),
+        doc: "Submit an I/O request to an async backend. Optional third arg is the origin fiber for heap-correct spawn allocation. Returns submission ID.",
         params: &["backend", "request"],
         category: "io",
         example: "(io/submit backend request)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/reap",
-        func: prim_io_reap,
+    }
+    "io/reap" => prim_io_reap {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking poll for async I/O completions. Returns array of completion structs.",
         params: &["backend"],
         category: "io",
         example: "(io/reap backend)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/wait",
-        func: prim_io_wait,
+    }
+    "io/wait" => prim_io_wait {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Wait for async I/O completions. timeout-ms: negative=forever, 0=poll, positive=ms. Returns array of completion structs.",
         params: &["backend", "timeout-ms"],
         category: "io",
         example: "(io/wait backend 1000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/cancel",
-        func: prim_io_cancel,
+    }
+    "io/cancel" => prim_io_cancel {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",
         params: &["backend", "id"],
         category: "io",
         example: "(io/cancel backend id)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ev/sleep",
-        func: prim_ev_sleep,
-        signal: Signal {
+    }
+    "ev/sleep" => prim_ev_sleep {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
         params: &["seconds"],
         category: "scheduler",
         example: "(ev/sleep 0.5)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ev/poll-fd",
-        func: prim_ev_poll_fd,
-        signal: Signal {
+    }
+    "ev/poll-fd" => prim_ev_poll_fd {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(2, 3),
         doc: "Poll a raw fd for readiness — yields to the scheduler. mode: :read, :write, :read-write. Optional timeout in seconds.",
         params: &["fd", "mode", "timeout?"],
         category: "scheduler",
         example: "(ev/poll-fd 5 :read 1.0)",
-        aliases: &[],
-    },
-];
+    }
+}

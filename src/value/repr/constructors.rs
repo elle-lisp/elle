@@ -85,6 +85,7 @@ impl Value {
     // =========================================================================
 
     /// Create a string value (heap-allocated, bytes stored inline in arena).
+    /// Requires an active allocation region (TLS).
     #[inline]
     pub fn string(s: impl AsRef<str>) -> Self {
         use crate::value::arena::alloc_inline_slice;
@@ -97,11 +98,35 @@ impl Value {
         })
     }
 
+    /// Create a string in the immortal region (compile-time constants).
+    #[inline]
+    pub fn string_permanent(s: impl AsRef<str>) -> Self {
+        use crate::value::arena::{alloc_inline_slice_permanent, alloc_permanent};
+        use crate::value::heap::{HeapObject, HeapTag};
+        let bytes = s.as_ref().as_bytes();
+        let slice = alloc_inline_slice_permanent::<u8>(bytes);
+        alloc_permanent(HeapObject::LString {
+            s: slice,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LString),
+        })
+    }
+
     /// Create a cons cell.
     #[inline]
     pub fn pair(head: Value, tail: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject, HeapTag, Pair};
         alloc(HeapObject::Pair(Pair {
+            first: head,
+            rest: tail,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::Pair),
+        }))
+    }
+
+    /// Create a cons cell in the immortal region (compile-time constants).
+    #[inline]
+    pub fn pair_permanent(head: Value, tail: Value) -> Self {
+        use crate::value::heap::{alloc_permanent, HeapObject, HeapTag, Pair};
+        alloc_permanent(HeapObject::Pair(Pair {
             first: head,
             rest: tail,
             traits: crate::primitives::traitregistry::default_traits_for(HeapTag::Pair),
@@ -176,10 +201,21 @@ impl Value {
     /// Create a closure. The closure is stored by value inline in the arena;
     /// `Closure`'s non-Copy fields are `Rc`-shared (`ClosureTemplate`), so
     /// cloning on access is O(1).
+    /// Requires an active allocation region (TLS).
     #[inline]
     pub fn closure(c: crate::value::heap::Closure) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         alloc(HeapObject::Closure {
+            closure: c,
+            traits: Value::NIL,
+        })
+    }
+
+    /// Create a closure in the immortal region (compile-time constant pool).
+    #[inline]
+    pub fn closure_permanent(c: crate::value::heap::Closure) -> Self {
+        use crate::value::heap::{alloc_permanent, HeapObject};
+        alloc_permanent(HeapObject::Closure {
             closure: c,
             traits: Value::NIL,
         })
@@ -225,6 +261,18 @@ impl Value {
         use crate::value::heap::{alloc, HeapObject, HeapTag};
         let slice = alloc_inline_slice::<Value>(&elements);
         alloc(HeapObject::LArray {
+            elements: slice,
+            traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LArray),
+        })
+    }
+
+    /// Create an immutable array in the immortal region (compile-time constants).
+    #[inline]
+    pub fn array_permanent(elements: Vec<Value>) -> Self {
+        use crate::value::arena::{alloc_inline_slice_permanent, alloc_permanent};
+        use crate::value::heap::{HeapObject, HeapTag};
+        let slice = alloc_inline_slice_permanent::<Value>(&elements);
+        alloc_permanent(HeapObject::LArray {
             elements: slice,
             traits: crate::primitives::traitregistry::default_traits_for(HeapTag::LArray),
         })
@@ -293,6 +341,16 @@ impl Value {
     pub fn syntax(s: crate::syntax::Syntax) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         alloc(HeapObject::Syntax {
+            syntax: Box::new(s),
+            traits: Value::NIL,
+        })
+    }
+
+    /// Create a syntax object in the immortal region (compile-time constants).
+    #[inline]
+    pub fn syntax_permanent(s: crate::syntax::Syntax) -> Self {
+        use crate::value::heap::{alloc_permanent, HeapObject};
+        alloc_permanent(HeapObject::Syntax {
             syntax: Box::new(s),
             traits: Value::NIL,
         })

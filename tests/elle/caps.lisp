@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # ── Capability enforcement tests ───────────────────────────────────────
 #
 # Tests for the "capabilities down" model: fiber/new :deny, fiber/caps,

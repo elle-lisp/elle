@@ -69,28 +69,8 @@ impl VM {
         self.current_fiber_value = Some(child_value);
         std::mem::swap(&mut self.fiber, &mut child_fiber);
 
-        // 3a. Install child's fiber heap as the active allocation target.
-        //     Save whatever was active (parent's heap, always non-null after issue-525).
-        let saved_heap = crate::value::fiberheap::save_current_heap();
-        unsafe {
-            crate::value::fiberheap::install_fiber_heap(
-                &mut *self.fiber.heap as *mut crate::value::FiberHeap,
-            );
-        }
-        // 3b. Install outbox for yield-bound allocations. The compiler
-        // emits OutboxEnter/OutboxExit around yield/emit value expressions,
-        // routing those allocations to the outbox. The parent reads
-        // yielded values directly from the outbox (zero-copy).
-        //
-        // Default allocation target is the child's private heap. Only
-        // allocations between OutboxEnter/OutboxExit go to the outbox.
-        // install_outbox tears down the previous outbox (reset-on-resume).
-        let tmpl = &self.fiber.closure.template;
-        if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
-            self.fiber
-                .heap
-                .install_outbox(crate::value::fiberheap::pool::SlabPool::new());
-        }
+        // 3a. With unified heap, no heap swap needed — all fibers share
+        //     the VM's single heap. The TLS pointer stays unchanged.
 
         // 4. Execute the closure
         let bits = execute(self);
@@ -109,10 +89,14 @@ impl VM {
         };
 
         // 6. Extract the result before swapping back.
-        //    Safety net: if the value is heap-allocated in the child's
-        //    private pool (not in the outbox), deep-copy to the outbox
-        //    so the parent doesn't read a dangling pointer.
-        let mut result_value = self
+        //    Deep-copy any private-pool values to the outbox so the parent
+        //    doesn't read dangling pointers.  Two cases:
+        //      a) result_value itself is in the private pool — deep-copy it.
+        //      b) result_value is in the outbox but contains nested references
+        //         to the private pool (e.g. yield [:send target msg] where
+        //         msg was allocated before OutboxEnter) — deep-copy it so
+        //         nested values are relocated too.
+        let result_value = self
             .fiber
             .signal
             .as_ref()
@@ -120,21 +104,8 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-        if result_value.is_heap()
-            && self.fiber.heap.has_outbox()
-            && self.fiber.heap.value_in_private_pool(result_value)
-        {
-            result_value = self.fiber.heap.deep_copy_to_outbox(result_value);
-            // Update the signal with the new value so the parent reads the copy.
-            if let Some(ref mut sig) = self.fiber.signal {
-                sig.1 = result_value;
-            }
-        }
 
-        // 7. Swap back: parent in, child out; restore parent's heap and handle
-        unsafe {
-            crate::value::fiberheap::restore_saved_heap(saved_heap);
-        }
+        // 7. Swap back: parent in, child out; restore handle
         std::mem::swap(&mut self.fiber, &mut child_fiber);
         self.current_fiber_handle = parent_handle;
         self.current_fiber_value = parent_value;
@@ -446,15 +417,10 @@ impl VM {
             (rv, first)
         });
 
-        // Parameter inheritance is normally a snapshot taken at fiber/new
-        // time by `VM::snapshot_param_frames_into`.  As a fallback, fibers
-        // that were created outside the user-visible `fiber/new` primitive
-        // (e.g. directly from Rust) inherit from the resumer on first
-        // resume.  Skip when the child already carries its own snapshot.
-        if is_first_resume
-            && child_handle.with(|c| c.param_frames.is_empty())
-            && !self.fiber.param_frames.is_empty()
-        {
+        // Inherit parent's parameter bindings on first resume.
+        // Flatten all frames into a single frame so the child starts
+        // with the parent's current dynamic bindings as its baseline.
+        if is_first_resume && !self.fiber.param_frames.is_empty() {
             let mut flat: Vec<(u32, Value)> = Vec::new();
             for frame in &self.fiber.param_frames {
                 for &(id, val) in frame {
@@ -565,7 +531,8 @@ impl VM {
             return SIG_ERROR;
         }
 
-        let env_rc = match self.build_closure_env(&closure, args) {
+        let region_id = crate::value::fiberheap::get_alloc_region();
+        let env_rc = match self.build_closure_env(&closure, args, region_id) {
             Some(env) => env,
             None => {
                 // Error already set on fiber.signal

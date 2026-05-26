@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Ordering and equality tests
 ##
 ## Tests for Eq/Hash/Ord consistency at the Elle level.
@@ -46,12 +46,8 @@
 (assert (= [1 2] @[1 2]) "array = @array (cross-mutability equality)")
 
 # ============================================================================
-# NaN equality
+# NaN equality — IEEE 754: NaN is unequal to everything, including itself.
 # ============================================================================
 
-# NaN is stored inline with TAG_NAN encoding. Inline values compare by
-# raw bits, so NaN == NaN was already true before the Eq change.
-# The HeapObject::Float path (via SendValue roundtrip) now also uses
-# bitwise comparison, but that path is not exercisable from Elle.
-(assert (= (sqrt -1) (sqrt -1)) "NaN = NaN")
-(assert (identical? (sqrt -1) (sqrt -1)) "NaN identical? NaN")
+(assert (not (= (sqrt -1) (sqrt -1))) "NaN ≠ NaN (IEEE 754)")
+(assert (identical? (sqrt -1) (sqrt -1)) "NaN identical? NaN (bitwise)")

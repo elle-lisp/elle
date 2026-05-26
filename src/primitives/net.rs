@@ -7,8 +7,7 @@
 //! for scheduler dispatch.
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
-use crate::port::{Port, PortKind};
-use crate::primitives::def::PrimitiveDef;
+use crate::port::{Direction, Port, PortKind};
 use crate::primitives::kwarg::{extract_connect_kwargs, extract_keyword_timeout};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -261,12 +260,17 @@ fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
         Ok(k) => k,
         Err(e) => return e,
     };
+    let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
+    let accept_port = Value::external("port", Port::new_unopened(
+        PortKind::TcpStream, Direction::ReadWrite, encoding, String::new(),
+    ));
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             IoOp::Accept {
                 options: kwargs.options,
-                encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
+                encoding,
+                accept_port,
             },
             port_val,
             kwargs.timeout,
@@ -293,6 +297,11 @@ fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
         Ok(k) => k,
         Err(e) => return e,
     };
+    let peer = crate::io::sockaddr::format_host_port(&addr, port);
+    let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
+    let port_val = Value::external("port", Port::new_unopened(
+        PortKind::TcpStream, Direction::ReadWrite, encoding, peer,
+    ));
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
@@ -301,10 +310,10 @@ fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
                     addr,
                     port,
                     options: kwargs.options,
-                    encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
+                    encoding,
                 },
             },
-            Value::NIL,
+            port_val,
             kwargs.timeout,
         ),
     )
@@ -439,248 +448,89 @@ fn prim_sys_resolve(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    // TCP
-    PrimitiveDef {
-        name: "tcp/listen",
-        func: prim_tcp_listen,
-        arity: Arity::Exact(2),
+primitive! {
+    "tcp/listen" => prim_tcp_listen {
         signal: Signal::errors(),
+        arity: Arity::Exact(2),
         doc: "Bind and listen on a TCP address. Returns a listener port.",
         params: &["addr", "port"],
         category: "tcp",
         example: "(tcp/listen \"127.0.0.1\" 8080)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/accept",
-        func: prim_tcp_accept,
-        arity: Arity::AtLeast(1),
-        signal: Signal {
+    }
+    "tcp/accept" => prim_tcp_accept {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(1),
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
         params: &["listener"],
         category: "tcp",
         example: "(tcp/accept listener)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/connect",
-        func: prim_tcp_connect,
-        arity: Arity::AtLeast(2),
-        signal: Signal {
+    }
+    "tcp/connect" => prim_tcp_connect {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(2),
         doc: "Connect to a TCP address. Returns a stream port.",
         params: &["addr", "port"],
         category: "tcp",
         example: "(tcp/connect \"127.0.0.1\" 8080)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "tcp/shutdown",
-        func: prim_tcp_shutdown,
-        arity: Arity::Exact(2),
-        signal: Signal {
+    }
+    "tcp/shutdown" => prim_tcp_shutdown {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::Exact(2),
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "tcp",
         example: "(tcp/shutdown conn :write)",
-        aliases: &[],
-    },
-    // UDP
-    PrimitiveDef {
-        name: "udp/bind",
-        func: prim_udp_bind,
-        arity: Arity::Exact(2),
+    }
+    "udp/bind" => prim_udp_bind {
         signal: Signal::errors(),
+        arity: Arity::Exact(2),
         doc: "Bind a UDP socket. Returns a UDP port.",
         params: &["addr", "port"],
         category: "udp",
         example: "(udp/bind \"0.0.0.0\" 9000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "udp/send-to",
-        func: prim_udp_send_to,
-        arity: Arity::AtLeast(4),
-        signal: Signal {
+    }
+    "udp/send-to" => prim_udp_send_to {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(4),
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
         params: &["socket", "data", "addr", "port"],
         category: "udp",
         example: "(udp/send-to sock \"hello\" \"127.0.0.1\" 9000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "udp/recv-from",
-        func: prim_udp_recv_from,
-        arity: Arity::AtLeast(2),
-        signal: Signal {
+    }
+    "udp/recv-from" => prim_udp_recv_from {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(2),
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
         params: &["socket", "count"],
         category: "udp",
         example: "(udp/recv-from sock 1024)",
-        aliases: &[],
-    },
-    // DNS resolution
-    PrimitiveDef {
-        name: "sys/resolve",
-        func: prim_sys_resolve,
-        arity: Arity::Exact(1),
-        signal: Signal {
+    }
+    "sys/resolve" => prim_sys_resolve {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::Exact(1),
         doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",
         params: &["hostname"],
         category: "sys",
         example: "(sys/resolve \"localhost\")",
-        aliases: &[],
-    },
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::value::fiber::{SIG_IO, SIG_YIELD};
-
-    #[test]
-    fn test_tcp_listen_returns_ok() {
-        let (bits, val) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(0)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        assert_eq!(port.kind(), PortKind::TcpListener);
-        port.close();
-    }
-
-    #[test]
-    fn test_tcp_listen_port_zero() {
-        let (bits, val) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(0)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        // Verify OS assigned a real port (path contains it)
-        let path = port.path().unwrap();
-        assert!(path.contains(':'), "expected addr:port, got {}", path);
-        let port_str = path.split(':').next_back().unwrap();
-        let port_num: u16 = port_str.parse().unwrap();
-        assert!(port_num > 0, "expected non-zero port, got {}", port_num);
-        port.close();
-    }
-
-    #[test]
-    fn test_tcp_listen_bad_addr_errors() {
-        let (bits, _) = prim_tcp_listen(&[Value::string("not-a-valid-addr"), Value::int(0)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_listen_bad_port_errors() {
-        let (bits, _) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(99999)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_listen_non_string_addr_errors() {
-        let (bits, _) = prim_tcp_listen(&[Value::int(42), Value::int(0)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_accept_returns_sig_io() {
-        let (_, listener) = prim_tcp_listen(&[Value::string("127.0.0.1"), Value::int(0)]);
-        let (bits, val) = prim_tcp_accept(&[listener]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-        // Clean up
-        listener.as_external::<Port>().unwrap().close();
-    }
-
-    #[test]
-    fn test_tcp_accept_non_listener_errors() {
-        // Create a TcpStream port (not a listener)
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_tcp_stream(fd, "x".into()));
-        let (bits, _) = prim_tcp_accept(&[stream_port]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_accept_non_port_errors() {
-        let (bits, _) = prim_tcp_accept(&[Value::int(42)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_connect_returns_sig_io() {
-        let (bits, val) = prim_tcp_connect(&[Value::string("127.0.0.1"), Value::int(8080)]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_tcp_connect_bad_port_errors() {
-        let (bits, _) = prim_tcp_connect(&[Value::string("127.0.0.1"), Value::int(99999)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_tcp_shutdown_returns_sig_io() {
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_tcp_stream(fd, "x".into()));
-        let (bits, _) = prim_tcp_shutdown(&[stream_port, Value::keyword("write")]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-    }
-
-    #[test]
-    fn test_tcp_shutdown_bad_how_errors() {
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_tcp_stream(fd, "x".into()));
-        let (bits, _) = prim_tcp_shutdown(&[stream_port, Value::keyword("foo")]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_udp_bind_returns_ok() {
-        let (bits, val) = prim_udp_bind(&[Value::string("127.0.0.1"), Value::int(0)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        assert_eq!(port.kind(), PortKind::UdpSocket);
-        port.close();
-    }
-
-    #[test]
-    fn test_udp_send_to_returns_sig_io() {
-        let (_, socket) = prim_udp_bind(&[Value::string("127.0.0.1"), Value::int(0)]);
-        let (bits, _) = prim_udp_send_to(&[
-            socket,
-            Value::string("hello"),
-            Value::string("127.0.0.1"),
-            Value::int(9999),
-        ]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        socket.as_external::<Port>().unwrap().close();
-    }
-
-    #[test]
-    fn test_udp_recv_from_returns_sig_io() {
-        let (_, socket) = prim_udp_bind(&[Value::string("127.0.0.1"), Value::int(0)]);
-        let (bits, _) = prim_udp_recv_from(&[socket, Value::int(1024)]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        socket.as_external::<Port>().unwrap().close();
     }
 }
+
+// Tests migrated to tests/elle/prim-net.lisp

@@ -42,10 +42,6 @@ pub struct ClosureTemplate {
     pub symbol_names: Rc<HashMap<u32, String>>,
     /// Bytecode offset → source location mapping for error reporting.
     pub location_map: Rc<LocationMap>,
-    /// True when pool rotation is safe during tail-call iteration.
-    /// A rotation-safe function doesn't escape heap values to external
-    /// mutable structures, so temporaries can be freed between iterations.
-    pub rotation_safe: bool,
     /// LIR function for deferred JIT compilation.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
     /// Module's closure list for JIT MakeClosure resolution.
@@ -58,12 +54,6 @@ pub struct ClosureTemplate {
     pub vararg_kind: crate::hir::VarargKind,
     /// Optional name of this closure (for debugging/stack traces).
     pub name: Option<Rc<str>>,
-    /// True when the body's final expression is provably not a heap pointer.
-    /// Used by fiber resume to decide whether shared allocation is needed.
-    pub result_is_immediate: bool,
-    /// True when the body contains `set!` to a captured binding with a
-    /// potentially heap-allocated value. Used by fiber resume.
-    pub has_outward_heap_set: bool,
     /// WASM function table index (if compiled to WASM backend).
     /// When set, rt_call dispatches to this WASM function instead of bytecode.
     pub wasm_func_idx: Option<u32>,
@@ -71,9 +61,39 @@ pub struct ClosureTemplate {
     /// SPIR-V is a property of the code, not the instance — all closures
     /// from the same lambda share the template, so the cache is shared.
     pub spirv: std::cell::OnceCell<Vec<u8>>,
+    /// Per-function region table: maps region id (1-based) to region.
+    /// Region 0 is the default (no region). Empty when the function
+    /// has no non-default regions (the common case).
+    pub region_table: Vec<u16>,
 }
 
 impl ClosureTemplate {
+    /// Create a new ClosureTemplate with the three required fields;
+    /// all other fields default to zero/empty/None.
+    pub fn new(bytecode: Rc<Vec<u8>>, arity: Arity, constants: Rc<Vec<Value>>) -> Self {
+        ClosureTemplate {
+            bytecode,
+            arity,
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants,
+            signal: Signal::silent(),
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            lir_function: None,
+            doc: None,
+            syntax: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+            wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
+            region_table: Vec::new(),
+        }
+    }
+
     /// True if signal and structural checks pass for GPU eligibility.
     ///
     /// This is a necessary but not sufficient condition — the full
@@ -176,228 +196,4 @@ impl PartialEq for Closure {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_template() -> Rc<ClosureTemplate> {
-        Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        })
-    }
-
-    #[test]
-    fn test_closure_signal() {
-        let closure = Closure {
-            template: make_template(),
-            env: InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure.signal(), Signal::silent());
-        assert_eq!(closure.effective_signal(), Signal::silent());
-    }
-
-    #[test]
-    fn test_closure_env_capacity() {
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(3),
-            num_locals: 5,
-            num_captures: 2,
-            num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure = Closure {
-            template,
-            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::NIL, Value::NIL]),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure.env_capacity(), 7);
-
-        let template2 = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::AtLeast(2),
-            num_locals: 4,
-            num_captures: 1,
-            num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure2 = Closure {
-            template: template2,
-            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::NIL]),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure2.env_capacity(), 5);
-
-        let template3 = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Range(1, 3),
-            num_locals: 3,
-            num_captures: 0,
-            num_params: 3,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure3 = Closure {
-            template: template3,
-            env: InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure3.env_capacity(), 3);
-    }
-
-    #[test]
-    fn test_effective_signal_no_squelch() {
-        let closure = Closure {
-            template: make_template(),
-            env: InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        assert_eq!(closure.effective_signal(), Signal::silent());
-    }
-
-    #[test]
-    fn test_effective_signal_squelch_clears_bits() {
-        use crate::signals::SIG_YIELD;
-        let template = Rc::new(ClosureTemplate {
-            signal: Signal::yields(),
-            ..(*make_template()).clone()
-        });
-        let closure = Closure {
-            template,
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD,
-        };
-        let eff = closure.effective_signal();
-        assert_eq!(eff.bits, crate::signals::SIG_ERROR);
-        assert_eq!(eff.propagates, 0);
-    }
-
-    #[test]
-    fn test_effective_signal_squelch_no_effect_on_silent() {
-        use crate::signals::SIG_YIELD;
-        let closure = Closure {
-            template: make_template(), // signal = silent()
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD,
-        };
-        assert_eq!(closure.effective_signal(), Signal::silent());
-    }
-
-    #[test]
-    fn test_effective_signal_partial_squelch() {
-        use crate::signals::{SIG_ERROR, SIG_IO, SIG_YIELD};
-        let template = Rc::new(ClosureTemplate {
-            signal: Signal {
-                bits: SIG_YIELD.union(SIG_IO),
-                propagates: 0,
-            },
-            ..(*make_template()).clone()
-        });
-        let closure = Closure {
-            template,
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD, // only squelch yield
-        };
-        let eff = closure.effective_signal();
-        // SIG_YIELD cleared, SIG_IO still set, SIG_ERROR added
-        assert!(eff.bits.contains(SIG_ERROR), "SIG_ERROR should be set");
-        assert!(!eff.bits.contains(SIG_YIELD), "SIG_YIELD should be cleared");
-        assert!(eff.bits.contains(SIG_IO), "SIG_IO should remain set");
-    }
-
-    #[test]
-    fn test_effective_signal_composable() {
-        use crate::signals::{SIG_ERROR, SIG_IO, SIG_YIELD};
-        let template = Rc::new(ClosureTemplate {
-            signal: Signal {
-                bits: SIG_YIELD.union(SIG_IO),
-                propagates: 0,
-            },
-            ..(*make_template()).clone()
-        });
-        let closure1 = Closure {
-            template: template.clone(),
-            env: InlineSlice::empty(),
-            squelch_mask: SIG_YIELD,
-        };
-        // Simulate composing a second squelch
-        let closure2 = Closure {
-            template: template.clone(),
-            env: InlineSlice::empty(),
-            squelch_mask: closure1.squelch_mask.union(SIG_IO),
-        };
-        let eff = closure2.effective_signal();
-        assert!(eff.bits.contains(SIG_ERROR), "SIG_ERROR should be set");
-        assert!(!eff.bits.contains(SIG_YIELD), "SIG_YIELD should be cleared");
-        assert!(!eff.bits.contains(SIG_IO), "SIG_IO should be cleared");
-    }
-}
+// Tests migrated to tests/elle/value-closure.lisp

@@ -22,24 +22,11 @@ impl<'a> Lowerer<'a> {
                 return Ok(result);
             }
 
-            // Call-scoped reclamation: wrap the call in two RegionEnters
-            // (before args, after args) + RegionExitCall (after Call).
-            // RegionExitCall pops both marks and frees only the arg range
-            // [mark1..mark2), leaving the callee's allocations intact.
-            let call_scoped = !is_tail && self.can_scope_allocate_call(func, args, call_signals);
-            if call_scoped {
-                self.emit_region_enter(); // mark1: before arg evaluation
-            }
-
             let mut arg_regs = Vec::new();
             for arg in args {
                 arg_regs.push(self.lower_expr(&arg.expr)?);
             }
             let func_reg = self.lower_expr(func)?;
-
-            if call_scoped {
-                self.emit_region_enter(); // mark2: barrier before Call
-            }
 
             // Determine if the compiler verified arity for this call.
             // True when the callee is a primitive binding that hasn't been
@@ -61,15 +48,10 @@ impl<'a> Lowerer<'a> {
             if is_tail {
                 // Emit pending RegionExits before TailCall — the scope's
                 // allocations must be freed before the frame is replaced.
-                // Args are already in registers, so they're not affected.
-                // Emit raw instructions (not emit_region_exit()) — region_depth
-                // must not change because both branches of an `if` emit the
-                // same exits but only one executes at runtime.
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
+                //
+                self.emit_pending_free_regions();
 
-                self.emit(LirInstr::TailCall {
+                self.emit_alloc(LirInstr::TailCall {
                     func: func_reg,
                     args: arg_regs,
                     arity_checked,
@@ -80,24 +62,19 @@ impl<'a> Lowerer<'a> {
                 if call_signals
                     .intersects(crate::signals::SIG_YIELD.union(crate::signals::SIG_DEBUG))
                 {
-                    self.emit(LirInstr::SuspendingCall {
+                    self.emit_alloc(LirInstr::SuspendingCall {
                         dst,
                         func: func_reg,
                         args: arg_regs,
                         arity_checked,
                     });
                 } else {
-                    self.emit(LirInstr::Call {
+                    self.emit_alloc(LirInstr::Call {
                         dst,
                         func: func_reg,
                         args: arg_regs,
                         arity_checked,
                     });
-                }
-                if call_scoped {
-                    self.emit(LirInstr::RegionExitCall);
-                    self.region_depth -= 2; // both marks consumed
-                    self.scope_stats.calls_scoped += 1;
                 }
                 Ok(dst)
             }
@@ -120,7 +97,7 @@ impl<'a> Lowerer<'a> {
                     (None, false) => {
                         // First arg, not spliced: create array with one element
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::MakeArrayMut {
+                        self.emit_alloc(LirInstr::MakeArrayMut {
                             dst,
                             elements: vec![*reg],
                         });
@@ -129,7 +106,7 @@ impl<'a> Lowerer<'a> {
                     (None, true) => {
                         // First arg, spliced: create empty array, then extend
                         let empty = self.fresh_reg();
-                        self.emit(LirInstr::MakeArrayMut {
+                        self.emit_alloc(LirInstr::MakeArrayMut {
                             dst: empty,
                             elements: vec![],
                         });
@@ -164,7 +141,7 @@ impl<'a> Lowerer<'a> {
 
             let final_args = args_reg.unwrap_or_else(|| {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::MakeArrayMut {
+                self.emit_alloc(LirInstr::MakeArrayMut {
                     dst,
                     elements: vec![],
                 });
@@ -172,17 +149,15 @@ impl<'a> Lowerer<'a> {
             });
 
             if is_tail {
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
-                self.emit(LirInstr::TailCallArrayMut {
+                self.emit_pending_free_regions();
+                self.emit_alloc(LirInstr::TailCallArrayMut {
                     func: func_reg,
                     args: final_args,
                 });
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::CallArrayMut {
+                self.emit_alloc(LirInstr::CallArrayMut {
                     dst,
                     func: func_reg,
                     args: final_args,
@@ -361,12 +336,9 @@ impl<'a> Lowerer<'a> {
         signal: crate::value::fiber::SignalBits,
         value: &Hir,
     ) -> Result<Reg, String> {
-        // Wrap value expression in OutboxEnter/OutboxExit so that
-        // yield-bound allocations route to the outbox (for zero-copy
-        // reading by the parent after yield).
-        self.emit(LirInstr::OutboxEnter);
+        // Region inference stamps yield-bound allocations with the Parent
+        // region via alloc_region. No OutboxEnter/OutboxExit toggle needed.
         let value_reg = self.lower_expr(value)?;
-        self.emit(LirInstr::OutboxExit);
 
         let resume_label = self.fresh_label();
 

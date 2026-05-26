@@ -259,7 +259,7 @@ impl Emitter {
         for spanned in &block.instructions {
             // Record source location before emitting the instruction
             self.bytecode.record_location(&spanned.span);
-            self.emit_instr(&spanned.instr, func);
+            self.emit_instr(&spanned.instr, func, spanned.region);
         }
 
         // Record source location for the terminator
@@ -267,7 +267,8 @@ impl Emitter {
         self.emit_terminator(&block.terminator.terminator);
     }
 
-    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction) {
+    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction, region: Option<crate::hir::region::RegionId>) {
+        let region: crate::hir::region::RegionId = region.unwrap_or(0);
         match instr {
             LirInstr::Const { dst, value } => {
                 self.emit_const(value, func);
@@ -294,6 +295,14 @@ impl Emitter {
                 // StoreLocal pops the value, stores it, and pushes it back.
                 // Auto-pop: consume the pushed-back value so stores are pure
                 // side effects from the LIR's perspective.
+                self.bytecode.emit(Instruction::Pop);
+                self.pop();
+            }
+
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::StoreLocal);
+                self.bytecode.emit_u16(*slot);
                 self.bytecode.emit(Instruction::Pop);
                 self.pop();
             }
@@ -389,12 +398,9 @@ impl Emitter {
 
                 // Create closure template
                 let template = crate::value::ClosureTemplate {
-                    bytecode: Rc::new(nested_bytecode.instructions),
-                    arity: func.arity,
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     num_params: func.num_params,
-                    constants: Rc::new(nested_bytecode.constants),
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask,
@@ -405,24 +411,26 @@ impl Emitter {
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
                     name: func.name.clone().map(|s| Rc::from(s.as_str())),
-                    result_is_immediate: func.result_is_immediate,
-                    has_outward_heap_set: func.has_outward_heap_set,
-                    wasm_func_idx: None,
-                    spirv: std::cell::OnceCell::new(),
-
-                    rotation_safe: func.rotation_safe,
+                    region_table: func.region_table.clone(),
+                    ..crate::value::ClosureTemplate::new(
+                        Rc::new(nested_bytecode.instructions),
+                        func.arity,
+                        Rc::new(nested_bytecode.constants),
+                    )
                 };
+                let template_rc = Rc::new(template);
                 let closure = Closure {
-                    template: Rc::new(template),
+                    template: template_rc,
                     env: crate::value::inline_slice::InlineSlice::empty(),
                     squelch_mask: SignalBits::EMPTY,
                 };
 
                 // Add closure template to constants
-                let const_idx = self.bytecode.add_constant(Value::closure(closure));
+                let const_idx = self.bytecode.add_constant(Value::closure_permanent(closure));
 
-                // Emit MakeClosure instruction
+                // Emit MakeClosure instruction (region first so VM can set TLS before alloc)
                 self.bytecode.emit(Instruction::MakeClosure);
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_u16(const_idx);
                 self.bytecode.emit_u16(captures.len() as u16);
 
@@ -479,6 +487,7 @@ impl Emitter {
                     self.bytecode.emit(Instruction::Call);
                 }
                 self.bytecode.emit_u16(args.len() as u16);
+                self.bytecode.emit_u16(region);
                 let call_resume_ip = self.bytecode.current_pos();
 
                 // Pop func and args from simulated stack
@@ -538,6 +547,7 @@ impl Emitter {
                     self.bytecode.emit(Instruction::TailCall);
                 }
                 self.bytecode.emit_u16(args.len() as u16);
+                self.bytecode.emit_u16(region);
             }
 
             LirInstr::List { dst, head, tail } => {
@@ -546,6 +556,7 @@ impl Emitter {
                 self.ensure_on_top(*head);
                 self.ensure_on_top(*tail);
                 self.bytecode.emit(Instruction::Pair);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.pop();
                 self.push_reg(*dst);
@@ -556,6 +567,7 @@ impl Emitter {
                     self.ensure_on_top(*elem);
                 }
                 self.bytecode.emit(Instruction::MakeArrayMut);
+                self.bytecode.emit_u16(region);
                 self.bytecode.emit_byte(elements.len() as u8);
                 for _ in elements {
                     self.pop();
@@ -611,7 +623,7 @@ impl Emitter {
                 self.ensure_on_top(*src);
                 let key_value = match key {
                     LirConst::Keyword(name) => Value::keyword(name),
-                    LirConst::String(s) => Value::string(s.clone()),
+                    LirConst::String(s) => Value::string_permanent(s.clone()),
                     LirConst::Int(n) => Value::int(*n),
                     LirConst::Symbol(sym) => Value::symbol(sym.0),
                     LirConst::Bool(b) => Value::bool(*b),
@@ -629,7 +641,7 @@ impl Emitter {
                 self.ensure_on_top(*src);
                 let key_value = match key {
                     LirConst::Keyword(name) => Value::keyword(name),
-                    LirConst::String(s) => Value::string(s.clone()),
+                    LirConst::String(s) => Value::string_permanent(s.clone()),
                     LirConst::Int(n) => Value::int(*n),
                     LirConst::Symbol(sym) => Value::symbol(sym.0),
                     LirConst::Bool(b) => Value::bool(*b),
@@ -826,6 +838,7 @@ impl Emitter {
             LirInstr::MakeCaptureCell { dst, value } => {
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::MakeCapture);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -892,6 +905,7 @@ impl Emitter {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::CallArrayMut);
+                self.bytecode.emit_u16(region);
                 let call_resume_ip = self.bytecode.current_pos();
                 self.pop(); // args
                 self.pop(); // func
@@ -911,56 +925,24 @@ impl Emitter {
                 // Stack: [func, args_array] → (tail call, no push)
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::TailCallArrayMut);
+                self.bytecode.emit_u16(region);
                 self.pop(); // args
                 self.pop(); // func
             }
 
-            LirInstr::RegionEnter => {
-                self.bytecode.emit(Instruction::RegionEnter);
-                // No stack effect
+            LirInstr::FreeRegion { region_id } => {
+                self.bytecode.emit(Instruction::FreeRegion);
+                self.bytecode.emit_u16(*region_id);
             }
 
-            LirInstr::RegionExit => {
-                self.bytecode.emit(Instruction::RegionExit);
-                // No stack effect
+            LirInstr::IncrefRegion { region_id } => {
+                self.bytecode.emit(Instruction::IncrefRegion);
+                self.bytecode.emit_u16(*region_id);
             }
 
-            LirInstr::RegionExitCall => {
-                self.bytecode.emit(Instruction::RegionExitCall);
-                // No stack effect
-            }
-
-            LirInstr::RegionRotate => {
-                self.bytecode.emit(Instruction::RegionRotate);
-            }
-            LirInstr::RegionRotateDealloc => {
-                self.bytecode.emit(Instruction::RegionRotateDealloc);
-            }
-            LirInstr::RegionRotateRefcounted => {
-                self.bytecode.emit(Instruction::RegionRotateRefcounted);
-            }
-            LirInstr::RegionExitRefcounted => {
-                self.bytecode.emit(Instruction::RegionExitRefcounted);
-            }
-
-            LirInstr::OutboxEnter => {
-                self.bytecode.emit(Instruction::OutboxEnter);
-                // No stack effect
-            }
-
-            LirInstr::OutboxExit => {
-                self.bytecode.emit(Instruction::OutboxExit);
-                // No stack effect
-            }
-
-            LirInstr::FlipEnter => {
-                self.bytecode.emit(Instruction::FlipEnter);
-            }
-            LirInstr::FlipSwap => {
-                self.bytecode.emit(Instruction::FlipSwap);
-            }
-            LirInstr::FlipExit => {
-                self.bytecode.emit(Instruction::FlipExit);
+            LirInstr::DecrefRegion { region_id } => {
+                self.bytecode.emit(Instruction::DecrefRegion);
+                self.bytecode.emit_u16(*region_id);
             }
 
             LirInstr::PushParamFrame { pairs } => {
@@ -1100,6 +1082,20 @@ impl Emitter {
                 self.bytecode.emit(Instruction::IntrPush);
                 self.pop(); // value
                 self.pop(); // array
+                self.push_reg(*dst);
+            }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                self.ensure_binary_on_top(*string, *value);
+                self.bytecode.emit(Instruction::IntrStringPush);
+                self.pop(); // value
+                self.pop(); // string
+                self.push_reg(*dst);
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                self.ensure_binary_on_top(*bytes, *value);
+                self.bytecode.emit(Instruction::IntrBytesPush);
+                self.pop(); // value
+                self.pop(); // bytes
                 self.push_reg(*dst);
             }
             LirInstr::Pop { dst, src } => {
@@ -1311,7 +1307,7 @@ impl Emitter {
                 self.bytecode.emit_u16(idx);
             }
             LirConst::String(s) => {
-                let idx = self.bytecode.add_constant(Value::string(s.clone()));
+                let idx = self.bytecode.add_constant(Value::string_permanent(s.clone()));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }

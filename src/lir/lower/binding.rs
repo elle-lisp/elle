@@ -10,43 +10,23 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         hir_id: HirId,
     ) -> Result<Reg, String> {
-        // Region inference provides a conservative first pass; escape
-        // analysis validates all safety conditions (captures, suspension,
-        // result safety, outward mutations, breaks).
-        let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
-        if scoped {
-            self.emit_region_enter();
+        let region_id = if self.region_scope_check(hir_id) {
+            self.scope_region_id(hir_id)
+        } else {
+            None
+        };
+        if let Some(rid) = region_id {
+            self.active_region_ids.push(rid);
         }
 
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
-            // Seed immutable_values for constant bindings before lowering
-            // so nested lambdas can see the constant.
             self.try_seed_immutable(*binding, init);
 
             let init_reg = self.lower_expr(init)?;
-            // Record rotation_safe for lambda bindings.
-            if matches!(init.kind, HirKind::Lambda { .. }) {
-                if let Some(block) = self.current_func.blocks.last() {
-                    for instr in block.instructions.iter().rev() {
-                        if let LirInstr::MakeClosure { closure_id, .. } = &instr.instr {
-                            self.callee_rotation_safe.insert(
-                                *binding,
-                                self.closures[closure_id.0 as usize].rotation_safe,
-                            );
-                            break;
-                        }
-                    }
-                }
-            }
             let slot = self.allocate_slot(*binding);
-
-            // Check if this binding needs to be wrapped in a cell
             let needs_capture = self.arena.get(*binding).needs_capture();
 
-            // Inside lambdas, only LBox-wrapped locals need upvalue treatment
-            // (StoreCapture assumes LBox indirection). Plain let bindings use
-            // StoreLocal — the slot index from allocate_slot is valid for both.
             if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
                 self.emit(LirInstr::StoreCapture {
@@ -54,48 +34,42 @@ impl<'a> Lowerer<'a> {
                     src: init_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: init_reg,
-                });
+                self.emit_binding_store(slot, init_reg);
             } else {
-                // Outside lambdas, use stack-based locals
                 if needs_capture {
                     let cell_reg = self.fresh_reg();
-                    self.emit(LirInstr::MakeCaptureCell {
+                    self.emit_alloc(LirInstr::MakeCaptureCell {
                         dst: cell_reg,
                         value: init_reg,
                     });
-                    self.emit(LirInstr::StoreLocal {
-                        slot,
-                        src: cell_reg,
-                    });
+                    self.emit_binding_store(slot, cell_reg);
                 } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot,
-                        src: init_reg,
-                    });
+                    self.emit_binding_store(slot, init_reg);
                 }
             }
         }
-        // When the body is a tail call and the scope is allocated, we can't
-        // emit RegionExit after the body — TailCall replaces the frame, making
-        // any post-body instructions dead code. Instead, increment the pending
-        // counter so that TailCall lowering emits raw RegionExit instructions
-        // between arg computation and the TailCall instruction itself.
-        let tail_scoped = scoped && Self::body_is_tail_call(body);
-        if tail_scoped {
-            self.pending_region_exits += 1;
+        // For tail calls in scoped lets, emit FreeRegion before the
+        // tail call via the pending mechanism.
+        let tail_scoped = region_id.is_some() && Self::body_is_tail_call(body);
+        if let Some(rid) = region_id {
+            if tail_scoped {
+                self.pending_free_regions.push(rid);
+            }
         }
         let result = self.lower_expr(body)?;
+        // Pop region from active stack BEFORE deciding whether to emit
+        // FreeRegion. If the region is still in the stack, an outer scope
+        // also uses it and will emit its own FreeRegion — emitting one here
+        // would double-decref and free the region prematurely.
+        if region_id.is_some() {
+            self.active_region_ids.pop();
+        }
         if tail_scoped {
-            // The raw RegionExits were emitted by lower_call — adjust our
-            // bookkeeping to match. Don't use emit_region_exit() here because
-            // no actual instruction needs emitting at this point.
-            self.pending_region_exits -= 1;
-            self.region_depth -= 1;
-        } else if scoped {
-            self.emit_region_exit();
+            self.pending_free_regions.pop();
+        } else if let Some(rid) = region_id {
+            if !self.active_region_ids.contains(&rid) {
+                self.emit_free_region(rid);
+            }
         }
         Ok(result)
     }
@@ -106,9 +80,13 @@ impl<'a> Lowerer<'a> {
         body: &Hir,
         hir_id: HirId,
     ) -> Result<Reg, String> {
-        let scoped = self.region_scope_check(hir_id) && self.can_scope_allocate_let(bindings, body);
-        if scoped {
-            self.emit_region_enter();
+        let region_id = if self.region_scope_check(hir_id) {
+            self.scope_region_id(hir_id)
+        } else {
+            None
+        };
+        if let Some(rid) = region_id {
+            self.active_region_ids.push(rid);
         }
 
         // First allocate all slots with nil (or cells containing nil)
@@ -126,19 +104,16 @@ impl<'a> Lowerer<'a> {
                     src: nil_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                self.emit_binding_store(slot, nil_reg);
             } else if needs_capture {
                 let cell_reg = self.fresh_reg();
-                self.emit(LirInstr::MakeCaptureCell {
+                self.emit_alloc(LirInstr::MakeCaptureCell {
                     dst: cell_reg,
                     value: nil_reg,
                 });
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: cell_reg,
-                });
+                self.emit_binding_store(slot, cell_reg);
             } else {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                self.emit_binding_store(slot, nil_reg);
             }
         }
         // Then initialize
@@ -176,10 +151,7 @@ impl<'a> Lowerer<'a> {
                     src: init_reg,
                 });
             } else if self.in_lambda {
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: init_reg,
-                });
+                self.emit_binding_store(slot, init_reg);
             } else if needs_capture {
                 let cell_reg = self.fresh_reg();
                 self.emit(LirInstr::LoadLocal {
@@ -191,22 +163,27 @@ impl<'a> Lowerer<'a> {
                     value: init_reg,
                 });
             } else {
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: init_reg,
-                });
+                self.emit_binding_store(slot, init_reg);
             }
         }
-        let tail_scoped = scoped && Self::body_is_tail_call(body);
-        if tail_scoped {
-            self.pending_region_exits += 1;
+        let tail_scoped = region_id.is_some() && Self::body_is_tail_call(body);
+        if let Some(rid) = region_id {
+            if tail_scoped {
+                self.pending_free_regions.push(rid);
+            }
         }
         let result = self.lower_expr(body)?;
+        // Pop first, then check if region is still in stack (shared with
+        // outer scope). See lower_let for rationale.
+        if region_id.is_some() {
+            self.active_region_ids.pop();
+        }
         if tail_scoped {
-            self.pending_region_exits -= 1;
-            self.region_depth -= 1;
-        } else if scoped {
-            self.emit_region_exit();
+            self.pending_free_regions.pop();
+        } else if let Some(rid) = region_id {
+            if !self.active_region_ids.contains(&rid) {
+                self.emit_free_region(rid);
+            }
         }
         Ok(result)
     }
@@ -245,20 +222,6 @@ impl<'a> Lowerer<'a> {
         // Seed immutable_values for constant definitions
         self.try_seed_immutable(binding, value);
 
-        // Record rotation_safe for lambda bindings so callers can
-        // check callee safety transitively.
-        if matches!(value.kind, HirKind::Lambda { .. }) {
-            if let Some(lir_instr) = self.current_func.blocks.last() {
-                for instr in lir_instr.instructions.iter().rev() {
-                    if let LirInstr::MakeClosure { closure_id, .. } = &instr.instr {
-                        self.callee_rotation_safe
-                            .insert(binding, self.closures[closure_id.0 as usize].rotation_safe);
-                        break;
-                    }
-                }
-            }
-        }
-
         if self.in_lambda && needs_capture {
             self.emit(LirInstr::StoreCapture {
                 index: slot,
@@ -271,10 +234,7 @@ impl<'a> Lowerer<'a> {
             });
             Ok(result)
         } else if self.in_lambda {
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: value_reg,
-            });
+            self.emit_binding_store(slot, value_reg);
             let result = self.fresh_reg();
             self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
@@ -302,10 +262,7 @@ impl<'a> Lowerer<'a> {
             });
             Ok(result)
         } else {
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: value_reg,
-            });
+            self.emit_binding_store(slot, value_reg);
             let result = self.fresh_reg();
             self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
@@ -360,7 +317,9 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(result)
             } else {
-                // For simple local variables, store directly
+                // Drop-on-overwrite: decref_and_free the old value,
+                // incref the new value. Aliasing is safe because
+                // aliased values have refcount > 0 and won't be freed.
                 self.emit(LirInstr::StoreLocal {
                     slot,
                     src: value_reg,
@@ -791,10 +750,7 @@ impl<'a> Lowerer<'a> {
                 src: value_reg,
             });
         } else if self.in_lambda {
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: value_reg,
-            });
+            self.emit_binding_store(slot, value_reg);
         } else if needs_capture {
             // cell was already created in Begin pre-pass
             let cell_reg = self.fresh_reg();
@@ -807,10 +763,7 @@ impl<'a> Lowerer<'a> {
                 value: value_reg,
             });
         } else {
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: value_reg,
-            });
+            self.emit_binding_store(slot, value_reg);
         }
         Ok(value_reg)
     }

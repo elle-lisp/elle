@@ -95,7 +95,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_CANCEL` → inject error into target fiber
 - `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats` (0-arg: current fiber; 1-arg: suspended fiber; includes scope-enter/dtor counts), `call-count`, `doc`, `global?`, `fiber/self`, `jit/rejections`, `list-primitives`, `primitive-meta`
 
-All SIG_RESUME primitives (including coroutine wrappers) return
+All SIG_RESUME primitives (including fiber wrappers) return
 `(SIG_RESUME, fiber_value)`. The VM uses `FiberHandle::take()`/`put()` to swap
 the child fiber into `vm.fiber`, executes the child, then swaps back.
 
@@ -190,7 +190,7 @@ and runs on the same fiber (same heap, parameter frames).
 | Non-yielding `fiber/resume` | `call.rs` | Runs a child fiber inline on the current thread |
 | `arena/allocs` SIG_QUERY handler | `signal.rs` | Runs a thunk to measure its allocations |
 | JIT trampolines | `call.rs` | Re-enters interpreter for uncompiled hot paths |
-| Coroutine resume | `call.rs` | Resumes a suspended coroutine |
+| Fiber resume | `call.rs` | Resumes a suspended fiber |
 
 ### Yield hazard
 
@@ -277,9 +277,10 @@ the parent's heap (always non-null after issue-525) is restored.
 `FiberHeap` uses a bump arena (`BumpArena`) wrapped in `SlabPool` for all
 allocations. Destructor tracking ensures `HeapObject` variants with inner heap
 allocations (`Vec`, `Rc`, `BTreeMap`) have their `Drop` impls called on
-`release()` and `clear()`. `release()` runs destructors and rewinds the arena
-to the scope-entry position. Individual slot deallocation is a no-op; memory
-is reclaimed only by scope release or fiber death.
+`release()` and `clear()`. `release()` runs destructors, returns slab slots to
+the free list, and rewinds the arena to the scope-entry position. Memory is
+reclaimed by scope release (`RegionExit`), tail-call rotation (trampoline
+`release()` at each boundary), or fiber death.
 
 The root fiber uses the persistent `ROOT_HEAP` thread-local (a leaked `Box<FiberHeap>`
 created by `ensure_root_heap()`). The heap outlives any individual VM, so Values

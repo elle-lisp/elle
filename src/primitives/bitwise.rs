@@ -1,5 +1,4 @@
 //! Bitwise operation primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -145,55 +144,41 @@ pub(crate) fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(value.wrapping_shr(shift)))
 }
 
-/// Declarative primitive definitions for bitwise functions.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "bit/and",
-        func: prim_bit_and,
+// Declarative primitive definitions for bitwise functions.
+primitive! {
+    "bit/and" => prim_bit_and {
         signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Bitwise AND of all arguments",
         params: &["xs"],
         category: "bit",
         example: "(bit/and 12 10) #=> 8",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bit/or",
-        func: prim_bit_or,
+    }
+    "bit/or" => prim_bit_or {
         signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Bitwise OR of all arguments",
         params: &["xs"],
         category: "bit",
         example: "(bit/or 12 10) #=> 14",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bit/xor",
-        func: prim_bit_xor,
+    }
+    "bit/xor" => prim_bit_xor {
         signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Bitwise XOR of all arguments",
         params: &["xs"],
         category: "bit",
         example: "(bit/xor 12 10) #=> 6",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bit/not",
-        func: prim_bit_not,
+    }
+    "bit/not" => prim_bit_not {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Bitwise NOT of argument",
         params: &["x"],
         category: "bit",
         example: "(bit/not 0) #=> -1",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bit/shl",
-        func: prim_bit_shift_left,
+    }
+    "bit/shl" => prim_bit_shift_left {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Left shift first argument by second argument (clamped to 0-63).",
@@ -201,10 +186,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "bit",
         example: "(bit/shl 1 3) #=> 8",
         aliases: &["bit/shift-left"],
-    },
-    PrimitiveDef {
-        name: "bit/shr",
-        func: prim_bit_shift_right,
+    }
+    "bit/shr" => prim_bit_shift_right {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Arithmetic right shift first argument by second argument (clamped to 0-63).",
@@ -212,5 +195,5 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "bit",
         example: "(bit/shr 8 2) #=> 2",
         aliases: &["bit/shift-right"],
-    },
-];
+    }
+}

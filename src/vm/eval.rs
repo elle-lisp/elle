@@ -75,7 +75,11 @@ fn eval_inner(
     let syntax = Syntax::from_value(&expr_value, symbols, span)?;
 
     // Get-or-create Expander (cached on VM)
-    let mut expander = vm.eval_expander.take().unwrap_or_default();
+    let mut expander = vm.eval_expander.take().unwrap_or_else(|| {
+        let mut e = crate::syntax::Expander::new();
+        e.core_env = crate::pipeline::get_cached_core_env();
+        e
+    });
 
     // Save the caller's stack before macro expansion. load_prelude and
     // expand both execute VM bytecode (via eval_syntax → vm.execute)
@@ -129,6 +133,11 @@ fn eval_inner(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if let Some(ref exp) = vm.eval_expander {
+        if !exp.core_env.is_empty() {
+            analyzer.bind_compile_time_env(&exp.core_env);
+        }
+    }
     if let Some(ref env_map) = env_map {
         analyzer.bind_compile_time_env(env_map);
     }
@@ -141,15 +150,17 @@ fn eval_inner(
 
     // Mark tail calls
     mark_tail_calls(&mut analysis.hir);
+    crate::hir::functionalize::functionalize(&mut analysis.hir, &mut arena);
 
     // Lower
-    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let region_info =
+        crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
-        .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
+        .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbols.all_names());
+        .with_symbol_names(symbols.all_names())
+        .with_region_info(region_info);
     let lir_module = lowerer
         .lower(&analysis.hir)
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;

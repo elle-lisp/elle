@@ -129,6 +129,22 @@ pub(crate) fn prepare_task(
     let mut lir = lir.clone();
     lir.syntax = None;
     lir.doc = None;
+    // Pre-resolve LirConst::String to ValueConst on the VM thread,
+    // which has an active region. The JIT thread has no region and
+    // would panic in Value::string() → arena::alloc().
+    for block in &mut lir.blocks {
+        for si in &mut block.instructions {
+            if let crate::lir::LirInstr::Const {
+                dst,
+                value: crate::lir::LirConst::String(s),
+            } = &mut si.instr
+            {
+                let dst = *dst;
+                let v = crate::value::Value::string(std::mem::take(s));
+                si.instr = crate::lir::LirInstr::ValueConst { dst, value: v };
+            }
+        }
+    }
     JitTask {
         lir,
         self_sym,

@@ -77,4 +77,4 @@ Use `block` + `break` for search patterns:
 
 - [control.md](control.md) — full control flow reference
 - [arrays.md](arrays.md) — array iteration
-- [coroutines.md](coroutines.md) — lazy generators
+- [concurrency.md](concurrency.md) — fibers and lazy generators

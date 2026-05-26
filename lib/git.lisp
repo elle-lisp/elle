@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/git.lisp — Git repository access via FFI to libgit2
 ##
 ## Usage:

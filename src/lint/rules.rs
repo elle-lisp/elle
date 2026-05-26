@@ -53,7 +53,7 @@ mod tests {
     fn test_builtin_arity() {
         use crate::value::Arity;
         // +, pair moved to stdlib; test with remaining Rust primitives
-        assert_eq!(builtin_arity("abs"), Some(Arity::Exact(1)));
+        assert_eq!(builtin_arity("length"), Some(Arity::Exact(1)));
         assert_eq!(builtin_arity("list"), Some(Arity::AtLeast(0)));
         assert_eq!(builtin_arity("undefined"), None);
     }
@@ -80,16 +80,16 @@ mod tests {
 
     #[test]
     fn test_exact_arity_still_warns() {
-        // abs expects exactly 1 arg
+        // length expects exactly 1 arg
         let mut symbols = crate::SymbolTable::new();
         let mut diagnostics = Vec::new();
 
-        let abs = symbols.intern("abs");
-        check_call_arity(abs, 0, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (abs)");
+        let length = symbols.intern("length");
+        check_call_arity(length, 0, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (length)");
 
         diagnostics.clear();
-        check_call_arity(abs, 2, &None, &symbols, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "W002 should fire for (abs 1 2)");
+        check_call_arity(length, 2, &None, &symbols, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "W002 should fire for (length 1 2)");
     }
 }

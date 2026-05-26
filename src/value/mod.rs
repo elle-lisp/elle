@@ -19,17 +19,13 @@ pub mod intern;
 pub mod keyword;
 pub mod repr;
 pub mod send;
-pub mod shared_alloc;
 pub mod types;
 
 // Export the tagged-union Value as the canonical Value type
-pub use repr::{list, pair, Value};
+pub use repr::{list, list_permanent, pair, Value};
 
 // Export heap types
 pub use heap::{HeapObject, HeapTag, Pair};
-
-// Export arena management
-pub use heap::{ArenaGuard, ArenaMark};
 
 // Export error value construction
 pub use error::{error_val, error_val_extra, format_error};

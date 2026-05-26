@@ -271,14 +271,18 @@ mod tests {
 
     #[test]
     fn test_marshal_string() {
-        let val = Value::string("hello");
-        assert!(MarshalledArg::new(&val, &TypeDesc::Str).is_ok());
+        crate::value::arena::with_test_region(|| {
+            let val = Value::string("hello");
+            assert!(MarshalledArg::new(&val, &TypeDesc::Str).is_ok());
+        });
     }
 
     #[test]
     fn test_marshal_string_interior_null() {
-        let val = Value::string("hel\0lo");
-        assert!(MarshalledArg::new(&val, &TypeDesc::Str).is_err());
+        crate::value::arena::with_test_region(|| {
+            let val = Value::string("hel\0lo");
+            assert!(MarshalledArg::new(&val, &TypeDesc::Str).is_err());
+        });
     }
 
     #[test]
@@ -289,21 +293,25 @@ mod tests {
 
     #[test]
     fn test_marshal_struct() {
-        let desc = TypeDesc::Struct(StructDesc {
-            fields: vec![TypeDesc::I32, TypeDesc::Double],
+        crate::value::arena::with_test_region(|| {
+            let desc = TypeDesc::Struct(StructDesc {
+                fields: vec![TypeDesc::I32, TypeDesc::Double],
+            });
+            let val = Value::array_mut(vec![Value::int(42), Value::float(1.5)]);
+            let m = MarshalledArg::new(&val, &desc).unwrap();
+            let _ = m.as_arg();
         });
-        let val = Value::array_mut(vec![Value::int(42), Value::float(1.5)]);
-        let m = MarshalledArg::new(&val, &desc).unwrap();
-        let _ = m.as_arg(); // Should not panic
     }
 
     #[test]
     fn test_marshal_struct_wrong_count() {
-        let desc = TypeDesc::Struct(StructDesc {
-            fields: vec![TypeDesc::I32, TypeDesc::Double],
+        crate::value::arena::with_test_region(|| {
+            let desc = TypeDesc::Struct(StructDesc {
+                fields: vec![TypeDesc::I32, TypeDesc::Double],
+            });
+            let val = Value::array_mut(vec![Value::int(42)]);
+            assert!(MarshalledArg::new(&val, &desc).is_err());
         });
-        let val = Value::array_mut(vec![Value::int(42)]); // Only 1 value for 2 fields
-        assert!(MarshalledArg::new(&val, &desc).is_err());
     }
 
     #[test]
@@ -317,85 +325,90 @@ mod tests {
 
     #[test]
     fn test_marshal_array() {
-        let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
-        let val = Value::array_mut(vec![Value::int(1), Value::int(2), Value::int(3)]);
-        let m = MarshalledArg::new(&val, &desc).unwrap();
-        let _ = m.as_arg();
+        crate::value::arena::with_test_region(|| {
+            let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
+            let val = Value::array_mut(vec![Value::int(1), Value::int(2), Value::int(3)]);
+            let m = MarshalledArg::new(&val, &desc).unwrap();
+            let _ = m.as_arg();
+        });
     }
 
     #[test]
     fn test_marshal_array_wrong_count() {
-        let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
-        let val = Value::array_mut(vec![Value::int(1), Value::int(2)]);
-        assert!(MarshalledArg::new(&val, &desc).is_err());
+        crate::value::arena::with_test_region(|| {
+            let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
+            let val = Value::array_mut(vec![Value::int(1), Value::int(2)]);
+            assert!(MarshalledArg::new(&val, &desc).is_err());
+        });
     }
 
     #[test]
     fn test_read_write_struct_roundtrip() {
-        let sd = StructDesc {
-            fields: vec![TypeDesc::I32, TypeDesc::Double, TypeDesc::I64],
-        };
-        let desc = TypeDesc::Struct(sd.clone());
-        let values = Value::array_mut(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
+        crate::value::arena::with_test_region(|| {
+            let sd = StructDesc {
+                fields: vec![TypeDesc::I32, TypeDesc::Double, TypeDesc::I64],
+            };
+            let desc = TypeDesc::Struct(sd.clone());
+            let values = Value::array_mut(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
 
-        let (offsets, total_size) = sd.field_offsets().unwrap();
-        let align = desc.align().unwrap();
-        let buf = AlignedBuffer::new(total_size, align);
+            let (offsets, total_size) = sd.field_offsets().unwrap();
+            let align = desc.align().unwrap();
+            let buf = AlignedBuffer::new(total_size, align);
 
-        // Write each field
-        let arr = values.as_array_mut().unwrap();
-        let elems = arr.borrow();
-        for (i, (field_desc, &offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
-            let _ = write_value_to_buffer(
-                unsafe { buf.as_mut_ptr().add(offset) },
-                &elems[i],
-                field_desc,
-            )
-            .unwrap();
-        }
+            let arr = values.as_array_mut().unwrap();
+            let elems = arr.borrow();
+            for (i, (field_desc, &offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
+                let _ = write_value_to_buffer(
+                    unsafe { buf.as_mut_ptr().add(offset) },
+                    &elems[i],
+                    field_desc,
+                )
+                .unwrap();
+            }
 
-        // Read back — returns immutable array
-        let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_elems = result.as_array().unwrap();
-        assert_eq!(result_elems[0].as_int(), Some(42));
-        assert!((result_elems[1].as_float().unwrap() - 1.5).abs() < 1e-10);
-        assert_eq!(result_elems[2].as_int(), Some(-100));
+            let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
+            let result_elems = result.as_array().unwrap();
+            assert_eq!(result_elems[0].as_int(), Some(42));
+            assert!((result_elems[1].as_float().unwrap() - 1.5).abs() < 1e-10);
+            assert_eq!(result_elems[2].as_int(), Some(-100));
+        });
     }
 
     #[test]
     fn test_read_write_array_roundtrip() {
-        let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 4);
-        let values = Value::array_mut(vec![
-            Value::int(10),
-            Value::int(20),
-            Value::int(30),
-            Value::int(40),
-        ]);
+        crate::value::arena::with_test_region(|| {
+            let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 4);
+            let values = Value::array_mut(vec![
+                Value::int(10),
+                Value::int(20),
+                Value::int(30),
+                Value::int(40),
+            ]);
 
-        let elem_size = TypeDesc::I32.size().unwrap();
-        let total_size = elem_size * 4;
-        let align = TypeDesc::I32.align().unwrap();
-        let buf = AlignedBuffer::new(total_size, align);
+            let elem_size = TypeDesc::I32.size().unwrap();
+            let total_size = elem_size * 4;
+            let align = TypeDesc::I32.align().unwrap();
+            let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = values.as_array_mut().unwrap();
-        let elems = arr.borrow();
-        for (i, elem_val) in elems.iter().enumerate() {
-            let _ = write_value_to_buffer(
-                unsafe { buf.as_mut_ptr().add(i * elem_size) },
-                elem_val,
-                &TypeDesc::I32,
-            )
-            .unwrap();
-        }
+            let arr = values.as_array_mut().unwrap();
+            let elems = arr.borrow();
+            for (i, elem_val) in elems.iter().enumerate() {
+                let _ = write_value_to_buffer(
+                    unsafe { buf.as_mut_ptr().add(i * elem_size) },
+                    elem_val,
+                    &TypeDesc::I32,
+                )
+                .unwrap();
+            }
 
-        // i32 array → returns immutable array (not bytes, since element type is i32)
-        let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_elems = result.as_array().unwrap();
-        assert_eq!(result_elems.len(), 4);
-        assert_eq!(result_elems[0].as_int(), Some(10));
-        assert_eq!(result_elems[1].as_int(), Some(20));
-        assert_eq!(result_elems[2].as_int(), Some(30));
-        assert_eq!(result_elems[3].as_int(), Some(40));
+            let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
+            let result_elems = result.as_array().unwrap();
+            assert_eq!(result_elems.len(), 4);
+            assert_eq!(result_elems[0].as_int(), Some(10));
+            assert_eq!(result_elems[1].as_int(), Some(20));
+            assert_eq!(result_elems[2].as_int(), Some(30));
+            assert_eq!(result_elems[3].as_int(), Some(40));
+        });
     }
 
     #[test]
@@ -431,58 +444,60 @@ mod tests {
 
     #[test]
     fn test_read_write_nested_struct_roundtrip() {
-        let inner_sd = StructDesc {
-            fields: vec![TypeDesc::I8, TypeDesc::I32],
-        };
-        let outer_sd = StructDesc {
-            fields: vec![TypeDesc::I64, TypeDesc::Struct(inner_sd)],
-        };
-        let desc = TypeDesc::Struct(outer_sd.clone());
+        crate::value::arena::with_test_region(|| {
+            let inner_sd = StructDesc {
+                fields: vec![TypeDesc::I8, TypeDesc::I32],
+            };
+            let outer_sd = StructDesc {
+                fields: vec![TypeDesc::I64, TypeDesc::Struct(inner_sd)],
+            };
+            let desc = TypeDesc::Struct(outer_sd.clone());
 
-        let inner_val = Value::array_mut(vec![Value::int(7), Value::int(999)]);
-        let outer_val = Value::array_mut(vec![Value::int(123456), inner_val]);
+            let inner_val = Value::array_mut(vec![Value::int(7), Value::int(999)]);
+            let outer_val = Value::array_mut(vec![Value::int(123456), inner_val]);
 
-        // Marshal via MarshalledArg
-        let m = MarshalledArg::new(&outer_val, &desc).unwrap();
-        let _ = m.as_arg();
+            let m = MarshalledArg::new(&outer_val, &desc).unwrap();
+            let _ = m.as_arg();
 
-        // Also test roundtrip through write/read
-        let (offsets, total_size) = outer_sd.field_offsets().unwrap();
-        let align = desc.align().unwrap();
-        let buf = AlignedBuffer::new(total_size, align);
+            let (offsets, total_size) = outer_sd.field_offsets().unwrap();
+            let align = desc.align().unwrap();
+            let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = outer_val.as_array_mut().unwrap();
-        let elems = arr.borrow();
-        for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate() {
-            let _ = write_value_to_buffer(
-                unsafe { buf.as_mut_ptr().add(offset) },
-                &elems[i],
-                field_desc,
-            )
-            .unwrap();
-        }
+            let arr = outer_val.as_array_mut().unwrap();
+            let elems = arr.borrow();
+            for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate() {
+                let _ = write_value_to_buffer(
+                    unsafe { buf.as_mut_ptr().add(offset) },
+                    &elems[i],
+                    field_desc,
+                )
+                .unwrap();
+            }
 
-        let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_elems = result.as_array().unwrap();
-        assert_eq!(result_elems[0].as_int(), Some(123456));
+            let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
+            let result_elems = result.as_array().unwrap();
+            assert_eq!(result_elems[0].as_int(), Some(123456));
 
-        let inner_elems = result_elems[1].as_array().unwrap();
-        assert_eq!(inner_elems[0].as_int(), Some(7));
-        assert_eq!(inner_elems[1].as_int(), Some(999));
+            let inner_elems = result_elems[1].as_array().unwrap();
+            assert_eq!(inner_elems[0].as_int(), Some(7));
+            assert_eq!(inner_elems[1].as_int(), Some(999));
+        });
     }
 
     #[test]
     fn test_as_arg_does_not_panic() {
-        let val = Value::int(42);
-        let m = MarshalledArg::new(&val, &TypeDesc::I32).unwrap();
-        let _ = m.as_arg();
+        crate::value::arena::with_test_region(|| {
+            let val = Value::int(42);
+            let m = MarshalledArg::new(&val, &TypeDesc::I32).unwrap();
+            let _ = m.as_arg();
 
-        let fval = Value::float(1.5);
-        let m2 = MarshalledArg::new(&fval, &TypeDesc::Double).unwrap();
-        let _ = m2.as_arg();
+            let fval = Value::float(1.5);
+            let m2 = MarshalledArg::new(&fval, &TypeDesc::Double).unwrap();
+            let _ = m2.as_arg();
 
-        let sval = Value::string("test");
-        let m3 = MarshalledArg::new(&sval, &TypeDesc::Str).unwrap();
-        let _ = m3.as_arg();
+            let sval = Value::string("test");
+            let m3 = MarshalledArg::new(&sval, &TypeDesc::Str).unwrap();
+            let _ = m3.as_arg();
+        });
     }
 }

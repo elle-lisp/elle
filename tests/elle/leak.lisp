@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Memory leak test suite
 #
 # Verifies that heap allocations stay bounded across the runtime's
@@ -72,6 +72,26 @@
       d10k (t0-string 10000)]
   (assert (or checked? (bounded? d100 d10k 10))
           (string "t0 string: d100=" d100 " d10k=" d10k)))
+
+# arena/bytes: bump arena inline data (string bytes, array elements).
+# release_refcounted frees slab slots but does NOT rewind the bump arena
+# because escaped values may hold InlineSlice pointers into the region.
+# Bump reclamation requires region inference to prove no pointers escape.
+# This test documents the known linear growth; convert to bounded? when
+# region inference lands.
+(defn t0-string-bytes [n]
+  (def before (arena/bytes))
+  (def @i 0)
+  (while (%lt i n)
+    (let [x (string "iter-" i "-padding-to-make-string-longer")]
+      x)
+    (assign i (%add i 1)))
+  (%sub (arena/bytes) before))
+
+(let [d5k (t0-string-bytes 5000)
+      d10k (t0-string-bytes 10000)]
+  (assert (%gt d10k d5k)
+          (string "t0 string-bytes (known leak): d5k=" d5k " d10k=" d10k)))
 
 # Pair (cons cell) allocation in while loop — scope reclaims.
 # pair is a stdlib wrapper around %pair; it must be recognized
@@ -902,9 +922,8 @@
 
 (let [d100 (t10-push-accum 100)
       d2k (t10-push-accum 2000)]
-  (assert (or checked? (not (bounded? d100 d2k 30)))
-          (string "t10 push-accum: FIXED? remove regression marker. d100=" d100
-                  " d2k=" d2k)))
+  (assert (or checked? (bounded? d100 d2k 30))
+          (string "t10 push-accum: d100=" d100 " d2k=" d2k)))
 
 # 10f: format-string in a loop (println is async I/O; test formatting only)
 (defn t10-format [n]
@@ -1021,9 +1040,9 @@
 # These don't genuinely escape heap values but are rejected by
 # escape analysis conservatism. When fixed, flip to bounded?.
 
-# each over lists: the each macro desugars to coroutines. QW2
+# each over lists: the each macro desugars to fibers. QW2
 # recognizes internal stdlib calls as non-escaping, enabling FlipSwap
-# on the outer while loop. The coroutine is fully drained within
+# on the outer while loop. The fiber is fully drained within
 # each iteration, so FlipSwap at the back-edge is safe.
 (defn leak-each-list [n]
   (def before (arena/count))
@@ -1124,9 +1143,9 @@
                             (yield (string "val-" i))
                             (assign i (%add i 1)))) |:yield|)
        vals (do
-              (def @acc [])
+              (def @acc @[])
               (while (not= (fiber/status fiber) :dead)
-                (assign acc (append acc [(fiber/resume fiber)])))
+                (push acc (fiber/resume fiber)))
               acc)]
   (assert (= (get vals 0) "val-0")
           (string "t4 yield-at-scale first: " (get vals 0)))
@@ -1429,3 +1448,118 @@
       d10k (t13-heap-struct-field 10000)]
   (assert (or checked? (bounded? d100 d10k 30))
           (string "t13 heap-struct-field: d100=" d100 " d10k=" d10k)))
+
+# ── Tier 14: suspending loops with outward mutations ──────────
+# The intersection of Tier 3 (yield) and Tier 11 (refcount mutation).
+# A loop body that both suspends AND mutates an external mutable
+# collection. Escape analysis rejects flip (outward mutation) and
+# rejects refcounted rotation (suspension). Without the full refcount
+# protocol (incref every binding, DecrefLocal at scope exit), these
+# allocations accumulate linearly until fiber death.
+#
+# This is the http2:serve pattern: the read-loop processes frames in
+# a forever loop, suspends on I/O, and mutates session state.
+
+(defn drain-fiber [f]
+  "Resume fiber until dead, return final value."
+  (def @result 0)
+  (while (not= (fiber/status f) :dead) (assign result (fiber/resume f)))
+  result)
+
+# 14a: suspending loop with put to external struct
+(defn t14-yield-put [n]
+  (drain-fiber (fiber/new (fn []
+                            (def before (arena/count))
+                            (def @state @{:data nil})
+                            (def @i 0)
+                            (while (%lt i n)
+                              (put state
+                                   :data {:iter i :label (string "frame-" i)})
+                              (yield i)
+                              (assign i (%add i 1)))
+                            (%sub (arena/count) before)) |:yield|)))
+
+(let [d100 (t14-yield-put 100)
+      d10k (t14-yield-put 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t14 yield-put: d100=" d100 " d10k=" d10k)))
+
+# 14b: suspending loop with push to external array
+(defn t14-yield-push-overwrite [n]
+  (drain-fiber (fiber/new (fn []
+                            (def before (arena/count))
+                            (def @log @[(string "init")])
+                            (def @i 0)
+                            (while (%lt i n)
+                              (put log 0 (string "entry-" i))
+                              (yield i)
+                              (assign i (%add i 1)))
+                            (%sub (arena/count) before)) |:yield|)))
+
+(let [d100 (t14-yield-push-overwrite 100)
+      d10k (t14-yield-push-overwrite 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t14 yield-push-overwrite: d100=" d100 " d10k=" d10k)))
+
+# 14c: suspending loop with binding reassignment
+(defn t14-yield-reassign [n]
+  (drain-fiber (fiber/new (fn []
+                            (def before (arena/count))
+                            (def @v (string "init"))
+                            (def @i 0)
+                            (while (%lt i n)
+                              (assign v (string "val-" i))
+                              (yield i)
+                              (assign i (%add i 1)))
+                            (%sub (arena/count) before)) |:yield|)))
+
+(let [d100 (t14-yield-reassign 100)
+      d10k (t14-yield-reassign 10000)]
+  (assert (or checked? (bounded? d100 d10k 30))
+          (string "t14 yield-reassign: d100=" d100 " d10k=" d10k)))
+
+# 14d: suspending loop with multiple mutations and temporaries
+# (closest to http2:serve read-loop)
+(defn t14-yield-multi-mut [n]
+  (drain-fiber (fiber/new (fn []
+                            (def before (arena/count))
+                            (def @sess @{:count 0 :last nil :streams @{}})
+                            (def @i 0)
+                            (while (%lt i n)
+                              (let [frame {:type :data
+                                    :stream-id i
+                                    :payload (string "payload-" i)}]
+                                (put sess :count (%add sess:count 1))
+                                (put sess :last frame)
+                                (put sess:streams i frame))
+                              (yield i)
+                              (assign i (%add i 1)))
+                            (%sub (arena/count) before)) |:yield|)))
+
+(let [d100 (t14-yield-multi-mut 100)
+      d10k (t14-yield-multi-mut 10000)]
+  (assert (or checked? (bounded? d100 d10k 50))
+          (string "t14 yield-multi-mut: d100=" d100 " d10k=" d10k)))
+
+# 14e: spawned fibers per iteration in a suspending loop
+# Each iteration spawns a fiber that captures loop-local values.
+# The spawned fiber's captures must not dangle when the loop
+# scope reclaims the parent's allocations.
+(defn t14-spawn-per-iter [n]
+  (drain-fiber (fiber/new (fn []
+                            (def before (arena/count))
+                            (def @result nil)
+                            (def @i 0)
+                            (while (%lt i n)
+                              (let [label (string "task-" i)
+                                    f (fiber/new (fn [] (string label "-done"))
+                                    |:yield|)]
+                                (assign result (fiber/resume f)))
+                              (yield i)
+                              (assign i (%add i 1)))
+                            (%sub (arena/count) before)) |:yield|)))
+
+(let [d100 (t14-spawn-per-iter 100)
+      d10k (t14-spawn-per-iter 10000)]
+  (assert (or checked? (bounded? d100 d10k 50))
+          (string "t14 spawn-per-iter: d100=" d100 " d10k=" d10k)))

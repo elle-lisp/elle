@@ -918,28 +918,19 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             });
 
             let template = Rc::new(ClosureTemplate {
-                bytecode: Rc::new(sc.bytecode),
-                arity: sc.arity,
                 num_locals: sc.num_locals,
                 num_captures: sc.num_captures,
                 num_params: sc.num_params,
-                constants: Rc::new(constants),
                 signal: sc.signal,
                 capture_params_mask: sc.capture_params_mask,
                 capture_locals_mask: sc.capture_locals_mask,
-
                 symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
-                rotation_safe: false,
                 lir_function,
                 doc,
-                syntax: None,
                 vararg_kind: sc.vararg_kind,
                 name: sc.name.map(|s| Rc::from(s.as_str())),
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: None,
-                spirv: std::cell::OnceCell::new(),
+                ..ClosureTemplate::new(Rc::new(sc.bytecode), sc.arity, Rc::new(constants))
             });
 
             let val = Value::closure(Closure {
@@ -1042,45 +1033,26 @@ impl SendBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::LocationMap;
     use crate::lir::{
         BasicBlock, Label, LirConst, LirFunction, LirInstr, Reg, SpannedInstr, SpannedTerminator,
         Terminator,
     };
-    use crate::signals::Signal;
     use crate::syntax::Span;
     use crate::value::closure::{Closure, ClosureTemplate};
     use crate::value::fiber::SignalBits;
     use crate::value::heap::HeapObject;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
     use std::rc::Rc;
 
     /// Build a minimal closure Value with an attached LIR function.
     /// Used by the ClosureRef round-trip test.
     fn make_test_closure(name: &str, lir: Option<LirFunction>) -> Value {
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
             num_locals: 1,
-            num_captures: 0,
             num_params: 1,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
             lir_function: lir.map(Rc::new),
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
             name: Some(Rc::from(name)),
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
         });
         let closure = Closure {
             template,
@@ -1120,87 +1092,72 @@ mod tests {
     /// ClosureRef placeholder must be patched back to a valid ValueConst.
     #[test]
     fn test_send_bundle_patches_closure_value_const_in_lir() {
-        // 1. Build an inner closure (the "target" of the ValueConst).
-        let inner = make_test_closure("inner", None);
+        crate::value::arena::with_test_region(|| {
+            // 1. Build an inner closure (the "target" of the ValueConst).
+            let inner = make_test_closure("inner", None);
 
-        // 2. Build an outer closure whose LIR contains a ValueConst
-        //    referencing `inner`. Store `inner` in the outer closure's
-        //    env so it's reachable via the SendBundle intern table.
-        let lir = make_lir_with_closure_value_const(inner);
-        let outer_template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 1,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: Some(Rc::new(lir)),
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: Some(Rc::from("outer")),
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let outer_closure = Closure {
-            template: outer_template,
-            // make `inner` reachable from the bundle
-            env: crate::value::arena::alloc_inline_slice::<Value>(&[inner]),
-            squelch_mask: SignalBits::EMPTY,
-        };
-        let outer_val = crate::value::heap::alloc(HeapObject::Closure {
-            closure: outer_closure,
-            traits: Value::NIL,
-        });
+            // 2. Build an outer closure whose LIR contains a ValueConst
+            //    referencing `inner`. Store `inner` in the outer closure's
+            //    env so it's reachable via the SendBundle intern table.
+            let lir = make_lir_with_closure_value_const(inner);
+            let outer_template = Rc::new(ClosureTemplate {
+                num_captures: 1,
+                lir_function: Some(Rc::new(lir)),
+                name: Some(Rc::from("outer")),
+                ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(0), Rc::new(vec![]))
+            });
+            let outer_closure = Closure {
+                template: outer_template,
+                // make `inner` reachable from the bundle
+                env: crate::value::arena::alloc_inline_slice::<Value>(&[inner]),
+                squelch_mask: SignalBits::EMPTY,
+            };
+            let outer_val = crate::value::heap::alloc(HeapObject::Closure {
+                closure: outer_closure,
+                traits: Value::NIL,
+            });
 
-        // 3. Round-trip through SendBundle.
-        let bundle = SendBundle::from_value(outer_val).expect("should serialize");
-        let restored = bundle.into_value();
+            // 3. Round-trip through SendBundle.
+            let bundle = SendBundle::from_value(outer_val).expect("should serialize");
+            let restored = bundle.into_value();
 
-        // 4. The reconstructed outer closure should still have an LIR.
-        let restored_rc = restored
-            .as_closure()
-            .expect("restored value should be a closure");
-        let restored_lir = restored_rc
-            .template
-            .lir_function
-            .as_ref()
-            .expect("LIR must be preserved across SendBundle round-trip");
+            // 4. The reconstructed outer closure should still have an LIR.
+            let restored_rc = restored
+                .as_closure()
+                .expect("restored value should be a closure");
+            let restored_lir = restored_rc
+                .template
+                .lir_function
+                .as_ref()
+                .expect("LIR must be preserved across SendBundle round-trip");
 
-        // 5. The LIR should contain a ValueConst (not a ClosureRef) whose
-        //    value is a closure — specifically the reconstructed `inner`.
-        let mut found_closure_vc = false;
-        for block in &restored_lir.blocks {
-            for si in &block.instructions {
-                match &si.instr {
-                    LirInstr::Const {
-                        value: LirConst::ClosureRef(_),
-                        ..
-                    } => {
-                        panic!("ClosureRef should have been patched during reconstruction");
+            // 5. The LIR should contain a ValueConst (not a ClosureRef) whose
+            //    value is a closure — specifically the reconstructed `inner`.
+            let mut found_closure_vc = false;
+            for block in &restored_lir.blocks {
+                for si in &block.instructions {
+                    match &si.instr {
+                        LirInstr::Const {
+                            value: LirConst::ClosureRef(_),
+                            ..
+                        } => {
+                            panic!("ClosureRef should have been patched during reconstruction");
+                        }
+                        LirInstr::ValueConst { value, .. } => {
+                            assert!(
+                                value.as_closure().is_some(),
+                                "patched ValueConst should hold a closure"
+                            );
+                            found_closure_vc = true;
+                        }
+                        _ => {}
                     }
-                    LirInstr::ValueConst { value, .. } => {
-                        assert!(
-                            value.as_closure().is_some(),
-                            "patched ValueConst should hold a closure"
-                        );
-                        found_closure_vc = true;
-                    }
-                    _ => {}
                 }
             }
-        }
-        assert!(
-            found_closure_vc,
-            "restored LIR must contain the patched closure ValueConst"
-        );
+            assert!(
+                found_closure_vc,
+                "restored LIR must contain the patched closure ValueConst"
+            );
+        });
     }
 }

@@ -106,6 +106,9 @@ impl fmt::Display for LirInstr {
             // === Variables ===
             LirInstr::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
             LirInstr::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                write!(f, "local[{}] ←rc {}", slot, src)
+            }
             LirInstr::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
             LirInstr::LoadCaptureRaw { dst, index } => {
                 write!(f, "{} ← cap[{}] (raw)", dst, index)
@@ -227,7 +230,7 @@ impl fmt::Display for LirInstr {
                 write!(f, "{} ← {}[{}]?", dst, src, index)
             }
 
-            // === Coroutines ===
+            // === Fibers ===
             LirInstr::LoadResumeValue { dst } => write!(f, "{} ← resume-val", dst),
 
             // === Runtime Eval ===
@@ -250,19 +253,9 @@ impl fmt::Display for LirInstr {
             }
 
             // === Allocation Regions ===
-            LirInstr::RegionEnter => f.write_str("region-enter"),
-            LirInstr::RegionExit => f.write_str("region-exit"),
-            LirInstr::RegionExitCall => f.write_str("region-exit-call"),
-            LirInstr::RegionRotate => f.write_str("region-rotate"),
-            LirInstr::RegionRotateDealloc => f.write_str("region-rotate-dealloc"),
-            LirInstr::RegionRotateRefcounted => f.write_str("region-rotate-refcounted"),
-            LirInstr::RegionExitRefcounted => f.write_str("region-exit-refcounted"),
-            LirInstr::OutboxEnter => f.write_str("outbox-enter"),
-            LirInstr::OutboxExit => f.write_str("outbox-exit"),
-            LirInstr::FlipEnter => f.write_str("flip-enter"),
-            LirInstr::FlipSwap => f.write_str("flip-swap"),
-            LirInstr::FlipExit => f.write_str("flip-exit"),
-
+            LirInstr::FreeRegion { region_id } => write!(f, "free-region {region_id}"),
+            LirInstr::IncrefRegion { region_id } => write!(f, "incref-region {region_id}"),
+            LirInstr::DecrefRegion { region_id } => write!(f, "decref-region {region_id}"),
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
                 write!(f, "push-param-frame(")?;
@@ -302,6 +295,12 @@ impl fmt::Display for LirInstr {
             LirInstr::Has { dst, obj, key } => write!(f, "{} ← has?({}, {})", dst, obj, key),
             LirInstr::IntrPush { dst, array, value } => {
                 write!(f, "{} ← push({}, {})", dst, array, value)
+            }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                write!(f, "{} ← string-push({}, {})", dst, string, value)
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                write!(f, "{} ← bytes-push({}, {})", dst, bytes, value)
             }
             LirInstr::Pop { dst, src } => write!(f, "{} ← pop({})", dst, src),
 
@@ -542,7 +541,9 @@ mod tests {
 
     #[test]
     fn test_region_instructions() {
-        assert_eq!(format!("{}", LirInstr::RegionEnter), "region-enter");
-        assert_eq!(format!("{}", LirInstr::RegionExit), "region-exit");
+        assert_eq!(
+            format!("{}", LirInstr::FreeRegion { region_id: 1 }),
+            "free-region 1"
+        );
     }
 }

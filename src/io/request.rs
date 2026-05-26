@@ -161,18 +161,33 @@ fn pipe_to_port<T: Into<std::os::unix::io::OwnedFd>>(
 /// I/O operation descriptor.
 #[derive(Debug)]
 pub enum IoOp {
-    /// Read one line (up to `\n`). Returns string or nil (EOF).
-    ReadLine,
-    /// Read up to `count` bytes. Returns bytes/string or nil (EOF).
-    Read { count: usize },
-    /// Read exactly `count` bytes, looping over short reads.  Returns
+    /// Read one line (up to `\n`). Returns bytes or nil (EOF).
+    /// The buffer is pre-allocated on the fiber's heap.
+    ReadLine {
+        /// Pre-allocated LBytes buffer on the fiber's heap (64KB).
+        buffer: Value,
+    },
+    /// Read up to `count` bytes. Returns bytes or nil (EOF).
+    /// The buffer is pre-allocated on the fiber's heap.
+    Read {
+        count: usize,
+        /// Pre-allocated LBytes buffer on the fiber's heap.
+        buffer: Value,
+    },
+    /// Read exactly `count` bytes, looping over short reads. Returns
     /// bytes/string of length `count`, or nil if the stream ended
-    /// before `count` bytes arrived.  Unlike `Read`, this resubmits
+    /// before `count` bytes arrived. Unlike `Read`, this resubmits
     /// short reads on stream sockets too — `Read` follows POSIX "up
     /// to N" semantics on streams; this is the "no, really, exactly
     /// N" variant for length-prefixed framing.
-    ReadExact { count: usize },
-    /// Read everything remaining. Returns string or bytes.
+    /// The buffer is pre-allocated on the fiber's heap.
+    ReadExact {
+        count: usize,
+        /// Pre-allocated LBytes buffer on the fiber's heap (`count` bytes).
+        buffer: Value,
+    },
+    /// Read everything remaining. Returns bytes.
+    /// No pre-allocated buffer — unbounded, uses fd_states.buffer accumulation.
     ReadAll,
     /// Write data to port. Returns bytes written (int).
     Write { data: Value },
@@ -189,9 +204,11 @@ pub enum IoOp {
     /// `encoding` controls the resulting port's text/binary mode —
     /// callers default to Binary (POSIX sockets are byte streams);
     /// pass Text for line-oriented protocols (SMTP, IRC, etc.).
+    /// `accept_port` is pre-allocated at the call site (solver's region).
     Accept {
         options: SocketOptions,
         encoding: crate::port::Encoding,
+        accept_port: Value,
     },
     /// Connect to a remote address. Returns connected stream port.
     Connect { addr: ConnectAddr },
@@ -468,6 +485,126 @@ impl Drop for ProcessHandle {
     }
 }
 
+/// Extract a writeable pointer and length from a pre-allocated LBytes buffer.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The fiber that owns this buffer is parked (no mutator can read the data).
+/// - The pointer is used only for a single write (kernel SQE or thread pool copy).
+/// - The pointer is not used after the fiber is un-parked or torn down.
+///
+/// The `LBytes` variant stores an `InlineSlice<u8>` pointing into the fiber's
+/// bump arena. We cast away `const` to write through it. This is safe because:
+///
+/// - Bump arena pages are mmap'd with `PROT_READ | PROT_WRITE`.
+/// - The fiber is parked — no mutator can observe the write.
+/// - The pointer escapes to C (io_uring SQE) — the optimizer cannot assume
+///   the pointee is unchanged.
+pub(crate) unsafe fn writeable_buffer_ptr(buffer: &Value) -> (*mut u8, usize) {
+    use crate::value::heap::HeapObject;
+    let ext = buffer.as_heap_ptr().expect("buffer must be heap value");
+    let obj = ext as *const HeapObject;
+    match &*obj {
+        HeapObject::LBytes { data, .. } => (data.as_ptr() as *mut u8, data.len()),
+        _ => panic!("IoOp buffer must be LBytes, got {}", buffer.type_name()),
+    }
+}
+
+/// Truncate a pre-allocated LBytes buffer to the actual number of bytes written.
+///
+/// The pre-allocated buffer has capacity `N` but only `new_len` bytes are valid.
+/// This modifies the InlineSlice's `len` field in place so that `as_bytes()`
+/// returns a slice of the correct length.
+///
+/// # Safety
+///
+/// Same requirements as `writeable_buffer_ptr`: the owning fiber must be parked.
+/// `new_len` must be <= the buffer's current length.
+pub(crate) unsafe fn truncate_buffer(buffer: &Value, new_len: usize) {
+    use crate::value::heap::HeapObject;
+    use crate::value::inline_slice::InlineSlice;
+    let ext = buffer.as_heap_ptr().expect("buffer must be heap value");
+    let obj = ext as *mut HeapObject;
+    match &mut *obj {
+        HeapObject::LBytes { data, .. } => {
+            assert!(
+                new_len <= data.len(),
+                "truncate_buffer: new_len {} > buffer len {}",
+                new_len,
+                data.len()
+            );
+            *data = InlineSlice::from_raw(data.as_ptr(), new_len as u32);
+        }
+        _ => panic!("IoOp buffer must be LBytes, got {}", buffer.type_name()),
+    }
+}
+
+/// Transmute a pre-allocated LBytes buffer into an LString in place.
+///
+/// After `truncate_buffer` has set the correct length, this validates the
+/// buffer content as UTF-8 and transmutes the HeapObject from `LBytes` to
+/// `LString` without copying data. The returned Value has `TAG_STRING` and
+/// points to the same heap allocation.
+///
+/// This works because `LBytes` and `LString` have identical field layouts:
+///
+/// ```text
+/// LBytes  { data: InlineSlice<u8>, traits: Value }   // HeapTag 22
+/// LString { s:    InlineSlice<u8>, traits: Value }   // HeapTag 0
+/// ```
+///
+/// Only the HeapTag discriminant and Value TAG differ — we overwrite both
+/// in place via `ptr::write` (which does NOT drop the old value).
+///
+/// # Safety
+///
+/// Same requirements as `truncate_buffer`: the owning fiber must be parked.
+/// The buffer must be an `LBytes` value (not already transmuted).
+///
+/// # Returns
+///
+/// `Ok(Value)` with `TAG_STRING` on valid UTF-8.
+/// `Err(Value)` with an encoding error on invalid UTF-8.
+pub(crate) unsafe fn bytes_to_string_in_place(buffer: Value) -> Result<Value, Value> {
+    use crate::value::heap::HeapObject;
+    use crate::value::inline_slice::InlineSlice;
+    use crate::value::repr::TAG_STRING;
+
+    let ptr = buffer.as_heap_ptr().expect("buffer must be heap value") as *mut HeapObject;
+
+    let (slice_ptr, slice_len, traits) = match &*ptr {
+        HeapObject::LBytes { data, traits } => (data.as_ptr(), data.len(), *traits),
+        _ => panic!(
+            "bytes_to_string_in_place: expected LBytes, got {}",
+            buffer.type_name()
+        ),
+    };
+
+    // Validate UTF-8
+    let bytes = std::slice::from_raw_parts(slice_ptr, slice_len);
+    if std::str::from_utf8(bytes).is_err() {
+        return Err(crate::value::error_val(
+            "encoding-error",
+            format!("port/read-line: invalid UTF-8 in {} bytes", slice_len),
+        ));
+    }
+
+    // Transmute: overwrite HeapObject in place (LBytes → LString).
+    // ptr::write does NOT drop the old value — safe because neither
+    // InlineSlice<u8> nor Value has a Drop impl.
+    std::ptr::write(
+        ptr,
+        HeapObject::LString {
+            s: InlineSlice::from_raw(slice_ptr, slice_len as u32),
+            traits,
+        },
+    );
+
+    // Return new Value with TAG_STRING, same heap pointer
+    Ok(Value::from_heap_ptr(ptr as *const (), TAG_STRING))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,22 +612,30 @@ mod tests {
 
     #[test]
     fn test_io_request_type_name() {
-        let req = IoRequest::new(IoOp::ReadLine, Value::NIL);
-        assert_eq!(req.external_type_name(), Some("io-request"));
+        crate::value::arena::with_test_region(|| {
+            let buf = Value::bytes(vec![0u8; 64]);
+            let req = IoRequest::new(IoOp::ReadLine { buffer: buf }, Value::NIL);
+            assert_eq!(req.external_type_name(), Some("io-request"));
+        });
     }
 
     #[test]
     fn test_io_request_not_port() {
-        let req = IoRequest::new(IoOp::Flush, Value::NIL);
-        assert_ne!(req.external_type_name(), Some("port"));
+        crate::value::arena::with_test_region(|| {
+            let req = IoRequest::new(IoOp::Flush, Value::NIL);
+            assert_ne!(req.external_type_name(), Some("port"));
+        });
     }
 
     #[test]
     fn test_io_request_with_timeout() {
-        let timeout = Some(Duration::from_millis(5000));
-        let req = IoRequest::with_timeout(IoOp::ReadLine, Value::NIL, timeout);
-        let extracted = req.as_external::<IoRequest>().unwrap();
-        assert_eq!(extracted.timeout, timeout);
+        crate::value::arena::with_test_region(|| {
+            let timeout = Some(Duration::from_millis(5000));
+            let buf = Value::bytes(vec![0u8; 64]);
+            let req = IoRequest::with_timeout(IoOp::ReadLine { buffer: buf }, Value::NIL, timeout);
+            let extracted = req.as_external::<IoRequest>().unwrap();
+            assert_eq!(extracted.timeout, timeout);
+        });
     }
 
     #[test]
@@ -542,5 +687,71 @@ mod tests {
     fn test_ioop_tell_variant_is_unit() {
         let op = IoOp::Tell;
         assert!(matches!(op, IoOp::Tell));
+    }
+
+    #[test]
+    fn test_writeable_buffer_ptr_and_truncate() {
+        crate::value::arena::with_test_region(|| {
+            let buffer = Value::bytes(vec![0u8; 16]);
+            assert_eq!(buffer.as_bytes().unwrap().len(), 16);
+
+            unsafe {
+                let (ptr, len) = writeable_buffer_ptr(&buffer);
+                assert_eq!(len, 16);
+                std::ptr::copy_nonoverlapping(b"hello world".as_ptr(), ptr, 11);
+            }
+
+            unsafe {
+                truncate_buffer(&buffer, 5);
+            }
+            assert_eq!(buffer.as_bytes().unwrap().len(), 5);
+            assert_eq!(buffer.as_bytes().unwrap(), b"hello");
+        });
+    }
+
+    #[test]
+    fn test_bytes_to_string_in_place_valid_utf8() {
+        crate::value::arena::with_test_region(|| {
+            let buffer = Value::bytes(b"hello world".to_vec());
+            unsafe {
+                truncate_buffer(&buffer, 11);
+            }
+
+            let result = unsafe { bytes_to_string_in_place(buffer) };
+            assert!(result.is_ok(), "valid UTF-8 should succeed");
+            let string_val = result.unwrap();
+            assert_eq!(string_val.type_name(), "string");
+            assert_eq!(
+                string_val.with_string(|s| s.to_string()).unwrap(),
+                "hello world"
+            );
+            assert_eq!(string_val.as_heap_ptr(), buffer.as_heap_ptr());
+        });
+    }
+
+    #[test]
+    fn test_bytes_to_string_in_place_invalid_utf8() {
+        crate::value::arena::with_test_region(|| {
+            let buffer = Value::bytes(b"\xff\xfe".to_vec());
+            unsafe {
+                truncate_buffer(&buffer, 2);
+            }
+
+            let result = unsafe { bytes_to_string_in_place(buffer) };
+            assert!(result.is_err(), "invalid UTF-8 should fail");
+            let err = result.unwrap_err();
+            assert_eq!(err.type_name(), "struct");
+        });
+    }
+
+    #[test]
+    fn test_bytes_to_string_in_place_empty() {
+        crate::value::arena::with_test_region(|| {
+            let buffer = Value::bytes(vec![]);
+            let result = unsafe { bytes_to_string_in_place(buffer) };
+            assert!(result.is_ok(), "empty bytes should become empty string");
+            let string_val = result.unwrap();
+            assert_eq!(string_val.with_string(|s| s.len()).unwrap(), 0);
+        });
     }
 }

@@ -29,6 +29,47 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
+/// Execute a block with a fresh transient region, freeing it when done.
+///
+/// Two forms:
+/// - `with_transient_region!(heap, rid => { ... })` — binds the region id,
+///   frees via the given heap expression.
+/// - `with_transient_region!({ ... })` — no region id binding, frees via
+///   the TLS heap pointer.
+#[macro_export]
+macro_rules! with_transient_region {
+    ($heap:expr, $rid:ident => $body:expr) => {{
+        let $rid = $crate::lir::lower::fresh_region_id();
+        let __result = $crate::with_alloc_region!($rid => $body);
+        $heap.free_region_physical($rid);
+        __result
+    }};
+    ($body:expr) => {{
+        let __rid = $crate::lir::lower::fresh_region_id();
+        let __result = $crate::with_alloc_region!(__rid => $body);
+        let __hp = $crate::value::fiberheap::current_heap_ptr();
+        if !__hp.is_null() {
+            unsafe { (*__hp).free_region_physical(__rid) };
+        }
+        __result
+    }};
+}
+
+/// Execute a block with a different TLS alloc region, restoring the
+/// previous region when the block completes.
+///
+/// Usage: `with_alloc_region!(region_id => { ... })`
+#[macro_export]
+macro_rules! with_alloc_region {
+    ($rid:expr => $body:expr) => {{
+        let __saved = $crate::value::fiberheap::read_alloc_region_FOR_USE_IN_with_alloc_region_ONLY();
+        $crate::value::fiberheap::set_alloc_region($rid);
+        let __result = $body;
+        $crate::value::fiberheap::set_alloc_region(__saved);
+        __result
+    }};
+}
+
 use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::error::LocationMap;
 use crate::pipeline::lookup_stdlib_value;
@@ -87,13 +128,11 @@ impl VM {
         let mut current_location_map = Rc::new(LocationMap::new());
 
         // Initial execution with tail-call loop.
-        // Pool rotation: when a tail call is rotation-safe, release the
-        // previous iteration's temporaries via rotate_pools(). The tail
-        // call's env (arguments) was built before release, so referenced
-        // values survive. Only unreferenced temporaries are freed.
+        // Scope-mark rotation: when a tail call is rotation-safe,
+        // release the previous iteration's temporaries via release().
+        // The tail call's env (arguments) was built before release, so
+        // referenced values survive. Only unreferenced temporaries are freed.
         let mut bits;
-        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
-        let mut prev_rotation_safe = true;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
         loop {
             let (b, _ip) = self.execute_bytecode_inner_impl(
@@ -105,11 +144,6 @@ impl VM {
             );
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
-                execute::advance_rotation(
-                    &mut rotation_base,
-                    &mut prev_rotation_safe,
-                    tail.rotation_safe,
-                );
                 accumulated_squelch_mask |= tail.squelch_mask;
 
                 current_bytecode = tail.bytecode;
@@ -143,13 +177,10 @@ impl VM {
             } else if bits == SIG_SWITCH {
                 bits = self.handle_sig_switch();
             } else if bits.contains(SIG_YIELD) {
-                return Err("Unexpected yield outside coroutine context".to_string());
+                return Err("Unexpected yield outside fiber context".to_string());
             } else {
                 self.fiber.signal.take();
-                return Err(format!(
-                    "Unexpected signal outside coroutine context: {}",
-                    bits
-                ));
+                return Err(format!("Unexpected signal outside fiber context: {}", bits));
             }
         }
     }
@@ -241,35 +272,21 @@ impl VM {
             None => return self.execute(bytecode),
         };
 
-        let thunk = Value::closure(crate::value::Closure {
+        let thunk = Value::closure_permanent(crate::value::Closure {
             template: Rc::new(crate::value::ClosureTemplate {
-                bytecode: Rc::new(bytecode.instructions.to_vec()),
-                arity: crate::value::Arity::Exact(0),
-                num_locals: 0,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(bytecode.constants.to_vec()),
                 signal: bytecode.signal,
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-
-                symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
-                rotation_safe: false,
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: None,
-                spirv: std::cell::OnceCell::new(),
+                ..crate::value::ClosureTemplate::new(
+                    Rc::new(bytecode.instructions.to_vec()),
+                    crate::value::Arity::Exact(0),
+                    Rc::new(bytecode.constants.to_vec()),
+                )
             }),
             env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         });
 
+        let call_region = crate::lir::lower::fresh_region_id();
         let synthetic_bc = vec![
             Instruction::LoadConst as u8,
             0,
@@ -279,11 +296,15 @@ impl VM {
             1,
             Instruction::Call as u8,
             0,
-            1, // arg_count as u16be
+            1, // arg_count = 1 (u16be)
+            (call_region >> 8) as u8,
+            (call_region & 0xff) as u8, // region_id (u16be)
             Instruction::Return as u8,
         ];
         let synthetic_constants = vec![thunk, ev_run];
 
-        self.execute_bytecode(&synthetic_bc, &synthetic_constants, None)
+        crate::with_alloc_region!(call_region => {
+            self.execute_bytecode(&synthetic_bc, &synthetic_constants, None)
+        })
     }
 }

@@ -54,7 +54,8 @@ impl VM {
         }
 
         // Build environment.
-        let new_env = match self.build_closure_env(closure, args) {
+        let region_id = crate::value::fiberheap::get_alloc_region();
+        let new_env = match self.build_closure_env(closure, args, region_id) {
             Some(env) => env,
             None => {
                 return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));

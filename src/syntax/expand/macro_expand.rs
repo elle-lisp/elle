@@ -30,6 +30,7 @@ use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
 use crate::syntax::Syntax;
 use crate::value::Value;
+use crate::with_transient_region;
 use crate::vm::VM;
 
 /// Convert a macro argument Syntax node directly to a Value for passing
@@ -51,9 +52,9 @@ fn wrap_macro_arg_value(arg: &Syntax) -> Value {
         }
         SyntaxKind::Int(n) => Value::int(*n),
         SyntaxKind::Float(f) => Value::float(*f),
-        SyntaxKind::String(s) => Value::string(s.clone()),
+        SyntaxKind::String(s) => Value::string_permanent(s.clone()),
         SyntaxKind::Keyword(k) => Value::keyword(k),
-        _ => Value::syntax(arg.clone()),
+        _ => Value::syntax_permanent(arg.clone()),
     }
 }
 
@@ -122,16 +123,16 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let span = call_site.span.clone();
 
-        // --- Phase 1: Get or compile the transformer closure (no arena guard) ---
+        // --- Phase 1: Get or compile the transformer closure ---
         //
         // Cache miss: compile `(fn (p1 p2 & rest) template)` via eval_syntax.
         // Cache hit: clone the cached Value (cheap — Value is Copy, Rc inside).
         //
-        // No ArenaGuard here: the closure is allocated into the root FiberHeap
-        // and must persist until stored in the transformer cache. A guard would
-        // release it before caching.
-        // The closure compilation cost (one-time per pipeline call) is left in
-        // the arena; subsequent calls skip this phase entirely.
+        // A transient region scopes the compilation's syntax expansion
+        // (quasiquote Value::syntax wrappers, etc.). The resulting closure
+        // Value survives because it lives in a solver-assigned region from
+        // the nested compilation. The transient region is freed after
+        // compilation.
         let transformer: Value = {
             let cached = *macro_def.cached_transformer.borrow();
             if let Some(v) = cached {
@@ -175,7 +176,12 @@ impl Expander {
                 );
 
                 // Compile and execute to obtain the closure Value.
-                let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
+                // NativeFn allocations (quasiquote's Value::syntax() wrappers)
+                // go into the caller's TLS region. They survive as bytecode
+                // constants in the cached closure, so they must NOT be in a
+                // transient region that gets freed.
+                let closure_val =
+                    crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
 
                 // Store in this MacroDef instance's cache.
                 *macro_def.cached_transformer.borrow_mut() = Some(closure_val);
@@ -192,52 +198,39 @@ impl Expander {
             }
         };
 
-        // --- Phase 2: Call the closure and convert result (with arena guard) ---
+        // --- Phase 2: Call the closure and convert result ---
         //
-        // The arena guard here covers only the transient allocations from calling
-        // the closure and converting the Value result to Syntax. The closure itself
-        // (`transformer`) was allocated in Phase 1 outside this guard's scope, so
-        // it survives the release. This keeps per-invocation arena cost constant.
-        let result_syntax = {
-            let _arena_guard = crate::value::heap::ArenaGuard::new();
+        // TLS region is set for NativeFn calls inside the closure body
+        // (Value::syntax wrappers, string allocations, etc.).
+        // populate_env's capture cells use the region_id directly.
+        // The transient region is freed after converting the result to Syntax.
+        let closure = transformer.as_closure().ok_or_else(|| {
+            format!("Macro '{}': transformer is not a closure", macro_def.name)
+        })?;
 
-            // --- Wrap arguments as Values ---
-            let closure = transformer.as_closure().ok_or_else(|| {
-                format!("Macro '{}': transformer is not a closure", macro_def.name)
-            })?;
+        let opt_start = macro_def.params.len();
+        let opt_end = opt_start + macro_def.optional_params.len();
+        let opt_provided = args.len().min(opt_end);
 
-            // Collect fixed param arg values.
+        let result_syntax = with_transient_region!(vm.heap(), region_id => {
+            // Wrap arguments as Values (may allocate via TLS).
             let mut arg_values: Vec<Value> = args[..macro_def.params.len()]
                 .iter()
                 .map(wrap_macro_arg_value)
                 .collect();
-
-            // Collect optional param arg values (those provided).
-            // Missing optional args are handled by the fn's &opt default (nil).
-            let opt_start = macro_def.params.len();
-            let opt_end = opt_start + macro_def.optional_params.len();
-            let opt_provided = args.len().min(opt_end);
             for arg in &args[opt_start..opt_provided] {
                 arg_values.push(wrap_macro_arg_value(arg));
             }
-
-            // Collect rest args — the closure's arity is AtLeast(n) with a rest param,
-            // and VM's populate_env with VarargKind::List collects remaining args into
-            // an Elle list automatically. Pass them as individual Values.
             if macro_def.rest_param.is_some() {
                 for arg in &args[opt_end..] {
                     arg_values.push(wrap_macro_arg_value(arg));
                 }
             }
 
-            // --- Call the cached closure ---
-            let result_value = vm.call_closure(closure, &arg_values)?;
-
-            // --- Convert result back to Syntax ---
-            // Must happen before _arena_guard drops and frees result_value.
-            Syntax::from_value(&result_value, symbols, span.clone())?
-            // _arena_guard drops here, releasing transient allocations.
-        };
+            let result_value = vm.call_closure(closure, &arg_values, region_id)?;
+            // Convert to Syntax before the transient region is freed.
+            Syntax::from_value(&result_value, symbols, span.clone())
+        })?;
 
         // Add intro scope for hygiene.
         let intro_scope = self.fresh_scope();

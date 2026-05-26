@@ -430,25 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn test_symbol_def_has_documentation() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            r#"(def my-fn (fn (x) "Adds one to x" (+ x 1)))"#,
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        )
-        .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
-        let def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "my-fn")
-            .expect("Should have definition for my-fn");
-        assert_eq!(def.documentation.as_deref(), Some("Adds one to x"));
-    }
-
-    #[test]
     fn test_symbol_def_no_documentation_without_docstring() {
         let (mut symbols, mut vm) = setup();
         let result = analyze(
@@ -467,22 +448,4 @@ mod tests {
         assert_eq!(def.documentation, None);
     }
 
-    #[test]
-    fn test_defn_docstring_populates_symbol_def() {
-        let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            r#"(defn greet (name) "Greets someone by name" (string/append "Hello, " name))"#,
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        )
-        .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
-        let def = index
-            .definitions
-            .values()
-            .find(|d| d.name == "greet")
-            .expect("Should have definition for greet");
-        assert_eq!(def.documentation.as_deref(), Some("Greets someone by name"));
-    }
 }

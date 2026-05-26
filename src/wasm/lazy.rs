@@ -442,7 +442,8 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 }
 
                 // Bytecode closure: call back into the VM
-                match vm_ref.build_closure_env(closure, &args) {
+                let region_id = crate::value::fiberheap::get_alloc_region();
+                match vm_ref.build_closure_env(closure, &args, region_id) {
                     Some(env) => {
                         let exec = vm_ref.execute_bytecode_saving_stack(
                             &closure.template.bytecode,

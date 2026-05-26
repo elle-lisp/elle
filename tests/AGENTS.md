@@ -81,7 +81,7 @@ VM) and check the result. They cover:
 
 - Core language features (arithmetic, conditionals, lists, functions)
 - Advanced features (closures, recursion, higher-order functions, match)
-- Concurrency (fibers, coroutines, thread transfer)
+- Concurrency (fibers, thread transfer)
 - Signal enforcement (interprocedural signal tracking)
 - Error reporting (error messages include correct source locations)
 - Destructuring, blocks, splice, booleans, dispatch
@@ -117,7 +117,7 @@ the code they test and have access to private items. 58 modules have inline
 tests covering: lexer, parser, syntax conversion, expander, analyzer, lowerer,
 emitter, VM core, VM arithmetic, value representation,
 closures, fibers, signals, FFI (marshal, callback, loader, types, call),
-primitives (fibers, coroutines, FFI, process, JSON), JIT (compiler, dispatch,
+primitives (fibers, FFI, process, JSON), JIT (compiler, dispatch,
 group, runtime), LSP (completion, definition, hover, references, rename,
 formatting, state), lint (rules, diagnostics, CLI), formatter, pipeline,
 symbols, symbol table, error formatting, REPL, and arithmetic dispatch.

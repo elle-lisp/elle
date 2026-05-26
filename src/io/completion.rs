@@ -2,7 +2,7 @@
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, IoOp};
+use crate::io::request::IoOp;
 use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::io::Completion;
 use crate::port::{Encoding, Port, PortKind};
@@ -38,10 +38,12 @@ pub(super) fn process_raw_completion(
     pending: &PendingOp,
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
-    buf_handle: BufferHandle,
+    buf_handle: Option<BufferHandle>,
 ) -> Completion {
-    // Release the buffer back to the pool
-    buffer_pool.release(buf_handle);
+    // Release the buffer back to the pool (if present — reads don't use BufferPool)
+    if let Some(bh) = buf_handle {
+        buffer_pool.release(bh);
+    }
 
     match pending {
         PendingOp::ProcessWait {
@@ -119,8 +121,7 @@ pub(super) fn process_raw_completion(
         }
         PendingOp::Open {
             path,
-            direction,
-            encoding,
+            port: port_val,
             ..
         } => {
             if result_code < 0 {
@@ -139,16 +140,19 @@ pub(super) fn process_raw_completion(
                 };
             }
             // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
-            // No fallible operations between here and OwnedFd::from_raw_fd.
             let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
-            let port = Port::new_file(fd, *direction, *encoding, path.clone());
+            // Fill the fd into the pre-allocated port (born in the solver's region).
+            let port_ref = port_val.as_external::<Port>().expect("PendingOp::Open port must be a Port");
+            port_ref.set_fd(fd);
             Completion {
                 id,
-                result: Ok(Value::external("port", port)),
+                result: Ok(*port_val),
             }
         }
         PendingOp::Connect {
-            addr, connect_fd, ..
+            connect_fd,
+            port: port_val,
+            ..
         } => {
             if result_code < 0 {
                 let errno = -result_code;
@@ -164,31 +168,21 @@ pub(super) fn process_raw_completion(
                     result: Err(error_val(error_type, msg)),
                 };
             }
-            // Connect: fd and address come from PendingOp (set at submission time).
-            // io_uring: connect_fd = pre-created socket, result_code = 0.
-            // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
-            // io_uring: fd is pre-created in connect_fd. Thread pool: fd is result_code.
+            // Connect: fd comes from PendingOp (set at submission time).
             let fd = connect_fd.unwrap_or(result_code as RawFd);
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-            let peer_addr = match addr {
-                ConnectAddr::Tcp {
-                    addr: host, port, ..
-                } => crate::io::sockaddr::format_host_port(host, *port),
-                ConnectAddr::Unix { path, .. } => path.clone(),
-            };
-            let encoding = addr.encoding();
-            let new_port = match addr {
-                ConnectAddr::Tcp { .. } => {
-                    set_tcp_nodelay(&fd);
-                    Port::new_tcp_stream(fd, peer_addr).with_encoding(encoding)
-                }
-                ConnectAddr::Unix { .. } => {
-                    Port::new_unix_stream(fd, peer_addr).with_encoding(encoding)
-                }
-            };
+            // Port was pre-allocated by the caller (with the requested
+            // encoding already set on the Port — see prim_tcp_connect /
+            // prim_unix_connect). Set the fd on the existing port; no
+            // need to recreate it here.
+            if matches!(port_val.as_external::<Port>().map(|p| p.kind()), Some(PortKind::TcpStream)) {
+                set_tcp_nodelay(&fd);
+            }
+            let port_ref = port_val.as_external::<Port>().expect("PendingOp::Connect port must be a Port");
+            port_ref.set_fd(fd);
             Completion {
                 id,
-                result: Ok(Value::external("port", new_port)),
+                result: Ok(*port_val),
             }
         }
         PendingOp::Task { .. } => {
@@ -383,6 +377,10 @@ pub(super) fn process_raw_completion(
             listener_kind,
             ..
         } => {
+            let encoding = port
+                .as_external::<Port>()
+                .map(|p| p.encoding())
+                .unwrap_or(Encoding::Binary);
             if result_code < 0 {
                 // Error
                 let errno = -result_code;
@@ -406,7 +404,7 @@ pub(super) fn process_raw_completion(
             if result_code == 0
                 && matches!(
                     op,
-                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
+                    IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
                 )
             {
                 // EOF for read operations
@@ -417,32 +415,102 @@ pub(super) fn process_raw_completion(
 
                 // For ReadLine: check buffer for a partial last line
                 // (file content without trailing newline).
-                if matches!(op, IoOp::ReadLine) && !state.buffer.is_empty() {
-                    let remainder: Vec<u8> = state.buffer.drain(..).collect();
-                    let s = String::from_utf8_lossy(&remainder);
-                    let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
+                if let IoOp::ReadLine { ref buffer } = op {
+                    // Check fd_state buffer first (leftover from previous calls)
+                    if !state.buffer.is_empty() {
+                        let remainder: Vec<u8> = state.buffer.drain(..).collect();
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = remainder.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(remainder.as_ptr(), dst, copy_len);
+                            // Trim trailing \r\n
+                            let trimmed = if copy_len > 0 && remainder[copy_len - 1] == b'\n' {
+                                let mut end = copy_len - 1;
+                                if end > 0 && remainder[end - 1] == b'\r' {
+                                    end -= 1;
+                                }
+                                end
+                            } else {
+                                copy_len
+                            };
+                            crate::io::request::truncate_buffer(buffer, trimmed);
+                        }
+                        return Completion {
+                            id,
+                            result: unsafe {
+                                crate::io::request::bytes_to_string_in_place(*buffer)
+                            },
+                        };
+                    }
+                    // Check if fiber buffer has data from a previous short read
+                    let filled = pending.filled();
+                    if filled > 0 {
+                        // Trim trailing \r\n from fiber buffer data
+                        let buf_bytes = buffer.as_bytes().unwrap();
+                        let mut end = filled.min(buf_bytes.len());
+                        if end > 0 && buf_bytes[end - 1] == b'\n' {
+                            end -= 1;
+                            if end > 0 && buf_bytes[end - 1] == b'\r' {
+                                end -= 1;
+                            }
+                        }
+                        unsafe {
+                            crate::io::request::truncate_buffer(buffer, end);
+                        }
+                        return Completion {
+                            id,
+                            result: unsafe {
+                                crate::io::request::bytes_to_string_in_place(*buffer)
+                            },
+                        };
+                    }
+                    // No data at all — EOF on first read
                     return Completion {
                         id,
-                        result: Ok(Value::string(trimmed)),
+                        result: Ok(Value::NIL),
                     };
                 }
 
-                // For Read: return accumulated buffer on EOF (short-read
-                // resubmission buffered partial data before hitting EOF).
-                if matches!(op, IoOp::Read { .. }) && !state.buffer.is_empty() {
-                    let partial: Vec<u8> = state.buffer.drain(..).collect();
-                    if let Some(p) = port.as_external::<Port>() {
+                // For Read: return accumulated data on EOF.
+                if let IoOp::Read { ref buffer, .. } = op {
+                    // Check fd_state buffer first
+                    if !state.buffer.is_empty() {
+                        let partial: Vec<u8> = state.buffer.drain(..).collect();
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = partial.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(partial.as_ptr(), dst, copy_len);
+                            crate::io::request::truncate_buffer(buffer, copy_len);
+                        }
                         return Completion {
                             id,
-                            result: Ok(match p.encoding() {
-                                Encoding::Text => {
-                                    let s = String::from_utf8_lossy(&partial);
-                                    Value::string(s.as_ref())
-                                }
-                                Encoding::Binary => Value::bytes(partial),
-                            }),
+                            result: if encoding == Encoding::Text {
+                                unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
+                            } else {
+                                Ok(*buffer)
+                            },
                         };
                     }
+                    // Check fiber buffer
+                    let filled = pending.filled();
+                    if filled > 0 {
+                        unsafe {
+                            crate::io::request::truncate_buffer(buffer, filled);
+                        }
+                        return Completion {
+                            id,
+                            result: if encoding == Encoding::Text {
+                                unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
+                            } else {
+                                Ok(*buffer)
+                            },
+                        };
+                    }
+                    // No data and EOF — return nil (empty read)
+                    return Completion {
+                        id,
+                        result: Ok(Value::NIL),
+                    };
                 }
 
                 // For ReadExact: EOF before the full count is a failed
@@ -459,20 +527,17 @@ pub(super) fn process_raw_completion(
                 }
 
                 // For ReadAll: return accumulated buffer on EOF
-                // (empty bytes/string for empty files, not nil).
+                // (empty bytes for empty files, not nil).
                 if matches!(op, IoOp::ReadAll) {
                     let all: Vec<u8> = state.buffer.drain(..).collect();
-                    let value = if let Some(p) = port.as_external::<Port>() {
-                        match p.encoding() {
-                            Encoding::Text => Value::string(String::from_utf8_lossy(&all).as_ref()),
-                            Encoding::Binary => Value::bytes(all),
-                        }
-                    } else {
-                        Value::bytes(all)
-                    };
+                    let val = Value::bytes(all);
                     return Completion {
                         id,
-                        result: Ok(value),
+                        result: if encoding == Encoding::Text {
+                            unsafe { crate::io::request::bytes_to_string_in_place(val) }
+                        } else {
+                            Ok(val)
+                        },
                     };
                 }
 
@@ -484,27 +549,83 @@ pub(super) fn process_raw_completion(
 
             // Success
             let value = match op {
-                IoOp::ReadLine => {
-                    // Per-fd buffering: append raw data, extract one line.
+                IoOp::ReadLine { ref buffer } => {
+                    // The data is in the fiber's pre-allocated buffer (for both
+                    // io_uring and thread pool paths). Total valid bytes:
+                    let total = pending.filled() + result_code as usize;
+
+                    // Also check if fd_state has leftover bytes from a previous
+                    // over-read. If so, prepend them.
                     let state = fd_states
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
-                    state.buffer.extend_from_slice(&data);
 
-                    if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
-                        let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                        let s = String::from_utf8_lossy(&line_bytes);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        Value::string(trimmed)
-                    } else {
-                        // No newline — partial line at EOF. Drain everything.
-                        let all: Vec<u8> = state.buffer.drain(..).collect();
-                        let s = String::from_utf8_lossy(&all);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        Value::string(trimmed)
+                    if !state.buffer.is_empty() {
+                        // Copy leftover bytes into the fiber buffer, shifting
+                        // the kernel data to make room.
+                        let leftover = state.buffer.len();
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            // Shift existing data right to make room for leftover
+                            if total > leftover {
+                                std::ptr::copy(
+                                    dst.add(0),
+                                    dst.add(leftover),
+                                    total.min(dst_cap) - leftover,
+                                );
+                            }
+                            std::ptr::copy_nonoverlapping(
+                                state.buffer.as_ptr(),
+                                dst,
+                                leftover.min(dst_cap),
+                            );
+                        }
+                        state.buffer.clear();
                     }
+
+                    // Read the fiber buffer content to find the line boundary
+                    let buf_bytes = buffer.as_bytes().unwrap();
+                    let scan_len = total.min(buf_bytes.len());
+
+                    // Find newline in the fiber buffer
+                    let newline_pos = buf_bytes[..scan_len].iter().position(|&b| b == b'\n');
+
+                    let final_len = if let Some(pos) = newline_pos {
+                        // Store any bytes after the newline in state.buffer
+                        // for the next ReadLine call.
+                        if pos + 1 < scan_len {
+                            state
+                                .buffer
+                                .extend_from_slice(&buf_bytes[pos + 1..scan_len]);
+                        }
+                        // Trim trailing \r\n
+                        let mut end = pos;
+                        if end > 0 && buf_bytes[end - 1] == b'\r' {
+                            end -= 1;
+                        }
+                        end
+                    } else {
+                        // No newline found — return all data as partial line
+                        let mut end = scan_len;
+                        if end > 0 && buf_bytes[end - 1] == b'\n' {
+                            end -= 1;
+                            if end > 0 && buf_bytes[end - 1] == b'\r' {
+                                end -= 1;
+                            }
+                        }
+                        end
+                    };
+
+                    unsafe {
+                        crate::io::request::truncate_buffer(buffer, final_len);
+                    }
+                    // Transmute LBytes → LString in place (zero-copy, validates UTF-8)
+                    return Completion {
+                        id,
+                        result: unsafe { crate::io::request::bytes_to_string_in_place(*buffer) },
+                    };
                 }
-                IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll => {
+                IoOp::Read { ref buffer, .. } | IoOp::ReadExact { ref buffer, .. } => {
                     // Prepend any bytes left in the fd_state buffer from a
                     // previous over-read (e.g. ReadLine read past the line
                     // boundary, or a previous short-read for this op).  The
@@ -513,80 +634,81 @@ pub(super) fn process_raw_completion(
                     let state = fd_states
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
-                    let combined = if !state.buffer.is_empty() {
-                        let mut buf: Vec<u8> = state.buffer.drain(..).collect();
-                        buf.extend_from_slice(&data);
-                        buf
-                    } else {
-                        data
-                    };
-                    // ReadExact on a text port is grapheme-counted: split
-                    // at the Nth grapheme boundary and stash the trailing
-                    // bytes for the next read.  Other paths (binary Read /
-                    // ReadExact / ReadAll, text Read, text ReadAll) return
-                    // the full combined buffer per their existing contract.
-                    let text_exact_count = match op {
-                        IoOp::ReadExact { count } => port
-                            .as_external::<Port>()
-                            .filter(|p| matches!(p.encoding(), Encoding::Text))
-                            .map(|_| *count),
-                        _ => None,
-                    };
-                    if let Some(n) = text_exact_count {
-                        if let Some(end) = crate::io::nth_grapheme_byte_end(&combined, n) {
-                            let leftover = combined[end..].to_vec();
-                            if !leftover.is_empty() {
-                                state.buffer.extend_from_slice(&leftover);
-                            }
-                            Value::string(String::from_utf8_lossy(&combined[..end]).as_ref())
-                        } else {
-                            // The resubmit gate should have caught this and
-                            // looped; reaching here means the gate's grapheme
-                            // probe and ours disagree (impossible given the
-                            // same input).  Treat defensively as nil.
-                            Value::NIL
+
+                    let total = if !state.buffer.is_empty() {
+                        let buffered = state.buffer.len();
+                        // Copy buffered bytes to the start of the fiber buffer,
+                        // then shift kernel data after them.
+                        unsafe {
+                            let (dst, _) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let kernel_data_start = pending.filled();
+                            let kernel_data_len = result_code as usize;
+                            // Shift kernel data right by `buffered` positions
+                            std::ptr::copy(
+                                dst,
+                                dst.add(buffered),
+                                (kernel_data_start + kernel_data_len)
+                                    .min(buffer.as_bytes().unwrap().len()),
+                            );
+                            std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, buffered);
                         }
-                    } else if let Some(p) = port.as_external::<Port>() {
-                        match p.encoding() {
-                            Encoding::Text => {
-                                let s = String::from_utf8_lossy(&combined);
-                                Value::string(s.as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(combined),
-                        }
+                        state.buffer.clear();
+                        buffered + pending.filled() + result_code as usize
                     } else {
-                        Value::string(String::from_utf8_lossy(&combined).as_ref())
+                        // Data is already in the fiber's buffer (io_uring: kernel
+                        // wrote it; thread pool: pool_to_completion copied it).
+                        pending.filled() + result_code as usize
+                    };
+
+                    unsafe {
+                        crate::io::request::truncate_buffer(buffer, total);
                     }
+                    if encoding == Encoding::Text {
+                        return Completion {
+                            id,
+                            result: unsafe {
+                                crate::io::request::bytes_to_string_in_place(*buffer)
+                            },
+                        };
+                    }
+                    *buffer
+                }
+                IoOp::ReadAll => {
+                    // ReadAll still uses the existing fd_states.buffer accumulation.
+                    // Accumulated in fd_states.buffer by re-submission loop.
+                    let state = fd_states
+                        .entry(port_key.clone())
+                        .or_insert_with(FdState::new);
+                    state.buffer.extend_from_slice(&data);
+                    let all: Vec<u8> = state.buffer.drain(..).collect();
+                    let val = Value::bytes(all);
+                    if encoding == Encoding::Text {
+                        return Completion {
+                            id,
+                            result: unsafe { crate::io::request::bytes_to_string_in_place(val) },
+                        };
+                    }
+                    val
                 }
                 IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
                 IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-                IoOp::Accept {
-                    ref options,
-                    encoding,
-                } => {
+                IoOp::Accept { ref options, ref accept_port, .. } => {
                     // Accept: result_code is the new fd (from both io_uring and thread pool).
-                    // Peer address is obtained via getpeername() — works uniformly.
+                    // The accept_port was pre-allocated by the caller with the
+                    // requested encoding already set (see prim_tcp_accept /
+                    // prim_unix_accept). Set the fd on it and return.
                     let fd = result_code;
-                    let peer_addr = crate::io::sockaddr::peer_address(fd);
+                    let _peer_addr = crate::io::sockaddr::peer_address(fd);
                     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
                     // Apply user-specified socket options to the accepted fd.
                     crate::io::request::apply_socket_options(fd.as_raw_fd(), options);
-                    let new_port = match listener_kind {
-                        Some(PortKind::TcpListener) => {
-                            set_tcp_nodelay(&fd);
-                            Port::new_tcp_stream(fd, peer_addr).with_encoding(*encoding)
-                        }
-                        Some(PortKind::UnixListener) => {
-                            Port::new_unix_stream(fd, peer_addr).with_encoding(*encoding)
-                        }
-                        _ => {
-                            return Completion {
-                                id,
-                                result: Err(error_val("io-error", "invalid listener kind")),
-                            };
-                        }
-                    };
-                    Value::external("port", new_port)
+                    if let Some(PortKind::TcpListener) = listener_kind {
+                        set_tcp_nodelay(&fd);
+                    }
+                    let port_ref = accept_port.as_external::<Port>()
+                        .expect("accept_port must be a Port");
+                    port_ref.set_fd(fd);
+                    *accept_port
                 }
                 IoOp::Connect { .. } => {
                     // Connect ops use PendingOp::Connect, not PendingOp::Port

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/gtk4/webview.lisp — WebKit6 WebView integration
 ##
 ## Creates webviews, sets up JS→Elle IPC, provides eval/send/load.

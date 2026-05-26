@@ -508,6 +508,7 @@ mod tests {
 
     #[test]
     fn test_macro_definition_and_expansion() {
+        crate::value::arena::with_test_region(|| {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
@@ -565,6 +566,7 @@ mod tests {
         let expanded = result.unwrap();
         // The result should be (+ 5 5)
         assert_eq!(expanded.to_string(), "(+ 5 5)");
+        });
     }
 
     #[test]

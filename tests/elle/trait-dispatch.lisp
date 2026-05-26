@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Trait-based dispatch test suite
 ##
 ## Tests for dispatching first/rest/length/empty? through trait tables.

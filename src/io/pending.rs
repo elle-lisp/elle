@@ -3,7 +3,7 @@
 use crate::io::pool::BufferHandle;
 use crate::io::request::{ConnectAddr, IoOp};
 use crate::io::types::PortKey;
-use crate::port::{Direction, Encoding, PortKind};
+use crate::port::PortKind;
 use crate::value::Value;
 use std::os::unix::io::RawFd;
 
@@ -19,17 +19,25 @@ pub(crate) enum PendingOp {
         op: IoOp,
         port_key: PortKey,
         port: Value,
-        buffer_handle: BufferHandle,
+        /// BufferPool handle for non-read operations. `None` for Read/ReadLine
+        /// (which use pre-allocated fiber-heap buffers instead).
+        buffer_handle: Option<BufferHandle>,
         /// For Accept: which kind of listener (TcpListener or UnixListener).
         listener_kind: Option<PortKind>,
+        /// Bytes written into the fiber's pre-allocated buffer so far.
+        /// Used for short-read re-submission. Zero for non-read ops.
+        filled: usize,
     },
-    /// Connect to a remote address. Creates a new port on completion.
+    /// Connect to a remote address.
     Connect {
+        #[allow(dead_code)]
         addr: ConnectAddr,
         buffer_handle: BufferHandle,
         /// io_uring: pre-created socket fd. Thread pool: set to result fd
         /// on completion. Cleared on connect failure (fd closed).
         connect_fd: Option<RawFd>,
+        /// Pre-allocated port Value (born in the solver's region at the call site).
+        port: Value,
     },
     /// Async timer. No port.
     Sleep { buffer_handle: BufferHandle },
@@ -49,11 +57,11 @@ pub(crate) enum PendingOp {
     /// For thread pool: path is owned by the PoolOp::Open; buffer_handle is a
     /// dummy allocation (0 bytes).
     Open {
-        /// The file path (for error messages and Port construction).
+        /// The file path (for error messages).
         path: String,
-        direction: Direction,
-        encoding: Encoding,
         buffer_handle: BufferHandle,
+        /// Pre-allocated port Value (born in the solver's region at the call site).
+        port: Value,
     },
     /// Background task — arbitrary closure running on thread pool.
     Task { buffer_handle: BufferHandle },
@@ -83,35 +91,36 @@ pub(crate) enum PendingOp {
 }
 
 impl PendingOp {
-    pub(crate) fn buffer_handle(&self) -> BufferHandle {
+    /// Get the BufferHandle, if any. Returns `None` for read operations
+    /// (which use pre-allocated fiber-heap buffers) and `Some(handle)` for
+    /// all other operations.
+    pub(crate) fn buffer_handle(&self) -> Option<BufferHandle> {
         match self {
             PendingOp::Port { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Open { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Task { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
-            PendingOp::WatchNext { buffer_handle, .. } => *buffer_handle,
-            PendingOp::SigNext { buffer_handle, .. } => *buffer_handle,
-            PendingOp::PollFd { buffer_handle, .. } => *buffer_handle,
-            PendingOp::ChanSelectPark { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Connect { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Sleep { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::SigNext { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::PollFd { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::ChanSelectPark { buffer_handle, .. } => Some(*buffer_handle),
         }
     }
 
-    pub(super) fn buffer_handle_mut(&mut self) -> &mut BufferHandle {
+    pub(super) fn filled(&self) -> usize {
         match self {
-            PendingOp::Port { buffer_handle, .. } => buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => buffer_handle,
-            PendingOp::Open { buffer_handle, .. } => buffer_handle,
-            PendingOp::Task { buffer_handle, .. } => buffer_handle,
-            PendingOp::Resolve { buffer_handle, .. } => buffer_handle,
-            PendingOp::WatchNext { buffer_handle, .. } => buffer_handle,
-            PendingOp::SigNext { buffer_handle, .. } => buffer_handle,
-            PendingOp::PollFd { buffer_handle, .. } => buffer_handle,
-            PendingOp::ChanSelectPark { buffer_handle, .. } => buffer_handle,
+            PendingOp::Port { filled, .. } => *filled,
+            _ => 0,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn set_filled(&mut self, val: usize) {
+        if let PendingOp::Port { filled, .. } = self {
+            *filled = val;
         }
     }
 }

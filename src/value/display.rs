@@ -525,41 +525,50 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::arena::with_test_region;
     use crate::value::error::error_val;
 
     /// Debug repr of a string containing a double-quote must escape it.
     #[test]
     fn test_debug_string_escapes_double_quote() {
-        let val = Value::string("say \"hello\"");
-        let repr = format!("{:?}", val);
-        assert_eq!(repr, r#""say \"hello\"""#);
+        with_test_region(|| {
+            let val = Value::string("say \"hello\"");
+            let repr = format!("{:?}", val);
+            assert_eq!(repr, r#""say \"hello\"""#);
+        })
     }
 
     /// Debug repr of a string containing a backslash must escape it.
     #[test]
     fn test_debug_string_escapes_backslash() {
-        let val = Value::string("path\\to\\file");
-        let repr = format!("{:?}", val);
-        assert_eq!(repr, r#""path\\to\\file""#);
+        with_test_region(|| {
+            let val = Value::string("path\\to\\file");
+            let repr = format!("{:?}", val);
+            assert_eq!(repr, r#""path\\to\\file""#);
+        })
     }
 
     /// Debug repr of a string containing both backslash and double-quote.
     /// Backslash must be escaped before quote (order matters).
     #[test]
     fn test_debug_string_escapes_backslash_and_quote() {
-        let val = Value::string("a\\\"b");
-        let repr = format!("{:?}", val);
-        assert_eq!(repr, r#""a\\\"b""#);
+        with_test_region(|| {
+            let val = Value::string("a\\\"b");
+            let repr = format!("{:?}", val);
+            assert_eq!(repr, r#""a\\\"b""#);
+        })
     }
 
     /// Display of a struct with a string value must quote and escape the string.
     #[test]
     fn test_display_struct_quotes_string_values() {
-        let err = error_val("type-error", "expected \"integer\"");
-        let repr = format!("{}", err);
-        // The struct has :error and :message keys (BTreeMap, sorted by key).
-        // :error → :type-error (keyword, no quotes)
-        // :message → "expected \"integer\"" (string, quoted and escaped)
-        assert!(repr.contains(r#""expected \"integer\"""#), "got: {}", repr);
+        with_test_region(|| {
+            let err = error_val("type-error", "expected \"integer\"");
+            let repr = format!("{}", err);
+            // The struct has :error and :message keys (BTreeMap, sorted by key).
+            // :error → :type-error (keyword, no quotes)
+            // :message → "expected \"integer\"" (string, quoted and escaped)
+            assert!(repr.contains(r#""expected \"integer\"""#), "got: {}", repr);
+        })
     }
 }

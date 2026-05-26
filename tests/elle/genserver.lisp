@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## tests/elle/genserver.lisp — Tests for GenServer, Agent, and Supervisor
 ##
 ## Run: ./target/debug/elle tests/elle/genserver.lisp

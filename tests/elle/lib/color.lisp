@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 11)
 
 ## Test suite for lib/color — color science library
 

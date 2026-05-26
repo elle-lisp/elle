@@ -6,7 +6,7 @@ use crate::hir::functionalize::functionalize;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
-use crate::primitives::intern_primitive_names;
+use crate::primitives::{cached_primitive_meta, intern_primitive_names};
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
@@ -21,6 +21,14 @@ pub fn compile(
     symbols: &mut SymbolTable,
     source_name: &str,
 ) -> Result<CompileResult, String> {
+    crate::with_transient_region!({ compile_inner(source, symbols, source_name) })
+}
+
+fn compile_inner(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<CompileResult, String> {
     // Ensure caller's SymbolTable has primitive names interned so that
     // SymbolIds match the cached PrimitiveMeta.
     intern_primitive_names(symbols);
@@ -29,10 +37,11 @@ pub fn compile(
     let syntax = read_syntax(source, source_name)?;
 
     // Phase 2: Macro expansion (cached VM for macro bodies)
-    let (expanded, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-        let expanded = expander.expand(syntax, symbols, macro_vm)?;
-        Ok::<_, String>((expanded, meta))
-    })?;
+    let (expanded, meta, core_env) =
+        cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+            let expanded = expander.expand(syntax, symbols, macro_vm)?;
+            Ok::<_, String>((expanded, meta, expander.core_env.clone()))
+        })?;
 
     // Phase 3: Analyze to HIR with interprocedural signal and arity tracking
     let mut arena = BindingArena::new();
@@ -43,6 +52,9 @@ pub fn compile(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if !core_env.is_empty() {
+        analyzer.bind_compile_time_env(&core_env);
+    }
     let mut analysis = analyzer.analyze(&expanded)?;
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
@@ -53,9 +65,16 @@ pub fn compile(
     crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
     // Phase 4: Lower to LIR with intrinsic specialization
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] compile:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -63,16 +82,12 @@ pub fn compile(
         .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?;
-    let scope_stats = lowerer.scope_stats().clone();
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
-    Ok(CompileResult {
-        bytecode,
-        scope_stats,
-    })
+    Ok(CompileResult { bytecode })
 }
 
 /// Classify an expanded top-level form into a `FileForm`.
@@ -113,6 +128,17 @@ pub fn compile_file_to_lir(
     source_name: &str,
     epoch_skip: usize,
 ) -> Result<crate::lir::LirModule, String> {
+    crate::with_transient_region!({
+        compile_file_to_lir_inner(source, symbols, source_name, epoch_skip)
+    })
+}
+
+fn compile_file_to_lir_inner(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+    epoch_skip: usize,
+) -> Result<crate::lir::LirModule, String> {
     intern_primitive_names(symbols);
 
     let mut syntaxes = read_syntax_all_for(source, source_name)?;
@@ -127,18 +153,19 @@ pub fn compile_file_to_lir(
     }
 
     // Expand all forms, splicing include/include-file inline
-    let (expanded_forms, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-        let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-        let mut expanded_forms = Vec::new();
-        let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
-        while let Some(syntax) = pending.pop_front() {
-            if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
-                continue;
+    let (expanded_forms, meta, core_env) =
+        cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
+            let mut expanded_forms = Vec::new();
+            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+            while let Some(syntax) = pending.pop_front() {
+                if resolve_and_splice_include(&syntax, source_name, &mut pending, &mut included)? {
+                    continue;
+                }
+                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
-            expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
-        }
-        Ok::<_, String>((expanded_forms, meta))
-    })?;
+            Ok::<_, String>((expanded_forms, meta, expander.core_env.clone()))
+        })?;
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
 
@@ -160,6 +187,9 @@ pub fn compile_file_to_lir(
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
+    if !core_env.is_empty() {
+        analyzer.bind_compile_time_env(&core_env);
+    }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let errors = analyzer.take_errors();
@@ -189,9 +219,17 @@ pub fn compile_file_to_lir(
     functionalize(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let meta = cached_primitive_meta(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] compile_file_to_lir:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -205,7 +243,7 @@ pub fn compile_file_to_lir(
 /// expansion (with file-scope stamping and include resolution), analysis,
 /// error surfacing, tail-call marking, and functionalization.
 ///
-/// Returns `(hir, arena, expander, prim_values, signal_projection, escape_projection_env)`.
+/// Returns `(hir, arena, expander, prim_values, signal_projection)`.
 /// Callers that don't need all fields can ignore the extras.
 #[allow(clippy::type_complexity)]
 fn compile_file_frontend(
@@ -219,10 +257,24 @@ fn compile_file_frontend(
         crate::syntax::Expander,
         std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
         Option<std::collections::HashMap<String, crate::signals::Signal>>,
-        std::collections::HashMap<
-            crate::hir::Binding,
-            std::collections::HashMap<String, crate::compiler::bytecode::FieldEscapeInfo>,
-        >,
+    ),
+    String,
+> {
+    crate::with_transient_region!({ compile_file_frontend_inner(source, symbols, source_name) })
+}
+
+#[allow(clippy::type_complexity)]
+fn compile_file_frontend_inner(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<
+    (
+        crate::hir::Hir,
+        BindingArena,
+        crate::syntax::Expander,
+        std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
+        Option<std::collections::HashMap<String, crate::signals::Signal>>,
     ),
     String,
 > {
@@ -275,10 +327,12 @@ fn compile_file_frontend(
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let signal_projection = analyzer.take_signal_projection();
-    let escape_projection_env = std::mem::take(&mut analyzer.escape_projection_env);
     let errors = analyzer.take_errors();
     drop(analyzer);
 
@@ -301,14 +355,7 @@ fn compile_file_frontend(
     functionalize(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
-    Ok((
-        hir,
-        arena,
-        expander,
-        prim_values,
-        signal_projection,
-        escape_projection_env,
-    ))
+    Ok((hir, arena, expander, prim_values, signal_projection))
 }
 
 /// Compile a file as a single synthetic letrec.
@@ -327,7 +374,7 @@ pub fn compile_file_to_fhir(
     ),
     String,
 > {
-    let (hir, arena, _expander, _prim_values, _signal_projection, _escape_proj_env) =
+    let (hir, arena, _expander, _prim_values, _signal_projection) =
         compile_file_frontend(source, symbols, source_name)?;
     let names = symbols.all_names();
     Ok((hir, arena, names))
@@ -359,13 +406,21 @@ fn compile_file_inner(
     symbols: &mut SymbolTable,
     source_name: &str,
 ) -> Result<(CompileResult, crate::syntax::Expander), String> {
-    let (hir, arena, expander, prim_values, signal_projection, escape_projection_env) =
+    let (hir, arena, expander, prim_values, signal_projection) =
         compile_file_frontend(source, symbols, source_name)?;
 
     // Lower to LIR
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    let meta = cached_primitive_meta(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] compile_file:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -373,16 +428,7 @@ fn compile_file_inner(
         .with_symbol_names(symbol_names.clone())
         .with_region_info(region_info);
 
-    // Seed escape projections from imported modules
-    for (binding, proj) in &escape_projection_env {
-        let rotation_safe = proj.values().all(|v| v.rotation_safe);
-        let outward_safe = proj.values().all(|v| v.outward_safe);
-        lowerer.seed_import_escape_projection(*binding, rotation_safe, outward_safe);
-    }
-
     let lir_module = lowerer.lower(&hir)?;
-    let escape_projection = lowerer.take_escape_projection();
-    let scope_stats = lowerer.scope_stats().clone();
 
     // Emit bytecode
     let signal = lir_module.entry.signal;
@@ -390,15 +436,8 @@ fn compile_file_inner(
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
-    bytecode.escape_projection = escape_projection;
 
-    Ok((
-        CompileResult {
-            bytecode,
-            scope_stats,
-        },
-        expander,
-    ))
+    Ok((CompileResult { bytecode }, expander))
 }
 
 /// Splice include/include-file directives in source text.

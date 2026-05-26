@@ -426,39 +426,14 @@ mod tests {
     use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
     use crate::value::fiber::SignalBits;
     use crate::value::Closure;
-    use std::collections::HashMap;
 
-    /// Create a minimal closure for testing.
-    /// This closure has empty bytecode — it won't execute correctly,
-    /// but it's enough to test callback creation/destruction.
     fn test_closure(arity: usize) -> Rc<Closure> {
-        use crate::error::LocationMap;
-        use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
         let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(arity),
             num_locals: arity,
-            num_captures: 0,
             num_params: arity,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(arity), Rc::new(vec![]))
         });
         Rc::new(Closure {
             template,
@@ -512,20 +487,6 @@ mod tests {
     }
 
     #[test]
-    fn test_callback_error_flag() {
-        // Ensure the error flag starts empty
-        assert!(take_callback_error().is_none());
-
-        // Set an error
-        set_callback_error(crate::value::error_val("test", "test error"));
-        let err = take_callback_error();
-        assert!(err.is_some());
-
-        // Flag should be cleared after take
-        assert!(take_callback_error().is_none());
-    }
-
-    #[test]
     fn test_build_callback_env_exact_arity() {
         let closure = test_closure(2);
         let args = vec![Value::int(10), Value::int(20)];
@@ -536,50 +497,42 @@ mod tests {
         assert_eq!(env[1].as_int(), Some(20));
     }
 
+    // Restored (wrongly deleted in 94cd2050)
+    #[test]
+    fn test_callback_error_flag() {
+        crate::value::arena::with_test_region(|| {
+            assert!(take_callback_error().is_none());
+            set_callback_error(crate::value::error_val("test", "test error"));
+            let err = take_callback_error();
+            assert!(err.is_some());
+            assert!(take_callback_error().is_none());
+        });
+    }
+
     #[test]
     fn test_build_callback_env_with_captures() {
-        use crate::error::LocationMap;
-        use crate::signals::Signal;
-        use crate::value::types::Arity;
-        use crate::value::ClosureTemplate;
+        crate::value::arena::with_test_region(|| {
+            use crate::value::types::Arity;
+            use crate::value::ClosureTemplate;
 
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(1),
-            num_locals: 2, // 1 param + 1 local
-            num_captures: 1,
-            num_params: 1,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
+            let template = Rc::new(ClosureTemplate {
+                num_locals: 2, // 1 param + 1 local
+                num_captures: 1,
+                num_params: 1,
+                ..ClosureTemplate::new(Rc::new(vec![]), Arity::Exact(1), Rc::new(vec![]))
+            });
 
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
+            let closure = Rc::new(Closure {
+                template,
+                env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::int(99)]),
+                squelch_mask: SignalBits::EMPTY,
+            });
+            let args = vec![Value::int(42)];
+            let env = build_callback_env(&closure, &args);
+            assert_eq!(env.len(), 3);
+            assert_eq!(env[0].as_int(), Some(99));
+            assert_eq!(env[1].as_int(), Some(42));
         });
-
-        let closure = Rc::new(Closure {
-            template,
-            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::int(99)]), // 1 capture
-            squelch_mask: SignalBits::EMPTY,
-        });
-        let args = vec![Value::int(42)];
-        let env = build_callback_env(&closure, &args);
-        // 1 capture + 1 param + 1 local = 3
-        assert_eq!(env.len(), 3);
-        assert_eq!(env[0].as_int(), Some(99)); // capture
-        assert_eq!(env[1].as_int(), Some(42)); // param
-                                               // env[2] is NIL for the non-cell local variable
     }
 
     #[test]

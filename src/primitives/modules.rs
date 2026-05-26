@@ -1,4 +1,3 @@
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -345,15 +344,14 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Declarative primitive definitions for module loading operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
-    name: "import",
-    func: prim_import_file,
-    signal: Signal::errors(),
-    arity: Arity::Exact(1),
-    doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, native plugins). Binary files that fail UTF-8 reading are automatically tried as plugins.",
-    params: &["spec"],
-    category: "",
-    example: "(import \"std/http\")",
-    aliases: &["import-file", "module/import"],
-}];
+// Declarative primitive definitions for module loading operations
+primitive! {
+    "import" => prim_import_file {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, native plugins). Binary files that fail UTF-8 reading are automatically tried as plugins.",
+        params: &["spec"],
+        example: "(import \"std/http\")",
+        aliases: &["import-file", "module/import"],
+    }
+}

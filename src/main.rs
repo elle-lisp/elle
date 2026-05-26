@@ -32,8 +32,7 @@ fn print_help() {
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
     println!("  --mlir=POLICY         MLIR policy: off, eager, adaptive (default), or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
-    println!("  --flip=on|off         Insert FlipEnter/FlipSwap/FlipExit instructions");
-    println!("                          (escape-analysis-gated rotation; default on)");
+    println!("  --flip=on|off         Legacy no-op (accepted for backwards compat)");
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
     println!("                          call, signal, compile, fiber, hir, lir,");
     println!("                          emit, jit, io, gc, import, macro, wasm,");
@@ -221,7 +220,7 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
     let needs_pipeline = cfg.dump.iter().any(|k| {
         matches!(
             k.as_str(),
-            "hir" | "lir" | "cfg" | "dfa" | "jit" | "git" | "escape"
+            "hir" | "lir" | "cfg" | "dfa" | "jit" | "git"
         )
     });
     if !needs_pipeline {
@@ -233,13 +232,6 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
             eprintln!("{}", e);
             e
         })?;
-
-    if cfg.dump.contains("escape") {
-        println!(";; ── escape analysis ────────────────────────────────────────");
-        if let Some(ref dump) = module.escape_dump {
-            print!("{}", dump);
-        }
-    }
 
     if cfg.dump.contains("hir") {
         println!(";; ── hir ────────────────────────────────────────────────────");
@@ -409,14 +401,11 @@ fn print_dfa_module(module: &elle::lir::LirModule) {
 fn print_dfa_function(tag: &str, f: &elle::lir::LirFunction) {
     let name = f.name.as_deref().unwrap_or("<anon>");
     println!(
-        "; {} {}: signal={:?} rotation_safe={} result_immediate={} outward_heap_set={} \
+        "; {} {}: signal={:?} \
          capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
         tag,
         name,
         f.signal,
-        f.rotation_safe,
-        f.result_is_immediate,
-        f.has_outward_heap_set,
         f.capture_params_mask,
         f.capture_locals_mask,
     );
@@ -461,8 +450,7 @@ fn run_source(
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
     #[cfg(feature = "wasm")]
     if elle::config::get().wasm_full() {
-        let no_stdlib = elle::config::get().wasm_no_stdlib;
-        let eval_fn = if no_stdlib {
+        let eval_fn = if elle::config::get().no_stdlib {
             elle::wasm::eval_wasm
         } else {
             elle::wasm::eval_wasm_with_stdlib
@@ -489,11 +477,6 @@ fn run_source(
             return Err(e);
         }
     };
-
-    // Print scope stats if --stats is set
-    if elle::config::get().stats && result.scope_stats.scopes_analyzed > 0 {
-        eprint!("{}", result.scope_stats);
-    }
 
     // Debug: print bytecode if --debug is set
     if elle::config::get().has_trace("bytecode") {
@@ -631,7 +614,9 @@ fn main() {
 
     let _sym_guard = SymbolTableGuard::new(&mut symbols);
 
-    init_stdlib(&mut vm, &mut symbols);
+    if !elle::config::get().no_stdlib {
+        init_stdlib(&mut vm, &mut symbols);
+    }
 
     let _vm_guard = VmContextGuard::new(&mut vm);
 

@@ -5,7 +5,6 @@
 //! - `put`: updates values in @arrays, arrays, strings, @strings, @bytes, and structs
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
-use crate::value::fiberheap;
 use crate::value::{error_val, sorted_struct_get, sorted_struct_insert, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -536,9 +535,8 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let old = vec_ref.borrow()[resolved];
-        fiberheap::decref_and_free(old);
-        fiberheap::incref(args[2]);
         vec_ref.borrow_mut()[resolved] = args[2];
+        crate::value::arena::track_store(old, args[2]);
         return (SIG_OK, args[0]); // Return the mutated array
     }
 
@@ -663,12 +661,12 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     let value = args[2];
 
     if let Some(mstruct) = args[0].as_struct_mut() {
-        // Decref old value, incref new value.
-        if let Some(&old_val) = mstruct.borrow().get(&key) {
-            fiberheap::decref_and_free(old_val);
-        }
-        fiberheap::incref(value);
+        let old = mstruct.borrow().get(&key).copied();
         mstruct.borrow_mut().insert(key, value);
+        match old {
+            Some(old_val) => crate::value::arena::track_store(old_val, value),
+            None => crate::value::arena::track_insert(value),
+        }
         return (SIG_OK, args[0]); // Return the mutated struct
     }
 

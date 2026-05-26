@@ -10,7 +10,6 @@
 //! - fiber/abort (abort): Inject error and resume for graceful unwinding
 //! - fiber?: Type predicate
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{
     FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_TERMINAL,
@@ -59,13 +58,6 @@ pub(crate) fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
 
     let mask = handle.with(|fiber| fiber.mask);
     (SIG_OK, Value::int(mask.raw() as i64))
-}
-
-/// (fiber? value) → bool
-///
-/// Type predicate: returns true if the value is a fiber.
-pub(crate) fn prim_is_fiber(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_fiber()))
 }
 
 /// (fiber/parent fiber) → fiber | nil
@@ -316,117 +308,83 @@ pub(crate) fn prim_fiber_caps(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::set(keywords.into_iter().collect()))
 }
 
-/// Declarative primitive definitions for fiber introspection and management
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "fiber/bits",
-        func: prim_fiber_bits,
+// Declarative primitive definitions for fiber introspection and management
+primitive! {
+    "fiber/bits" => prim_fiber_bits {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the signal bits from the fiber's last signal",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/bits f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/mask",
-        func: prim_fiber_mask,
+    }
+    "fiber/mask" => prim_fiber_mask {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's signal mask",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/mask f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber?",
-        func: prim_is_fiber,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Check if a value is a fiber",
-        params: &["value"],
-        category: "fiber",
-        example: "(fiber? f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/cancel",
-        func: prim_fiber_cancel,
-        signal: Signal {
+    }
+    "fiber/cancel" => prim_fiber_cancel {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_TERMINAL),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(1, 2),
         doc: "Hard-kill a fiber. Sets it to :error without unwinding. No defer/protect runs. Supports self-cancel.",
         params: &["fiber", "error?"],
         category: "fiber",
         example: "(fiber/cancel f)\n(fiber/cancel f :reason)",
         aliases: &["cancel"],
-    },
-    PrimitiveDef {
-        name: "fiber/child",
-        func: prim_fiber_child,
+    }
+    "fiber/child" => prim_fiber_child {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the most recently resumed child fiber, or nil if none",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/child f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/parent",
-        func: prim_fiber_parent,
-        signal: Signal::silent(),
+    }
+    "fiber/parent" => prim_fiber_parent {
         arity: Arity::Exact(1),
         doc: "Get the parent fiber, or nil if this is a top-level fiber",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/parent f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/propagate",
-        func: prim_fiber_propagate,
-        signal: Signal {
+    }
+    "fiber/propagate" => prim_fiber_propagate {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_PROPAGATE),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/propagate f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/caps",
-        func: prim_fiber_caps,
-        signal: Signal {
+    }
+    "fiber/caps" => prim_fiber_caps {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_QUERY),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(0, 1),
         doc: "Get the fiber's active capabilities as a keyword set",
         params: &["fiber?"],
         category: "fiber",
         example: "(fiber/caps)\n(fiber/caps f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/abort",
-        func: prim_fiber_abort,
-        signal: Signal {
+    }
+    "fiber/abort" => prim_fiber_abort {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_ABORT),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(1, 2),
         doc: "Gracefully terminate a fiber by injecting an error and resuming it. Defer/protect blocks run.",
         params: &["fiber", "error?"],
         category: "fiber",
         example: "(fiber/abort f)\n(fiber/abort f :reason)",
         aliases: &["abort"],
-    },
-];
+    }
+}

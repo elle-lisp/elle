@@ -157,14 +157,6 @@ pub extern "C" fn elle_jit_call(
         } else {
             (def.func)(args_slice)
         };
-        // Parameter inheritance: snapshot the creating fiber's
-        // parameterize bindings into a freshly created fiber/new fiber.
-        // See `VM::snapshot_param_frames_into` for the rationale.
-        if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
-            if let Some(handle) = value.as_fiber() {
-                vm.snapshot_param_frames_into(handle);
-            }
-        }
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
@@ -209,12 +201,6 @@ pub extern "C" fn elle_jit_call(
                 return JitValue::nil();
             }
 
-            // Save/restore rotation base so nested self-tail-call loops
-            // don't corrupt the caller's rotation state.
-            let saved_rotation_base =
-                crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
-                    .flatten();
-
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
             } else {
@@ -233,11 +219,6 @@ pub extern "C" fn elle_jit_call(
             };
 
             vm.fiber.call_depth -= 1;
-
-            // Restore rotation base for the caller's self-tail-call loop.
-            crate::value::fiberheap::with_current_heap_mut(|h| {
-                h.restore_jit_rotation_base(saved_rotation_base.clone());
-            });
 
             // Check for exception (error or halt) — use contains for compound signals
             if vm
@@ -406,16 +387,12 @@ pub extern "C" fn elle_jit_resolve_tail_call(
     }
 }
 
-/// Rotate slab pools at a self-tail-call boundary in JIT code.
+/// Release heap objects at a self-tail-call boundary in JIT code.
 ///
 /// Called from the JIT self-tail-call loop after reading argument values
-/// but before writing them back. The argument SSA values are in registers;
-/// the rotation frees iteration N-2's slab slots while iteration N-1's
-/// slots (referenced by argument values) remain in the swap pool.
+/// JIT pool rotation — now a no-op (regions handle deallocation via FreeRegion).
 #[no_mangle]
-pub extern "C" fn elle_jit_rotate_pools(_vm: *mut ()) {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools_jit());
-}
+pub extern "C" fn elle_jit_rotate_pools(_vm: *mut ()) {}
 
 /// Increment call depth and check for stack overflow.
 ///
@@ -631,12 +608,6 @@ pub extern "C" fn elle_jit_tail_call(
         } else {
             (def.func)(args_slice)
         };
-        // Parameter inheritance for fiber/new — see elle_jit_call above.
-        if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
-            if let Some(handle) = value.as_fiber() {
-                vm.snapshot_param_frames_into(handle);
-            }
-        }
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
@@ -675,7 +646,6 @@ pub extern "C" fn elle_jit_tail_call(
             env: new_env,
             location_map: closure.template.location_map.clone(),
             squelch_mask: closure.squelch_mask,
-            rotation_safe: closure.template.rotation_safe,
         });
 
         return TAIL_CALL_SENTINEL;
@@ -847,33 +817,35 @@ mod tests {
 
     #[test]
     fn test_has_exception() {
-        use crate::primitives::register_primitives;
-        use crate::symbol::SymbolTable;
+        crate::value::arena::with_test_region(|| {
+            use crate::primitives::register_primitives;
+            use crate::symbol::SymbolTable;
 
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbols);
+            let mut symbols = SymbolTable::new();
+            let mut vm = VM::new();
+            let _signals = register_primitives(&mut vm, &mut symbols);
 
-        // Initially no exception
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(false));
+            // Initially no exception
+            let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+            assert_eq!(result, JitValue::bool_val(false));
 
-        // Set an error signal
-        vm.fiber.signal = Some((
-            crate::value::SIG_ERROR,
-            crate::value::error_val("division-by-zero", "test"),
-        ));
+            // Set an error signal
+            vm.fiber.signal = Some((
+                crate::value::SIG_ERROR,
+                crate::value::error_val("division-by-zero", "test"),
+            ));
 
-        // Now should return true
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(true));
+            // Now should return true
+            let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+            assert_eq!(result, JitValue::bool_val(true));
 
-        // Clear signal
-        vm.fiber.signal = None;
+            // Clear signal
+            vm.fiber.signal = None;
 
-        // Should return false again
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(false));
+            // Should return false again
+            let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+            assert_eq!(result, JitValue::bool_val(false));
+        });
     }
 
     // -- jit_handle_primitive_signal: composed signal coverage --
@@ -884,27 +856,6 @@ mod tests {
         let result = jit_handle_primitive_signal(&mut vm, SIG_OK, Value::int(42));
         assert_eq!(result, JitValue::from_value(Value::int(42)));
         assert!(vm.fiber.signal.is_none());
-    }
-
-    #[test]
-    fn bare_sig_error_stores_signal_returns_nil() {
-        let mut vm = make_vm();
-        let err = Value::string("boom");
-        let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
-        assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn composed_sig_error_io_stores_signal_returns_nil() {
-        let mut vm = make_vm();
-        let bits = SIG_ERROR | SIG_IO;
-        let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("io-error"));
-        assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        assert!(sig.contains(SIG_IO));
     }
 
     #[test]
@@ -958,15 +909,44 @@ mod tests {
         assert_eq!(sig, user_bit);
     }
 
+    // -- Restored tests (wrongly deleted in 94cd2050) --
+
+    #[test]
+    fn bare_sig_error_stores_signal_returns_nil() {
+        crate::value::arena::with_test_region(|| {
+            let mut vm = make_vm();
+            let err = Value::string("boom");
+            let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
+            assert_eq!(result, JitValue::nil());
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert_eq!(sig, SIG_ERROR);
+        });
+    }
+
+    #[test]
+    fn composed_sig_error_io_stores_signal_returns_nil() {
+        crate::value::arena::with_test_region(|| {
+            let mut vm = make_vm();
+            let bits = SIG_ERROR | SIG_IO;
+            let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("io-error"));
+            assert_eq!(result, JitValue::nil());
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert!(sig.contains(SIG_ERROR));
+            assert!(sig.contains(SIG_IO));
+        });
+    }
+
     #[test]
     fn sig_error_terminal_stored_as_error_not_panic() {
-        use crate::value::fiber::SIG_TERMINAL;
-        let bits = SIG_ERROR | SIG_TERMINAL;
-        let mut vm = make_vm();
-        let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("terminal"));
-        assert_eq!(result, JitValue::nil());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        assert!(sig.contains(SIG_TERMINAL));
+        crate::value::arena::with_test_region(|| {
+            use crate::value::fiber::SIG_TERMINAL;
+            let bits = SIG_ERROR | SIG_TERMINAL;
+            let mut vm = make_vm();
+            let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("terminal"));
+            assert_eq!(result, JitValue::nil());
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert!(sig.contains(SIG_ERROR));
+            assert!(sig.contains(SIG_TERMINAL));
+        });
     }
 }

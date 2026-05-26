@@ -55,7 +55,7 @@ Tests are organized by feature area:
 | `strings.lisp` | String operations |
 | `tables.lisp` | Table operations |
 | `fibers.lisp` | Fiber operations |
-| `coroutines.lisp` | Coroutine behavior |
+| `coroutines.lisp` | Fiber behavior |
 | `signals.lisp` | Signal system |
 | `closures.lisp` | Closure behavior |
 | `recursion.lisp` | Recursive functions |

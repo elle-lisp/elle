@@ -354,39 +354,55 @@ pub extern "C" fn elle_jit_check_signal_bound(
 // Region (scope) helpers for JIT
 // =============================================================================
 
-/// Push a scope mark on the current fiber heap (called by JIT `RegionEnter`).
+/// Legacy scope-mark helpers (no-ops — replaced by FreeRegion).
 #[no_mangle]
-pub extern "C" fn elle_jit_region_enter() -> JitValue {
-    crate::value::fiberheap::region_enter();
+pub extern "C" fn elle_jit_region_enter() -> JitValue { JitValue::nil() }
+#[no_mangle]
+pub extern "C" fn elle_jit_region_exit() -> JitValue { JitValue::nil() }
+#[no_mangle]
+pub extern "C" fn elle_jit_region_exit_call() -> JitValue { JitValue::nil() }
+#[no_mangle]
+pub extern "C" fn elle_jit_region_rotate() -> JitValue { JitValue::nil() }
+
+/// Free all objects in a specific region by walking the slab linked list.
+#[no_mangle]
+pub extern "C" fn elle_jit_free_region(region_id: u32) {
+    crate::value::fiberheap::free_region(region_id as u16);
+}
+
+/// Increment the reference count of a region (cross-region reference).
+#[no_mangle]
+pub extern "C" fn elle_jit_incref_region(region_id: u32) {
+    let ptr = crate::value::fiberheap::current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).incref_region(region_id as u16) };
+    }
+}
+
+/// Decrement the reference count of a region (cross-region reference).
+#[no_mangle]
+pub extern "C" fn elle_jit_decref_region(region_id: u32) {
+    let ptr = crate::value::fiberheap::current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).decref_region(region_id as u16) };
+    }
+}
+
+/// Increment the durable reference count for a heap value.
+/// Called by JIT `StoreLocal` to track binding references.
+#[no_mangle]
+pub extern "C" fn elle_jit_incref(tag: u64, payload: u64) -> JitValue {
+    let _val = crate::value::Value { tag, payload };
     JitValue::nil()
 }
 
-/// Pop a scope mark and release scoped objects (called by JIT `RegionExit`).
+/// Decrement refcount only (no drop). Called by JIT `StoreLocalRefcounted`
+/// to release the old binding's reference. The old value may still be
+/// reachable through collections or other bindings — actual freeing is
+/// deferred to scope exit.
 #[no_mangle]
-pub extern "C" fn elle_jit_region_exit() -> JitValue {
-    crate::value::fiberheap::region_exit();
-    JitValue::nil()
-}
-
-/// Pop two scope marks and release only the range between them
-/// (called by JIT `RegionExitCall`).
-#[no_mangle]
-pub extern "C" fn elle_jit_region_exit_call() -> JitValue {
-    crate::value::fiberheap::region_exit_call();
-    JitValue::nil()
-}
-
-/// Rotate loop scope marks: pop current, release previous, push current
-/// as new previous, push fresh mark as new current.
-#[no_mangle]
-pub extern "C" fn elle_jit_region_rotate() -> JitValue {
-    crate::value::fiberheap::region_rotate();
-    JitValue::nil()
-}
-
-#[no_mangle]
-pub extern "C" fn elle_jit_region_rotate_dealloc() -> JitValue {
-    crate::value::fiberheap::region_rotate_dealloc();
+pub extern "C" fn elle_jit_decref(tag: u64, payload: u64) -> JitValue {
+    let _val = crate::value::Value { tag, payload };
     JitValue::nil()
 }
 
@@ -398,32 +414,34 @@ mod tests {
 
     #[test]
     fn test_has_exception() {
-        use crate::primitives::register_primitives;
-        use crate::symbol::SymbolTable;
+        crate::value::arena::with_test_region(|| {
+            use crate::primitives::register_primitives;
+            use crate::symbol::SymbolTable;
 
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbols);
+            let mut symbols = SymbolTable::new();
+            let mut vm = VM::new();
+            let _signals = register_primitives(&mut vm, &mut symbols);
 
-        // Initially no exception
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(false));
+            // Initially no exception
+            let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+            assert_eq!(result, JitValue::bool_val(false));
 
-        // Set an error signal
-        vm.fiber.signal = Some((
-            crate::value::SIG_ERROR,
-            crate::value::error_val("division-by-zero", "test"),
-        ));
+            // Set an error signal
+            vm.fiber.signal = Some((
+                crate::value::SIG_ERROR,
+                crate::value::error_val("division-by-zero", "test"),
+            ));
 
-        // Now should return true
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(true));
+            // Now should return true
+            let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+            assert_eq!(result, JitValue::bool_val(true));
 
-        // Clear signal
-        vm.fiber.signal = None;
+            // Clear signal
+            vm.fiber.signal = None;
 
-        // Should return false again
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(false));
+            // Should return false again
+            let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+            assert_eq!(result, JitValue::bool_val(false));
+        });
     }
 }

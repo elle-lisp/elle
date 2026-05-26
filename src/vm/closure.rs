@@ -1,13 +1,15 @@
 use super::core::VM;
-use crate::value::arena::alloc_inline_slice;
+use crate::hir::region::RegionId;
 use crate::value::fiber::SignalBits;
-use crate::value::{Closure, Value};
+use crate::value::heap::{Closure, HeapObject};
+use crate::value::Value;
 
 pub(crate) fn handle_make_closure(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
     constants: &[Value],
+    region_id: RegionId,
 ) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     let num_upvalues = vm.read_u16(bytecode, ip) as usize;
@@ -30,12 +32,22 @@ pub(crate) fn handle_make_closure(
     captured.reverse();
 
     // Create closure with shared template and captured environment.
-    // `env` is arena-allocated inline; its lifetime matches the Closure's.
+    // `env` is allocated inline in the same region as the closure.
+    let env = vm
+        .heap()
+        .alloc_inline_slice_in_region::<Value>(&captured, region_id);
     let closure = Closure {
         template: template_closure.template.clone(),
-        env: alloc_inline_slice::<Value>(&captured),
+        env,
         squelch_mask: SignalBits::EMPTY,
     };
 
-    vm.fiber.stack.push(Value::closure(closure));
+    let obj = HeapObject::Closure {
+        closure,
+        traits: Value::NIL,
+    };
+    // alloc_in_region → alloc_obj → incref_cross_region_refs handles
+    // cross-region incref for closure env contents automatically.
+    let val = vm.heap().alloc_in_region(obj, region_id);
+    vm.fiber.stack.push(val);
 }

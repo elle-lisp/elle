@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 10;
+pub const CURRENT_EPOCH: u64 = 11;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -245,6 +245,51 @@ static MIGRATIONS: &[Migration] = &[
             MigrationRule::Rename { old: "cdr", new: "rest" },
         ],
     },
+    Migration {
+        epoch: 11,
+        summary: "remove coroutine API — use fibers directly",
+        rules: &[
+            // coro/new and make-coroutine → (fiber/new fn |:yield|)
+            MigrationRule::Replace {
+                symbol: "coro/new",
+                arity: 1,
+                template: "(fiber/new $1 |:yield|)",
+            },
+            MigrationRule::Replace {
+                symbol: "make-coroutine",
+                arity: 1,
+                template: "(fiber/new $1 |:yield|)",
+            },
+            // coro/* → fiber/* renames
+            MigrationRule::Rename { old: "coro/resume", new: "fiber/resume" },
+            MigrationRule::Rename { old: "coro/status", new: "fiber/status" },
+            MigrationRule::Rename { old: "coro/done?", new: "fiber/done?" },
+            MigrationRule::Rename { old: "coro/value", new: "fiber/value" },
+            // gen-1 long-form renames
+            MigrationRule::Rename { old: "coroutine-resume", new: "fiber/resume" },
+            MigrationRule::Rename { old: "coroutine-status", new: "fiber/status" },
+            MigrationRule::Rename { old: "coroutine-done?", new: "fiber/done?" },
+            MigrationRule::Rename { old: "coroutine-value", new: "fiber/value" },
+            // predicates
+            MigrationRule::Rename { old: "coroutine?", new: "fiber?" },
+            MigrationRule::Rename { old: "coro?", new: "fiber?" },
+            // delegation
+            MigrationRule::Rename { old: "yield-from", new: "yield*" },
+            // removals — fibers are natively iterable
+            MigrationRule::Remove {
+                symbol: "coro/>iterator",
+                message: "fibers are natively iterable; remove the coro/>iterator call",
+            },
+            MigrationRule::Remove {
+                symbol: "coroutine->iterator",
+                message: "fibers are natively iterable; remove the coroutine->iterator call",
+            },
+            MigrationRule::Remove {
+                symbol: "coroutine-next",
+                message: "use (fiber/resume f) instead of (coroutine-next f)",
+            },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -388,7 +433,19 @@ mod tests {
         assert_eq!(renames.get("cons"), Some(&"pair"));
         assert_eq!(renames.get("car"), Some(&"first"));
         assert_eq!(renames.get("cdr"), Some(&"rest"));
-        assert_eq!(renames.len(), 13);
+        // epoch 11: coro/* → fiber/*, coroutine-* → fiber/*, etc.
+        assert_eq!(renames.get("coro/resume"), Some(&"fiber/resume"));
+        assert_eq!(renames.get("coro/status"), Some(&"fiber/status"));
+        assert_eq!(renames.get("coro/done?"), Some(&"fiber/done?"));
+        assert_eq!(renames.get("coro/value"), Some(&"fiber/value"));
+        assert_eq!(renames.get("coroutine-resume"), Some(&"fiber/resume"));
+        assert_eq!(renames.get("coroutine-status"), Some(&"fiber/status"));
+        assert_eq!(renames.get("coroutine-done?"), Some(&"fiber/done?"));
+        assert_eq!(renames.get("coroutine-value"), Some(&"fiber/value"));
+        assert_eq!(renames.get("coroutine?"), Some(&"fiber?"));
+        assert_eq!(renames.get("coro?"), Some(&"fiber?"));
+        assert_eq!(renames.get("yield-from"), Some(&"yield*"));
+        assert_eq!(renames.len(), 24);
     }
 
     #[test]
@@ -409,7 +466,11 @@ mod tests {
     fn test_removals_epoch_2() {
         let removals = removals_in_range(0, CURRENT_EPOCH);
         assert!(removals.contains_key("write"));
-        assert_eq!(removals.len(), 1);
+        // epoch 11: coro/>iterator, coroutine->iterator, coroutine-next
+        assert!(removals.contains_key("coro/>iterator"));
+        assert!(removals.contains_key("coroutine->iterator"));
+        assert!(removals.contains_key("coroutine-next"));
+        assert_eq!(removals.len(), 4);
     }
 
     #[test]

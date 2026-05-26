@@ -4,7 +4,6 @@
 //! value extraction. Introspection and management primitives (bits, mask,
 //! parent, child, propagate, cancel, fiber?) are in `fiber_introspect.rs`.
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{
     Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
@@ -183,10 +182,6 @@ pub(crate) fn resolve_signal_bits(
 /// Optional `:deny` keyword arg withholds capabilities from the fiber.
 /// The child's `withheld` is the union of the explicit deny bits and the
 /// parent's withheld (propagated at resume time by the VM).
-///
-/// Dynamic parameter bindings (`parameterize`) active in the creating
-/// fiber are snapshotted into the new fiber by the dispatcher.  See
-/// `VM::snapshot_param_frames_into`.
 pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
     let closure = match args[0].as_closure() {
         Some(c) => std::rc::Rc::new(c.clone()),
@@ -210,50 +205,37 @@ pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
     let mut deny_bits = SignalBits::EMPTY;
     let mut i = 2;
     while i < args.len() {
-        match args[i].as_keyword_name().as_deref() {
-            Some("deny") => {
-                if i + 1 >= args.len() {
-                    return (
-                        SIG_ERROR,
-                        error_val("arity-error", "fiber/new: :deny requires a value"),
-                    );
-                }
-                deny_bits = match resolve_signal_bits(&args[i + 1], "fiber/new :deny") {
-                    Ok(bits) => bits,
-                    Err(err) => return err,
-                };
-                i += 2;
-            }
-            _ => {
+        if args[i].as_keyword_name().as_deref() == Some("deny") {
+            if i + 1 >= args.len() {
                 return (
                     SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        format!(
-                            "fiber/new: unexpected keyword argument :{}",
-                            args[i]
-                                .as_keyword_name()
-                                .unwrap_or_else(|| args[i].type_name().to_string())
-                        ),
-                    ),
+                    error_val("arity-error", "fiber/new: :deny requires a value"),
                 );
             }
+            deny_bits = match resolve_signal_bits(&args[i + 1], "fiber/new :deny") {
+                Ok(bits) => bits,
+                Err(err) => return err,
+            };
+            i += 2;
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "argument-error",
+                    format!(
+                        "fiber/new: unexpected keyword argument :{}",
+                        args[i]
+                            .as_keyword_name()
+                            .unwrap_or_else(|| args[i].type_name().to_string())
+                    ),
+                ),
+            );
         }
     }
 
     let mut fiber = Fiber::new(closure, mask);
     fiber.withheld = deny_bits;
     (SIG_OK, Value::fiber(fiber))
-}
-
-/// Is the given primitive function pointer `fiber/new`?
-///
-/// The dispatcher uses this to know when to snapshot parameter frames
-/// into a freshly-constructed fiber.  Comparing fn pointers requires the
-/// callee side coerce its fn item to a fn pointer; doing that here keeps
-/// the call sites readable.
-pub(crate) fn is_fiber_new(p: crate::value::types::PrimFn) -> bool {
-    std::ptr::fn_addr_eq(p, prim_fiber_new as crate::value::types::PrimFn)
 }
 
 /// (fiber/resume fiber) → value
@@ -480,11 +462,9 @@ pub(crate) fn prim_fiber_clear_fuel(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::NIL)
 }
 
-/// Declarative primitive definitions for fiber lifecycle operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "fiber/new",
-        func: prim_fiber_new,
+// Declarative primitive definitions for fiber lifecycle operations
+primitive! {
+    "fiber/new" => prim_fiber_new {
         signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Create a fiber with a signal mask. Optional :deny withholds capabilities.",
@@ -492,24 +472,21 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fiber",
         example: "(fiber/new (fn [] 42) |:error| :deny |:io|)",
         aliases: &["fiber"],
-    },
-    PrimitiveDef {
-        name: "fiber/resume",
-        func: prim_fiber_resume,
-        signal: Signal {
+        escapes_args: true,
+    }
+    "fiber/resume" => prim_fiber_resume {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_RESUME),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(1, 2),
         doc: "Resume a fiber, optionally delivering a value",
         params: &["fiber", "value"],
         category: "fiber",
         example: "(fiber/resume f)",
         aliases: &["resume"],
-    },
-    PrimitiveDef {
-        name: "fiber/emit",
-        func: prim_emit,
+    }
+    "fiber/emit" => prim_emit {
         signal: Signal::yields_errors(),
         arity: Arity::Exact(2),
         doc: "Emit a signal from the current fiber",
@@ -517,460 +494,47 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fiber",
         example: "(emit 2 42)",
         aliases: &["emit"],
-    },
-    PrimitiveDef {
-        name: "fiber/status",
-        func: prim_fiber_status,
+    }
+    "fiber/status" => prim_fiber_status {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's lifecycle status (:new, :alive, :suspended, :dead, :error)",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/status f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/value",
-        func: prim_fiber_value,
+    }
+    "fiber/value" => prim_fiber_value {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the signal payload from the fiber's last signal",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/value f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/set-fuel",
-        func: prim_fiber_set_fuel,
+    }
+    "fiber/set-fuel" => prim_fiber_set_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Set the instruction budget on a fiber. n is a non-negative integer.",
         params: &["fiber", "n"],
         category: "fiber",
         example: "(fiber/set-fuel f 10000)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/fuel",
-        func: prim_fiber_fuel,
+    }
+    "fiber/fuel" => prim_fiber_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Read remaining fuel. Returns integer or nil if unlimited.",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/fuel f)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "fiber/clear-fuel",
-        func: prim_fiber_clear_fuel,
+    }
+    "fiber/clear-fuel" => prim_fiber_clear_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Remove the instruction budget, restoring unlimited execution.",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/clear-fuel f)",
-        aliases: &[],
-    },
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
-    use crate::value::fiber::{SIG_ERROR as FIBER_SIG_ERROR, SIG_YIELD};
-    use crate::value::{Arity, Closure};
-    use std::collections::HashMap;
-    use std::rc::Rc;
-
-    fn make_test_closure() -> Value {
-        use crate::compiler::bytecode::Instruction;
-        use crate::value::ClosureTemplate;
-        let bytecode = vec![
-            Instruction::LoadConst as u8,
-            0,
-            0,
-            Instruction::Return as u8,
-        ];
-
-        let template = Rc::new(ClosureTemplate {
-            bytecode: Rc::new(bytecode),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![Value::int(42)]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-
-        Value::closure(Closure {
-            template,
-            env: crate::value::inline_slice::InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        })
-    }
-
-    #[test]
-    fn test_fiber_new() {
-        let closure = make_test_closure();
-        let mask = Value::int((SIG_ERROR | SIG_YIELD).raw() as i64);
-        let (sig, fiber_val) = prim_fiber_new(&[closure, mask]);
-        assert_eq!(sig, SIG_OK);
-        assert!(fiber_val.is_fiber());
-
-        let handle = fiber_val.as_fiber().unwrap();
-        handle.with(|fiber| {
-            assert_eq!(fiber.status, FiberStatus::New);
-            assert_eq!(fiber.mask, FIBER_SIG_ERROR | SIG_YIELD);
-        });
-    }
-
-    #[test]
-    fn test_fiber_new_wrong_type() {
-        let (sig, _) = prim_fiber_new(&[Value::int(42), Value::int(0)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_new_starts_with_empty_param_frames() {
-        // The primitive itself does not populate param_frames — that is the
-        // job of `VM::snapshot_param_frames_into`, invoked by the dispatcher
-        // after the primitive returns. The fiber returned here is a fresh
-        // construction with no parent context.
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert!(
-                fiber.param_frames.is_empty(),
-                "freshly constructed fiber must not carry param_frames \
-                 (the dispatcher snapshots them after we return)"
-            );
-        });
-    }
-
-    #[test]
-    fn test_fiber_new_accepts_deny_keyword() {
-        // :deny is still a valid keyword argument and sets withheld bits.
-        let closure = make_test_closure();
-        let (sig, fiber_val) = prim_fiber_new(&[
-            closure,
-            Value::int(0),
-            Value::keyword("deny"),
-            Value::int(SIG_YIELD.raw() as i64),
-        ]);
-        assert_eq!(sig, SIG_OK);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.withheld, SIG_YIELD);
-        });
-    }
-
-    #[test]
-    fn test_fiber_new_deny_requires_value() {
-        let closure = make_test_closure();
-        let (sig, _) = prim_fiber_new(&[closure, Value::int(0), Value::keyword("deny")]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_new_rejects_inherit_keyword() {
-        // `:inherit` was a transitional opt-in for parameter inheritance.
-        // Inheritance is now automatic and creation-time, so the keyword
-        // is no longer accepted — passing it must surface as an error so
-        // callers find out instead of silently doing nothing.
-        let closure_a = make_test_closure();
-        let (_, parent) = prim_fiber_new(&[closure_a, Value::int(0)]);
-        let closure_b = make_test_closure();
-        let (sig, _) =
-            prim_fiber_new(&[closure_b, Value::int(0), Value::keyword("inherit"), parent]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_new_rejects_unknown_keyword() {
-        let closure = make_test_closure();
-        let (sig, _) = prim_fiber_new(&[
-            closure,
-            Value::int(0),
-            Value::keyword("nonsense"),
-            Value::int(0),
-        ]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_resume_returns_sig_resume() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, val) = prim_fiber_resume(&[fiber_val]);
-        assert_eq!(sig, SIG_RESUME);
-        assert!(val.is_fiber());
-    }
-
-    #[test]
-    fn test_fiber_resume_dead_fiber() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        // Manually set to Dead
-        fiber_val
-            .as_fiber()
-            .unwrap()
-            .with_mut(|f| f.status = FiberStatus::Dead);
-        let (sig, _) = prim_fiber_resume(&[fiber_val]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_resume_errored_fiber_is_allowed() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        fiber_val
-            .as_fiber()
-            .unwrap()
-            .with_mut(|f| f.status = FiberStatus::Error);
-        let (sig, _) = prim_fiber_resume(&[fiber_val]);
-        assert_eq!(
-            sig, SIG_RESUME,
-            "errored fibers must be resumable (restarts)"
-        );
-    }
-
-    #[test]
-    fn test_fiber_resume_alive_fiber() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        fiber_val
-            .as_fiber()
-            .unwrap()
-            .with_mut(|f| f.status = FiberStatus::Alive);
-        let (sig, _) = prim_fiber_resume(&[fiber_val]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_resume_with_value() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_resume(&[fiber_val, Value::int(99)]);
-        assert_eq!(sig, SIG_RESUME);
-        // Check that the resume value was stored
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.signal, Some((SIG_OK, Value::int(99))));
-        });
-    }
-
-    #[test]
-    fn test_fiber_signal() {
-        let bits = Value::int(SIG_YIELD.raw() as i64);
-        let value = Value::int(42);
-        let (sig, val) = prim_emit(&[bits, value]);
-        assert_eq!(sig, SIG_YIELD);
-        assert_eq!(val, Value::int(42));
-    }
-
-    #[test]
-    fn test_fiber_status() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, status) = prim_fiber_status(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        assert!(status.is_keyword(), "Expected keyword, got {:?}", status);
-    }
-
-    #[test]
-    fn test_fiber_status_transitions() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-
-        // All statuses should return keywords
-        for status in [
-            FiberStatus::New,
-            FiberStatus::Alive,
-            FiberStatus::Paused,
-            FiberStatus::Dead,
-            FiberStatus::Error,
-        ] {
-            fiber_val
-                .as_fiber()
-                .unwrap()
-                .with_mut(|f| f.status = status);
-            let (sig, val) = prim_fiber_status(&[fiber_val]);
-            assert_eq!(sig, SIG_OK);
-            assert!(
-                val.is_keyword(),
-                "Expected keyword for {:?}, got {:?}",
-                status,
-                val
-            );
-        }
-    }
-
-    #[test]
-    fn test_fiber_value() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-
-        // No signal yet — returns nil
-        let (sig, val) = prim_fiber_value(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val, Value::NIL);
-
-        // Set a signal
-        fiber_val
-            .as_fiber()
-            .unwrap()
-            .with_mut(|f| f.signal = Some((SIG_YIELD, Value::int(42))));
-        let (sig, val) = prim_fiber_value(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val, Value::int(42));
-    }
-
-    #[test]
-    fn test_fiber_resume_wrong_type() {
-        let (sig, _) = prim_fiber_resume(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_status_wrong_type() {
-        let (sig, _) = prim_fiber_status(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_value_wrong_type() {
-        let (sig, _) = prim_fiber_value(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    // ── fiber/set-fuel ─────────────────────────────────────────────────────
-
-    #[test]
-    fn test_fiber_set_fuel_stores_value() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::int(1000)]);
-        assert_eq!(sig, SIG_OK);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.fuel, Some(1000));
-        });
-    }
-
-    #[test]
-    fn test_fiber_set_fuel_zero() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::int(0)]);
-        assert_eq!(sig, SIG_OK);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.fuel, Some(0));
-        });
-    }
-
-    #[test]
-    fn test_fiber_set_fuel_overwrites() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        prim_fiber_set_fuel(&[fiber_val, Value::int(500)]);
-        prim_fiber_set_fuel(&[fiber_val, Value::int(100)]);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.fuel, Some(100));
-        });
-    }
-
-    #[test]
-    fn test_fiber_set_fuel_not_a_fiber() {
-        let (sig, _) = prim_fiber_set_fuel(&[Value::int(42), Value::int(100)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_set_fuel_negative() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::int(-1)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_fiber_set_fuel_non_integer() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::keyword("oops")]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    // ── fiber/fuel ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_fiber_fuel_returns_nil_when_unlimited() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, val) = prim_fiber_fuel(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val, Value::NIL);
-    }
-
-    #[test]
-    fn test_fiber_fuel_returns_integer_when_set() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        prim_fiber_set_fuel(&[fiber_val, Value::int(42)]);
-        let (sig, val) = prim_fiber_fuel(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val, Value::int(42));
-    }
-
-    #[test]
-    fn test_fiber_fuel_not_a_fiber() {
-        let (sig, _) = prim_fiber_fuel(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    // ── fiber/clear-fuel ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_fiber_clear_fuel_removes_limit() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        prim_fiber_set_fuel(&[fiber_val, Value::int(100)]);
-        let (sig, _) = prim_fiber_clear_fuel(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.fuel, None);
-        });
-    }
-
-    #[test]
-    fn test_fiber_clear_fuel_on_unlimited_is_noop() {
-        let closure = make_test_closure();
-        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
-        let (sig, _) = prim_fiber_clear_fuel(&[fiber_val]);
-        assert_eq!(sig, SIG_OK);
-        fiber_val.as_fiber().unwrap().with(|fiber| {
-            assert_eq!(fiber.fuel, None);
-        });
-    }
-
-    #[test]
-    fn test_fiber_clear_fuel_not_a_fiber() {
-        let (sig, _) = prim_fiber_clear_fuel(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
     }
 }
+
+// Tests migrated to tests/elle/prim-fibers.lisp

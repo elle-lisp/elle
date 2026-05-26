@@ -740,7 +740,98 @@ pub extern "C" fn elle_jit_push(
         new.push(val);
         JitValue::from_value(Value::array(new))
     } else {
-        panic!("%push: unsupported type {}", arr.type_name())
+        panic!("%array-push: unsupported type {}", arr.type_name())
+    }
+}
+
+/// String push — panics on type error (intrinsic contract).
+///
+/// If `coll` is `@string` (mutable), appends `val`'s UTF-8 bytes to the
+/// underlying buffer in place and returns the same collection. If `coll` is
+/// an immutable string, allocates a new concatenated string in the active
+/// TLS region. Mirrors `handle_intr_string_push` in `src/vm/types.rs`. No
+/// region RC tracking is needed because `@string` stores bytes, not Value
+/// references (per `docs/regions.md`).
+#[no_mangle]
+pub extern "C" fn elle_jit_string_push(
+    coll_tag: u64,
+    coll_pay: u64,
+    val_tag: u64,
+    val_pay: u64,
+) -> JitValue {
+    let coll = Value {
+        tag: coll_tag,
+        payload: coll_pay,
+    };
+    let val = Value {
+        tag: val_tag,
+        payload: val_pay,
+    };
+    let s = val.with_string(|s| s.to_string()).unwrap_or_else(|| {
+        panic!(
+            "%string-push: value must be string, got {}",
+            val.type_name()
+        )
+    });
+    if let Some(buf_ref) = coll.as_string_mut() {
+        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
+        JitValue::from_value(coll)
+    } else {
+        let new = coll
+            .with_string(|base| {
+                let mut r = base.to_string();
+                r.push_str(&s);
+                Value::string(r)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "%string-push: expected string or @string, got {}",
+                    coll.type_name()
+                )
+            });
+        JitValue::from_value(new)
+    }
+}
+
+/// Bytes push — panics on type error (intrinsic contract).
+///
+/// If `coll` is `@bytes` (mutable), truncates `val` to a `u8` and appends it
+/// to the underlying buffer in place, returning the same collection. If
+/// `coll` is an immutable `bytes`, allocates a new bytes value with the
+/// byte appended. Mirrors `handle_intr_bytes_push` in `src/vm/types.rs`. No
+/// region RC tracking is needed because `@bytes` stores raw bytes, not
+/// Value references (per `docs/regions.md`).
+#[no_mangle]
+pub extern "C" fn elle_jit_bytes_push(
+    coll_tag: u64,
+    coll_pay: u64,
+    val_tag: u64,
+    val_pay: u64,
+) -> JitValue {
+    let coll = Value {
+        tag: coll_tag,
+        payload: coll_pay,
+    };
+    let val = Value {
+        tag: val_tag,
+        payload: val_pay,
+    };
+    let byte = val
+        .as_int()
+        .unwrap_or_else(|| panic!("%bytes-push: value must be integer, got {}", val.type_name()))
+        as u8;
+    if let Some(buf_ref) = coll.as_bytes_mut() {
+        buf_ref.borrow_mut().push(byte);
+        JitValue::from_value(coll)
+    } else if let Some(data) = coll.as_bytes() {
+        let mut new = data.to_vec();
+        new.push(byte);
+        JitValue::from_value(Value::bytes(new))
+    } else {
+        panic!(
+            "%bytes-push: expected bytes or @bytes, got {}",
+            coll.type_name()
+        )
     }
 }
 
@@ -889,109 +980,119 @@ mod tests {
 
     #[test]
     fn test_eq_heap_values() {
-        let list1 = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::EMPTY_LIST));
-        let list2 = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::EMPTY_LIST));
+        crate::value::arena::with_test_region(|| {
+            let list1 = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::EMPTY_LIST));
+            let list2 = Value::pair(Value::int(1), Value::pair(Value::int(2), Value::EMPTY_LIST));
 
-        assert_eq!(
-            elle_jit_eq(list1.tag, list1.payload, list2.tag, list2.payload),
-            JitValue::bool_val(true),
-            "equal lists must be eq"
-        );
-        assert_eq!(
-            elle_jit_ne(list1.tag, list1.payload, list2.tag, list2.payload),
-            JitValue::bool_val(false),
-            "equal lists must not be ne"
-        );
+            assert_eq!(
+                elle_jit_eq(list1.tag, list1.payload, list2.tag, list2.payload),
+                JitValue::bool_val(true),
+                "equal lists must be eq"
+            );
+            assert_eq!(
+                elle_jit_ne(list1.tag, list1.payload, list2.tag, list2.payload),
+                JitValue::bool_val(false),
+                "equal lists must not be ne"
+            );
 
-        let list3 = Value::pair(Value::int(1), Value::pair(Value::int(3), Value::EMPTY_LIST));
-        assert_eq!(
-            elle_jit_eq(list1.tag, list1.payload, list3.tag, list3.payload),
-            JitValue::bool_val(false),
-            "different lists must not be eq"
-        );
+            let list3 = Value::pair(Value::int(1), Value::pair(Value::int(3), Value::EMPTY_LIST));
+            assert_eq!(
+                elle_jit_eq(list1.tag, list1.payload, list3.tag, list3.payload),
+                JitValue::bool_val(false),
+                "different lists must not be eq"
+            );
 
-        let s1 = Value::string("hello");
-        let s2 = Value::string("hello");
-        assert_eq!(
-            elle_jit_eq(s1.tag, s1.payload, s2.tag, s2.payload),
-            JitValue::bool_val(true),
-            "equal strings must be eq"
-        );
+            let s1 = Value::string("hello");
+            let s2 = Value::string("hello");
+            assert_eq!(
+                elle_jit_eq(s1.tag, s1.payload, s2.tag, s2.payload),
+                JitValue::bool_val(true),
+                "equal strings must be eq"
+            );
 
-        let s3 = Value::string("world");
-        assert_eq!(
-            elle_jit_eq(s1.tag, s1.payload, s3.tag, s3.payload),
-            JitValue::bool_val(false),
-            "different strings must not be eq"
-        );
+            let s3 = Value::string("world");
+            assert_eq!(
+                elle_jit_eq(s1.tag, s1.payload, s3.tag, s3.payload),
+                JitValue::bool_val(false),
+                "different strings must not be eq"
+            );
+        });
     }
 
     #[test]
     fn test_lt_strings() {
-        let a = Value::string("apple");
-        let b = Value::string("banana");
-        assert_eq!(
-            elle_jit_lt(a.tag, a.payload, b.tag, b.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_lt(b.tag, b.payload, a.tag, a.payload),
-            JitValue::bool_val(false)
-        );
-        assert_eq!(
-            elle_jit_lt(a.tag, a.payload, a.tag, a.payload),
-            JitValue::bool_val(false)
-        );
+        crate::value::arena::with_test_region(|| {
+            let a = Value::string("apple");
+            let b = Value::string("banana");
+            assert_eq!(
+                elle_jit_lt(a.tag, a.payload, b.tag, b.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_lt(b.tag, b.payload, a.tag, a.payload),
+                JitValue::bool_val(false)
+            );
+            assert_eq!(
+                elle_jit_lt(a.tag, a.payload, a.tag, a.payload),
+                JitValue::bool_val(false)
+            );
+        });
     }
 
     #[test]
     fn test_gt_strings() {
-        let a = Value::string("banana");
-        let b = Value::string("apple");
-        assert_eq!(
-            elle_jit_gt(a.tag, a.payload, b.tag, b.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_gt(b.tag, b.payload, a.tag, a.payload),
-            JitValue::bool_val(false)
-        );
+        crate::value::arena::with_test_region(|| {
+            let a = Value::string("banana");
+            let b = Value::string("apple");
+            assert_eq!(
+                elle_jit_gt(a.tag, a.payload, b.tag, b.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_gt(b.tag, b.payload, a.tag, a.payload),
+                JitValue::bool_val(false)
+            );
+        });
     }
 
     #[test]
     fn test_le_strings() {
-        let a = Value::string("apple");
-        let b = Value::string("banana");
-        assert_eq!(
-            elle_jit_le(a.tag, a.payload, b.tag, b.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_le(a.tag, a.payload, a.tag, a.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_le(b.tag, b.payload, a.tag, a.payload),
-            JitValue::bool_val(false)
-        );
+        crate::value::arena::with_test_region(|| {
+            let a = Value::string("apple");
+            let b = Value::string("banana");
+            assert_eq!(
+                elle_jit_le(a.tag, a.payload, b.tag, b.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_le(a.tag, a.payload, a.tag, a.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_le(b.tag, b.payload, a.tag, a.payload),
+                JitValue::bool_val(false)
+            );
+        });
     }
 
     #[test]
     fn test_ge_strings() {
-        let a = Value::string("banana");
-        let b = Value::string("apple");
-        assert_eq!(
-            elle_jit_ge(a.tag, a.payload, b.tag, b.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_ge(a.tag, a.payload, a.tag, a.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_ge(b.tag, b.payload, a.tag, a.payload),
-            JitValue::bool_val(false)
-        );
+        crate::value::arena::with_test_region(|| {
+            let a = Value::string("banana");
+            let b = Value::string("apple");
+            assert_eq!(
+                elle_jit_ge(a.tag, a.payload, b.tag, b.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_ge(a.tag, a.payload, a.tag, a.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_ge(b.tag, b.payload, a.tag, a.payload),
+                JitValue::bool_val(false)
+            );
+        });
     }
 
     #[test]

@@ -1475,7 +1475,8 @@ fn rotation_safe_for_pure_recursive_functions() {
         .expect("should have a closure");
     // Rotation safety depends on escape analysis call path (still active).
     // The function has no heap-allocating calls, so it should be rotation-safe.
-    assert!(closure.template.rotation_safe, "pure recursive function should be rotation-safe");
+    assert!(closure.template.lir_function.as_ref().unwrap().rotation_safe,
+        "pure recursive function should be rotation-safe");
 }
 
 #[test]
@@ -1486,7 +1487,8 @@ fn rotation_unsafe_for_push_in_body() {
     let closure = compiled.bytecode.constants.iter()
         .find_map(|c| c.as_closure())
         .expect("should have a closure");
-    assert!(!closure.template.rotation_safe, "function with push should not be rotation-safe");
+    assert!(!closure.template.lir_function.as_ref().unwrap().rotation_safe,
+        "function with push should not be rotation-safe");
 }
 
 #[test]
@@ -1502,7 +1504,7 @@ fn rotation_safe_for_mutual_recursion() {
         .collect();
     assert!(closures.len() >= 2, "should have at least 2 closures");
     for c in &closures {
-        assert!(c.template.rotation_safe,
+        assert!(c.template.lir_function.as_ref().unwrap().rotation_safe,
             "pure mutual recursion should be rotation-safe");
     }
 }

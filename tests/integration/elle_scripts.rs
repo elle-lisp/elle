@@ -72,7 +72,7 @@ fn fiber_stress() {
 #[test]
 #[ignore] // JIT leaks raw io-request structs after repeated sequential reads
 fn fiber_io_stress() {
-    run_elle_script("fiber_io_stress");
+    run_elle_script("fiber-io-stress");
 }
 
 #[test]
@@ -101,8 +101,18 @@ fn table_key_expand() {
 }
 
 #[test]
-fn parameters() {
-    run_elle_script("parameters");
+fn region_basic() {
+    run_elle_script("region-basic");
+}
+
+#[test]
+fn jit_string_push() {
+    run_elle_script("jit-string-push");
+}
+
+#[test]
+fn jit_bytes_push() {
+    run_elle_script("jit-bytes-push");
 }
 
 #[test]

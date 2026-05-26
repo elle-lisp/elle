@@ -528,10 +528,7 @@ impl std::fmt::Debug for HeapObject {
 
 // Re-export arena types and functions so existing `use crate::value::heap::{...}`
 // import sites continue working after the arena code moved to `arena.rs`.
-pub use super::arena::{
-    alloc, alloc_permanent, deref, drop_heap, heap_arena_len, heap_arena_mark, heap_arena_release,
-    ArenaGuard, ArenaMark,
-};
+pub use super::arena::{alloc, alloc_permanent, deref, drop_heap, heap_arena_len};
 
 #[cfg(test)]
 mod tests {
@@ -539,87 +536,37 @@ mod tests {
 
     #[test]
     fn test_alloc_string() {
-        let v = Value::string("hello");
-        assert!(v.is_heap());
-        assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "hello");
+        crate::value::arena::with_test_region(|| {
+            let v = Value::string("hello");
+            assert!(v.is_heap());
+            assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "hello");
+        });
     }
 
     #[test]
     fn test_alloc_permanent_cons() {
-        // Pair has no inner arena allocation, safe for alloc_permanent.
-        let v = alloc_permanent(HeapObject::Pair(Pair::new(Value::NIL, Value::int(1))));
-        assert!(v.is_heap());
-        unsafe {
-            let obj = deref(v);
-            match obj {
-                HeapObject::Pair(c) => assert_eq!(c.rest.as_int(), Some(1)),
-                _ => panic!("Expected Pair"),
+        crate::value::arena::with_test_region(|| {
+            // Pair has no inner arena allocation, safe for alloc_permanent.
+            let v = alloc_permanent(HeapObject::Pair(Pair::new(Value::NIL, Value::int(1))));
+            assert!(v.is_heap());
+            unsafe {
+                let obj = deref(v);
+                match obj {
+                    HeapObject::Pair(c) => assert_eq!(c.rest.as_int(), Some(1)),
+                    _ => panic!("Expected Pair"),
+                }
+                drop_heap(v);
             }
-            drop_heap(v);
-        }
-    }
-
-    #[test]
-    fn test_arena_mark_release() {
-        let mark = heap_arena_mark();
-        let v = Value::string("temporary");
-        assert!(v.is_heap());
-        assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "temporary");
-        heap_arena_release(mark);
-    }
-
-    #[test]
-    fn test_arena_guard_raii() {
-        let before = heap_arena_len();
-        {
-            let _guard = ArenaGuard::new();
-            Value::string("guarded");
-            alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-            let during = heap_arena_len();
-            assert_eq!(during, before + 2);
-        }
-        let after = heap_arena_len();
-        assert_eq!(after, before);
-    }
-
-    #[test]
-    fn test_arena_nested_guards() {
-        let before = heap_arena_len();
-        {
-            let _outer = ArenaGuard::new();
-            Value::string("outer alloc");
-            {
-                let _inner = ArenaGuard::new();
-                Value::string("inner alloc");
-                let during_inner = heap_arena_len();
-                assert_eq!(during_inner, before + 2);
-            }
-            let after_inner = heap_arena_len();
-            assert_eq!(after_inner, before + 1);
-        }
-        let after_outer = heap_arena_len();
-        assert_eq!(after_outer, before);
-    }
-
-    #[test]
-    fn test_arena_guard_fires_on_error_path() {
-        let before = heap_arena_len();
-        let result: Result<(), String> = {
-            let _guard = ArenaGuard::new();
-            Value::string("will be freed");
-            alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-            Err("simulated error".to_string())
-        };
-        assert!(result.is_err());
-        let after = heap_arena_len();
-        assert_eq!(after, before);
+        });
     }
 
     #[test]
     fn test_heap_tag() {
-        let v = Value::string("test");
-        let s = unsafe { deref(v) };
-        assert_eq!(s.tag(), HeapTag::LString);
-        assert_eq!(s.type_name(), "string");
+        crate::value::arena::with_test_region(|| {
+            let v = Value::string("test");
+            let s = unsafe { deref(v) };
+            assert_eq!(s.tag(), HeapTag::LString);
+            assert_eq!(s.type_name(), "string");
+        });
     }
 }

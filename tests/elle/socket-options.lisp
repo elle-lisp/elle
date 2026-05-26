@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # Socket options tests — :sndbuf, :rcvbuf, :nodelay, :keepalive on connect primitives
 #
 # Tests verify that socket option keywords are accepted, correctly validated,

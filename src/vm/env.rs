@@ -10,6 +10,7 @@
 //! - `populate_env`: fills a caller-supplied buffer; shared by `build_closure_env`
 //!   and `tail_call_inner` (which uses `tail_call_env_cache`)
 
+use crate::hir::region::RegionId;
 use crate::value::Value;
 use std::rc::Rc;
 
@@ -24,8 +25,9 @@ impl VM {
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
+        region_id: RegionId,
     ) -> Option<Rc<Vec<Value>>> {
-        if !Self::populate_env(&mut self.env_cache, &mut self.fiber, closure, args) {
+        if !Self::populate_env(&mut self.env_cache, unsafe { &mut *self.heap_ptr }, &mut self.fiber, closure, args, region_id) {
             return None;
         }
         Some(Rc::new(self.env_cache.clone()))
@@ -38,12 +40,17 @@ impl VM {
     /// can't alias — a tail call may occur inside a closure call that is
     /// still using `env_cache`.
     ///
+    /// `region_id`: capture cells and rest-arg cons cells are allocated
+    /// directly via `heap.alloc_in_region()`. No TLS.
+    ///
     /// Returns `false` if keyword argument collection fails (error set on fiber).
     pub(super) fn populate_env(
         buf: &mut Vec<Value>,
+        heap: &mut crate::value::fiberheap::FiberHeap,
         fiber: &mut crate::value::Fiber,
         closure: &crate::value::Closure,
         args: &[Value],
+        region_id: RegionId,
     ) -> bool {
         buf.clear();
         let needed = closure.env_capacity();
@@ -82,11 +89,11 @@ impl VM {
 
                 // Push args for fixed slots (required + optional)
                 for (i, arg) in args[..provided_fixed].iter().enumerate() {
-                    Self::push_param(buf, closure, i, *arg);
+                    Self::push_param(buf, heap, closure, i, *arg, region_id);
                 }
                 // Fill missing optional slots with nil
                 for i in provided_fixed..fixed_slots {
-                    Self::push_param(buf, closure, i, Value::NIL);
+                    Self::push_param(buf, heap, closure, i, Value::NIL, region_id);
                 }
 
                 // Collect remaining args into rest slot
@@ -96,7 +103,7 @@ impl VM {
                     &[]
                 };
                 let collected = match &closure.template.vararg_kind {
-                    crate::hir::VarargKind::List => Self::args_to_list(rest_args),
+                    crate::hir::VarargKind::List => Self::args_to_list(rest_args, heap, region_id),
                     crate::hir::VarargKind::Struct => {
                         match Self::args_to_struct_static(fiber, rest_args, None) {
                             Some(v) => v,
@@ -110,22 +117,22 @@ impl VM {
                         }
                     }
                 };
-                Self::push_param(buf, closure, fixed_slots, collected);
+                Self::push_param(buf, heap, closure, fixed_slots, collected, region_id);
             }
             crate::value::Arity::Range(_, max) => {
                 // All slots are fixed (no rest param)
                 // Push provided args
                 for (i, arg) in args.iter().enumerate() {
-                    Self::push_param(buf, closure, i, *arg);
+                    Self::push_param(buf, heap, closure, i, *arg, region_id);
                 }
                 // Fill missing optional slots with nil
                 for i in args.len()..max {
-                    Self::push_param(buf, closure, i, Value::NIL);
+                    Self::push_param(buf, heap, closure, i, Value::NIL, region_id);
                 }
             }
             crate::value::Arity::Exact(_) => {
                 for (i, arg) in args.iter().enumerate() {
-                    Self::push_param(buf, closure, i, *arg);
+                    Self::push_param(buf, heap, closure, i, *arg, region_id);
                 }
             }
         }
@@ -142,7 +149,14 @@ impl VM {
             .saturating_sub(closure.template.num_params);
         for i in 0..num_locally_defined {
             if i >= 64 || (closure.template.capture_locals_mask & (1 << i)) != 0 {
-                buf.push(Value::capture_cell(Value::NIL));
+                use crate::value::heap::HeapObject;
+                use std::cell::RefCell;
+                use std::rc::Rc;
+                let obj = HeapObject::CaptureCell {
+                    cell: Rc::new(RefCell::new(Value::NIL)),
+                    traits: Value::NIL,
+                };
+                buf.push(heap.alloc_in_region(obj, region_id));
             } else {
                 buf.push(Value::NIL);
             }
@@ -152,21 +166,55 @@ impl VM {
     }
 
     /// Push a parameter value into the environment buffer, wrapping in a
-    /// LocalCell if the capture_params_mask indicates it's needed.
+    /// CaptureCell if the capture_params_mask indicates it's needed.
     #[inline]
-    fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
+    fn push_param(
+        buf: &mut Vec<Value>,
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        closure: &crate::value::Closure,
+        i: usize,
+        val: Value,
+        region_id: RegionId,
+    ) {
         if i < 64 && (closure.template.capture_params_mask & (1 << i)) != 0 {
-            buf.push(Value::capture_cell(val));
+            use crate::value::heap::HeapObject;
+            use std::cell::RefCell;
+            use std::rc::Rc;
+            // alloc_in_region → alloc_obj → incref_cross_region_refs handles
+            // the cross-region incref for the wrapped value automatically.
+            let obj = HeapObject::CaptureCell {
+                cell: Rc::new(RefCell::new(val)),
+                traits: Value::NIL,
+            };
+            buf.push(heap.alloc_in_region(obj, region_id));
         } else {
             buf.push(val);
         }
     }
 
     /// Collect values into an Elle list (pair chain terminated by EMPTY_LIST).
-    fn args_to_list(args: &[Value]) -> Value {
+    fn args_to_list(
+        args: &[Value],
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        region_id: RegionId,
+    ) -> Value {
+        use crate::value::heap::{HeapObject, HeapTag, Pair};
         let mut list = Value::EMPTY_LIST;
         for arg in args.iter().rev() {
-            list = Value::pair(*arg, list);
+            // alloc_in_region → alloc_obj → incref_cross_region_refs handles
+            // the cross-region incref for pair contents automatically.
+            if list.is_heap() {
+                let rid = crate::value::arena::region_of(list);
+                if rid != 0 && rid != region_id {
+                    heap.incref_region(rid);
+                }
+            }
+            let obj = HeapObject::Pair(Pair {
+                first: *arg,
+                rest: list,
+                traits: crate::primitives::traitregistry::default_traits_for(HeapTag::Pair),
+            });
+            list = heap.alloc_in_region(obj, region_id);
         }
         list
     }

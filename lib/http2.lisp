@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## lib/http2.lisp — HTTP/2 client and server for Elle
 ##
 ## Plain h2c (cleartext):
@@ -25,12 +25,10 @@
   (def stream ((import "std/http2/stream") :frame frame))
   (def transport ((import "std/http2/transport") :tls tls))
   (def session
-    ((import "std/http2/session") :frame frame :stream stream
-                                  :hpack hpack))
+    ((import "std/http2/session") :frame frame :stream stream :hpack hpack))
   (def server
-    ((import "std/http2/server") :hpack hpack :frame frame
-                                 :stream stream :session session :tls tls
-                                 :transport transport))
+    ((import "std/http2/server") :hpack hpack :frame frame :stream stream
+                                 :session session :tls tls :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 
@@ -311,8 +309,7 @@
         (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
-      # Abort reader before closing transport — the reader may have a pending
+      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))  # Abort reader before closing transport — the reader may have a pending
       # read on the socket (started by fuel preemption or concurrent sub-fiber).
       # Closing the fd while a read is in-flight causes partial-read errors.
       (when sess:reader-fiber

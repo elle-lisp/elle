@@ -666,60 +666,70 @@ mod tests {
 
     #[test]
     fn arity_error_no_args() {
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let syn = read_syntax("(syntax-case)", "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("syntax-case requires"));
+            let syn = read_syntax("(syntax-case)", "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("syntax-case requires"));
+        });
     }
 
     #[test]
     fn arity_error_no_clauses() {
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let syn = read_syntax("(syntax-case stx)", "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("syntax-case requires"));
+            let syn = read_syntax("(syntax-case stx)", "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("syntax-case requires"));
+        });
     }
 
     #[test]
     fn bad_clause_not_list() {
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let syn = read_syntax("(syntax-case stx 42)", "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("clause must be a list"));
+            let syn = read_syntax("(syntax-case stx 42)", "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("clause must be a list"));
+        });
     }
 
     #[test]
     fn duplicate_pattern_variable() {
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let syn = read_syntax("(syntax-case stx ((x x) :body))", "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("duplicate pattern variable"));
+            let syn = read_syntax("(syntax-case stx ((x x) :body))", "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("duplicate pattern variable"));
+        });
     }
 
     #[test]
     fn literal_wrong_arity() {
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let syn = read_syntax("(syntax-case stx ((literal) :body))", "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err());
+            let syn = read_syntax("(syntax-case stx ((literal) :body))", "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err());
+        });
     }
 }

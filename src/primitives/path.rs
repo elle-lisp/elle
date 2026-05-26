@@ -2,7 +2,6 @@
 //!
 //! Thin wrappers around `crate::path`. No camino imports here.
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -240,164 +239,118 @@ fn prim_path_is_dir(args: &[Value]) -> (SignalBits, Value) {
     })
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "path/join",
-        func: prim_path_join,
+primitive! {
+    "path/join" => prim_path_join {
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Join path components",
         params: &["components"],
         category: "path",
         example: "(path/join \"a\" \"b\" \"c\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/parent",
-        func: prim_path_parent,
+    }
+    "path/parent" => prim_path_parent {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get parent directory (nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/parent \"/home/user/data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/filename",
-        func: prim_path_filename,
+    }
+    "path/filename" => prim_path_filename {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file name (last component, nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/filename \"/home/user/data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/stem",
-        func: prim_path_stem,
+    }
+    "path/stem" => prim_path_stem {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file stem (filename without extension, nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/stem \"archive.tar.gz\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/extension",
-        func: prim_path_extension,
+    }
+    "path/extension" => prim_path_extension {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file extension without dot (nil if none)",
         params: &["path"],
         category: "path",
         example: "(path/extension \"data.txt\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/with-extension",
-        func: prim_path_with_extension,
+    }
+    "path/with-extension" => prim_path_with_extension {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Replace file extension (empty string removes it)",
         params: &["path", "ext"],
         category: "path",
         example: "(path/with-extension \"foo.txt\" \"rs\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/normalize",
-        func: prim_path_normalize,
+    }
+    "path/normalize" => prim_path_normalize {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Lexical path normalization (resolve . and ..)",
         params: &["path"],
         category: "path",
         example: "(path/normalize \"./a/../b\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/absolute",
-        func: prim_path_absolute,
+    }
+    "path/absolute" => prim_path_absolute {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Compute absolute path (does not require path to exist)",
         params: &["path"],
         category: "path",
         example: "(path/absolute \"src\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/canonicalize",
-        func: prim_path_canonicalize,
+    }
+    "path/canonicalize" => prim_path_canonicalize {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Resolve path through filesystem (symlinks resolved, must exist)",
         params: &["path"],
         category: "path",
         example: "(path/canonicalize \".\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/relative",
-        func: prim_path_relative,
+    }
+    "path/relative" => prim_path_relative {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute relative path from base to target (nil if impossible)",
         params: &["target", "base"],
         category: "path",
         example: "(path/relative \"/foo/bar/baz\" \"/foo/bar\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/components",
-        func: prim_path_components,
+    }
+    "path/components" => prim_path_components {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Split path into list of components",
         params: &["path"],
         category: "path",
         example: "(path/components \"/a/b/c\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/absolute?",
-        func: prim_path_is_absolute,
+    }
+    "path/absolute?" => prim_path_is_absolute {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "True if path is absolute",
         params: &["path"],
         category: "path",
         example: "(path/absolute? \"/foo\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/relative?",
-        func: prim_path_is_relative,
+    }
+    "path/relative?" => prim_path_is_relative {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "True if path is relative",
         params: &["path"],
         category: "path",
         example: "(path/relative? \"foo\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/cwd",
-        func: prim_path_cwd,
+    }
+    "path/cwd" => prim_path_cwd {
         signal: Signal::errors(),
-        arity: Arity::Exact(0),
         doc: "Get current working directory",
-        params: &[],
         category: "path",
         example: "(path/cwd)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "path/exists?",
-        func: prim_path_exists,
+    }
+    "path/exists?" => prim_path_exists {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if path exists",
@@ -405,10 +358,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "path",
         example: "(path/exists? \"data.txt\")",
         aliases: &["file-exists?", "file/exists?"],
-    },
-    PrimitiveDef {
-        name: "path/file?",
-        func: prim_path_is_file,
+    }
+    "path/file?" => prim_path_is_file {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a regular file",
@@ -416,10 +367,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "path",
         example: "(path/file? \"data.txt\")",
         aliases: &["file?", "file/file?"],
-    },
-    PrimitiveDef {
-        name: "path/dir?",
-        func: prim_path_is_dir,
+    }
+    "path/dir?" => prim_path_is_dir {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a directory",
@@ -427,5 +376,5 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "path",
         example: "(path/dir? \"/home\")",
         aliases: &["directory?", "file/directory?"],
-    },
-];
+    }
+}

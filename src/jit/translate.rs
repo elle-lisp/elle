@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{InstBuilder, MemFlags};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
@@ -178,6 +178,13 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::StoreLocal { slot, src } => {
+                let base = self.local_slot_to_var(*slot);
+                let (tag, payload) = self.use_var_pair(builder, src.0);
+                self.def_var_pair(builder, base, tag, payload);
+            }
+
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                // Refcounting removed — just store (identical to StoreLocal).
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
@@ -594,9 +601,7 @@ impl<'a> FunctionTranslator<'a> {
                         // skip the rotation entirely — leak-style correctness
                         // matches the VM interpreter's behavior, which also
                         // declines to rotate non-rotation-safe callers.
-                        if self.lir.rotation_safe {
-                            self.call_rotate_pools(builder, vm)?;
-                        }
+                        // rotation_safe removed; skip pool rotation.
 
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
@@ -664,7 +669,6 @@ impl<'a> FunctionTranslator<'a> {
                 let lir_module = crate::lir::LirModule {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
-                    escape_dump: None,
                 };
                 let (nested_bytecode, nested_yield_points, nested_call_sites) =
                     emitter.emit_module(&lir_module);
@@ -684,27 +688,25 @@ impl<'a> FunctionTranslator<'a> {
                 nested_lir.call_sites = nested_call_sites;
 
                 let template = crate::value::ClosureTemplate {
-                    bytecode: std::rc::Rc::new(nested_bytecode.instructions),
-                    arity: func.arity,
                     num_locals: func.num_locals as usize,
                     num_captures: captures.len(),
                     num_params: func.num_params,
-                    constants: std::rc::Rc::new(nested_bytecode.constants),
                     signal: func.signal,
                     capture_params_mask: func.capture_params_mask,
                     capture_locals_mask: func.capture_locals_mask,
                     symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
                     location_map: std::rc::Rc::new(nested_bytecode.location_map),
-                    rotation_safe: func.rotation_safe,
                     lir_function: Some(std::rc::Rc::new(nested_lir)),
                     doc: func.doc,
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
                     name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
-                    result_is_immediate: func.result_is_immediate,
-                    has_outward_heap_set: func.has_outward_heap_set,
-                    wasm_func_idx: None,
-                    spirv: std::cell::OnceCell::new(),
+                    region_table: func.region_table.clone(),
+                    ..crate::value::ClosureTemplate::new(
+                        std::rc::Rc::new(nested_bytecode.instructions),
+                        func.arity,
+                        std::rc::Rc::new(nested_bytecode.constants),
+                    )
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),
@@ -1076,56 +1078,28 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(true);
             }
 
-            LirInstr::RegionEnter => {
+            LirInstr::FreeRegion { region_id } => {
                 let func_ref = self
                     .module
-                    .declare_func_in_func(self.helpers.region_enter, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
+                    .declare_func_in_func(self.helpers.free_region, builder.func);
+                let rid = builder.ins().iconst(I32, *region_id as i64);
+                builder.ins().call(func_ref, &[rid]);
             }
-            LirInstr::RegionExit => {
+
+            LirInstr::IncrefRegion { region_id } => {
                 let func_ref = self
                     .module
-                    .declare_func_in_func(self.helpers.region_exit, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
+                    .declare_func_in_func(self.helpers.incref_region, builder.func);
+                let rid = builder.ins().iconst(I32, *region_id as i64);
+                builder.ins().call(func_ref, &[rid]);
             }
-            LirInstr::RegionExitCall => {
+
+            LirInstr::DecrefRegion { region_id } => {
                 let func_ref = self
                     .module
-                    .declare_func_in_func(self.helpers.region_exit_call, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionRotate => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_rotate, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionRotateDealloc => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_rotate_dealloc, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            // Refcount-aware variants: fall back to the non-dealloc
-            // versions in JIT for now. Full JIT support is Phase 2.
-            LirInstr::RegionRotateRefcounted => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_rotate, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
-            }
-            LirInstr::RegionExitRefcounted => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.region_exit, builder.func);
-                let call = builder.ins().call(func_ref, &[]);
-                let _ = builder.inst_results(call);
+                    .declare_func_in_func(self.helpers.decref_region, builder.func);
+                let rid = builder.ins().iconst(I32, *region_id as i64);
+                builder.ins().call(func_ref, &[rid]);
             }
 
             LirInstr::PushParamFrame { pairs } => {
@@ -1204,12 +1178,8 @@ impl<'a> FunctionTranslator<'a> {
                 self.emit_exception_check_after_call(builder)?;
             }
 
-            // Outbox routing is VM-only; the JIT doesn't support yielding.
-            LirInstr::OutboxEnter | LirInstr::OutboxExit => {}
             // Flip rotation is VM-only; the JIT uses `rotate_pools_jit`
             // via its own trampoline path.
-            LirInstr::FlipEnter | LirInstr::FlipSwap | LirInstr::FlipExit => {}
-
             // === New intrinsic type predicates ===
             LirInstr::IsEmpty { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
@@ -1329,6 +1299,32 @@ impl<'a> FunctionTranslator<'a> {
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let (rt, rp) =
                     self.call_helper_value_binary(builder, self.helpers.intr_push, at, ap, vt, vp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
+            }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                let (st, sp) = self.use_var_pair(builder, string.0);
+                let (vt, vp) = self.use_var_pair(builder, value.0);
+                let (rt, rp) = self.call_helper_value_binary(
+                    builder,
+                    self.helpers.intr_string_push,
+                    st,
+                    sp,
+                    vt,
+                    vp,
+                )?;
+                self.def_var_pair(builder, dst.0, rt, rp);
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                let (bt, bp) = self.use_var_pair(builder, bytes.0);
+                let (vt, vp) = self.use_var_pair(builder, value.0);
+                let (rt, rp) = self.call_helper_value_binary(
+                    builder,
+                    self.helpers.intr_bytes_push,
+                    bt,
+                    bp,
+                    vt,
+                    vp,
+                )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
             LirInstr::Pop { dst, src } => {

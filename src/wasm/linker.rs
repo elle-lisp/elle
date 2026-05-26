@@ -223,31 +223,17 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 .map(|(bc, cs)| (bc.clone(), cs.clone()))
                 .unwrap_or_else(|| (std::rc::Rc::new(vec![]), std::rc::Rc::new(vec![])));
             let template = std::rc::Rc::new(crate::value::closure::ClosureTemplate {
-                bytecode,
-                arity,
                 num_locals,
                 num_captures: num_captures as usize,
                 num_params,
-                constants,
                 signal: crate::signals::Signal {
                     bits: crate::value::fiber::SignalBits::new(signal_bits),
                     propagates: 0,
                 },
                 capture_params_mask,
                 capture_locals_mask,
-
-                symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-                location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
-                rotation_safe: false,
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
                 wasm_func_idx: Some(table_idx as u32),
-                spirv: std::cell::OnceCell::new(),
+                ..crate::value::closure::ClosureTemplate::new(bytecode, arity, constants)
             });
 
             let closure = crate::value::closure::Closure {
@@ -825,8 +811,14 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
         }
         x if x == DataOp::IntrPushOp as i32 => {
             let (b, r) = crate::primitives::array::prim_push(&args[..2]);
-            assert!(!b.contains(SIG_ERROR), "%push: intrinsic contract violated");
+            assert!(!b.contains(SIG_ERROR), "%array-push: intrinsic contract violated");
             (SIG_OK, r)
+        }
+        x if x == DataOp::IntrStringPushOp as i32 => {
+            panic!("not yet implemented: IntrStringPush in WASM linker");
+        }
+        x if x == DataOp::IntrBytesPushOp as i32 => {
+            panic!("not yet implemented: IntrBytesPush in WASM linker");
         }
         x if x == DataOp::IntrPopOp as i32 => {
             let (b, r) = crate::primitives::array::prim_pop(&args[..1]);

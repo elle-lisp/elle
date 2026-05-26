@@ -10,7 +10,7 @@
         "functions", "named-args", "parameters",
         "arrays", "structs", "sets", "strings", "bytes",
         "control", "loops", "match", "errors",
-        "concurrency", "threads", "coroutines",
+        "concurrency", "threads",
         "modules", "macros", "traits", "io", "ffi", "lua", "epochs"
       ]
     },

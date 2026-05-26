@@ -1,8 +1,7 @@
 //! Unix domain socket primitives.
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
-use crate::port::{Port, PortKind};
-use crate::primitives::def::PrimitiveDef;
+use crate::port::{Direction, Port, PortKind};
 use crate::primitives::kwarg::extract_connect_kwargs;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -99,12 +98,16 @@ pub(crate) fn prim_unix_accept(args: &[Value]) -> (SignalBits, Value) {
         Ok(k) => k,
         Err(e) => return e,
     };
+    let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
             IoOp::Accept {
                 options: kwargs.options,
-                encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
+                encoding,
+                accept_port: Value::external("port", Port::new_unopened(
+                    PortKind::UnixStream, Direction::ReadWrite, encoding, String::new(),
+                )),
             },
             port_val,
             kwargs.timeout,
@@ -127,6 +130,10 @@ pub(crate) fn prim_unix_connect(args: &[Value]) -> (SignalBits, Value) {
         Ok(k) => k,
         Err(e) => return e,
     };
+    let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
+    let port_val = Value::external("port", Port::new_unopened(
+        PortKind::UnixStream, Direction::ReadWrite, encoding, path.clone(),
+    ));
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
@@ -134,10 +141,10 @@ pub(crate) fn prim_unix_connect(args: &[Value]) -> (SignalBits, Value) {
                 addr: ConnectAddr::Unix {
                     path,
                     options: kwargs.options,
-                    encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
+                    encoding,
                 },
             },
-            Value::NIL,
+            port_val,
             kwargs.timeout,
         ),
     )
@@ -163,61 +170,49 @@ pub(crate) fn prim_unix_shutdown(args: &[Value]) -> (SignalBits, Value) {
 // PRIMITIVES table
 // ---------------------------------------------------------------------------
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "unix/listen",
-        func: prim_unix_listen,
-        arity: Arity::Exact(1),
+primitive! {
+    "unix/listen" => prim_unix_listen {
         signal: Signal::errors(),
+        arity: Arity::Exact(1),
         doc: "Listen on a Unix domain socket. Returns a listener port.",
         params: &["path"],
         category: "unix",
         example: "(unix/listen \"/tmp/my.sock\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unix/accept",
-        func: prim_unix_accept,
-        arity: Arity::AtLeast(1),
-        signal: Signal {
+    }
+    "unix/accept" => prim_unix_accept {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(1),
         doc: "Accept a connection on a Unix listener. Returns a stream port.",
         params: &["listener"],
         category: "unix",
         example: "(unix/accept listener)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unix/connect",
-        func: prim_unix_connect,
-        arity: Arity::AtLeast(1),
-        signal: Signal {
+    }
+    "unix/connect" => prim_unix_connect {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::AtLeast(1),
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],
         category: "unix",
         example: "(unix/connect \"/tmp/my.sock\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "unix/shutdown",
-        func: prim_unix_shutdown,
-        arity: Arity::Exact(2),
-        signal: Signal {
+    }
+    "unix/shutdown" => prim_unix_shutdown {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
+        arity: Arity::Exact(2),
         doc: "Shutdown a Unix stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "unix",
         example: "(unix/shutdown conn :write)",
-        aliases: &[],
-    },
-];
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -226,37 +221,45 @@ mod tests {
 
     #[test]
     fn test_unix_listen_returns_ok() {
-        let path = format!("/tmp/elle-test-unix-listen-{}.sock", std::process::id());
-        let (bits, val) = prim_unix_listen(&[Value::string(&*path)]);
-        assert_eq!(bits, SIG_OK);
-        let port = val.as_external::<Port>().unwrap();
-        assert_eq!(port.kind(), PortKind::UnixListener);
-        port.close();
-        std::fs::remove_file(&path).ok();
+        crate::value::arena::with_test_region(|| {
+            let path = format!("/tmp/elle-test-unix-listen-{}.sock", std::process::id());
+            let (bits, val) = prim_unix_listen(&[Value::string(&*path)]);
+            assert_eq!(bits, SIG_OK);
+            let port = val.as_external::<Port>().unwrap();
+            assert_eq!(port.kind(), PortKind::UnixListener);
+            port.close();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_unix_accept_returns_sig_io() {
-        let path = format!("/tmp/elle-test-unix-accept-{}.sock", std::process::id());
-        let (_, listener) = prim_unix_listen(&[Value::string(&*path)]);
-        let (bits, _) = prim_unix_accept(&[listener]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        listener.as_external::<Port>().unwrap().close();
-        std::fs::remove_file(&path).ok();
+        crate::value::arena::with_test_region(|| {
+            let path = format!("/tmp/elle-test-unix-accept-{}.sock", std::process::id());
+            let (_, listener) = prim_unix_listen(&[Value::string(&*path)]);
+            let (bits, _) = prim_unix_accept(&[listener]);
+            assert_eq!(bits, SIG_YIELD | SIG_IO);
+            listener.as_external::<Port>().unwrap().close();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_unix_connect_returns_sig_io() {
-        let (bits, _) = prim_unix_connect(&[Value::string("/tmp/nonexistent.sock")]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        crate::value::arena::with_test_region(|| {
+            let (bits, _) = prim_unix_connect(&[Value::string("/tmp/nonexistent.sock")]);
+            assert_eq!(bits, SIG_YIELD | SIG_IO);
+        });
     }
 
     #[test]
     fn test_unix_shutdown_returns_sig_io() {
-        let file = std::fs::File::open("/dev/null").unwrap();
-        let fd: std::os::unix::io::OwnedFd = file.into();
-        let stream_port = Value::external("port", Port::new_unix_stream(fd, "x".into()));
-        let (bits, _) = prim_unix_shutdown(&[stream_port, Value::keyword("read-write")]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        crate::value::arena::with_test_region(|| {
+            let file = std::fs::File::open("/dev/null").unwrap();
+            let fd: std::os::unix::io::OwnedFd = file.into();
+            let stream_port = Value::external("port", Port::new_unix_stream(fd, "x".into()));
+            let (bits, _) = prim_unix_shutdown(&[stream_port, Value::keyword("read-write")]);
+            assert_eq!(bits, SIG_YIELD | SIG_IO);
+        });
     }
 }

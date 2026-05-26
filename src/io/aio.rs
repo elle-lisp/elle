@@ -23,20 +23,82 @@ fn stdin_to_completion(
     buffer_pool: &mut BufferPool,
 ) -> Option<Completion> {
     let pending_op = pending.remove(&sc.id)?;
-    buffer_pool.release(pending_op.buffer_handle());
+    // Release BufferPool handle if present
+    if let Some(bh) = pending_op.buffer_handle() {
+        buffer_pool.release(bh);
+    }
     Some(match sc.result {
         Ok(data) if data.is_empty() => Completion {
             id: sc.id,
             result: Ok(Value::NIL),
         },
-        Ok(data) => Completion {
-            id: sc.id,
-            result: Ok(Value::string(
-                String::from_utf8_lossy(&data)
-                    .trim_end_matches('\n')
-                    .trim_end_matches('\r'),
-            )),
-        },
+        Ok(data) => {
+            // For Read/ReadLine, copy data into the pre-allocated buffer
+            if let PendingOp::Port {
+                op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+                ref port,
+                ..
+            } = &pending_op
+            {
+                let enc = port
+                    .as_external::<Port>()
+                    .map(|p| p.encoding())
+                    .unwrap_or(Encoding::Binary);
+                unsafe {
+                    let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                    let copy_len = data.len().min(dst_cap);
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_len);
+                    // For ReadLine, trim trailing \r\n
+                    let final_len = if matches!(
+                        &pending_op,
+                        PendingOp::Port {
+                            op: IoOp::ReadLine { .. },
+                            ..
+                        }
+                    ) {
+                        let mut end = copy_len;
+                        if end > 0 && data[end - 1] == b'\n' {
+                            end -= 1;
+                            if end > 0 && data[end - 1] == b'\r' {
+                                end -= 1;
+                            }
+                        }
+                        end
+                    } else {
+                        copy_len
+                    };
+                    crate::io::request::truncate_buffer(buffer, final_len);
+                }
+                if let PendingOp::Port {
+                    op: IoOp::ReadLine { buffer } | IoOp::Read { buffer, .. },
+                    ..
+                } = &pending_op
+                {
+                    // ReadLine always returns string; Read depends on encoding
+                    let result = if matches!(
+                        &pending_op,
+                        PendingOp::Port {
+                            op: IoOp::ReadLine { .. },
+                            ..
+                        }
+                    ) || enc == Encoding::Text
+                    {
+                        unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
+                    } else {
+                        Ok(*buffer)
+                    };
+                    Completion { id: sc.id, result }
+                } else {
+                    unreachable!()
+                }
+            } else {
+                // ReadAll or other — construct bytes (legacy path)
+                Completion {
+                    id: sc.id,
+                    result: Ok(Value::bytes(data)),
+                }
+            }
+        }
         Err(e) => Completion {
             id: sc.id,
             result: Err(error_val("io-error", e)),
@@ -60,6 +122,28 @@ fn pool_to_completion(
             *connect_fd = Some(pc.result_code);
         }
     }
+
+    // For read operations on the thread pool, copy data into the
+    // pre-allocated fiber buffer before processing the completion.
+    if let PendingOp::Port {
+        op: IoOp::Read { ref buffer, .. } | IoOp::ReadLine { ref buffer },
+        filled,
+        ..
+    } = &pending_op
+    {
+        if pc.result_code > 0 && !pc.data.is_empty() {
+            unsafe {
+                let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                let offset = *filled;
+                let remaining = dst_cap.saturating_sub(offset);
+                let copy_len = pc.data.len().min(remaining);
+                std::ptr::copy_nonoverlapping(pc.data.as_ptr(), dst.add(offset), copy_len);
+                let total = offset + copy_len;
+                crate::io::request::truncate_buffer(buffer, total);
+            }
+        }
+    }
+
     let bh = pending_op.buffer_handle();
     Some(completion::process_raw_completion(
         pc.id,
@@ -150,10 +234,17 @@ impl AsyncBackend {
     }
 
     /// Submit an I/O request. Returns a submission ID.
-    pub(crate) fn submit(&self, request: &IoRequest) -> Result<u64, String> {
+    ///
+    /// `origin_heap`: when non-null, spawn results are allocated on this heap
+    /// (the requesting fiber's heap) instead of the current thread-local heap.
+    pub(crate) fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
         // Portless operations — handle before port extraction.
         if let IoOp::Connect { ref addr } = request.op {
-            return self.submit_connect(addr, request.timeout);
+            return self.submit_connect(addr, request.timeout, request.port);
         }
         if let IoOp::Sleep { duration } = request.op {
             return self.submit_sleep(duration);
@@ -161,7 +252,7 @@ impl AsyncBackend {
 
         // Subprocess ops: portless (Spawn) or ProcessHandle-in-port (ProcessWait).
         if let IoOp::Spawn(ref req) = request.op {
-            return self.submit_spawn(req);
+            return self.submit_spawn(req, origin_heap);
         }
         if let IoOp::ProcessWait = request.op {
             return self.submit_process_wait(&request.port);
@@ -191,7 +282,7 @@ impl AsyncBackend {
             encoding,
         } = request.op
         {
-            return self.submit_open(path, flags, mode, direction, encoding, request.timeout);
+            return self.submit_open(path, flags, mode, direction, encoding, request.timeout, request.port);
         }
 
         // Task: run closure on thread pool.
@@ -338,7 +429,10 @@ impl AsyncBackend {
             PortKey::Stdin => unreachable!(),
         };
 
-        let buf_handle = inner.buffer_pool.alloc(4096);
+        let buf_handle = match &request.op {
+            IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadExact { .. } => None,
+            _ => Some(inner.buffer_pool.alloc(4096)),
+        };
 
         // Flush on socket/pipe/stdio ports is a no-op: fsync(2) returns EINVAL on
         // non-file fds (sockets, pipes, and stdio when redirected to pipes in subprocesses).
@@ -354,7 +448,9 @@ impl AsyncBackend {
                     | PortKind::Stderr
             )
         {
-            inner.buffer_pool.release(buf_handle);
+            if let Some(bh) = buf_handle {
+                inner.buffer_pool.release(bh);
+            }
             inner.completions.push_back(Completion {
                 id,
                 result: Ok(Value::NIL),
@@ -370,6 +466,7 @@ impl AsyncBackend {
         // `read_buffered` tracks how many bytes were already in the buffer
         // when a Read request can't be fully served — the completion handler
         // must prepend those bytes to the fd data.
+        let port_encoding = port.encoding();
         let mut read_buffered: usize = 0;
         {
             let state = inner
@@ -377,42 +474,63 @@ impl AsyncBackend {
                 .entry(port_key.clone())
                 .or_insert_with(FdState::new);
             match &request.op {
-                IoOp::ReadLine => {
+                IoOp::ReadLine { buffer } => {
                     if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
                         let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                        let s = String::from_utf8_lossy(&line_bytes);
-                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                        inner.buffer_pool.release(buf_handle);
-                        inner.completions.push_back(Completion {
-                            id,
-                            result: Ok(Value::string(trimmed)),
-                        });
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = line_bytes.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(line_bytes.as_ptr(), dst, copy_len);
+                            let final_len = if copy_len > 0 && line_bytes[copy_len - 1] == b'\n' {
+                                let mut end = copy_len - 1;
+                                if end > 0 && line_bytes[end - 1] == b'\r' {
+                                    end -= 1;
+                                }
+                                end
+                            } else {
+                                copy_len
+                            };
+                            crate::io::request::truncate_buffer(buffer, final_len);
+                        }
+                        // Transmute LBytes → LString (zero-copy)
+                        let result =
+                            unsafe { crate::io::request::bytes_to_string_in_place(*buffer) };
+                        inner.completions.push_back(Completion { id, result });
                         return Ok(id);
+                    }
+                    // No newline found in state.buffer, but there IS buffered data.
+                    // Copy it into the fiber buffer at offset 0 so the completion
+                    // handler can prepend it to the kernel/thread-pool data.
+                    if !state.buffer.is_empty() {
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = state.buffer.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
+                        }
+                        read_buffered = state.buffer.len();
+                        state.buffer.clear();
                     }
                 }
-                IoOp::Read { count } => {
+                IoOp::Read { count, buffer } => {
                     if state.buffer.len() >= *count {
-                        // Buffer has enough — serve entirely from buffer.
                         let chunk: Vec<u8> = state.buffer.drain(..*count).collect();
-                        let value = match port.encoding() {
-                            Encoding::Text => {
-                                Value::string(String::from_utf8_lossy(&chunk).as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(chunk),
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = chunk.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, copy_len);
+                            crate::io::request::truncate_buffer(buffer, copy_len);
+                        }
+                        let result = if port_encoding == Encoding::Text {
+                            unsafe { crate::io::request::bytes_to_string_in_place(*buffer) }
+                        } else {
+                            Ok(*buffer)
                         };
-                        inner.buffer_pool.release(buf_handle);
-                        inner.completions.push_back(Completion {
-                            id,
-                            result: Ok(value),
-                        });
+                        inner.completions.push_back(Completion { id, result });
                         return Ok(id);
                     }
-                    // Buffer has partial data — leave it in place and submit
-                    // a read for the remaining bytes. The completion handler
-                    // will prepend the buffered bytes.
                     read_buffered = state.buffer.len();
                 }
-                IoOp::ReadExact { count } => {
+                IoOp::ReadExact { count, .. } => {
                     // ReadExact's unit is whatever the port is measured in:
                     // bytes for Binary, graphemes for Text.  If the buffered
                     // prefix already contains `count` units, serve from buffer.
@@ -434,7 +552,9 @@ impl AsyncBackend {
                             }
                             Encoding::Binary => Value::bytes(chunk),
                         };
-                        inner.buffer_pool.release(buf_handle);
+                        if let Some(bh) = buf_handle {
+                            inner.buffer_pool.release(bh);
+                        }
                         inner.completions.push_back(Completion {
                             id,
                             result: Ok(value),
@@ -460,6 +580,7 @@ impl AsyncBackend {
             IoOp::Accept {
                 ref options,
                 encoding,
+                ref accept_port,
             } => {
                 let listener_kind = Some(port.kind());
 
@@ -487,11 +608,13 @@ impl AsyncBackend {
                         op: IoOp::Accept {
                             options: options.clone(),
                             encoding: *encoding,
+                            accept_port: *accept_port,
                         },
                         port_key,
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -552,6 +675,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -591,6 +715,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -630,6 +755,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: 0,
                     },
                 );
                 Ok(id)
@@ -660,13 +786,13 @@ impl AsyncBackend {
                     PlatformBackend::ThreadPool(pool) => {
                         let _ = buffer_pool;
                         let pool_op = match &request.op {
-                            IoOp::ReadLine => PoolOp::ReadLine { fd },
+                            IoOp::ReadLine { .. } => PoolOp::ReadLine { fd },
                             IoOp::ReadAll => PoolOp::ReadAll { fd },
-                            IoOp::Read { count } => PoolOp::Read {
+                            IoOp::Read { count, .. } => PoolOp::Read {
                                 fd,
                                 size: *count - read_buffered,
                             },
-                            IoOp::ReadExact { count } => {
+                            IoOp::ReadExact { count, .. } => {
                                 let is_text = matches!(port.encoding(), Encoding::Text);
                                 if is_text {
                                     // Grapheme-counted: the worker grows its
@@ -703,9 +829,15 @@ impl AsyncBackend {
                     id,
                     PendingOp::Port {
                         op: match &request.op {
-                            IoOp::ReadLine => IoOp::ReadLine,
-                            IoOp::Read { count } => IoOp::Read { count: *count },
-                            IoOp::ReadExact { count } => IoOp::ReadExact { count: *count },
+                            IoOp::ReadLine { buffer } => IoOp::ReadLine { buffer: *buffer },
+                            IoOp::Read { count, buffer } => IoOp::Read {
+                                count: *count,
+                                buffer: *buffer,
+                            },
+                            IoOp::ReadExact { count, buffer } => IoOp::ReadExact {
+                                count: *count,
+                                buffer: *buffer,
+                            },
                             IoOp::ReadAll => IoOp::ReadAll,
                             IoOp::Write { data } => IoOp::Write { data: *data },
                             IoOp::Flush => IoOp::Flush,
@@ -715,6 +847,7 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
+                        filled: read_buffered,
                     },
                 );
                 Ok(id)
@@ -725,7 +858,7 @@ impl AsyncBackend {
     /// Submit a Connect operation. Connect creates a new port, so
     /// request.port is Value::NIL — we handle it separately.
     #[allow(unused_variables)]
-    fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>) -> Result<u64, String> {
+    fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>, port: Value) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
@@ -828,6 +961,7 @@ impl AsyncBackend {
                 },
                 buffer_handle: buf_handle,
                 connect_fd: uring_fd,
+                port,
             },
         );
         Ok(id)
@@ -1103,7 +1237,7 @@ impl AsyncBackend {
 
     /// Submit a file open operation. Open creates a new port, so
     /// request.port is Value::NIL — we handle it before the port guard.
-    #[allow(unused_variables)]
+    #[allow(unused_variables, clippy::too_many_arguments)]
     fn submit_open(
         &self,
         path: &str,
@@ -1112,6 +1246,7 @@ impl AsyncBackend {
         direction: Direction,
         encoding: Encoding,
         timeout: Option<Duration>,
+        port: Value,
     ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
@@ -1160,23 +1295,38 @@ impl AsyncBackend {
             id,
             PendingOp::Open {
                 path: path.to_string(),
-                direction,
-                encoding,
                 buffer_handle: buf_handle,
+                port,
             },
         );
         Ok(id)
     }
 
-    fn submit_spawn(&self, req: &SpawnRequest) -> Result<u64, String> {
+    fn submit_spawn(
+        &self,
+        req: &SpawnRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
         let buf_handle = inner.buffer_pool.alloc(0);
 
-        let result = req.spawn_to_struct();
+        // Allocate the spawn result on the requesting fiber's heap (if
+        // provided) so there are no cross-heap references. The requesting
+        // fiber receives this value via fiber/resume, so the value lives
+        // on the same heap that will manage its lifetime.
+        let result = if !origin_heap.is_null() {
+            let saved = crate::value::fiberheap::save_current_heap();
+            unsafe { crate::value::fiberheap::install_fiber_heap(origin_heap) };
+            let r = req.spawn_to_struct();
+            unsafe { crate::value::fiberheap::restore_saved_heap(saved) };
+            r
+        } else {
+            req.spawn_to_struct()
+        };
 
-        inner.completions.push_back(Completion { id, result });
+        inner.completions.push_back(Completion::new(id, result));
 
         // Spawn is an immediate completion — no CQE will arrive.
         // Release the placeholder buffer (was alloc(0), nothing stored).
@@ -1636,8 +1786,12 @@ impl AsyncBackend {
 }
 
 impl crate::io::IoBackend for AsyncBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String> {
-        self.submit(request)
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String> {
+        self.submit(request, origin_heap)
     }
 
     fn poll(&self) -> Vec<Completion> {
@@ -1669,23 +1823,13 @@ impl AsyncBackendInner {
             }
             PlatformBackend::ThreadPool(pool) => {
                 let raw = pool.poll();
-                for PoolCompletion {
-                    id,
-                    result_code,
-                    data,
-                } in raw
-                {
-                    if let Some(pending) = self.pending.remove(&id) {
-                        let buf_handle = pending.buffer_handle();
-                        let c = completion::process_raw_completion(
-                            id,
-                            result_code,
-                            data,
-                            &pending,
-                            &mut self.fd_states,
-                            &mut self.buffer_pool,
-                            buf_handle,
-                        );
+                for pc in raw {
+                    if let Some(c) = pool_to_completion(
+                        pc,
+                        &mut self.pending,
+                        &mut self.fd_states,
+                        &mut self.buffer_pool,
+                    ) {
                         self.completions.push_back(c);
                     }
                 }
@@ -1735,8 +1879,8 @@ impl AsyncBackendInner {
     fn submit_stdin(&mut self, id: u64, op: &IoOp) -> Result<u64, String> {
         let stdin_thread = self.stdin_thread.get_or_insert_with(StdinThread::new);
         let op_kind = match op {
-            IoOp::ReadLine => StdinOpKind::ReadLine,
-            IoOp::Read { count } => StdinOpKind::Read { count: *count },
+            IoOp::ReadLine { .. } => StdinOpKind::ReadLine,
+            IoOp::Read { count, .. } => StdinOpKind::Read { count: *count },
             IoOp::ReadAll => StdinOpKind::ReadAll,
             IoOp::ReadExact { .. }
             | IoOp::Write { .. }
@@ -1763,21 +1907,24 @@ impl AsyncBackendInner {
             }
         };
         stdin_thread.submit(id, op_kind)?;
-        // No buffer needed for stdin (thread manages its own)
         let buf_handle = self.buffer_pool.alloc(0);
         self.pending.insert(
             id,
             PendingOp::Port {
                 op: match op {
-                    IoOp::ReadLine => IoOp::ReadLine,
-                    IoOp::Read { count } => IoOp::Read { count: *count },
+                    IoOp::ReadLine { buffer } => IoOp::ReadLine { buffer: *buffer },
+                    IoOp::Read { count, buffer } => IoOp::Read {
+                        count: *count,
+                        buffer: *buffer,
+                    },
                     IoOp::ReadAll => IoOp::ReadAll,
                     _ => unreachable!(),
                 },
                 port_key: PortKey::Stdin,
-                port: Value::NIL, // stdin has no port Value
-                buffer_handle: buf_handle,
+                port: Value::NIL,
+                buffer_handle: Some(buf_handle),
                 listener_kind: None,
+                filled: 0,
             },
         );
         Ok(id)
@@ -1885,7 +2032,7 @@ impl AsyncBackendInner {
 mod tests {
     use super::*;
     use crate::io::request::{IoOp, IoRequest};
-    use crate::port::{Direction, Encoding, Port};
+    use crate::port::{Direction, Encoding, Port, PortKind};
     use crate::value::heap::TableKey;
     use crate::value::sorted_struct_get;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1930,45 +2077,49 @@ mod tests {
 
     #[test]
     fn test_submit_returns_monotonic_ids() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("hello");
-        let port = open_read_port(&path);
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let path = write_temp_file("hello");
+            let port = open_read_port(&path);
 
-        let req1 = IoRequest {
-            op: IoOp::ReadAll,
-            port,
-            timeout: None,
-        };
-        let req2 = IoRequest {
-            op: IoOp::ReadAll,
-            port,
-            timeout: None,
-        };
+            let req1 = IoRequest {
+                op: IoOp::ReadAll,
+                port,
+                timeout: None,
+            };
+            let req2 = IoRequest {
+                op: IoOp::ReadAll,
+                port,
+                timeout: None,
+            };
 
-        let id1 = backend.submit(&req1).unwrap();
-        let id2 = backend.submit(&req2).unwrap();
-        assert!(id2 > id1, "IDs must be monotonically increasing");
+            let id1 = backend.submit(&req1, std::ptr::null_mut()).unwrap();
+            let id2 = backend.submit(&req2, std::ptr::null_mut()).unwrap();
+            assert!(id2 > id1, "IDs must be monotonically increasing");
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_submit_closed_port_errors() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("test");
-        let port_val = open_read_port(&path);
-        let port = port_val.as_external::<Port>().unwrap();
-        port.close();
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let path = write_temp_file("test");
+            let port_val = open_read_port(&path);
+            let port = port_val.as_external::<Port>().unwrap();
+            port.close();
 
-        let req = IoRequest {
-            op: IoOp::ReadAll,
-            port: port_val,
-            timeout: None,
-        };
-        let result = backend.submit(&req);
-        assert!(result.is_err());
+            let req = IoRequest {
+                op: IoOp::ReadAll,
+                port: port_val,
+                timeout: None,
+            };
+            let result = backend.submit(&req, std::ptr::null_mut());
+            assert!(result.is_err());
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
@@ -1980,96 +2131,104 @@ mod tests {
 
     #[test]
     fn test_submit_and_wait_read() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("async read test");
-        let port = open_read_port(&path);
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let path = write_temp_file("async read test");
+            let port = open_read_port(&path);
 
-        let req = IoRequest {
-            op: IoOp::ReadAll,
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
+            let req = IoRequest {
+                op: IoOp::ReadAll,
+                port,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
+            let completions = backend.wait(-1).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(completions[0].result.is_ok());
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_submit_and_wait_write() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = format!("/tmp/elle-test-async-write-{}", std::process::id());
-        let port = open_write_port(&path);
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let path = format!("/tmp/elle-test-async-write-{}", std::process::id());
+            let port = open_write_port(&path);
 
-        let req = IoRequest {
-            op: IoOp::Write {
-                data: Value::string("async write"),
-            },
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
+            let req = IoRequest {
+                op: IoOp::Write {
+                    data: Value::string("async write"),
+                },
+                port,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
+            let completions = backend.wait(-1).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(completions[0].result.is_ok());
 
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "async write");
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(content, "async write");
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_completion_to_value_success() {
-        let c = Completion {
-            id: 42,
-            result: Ok(Value::string("hello")),
-        };
-        let v = c.to_value();
-        let fields = v.as_struct().unwrap();
-        assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
-                .unwrap()
-                .as_int(),
-            Some(42)
-        );
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .is_nil()
-        );
+        crate::value::arena::with_test_region(|| {
+            let c = Completion {
+                id: 42,
+                result: Ok(Value::string("hello")),
+            };
+            let v = c.to_value();
+            let fields = v.as_struct().unwrap();
+            assert_eq!(
+                sorted_struct_get(fields, &TableKey::Keyword("id".into()))
+                    .unwrap()
+                    .as_int(),
+                Some(42)
+            );
+            assert!(
+                sorted_struct_get(fields, &TableKey::Keyword("error".into()))
+                    .unwrap()
+                    .is_nil()
+            );
+        });
     }
 
     #[test]
     fn test_completion_to_value_error() {
-        let c = Completion {
-            id: 7,
-            result: Err(error_val("io-error", "test error")),
-        };
-        let v = c.to_value();
-        let fields = v.as_struct().unwrap();
-        assert_eq!(
-            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
-                .unwrap()
-                .as_int(),
-            Some(7)
-        );
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("value".into()))
-                .unwrap()
-                .is_nil()
-        );
-        assert!(
-            !sorted_struct_get(fields, &TableKey::Keyword("error".into()))
-                .unwrap()
-                .is_nil()
-        );
+        crate::value::arena::with_test_region(|| {
+            let c = Completion {
+                id: 7,
+                result: Err(error_val("io-error", "test error")),
+            };
+            let v = c.to_value();
+            let fields = v.as_struct().unwrap();
+            assert_eq!(
+                sorted_struct_get(fields, &TableKey::Keyword("id".into()))
+                    .unwrap()
+                    .as_int(),
+                Some(7)
+            );
+            assert!(
+                sorted_struct_get(fields, &TableKey::Keyword("value".into()))
+                    .unwrap()
+                    .is_nil()
+            );
+            assert!(
+                !sorted_struct_get(fields, &TableKey::Keyword("error".into()))
+                    .unwrap()
+                    .is_nil()
+            );
+        });
     }
 
     #[test]
@@ -2088,237 +2247,258 @@ mod tests {
     /// at least one completion arrives or the deadline passes.
     #[test]
     fn test_accept_wait_does_not_return_zero_completions_spuriously() {
-        use std::os::unix::io::FromRawFd;
-        use std::sync::{Arc, Barrier};
+        crate::value::arena::with_test_region(|| {
+            use std::os::unix::io::FromRawFd;
+            use std::sync::{Arc, Barrier};
 
-        let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
-            assert!(fd >= 0);
-            let opt: libc::c_int = 1;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            );
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            addr.sin_family = libc::AF_INET as libc::sa_family_t;
-            addr.sin_port = 0;
-            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
-            assert_eq!(
-                libc::bind(
+            let listener_fd = unsafe {
+                let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+                assert!(fd >= 0);
+                let opt: libc::c_int = 1;
+                libc::setsockopt(
                     fd,
-                    &addr as *const _ as *const libc::sockaddr,
-                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    &opt as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+                let mut addr: libc::sockaddr_in = std::mem::zeroed();
+                addr.sin_family = libc::AF_INET as libc::sa_family_t;
+                addr.sin_port = 0;
+                addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+                assert_eq!(
+                    libc::bind(
+                        fd,
+                        &addr as *const _ as *const libc::sockaddr,
+                        std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+                    ),
+                    0
+                );
+                assert_eq!(libc::listen(fd, 128), 0);
+                fd
+            };
+            let bound_port = unsafe {
+                let mut addr: libc::sockaddr_in = std::mem::zeroed();
+                let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+                libc::getsockname(
+                    listener_fd,
+                    &mut addr as *mut _ as *mut libc::sockaddr,
+                    &mut len,
+                );
+                u16::from_be(addr.sin_port)
+            };
+            let listener_port = Value::external(
+                "port",
+                Port::new_tcp_listener(
+                    unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                    format!("127.0.0.1:{}", bound_port),
                 ),
-                0
             );
-            assert_eq!(libc::listen(fd, 128), 0);
-            fd
-        };
-        let bound_port = unsafe {
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            libc::getsockname(
-                listener_fd,
-                &mut addr as *mut _ as *mut libc::sockaddr,
-                &mut len,
+
+            let backend = AsyncBackend::new().unwrap();
+            let accept_port_val = Value::external("port", Port::new_unopened(
+                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary, String::new(),
+            ));
+            let accept_id = backend
+                .submit(
+                    &IoRequest {
+                        op: IoOp::Accept {
+                            options: Default::default(),
+                            encoding: crate::port::Encoding::Binary,
+                            accept_port: accept_port_val,
+                        },
+                        port: listener_port,
+                        timeout: None,
+                    },
+                    std::ptr::null_mut(),
+                )
+                .unwrap();
+
+            // Use a barrier so the connect happens only after we're about to call wait().
+            // This maximises the chance that wait() sees 0 completions on the first
+            // drain and must block — the scenario where the spurious-return bug fires.
+            let barrier = Arc::new(Barrier::new(2));
+            let barrier2 = barrier.clone();
+            let handle = std::thread::spawn(move || {
+                barrier2.wait(); // released just before wait() is called
+                std::net::TcpStream::connect(format!("127.0.0.1:{}", bound_port)).unwrap()
+            });
+
+            barrier.wait(); // release the connector thread
+                            // wait() must return exactly 1 completion — the accept.
+                            // If it returns 0, the bug is confirmed.
+            let completions = backend.wait(5000).unwrap();
+            assert_eq!(
+                completions.len(),
+                1,
+                "wait() returned {} completions — expected 1 (spurious early return bug)",
+                completions.len()
             );
-            u16::from_be(addr.sin_port)
-        };
-        let listener_port = Value::external(
-            "port",
-            Port::new_tcp_listener(
-                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
-                format!("127.0.0.1:{}", bound_port),
-            ),
-        );
-
-        let backend = AsyncBackend::new().unwrap();
-        let accept_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Accept {
-                    options: Default::default(),
-                    encoding: crate::port::Encoding::Binary,
-                },
-                port: listener_port,
-                timeout: None,
-            })
-            .unwrap();
-
-        // Use a barrier so the connect happens only after we're about to call wait().
-        // This maximises the chance that wait() sees 0 completions on the first
-        // drain and must block — the scenario where the spurious-return bug fires.
-        let barrier = Arc::new(Barrier::new(2));
-        let barrier2 = barrier.clone();
-        let handle = std::thread::spawn(move || {
-            barrier2.wait(); // released just before wait() is called
-            std::net::TcpStream::connect(format!("127.0.0.1:{}", bound_port)).unwrap()
+            assert_eq!(completions[0].id, accept_id);
+            assert!(completions[0].result.is_ok());
+            handle.join().unwrap();
         });
-
-        barrier.wait(); // release the connector thread
-                        // wait() must return exactly 1 completion — the accept.
-                        // If it returns 0, the bug is confirmed.
-        let completions = backend.wait(5000).unwrap();
-        assert_eq!(
-            completions.len(),
-            1,
-            "wait() returned {} completions — expected 1 (spurious early return bug)",
-            completions.len()
-        );
-        assert_eq!(completions[0].id, accept_id);
-        assert!(completions[0].result.is_ok());
-        handle.join().unwrap();
     }
 
     #[test]
     fn test_accept_via_uring() {
-        use std::os::unix::io::FromRawFd;
+        crate::value::arena::with_test_region(|| {
+            use std::os::unix::io::FromRawFd;
 
-        // Create a TCP listener via libc
-        let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
-            assert!(fd >= 0, "socket() failed");
+            // Create a TCP listener via libc
+            let listener_fd = unsafe {
+                let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+                assert!(fd >= 0, "socket() failed");
 
-            let opt: libc::c_int = 1;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                let opt: libc::c_int = 1;
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    &opt as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+
+                let mut addr: libc::sockaddr_in = std::mem::zeroed();
+                addr.sin_family = libc::AF_INET as libc::sa_family_t;
+                addr.sin_port = 0; // ephemeral port
+                addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+
+                let ret = libc::bind(
+                    fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                );
+                assert_eq!(ret, 0, "bind() failed: {}", std::io::Error::last_os_error());
+
+                let ret = libc::listen(fd, 128);
+                assert_eq!(ret, 0, "listen() failed");
+
+                fd
+            };
+
+            // Get the bound port
+            let bound_port = unsafe {
+                let mut addr: libc::sockaddr_in = std::mem::zeroed();
+                let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+                libc::getsockname(
+                    listener_fd,
+                    &mut addr as *mut _ as *mut libc::sockaddr,
+                    &mut len,
+                );
+                u16::from_be(addr.sin_port)
+            };
+
+            let listener_port = Value::external(
+                "port",
+                Port::new_tcp_listener(
+                    unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                    format!("127.0.0.1:{}", bound_port),
+                ),
             );
 
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            addr.sin_family = libc::AF_INET as libc::sa_family_t;
-            addr.sin_port = 0; // ephemeral port
-            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            let backend = AsyncBackend::new().unwrap();
 
-            let ret = libc::bind(
-                fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            // Submit Accept
+            let accept_port_val = Value::external("port", Port::new_unopened(
+                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary, String::new(),
+            ));
+            let accept_req = IoRequest {
+                op: IoOp::Accept {
+                    options: Default::default(),
+                    encoding: crate::port::Encoding::Binary,
+                    accept_port: accept_port_val,
+                },
+                port: listener_port,
+                timeout: None,
+            };
+            let accept_id = backend.submit(&accept_req, std::ptr::null_mut()).unwrap();
+
+            // Connect from a background thread
+            let port_copy = bound_port;
+            let handle = std::thread::spawn(move || {
+                // Small delay to ensure accept is submitted
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                let _stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port_copy)).unwrap();
+            });
+
+            // Wait for the accept completion
+            let completions = backend.wait(5000).unwrap();
+            assert_eq!(
+                completions.len(),
+                1,
+                "expected 1 completion, got {}",
+                completions.len()
             );
-            assert_eq!(ret, 0, "bind() failed: {}", std::io::Error::last_os_error());
-
-            let ret = libc::listen(fd, 128);
-            assert_eq!(ret, 0, "listen() failed");
-
-            fd
-        };
-
-        // Get the bound port
-        let bound_port = unsafe {
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            libc::getsockname(
-                listener_fd,
-                &mut addr as *mut _ as *mut libc::sockaddr,
-                &mut len,
+            assert_eq!(completions[0].id, accept_id);
+            assert!(
+                completions[0].result.is_ok(),
+                "accept failed: {:?}",
+                completions[0].result
             );
-            u16::from_be(addr.sin_port)
-        };
 
-        let listener_port = Value::external(
-            "port",
-            Port::new_tcp_listener(
-                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
-                format!("127.0.0.1:{}", bound_port),
-            ),
-        );
+            // The result should be a port
+            let accepted = completions[0].result.as_ref().unwrap();
+            assert_eq!(
+                accepted.external_type_name(),
+                Some("port"),
+                "expected a port value"
+            );
 
-        let backend = AsyncBackend::new().unwrap();
-
-        // Submit Accept
-        let accept_req = IoRequest {
-            op: IoOp::Accept {
-                options: Default::default(),
-                encoding: crate::port::Encoding::Binary,
-            },
-            port: listener_port,
-            timeout: None,
-        };
-        let accept_id = backend.submit(&accept_req).unwrap();
-
-        // Connect from a background thread
-        let port_copy = bound_port;
-        let handle = std::thread::spawn(move || {
-            // Small delay to ensure accept is submitted
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            let _stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port_copy)).unwrap();
+            handle.join().unwrap();
         });
-
-        // Wait for the accept completion
-        let completions = backend.wait(5000).unwrap();
-        assert_eq!(
-            completions.len(),
-            1,
-            "expected 1 completion, got {}",
-            completions.len()
-        );
-        assert_eq!(completions[0].id, accept_id);
-        assert!(
-            completions[0].result.is_ok(),
-            "accept failed: {:?}",
-            completions[0].result
-        );
-
-        // The result should be a port
-        let accepted = completions[0].result.as_ref().unwrap();
-        assert_eq!(
-            accepted.external_type_name(),
-            Some("port"),
-            "expected a port value"
-        );
-
-        handle.join().unwrap();
     }
 
     #[test]
     fn test_connect_via_uring() {
-        // Create a TCP listener via std
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let bound_addr = listener.local_addr().unwrap();
+        crate::value::arena::with_test_region(|| {
+            // Create a TCP listener via std
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let bound_addr = listener.local_addr().unwrap();
 
-        // Accept from a background thread so we don't deadlock
-        let handle = std::thread::spawn(move || {
-            let _accepted = listener.accept().unwrap();
-            // Keep the accepted connection alive until the test is done
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        });
+            // Accept from a background thread so we don't deadlock
+            let handle = std::thread::spawn(move || {
+                let _accepted = listener.accept().unwrap();
+                // Keep the accepted connection alive until the test is done
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            });
 
-        let backend = AsyncBackend::new().unwrap();
+            let backend = AsyncBackend::new().unwrap();
 
-        // Submit Connect
-        let connect_req = IoRequest {
-            op: IoOp::Connect {
-                addr: crate::io::request::ConnectAddr::Tcp {
-                    addr: "127.0.0.1".to_string(),
-                    port: bound_addr.port(),
-                    options: Default::default(),
-                    encoding: crate::port::Encoding::Binary,
+            // Submit Connect
+            let connect_port = Value::external("port", Port::new_unopened(
+                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary,
+                format!("127.0.0.1:{}", bound_addr.port()),
+            ));
+            let connect_req = IoRequest {
+                op: IoOp::Connect {
+                    addr: crate::io::request::ConnectAddr::Tcp {
+                        addr: "127.0.0.1".to_string(),
+                        port: bound_addr.port(),
+                        options: Default::default(),
+                        encoding: crate::port::Encoding::Binary,
+                    },
                 },
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let connect_id = backend.submit(&connect_req).unwrap();
+                port: connect_port,
+                timeout: None,
+            };
+            let connect_id = backend.submit(&connect_req, std::ptr::null_mut()).unwrap();
 
-        // Wait for the connect completion
-        let completions = backend.wait(5000).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, connect_id);
-        assert!(
-            completions[0].result.is_ok(),
-            "connect failed: {:?}",
-            completions[0].result
-        );
+            // Wait for the connect completion
+            let completions = backend.wait(5000).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, connect_id);
+            assert!(
+                completions[0].result.is_ok(),
+                "connect failed: {:?}",
+                completions[0].result
+            );
 
-        let connected = completions[0].result.as_ref().unwrap();
-        assert_eq!(connected.external_type_name(), Some("port"));
+            let connected = completions[0].result.as_ref().unwrap();
+            assert_eq!(connected.external_type_name(), Some("port"));
 
-        handle.join().unwrap();
+            handle.join().unwrap();
+        });
     }
 
     /// Accept + connect on the same io_uring ring — the scheduler scenario.
@@ -2326,97 +2506,113 @@ mod tests {
     /// the same ring. Both completions must arrive.
     #[test]
     fn test_accept_and_connect_concurrent() {
-        use std::os::unix::io::FromRawFd;
+        crate::value::arena::with_test_region(|| {
+            use std::os::unix::io::FromRawFd;
 
-        // Create a non-blocking TCP listener via libc
-        let listener_fd = unsafe {
-            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
-            assert!(fd >= 0);
-            let opt: libc::c_int = 1;
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            // Create a non-blocking TCP listener via libc
+            let listener_fd = unsafe {
+                let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+                assert!(fd >= 0);
+                let opt: libc::c_int = 1;
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    &opt as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+                let mut addr: libc::sockaddr_in = std::mem::zeroed();
+                addr.sin_family = libc::AF_INET as libc::sa_family_t;
+                addr.sin_port = 0;
+                addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+                libc::bind(
+                    fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                );
+                libc::listen(fd, 128);
+                fd
+            };
+
+            let bound_port = unsafe {
+                let mut addr: libc::sockaddr_in = std::mem::zeroed();
+                let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+                libc::getsockname(
+                    listener_fd,
+                    &mut addr as *mut _ as *mut libc::sockaddr,
+                    &mut len,
+                );
+                u16::from_be(addr.sin_port)
+            };
+
+            let listener_port = Value::external(
+                "port",
+                Port::new_tcp_listener(
+                    unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                    format!("127.0.0.1:{}", bound_port),
+                ),
             );
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            addr.sin_family = libc::AF_INET as libc::sa_family_t;
-            addr.sin_port = 0;
-            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
-            libc::bind(
-                fd,
-                &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-            );
-            libc::listen(fd, 128);
-            fd
-        };
 
-        let bound_port = unsafe {
-            let mut addr: libc::sockaddr_in = std::mem::zeroed();
-            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            libc::getsockname(
-                listener_fd,
-                &mut addr as *mut _ as *mut libc::sockaddr,
-                &mut len,
-            );
-            u16::from_be(addr.sin_port)
-        };
+            let backend = AsyncBackend::new().unwrap();
 
-        let listener_port = Value::external(
-            "port",
-            Port::new_tcp_listener(
-                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
-                format!("127.0.0.1:{}", bound_port),
-            ),
-        );
-
-        let backend = AsyncBackend::new().unwrap();
-
-        let accept_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Accept {
-                    options: Default::default(),
-                    encoding: crate::port::Encoding::Binary,
-                },
-                port: listener_port,
-                timeout: None,
-            })
-            .unwrap();
-
-        let connect_id = backend
-            .submit(&IoRequest {
-                op: IoOp::Connect {
-                    addr: crate::io::request::ConnectAddr::Tcp {
-                        addr: "127.0.0.1".to_string(),
-                        port: bound_port,
-                        options: Default::default(),
-                        encoding: crate::port::Encoding::Binary,
+            let accept_port_val = Value::external("port", Port::new_unopened(
+                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary, String::new(),
+            ));
+            let accept_id = backend
+                .submit(
+                    &IoRequest {
+                        op: IoOp::Accept {
+                            options: Default::default(),
+                            encoding: crate::port::Encoding::Binary,
+                            accept_port: accept_port_val,
+                        },
+                        port: listener_port,
+                        timeout: None,
                     },
-                },
-                port: Value::NIL,
-                timeout: None,
-            })
-            .unwrap();
+                    std::ptr::null_mut(),
+                )
+                .unwrap();
 
-        // Collect completions — may arrive in 1 or 2 wait calls.
-        let mut all = Vec::new();
-        for _ in 0..5 {
-            let cs = backend.wait(2000).unwrap();
-            all.extend(cs);
-            if all.len() >= 2 {
-                break;
+            let connect_port = Value::external("port", Port::new_unopened(
+                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary,
+                format!("127.0.0.1:{}", bound_port),
+            ));
+            let connect_id = backend
+                .submit(
+                    &IoRequest {
+                        op: IoOp::Connect {
+                            addr: crate::io::request::ConnectAddr::Tcp {
+                                addr: "127.0.0.1".to_string(),
+                                port: bound_port,
+                                options: Default::default(),
+                                encoding: crate::port::Encoding::Binary,
+                            },
+                        },
+                        port: connect_port,
+                        timeout: None,
+                    },
+                    std::ptr::null_mut(),
+                )
+                .unwrap();
+
+            // Collect completions — may arrive in 1 or 2 wait calls.
+            let mut all = Vec::new();
+            for _ in 0..5 {
+                let cs = backend.wait(2000).unwrap();
+                all.extend(cs);
+                if all.len() >= 2 {
+                    break;
+                }
             }
-        }
 
-        assert_eq!(all.len(), 2, "expected 2 completions, got {}", all.len());
-        for c in &all {
-            assert!(c.result.is_ok(), "id={} failed: {:?}", c.id, c.result);
-        }
-        let ids: Vec<u64> = all.iter().map(|c| c.id).collect();
-        assert!(ids.contains(&accept_id), "missing accept");
-        assert!(ids.contains(&connect_id), "missing connect");
+            assert_eq!(all.len(), 2, "expected 2 completions, got {}", all.len());
+            for c in &all {
+                assert!(c.result.is_ok(), "id={} failed: {:?}", c.id, c.result);
+            }
+            let ids: Vec<u64> = all.iter().map(|c| c.id).collect();
+            assert!(ids.contains(&accept_id), "missing accept");
+            assert!(ids.contains(&connect_id), "missing connect");
+        });
     }
 
     fn open_rw_port(path: &str) -> Value {
@@ -2436,103 +2632,111 @@ mod tests {
 
     #[test]
     fn test_async_seek_returns_immediate_completion() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("hello world");
-        let port = open_rw_port(&path);
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let path = write_temp_file("hello world");
+            let port = open_rw_port(&path);
 
-        let req = IoRequest {
-            op: IoOp::Seek {
-                offset: 6,
-                whence: libc::SEEK_SET,
-            },
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
+            let req = IoRequest {
+                op: IoOp::Seek {
+                    offset: 6,
+                    whence: libc::SEEK_SET,
+                },
+                port,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
-        // Seek is immediate — no wait needed
-        let completions = backend.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
-        assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(6));
+            // Seek is immediate — no wait needed
+            let completions = backend.poll();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(completions[0].result.is_ok());
+            assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(6));
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_async_tell_returns_immediate_completion() {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("hello");
-        let port = open_rw_port(&path);
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let path = write_temp_file("hello");
+            let port = open_rw_port(&path);
 
-        let req = IoRequest {
-            op: IoOp::Tell,
-            port,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
+            let req = IoRequest {
+                op: IoOp::Tell,
+                port,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
 
-        let completions = backend.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_ok());
-        assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(0));
+            let completions = backend.poll();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(completions[0].result.is_ok());
+            assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(0));
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_async_seek_non_file_port_errors() {
-        let backend = AsyncBackend::new().unwrap();
-        let stdin_port = Value::external("port", Port::stdin());
+        crate::value::arena::with_test_region(|| {
+            let backend = AsyncBackend::new().unwrap();
+            let stdin_port = Value::external("port", Port::stdin());
 
-        let req = IoRequest {
-            op: IoOp::Seek {
-                offset: 0,
-                whence: libc::SEEK_SET,
-            },
-            port: stdin_port,
-            timeout: None,
-        };
-        // stdin has PortKind::Stdin — seek must fail immediately
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.poll();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(completions[0].result.is_err());
+            let req = IoRequest {
+                op: IoOp::Seek {
+                    offset: 0,
+                    whence: libc::SEEK_SET,
+                },
+                port: stdin_port,
+                timeout: None,
+            };
+            // stdin has PortKind::Stdin — seek must fail immediately
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
+            let completions = backend.poll();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(completions[0].result.is_err());
+        });
     }
 
     #[test]
     fn test_async_submit_spawn_echo() {
-        use crate::io::request::{SpawnRequest, StdioDisposition};
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Spawn(SpawnRequest {
-                program: "/bin/echo".to_string(),
-                args: vec!["hello-async".to_string()],
-                env: None,
-                cwd: None,
-                stdin: StdioDisposition::Null,
-                stdout: StdioDisposition::Pipe,
-                stderr: StdioDisposition::Null,
-            }),
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        let val = completions[0].result.as_ref().expect("spawn failed");
-        let fields = val.as_struct().expect("expected struct");
-        assert!(
-            sorted_struct_get(fields, &TableKey::Keyword("pid".into()))
-                .unwrap()
-                .as_int()
-                .unwrap()
-                > 0
-        );
+        crate::value::arena::with_test_region(|| {
+            use crate::io::request::{SpawnRequest, StdioDisposition};
+            let backend = AsyncBackend::new().unwrap();
+            let req = IoRequest {
+                op: IoOp::Spawn(SpawnRequest {
+                    program: "/bin/echo".to_string(),
+                    args: vec!["hello-async".to_string()],
+                    env: None,
+                    cwd: None,
+                    stdin: StdioDisposition::Null,
+                    stdout: StdioDisposition::Pipe,
+                    stderr: StdioDisposition::Null,
+                }),
+                port: Value::NIL,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
+            let completions = backend.wait(-1).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            let val = completions[0].result.as_ref().expect("spawn failed");
+            let fields = val.as_struct().expect("expected struct");
+            assert!(
+                sorted_struct_get(fields, &TableKey::Keyword("pid".into()))
+                    .unwrap()
+                    .as_int()
+                    .unwrap()
+                    > 0
+            );
+        });
     }
 
     /// Test IORING_OP_WAITID via async backend.
@@ -2541,142 +2745,156 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn test_async_submit_process_wait_uring() {
-        use crate::io::request::{IoOp, IoRequest, ProcessHandle};
+        crate::value::arena::with_test_region(|| {
+            use crate::io::request::{IoOp, IoRequest, ProcessHandle};
 
-        let child = std::process::Command::new("/bin/true").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
+            let child = std::process::Command::new("/bin/true").spawn().unwrap();
+            let pid = child.id();
+            let handle = ProcessHandle::new(pid, child);
+            let handle_val = Value::external("process", handle);
 
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::ProcessWait,
-            port: handle_val,
-            timeout: None,
-        };
-        let id = backend.submit(&req);
+            let backend = AsyncBackend::new().unwrap();
+            let req = IoRequest {
+                op: IoOp::ProcessWait,
+                port: handle_val,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut());
 
-        match id {
-            Err(e) if e.contains("thread-pool") => {
-                // Thread-pool backend: ProcessWait not supported. Skip.
-            }
-            Err(e) => panic!("submit failed unexpectedly: {}", e),
-            Ok(id) => {
-                let completions = backend.wait(5000).unwrap();
-                assert_eq!(completions.len(), 1);
-                assert_eq!(completions[0].id, id);
-                match &completions[0].result {
-                    Err(e) => {
-                        // -EINVAL means IORING_OP_WAITID not supported on this kernel. Skip.
-                        let msg = format!("{:?}", e);
-                        if msg.contains("22")
-                            || msg.contains("EINVAL")
-                            || msg.contains("waitid failed")
-                        {
-                            return; // kernel < 6.7
+            match id {
+                Err(e) if e.contains("thread-pool") => {
+                    // Thread-pool backend: ProcessWait not supported. Skip.
+                }
+                Err(e) => panic!("submit failed unexpectedly: {}", e),
+                Ok(id) => {
+                    let completions = backend.wait(5000).unwrap();
+                    assert_eq!(completions.len(), 1);
+                    assert_eq!(completions[0].id, id);
+                    match &completions[0].result {
+                        Err(e) => {
+                            // -EINVAL means IORING_OP_WAITID not supported on this kernel. Skip.
+                            let msg = format!("{:?}", e);
+                            if msg.contains("22")
+                                || msg.contains("EINVAL")
+                                || msg.contains("waitid failed")
+                            {
+                                return; // kernel < 6.7
+                            }
+                            panic!("ProcessWait failed: {:?}", e);
                         }
-                        panic!("ProcessWait failed: {:?}", e);
-                    }
-                    Ok(val) => {
-                        assert_eq!(val.as_int(), Some(0), "expected exit 0");
+                        Ok(val) => {
+                            assert_eq!(val.as_int(), Some(0), "expected exit 0");
+                        }
                     }
                 }
             }
-        }
+        });
     }
 
     // ── IoOp::Open integration tests ─────────────────────────────────────────
 
     #[test]
     fn test_async_open_regular_file_returns_port() {
-        let path = format!("/tmp/elle-test-async-open-{}", std::process::id());
-        std::fs::write(&path, "async open test").unwrap();
+        crate::value::arena::with_test_region(|| {
+            let path = format!("/tmp/elle-test-async-open-{}", std::process::id());
+            std::fs::write(&path, "async open test").unwrap();
 
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
-                path: path.clone(),
-                flags: libc::O_RDONLY | libc::O_CLOEXEC,
-                mode: 0o666,
-                direction: crate::port::Direction::Read,
-                encoding: crate::port::Encoding::Text,
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(
-            completions[0].result.is_ok(),
-            "open should succeed for existing file: {:?}",
-            completions[0].result
-        );
-        // Result must be a port value
-        let val = completions[0].result.as_ref().unwrap();
-        assert_eq!(
-            val.external_type_name(),
-            Some("port"),
-            "open result must be a port"
-        );
+            let port_val = Value::external("port", Port::new_unopened(
+                PortKind::File, Direction::Read, Encoding::Text, path.clone(),
+            ));
+            let backend = AsyncBackend::new().unwrap();
+            let req = IoRequest {
+                op: IoOp::Open {
+                    path: path.clone(),
+                    flags: libc::O_RDONLY | libc::O_CLOEXEC,
+                    mode: 0o666,
+                    direction: Direction::Read,
+                    encoding: Encoding::Text,
+                },
+                port: port_val,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
+            let completions = backend.wait(-1).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(
+                completions[0].result.is_ok(),
+                "open should succeed for existing file: {:?}",
+                completions[0].result
+            );
+            // Result must be a port value
+            let val = completions[0].result.as_ref().unwrap();
+            assert_eq!(
+                val.external_type_name(),
+                Some("port"),
+                "open result must be a port"
+            );
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 
     #[test]
     fn test_async_open_nonexistent_path_errors() {
-        let path = "/tmp/elle-test-async-open-nonexistent-dir/nofile";
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
-                path: path.to_string(),
-                flags: libc::O_RDONLY | libc::O_CLOEXEC,
-                mode: 0o666,
-                direction: crate::port::Direction::Read,
-                encoding: crate::port::Encoding::Text,
-            },
-            port: Value::NIL,
-            timeout: None,
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        assert!(
-            completions[0].result.is_err(),
-            "open must error for nonexistent path"
-        );
+        crate::value::arena::with_test_region(|| {
+            let path = "/tmp/elle-test-async-open-nonexistent-dir/nofile";
+            let backend = AsyncBackend::new().unwrap();
+            let req = IoRequest {
+                op: IoOp::Open {
+                    path: path.to_string(),
+                    flags: libc::O_RDONLY | libc::O_CLOEXEC,
+                    mode: 0o666,
+                    direction: crate::port::Direction::Read,
+                    encoding: crate::port::Encoding::Text,
+                },
+                port: Value::NIL,
+                timeout: None,
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
+            let completions = backend.wait(-1).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            assert!(
+                completions[0].result.is_err(),
+                "open must error for nonexistent path"
+            );
+        });
     }
 
     #[test]
     fn test_async_open_with_timeout_succeeds_on_regular_file() {
-        let path = format!("/tmp/elle-test-async-open-timeout-{}", std::process::id());
-        std::fs::write(&path, "timeout test").unwrap();
+        crate::value::arena::with_test_region(|| {
+            let path = format!("/tmp/elle-test-async-open-timeout-{}", std::process::id());
+            std::fs::write(&path, "timeout test").unwrap();
 
-        let backend = AsyncBackend::new().unwrap();
-        let req = IoRequest {
-            op: IoOp::Open {
-                path: path.clone(),
-                flags: libc::O_RDONLY | libc::O_CLOEXEC,
-                mode: 0o666,
-                direction: crate::port::Direction::Read,
-                encoding: crate::port::Encoding::Text,
-            },
-            port: Value::NIL,
-            timeout: Some(std::time::Duration::from_millis(5000)),
-        };
-        let id = backend.submit(&req).unwrap();
-        let completions = backend.wait(-1).unwrap();
-        assert_eq!(completions.len(), 1);
-        assert_eq!(completions[0].id, id);
-        // Regular file opens instantly — should succeed before the 5s timeout.
-        assert!(
-            completions[0].result.is_ok(),
-            "open with generous timeout must succeed for regular file: {:?}",
-            completions[0].result
-        );
+            let port_val = Value::external("port", Port::new_unopened(
+                PortKind::File, Direction::Read, Encoding::Text, path.clone(),
+            ));
+            let backend = AsyncBackend::new().unwrap();
+            let req = IoRequest {
+                op: IoOp::Open {
+                    path: path.clone(),
+                    flags: libc::O_RDONLY | libc::O_CLOEXEC,
+                    mode: 0o666,
+                    direction: Direction::Read,
+                    encoding: Encoding::Text,
+                },
+                port: port_val,
+                timeout: Some(std::time::Duration::from_millis(5000)),
+            };
+            let id = backend.submit(&req, std::ptr::null_mut()).unwrap();
+            let completions = backend.wait(-1).unwrap();
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].id, id);
+            // Regular file opens instantly — should succeed before the 5s timeout.
+            assert!(
+                completions[0].result.is_ok(),
+                "open with generous timeout must succeed for regular file: {:?}",
+                completions[0].result
+            );
 
-        std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&path).ok();
+        });
     }
 }

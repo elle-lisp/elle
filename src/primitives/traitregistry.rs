@@ -98,8 +98,7 @@ fn build_sequence_methods() -> Value {
         doc: "Sequence trait: first element",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_REST: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:rest",
@@ -109,8 +108,7 @@ fn build_sequence_methods() -> Value {
         doc: "Sequence trait: rest of sequence",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_LAST: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:last",
@@ -120,8 +118,7 @@ fn build_sequence_methods() -> Value {
         doc: "Sequence trait: last element",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_NTH: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:nth",
@@ -131,8 +128,7 @@ fn build_sequence_methods() -> Value {
         doc: "Sequence trait: nth element",
         params: &["self", "n"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static SEQ_ITER: PrimitiveDef = PrimitiveDef {
         name: "trait:Sequence:iter",
@@ -142,8 +138,7 @@ fn build_sequence_methods() -> Value {
         doc: "Sequence trait: fiber iterator",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
 
     let mut entries = BTreeMap::new();
@@ -186,8 +181,7 @@ fn build_collection_methods() -> Value {
         doc: "Collection trait: element count",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_EMPTY: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:empty?",
@@ -197,8 +191,7 @@ fn build_collection_methods() -> Value {
         doc: "Collection trait: is empty?",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_HAS: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:has?",
@@ -208,8 +201,7 @@ fn build_collection_methods() -> Value {
         doc: "Collection trait: membership test",
         params: &["self", "needle"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_CONJ: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:conj",
@@ -219,8 +211,7 @@ fn build_collection_methods() -> Value {
         doc: "Collection trait: add element",
         params: &["self", "item"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
     static COLL_EMPTY_NEW: PrimitiveDef = PrimitiveDef {
         name: "trait:Collection:empty",
@@ -230,8 +221,7 @@ fn build_collection_methods() -> Value {
         doc: "Collection trait: empty container of same type",
         params: &["self"],
         category: "trait",
-        example: "",
-        aliases: &[],
+        ..PrimitiveDef::DEFAULT
     };
 
     let mut entries = BTreeMap::new();
@@ -629,7 +619,9 @@ fn call_method_fn(
             }
         };
         let vm = unsafe { &mut *vm_ptr };
-        match vm.call_closure(closure, args) {
+        let rid = crate::value::fiberheap::get_alloc_region();
+        let result = vm.call_closure(closure, args, rid);
+        match result {
             Ok(v) => return (SIG_OK, v),
             Err(msg) => {
                 return (SIG_ERROR, crate::value::error_val("trait-error", msg));

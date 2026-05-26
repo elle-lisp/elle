@@ -1,5 +1,4 @@
 //! Type conversion primitives
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -255,41 +254,102 @@ pub(crate) fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
         0 => (SIG_OK, Value::string("")),
         1 => prim_to_string_single(args[0]),
         _ => {
+            // Multi-arg: format directly into a Rust String to avoid
+            // allocating slab-backed intermediate strings per argument.
             let mut result = String::new();
             for arg in args {
-                let (sig, val) = prim_to_string_single(*arg);
-                if sig != SIG_OK {
+                if let Err((sig, val)) = write_value_to_string(*arg, &mut result) {
                     return (sig, val);
-                }
-                if let Some(s) = val.with_string(|s| s.to_string()) {
-                    result.push_str(&s);
-                } else if let Some(ms) = val.as_string_mut() {
-                    let borrowed = ms.borrow();
-                    match std::str::from_utf8(&borrowed) {
-                        Ok(s) => result.push_str(s),
-                        Err(e) => {
-                            return (
-                                SIG_ERROR,
-                                error_val(
-                                    "encoding-error",
-                                    format!("string: invalid UTF-8: {}", e),
-                                ),
-                            )
-                        }
-                    }
-                } else {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "internal-error",
-                            "to-string: internal conversion failure".to_string(),
-                        ),
-                    );
                 }
             }
             (SIG_OK, Value::string(result))
         }
     }
+}
+
+/// Append a value's string representation directly to a Rust String,
+/// avoiding slab allocation for intermediates.
+fn write_value_to_string(val: Value, out: &mut String) -> Result<(), (SignalBits, Value)> {
+    use std::fmt::Write;
+
+    if val.is_string() {
+        val.with_string(|s| out.push_str(s));
+        return Ok(());
+    }
+    if let Some(ms) = val.as_string_mut() {
+        let borrowed = ms.borrow();
+        match std::str::from_utf8(&borrowed) {
+            Ok(s) => out.push_str(s),
+            Err(e) => {
+                return Err((
+                    SIG_ERROR,
+                    error_val("encoding-error", format!("string: invalid UTF-8: {}", e)),
+                ))
+            }
+        }
+        return Ok(());
+    }
+    if let Some(n) = val.as_int() {
+        let _ = write!(out, "{}", n);
+        return Ok(());
+    }
+    if let Some(f) = val.as_float() {
+        if f.is_infinite() {
+            out.push_str(if f.is_sign_positive() { "inf" } else { "-inf" });
+        } else if f.is_nan() {
+            out.push_str("NaN");
+        } else if f.fract() == 0.0 {
+            let _ = write!(out, "{:.1}", f);
+        } else {
+            let _ = write!(out, "{}", f);
+        }
+        return Ok(());
+    }
+    if let Some(b) = val.as_bool() {
+        out.push_str(if b { "true" } else { "false" });
+        return Ok(());
+    }
+    if val.is_nil() {
+        out.push_str("nil");
+        return Ok(());
+    }
+    if let Some(name) = val.as_keyword_name() {
+        out.push_str(&name);
+        return Ok(());
+    }
+    if let Some(sym_id) = val.as_symbol() {
+        match crate::context::resolve_symbol_name(sym_id) {
+            Some(name) => out.push_str(&name),
+            None => {
+                return Err((
+                    SIG_ERROR,
+                    error_val(
+                        "internal-error",
+                        format!("to-string: symbol ID {} not found in symbol table", sym_id),
+                    ),
+                ))
+            }
+        }
+        return Ok(());
+    }
+    // For compound/heap types, fall back to prim_to_string_single
+    // (these are rare in hot concat paths).
+    let (sig, string_val) = prim_to_string_single(val);
+    if sig != SIG_OK {
+        return Err((sig, string_val));
+    }
+    if let Some(s) = string_val.with_string(|s| s.to_string()) {
+        out.push_str(&s);
+    } else {
+        return Err((
+            SIG_ERROR,
+            error_val(
+                "internal-error",
+                "to-string: internal conversion failure".to_string(),
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Single-value string conversion (original behavior).
@@ -473,11 +533,9 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
     (SIG_OK, Value::string(format!("{:?}", val)))
 }
 
-/// Declarative primitive definitions for conversion module.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "integer",
-        func: prim_to_int,
+// Declarative primitive definitions for conversion module.
+primitive! {
+    "integer" => prim_to_int {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert number to integer (i64). Accepts int (identity) or float (truncation). Use parse-int for string→int.",
@@ -485,43 +543,32 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(integer 3.7) #=> 3\n(integer 42) #=> 42",
         aliases: &["int"],
-    },
-    PrimitiveDef {
-        name: "float",
-        func: prim_to_float,
+    }
+    "float" => prim_to_float {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert number to float. Accepts int (→ f64) or float (identity). Use parse-float for string→float.",
         params: &["x"],
         category: "conversion",
         example: "(float 42) #=> 42.0\n(float 3.14) #=> 3.14",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "parse-int",
-        func: prim_parse_int,
+    }
+    "parse-int" => prim_parse_int {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Parse string or keyword to integer. Optional radix (2–36) for base conversion.",
         params: &["s", "radix?"],
         category: "conversion",
         example: "(parse-int \"42\") #=> 42\n(parse-int \"ff\" 16) #=> 255\n(parse-int \"1010\" 2) #=> 10",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "parse-float",
-        func: prim_parse_float,
+    }
+    "parse-float" => prim_parse_float {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Parse string or keyword to float.",
         params: &["s"],
         category: "conversion",
         example: "(parse-float \"3.14\") #=> 3.14",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string",
-        func: prim_to_string,
+    }
+    "string" => prim_to_string {
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Convert values to string. Multiple arguments are concatenated.",
@@ -529,16 +576,13 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(string \"count: \" 42) #=> \"count: 42\"",
         aliases: &["any->string", "symbol->string"],
-    },
-    PrimitiveDef {
-        name: "number->string",
-        func: prim_number_to_string,
+    }
+    "number->string" => prim_number_to_string {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Convert a number to string. With an optional radix (2–36), converts an integer to the given base (lowercase, no prefix).",
         params: &["n", "radix?"],
         category: "conversion",
         example: "(number->string 42) #=> \"42\"\n(number->string 255 16) #=> \"ff\"\n(number->string -255 16) #=> \"-ff\"",
-        aliases: &[],
-    },
-];
+    }
+}

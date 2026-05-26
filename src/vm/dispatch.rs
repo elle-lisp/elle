@@ -74,29 +74,21 @@ impl VM {
             // The error flag is stored on the current FiberHeap (always installed
             // after chunk 1). Temporarily remove the limit so the error struct
             // can be allocated.
-            {
-                let heap_ptr = crate::value::fiberheap::current_heap_ptr();
-                let alloc_err = if !heap_ptr.is_null() {
-                    unsafe { (*heap_ptr).take_alloc_error() }
-                } else {
-                    None
-                };
-                if let Some((count, limit)) = alloc_err {
-                    let saved_limit = unsafe { (*heap_ptr).set_object_limit(None) };
-                    let err = crate::value::error_val(
-                        "allocation-error",
-                        format!(
-                            "heap object limit exceeded ({} objects, limit {})",
-                            count, limit
-                        ),
-                    );
-                    unsafe { (*heap_ptr).set_object_limit(saved_limit) };
-                    self.fiber.signal = Some((SIG_ERROR, err));
-                    if self.error_loc.is_none() {
-                        self.error_loc = location_map.get(&instr_ip).cloned();
-                    }
-                    return (SIG_ERROR, ip);
+            if let Some((count, limit)) = self.heap().take_alloc_error() {
+                let saved_limit = self.heap().set_object_limit(None);
+                let err = crate::value::error_val(
+                    "allocation-error",
+                    format!(
+                        "heap object limit exceeded ({} objects, limit {})",
+                        count, limit
+                    ),
+                );
+                self.heap().set_object_limit(saved_limit);
+                self.fiber.signal = Some((SIG_ERROR, err));
+                if self.error_loc.is_none() {
+                    self.error_loc = location_map.get(&instr_ip).cloned();
                 }
+                return (SIG_ERROR, ip);
             }
 
             if ip >= bc.len() {
@@ -206,12 +198,14 @@ impl VM {
 
                 // Closures
                 Instruction::MakeClosure => {
-                    closure::handle_make_closure(self, bc, &mut ip, consts);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    closure::handle_make_closure(self, bc, &mut ip, consts, region_id);
                 }
 
                 // Data structures
                 Instruction::Pair => {
-                    data::handle_list(self);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    data::handle_list(self, region_id);
                 }
                 Instruction::First => {
                     data::handle_first(self);
@@ -220,7 +214,8 @@ impl VM {
                     data::handle_rest(self);
                 }
                 Instruction::MakeArrayMut => {
-                    data::handle_make_array(self, bc, &mut ip);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    data::handle_make_array(self, bc, &mut ip, region_id);
                 }
                 Instruction::ArrayMutRef => {
                     data::handle_array_ref(self);
@@ -390,7 +385,8 @@ impl VM {
 
                 // Box operations
                 Instruction::MakeCapture => {
-                    capture::handle_make_capture(self);
+                    let region_id = self.read_u16(bc, &mut ip);
+                    capture::handle_make_capture(self, region_id);
                 }
                 Instruction::UnwrapCapture => {
                     capture::handle_unwrap_capture(self);
@@ -446,47 +442,22 @@ impl VM {
                     }
                 }
 
-                // Allocation region markers: push/pop scope marks on FiberHeap.
-                // Effective for both root and child fibers.
-                Instruction::RegionEnter => {
-                    crate::value::fiberheap::region_enter();
-                }
-                Instruction::RegionExit => {
-                    crate::value::fiberheap::region_exit();
-                }
-                Instruction::RegionExitCall => {
-                    crate::value::fiberheap::region_exit_call();
-                }
-                Instruction::RegionRotate => {
-                    crate::value::fiberheap::region_rotate();
-                }
-                Instruction::RegionRotateDealloc => {
-                    crate::value::fiberheap::region_rotate_dealloc();
-                }
-                Instruction::RegionRotateRefcounted => {
-                    crate::value::fiberheap::region_rotate_refcounted();
-                }
-                Instruction::RegionExitRefcounted => {
-                    crate::value::fiberheap::region_exit_refcounted();
+                Instruction::FreeRegion => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    if std::env::var("ELLE_TRACE_FREE").is_ok() {
+                        eprintln!("[trace] FreeRegion({region_id})");
+                    }
+                    self.heap().free_region_physical(region_id);
                 }
 
-                // Outbox routing: toggle allocation target for yield-bound values.
-                Instruction::OutboxEnter => {
-                    crate::value::fiberheap::outbox_enter();
-                }
-                Instruction::OutboxExit => {
-                    crate::value::fiberheap::outbox_exit();
+                Instruction::IncrefRegion => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    self.heap().incref_region(region_id);
                 }
 
-                // Explicit rotation: push/rotate/pop a flip frame.
-                Instruction::FlipEnter => {
-                    crate::value::fiberheap::flip_enter();
-                }
-                Instruction::FlipSwap => {
-                    crate::value::fiberheap::flip_swap();
-                }
-                Instruction::FlipExit => {
-                    crate::value::fiberheap::flip_exit();
+                Instruction::DecrefRegion => {
+                    let region_id = self.read_u16(bc, &mut ip);
+                    self.heap().decref_region(region_id);
                 }
 
                 // Dynamic parameter frame management
@@ -598,6 +569,12 @@ impl VM {
                 }
                 Instruction::IntrPush => {
                     types::handle_intr_push(self);
+                }
+                Instruction::IntrStringPush => {
+                    types::handle_intr_string_push(self);
+                }
+                Instruction::IntrBytesPush => {
+                    types::handle_intr_bytes_push(self);
                 }
                 Instruction::IntrPop => {
                     types::handle_intr_pop(self);

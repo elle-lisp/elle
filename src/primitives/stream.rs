@@ -6,7 +6,6 @@
 
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::Port;
-use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
@@ -27,7 +26,7 @@ fn extract_port_value(value: &Value, prim_name: &str) -> Result<Value, (SignalBi
     Ok(*value)
 }
 
-/// (port/read-line port [:timeout ms]) → string | nil
+/// (port/read-line port [:timeout ms]) → bytes | nil
 fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
     let port = match extract_port_value(&args[0], "port/read-line") {
         Ok(p) => p,
@@ -37,13 +36,20 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
         Ok(t) => t,
         Err(e) => return e,
     };
+    let buffer = Value::bytes(vec![0u8; READ_LINE_BUF_SIZE]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::ReadLine, port, timeout),
+        IoRequest::with_timeout(IoOp::ReadLine { buffer }, port, timeout),
     )
 }
 
-/// (port/read port n [:timeout ms]) → bytes | nil
+/// Default buffer size for ReadLine operations (64KB).
+/// Covers every real protocol line. If a line exceeds this, the fiber
+/// receives a partial result and can re-issue the read.
+const READ_LINE_BUF_SIZE: usize = 65536;
+
+/// (port/read port n [:timeout ms]) → string | bytes | nil
+/// Text ports return a string of up to n characters; binary ports return bytes.
 fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
     let port = match extract_port_value(&args[0], "port/read") {
         Ok(p) => p,
@@ -78,9 +84,10 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
         Ok(t) => t,
         Err(e) => return e,
     };
+    let buffer = Value::bytes(vec![0u8; count]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::Read { count }, port, timeout),
+        IoRequest::with_timeout(IoOp::Read { count, buffer }, port, timeout),
     )
 }
 
@@ -119,9 +126,10 @@ fn prim_stream_read_exact(args: &[Value]) -> (SignalBits, Value) {
         Ok(t) => t,
         Err(e) => return e,
     };
+    let buffer = Value::bytes(vec![0u8; count]);
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::ReadExact { count }, port, timeout),
+        IoRequest::with_timeout(IoOp::ReadExact { count, buffer }, port, timeout),
     )
 }
 
@@ -182,42 +190,36 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "port/read-line",
-        func: prim_stream_read_line,
-        signal: Signal {
+primitive! {
+    "port/read-line" => prim_stream_read_line {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(1),
-        doc: "Read one line from port. Returns string or nil (EOF).",
+        doc: "Read one line from port. Returns bytes or nil (EOF).",
         params: &["port"],
         category: "port",
         example: "(port/read-line (port/open \"file.txt\" :read))",
         aliases: &["port/read-line"],
-    },
-    PrimitiveDef {
-        name: "port/read",
-        func: prim_stream_read,
-        signal: Signal {
+    }
+    "port/read" => prim_stream_read {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
         params: &["port", "n"],
         category: "port",
         example: "(port/read (port/open \"file.txt\" :read) 1024)",
         aliases: &["stream/read"],
-    },
-    PrimitiveDef {
-        name: "port/read-exact",
-        func: prim_stream_read_exact,
-        signal: Signal {
+    }
+    "port/read-exact" => prim_stream_read_exact {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Read exactly n bytes from port, looping over short reads. \
               Returns bytes/string of length n, or nil if EOF arrived first. \
@@ -228,97 +230,43 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "port",
         example: "(port/read-exact tcp-sock 1024)",
         aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/read-all",
-        func: prim_stream_read_all,
-        signal: Signal {
+    }
+    "port/read-all" => prim_stream_read_all {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(1),
         doc: "Read everything remaining from port.",
         params: &["port"],
         category: "port",
         example: "(port/read-all (port/open \"file.txt\" :read))",
         aliases: &["port/read-all"],
-    },
-    PrimitiveDef {
-        name: "port/write",
-        func: prim_stream_write,
-        signal: Signal {
+    }
+    "port/write" => prim_stream_write {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(2),
         doc: "Write data to port. Returns bytes written.",
         params: &["port", "data"],
         category: "port",
         example: "(port/write (port/stdout) \"hello\")",
         aliases: &["stream/write"],
-    },
-    PrimitiveDef {
-        name: "port/flush",
-        func: prim_stream_flush,
-        signal: Signal {
+    }
+    "port/flush" => prim_stream_flush {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::AtLeast(1),
         doc: "Flush port's write buffer.",
         params: &["port"],
         category: "port",
         example: "(port/flush (port/stdout))",
         aliases: &["stream/flush"],
-    },
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::port::Port;
-    use crate::value::fiber::{SIG_IO, SIG_YIELD};
-
-    #[test]
-    fn test_read_line_returns_sig_io() {
-        let port_val = Value::external("port", Port::stdin());
-        let (bits, val) = prim_stream_read_line(&[port_val]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_read_returns_sig_io_with_count() {
-        let port_val = Value::external("port", Port::stdin());
-        let (bits, val) = prim_stream_read(&[port_val, Value::int(1024)]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_write_returns_sig_io() {
-        let port_val = Value::external("port", Port::stdout());
-        let (bits, val) = prim_stream_write(&[port_val, Value::string("hello")]);
-        assert_eq!(bits, SIG_YIELD | SIG_IO);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_non_port_arg_errors() {
-        let (bits, _) = prim_stream_read_line(&[Value::int(42)]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_wrong_arity_errors() {
-        let (bits, _) = prim_stream_read_line(&[]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_read_negative_count_errors() {
-        let port_val = Value::external("port", Port::stdin());
-        let (bits, _) = prim_stream_read(&[port_val, Value::int(-1)]);
-        assert_eq!(bits, SIG_ERROR);
     }
 }
+
+// Tests migrated to tests/elle/prim-stream.lisp

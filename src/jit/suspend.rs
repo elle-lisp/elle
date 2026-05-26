@@ -226,7 +226,7 @@ mod tests {
         use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
-        use std::collections::HashMap;
+
         use std::rc::Rc;
         use std::sync::Arc;
 
@@ -234,28 +234,8 @@ mod tests {
         let constants = Rc::new(constants);
 
         let template = Rc::new(ClosureTemplate {
-            bytecode: bytecode.clone(),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants,
             signal: Signal::yields(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-            rotation_safe: false,
+            ..ClosureTemplate::new(bytecode.clone(), Arity::Exact(0), constants)
         });
 
         // VM must exist before allocating the closure env slice so a root
@@ -290,7 +270,7 @@ mod tests {
         use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
-        use std::collections::HashMap;
+
         use std::rc::Rc;
         use std::sync::Arc;
 
@@ -298,28 +278,11 @@ mod tests {
         let constants = Rc::new(constants);
 
         let template = Rc::new(ClosureTemplate {
-            bytecode: bytecode.clone(),
-            arity: Arity::Exact(num_params),
-            num_locals: 0,
-            num_captures: 0,
             num_params,
-            constants,
             signal: Signal::yields(),
             capture_params_mask,
             capture_locals_mask,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-            rotation_safe: false,
+            ..ClosureTemplate::new(bytecode.clone(), Arity::Exact(num_params), constants)
         });
 
         // VM must exist before allocating the closure env slice so a root
@@ -351,350 +314,366 @@ mod tests {
 
     #[test]
     fn test_jit_yield_builds_correct_suspended_frame() {
-        // 2 params, 1 local, 3 operands
-        let yield_meta = YieldPointMeta {
-            num_params: 2,
-            resume_ip: 42,
-            num_spilled: 3, // operand count
-            num_locals: 1,  // 1 locally-defined
-        };
+        crate::value::arena::with_test_region(|| {
+            // 2 params, 1 local, 3 operands
+            let yield_meta = YieldPointMeta {
+                num_params: 2,
+                resume_ip: 42,
+                num_spilled: 3, // operand count
+                num_locals: 1,  // 1 locally-defined
+            };
 
-        let bytecode = vec![0xAA; 10];
-        let constants = vec![Value::int(999)];
-        let env = vec![Value::int(777)];
+            let bytecode = vec![0xAA; 10];
+            let constants = vec![Value::int(999)];
+            let env = vec![Value::int(777)];
 
-        let (mut vm, closure_val) = setup_yield_test(
-            bytecode.clone(),
-            constants.clone(),
-            env.clone(),
-            vec![yield_meta],
-        );
+            let (mut vm, closure_val) = setup_yield_test(
+                bytecode.clone(),
+                constants.clone(),
+                env.clone(),
+                vec![yield_meta],
+            );
 
-        // Spilled buffer: [param0, param1, local0, op0, op1, op2]
-        let spilled: Vec<Value> = vec![
-            Value::int(10),
-            Value::int(20),
-            Value::int(30),
-            Value::int(40),
-            Value::int(50),
-            Value::int(60),
-        ];
+            // Spilled buffer: [param0, param1, local0, op0, op1, op2]
+            let spilled: Vec<Value> = vec![
+                Value::int(10),
+                Value::int(20),
+                Value::int(30),
+                Value::int(40),
+                Value::int(50),
+                Value::int(60),
+            ];
 
-        let yielded = Value::int(100);
+            let yielded = Value::int(100);
 
-        let result = elle_jit_yield(
-            yielded.tag,
-            yielded.payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            let result = elle_jit_yield(
+                yielded.tag,
+                yielded.payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        assert_eq!(result, YIELD_SENTINEL);
+            assert_eq!(result, YIELD_SENTINEL);
 
-        let (sig, val) = vm.fiber.signal.unwrap();
-        assert_eq!(sig, SIG_YIELD);
-        assert_eq!(val.as_int(), Some(100));
+            let (sig, val) = vm.fiber.signal.unwrap();
+            assert_eq!(sig, SIG_YIELD);
+            assert_eq!(val.as_int(), Some(100));
 
-        let frames = vm.fiber.suspended.as_ref().unwrap();
-        assert_eq!(frames.len(), 1);
-        let frame = as_bytecode_frame(&frames[0]);
+            let frames = vm.fiber.suspended.as_ref().unwrap();
+            assert_eq!(frames.len(), 1);
+            let frame = as_bytecode_frame(&frames[0]);
 
-        assert_eq!(frame.ip, 42);
-        assert_eq!(&*frame.bytecode, &bytecode);
-        assert_eq!(&*frame.constants, &constants);
-        // env = captures [777] + params [10, 20]
-        assert_eq!(frame.env.len(), 3);
-        assert_eq!(frame.env[0].as_int(), Some(777));
-        assert_eq!(frame.env[1].as_int(), Some(10));
-        assert_eq!(frame.env[2].as_int(), Some(20));
+            assert_eq!(frame.ip, 42);
+            assert_eq!(&*frame.bytecode, &bytecode);
+            assert_eq!(&*frame.constants, &constants);
+            // env = captures [777] + params [10, 20]
+            assert_eq!(frame.env.len(), 3);
+            assert_eq!(frame.env[0].as_int(), Some(777));
+            assert_eq!(frame.env[1].as_int(), Some(10));
+            assert_eq!(frame.env[2].as_int(), Some(20));
 
-        // stack = locals [30] + operands [40, 50, 60]
-        assert_eq!(frame.stack.len(), 4);
-        assert_eq!(frame.stack[0].as_int(), Some(30));
-        assert_eq!(frame.stack[1].as_int(), Some(40));
-        assert_eq!(frame.stack[2].as_int(), Some(50));
-        assert_eq!(frame.stack[3].as_int(), Some(60));
+            // stack = locals [30] + operands [40, 50, 60]
+            assert_eq!(frame.stack.len(), 4);
+            assert_eq!(frame.stack[0].as_int(), Some(30));
+            assert_eq!(frame.stack[1].as_int(), Some(40));
+            assert_eq!(frame.stack[2].as_int(), Some(50));
+            assert_eq!(frame.stack[3].as_int(), Some(60));
+        });
     }
 
     #[test]
     fn test_jit_yield_zero_locals_zero_operands() {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 0,
-            num_spilled: 0,
-            num_locals: 0,
-        };
+        crate::value::arena::with_test_region(|| {
+            let yield_meta = YieldPointMeta {
+                num_params: 0,
+                resume_ip: 0,
+                num_spilled: 0,
+                num_locals: 0,
+            };
 
-        let (mut vm, closure_val) = setup_yield_test(vec![], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) = setup_yield_test(vec![], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<Value> = vec![];
-        let yielded = Value::NIL;
+            let spilled: Vec<Value> = vec![];
+            let yielded = Value::NIL;
 
-        let result = elle_jit_yield(
-            yielded.tag,
-            yielded.payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            let result = elle_jit_yield(
+                yielded.tag,
+                yielded.payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        assert_eq!(result, YIELD_SENTINEL);
+            assert_eq!(result, YIELD_SENTINEL);
 
-        let frames = vm.fiber.suspended.as_ref().unwrap();
-        let frame = as_bytecode_frame(&frames[0]);
-        assert_eq!(frame.stack.len(), 0);
-        assert_eq!(frame.ip, 0);
+            let frames = vm.fiber.suspended.as_ref().unwrap();
+            let frame = as_bytecode_frame(&frames[0]);
+            assert_eq!(frame.stack.len(), 0);
+            assert_eq!(frame.ip, 0);
+        });
     }
 
     #[test]
     fn test_jit_yield_only_operands_no_locals() {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 10,
-            num_spilled: 2,
-            num_locals: 0,
-        };
+        crate::value::arena::with_test_region(|| {
+            let yield_meta = YieldPointMeta {
+                num_params: 0,
+                resume_ip: 10,
+                num_spilled: 2,
+                num_locals: 0,
+            };
 
-        let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<Value> = vec![Value::int(1), Value::int(2)];
+            let spilled: Vec<Value> = vec![Value::int(1), Value::int(2)];
 
-        elle_jit_yield(
-            Value::int(0).tag,
-            Value::int(0).payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            elle_jit_yield(
+                Value::int(0).tag,
+                Value::int(0).payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        assert_eq!(frame.stack.len(), 2);
-        assert_eq!(frame.stack[0].as_int(), Some(1));
-        assert_eq!(frame.stack[1].as_int(), Some(2));
+            let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+            assert_eq!(frame.stack.len(), 2);
+            assert_eq!(frame.stack[0].as_int(), Some(1));
+            assert_eq!(frame.stack[1].as_int(), Some(2));
+        });
     }
 
     #[test]
     fn test_jit_yield_only_locals_no_operands() {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 5,
-            num_spilled: 0,
-            num_locals: 3,
-        };
+        crate::value::arena::with_test_region(|| {
+            let yield_meta = YieldPointMeta {
+                num_params: 0,
+                resume_ip: 5,
+                num_spilled: 0,
+                num_locals: 3,
+            };
 
-        let (mut vm, closure_val) = setup_yield_test(vec![0x02], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) = setup_yield_test(vec![0x02], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<Value> = vec![Value::int(100), Value::int(200), Value::int(300)];
+            let spilled: Vec<Value> = vec![Value::int(100), Value::int(200), Value::int(300)];
 
-        elle_jit_yield(
-            Value::int(0).tag,
-            Value::int(0).payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            elle_jit_yield(
+                Value::int(0).tag,
+                Value::int(0).payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(0) = empty
-        assert_eq!(frame.env.len(), 0);
-        // stack = locals [100, 200, 300] + operands(0)
-        assert_eq!(frame.stack.len(), 3);
-        assert_eq!(frame.stack[0].as_int(), Some(100));
-        assert_eq!(frame.stack[1].as_int(), Some(200));
-        assert_eq!(frame.stack[2].as_int(), Some(300));
+            let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+            // env = captures(0) + params(0) = empty
+            assert_eq!(frame.env.len(), 0);
+            // stack = locals [100, 200, 300] + operands(0)
+            assert_eq!(frame.stack.len(), 3);
+            assert_eq!(frame.stack[0].as_int(), Some(100));
+            assert_eq!(frame.stack[1].as_int(), Some(200));
+            assert_eq!(frame.stack[2].as_int(), Some(300));
+        });
     }
 
     #[test]
     fn test_jit_yield_large_spill() {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 99,
-            num_spilled: 20,
-            num_locals: 10,
-        };
+        crate::value::arena::with_test_region(|| {
+            let yield_meta = YieldPointMeta {
+                num_params: 0,
+                resume_ip: 99,
+                num_spilled: 20,
+                num_locals: 10,
+            };
 
-        let (mut vm, closure_val) = setup_yield_test(vec![0xFF], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) = setup_yield_test(vec![0xFF], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<Value> = (0..30).map(Value::int).collect();
+            let spilled: Vec<Value> = (0..30).map(Value::int).collect();
 
-        elle_jit_yield(
-            Value::int(0).tag,
-            Value::int(0).payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
-
-        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(0) = empty
-        assert_eq!(frame.env.len(), 0);
-        // stack = locals(10) + operands(20)
-        assert_eq!(frame.stack.len(), 30);
-        for i in 0..30 {
-            assert_eq!(
-                frame.stack[i].as_int(),
-                Some(i as i64),
-                "stack[{}] mismatch",
-                i
+            elle_jit_yield(
+                Value::int(0).tag,
+                Value::int(0).payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
             );
-        }
-        assert_eq!(frame.ip, 99);
+
+            let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+            // env = captures(0) + params(0) = empty
+            assert_eq!(frame.env.len(), 0);
+            // stack = locals(10) + operands(20)
+            assert_eq!(frame.stack.len(), 30);
+            for i in 0..30 {
+                assert_eq!(
+                    frame.stack[i].as_int(),
+                    Some(i as i64),
+                    "stack[{}] mismatch",
+                    i
+                );
+            }
+            assert_eq!(frame.ip, 99);
+        });
     }
 
     #[test]
     fn test_jit_yield_multiple_yield_points() {
-        let yield_points = vec![
-            YieldPointMeta {
-                num_params: 0,
-                resume_ip: 10,
-                num_spilled: 1,
-                num_locals: 2,
-            },
-            YieldPointMeta {
-                num_params: 0,
-                resume_ip: 20,
-                num_spilled: 3,
-                num_locals: 1,
-            },
-        ];
+        crate::value::arena::with_test_region(|| {
+            let yield_points = vec![
+                YieldPointMeta {
+                    num_params: 0,
+                    resume_ip: 10,
+                    num_spilled: 1,
+                    num_locals: 2,
+                },
+                YieldPointMeta {
+                    num_params: 0,
+                    resume_ip: 20,
+                    num_spilled: 3,
+                    num_locals: 1,
+                },
+            ];
 
-        let (mut vm, closure_val) =
-            setup_yield_test(vec![0x01, 0x02], vec![], vec![], yield_points);
+            let (mut vm, closure_val) =
+                setup_yield_test(vec![0x01, 0x02], vec![], vec![], yield_points);
 
-        let spilled: Vec<Value> = vec![
-            Value::int(10),
-            Value::int(20),
-            Value::int(30),
-            Value::int(40),
-        ];
+            let spilled: Vec<Value> = vec![
+                Value::int(10),
+                Value::int(20),
+                Value::int(30),
+                Value::int(40),
+            ];
 
-        elle_jit_yield(
-            Value::int(0).tag,
-            Value::int(0).payload,
-            spilled.as_ptr(),
-            1,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            elle_jit_yield(
+                Value::int(0).tag,
+                Value::int(0).payload,
+                spilled.as_ptr(),
+                1,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        assert_eq!(frame.ip, 20);
-        // yield point 1: num_params=0, num_locals=1, num_spilled=3
-        // env = captures(0) + params(0) = empty; stack = locals(1) + operands(3)
-        assert_eq!(frame.env.len(), 0);
-        assert_eq!(frame.stack.len(), 4);
+            let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+            assert_eq!(frame.ip, 20);
+            // yield point 1: num_params=0, num_locals=1, num_spilled=3
+            // env = captures(0) + params(0) = empty; stack = locals(1) + operands(3)
+            assert_eq!(frame.env.len(), 0);
+            assert_eq!(frame.stack.len(), 4);
+        });
     }
 
     #[test]
     fn test_jit_yield_preserves_value_types() {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 0,
-            num_spilled: 2,
-            num_locals: 2,
-        };
+        crate::value::arena::with_test_region(|| {
+            let yield_meta = YieldPointMeta {
+                num_params: 0,
+                resume_ip: 0,
+                num_spilled: 2,
+                num_locals: 2,
+            };
 
-        let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<Value> = vec![
-            Value::NIL,
-            Value::bool(true),
-            Value::float(1.5),
-            Value::EMPTY_LIST,
-        ];
+            let spilled: Vec<Value> = vec![
+                Value::NIL,
+                Value::bool(true),
+                Value::float(1.5),
+                Value::EMPTY_LIST,
+            ];
 
-        elle_jit_yield(
-            Value::int(0).tag,
-            Value::int(0).payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            elle_jit_yield(
+                Value::int(0).tag,
+                Value::int(0).payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(0) = empty; stack = locals(2) + operands(2)
-        assert_eq!(frame.env.len(), 0);
-        assert_eq!(frame.stack.len(), 4);
-        assert!(frame.stack[0].is_nil());
-        assert_eq!(frame.stack[1].as_bool(), Some(true));
-        assert_eq!(frame.stack[2].as_float(), Some(1.5));
-        assert!(frame.stack[3].is_empty_list());
+            let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+            // env = captures(0) + params(0) = empty; stack = locals(2) + operands(2)
+            assert_eq!(frame.env.len(), 0);
+            assert_eq!(frame.stack.len(), 4);
+            assert!(frame.stack[0].is_nil());
+            assert_eq!(frame.stack[1].as_bool(), Some(true));
+            assert_eq!(frame.stack[2].as_float(), Some(1.5));
+            assert!(frame.stack[3].is_empty_list());
+        });
     }
 
     #[test]
     fn test_jit_yield_rewraps_lbox_locals() {
-        // 2 params (param 1 is lbox-wrapped), 2 locally-defined (local 0 is lbox-wrapped)
-        // capture_params_mask = 0b10 (param index 1)
-        // capture_locals_mask = 0b01 (local index 0)
-        let yield_meta = YieldPointMeta {
-            num_params: 2,
-            resume_ip: 50,
-            num_spilled: 1, // 1 operand
-            num_locals: 2,  // 2 locally-defined
-        };
+        crate::value::arena::with_test_region(|| {
+            // 2 params (param 1 is lbox-wrapped), 2 locally-defined (local 0 is lbox-wrapped)
+            // capture_params_mask = 0b10 (param index 1)
+            // capture_locals_mask = 0b01 (local index 0)
+            let yield_meta = YieldPointMeta {
+                num_params: 2,
+                resume_ip: 50,
+                num_spilled: 1, // 1 operand
+                num_locals: 2,  // 2 locally-defined
+            };
 
-        let (mut vm, closure_val) = setup_yield_test_with_lbox(
-            vec![0xBB; 10],
-            vec![],
-            vec![], // no captures
-            vec![yield_meta],
-            2,    // num_params
-            0b10, // capture_params_mask: param 1 is mutable-captured
-            0b01, // capture_locals_mask: local 0 is mutable-captured
-        );
+            let (mut vm, closure_val) = setup_yield_test_with_lbox(
+                vec![0xBB; 10],
+                vec![],
+                vec![], // no captures
+                vec![yield_meta],
+                2,    // num_params
+                0b10, // capture_params_mask: param 1 is mutable-captured
+                0b01, // capture_locals_mask: local 0 is mutable-captured
+            );
 
-        // Spilled: [param0=10, param1=20, local0=30, local1=40, op0=50]
-        // JIT spills raw (unwrapped) values for all slots.
-        let spilled: Vec<Value> = vec![
-            Value::int(10),
-            Value::int(20),
-            Value::int(30),
-            Value::int(40),
-            Value::int(50),
-        ];
+            // Spilled: [param0=10, param1=20, local0=30, local1=40, op0=50]
+            // JIT spills raw (unwrapped) values for all slots.
+            let spilled: Vec<Value> = vec![
+                Value::int(10),
+                Value::int(20),
+                Value::int(30),
+                Value::int(40),
+                Value::int(50),
+            ];
 
-        elle_jit_yield(
-            Value::int(0).tag,
-            Value::int(0).payload,
-            spilled.as_ptr(),
-            0,
-            &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.tag,
-            closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw(),
-        );
+            elle_jit_yield(
+                Value::int(0).tag,
+                Value::int(0).payload,
+                spilled.as_ptr(),
+                0,
+                &mut vm as *mut crate::vm::VM as *mut () as u64,
+                closure_val.tag,
+                closure_val.payload,
+                crate::value::fiber::SIG_YIELD.raw(),
+            );
 
-        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(2)
-        assert_eq!(frame.env.len(), 2);
-        assert_eq!(frame.env[0].as_int(), Some(10)); // param 0
-        assert_eq!(frame.env[1].as_int(), Some(20)); // param 1
+            let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+            // env = captures(0) + params(2)
+            assert_eq!(frame.env.len(), 2);
+            assert_eq!(frame.env[0].as_int(), Some(10)); // param 0
+            assert_eq!(frame.env[1].as_int(), Some(20)); // param 1
 
-        // stack = locals(2) + operands(1)
-        assert_eq!(frame.stack.len(), 3);
-        assert_eq!(frame.stack[0].as_int(), Some(30)); // local 0
-        assert_eq!(frame.stack[1].as_int(), Some(40)); // local 1
-        assert_eq!(frame.stack[2].as_int(), Some(50)); // operand 0
+            // stack = locals(2) + operands(1)
+            assert_eq!(frame.stack.len(), 3);
+            assert_eq!(frame.stack[0].as_int(), Some(30)); // local 0
+            assert_eq!(frame.stack[1].as_int(), Some(40)); // local 1
+            assert_eq!(frame.stack[2].as_int(), Some(50)); // operand 0
+        });
     }
 }

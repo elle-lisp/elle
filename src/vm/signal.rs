@@ -436,37 +436,18 @@ impl VM {
                         None => Value::NIL,
                     };
                     fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
-                    fields.insert(
-                        TableKey::Keyword("scope-depth".to_string()),
-                        Value::int(heap.scope_depth() as i64),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("dtor-count".to_string()),
-                        Value::int(heap.dtor_count() as i64),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("root-live-count".to_string()),
-                        Value::int(heap.root_live() as i64),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("root-alloc-count".to_string()),
-                        Value::int(heap.root_alloc_count() as i64),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("shared-count".to_string()),
-                        Value::int(heap.shared_count() as i64),
-                    );
+                    fields.insert(TableKey::Keyword("scope-depth".to_string()), Value::int(0));
                     fields.insert(
                         TableKey::Keyword("active-allocator".to_string()),
-                        Value::keyword("slab"),
+                        Value::keyword("region"),
                     );
                     fields.insert(
                         TableKey::Keyword("scope-enter-count".to_string()),
-                        Value::int(heap.scope_enters() as i64),
+                        Value::int(0),
                     );
                     fields.insert(
                         TableKey::Keyword("scope-dtor-count".to_string()),
-                        Value::int(heap.scope_dtors_run() as i64),
+                        Value::int(0),
                     );
                     Value::struct_from(fields)
                 }
@@ -478,29 +459,21 @@ impl VM {
                     let stats = unsafe { build_stats(&*heap_ptr) };
                     (SIG_OK, stats)
                 } else {
-                    // 1-arg path: read from the provided fiber's heap.
-                    let fiber_handle = match arg.as_fiber() {
-                        Some(h) => h,
-                        None => {
-                            return (
-                                SIG_ERROR,
-                                error_val(
-                                    "type-error",
-                                    format!("arena/stats: expected fiber, got {}", arg.type_name()),
-                                ),
-                            );
-                        }
-                    };
-                    match fiber_handle.try_with(|fiber| build_stats(&fiber.heap)) {
-                        Some(v) => (SIG_OK, v),
-                        None => (
+                    // 1-arg path: validate it's a fiber, then return the
+                    // shared heap's stats (all fibers share one heap now).
+                    if arg.as_fiber().is_none() {
+                        return (
                             SIG_ERROR,
                             error_val(
-                                "state-error",
-                                "arena/stats: fiber is currently executing".to_string(),
+                                "type-error",
+                                format!("arena/stats: expected fiber, got {}", arg.type_name()),
                             ),
-                        ),
+                        );
                     }
+                    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
+                    debug_assert!(!heap_ptr.is_null(), "VM heap must always be installed");
+                    let stats = unsafe { build_stats(&*heap_ptr) };
+                    (SIG_OK, stats)
                 }
             }
             #[cfg(feature = "jit")]
@@ -990,32 +963,8 @@ impl VM {
                 self.runtime_config.stats = val.is_truthy();
                 Value::NIL
             }
-            "flip" => {
-                let on = if let Some(b) = val.as_bool() {
-                    b
-                } else if let Some(kw) = val.as_keyword_name() {
-                    match kw.as_str() {
-                        "on" => true,
-                        "off" => false,
-                        _ => {
-                            return error_val(
-                                "argument-error",
-                                format!("vm/config-set :flip: expected :on/:off, got :{}", kw),
-                            )
-                        }
-                    }
-                } else {
-                    return error_val(
-                        "type-error",
-                        format!(
-                            "vm/config-set :flip: expected bool or keyword, got {}",
-                            val.type_name()
-                        ),
-                    );
-                };
-                crate::config::set_flip(on);
-                Value::NIL
-            }
+            // Legacy: flip is always off (no-op). Accept for compat.
+            "flip" => Value::NIL,
             _ => error_val(
                 "argument-error",
                 format!("vm/config-set: unknown field :{}", kw),
@@ -1047,8 +996,9 @@ impl VM {
             unsafe { (*heap_ptr).visible_len() }
         };
 
+        let region_id = crate::value::fiberheap::get_alloc_region();
         let thunk_env = self
-            .build_closure_env(&closure, &[])
+            .build_closure_env(&closure, &[], region_id)
             .expect("arena/allocs: zero-arg thunk env build cannot fail");
 
         let exec_result = self.execute_bytecode_saving_stack(
@@ -1085,6 +1035,7 @@ impl VM {
 mod tests {
     use super::*;
     use crate::error::LocationMap;
+    use crate::value::arena::with_test_region;
     use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
 
     /// Create minimal test fixtures for handle_primitive_signal.
@@ -1102,97 +1053,109 @@ mod tests {
 
     #[test]
     fn composed_error_io_treated_as_error() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-        let bits = SIG_ERROR | SIG_IO;
+        with_test_region(|| {
+            let mut vm = VM::new();
+            let (bc, consts, env, loc) = test_fixtures();
+            let mut ip = 0usize;
+            let bits = SIG_ERROR | SIG_IO;
 
-        let result = vm.handle_primitive_signal(
-            bits,
-            Value::string("boom"),
-            &bc,
-            &consts,
-            &env,
-            &mut ip,
-            &loc,
-        );
+            let result = vm.handle_primitive_signal(
+                bits,
+                Value::string("boom"),
+                &bc,
+                &consts,
+                &env,
+                &mut ip,
+                &loc,
+            );
 
-        // Error path returns None
-        assert!(result.is_none());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        // NIL pushed (error convention)
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
-        // No suspended frame created
-        assert!(vm.fiber.suspended.is_none());
+            // Error path returns None
+            assert!(result.is_none());
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert!(sig.contains(SIG_ERROR));
+            // NIL pushed (error convention)
+            assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
+            // No suspended frame created
+            assert!(vm.fiber.suspended.is_none());
+        })
     }
 
     #[test]
     fn unknown_signal_propagates() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-        let bits = SIG_DEBUG; // not handled by any specific branch
+        with_test_region(|| {
+            let mut vm = VM::new();
+            let (bc, consts, env, loc) = test_fixtures();
+            let mut ip = 0usize;
+            let bits = SIG_DEBUG; // not handled by any specific branch
 
-        let result =
-            vm.handle_primitive_signal(bits, Value::int(1), &bc, &consts, &env, &mut ip, &loc);
+            let result =
+                vm.handle_primitive_signal(bits, Value::int(1), &bc, &consts, &env, &mut ip, &loc);
 
-        assert_eq!(result, Some(SIG_DEBUG));
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_DEBUG);
+            assert_eq!(result, Some(SIG_DEBUG));
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert_eq!(sig, SIG_DEBUG);
+        })
     }
 
     // -- handle_primitive_signal_tail (TailCall position) --
 
     #[test]
     fn tail_composed_error_io_treated_as_error() {
-        let mut vm = VM::new();
-        let bits = SIG_ERROR | SIG_IO;
+        with_test_region(|| {
+            let mut vm = VM::new();
+            let bits = SIG_ERROR | SIG_IO;
 
-        let result = vm.handle_primitive_signal_tail(bits, Value::string("boom"));
+            let result = vm.handle_primitive_signal_tail(bits, Value::string("boom"));
 
-        // Should return the full composed bits
-        assert!(result.contains(SIG_ERROR));
-        assert!(result.contains(SIG_IO));
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
-        assert!(sig.contains(SIG_IO));
+            // Should return the full composed bits
+            assert!(result.contains(SIG_ERROR));
+            assert!(result.contains(SIG_IO));
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert!(sig.contains(SIG_ERROR));
+            assert!(sig.contains(SIG_IO));
+        })
     }
 
     #[test]
     fn tail_composed_yield_io_propagates() {
-        let mut vm = VM::new();
-        let bits = SIG_YIELD | SIG_IO;
+        with_test_region(|| {
+            let mut vm = VM::new();
+            let bits = SIG_YIELD | SIG_IO;
 
-        let result = vm.handle_primitive_signal_tail(bits, Value::int(42));
+            let result = vm.handle_primitive_signal_tail(bits, Value::int(42));
 
-        assert_eq!(result, SIG_YIELD | SIG_IO);
-        let (sig, val) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_YIELD | SIG_IO);
-        assert_eq!(val, Value::int(42));
+            assert_eq!(result, SIG_YIELD | SIG_IO);
+            let (sig, val) = vm.fiber.signal.take().unwrap();
+            assert_eq!(sig, SIG_YIELD | SIG_IO);
+            assert_eq!(val, Value::int(42));
+        })
     }
 
     #[test]
     fn tail_sig_ok_stores_ok() {
-        let mut vm = VM::new();
+        with_test_region(|| {
+            let mut vm = VM::new();
 
-        let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5));
+            let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5));
 
-        assert_eq!(result, SIG_OK);
-        let (sig, val) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val, Value::int(5));
+            assert_eq!(result, SIG_OK);
+            let (sig, val) = vm.fiber.signal.take().unwrap();
+            assert_eq!(sig, SIG_OK);
+            assert_eq!(val, Value::int(5));
+        })
     }
 
     #[test]
     fn tail_error_priority_over_yield() {
-        let mut vm = VM::new();
-        let bits = SIG_ERROR | SIG_YIELD;
+        with_test_region(|| {
+            let mut vm = VM::new();
+            let bits = SIG_ERROR | SIG_YIELD;
 
-        let result = vm.handle_primitive_signal_tail(bits, Value::string("err"));
+            let result = vm.handle_primitive_signal_tail(bits, Value::string("err"));
 
-        assert!(result.contains(SIG_ERROR));
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR));
+            assert!(result.contains(SIG_ERROR));
+            let (sig, _) = vm.fiber.signal.take().unwrap();
+            assert!(sig.contains(SIG_ERROR));
+        })
     }
 }

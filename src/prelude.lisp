@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Elle standard prelude
 ##
 ## Loaded automatically by the Expander before user code expansion.
@@ -32,7 +32,7 @@
     val
     (let* [form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,(first form) ,val ,;(rest form))
                       `(,form ,val))]
       `(-> ,threaded
@@ -45,7 +45,7 @@
     val
     (let* [form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,;form ,val)
                       `(,form ,val))]
       `(->> ,threaded
@@ -70,7 +70,7 @@
     (let* [g (gensym)
            form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,(first form) ,g ,;(rest form))
                       `(,form ,g))]
       `(let [,g ,val]
@@ -87,7 +87,7 @@
     (let* [g (gensym)
            form (first forms)
            rest-forms (rest forms)
-           threaded (if (pair? form)
+           threaded (if (syntax-pair? form)
                       `(,;form ,g)
                       `(,form ,g))]
       `(let [,g ,val]
@@ -252,7 +252,7 @@
                  ,;body)
                (assign idx (%add idx 1))))
          (or :set :@set)
-           (let [items (set->array seq)]
+           (let [items (->array seq)]
              (def @idx 0)
              (def @len (length items))
              (while (%lt idx len)

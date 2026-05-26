@@ -25,32 +25,46 @@ pub(super) fn submit_uring_stream(
     op: &IoOp,
     timeout: Option<Duration>,
     buffer_pool: &mut BufferPool,
-    buf_handle: BufferHandle,
+    buf_handle: Option<BufferHandle>,
     read_buffered: usize,
 ) -> Result<(), String> {
     use io_uring::opcode;
     use io_uring::types::Fd;
 
     let entry = match op {
-        IoOp::ReadLine | IoOp::ReadAll => {
-            let buf = buffer_pool.get_mut(buf_handle);
+        IoOp::ReadLine { buffer } => {
+            let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
+            let read_size = (dst_cap - read_buffered).min(4096);
+            unsafe {
+                opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
+                    .offset(u64::MAX)
+                    .build()
+                    .user_data(id)
+            }
+        }
+        IoOp::ReadAll => {
+            let bh = buf_handle.expect("ReadAll requires BufferHandle");
+            let buf = buffer_pool.get_mut(bh);
             buf.resize(4096, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
                 .offset(u64::MAX)
                 .build()
                 .user_data(id)
         }
-        IoOp::Read { count } | IoOp::ReadExact { count } => {
-            let buf = buffer_pool.get_mut(buf_handle);
-            buf.resize(*count - read_buffered, 0);
-            opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
-                .offset(u64::MAX)
-                .build()
-                .user_data(id)
+        IoOp::Read { count, buffer } | IoOp::ReadExact { count, buffer } => {
+            let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
+            let read_size = (*count - read_buffered).min(dst_cap - read_buffered);
+            unsafe {
+                opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
+                    .offset(u64::MAX)
+                    .build()
+                    .user_data(id)
+            }
         }
         IoOp::Write { data } => {
             let bytes = crate::io::aio::AsyncBackend::extract_write_bytes(data);
-            let buf = buffer_pool.get_mut(buf_handle);
+            let bh = buf_handle.expect("Write requires BufferHandle");
+            let buf = buffer_pool.get_mut(bh);
             buf.clear();
             buf.extend_from_slice(&bytes);
             opcode::Write::new(Fd(fd), buf.as_ptr(), buf.len() as u32)
@@ -728,7 +742,7 @@ pub(super) fn drain_cqes(
                         let msghdr_size = std::mem::size_of::<libc::msghdr>();
                         let iovec_size = std::mem::size_of::<libc::iovec>();
                         let sockaddr_size = std::mem::size_of::<libc::sockaddr_storage>();
-                        let buf = buffer_pool.get_mut(buf_handle);
+                        let buf = buffer_pool.get_mut(buf_handle.unwrap());
 
                         // Read actual address length from msghdr (kernel updates msg_namelen)
                         let addr_len = unsafe {
@@ -751,50 +765,53 @@ pub(super) fn drain_cqes(
                         encoded.extend_from_slice(&payload);
                         encoded
                     }
-                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
+                    IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadExact { .. }
                         if result_code > 0 =>
                     {
-                        let buf = buffer_pool.get_mut(buf_handle);
+                        // Data was written directly into the fiber buffer by the kernel.
+                        Vec::new()
+                    }
+                    IoOp::ReadAll if result_code > 0 => {
+                        let buf = buffer_pool.get_mut(buf_handle.unwrap());
                         buf[..result_code as usize].to_vec()
                     }
                     _ => Vec::new(),
                 },
                 PendingOp::WatchNext { .. } if result_code > 0 => {
-                    let buf = buffer_pool.get_mut(buf_handle);
+                    let buf = buffer_pool.get_mut(buf_handle.unwrap());
                     buf[..result_code as usize].to_vec()
                 }
                 PendingOp::SigNext { .. } if result_code > 0 => {
-                    let buf = buffer_pool.get_mut(buf_handle);
+                    let buf = buffer_pool.get_mut(buf_handle.unwrap());
                     buf[..result_code as usize].to_vec()
                 }
                 _ => Vec::new(),
             };
 
             // ReadLine re-submission: if the read returned data but no newline
-            // was found (combined with any previously buffered bytes), buffer
-            // the data and schedule another read instead of returning a
-            // truncated line.
+            // was found in the fiber's buffer, resubmit for more data.
             if let PendingOp::Port {
-                op: IoOp::ReadLine,
+                op: IoOp::ReadLine { ref buffer },
                 ref port_key,
+                ref mut filled,
                 ..
             } = pending_op
             {
                 if result_code > 0 {
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
-                    let has_newline = state.buffer.iter().chain(data.iter()).any(|&b| b == b'\n');
+                    let total_in_fiber = *filled + result_code as usize;
+                    // Check for newline in the fiber's buffer content
+                    let buf_bytes = buffer.as_bytes().unwrap();
+                    let has_newline =
+                        buf_bytes[..total_in_fiber.min(buf_bytes.len())].contains(&b'\n');
                     if !has_newline {
-                        state.buffer.extend_from_slice(&data);
-                        buffer_pool.release(buf_handle);
+                        // No newline found — advance filled cursor for re-submission.
+                        *filled = total_in_fiber;
                         let fd = match port_key {
                             PortKey::Fd(raw) => *raw,
                             PortKey::Stdout => 1,
                             PortKey::Stderr => 2,
                             PortKey::Stdin => unreachable!(),
                         };
-                        // size=4096 for ReadLine (variable-length read)
                         read_resubmits.push((id, fd, 4096, pending_op));
                         continue;
                     }
@@ -806,77 +823,58 @@ pub(super) fn drain_cqes(
             // and resubmit for the remainder. Stream sockets (TCP, Unix)
             // are excluded for plain `Read` — port/read returns "up to N
             // bytes" per POSIX semantics, so a short read is a normal
-            // completion.  `ReadExact` is the strict variant: we resubmit
-            // for stream sockets too, so callers get exactly N units (or
-            // nil if the stream ended early).  Units are bytes on binary
-            // ports, graphemes on text ports — strings under Elle are
-            // measured in graphemes, so `(length (port/read-exact text 50))`
-            // must be 50 graphemes regardless of how many kernel bytes
-            // that took.
-            let (read_count, is_exact) = match pending_op {
-                PendingOp::Port {
-                    op: IoOp::Read { count },
-                    ..
-                } => (Some(count), false),
-                PendingOp::Port {
-                    op: IoOp::ReadExact { count },
-                    ..
-                } => (Some(count), true),
-                _ => (None, false),
-            };
-            if let Some(count) = read_count {
-                let (port_key_ref, port_ref) = match &pending_op {
+            // completion. `ReadExact` is the strict variant: resubmit for
+            // stream sockets too so callers get exactly N bytes (or nil if
+            // the stream ended early).
+            let (count, buffer_ref, port_key_for_resubmit, port_for_resubmit, filled_for_resubmit, is_exact) =
+                match &mut pending_op {
                     PendingOp::Port {
-                        ref port_key,
-                        ref port,
+                        op: IoOp::Read { count, buffer },
+                        port_key,
+                        port,
+                        filled,
                         ..
-                    } => (port_key, port),
-                    _ => unreachable!(),
+                    } => (Some(*count), Some(*buffer), Some(port_key.clone()), Some(*port), Some(filled), false),
+                    PendingOp::Port {
+                        op: IoOp::ReadExact { count, buffer },
+                        port_key,
+                        port,
+                        filled,
+                        ..
+                    } => (Some(*count), Some(*buffer), Some(port_key.clone()), Some(*port), Some(filled), true),
+                    _ => (None, None, None, None, None, false),
                 };
-                let port_ext = port_ref.as_external::<Port>();
-                let is_stream = port_ext
+            if let (Some(count), Some(buffer), Some(port_key), Some(port), Some(filled)) =
+                (count, buffer_ref, port_key_for_resubmit, port_for_resubmit, filled_for_resubmit)
+            {
+                let is_stream = port
+                    .as_external::<Port>()
                     .map(|p| matches!(p.kind(), PortKind::TcpStream | PortKind::UnixStream))
                     .unwrap_or(false);
-                let is_text = is_exact
-                    && port_ext
-                        .map(|p| matches!(p.encoding(), crate::port::Encoding::Text))
-                        .unwrap_or(false);
                 if (is_exact || !is_stream) && result_code > 0 {
                     let got = result_code as usize;
                     let state = fd_states
-                        .entry(port_key_ref.clone())
+                        .entry(port_key.clone())
                         .or_insert_with(FdState::new);
-                    let needs_more = if is_text {
-                        // Combined buffer (already-buffered + freshly read) —
-                        // check it has `count` graphemes.  We don't extend
-                        // state.buffer yet; only extend if we need to resubmit.
-                        let mut probe = Vec::with_capacity(state.buffer.len() + data.len());
-                        probe.extend_from_slice(&state.buffer);
-                        probe.extend_from_slice(&data);
-                        crate::io::nth_grapheme_byte_end(&probe, count).is_none()
-                    } else {
-                        state.buffer.len() + got < count
-                    };
-                    if needs_more {
-                        // Short read — buffer and resubmit for more bytes.
-                        state.buffer.extend_from_slice(&data);
-                        buffer_pool.release(buf_handle);
-                        let fd = match port_key_ref {
+                    let total_in_fiber = *filled + got;
+                    let total = state.buffer.len() + total_in_fiber;
+                    if total < count {
+                        // Short read — copy from fiber buffer into state.buffer and resubmit.
+                        unsafe {
+                            let (dst, _) = crate::io::request::writeable_buffer_ptr(&buffer);
+                            state
+                                .buffer
+                                .extend_from_slice(std::slice::from_raw_parts(dst, total_in_fiber));
+                        }
+                        // Reset filled for re-submission (data moved to state.buffer)
+                        *filled = 0;
+                        let fd = match &port_key {
                             PortKey::Fd(raw) => *raw,
                             PortKey::Stdout => 1,
                             PortKey::Stderr => 2,
                             PortKey::Stdin => unreachable!(),
                         };
-                        // For binary the remaining count is exact bytes.
-                        // For text we estimate one byte per missing
-                        // grapheme (ASCII best case) — if that under-reads,
-                        // we'll loop on the next short.
-                        let request = if is_text {
-                            let g_so_far = crate::io::grapheme_count_in_valid_prefix(&state.buffer);
-                            (count - g_so_far).max(1)
-                        } else {
-                            count - state.buffer.len()
-                        };
+                        let request = count - state.buffer.len();
                         read_resubmits.push((id, fd, request, pending_op));
                         continue;
                     }
@@ -896,7 +894,9 @@ pub(super) fn drain_cqes(
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
                     state.buffer.extend_from_slice(&data);
-                    buffer_pool.release(buf_handle);
+                    if let Some(bh) = buf_handle {
+                        buffer_pool.release(bh);
+                    }
                     let fd = match port_key {
                         PortKey::Fd(raw) => *raw,
                         PortKey::Stdout => 1,
@@ -907,6 +907,11 @@ pub(super) fn drain_cqes(
                     continue;
                 }
             }
+
+            // Note: filled is NOT updated here. Re-submissions update filled in
+            // the re-submit block below. For final completions, process_raw_completion
+            // computes total = filled + result_code, which is correct because filled
+            // was set at submission time (read_buffered) or by a previous re-submission.
 
             let completion = process_raw_completion(
                 id,
@@ -922,24 +927,62 @@ pub(super) fn drain_cqes(
     }
 
     // Re-submit ReadLine and short-Read ops that need more data.
-    for (id, fd, size, pending_op) in read_resubmits {
-        let new_buf = buffer_pool.alloc(size);
-        let buf = buffer_pool.get_mut(new_buf);
-        buf.resize(size, 0);
-        let sqe = io_uring::opcode::Read::new(
-            io_uring::types::Fd(fd),
-            buf.as_mut_ptr(),
-            buf.len() as u32,
-        )
-        .offset(u64::MAX)
-        .build()
-        .user_data(id);
-        // Re-insert pending op with new buffer handle.
-        let mut reinserted: PendingOp = pending_op;
-        *reinserted.buffer_handle_mut() = new_buf;
-        pending.insert(id, reinserted);
-        unsafe {
-            let _ = ring.submission().push(&sqe);
+    // For reads with pre-allocated buffers, re-submit into the remaining
+    // space in the fiber's buffer (advance past filled bytes).
+    for (id, fd, _size, mut pending_op) in read_resubmits {
+        if let PendingOp::Port {
+            op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+            ref mut filled,
+            ..
+        } = pending_op
+        {
+            let buf_bytes = buffer.as_bytes().unwrap();
+            let remaining = buf_bytes.len().saturating_sub(*filled);
+            if remaining == 0 {
+                // Buffer full — return what we have as a partial result.
+                // Don't re-submit; let process_raw_completion handle it.
+                // Push back into completions via process_raw_completion.
+                continue;
+            }
+            unsafe {
+                let (dst, _) = crate::io::request::writeable_buffer_ptr(buffer);
+                let sqe = io_uring::opcode::Read::new(
+                    io_uring::types::Fd(fd),
+                    dst.add(*filled),
+                    remaining as u32,
+                )
+                .offset(u64::MAX)
+                .build()
+                .user_data(id);
+                pending.insert(id, pending_op);
+                let _ = ring.submission().push(&sqe);
+            }
+        } else {
+            // Non-read re-submission (shouldn't happen, but handle defensively)
+            let new_buf = buffer_pool.alloc(4096);
+            let buf = buffer_pool.get_mut(new_buf);
+            buf.resize(4096, 0);
+            let sqe = io_uring::opcode::Read::new(
+                io_uring::types::Fd(fd),
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+            )
+            .offset(u64::MAX)
+            .build()
+            .user_data(id);
+            if let PendingOp::Port {
+                ref mut buffer_handle,
+                ref mut filled,
+                ..
+            } = pending_op
+            {
+                *buffer_handle = Some(new_buf);
+                *filled = 0;
+            }
+            pending.insert(id, pending_op);
+            unsafe {
+                let _ = ring.submission().push(&sqe);
+            }
         }
     }
     if !ring.submission().is_empty() {

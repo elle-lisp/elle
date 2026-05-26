@@ -18,7 +18,7 @@
 //!   value_binary_vm: (atag, apay, btag, bpay, vm) -> (tag, payload) = 5 params, 2 returns
 //!   call: (ftag, fpay, args_ptr, nargs, vm) -> (tag, payload) = 5 params, 2 returns
 
-use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -102,12 +102,23 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
+    #[allow(dead_code)] // JIT region infrastructure — wired incrementally
     pub(crate) region_enter: FuncId,
+    #[allow(dead_code)]
     pub(crate) region_exit: FuncId,
+    #[allow(dead_code)]
     pub(crate) region_exit_call: FuncId,
+    #[allow(dead_code)]
     pub(crate) region_rotate: FuncId,
-    pub(crate) region_rotate_dealloc: FuncId,
+    pub(crate) free_region: FuncId,
+    pub(crate) incref_region: FuncId,
+    pub(crate) decref_region: FuncId,
+    #[allow(dead_code)]
     pub(crate) rotate_pools: FuncId,
+    #[allow(dead_code)]
+    pub(crate) incref: FuncId,
+    #[allow(dead_code)]
+    pub(crate) decref: FuncId,
     // New intrinsic helpers
     pub(crate) is_empty: FuncId,
     pub(crate) is_bool: FuncId,
@@ -127,6 +138,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) del: FuncId,
     pub(crate) has: FuncId,
     pub(crate) intr_push: FuncId,
+    pub(crate) intr_string_push: FuncId,
+    pub(crate) intr_bytes_push: FuncId,
     pub(crate) pop: FuncId,
     pub(crate) freeze: FuncId,
     pub(crate) thaw: FuncId,
@@ -342,13 +355,23 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_region_rotate as *const u8,
     );
     builder.symbol(
-        "elle_jit_region_rotate_dealloc",
-        dispatch::elle_jit_region_rotate_dealloc as *const u8,
+        "elle_jit_free_region",
+        dispatch::elle_jit_free_region as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_incref_region",
+        dispatch::elle_jit_incref_region as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_decref_region",
+        dispatch::elle_jit_decref_region as *const u8,
     );
     builder.symbol(
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
+    builder.symbol("elle_jit_incref", dispatch::elle_jit_incref as *const u8);
+    builder.symbol("elle_jit_decref", dispatch::elle_jit_decref as *const u8);
     // New intrinsic helpers
     builder.symbol("elle_jit_is_empty", runtime::elle_jit_is_empty as *const u8);
     builder.symbol("elle_jit_is_bool", runtime::elle_jit_is_bool as *const u8);
@@ -380,6 +403,14 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol("elle_jit_del", runtime::elle_jit_del as *const u8);
     builder.symbol("elle_jit_has", runtime::elle_jit_has as *const u8);
     builder.symbol("elle_jit_push", runtime::elle_jit_push as *const u8);
+    builder.symbol(
+        "elle_jit_string_push",
+        runtime::elle_jit_string_push as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_bytes_push",
+        runtime::elle_jit_bytes_push as *const u8,
+    );
     builder.symbol("elle_jit_pop", runtime::elle_jit_pop as *const u8);
     builder.symbol("elle_jit_freeze", runtime::elle_jit_freeze as *const u8);
     builder.symbol("elle_jit_thaw", runtime::elle_jit_thaw as *const u8);
@@ -555,8 +586,12 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
         region_exit_call: declare(module, "elle_jit_region_exit_call", &void_to_value)?,
         region_rotate: declare(module, "elle_jit_region_rotate", &void_to_value)?,
-        region_rotate_dealloc: declare(module, "elle_jit_region_rotate_dealloc", &void_to_value)?,
+        free_region: declare(module, "elle_jit_free_region", &make_sig(module, &[I32], &[]))?,
+        incref_region: declare(module, "elle_jit_incref_region", &make_sig(module, &[I32], &[]))?,
+        decref_region: declare(module, "elle_jit_decref_region", &make_sig(module, &[I32], &[]))?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
+        incref: declare(module, "elle_jit_incref", &value_unary)?,
+        decref: declare(module, "elle_jit_decref", &value_unary)?,
         // New intrinsic helpers
         is_empty: declare(module, "elle_jit_is_empty", &value_unary)?,
         is_bool: declare(module, "elle_jit_is_bool", &value_unary)?,
@@ -580,6 +615,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         del: declare(module, "elle_jit_del", &value_binary)?,
         has: declare(module, "elle_jit_has", &value_binary)?,
         intr_push: declare(module, "elle_jit_push", &value_binary)?,
+        intr_string_push: declare(module, "elle_jit_string_push", &value_binary)?,
+        intr_bytes_push: declare(module, "elle_jit_bytes_push", &value_binary)?,
         pop: declare(module, "elle_jit_pop", &value_unary)?,
         freeze: declare(module, "elle_jit_freeze", &value_unary)?,
         thaw: declare(module, "elle_jit_thaw", &value_unary)?,

@@ -98,6 +98,10 @@ pub(crate) struct Completion {
 }
 
 impl Completion {
+    pub(crate) fn new(id: u64, result: Result<Value, Value>) -> Self {
+        Completion { id, result }
+    }
+
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}
     pub(crate) fn to_value(&self) -> Value {
         let mut fields = BTreeMap::new();
@@ -121,7 +125,11 @@ impl Completion {
 /// Implemented by `AsyncBackend` (real I/O via io_uring or thread pool)
 /// and `MockBackend` (in-memory, deterministic).
 pub(crate) trait IoBackend {
-    fn submit(&self, request: &IoRequest) -> Result<u64, String>;
+    fn submit(
+        &self,
+        request: &IoRequest,
+        origin_heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<u64, String>;
     fn poll(&self) -> Vec<Completion>;
     fn wait(&self, timeout_ms: i64) -> Result<Vec<Completion>, String>;
     fn cancel(&self, id: u64) -> Result<(), String>;

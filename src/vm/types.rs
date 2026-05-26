@@ -329,23 +329,88 @@ pub(crate) fn handle_intr_has(vm: &mut VM) {
 pub(crate) fn handle_intr_push(vm: &mut VM) {
     let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    if let Some(vec_ref) = collection.as_array_mut() {
-        vec_ref.borrow_mut().push(value);
-        vm.fiber.stack.push(collection);
+    if collection.is_array_mut() {
+        // @array: mutate in place + track cross-region reference
+        vm.fiber
+            .stack
+            .push(crate::value::arena::tracked_push(collection, value));
     } else if let Some(elems) = collection.as_array() {
+        // Immutable array: create new array
         let mut new = elems.to_vec();
         new.push(value);
         vm.fiber.stack.push(Value::array(new));
     } else {
-        panic!("%push: unsupported type {}", collection.type_name())
+        panic!("%array-push: unsupported type {}", collection.type_name())
+    }
+}
+
+pub(crate) fn handle_intr_string_push(vm: &mut VM) {
+    let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    // Extract the string content from the value.
+    let s = value.with_string(|s| s.to_string()).unwrap_or_else(|| {
+        panic!(
+            "%string-push: value must be string, got {}",
+            value.type_name()
+        )
+    });
+    if let Some(buf_ref) = collection.as_string_mut() {
+        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
+        vm.fiber.stack.push(collection);
+    } else {
+        let new = collection
+            .with_string(|base| {
+                let mut r = base.to_string();
+                r.push_str(&s);
+                Value::string(r)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "%string-push: expected string or @string, got {}",
+                    collection.type_name()
+                )
+            });
+        vm.fiber.stack.push(new);
+    }
+}
+
+pub(crate) fn handle_intr_bytes_push(vm: &mut VM) {
+    let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let byte = value.as_int().expect("%bytes-push: value must be integer") as u8;
+    if let Some(buf_ref) = collection.as_bytes_mut() {
+        // Mutable @bytes: append byte in place.
+        buf_ref.borrow_mut().push(byte);
+        vm.fiber.stack.push(collection);
+    } else if let Some(data) = collection.as_bytes() {
+        // Immutable bytes: create new bytes with byte appended.
+        let mut new = data.to_vec();
+        new.push(byte);
+        vm.fiber.stack.push(Value::bytes(new));
+    } else {
+        panic!(
+            "%bytes-push: expected bytes or @bytes, got {}",
+            collection.type_name()
+        );
     }
 }
 
 pub(crate) fn handle_intr_pop(vm: &mut VM) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    let arr = val.as_array_mut().expect("%pop: expected @array");
-    let popped = arr.borrow_mut().pop().expect("%pop: empty @array");
-    vm.fiber.stack.push(popped);
+    let vec_ref = val.as_array_mut().expect("intr_pop: expected @array");
+    let mut buf = vec_ref.borrow_mut();
+    match buf.pop() {
+        Some(popped) => {
+            drop(buf);
+            crate::value::arena::track_remove(popped);
+            vm.fiber.stack.push(popped);
+        }
+        None => {
+            drop(buf);
+            vm.fiber.set_error("argument-error", "pop: empty @array");
+            vm.fiber.stack.push(Value::NIL);
+        }
+    }
 }
 
 pub(crate) fn handle_intr_freeze(vm: &mut VM) {

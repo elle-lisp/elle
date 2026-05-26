@@ -211,6 +211,16 @@ pub fn list(values: impl IntoIterator<Item = Value>) -> Value {
         .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc))
 }
 
+/// Create a proper list in the immortal region (compile-time constants).
+pub fn list_permanent(values: impl IntoIterator<Item = Value>) -> Value {
+    values
+        .into_iter()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .fold(Value::EMPTY_LIST, |acc, v| Value::pair_permanent(v, acc))
+}
+
 /// Create a cons cell (convenience function).
 #[inline]
 pub fn pair(head: Value, tail: Value) -> Value {

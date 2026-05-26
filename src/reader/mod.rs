@@ -158,32 +158,4 @@ pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[allow(clippy::approx_constant)]
-    fn test_read_number() {
-        let mut symbols = SymbolTable::new();
-        assert_eq!(read_str("42", &mut symbols).unwrap(), Value::int(42));
-        assert_eq!(read_str("3.14", &mut symbols).unwrap(), Value::float(3.14));
-    }
-
-    #[test]
-    fn test_read_list() {
-        let mut symbols = SymbolTable::new();
-        let result = read_str("(1 2 3)", &mut symbols).unwrap();
-        assert!(result.is_list());
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 3);
-    }
-
-    #[test]
-    fn test_read_quote() {
-        let mut symbols = SymbolTable::new();
-        let result = read_str("'foo", &mut symbols).unwrap();
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 2);
-    }
-}
+// Tests migrated to tests/elle/reader.lisp

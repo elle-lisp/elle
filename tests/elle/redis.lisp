@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.
@@ -277,6 +277,7 @@
                 (assert (= (unbox result-box) "preset")
                         "spawned fiber sees *redis-port* inherited from spawner"))
               (println "  ev/spawn inside redis-with: ok")
+
 
               # ── Cleanup ─────────────────────────────────────────────────────
 

@@ -8,7 +8,6 @@
 //! - `(put (vm/config) :trace |:call :signal|)` — sets trace keywords
 //! - `(put (vm/config) :jit :eager)` — sets JIT policy
 
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_QUERY};
 use crate::value::types::Arity;
@@ -47,35 +46,29 @@ pub(crate) fn prim_vm_config_set(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Declarative primitive definitions for config operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "vm/config",
-        func: prim_vm_config,
-        signal: Signal {
+// Declarative primitive definitions for config operations.
+primitive! {
+    "vm/config" => prim_vm_config {
+        signal: (Signal {
             bits: SIG_QUERY.union(SIG_ERROR),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(0, 1),
         doc: "Read runtime configuration. No args returns the full config struct. \
               Pass a keyword (:trace, :jit, :wasm, :stats) to read a specific field.",
         params: &["key?"],
         category: "meta",
         example: "(vm/config :jit)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "vm/config-set",
-        func: prim_vm_config_set,
-        signal: Signal {
+    }
+    "vm/config-set" => prim_vm_config_set {
+        signal: (Signal {
             bits: SIG_QUERY.union(SIG_ERROR),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(2),
         doc: "Set a runtime configuration field. Use (put (vm/config) :key value) instead.",
         params: &["key", "value"],
         category: "meta",
         example: "(vm/config-set :jit :eager)",
-        aliases: &[],
-    },
-];
+    }
+}

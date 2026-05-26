@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## compile/primitives — verify Rust primitive metadata is accessible
 
 (def prims (compile/primitives))
@@ -35,11 +35,10 @@
 (assert (nil? (find-prim "pair")) "pair is stdlib, not a Rust primitive")
 (assert (nil? (find-prim "+")) "+ is stdlib, not a Rust primitive")
 
-# abs is a core Rust primitive (kept in arithmetic.rs)
-(def abs-prim (find-prim "abs"))
-(assert (not (nil? abs-prim)) "abs primitive exists")
-(assert (= (get abs-prim :category) "arithmetic")
-        "abs is in arithmetic category")
+# math/inf is a core Rust primitive
+(def inf-prim (find-prim "math/inf"))
+(assert (not (nil? inf-prim)) "math/inf primitive exists")
+(assert (= (get inf-prim :category) "math") "math/inf is in math category")
 
 # ── Find port/write (yields, io) ──────────────────────────────────────
 

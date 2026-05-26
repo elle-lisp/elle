@@ -40,32 +40,10 @@ fails on your branch, your branch broke it. Fix it.
 
 ### Why "pre-existing" is not an excuse
 
-Because main is green, every test that fails on your branch either:
-
-- **Was introduced by your branch.** You wrote the test, or your
-  changes broke an existing test. Fix it.
-- **Was uncovered by your branch.** Your changes exposed a latent
-  bug — perhaps a test that was order-dependent, timing-sensitive, or
-  masked by a different code path. Your branch revealed it; your
-  branch fixes it.
-
-The reasoning is simple: if the defect were truly pre-existing, main
-would not be green. Main is green. Therefore, the defect is not
-pre-existing — it is a consequence of your branch's interaction with
-the codebase.
-
-Even in the rare case where a defect genuinely exists on main (a flaky
-test that passes on CI hardware but fails on yours, a race condition
-that only manifests under load), the response is the same: fix it.
-If you discovered it, you are in the best position to understand and
-fix it. And your branch cannot merge until you do.
-
-### Why this matters for LLM agents
-
-LLM agents are prone to a specific failure mode: encountering a test
-failure, classifying it as "pre-existing" or "unrelated", and moving
-on. This is exactly wrong. The test suite is the ground truth. When a
-test fails, the test is telling you something. Listen to it.
+If the defect were truly pre-existing, main would not be green. Main
+is green. Therefore, the defect is a consequence of your branch's
+interaction with the codebase — either you broke a test, or you
+exposed a latent bug. Either way, fix it before merging.
 
 The correct workflow:
 
@@ -77,6 +55,35 @@ The correct workflow:
 
 Do not skip tests. Do not add skip lists. Do not mark tests as
 expected failures. Do not rationalize failures away. Fix them.
+
+## Debugging with tests and assertions
+
+Some bugs — especially UAF, race conditions, and timing-dependent crashes
+— require enormous context to fully understand. A single debugging session
+is unlikely to solve them. The correct strategy is **progressive
+constraint**:
+
+1. **Add tests to the test suite.** Every partial reproduction, every
+   minimized case, every boundary condition you discover becomes a
+   permanent test. Even if the bug isn't fixed this session, the test
+   stays. Future sessions inherit a smaller search space.
+
+2. **Add assertions to the code.** Rust `debug_assert!`, runtime checks,
+   invariant guards — anything that turns a silent corruption into a loud
+   panic closer to the site of the bug. Assertions are disposable
+   scaffolding; keep the ones that catch real problems, remove the rest
+   after the fix lands.
+
+3. **Run the tests after every change.** Not at the end. Not after
+   "one more thing." After every change. The tests are the compass.
+
+The goal is not to solve the bug in one pass. The goal is that every
+session leaves the codebase better defended than it was before. Bugs
+have fewer places to live. Incorrect assumptions become asserts. The
+search space shrinks. Eventually the bug has nowhere left to hide.
+
+This is not optional. If you spent a session debugging and added zero
+tests and zero assertions, the session was wasted.
 
 ## Running tests
 

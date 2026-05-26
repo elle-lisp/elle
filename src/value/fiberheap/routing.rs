@@ -1,11 +1,19 @@
 //! Thread-local fiber heap routing.
 
 use super::FiberHeap;
+use crate::hir::region::RegionId;
 use std::cell::Cell;
 
 thread_local! {
     static CURRENT_FIBER_HEAP: Cell<*mut FiberHeap> =
         const { Cell::new(std::ptr::null_mut()) };
+
+    /// Current region for allocation routing.
+    ///
+    /// Set by the VM before NativeFn calls and macro expansion.
+    /// Read by `arena::alloc()` to route allocations into the correct
+    /// region's pages. 0 = no active region (panics on access).
+    static CURRENT_ALLOC_REGION: Cell<RegionId> = const { Cell::new(0) };
 }
 
 // Thread-local storage for the root fiber's persistent FiberHeap.
@@ -107,18 +115,6 @@ pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
     CURRENT_FIBER_HEAP.with(|cell| cell.set(saved));
 }
 
-/// Check whether the current fiber heap has a shared allocator active.
-pub fn current_heap_has_shared_alloc() -> bool {
-    CURRENT_FIBER_HEAP.with(|cell| {
-        let ptr = cell.get();
-        if ptr.is_null() {
-            false
-        } else {
-            unsafe { (*ptr).has_shared_alloc() }
-        }
-    })
-}
-
 pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R> {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();
@@ -130,141 +126,51 @@ pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R
     })
 }
 
-/// Enter outbox routing context on the current FiberHeap.
-/// Allocations between outbox_enter and outbox_exit go to the outbox.
-pub fn outbox_enter() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).outbox_enter() };
-    }
+/// Set the current allocation region for NativeFn calls.
+///
+/// The VM sets this before dispatching a NativeFn and clears it after.
+/// NativeFn code calls `arena::alloc()` which samples this TLS variable
+/// to route allocations into the correct region.
+#[inline]
+pub fn set_alloc_region(region_id: RegionId) {
+    CURRENT_ALLOC_REGION.with(|cell| cell.set(region_id));
 }
 
-/// Exit outbox routing context on the current FiberHeap.
-pub fn outbox_exit() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).outbox_exit() };
-    }
+/// Get the current allocation region. Panics if no region is active.
+#[inline]
+pub fn get_alloc_region() -> RegionId {
+    let id = CURRENT_ALLOC_REGION.with(|cell| cell.get());
+    assert!(id != 0, "get_alloc_region: no active region");
+    id
 }
 
-/// Push a scope mark on the current FiberHeap (called by VM `RegionEnter`).
-pub fn region_enter() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).push_scope_mark() };
-    }
+/// **DO NOT CALL THIS DIRECTLY.**
+///
+/// Raw read of the TLS alloc region. Returns 0 when no region is active.
+/// The ONLY legitimate caller is the `with_alloc_region!` macro, which
+/// needs to save the current value (possibly 0) before replacing it and
+/// restore it afterward. Every other read must go through
+/// `get_alloc_region()` which panics on 0 — catching misuse.
+///
+/// If you are reading this and thinking about calling it: don't.
+/// Use `with_alloc_region!` or `with_transient_region!` instead.
+#[inline]
+#[allow(non_snake_case)]
+pub fn read_alloc_region_FOR_USE_IN_with_alloc_region_ONLY() -> RegionId {
+    CURRENT_ALLOC_REGION.with(|cell| cell.get())
 }
 
-/// Pop a scope mark and release scoped objects on the current FiberHeap
-/// (called by VM `RegionExit`).
-pub fn region_exit() {
+/// Free all objects in a specific region on the current FiberHeap.
+///
+/// Panics if `region_id == 0`.
+pub fn free_region(region_id: RegionId) {
+    assert!(
+        region_id != 0,
+        "free_region called with region_id 0 — solver bug"
+    );
     let ptr = current_heap_ptr();
     if !ptr.is_null() {
-        unsafe { (*ptr).pop_scope_mark_and_release() };
-    }
-}
-
-/// Pop two scope marks and release only the range between them
-/// (called by VM `RegionExitCall`).
-pub fn region_exit_call() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).pop_call_scope_marks_and_release() };
-    }
-}
-
-/// Rotate loop scope marks on the current FiberHeap (`RegionRotate`).
-pub fn region_rotate() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).rotate_scope_marks() };
-    }
-}
-
-// ── Refcounting ───────────────────────────────────────────────────
-
-/// Increment the durable reference count for a heap value on the
-/// current FiberHeap. No-op for non-heap values or if no heap installed.
-pub fn incref(val: crate::value::Value) {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).incref_value(val) };
-    }
-}
-
-/// Decrement the durable reference count for a heap value on the
-/// current FiberHeap. No-op for non-heap values or if no heap installed.
-pub fn decref(val: crate::value::Value) {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).decref_value(val) };
-    }
-}
-
-/// Decrement the durable reference count for a heap value and free it
-/// immediately if the refcount reaches 0. Called at mutation points
-/// (put/push) when the old value is evicted from a collection.
-pub fn decref_and_free(val: crate::value::Value) {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).decref_and_free(val) };
-    }
-}
-
-/// Refcount-aware rotation (`RegionRotateRefcounted`).
-pub fn region_rotate_refcounted() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).rotate_scope_marks_refcounted() };
-    }
-}
-
-/// Refcount-aware scope exit: pops scope mark and releases only
-/// refcount-0 objects. Pinned objects (refcount > 0) survive.
-pub fn region_exit_refcounted() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe {
-            let heap = &mut *ptr;
-            let mark = heap
-                .scope_marks
-                .pop()
-                .expect("RegionExitRefcounted without matching RegionEnter");
-            let dtors_before = heap.pool.dtors.len();
-            heap.release_refcounted(mark);
-            heap.scope_dtors_run += dtors_before - heap.pool.dtors.len();
-        };
-    }
-}
-
-/// Rotate loop scope marks with dealloc (`RegionRotateDealloc`).
-pub fn region_rotate_dealloc() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).rotate_scope_marks_dealloc() };
-    }
-}
-
-/// Push a flip frame on the current FiberHeap (`FlipEnter`).
-pub fn flip_enter() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).flip_enter() };
-    }
-}
-
-/// Rotate using the top flip frame (`FlipSwap`).
-pub fn flip_swap() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).flip_swap() };
-    }
-}
-
-/// Pop the top flip frame (`FlipExit`).
-pub fn flip_exit() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).flip_exit() };
+        let heap = unsafe { &mut *ptr };
+        heap.free_region_physical(region_id);
     }
 }

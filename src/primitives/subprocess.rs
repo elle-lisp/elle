@@ -1,6 +1,5 @@
 //! Subprocess-related primitives
 use crate::io::request::{IoOp, IoRequest, ProcessHandle, SpawnRequest, StdioDisposition};
-use crate::primitives::def::PrimitiveDef;
 use crate::signals::{Signal, SIG_EXEC};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::heap::TableKey;
@@ -572,11 +571,9 @@ fn prim_subprocess_pid(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(handle.pid() as i64))
 }
 
-/// Declarative primitive definitions for process operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "sys/exit",
-        func: prim_exit,
+// Declarative primitive definitions for process operations
+primitive! {
+    "sys/exit" => prim_exit {
         signal: Signal::halts(),
         arity: Arity::Range(0, 1),
         doc: "Exit the process with an optional exit code (0-255)",
@@ -584,10 +581,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "sys",
         example: "(sys/exit 0)",
         aliases: &["exit", "os/exit"],
-    },
-    PrimitiveDef {
-        name: "sys/halt",
-        func: prim_halt,
+    }
+    "sys/halt" => prim_halt {
         signal: Signal::halts(),
         arity: Arity::Range(0, 1),
         doc: "Halt the VM gracefully, returning a value to the host",
@@ -595,565 +590,74 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "sys",
         example: "(sys/halt 42)",
         aliases: &["halt", "os/halt"],
-    },
-    PrimitiveDef {
-        name: "sys/args",
-        func: prim_sys_args,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "sys/args" => prim_sys_args {
         doc: "Return command-line arguments as a list (excluding interpreter and script path)",
-        params: &[],
         category: "sys",
         example: "(sys/args)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "sys/argv",
-        func: prim_sys_argv,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+    }
+    "sys/argv" => prim_sys_argv {
         doc: "Return the full argv as a list: script name as element 0 followed by all user args. Element 0 is \"-\" for stdin or the script path for a file. Returns an empty list in REPL mode.",
-        params: &[],
         category: "sys",
         example: "(sys/argv)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "sys/pid",
-        func: prim_sys_pid,
-        signal: Signal::silent(),
+    }
+    "sys/pid" => prim_sys_pid {
         arity: Arity::Exact(0),
         doc: "Return the current process's pid as an integer.",
         params: &[],
         category: "sys",
         example: "(sys/pid)",
         aliases: &[],
-    },
-    PrimitiveDef {
-        name: "sys/env",
-        func: prim_sys_env,
-        signal: Signal::silent(),
+    }
+    "sys/env" => prim_sys_env {
         arity: Arity::Range(0, 1),
         doc: "Return the process environment as a struct with string keys and string values, or look up a single variable by name. Non-UTF-8 entries are silently skipped.",
         params: &["name"],
         category: "sys",
         example: "(sys/env) ; or (sys/env \"HOME\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/exec",
-        func: prim_subprocess_exec,
-        signal: Signal {
+    }
+    "subprocess/exec" => prim_subprocess_exec {
+        signal: (Signal {
             // SIG_EXEC: capability bit for fiber mask access control.
             // SIG_IO: dispatch bit — routes through the I/O scheduler.
             // Both are emitted; dispatch is IO-based; exec bit enables capability gating.
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
             propagates: 0,
-        },
+        }),
         arity: Arity::Range(2, 3),
         doc: "Spawn a subprocess. Returns {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <process>}",
         params: &["program", "args", "opts"],
         category: "sys",
         example: "(subprocess/exec \"ls\" [\"-la\"])",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/wait",
-        func: prim_subprocess_wait,
-        signal: Signal {
+    }
+    "subprocess/wait" => prim_subprocess_wait {
+        signal: (Signal {
             // SIG_EXEC: capability bit (same fiber mask semantics as subprocess/exec).
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Wait for a subprocess to exit. Returns exit code (0 = success).",
         params: &["handle"],
         category: "sys",
         example: "(subprocess/wait proc)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/kill",
-        func: prim_subprocess_kill,
+    }
+    "subprocess/kill" => prim_subprocess_kill {
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm).",
         params: &["handle", "signal"],
         category: "sys",
         example: "(subprocess/kill proc :sigterm)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "subprocess/pid",
-        func: prim_subprocess_pid,
+    }
+    "subprocess/pid" => prim_subprocess_pid {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the OS process ID of a subprocess.",
         params: &["handle"],
         category: "sys",
         example: "(subprocess/pid proc)",
-        aliases: &[],
-    },
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_exit_too_many_args() {
-        let (signal, _) = prim_exit(&[Value::int(0), Value::int(1)]);
-        assert_eq!(signal, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_exit_wrong_type() {
-        let (signal, _) = prim_exit(&[Value::bool(true)]);
-        assert_eq!(signal, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_exit_negative() {
-        let (signal, _) = prim_exit(&[Value::int(-1)]);
-        assert_eq!(signal, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_exit_too_large() {
-        let (signal, _) = prim_exit(&[Value::int(256)]);
-        assert_eq!(signal, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_halt_no_args() {
-        let (signal, value) = prim_halt(&[]);
-        assert_eq!(signal, SIG_HALT);
-        assert!(value.is_nil());
-    }
-
-    #[test]
-    fn test_halt_with_value() {
-        let (signal, value) = prim_halt(&[Value::int(42)]);
-        assert_eq!(signal, SIG_HALT);
-        assert_eq!(value, Value::int(42));
-    }
-
-    // --- sys/args ---
-
-    #[test]
-    fn test_sys_args_no_vm_context_returns_empty() {
-        // Without a VM context set (as in unit test environment), prim_sys_args
-        // falls back to an empty list.
-        // Note: other tests may set the VM context, so clear it first.
-        crate::context::clear_vm_context();
-        let (sig, val) = prim_sys_args(&[]);
-        assert_eq!(sig, SIG_OK);
-        assert!(
-            val == Value::EMPTY_LIST,
-            "sys/args without trailing args should return empty list, got {:?}",
-            val
-        );
-    }
-
-    #[test]
-    fn test_sys_args_reads_from_vm_context() {
-        // Set up a VM with user_args and verify prim_sys_args reads them as a list.
-        let mut vm = crate::vm::VM::new();
-        vm.user_args = vec!["a".to_string(), "b".to_string()];
-        crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
-
-        let (sig, val) = prim_sys_args(&[]);
-
-        crate::context::clear_vm_context();
-
-        assert_eq!(sig, SIG_OK);
-        assert!(val.is_list(), "sys/args should return a list");
-        let elems = val.list_to_vec().expect("should be a proper list");
-        assert_eq!(elems.len(), 2, "expected 2 args");
-        assert_eq!(
-            elems[0].with_string(|s| s.to_string()),
-            Some("a".to_string())
-        );
-        assert_eq!(
-            elems[1].with_string(|s| s.to_string()),
-            Some("b".to_string())
-        );
-    }
-
-    // --- sys/argv ---
-
-    #[test]
-    fn test_sys_argv_no_vm_context_returns_empty() {
-        crate::context::clear_vm_context();
-        let (sig, val) = prim_sys_argv(&[]);
-        assert_eq!(sig, SIG_OK);
-        assert!(
-            val == Value::EMPTY_LIST,
-            "sys/argv without VM context should return empty list, got {:?}",
-            val
-        );
-    }
-
-    #[test]
-    fn test_sys_argv_reads_source_arg_and_user_args() {
-        let mut vm = crate::vm::VM::new();
-        vm.source_arg = "-".to_string();
-        vm.user_args = vec!["foo".to_string(), "bar".to_string()];
-        crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
-
-        let (sig, val) = prim_sys_argv(&[]);
-
-        crate::context::clear_vm_context();
-
-        assert_eq!(sig, SIG_OK);
-        assert!(val.is_list(), "sys/argv should return a list");
-        let elems = val.list_to_vec().expect("should be a proper list");
-        assert_eq!(elems.len(), 3, "expected 3 elements");
-        assert_eq!(
-            elems[0].with_string(|s| s.to_string()),
-            Some("-".to_string()),
-            "element 0 should be source_arg"
-        );
-        assert_eq!(
-            elems[1].with_string(|s| s.to_string()),
-            Some("foo".to_string())
-        );
-        assert_eq!(
-            elems[2].with_string(|s| s.to_string()),
-            Some("bar".to_string())
-        );
-    }
-
-    #[test]
-    fn test_sys_argv_repl_mode_returns_empty() {
-        // In REPL mode source_arg is "", and user_args is empty.
-        // sys/argv should return ().
-        let mut vm = crate::vm::VM::new();
-        vm.source_arg = "".to_string();
-        vm.user_args = vec![];
-        crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
-
-        let (sig, val) = prim_sys_argv(&[]);
-
-        crate::context::clear_vm_context();
-
-        assert_eq!(sig, SIG_OK);
-        assert!(
-            val == Value::EMPTY_LIST,
-            "sys/argv in REPL mode should return empty list, got {:?}",
-            val
-        );
-    }
-
-    // --- sys/env ---
-
-    #[test]
-    fn test_sys_env_returns_struct() {
-        let (sig, val) = prim_sys_env(&[]);
-        assert_eq!(sig, SIG_OK);
-        assert!(val.as_struct().is_some(), "sys/env should return a struct");
-    }
-
-    #[test]
-    fn test_sys_env_path_present() {
-        let (sig, val) = prim_sys_env(&[]);
-        assert_eq!(sig, SIG_OK);
-        let fields = val.as_struct().expect("sys/env should return a struct");
-        let path_val = crate::value::sorted_struct_get(fields, &TableKey::String("PATH".into()));
-        assert!(
-            path_val
-                .map(|v: &Value| v.with_string(|_| true).unwrap_or(false))
-                .unwrap_or(false),
-            "sys/env should contain PATH as a string"
-        );
-    }
-
-    #[test]
-    fn test_sys_env_single_lookup_path_is_string() {
-        // PATH is always set in a real environment.
-        let (sig, val) = prim_sys_env(&[Value::string("PATH")]);
-        assert_eq!(sig, SIG_OK);
-        assert!(
-            val.with_string(|_| true).unwrap_or(false),
-            "sys/env with 'PATH' should return a non-nil string"
-        );
-    }
-
-    #[test]
-    fn test_sys_env_single_lookup_unset_returns_nil() {
-        let (sig, val) = prim_sys_env(&[Value::string("DEFINITELY_NOT_SET_XYZ_ELLE_123")]);
-        assert_eq!(sig, SIG_OK);
-        assert!(val.is_nil(), "sys/env with unset var should return nil");
-    }
-
-    #[test]
-    fn test_sys_env_single_lookup_non_string_type_error() {
-        let (sig, _) = prim_sys_env(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    // --- subprocess/exec ---
-
-    #[test]
-    fn test_subprocess_exec_program_not_string() {
-        let (sig, _) = prim_subprocess_exec(&[Value::int(42), Value::array(vec![])]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_args_not_array() {
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), Value::string("not-array")]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_args_element_not_string() {
-        let (sig, _) =
-            prim_subprocess_exec(&[Value::string("echo"), Value::array(vec![Value::int(99)])]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_returns_sig_exec_io_yield() {
-        let (sig, val) = prim_subprocess_exec(&[
-            Value::string("echo"),
-            Value::array(vec![Value::string("hi")]),
-        ]);
-        assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
-        assert!(sig.contains(SIG_IO), "expected SIG_IO in {:?}", sig);
-        assert!(sig.contains(SIG_YIELD), "expected SIG_YIELD in {:?}", sig);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    // --- extract_string_sequence ---
-
-    #[test]
-    fn test_extract_string_sequence_empty_list() {
-        let result = extract_string_sequence(&Value::EMPTY_LIST, "test");
-        assert_eq!(result, Ok(vec![]));
-    }
-
-    #[test]
-    fn test_extract_string_sequence_cons_list() {
-        let list = Value::pair(
-            Value::string("hello"),
-            Value::pair(Value::string("world"), Value::EMPTY_LIST),
-        );
-        let result = extract_string_sequence(&list, "test");
-        assert_eq!(result, Ok(vec!["hello".to_string(), "world".to_string()]));
-    }
-
-    #[test]
-    fn test_extract_string_sequence_array() {
-        let arr = Value::array(vec![Value::string("a"), Value::string("b")]);
-        let result = extract_string_sequence(&arr, "test");
-        assert_eq!(result, Ok(vec!["a".to_string(), "b".to_string()]));
-    }
-
-    #[test]
-    fn test_extract_string_sequence_array_mut() {
-        let arr = Value::array_mut(vec![Value::string("x"), Value::string("y")]);
-        let result = extract_string_sequence(&arr, "test");
-        assert_eq!(result, Ok(vec!["x".to_string(), "y".to_string()]));
-    }
-
-    #[test]
-    fn test_extract_string_sequence_type_error() {
-        let (sig, _) = extract_string_sequence(&Value::int(42), "test").unwrap_err();
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_extract_string_sequence_non_string_element() {
-        let list = Value::pair(Value::int(99), Value::EMPTY_LIST);
-        let (sig, _) = extract_string_sequence(&list, "test").unwrap_err();
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    // --- subprocess/exec: sequence widening ---
-
-    #[test]
-    fn test_subprocess_exec_empty_list_args() {
-        let (sig, val) = prim_subprocess_exec(&[Value::string("echo"), Value::EMPTY_LIST]);
-        assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
-        assert!(sig.contains(SIG_IO), "expected SIG_IO in {:?}", sig);
-        assert!(sig.contains(SIG_YIELD), "expected SIG_YIELD in {:?}", sig);
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    #[test]
-    fn test_subprocess_exec_cons_list_args() {
-        let list = Value::pair(
-            Value::string("hello"),
-            Value::pair(Value::string("world"), Value::EMPTY_LIST),
-        );
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), list]);
-        assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
-    }
-
-    #[test]
-    fn test_subprocess_exec_mutable_array_args() {
-        let arr = Value::array_mut(vec![Value::string("hi")]);
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), arr]);
-        assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
-    }
-
-    #[test]
-    fn test_subprocess_exec_args_non_sequence_rejected() {
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_args_non_string_element_in_list() {
-        let list = Value::pair(Value::int(99), Value::EMPTY_LIST);
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), list]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_improper_list_rejected() {
-        let improper = Value::pair(Value::string("a"), Value::int(1));
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), improper]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_exec_args_non_string_element_in_mutable_array() {
-        let arr = Value::array_mut(vec![Value::int(5)]);
-        let (sig, _) = prim_subprocess_exec(&[Value::string("echo"), arr]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    // --- subprocess/wait ---
-
-    #[test]
-    fn test_subprocess_wait_wrong_type() {
-        let (sig, _) = prim_subprocess_wait(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_wait_signal_bits() {
-        use crate::io::request::ProcessHandle;
-        use std::process::Command;
-        let child = Command::new("/bin/true").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
-        let (sig, val) = prim_subprocess_wait(&[handle_val]);
-        assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
-        assert!(sig.contains(SIG_IO), "expected SIG_IO in {:?}", sig);
-        assert!(sig.contains(SIG_YIELD));
-        assert_eq!(val.external_type_name(), Some("io-request"));
-    }
-
-    // --- subprocess/kill ---
-
-    #[test]
-    fn test_subprocess_kill_arity() {
-        let (sig, _) = prim_subprocess_kill(&[]);
-        assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_subprocess_kill(&[Value::NIL, Value::NIL, Value::NIL]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_kill_wrong_type() {
-        // Single int arg — not a process handle or struct, triggers type error
-        let (sig, _) = prim_subprocess_kill(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_kill_signal_is_errors() {
-        // subprocess/kill is synchronous — it does not yield.
-        let def = PRIMITIVES
-            .iter()
-            .find(|d| d.name == "subprocess/kill")
-            .unwrap();
-        assert!(!def.signal.may_yield(), "subprocess/kill must not yield");
-        assert!(def.signal.may_error());
-    }
-
-    #[test]
-    fn test_subprocess_kill_keyword_sigterm() {
-        use crate::io::request::ProcessHandle;
-        use std::process::Command;
-        let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
-        let sig_kw = Value::keyword("sigterm");
-        let (sig, _) = prim_subprocess_kill(&[handle_val, sig_kw]);
-        assert_eq!(sig, SIG_OK);
-    }
-
-    #[test]
-    fn test_subprocess_kill_unknown_keyword() {
-        use crate::io::request::ProcessHandle;
-        use std::process::Command;
-        let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
-        let sig_kw = Value::keyword("sigfoo");
-        let (sig, _) = prim_subprocess_kill(&[handle_val, sig_kw]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_kill_integer_still_works() {
-        use crate::io::request::ProcessHandle;
-        use std::process::Command;
-        let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
-        let pid = child.id();
-        let handle = ProcessHandle::new(pid, child);
-        let handle_val = Value::external("process", handle);
-        let (sig, _) = prim_subprocess_kill(&[handle_val, Value::int(15)]);
-        assert_eq!(sig, SIG_OK);
-    }
-
-    // --- subprocess/pid ---
-
-    #[test]
-    fn test_subprocess_pid_wrong_type() {
-        let (sig, _) = prim_subprocess_pid(&[Value::int(42)]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_subprocess_pid_from_handle() {
-        use crate::io::request::ProcessHandle;
-        use std::process::Command;
-        let child = Command::new("/bin/true").spawn().unwrap();
-        let expected_pid = child.id();
-        let handle = ProcessHandle::new(expected_pid, child);
-        let handle_val = Value::external("process", handle);
-        let (sig, val) = prim_subprocess_pid(&[handle_val]);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val.as_int(), Some(expected_pid as i64));
-    }
-
-    #[test]
-    fn test_subprocess_pid_from_struct() {
-        use crate::io::request::ProcessHandle;
-        use crate::value::heap::TableKey;
-        use std::collections::BTreeMap;
-        use std::process::Command;
-        let child = Command::new("/bin/true").spawn().unwrap();
-        let expected_pid = child.id();
-        let handle = ProcessHandle::new(expected_pid, child);
-        let handle_val = Value::external("process", handle);
-        let mut fields = BTreeMap::new();
-        fields.insert(TableKey::Keyword("process".into()), handle_val);
-        fields.insert(
-            TableKey::Keyword("pid".into()),
-            Value::int(expected_pid as i64),
-        );
-        let proc_struct = Value::struct_from(fields);
-        let (sig, val) = prim_subprocess_pid(&[proc_struct]);
-        assert_eq!(sig, SIG_OK);
-        assert_eq!(val.as_int(), Some(expected_pid as i64));
     }
 }
+
+// Tests migrated to tests/elle/prim-subprocess.lisp

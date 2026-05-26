@@ -216,7 +216,7 @@ impl<'a> Analyzer<'a> {
         let body_items = &items[2..];
         let (doc, body_start) = if body_items.len() > 1 {
             if let SyntaxKind::String(s) = &body_items[0].kind {
-                (Some(Value::string(s.clone())), &body_items[1..])
+                (Some(Value::string_permanent(s.clone())), &body_items[1..])
             } else {
                 (None, body_items)
             }

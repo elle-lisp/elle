@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -16,6 +16,298 @@
 ## - Stream transforms: stream/map, stream/filter, stream/take, stream/drop, stream/concat, stream/zip, stream/pipe
 ## - Stream ports: port/lines, port/chunks, port/writer
 ## - Subprocess convenience: subprocess/system
+
+## ── Type predicates ──────────────────────────────────────────────────
+
+(defn nil? [x]
+  (match (type-of x)
+    :nil true
+    _ false))
+(defn integer? [x]
+  (match (type-of x)
+    :integer true
+    _ false))
+(defn float? [x]
+  (match (type-of x)
+    :float true
+    _ false))
+(defn boolean? [x]
+  (match (type-of x)
+    :boolean true
+    _ false))
+(defn keyword? [x]
+  (match (type-of x)
+    :keyword true
+    _ false))
+(defn native-fn? [x]
+  (match (type-of x)
+    :native-fn true
+    _ false))
+(defn closure? [x]
+  (match (type-of x)
+    :closure true
+    _ false))
+(defn fiber? [x]
+  (match (type-of x)
+    :fiber true
+    _ false))
+(defn box? [x]
+  (match (type-of x)
+    :box true
+    _ false))
+(defn parameter? [x]
+  (match (type-of x)
+    :parameter true
+    _ false))
+(defn number? [x]
+  (match (type-of x)
+    :integer true
+    :float true
+    _ false))
+(defn string? [x]
+  (match (type-of x)
+    :string true
+    :@string true
+    _ false))
+(defn bytes? [x]
+  (match (type-of x)
+    :bytes true
+    :@bytes true
+    _ false))
+(defn array? [x]
+  (match (type-of x)
+    :array true
+    :@array true
+    _ false))
+(defn struct? [x]
+  (match (type-of x)
+    :struct true
+    :@struct true
+    _ false))
+(defn set? [x]
+  (match (type-of x)
+    :set true
+    :@set true
+    _ false))
+(defn fn? [x]
+  (match (type-of x)
+    :closure true
+    :native-fn true
+    _ false))
+(defn mutable? [x]
+  (match (type-of x)
+    :@array true
+    :@struct true
+    :@string true
+    :@bytes true
+    :@set true
+    :box true
+    _ false))
+(defn immutable? [x]
+  (not (mutable? x)))
+(defn pair? [x]
+  (match (type-of x)
+    :list (not (empty? x))
+    :syntax (pair? (syntax->datum x))
+    _ false))
+(defn list? [x]
+  (match (type-of x)
+    :list true
+    :syntax (list? (syntax->datum x))
+    _ false))
+(defn symbol? [x]
+  (match (type-of x)
+    :symbol true
+    :syntax (symbol? (syntax->datum x))
+    _ false))
+(defn even? [x]
+  (when (not (integer? x))
+    (error {:error :type-error
+            :message (string "even?: expected integer, got " (type x))}))
+  (= (%rem x 2) 0))
+(defn odd? [x]
+  (not (even? x)))
+(defn abs [x]
+  (cond
+    (integer? x)
+      (if (>= x 0)
+        x
+        (let [r (%sub 0 x)]
+          (when (< r 0)
+            (error {:error :overflow :message "abs: integer overflow"}))
+          r))
+    (float? x) (if (< x 0.0) (%sub 0.0 x) x)
+    true
+      (error {:error :type-error
+              :message (string "abs: expected number, got " (type x))})))
+(defn floor [x]
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (< x (float t)) (%sub t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "floor: expected number, got " (type x))})))
+(defn ceil [x]
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (> x (float t)) (%add t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "ceil: expected number, got " (type x))})))
+(defn round [x]
+  (cond
+    (integer? x) x
+    (float? x)
+      (if (>= x 0.0) (floor (%add x 0.5)) (ceil (%sub x 0.5)))
+    true
+      (error {:error :type-error
+              :message (string "round: expected number, got " (type x))})))
+(defn zero? [x]
+  (= x 0))
+(defn nonzero? [x]
+  (not (= x 0)))
+(defn nan? [x]
+  (and (float? x) (not (= x x))))
+(defn finite? [x]
+  (and (number? x) (not (nan? x)) (< (abs x) (math/inf))))
+(defn inf? [x]
+  (and (float? x) (not (finite? x)) (not (nan? x))))
+(defn pos? [x]
+  (> x 0))
+(defn neg? [x]
+  (< x 0))
+(def int? integer?)
+(def bool? boolean?)
+(def native? native-fn?)
+(def primitive? native-fn?)
+(def positive? pos?)
+(def negative? neg?)
+(def infinite? inf?)
+
+(defn min [x & args]
+  "Minimum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "min: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "min: expected number, got "
+                              (type b))}))
+                    (go (if (< b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn max [x & args]
+  "Maximum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "max: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "max: expected number, got "
+                              (type b))}))
+                    (go (if (> b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn not= [a b]
+  "Test inequality. Numeric-aware: (not= 1 1.0) is false."
+  (not (= a b)))
+
+(defn nonempty? [x]
+  "Return true if collection is non-empty."
+  (not (empty? x)))
+
+(defn compare [a b]
+  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
+   For non-comparable types (nil, bool), falls back to type-rank ordering."
+  (if (= a b)
+    0
+    (let [rank (fn [x]
+                 (match (type-of x)
+                   :nil 0
+                   :boolean 1
+                   :integer 2
+                   :float 2
+                   :string 3
+                   :keyword 4
+                   _ 5))
+          ra (rank a)
+          rb (rank b)]
+      (if (not= ra rb)
+        (if (%lt ra rb) -1 1)
+        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
+
+(defn range [start-or-end & args]
+  "Generate a range of integers as an array."
+  (let [start (if (empty? args) 0 start-or-end)
+        end (if (empty? args) start-or-end (first args))
+        step (if (< (length args) 2) 1 (second args))]
+    (when (= step 0)
+      (error {:error :argument-error :message "range: step cannot be zero"}))
+    (let [acc @[]]
+      (if (> step 0)
+        (begin
+          (def @i start)
+          (while (< i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step))))
+        (begin
+          (def @i start)
+          (while (> i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step)))))
+      (freeze acc))))
+
+(defn assert [value & args]
+  "Assert that value is truthy. Signals error if not."
+  (when (not value)
+    (error {:error :failed-assertion
+            :message (if (empty? args) "assertion failed" (string (first args)))}))
+  value)
+
+(defn xor [& args]
+  "Logical XOR. True if odd number of truthy values."
+  (letrec [go (fn [n xs]
+                (if (empty? xs)
+                  (odd? n)
+                  (go (if (first xs) (+ n 1) n) (rest xs))))]
+    (go 0 args)))
+(defn take [n coll]
+  "Take the first n elements of a list."
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "take: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "take: count must be non-negative, got " n)}))
+  (letrec [go (fn [i xs acc]
+                (if (or (= i 0) (empty? xs))
+                  (reverse acc)
+                  (go (- i 1) (rest xs) (pair (first xs) acc))))]
+    (go n coll ())))
+(defn drop [n coll]
+  "Drop the first n elements of a list."
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "drop: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "drop: count must be non-negative, got " n)}))
+  (letrec [go (fn [i xs] (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
+    (go n coll)))
 
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
@@ -162,6 +454,29 @@
   "Construct a pair with head and tail."
   (%pair a b))
 
+## ── Collection mutation ─────────────────────────────────────────────
+## Defined in stdlib (same compilation unit as user code) so the region
+## solver inlines the Lambda body and sees the %array-push/%put
+## intrinsics, generating the correct escape constraints.
+
+(defn push [coll val]
+  "Append val to coll. Mutates @array/@string/@bytes in place; returns new collection for immutable types."
+  (match (type-of coll)
+    :array (%array-push coll val)
+    :@array (%array-push coll val)
+    :string (%string-push coll val)
+    :@string (%string-push coll val)
+    :bytes (%bytes-push coll val)
+    :@bytes (%bytes-push coll val)
+    _
+      (error {:error :type-error
+              :message (string "push: expected array, string, or bytes, got "
+                               (type coll))})))
+
+(defn put [coll key & rest]
+  "Associate key with val in coll. For sets, (put s val) delegates to add."
+  (if (empty? rest) (add coll key) (%put coll key (first rest))))
+
 ## ── Higher-order functions ──────────────────────────────────────────
 
 (defn map [f coll]
@@ -176,7 +491,7 @@
           (assign i (+ i 1)))
         (if (mutable? coll) acc (freeze acc)))
     (set? coll)
-      (let* [items (set->array coll)
+      (let* [items (->array coll)
              acc @||]
         (each item in items
           (add acc (f item)))
@@ -204,7 +519,7 @@
           (assign i (+ i 1)))
         (if (mutable? coll) acc (freeze acc)))
     (set? coll)
-      (let* [items (set->array coll)
+      (let* [items (->array coll)
              acc (if (mutable? coll) (@set) (set))]
         (each item in items
           (when (p item) (add acc item)))
@@ -219,13 +534,6 @@
                  :reason :not-a-sequence
                  :message "not a sequence"})))
 
-(defn fold [f init lst]
-  "Reduce lst by applying (f accumulator element) left to right, starting from init. Alias: reduce."
-  (if (empty? lst)
-    init
-    (fold f (f init (first lst)) (rest lst))))
-
-(def reduce fold)
 (def keep filter)
 
 ## ── Functional combinators ──────────────────────────────────────────
@@ -1215,7 +1523,6 @@
         select-sets @{}  # waiting-fiber → @{:candidates [...] :woken @[false]}
         completed @{}  # fiber → :ok | :error (already-completed fibers)
         joined @||  # set of fibers whose result was observed
-        scheduler-killed @||  # set of fibers the scheduler aborted during shutdown
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
         park-queues @{}
         forwarded-pending @{}]
@@ -1404,7 +1711,8 @@
               (not (= 0 (bit/and bits 1)))  # SIG_ERROR
                (complete-fiber fiber :error)
               (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [[ok? result] (protect (io/submit backend (fiber/value fiber)))]
+              (let [[ok? result] (protect (io/submit backend (fiber/value fiber)
+                    fiber))]
                 (if ok?
                   (begin
                     (put pending result fiber)
@@ -1462,18 +1770,13 @@
                 (handle-fiber-after-resume parked)))))))
 
     (defn do-shutdown [timeout-ms]
-      "Abort all pending fibers, pump for timeout-ms, cancel stragglers.
-       Aborted fibers go into scheduler-killed (not joined) so the pump's
-       unjoined-error tail can distinguish 'user observed this' from
-       'we injected :shutdown' — defer-time errors during shutdown are
-       dropped here rather than misattributed to user code."
+      "Abort all pending fibers, pump for timeout-ms, cancel stragglers."
 
-      # Phase 1a: abort pending-I/O fibers (inject error, let defer run).
+      # Phase 1: abort all pending fibers (inject error, let defer run).
       (each [id fiber] in (pairs pending)
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
-        (add scheduler-killed fiber)
         (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
           (when ok? (handle-fiber-after-resume fiber))))
 
@@ -1510,11 +1813,9 @@
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
-        (add scheduler-killed fiber)
         (protect (fiber/cancel fiber {:error :shutdown})))
       (while (> (length runnable) 0)
         (let [fiber (pop runnable)]
-          (add scheduler-killed fiber)
           (protect (fiber/cancel fiber {:error :shutdown})))))
 
     (defn step [timeout-ms]
@@ -2011,6 +2312,8 @@
    :>= >=
    :not not
    :pair pair
+   :push push
+   :put put
    :map map
    :filter filter
    :fold fold
@@ -2123,4 +2426,57 @@
    :update update
    :get-in get-in
    :put-in put-in
-   :update-in update-in})
+   :update-in update-in
+   :nil? nil?
+   :integer? integer?
+   :float? float?
+   :boolean? boolean?
+   :keyword? keyword?
+   :native-fn? native-fn?
+   :closure? closure?
+   :fiber? fiber?
+   :box? box?
+   :parameter? parameter?
+   :number? number?
+   :string? string?
+   :bytes? bytes?
+   :array? array?
+   :struct? struct?
+   :set? set?
+   :fn? fn?
+   :mutable? mutable?
+   :immutable? immutable?
+   :pair? pair?
+   :list? list?
+   :symbol? symbol?
+   :zero? zero?
+   :nonzero? nonzero?
+   :nan? nan?
+   :finite? finite?
+   :inf? inf?
+   :pos? pos?
+   :neg? neg?
+   :int? int?
+   :bool? bool?
+   :native? native?
+   :primitive? primitive?
+   :positive? positive?
+   :negative? negative?
+   :infinite? infinite?
+   :even? even?
+   :odd? odd?
+   :abs abs
+   :floor floor
+   :ceil ceil
+   :round round
+   :min min
+   :max max
+   :not= not=
+   :nonempty? nonempty?
+   :compare compare
+   :range range
+   :assert assert
+   :xor xor
+   :take take
+   :drop drop
+   :set->array (fn [s] (->array s))})

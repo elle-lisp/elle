@@ -86,7 +86,7 @@ impl Expander {
             // together with the definition-site scopes ensures correct
             // resolution even when the call site shadows the same name.
             SyntaxKind::Symbol(_) => Ok(Syntax::new(
-                SyntaxKind::SyntaxLiteral(Value::syntax(syntax.clone())),
+                SyntaxKind::SyntaxLiteral(Value::syntax_permanent(syntax.clone())),
                 span.clone(),
             )),
 

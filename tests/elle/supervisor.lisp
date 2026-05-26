@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## tests/elle/supervisor.lisp — Tests for supervisor improvements
 ##
 ## Tests for: max-restarts, logger, make-subprocess-child,

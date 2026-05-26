@@ -39,6 +39,8 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     format::PRIMITIVES,
     intrinsics::PRIMITIVES,
     introspection::PRIMITIVES,
+    #[cfg(feature = "mlir")]
+    introspection::MLIR_PRIMITIVES,
     io::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,
@@ -91,6 +93,12 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
             meta.functions.insert(sym_id, native_val);
+            if def.returns_immediate {
+                meta.immediates.insert(sym_id);
+            }
+            if def.escapes_args {
+                meta.escapers.insert(sym_id);
+            }
 
             let doc = Doc {
                 name: def.name,
@@ -110,6 +118,9 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, alias_val);
+                if def.returns_immediate {
+                    meta.immediates.insert(alias_id);
+                }
                 vm.docs.insert((*alias).to_string(), doc.clone());
             }
         }
@@ -134,12 +145,21 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
             meta.functions.insert(sym_id, Value::native_fn(def));
+            if def.returns_immediate {
+                meta.immediates.insert(sym_id);
+            }
+            if def.escapes_args {
+                meta.escapers.insert(sym_id);
+            }
 
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, Value::native_fn(def));
+                if def.returns_immediate {
+                    meta.immediates.insert(alias_id);
+                }
             }
         }
     }

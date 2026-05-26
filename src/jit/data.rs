@@ -412,60 +412,68 @@ mod tests {
 
     #[test]
     fn test_cons_car_cdr() {
-        let head = Value::int(1);
-        let tail = Value::int(2);
-        let pair = elle_jit_pair(head.tag, head.payload, tail.tag, tail.payload).to_value();
+        crate::value::arena::with_test_region(|| {
+            let head = Value::int(1);
+            let tail = Value::int(2);
+            let pair = elle_jit_pair(head.tag, head.payload, tail.tag, tail.payload).to_value();
 
-        let car_val = elle_jit_first(pair.tag, pair.payload).to_value();
-        let cdr_val = elle_jit_rest(pair.tag, pair.payload).to_value();
+            let car_val = elle_jit_first(pair.tag, pair.payload).to_value();
+            let cdr_val = elle_jit_rest(pair.tag, pair.payload).to_value();
 
-        assert_eq!(car_val.as_int(), Some(1));
-        assert_eq!(cdr_val.as_int(), Some(2));
+            assert_eq!(car_val.as_int(), Some(1));
+            assert_eq!(cdr_val.as_int(), Some(2));
+        });
     }
 
     #[test]
     fn test_is_pair() {
-        let head = Value::int(1);
-        let tail = Value::int(2);
-        let pair = elle_jit_pair(head.tag, head.payload, tail.tag, tail.payload).to_value();
+        crate::value::arena::with_test_region(|| {
+            let head = Value::int(1);
+            let tail = Value::int(2);
+            let pair = elle_jit_pair(head.tag, head.payload, tail.tag, tail.payload).to_value();
 
-        assert_eq!(
-            elle_jit_is_pair(pair.tag, pair.payload),
-            JitValue::bool_val(true)
-        );
-        assert_eq!(
-            elle_jit_is_pair(Value::int(42).tag, Value::int(42).payload),
-            JitValue::bool_val(false)
-        );
+            assert_eq!(
+                elle_jit_is_pair(pair.tag, pair.payload),
+                JitValue::bool_val(true)
+            );
+            assert_eq!(
+                elle_jit_is_pair(Value::int(42).tag, Value::int(42).payload),
+                JitValue::bool_val(false)
+            );
+        });
     }
 
     #[test]
     fn test_make_array() {
-        let elements = [Value::int(1), Value::int(2), Value::int(3)];
-        let vec_val = elle_jit_make_array(elements.as_ptr(), 3).to_value();
+        crate::value::arena::with_test_region(|| {
+            let elements = [Value::int(1), Value::int(2), Value::int(3)];
+            let vec_val = elle_jit_make_array(elements.as_ptr(), 3).to_value();
 
-        assert!(vec_val.is_array_mut());
-        let vec_ref = vec_val.as_array_mut().unwrap();
-        let borrowed = vec_ref.borrow();
-        assert_eq!(borrowed.len(), 3);
-        assert_eq!(borrowed[0].as_int(), Some(1));
-        assert_eq!(borrowed[1].as_int(), Some(2));
-        assert_eq!(borrowed[2].as_int(), Some(3));
+            assert!(vec_val.is_array_mut());
+            let vec_ref = vec_val.as_array_mut().unwrap();
+            let borrowed = vec_ref.borrow();
+            assert_eq!(borrowed.len(), 3);
+            assert_eq!(borrowed[0].as_int(), Some(1));
+            assert_eq!(borrowed[1].as_int(), Some(2));
+            assert_eq!(borrowed[2].as_int(), Some(3));
+        });
     }
 
     #[test]
     fn test_cell_operations() {
-        let v = Value::int(42);
-        let cell = elle_jit_make_capture(v.tag, v.payload).to_value();
-        assert!(cell.is_capture_cell());
+        crate::value::arena::with_test_region(|| {
+            let v = Value::int(42);
+            let cell = elle_jit_make_capture(v.tag, v.payload).to_value();
+            assert!(cell.is_capture_cell());
 
-        let loaded = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
-        assert_eq!(loaded.as_int(), Some(42));
+            let loaded = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
+            assert_eq!(loaded.as_int(), Some(42));
 
-        let new_val = Value::int(100);
-        elle_jit_store_capture_cell(cell.tag, cell.payload, new_val.tag, new_val.payload);
+            let new_val = Value::int(100);
+            elle_jit_store_capture_cell(cell.tag, cell.payload, new_val.tag, new_val.payload);
 
-        let loaded2 = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
-        assert_eq!(loaded2.as_int(), Some(100));
+            let loaded2 = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
+            assert_eq!(loaded2.as_int(), Some(100));
+        });
     }
 }

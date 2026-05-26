@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection
@@ -52,7 +52,8 @@
     (fn (f x)
       (silence f)
       (f x)))
-  (assert (= (apply-inert2 abs -43) 43) "silence runtime: non-closure passes"))
+  (assert (= (apply-inert2 length [1 2 3]) 3)
+          "silence runtime: non-closure passes"))
 
 # squelch with keyword passes for silent closure (open-world: silent closure has no :rt_c5a)
 # Direct invocation: (squelch f :rt_c5a) returns a squelched closure; calling it with
@@ -133,7 +134,7 @@
 # squelch runtime: calling squelch on a non-closure (primitive) is a type error
 # (The new squelch primitive requires a closure; use the primitive directly for non-closures)
 (begin
-  (def [ok-prim? _] (protect (squelch abs :yield)))
+  (def [ok-prim? _] (protect (squelch length :yield)))
   (assert (not ok-prim?) "squelch runtime: non-closure produces type error"))
 
 # squelch runtime: a silent closure passes squelch

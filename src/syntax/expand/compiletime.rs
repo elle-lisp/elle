@@ -105,72 +105,80 @@ mod tests {
 
     #[test]
     fn bfs_non_def_rejected() {
-        // (begin-for-syntax (+ 1 2)) must fail
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            // (begin-for-syntax (+ 1 2)) must fail
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let src = "(begin-for-syntax (+ 1 2))";
-        let syn = read_syntax(src, "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err(), "non-def form should be rejected");
-        let msg = result.unwrap_err();
-        assert!(
-            msg.contains("begin-for-syntax"),
-            "error should mention begin-for-syntax: {}",
-            msg
-        );
+            let src = "(begin-for-syntax (+ 1 2))";
+            let syn = read_syntax(src, "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err(), "non-def form should be rejected");
+            let msg = result.unwrap_err();
+            assert!(
+                msg.contains("begin-for-syntax"),
+                "error should mention begin-for-syntax: {}",
+                msg
+            );
+        });
     }
 
     #[test]
     fn bfs_destructuring_def_rejected() {
-        // (begin-for-syntax (def (a b) 42)) must fail
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            // (begin-for-syntax (def (a b) 42)) must fail
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let src = "(begin-for-syntax (def (a b) 42))";
-        let syn = read_syntax(src, "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm);
-        assert!(result.is_err());
+            let src = "(begin-for-syntax (def (a b) 42))";
+            let syn = read_syntax(src, "<test>").unwrap();
+            let result = expander.expand(syn, &mut symbols, &mut vm);
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn bfs_stores_value_in_env() {
-        // (begin-for-syntax (def my-val 42)) should store "my-val" in compile_time_env
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            // (begin-for-syntax (def my-val 42)) should store "my-val" in compile_time_env
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let src = "(begin-for-syntax (def my-val 42))";
-        let syn = read_syntax(src, "<test>").unwrap();
-        expander.expand(syn, &mut symbols, &mut vm).unwrap();
+            let src = "(begin-for-syntax (def my-val 42))";
+            let syn = read_syntax(src, "<test>").unwrap();
+            expander.expand(syn, &mut symbols, &mut vm).unwrap();
 
-        assert!(
-            expander.compile_time_env.contains_key("my-val"),
-            "compile_time_env should contain my-val"
-        );
-        let val = expander.compile_time_env["my-val"];
-        assert_eq!(val, crate::value::Value::int(42));
+            assert!(
+                expander.compile_time_env.contains_key("my-val"),
+                "compile_time_env should contain my-val"
+            );
+            let val = expander.compile_time_env["my-val"];
+            assert_eq!(val, crate::value::Value::int(42));
+        });
     }
 
     #[test]
     fn bfs_clone_resets_env() {
-        // Cloning an Expander that has compile_time_env entries should
-        // produce an Expander with an empty compile_time_env.
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+        crate::value::arena::with_test_region(|| {
+            // Cloning an Expander that has compile_time_env entries should
+            // produce an Expander with an empty compile_time_env.
+            let mut expander = Expander::new();
+            let (mut symbols, mut vm) = setup();
+            expander.load_prelude(&mut symbols, &mut vm).unwrap();
 
-        let src = "(begin-for-syntax (def helper 99))";
-        let syn = read_syntax(src, "<test>").unwrap();
-        expander.expand(syn, &mut symbols, &mut vm).unwrap();
-        assert!(!expander.compile_time_env.is_empty());
+            let src = "(begin-for-syntax (def helper 99))";
+            let syn = read_syntax(src, "<test>").unwrap();
+            expander.expand(syn, &mut symbols, &mut vm).unwrap();
+            assert!(!expander.compile_time_env.is_empty());
 
-        let cloned = expander.clone();
-        assert!(
-            cloned.compile_time_env.is_empty(),
-            "cloned Expander should have empty compile_time_env"
-        );
+            let cloned = expander.clone();
+            assert!(
+                cloned.compile_time_env.is_empty(),
+                "cloned Expander should have empty compile_time_env"
+            );
+        });
     }
 }
