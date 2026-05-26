@@ -89,3 +89,8 @@ fn websocket() {
 fn table_key_expand() {
     run_elle_script("table-key-expand");
 }
+
+#[test]
+fn parameters() {
+    run_elle_script("parameters");
+}

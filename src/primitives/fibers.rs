@@ -183,6 +183,10 @@ pub(crate) fn resolve_signal_bits(
 /// Optional `:deny` keyword arg withholds capabilities from the fiber.
 /// The child's `withheld` is the union of the explicit deny bits and the
 /// parent's withheld (propagated at resume time by the VM).
+///
+/// Dynamic parameter bindings (`parameterize`) active in the creating
+/// fiber are snapshotted into the new fiber by the dispatcher.  See
+/// `VM::snapshot_param_frames_into`.
 pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
     let closure = match args[0].as_closure() {
         Some(c) => std::rc::Rc::new(c.clone()),
@@ -206,37 +210,50 @@ pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
     let mut deny_bits = SignalBits::EMPTY;
     let mut i = 2;
     while i < args.len() {
-        if args[i].as_keyword_name().as_deref() == Some("deny") {
-            if i + 1 >= args.len() {
+        match args[i].as_keyword_name().as_deref() {
+            Some("deny") => {
+                if i + 1 >= args.len() {
+                    return (
+                        SIG_ERROR,
+                        error_val("arity-error", "fiber/new: :deny requires a value"),
+                    );
+                }
+                deny_bits = match resolve_signal_bits(&args[i + 1], "fiber/new :deny") {
+                    Ok(bits) => bits,
+                    Err(err) => return err,
+                };
+                i += 2;
+            }
+            _ => {
                 return (
                     SIG_ERROR,
-                    error_val("arity-error", "fiber/new: :deny requires a value"),
+                    error_val(
+                        "argument-error",
+                        format!(
+                            "fiber/new: unexpected keyword argument :{}",
+                            args[i]
+                                .as_keyword_name()
+                                .unwrap_or_else(|| args[i].type_name().to_string())
+                        ),
+                    ),
                 );
             }
-            deny_bits = match resolve_signal_bits(&args[i + 1], "fiber/new :deny") {
-                Ok(bits) => bits,
-                Err(err) => return err,
-            };
-            i += 2;
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!(
-                        "fiber/new: unexpected keyword argument :{}",
-                        args[i]
-                            .as_keyword_name()
-                            .unwrap_or_else(|| args[i].type_name().to_string())
-                    ),
-                ),
-            );
         }
     }
 
     let mut fiber = Fiber::new(closure, mask);
     fiber.withheld = deny_bits;
     (SIG_OK, Value::fiber(fiber))
+}
+
+/// Is the given primitive function pointer `fiber/new`?
+///
+/// The dispatcher uses this to know when to snapshot parameter frames
+/// into a freshly-constructed fiber.  Comparing fn pointers requires the
+/// callee side coerce its fn item to a fn pointer; doing that here keeps
+/// the call sites readable.
+pub(crate) fn is_fiber_new(p: crate::value::types::PrimFn) -> bool {
+    std::ptr::fn_addr_eq(p, prim_fiber_new as crate::value::types::PrimFn)
 }
 
 /// (fiber/resume fiber) → value
@@ -628,6 +645,72 @@ mod tests {
     #[test]
     fn test_fiber_new_wrong_type() {
         let (sig, _) = prim_fiber_new(&[Value::int(42), Value::int(0)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_new_starts_with_empty_param_frames() {
+        // The primitive itself does not populate param_frames — that is the
+        // job of `VM::snapshot_param_frames_into`, invoked by the dispatcher
+        // after the primitive returns. The fiber returned here is a fresh
+        // construction with no parent context.
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert!(
+                fiber.param_frames.is_empty(),
+                "freshly constructed fiber must not carry param_frames \
+                 (the dispatcher snapshots them after we return)"
+            );
+        });
+    }
+
+    #[test]
+    fn test_fiber_new_accepts_deny_keyword() {
+        // :deny is still a valid keyword argument and sets withheld bits.
+        let closure = make_test_closure();
+        let (sig, fiber_val) = prim_fiber_new(&[
+            closure,
+            Value::int(0),
+            Value::keyword("deny"),
+            Value::int(SIG_YIELD.raw() as i64),
+        ]);
+        assert_eq!(sig, SIG_OK);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.withheld, SIG_YIELD);
+        });
+    }
+
+    #[test]
+    fn test_fiber_new_deny_requires_value() {
+        let closure = make_test_closure();
+        let (sig, _) = prim_fiber_new(&[closure, Value::int(0), Value::keyword("deny")]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_new_rejects_inherit_keyword() {
+        // `:inherit` was a transitional opt-in for parameter inheritance.
+        // Inheritance is now automatic and creation-time, so the keyword
+        // is no longer accepted — passing it must surface as an error so
+        // callers find out instead of silently doing nothing.
+        let closure_a = make_test_closure();
+        let (_, parent) = prim_fiber_new(&[closure_a, Value::int(0)]);
+        let closure_b = make_test_closure();
+        let (sig, _) =
+            prim_fiber_new(&[closure_b, Value::int(0), Value::keyword("inherit"), parent]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_new_rejects_unknown_keyword() {
+        let closure = make_test_closure();
+        let (sig, _) = prim_fiber_new(&[
+            closure,
+            Value::int(0),
+            Value::keyword("nonsense"),
+            Value::int(0),
+        ]);
         assert_eq!(sig, SIG_ERROR);
     }
 

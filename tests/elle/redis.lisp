@@ -2,9 +2,16 @@
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.
-# All tests run within a single connection to avoid parallel flushdb races.
+# All tests run within a single connection; the test cleans up only its own
+# "test:*" keys via SCAN+DEL so it never touches db0 (or any db) as a whole.
 
 (def redis ((import-file "lib/redis.lisp")))
+
+# Delete only keys created by this test (prefix "test:"), so we never run
+# FLUSHDB / FLUSHALL against a shared Redis. Safe to call when no keys match.
+(defn clear-test-keys []
+  (let [keys (redis:scan-all redis:scan :match "test:*")]
+    (when (not (empty? keys)) (apply redis:del keys))))
 
 # RESP self-tests (no Redis needed)
 (println "Running RESP self-tests...")
@@ -32,7 +39,7 @@
               (assert (= (redis:echo "hello") "hello") "echo")
               (println "  echo: ok")
 
-              (redis:flushdb)
+              (clear-test-keys)
 
               # ── String commands ─────────────────────────────────────────────
 
@@ -202,7 +209,7 @@
               # 2. Stress tests
               # ================================================================
 
-              (redis:flushdb)
+              (clear-test-keys)
 
               # 100 PINGs
               (def @i 0)
@@ -225,7 +232,7 @@
               (println "  50 set/get pairs: ok")
 
               # Mixed response types
-              (redis:flushdb)
+              (clear-test-keys)
               (redis:set "test:k1" "v1")
               (redis:get "test:k1")
               (redis:get "test:nonexistent")
@@ -249,7 +256,26 @@
                       "stress exists false")
               (println "  mixed commands: ok")
 
+              # ── ev/spawn inside redis-with ─────────────────────────────────
+              #
+              # Regression: redis:with binds *redis-port* via parameterize.
+              # A fiber spawned with ev/spawn inside the body is resumed
+              # later by the scheduler, whose own param_frames do not
+              # contain *redis-port*.  Only creation-time inheritance in
+              # fiber/new makes the child see the connection.  Without it
+              # the redis:get call fails with :no-connection.
+
+              (redis:set "test:spawn-canary" "preset")
+              (let [result-box (box nil)
+                    f (ev/spawn (fn []
+                                  (rebox result-box
+                                         (redis:get "test:spawn-canary"))))]
+                (ev/join f)
+                (assert (= (unbox result-box) "preset")
+                        "spawned fiber sees *redis-port* inherited from spawner"))
+              (println "  ev/spawn inside redis-with: ok")
+
               # ── Cleanup ─────────────────────────────────────────────────────
 
-              (redis:flushdb)
+              (clear-test-keys)
               (println "redis: all tests passed")))

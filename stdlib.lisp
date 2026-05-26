@@ -1215,6 +1215,7 @@
         select-sets @{}  # waiting-fiber → @{:candidates [...] :woken @[false]}
         completed @{}  # fiber → :ok | :error (already-completed fibers)
         joined @||  # set of fibers whose result was observed
+        scheduler-killed @||  # set of fibers the scheduler aborted during shutdown
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
         park-queues @{}
         forwarded-pending @{}]  # id → {:queue @[] :wake-box box} (process scheduler I/O)
@@ -1466,15 +1467,33 @@
                 (handle-fiber-after-resume parked)))))))
 
     (defn do-shutdown [timeout-ms]
-      "Abort all pending fibers, pump for timeout-ms, cancel stragglers."
+      "Abort all pending fibers, pump for timeout-ms, cancel stragglers.
+       Aborted fibers go into scheduler-killed (not joined) so the pump's
+       unjoined-error tail can distinguish 'user observed this' from
+       'we injected :shutdown' — defer-time errors during shutdown are
+       dropped here rather than misattributed to user code."
 
-      # Phase 1: abort all pending fibers (inject error, let defer run).
+      # Phase 1a: abort pending-I/O fibers (inject error, let defer run).
       (each [id fiber] in (pairs pending)
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
+        (add scheduler-killed fiber)
         (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
-          (when ok? (handle-fiber-after-resume fiber))))  # Phase 2: drain cancel CQEs and let aborted fibers unwind
+          (when ok? (handle-fiber-after-resume fiber))))
+
+      # Phase 1b: abort futex-parked fibers. Without this, long-lived
+      # fibers blocked on (chan:take), sync locks, etc. never get cleaned
+      # up and `step` never sees park-queues empty.
+      (let [snapshot (pairs park-queues)]
+        (each [k _] in snapshot (del park-queues k))
+        (each [_ q] in snapshot
+          (each fiber in q
+            (add scheduler-killed fiber)
+            (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
+              (when ok? (handle-fiber-after-resume fiber))))))
+
+      # Phase 2: drain cancel CQEs and let aborted fibers unwind
       (when (> timeout-ms 0)
         (let [deadline (+ (clock/monotonic) (/ timeout-ms 1000.0))]
           (while (and (> (+ (length runnable) (length pending)) 0)
@@ -1495,9 +1514,11 @@
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
+        (add scheduler-killed fiber)
         (protect (fiber/cancel fiber {:error :shutdown})))
       (while (> (length runnable) 0)
         (let [fiber (pop runnable)]
+          (add scheduler-killed fiber)
           (protect (fiber/cancel fiber {:error :shutdown})))))
 
     (defn step [timeout-ms]
@@ -1523,9 +1544,14 @@
      :pump  # pump-fn: event loop
       (fn ()
         (block :loop
-          (forever (when (= (step (- 0 1)) :done) (break :loop nil))))  # Crash on unjoined errored fibers — never swallow errors silently
+          (forever (when (= (step (- 0 1)) :done) (break :loop nil))))  # Crash on unjoined errored fibers — never swallow errors silently.
+        # scheduler-killed fibers are excluded: we injected their :shutdown
+        # at teardown time, so re-raising would surface our own signal as a
+        # user error.
         (each [fiber status] in (pairs completed)
-          (when (and (= status :error) (not (contains? joined fiber)))
+          (when (and (= status :error)
+                     (not (contains? joined fiber))
+                     (not (contains? scheduler-killed fiber)))
             (error (fiber/value fiber)))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))

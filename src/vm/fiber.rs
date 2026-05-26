@@ -446,10 +446,15 @@ impl VM {
             (rv, first)
         });
 
-        // Inherit parent's parameter bindings on first resume.
-        // Flatten all frames into a single frame so the child starts
-        // with the parent's current dynamic bindings as its baseline.
-        if is_first_resume && !self.fiber.param_frames.is_empty() {
+        // Parameter inheritance is normally a snapshot taken at fiber/new
+        // time by `VM::snapshot_param_frames_into`.  As a fallback, fibers
+        // that were created outside the user-visible `fiber/new` primitive
+        // (e.g. directly from Rust) inherit from the resumer on first
+        // resume.  Skip when the child already carries its own snapshot.
+        if is_first_resume
+            && child_handle.with(|c| c.param_frames.is_empty())
+            && !self.fiber.param_frames.is_empty()
+        {
             let mut flat: Vec<(u32, Value)> = Vec::new();
             for frame in &self.fiber.param_frames {
                 for &(id, val) in frame {
