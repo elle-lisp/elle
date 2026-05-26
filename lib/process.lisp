@@ -913,12 +913,13 @@
 
     (def @sched-run
       (fn [init]
-        (sched-spawn init)
-
         # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
-        # registers fibers with THIS scheduler. Parameter inheritance happens
-        # at fiber resume time, so this must wrap the entire scheduler loop.
+        # registers fibers with THIS scheduler. Spawn the init process inside
+        # the parameterize too — fibers capture their parameter environment at
+        # creation time, so sched-spawn (which creates the init fiber) must
+        # run with the rebound *spawn*.
         (parameterize ((*spawn* sched-spawn-fn))
+        (sched-spawn init)
         (while (has-work?)
           (assign tick (box (+ (unbox tick) 1)))
           (fire-timers)

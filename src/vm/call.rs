@@ -201,6 +201,14 @@ impl VM {
                 } else {
                     (def.func)(args.as_slice())
                 };
+            // Parameter inheritance: when fiber/new produces a fresh fiber,
+            // snapshot the creating fiber's parameterize bindings into it
+            // so the child sees them regardless of who resumes it later.
+            if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
+                if let Some(handle) = value.as_fiber() {
+                    self.snapshot_param_frames_into(handle);
+                }
+            }
             return self.handle_primitive_signal(
                 bits,
                 value,
@@ -661,6 +669,13 @@ impl VM {
                 } else {
                     (def.func)(&args)
                 };
+            // Parameter inheritance for fiber/new — see the non-tail call
+            // path above for the rationale.
+            if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
+                if let Some(handle) = value.as_fiber() {
+                    self.snapshot_param_frames_into(handle);
+                }
+            }
             return Some(self.handle_primitive_signal_tail(bits, value));
         }
 

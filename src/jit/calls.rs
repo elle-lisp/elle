@@ -157,6 +157,14 @@ pub extern "C" fn elle_jit_call(
         } else {
             (def.func)(args_slice)
         };
+        // Parameter inheritance: snapshot the creating fiber's
+        // parameterize bindings into a freshly created fiber/new fiber.
+        // See `VM::snapshot_param_frames_into` for the rationale.
+        if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
+            if let Some(handle) = value.as_fiber() {
+                vm.snapshot_param_frames_into(handle);
+            }
+        }
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
@@ -623,6 +631,12 @@ pub extern "C" fn elle_jit_tail_call(
         } else {
             (def.func)(args_slice)
         };
+        // Parameter inheritance for fiber/new — see elle_jit_call above.
+        if bits == SIG_OK && crate::primitives::fibers::is_fiber_new(def.func) {
+            if let Some(handle) = value.as_fiber() {
+                vm.snapshot_param_frames_into(handle);
+            }
+        }
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
