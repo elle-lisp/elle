@@ -8,6 +8,20 @@
 ## Connection model: bare TCP port, no wrapper struct.
 ## Error model: manager fiber owns the port, reconnects on transient errors.
 ## Protocol: RESP2 over TCP.
+##
+## Concurrency: redis:with binds a mutex alongside the connection.  Every
+## redis:cmd and redis:pipeline acquires that mutex around its write+read
+## sequence, so callers that share one connection across fibers (e.g.,
+## http2:serve spawning a handler fiber per request) cannot interleave
+## RESP framing on the wire.  Without this guard, two concurrent fibers
+## using a pipeline can each write commands then race on reads — the
+## RESP parser then tries to parse the middle of a bulk-string payload
+## as the next length prefix and surfaces "integer: cannot parse
+## \"<csv-of-floats>\" as base-10 integer" (or similar) up through the
+## handler.  See grace/research.md "Polish round-2 wedge" for the
+## diagnosis.
+
+(def sync ((import "std/sync")))
 
 ## ── RESP2 encoder ─────────────────────────────────────────────────────
 
@@ -95,6 +109,25 @@
 
 (def *redis-port* (parameter nil))
 
+## Mutex paired with *redis-port*.  Bound by redis-with so concurrent
+## fibers sharing one connection cannot interleave writes/reads on
+## the wire.  Nil means "no lock needed" — callers that own the
+## connection from a single fiber leave the parameter unbound.
+(def *redis-lock* (parameter nil))
+
+(defn with-redis-lock [thunk]
+  "Run thunk holding the ambient *redis-lock* (no-op if unbound).
+   Released even on error.  Not reentrant: callers must not nest
+   redis-cmd/pipeline inside their own with-redis-lock block."
+  (let [lk (*redis-lock*)]
+    (if (nil? lk)
+      (thunk)
+      (begin
+        ((get lk :acquire))
+        (defer
+          ((get lk :release))
+          (thunk))))))
+
 (defn redis-cmd [& args]
   "Send a command on the current Redis port and read the reply."
   (let [port (*redis-port*)]
@@ -102,9 +135,11 @@
       (error {:error :redis-error
               :reason :no-connection
               :message "no active Redis connection"}))
-    (port/write port (apply resp-encode args))
-    (port/flush port)
-    (resp-read port)))
+    (with-redis-lock
+      (fn []
+        (port/write port (apply resp-encode args))
+        (port/flush port)
+        (resp-read port)))))
 
 ## ── Connection ────────────────────────────────────────────────────────
 
@@ -166,11 +201,17 @@
 ## ── Client — simplified connection for direct use ─────────────────────
 
 (defn redis-with [host port thunk]
-  "Open a Redis connection, run thunk with *redis-port* bound, close on exit."
-  (let [conn (redis-connect host port)]
+  "Open a Redis connection, run thunk with *redis-port* and *redis-lock*
+   bound, close on exit.  The lock serialises wire access across fibers
+   sharing the connection — without it, an h2 server that dispatches
+   handler fibers under (redis:with ...) sees its concurrent redis-cmd
+   / redis-pipeline calls race and corrupt RESP framing."
+  (let [conn (redis-connect host port)
+        lk (sync:make-lock)]
     (defer
       (port/close conn)
-      (parameterize ((*redis-port* conn))
+      (parameterize ((*redis-port* conn)
+                     (*redis-lock* lk))
         (thunk)))))
 
 ## ── Commands — String ─────────────────────────────────────────────────
@@ -695,19 +736,28 @@
   "Send multiple commands in a batch, read all replies.
    Each command is a list like (list 'GET' 'key').
    Uses resp-read-raw so error replies don't corrupt state.
-   Returns array of results."
+   Returns array of results.
+
+   The whole write-flush-read-N sequence is held under *redis-lock*
+   (when bound), so concurrent fibers serialise here instead of
+   interleaving on the wire — without the lock, fiber A's bulk-string
+   payloads can land where fiber B expects its next length prefix."
   (let [port (*redis-port*)]
     (when (nil? port)
       (error {:error :redis-error
               :reason :no-connection
-              :message "no active Redis connection"}))  # Send all commands
-    (each cmd in commands
-      (port/write port (apply resp-encode cmd)))
-    (port/flush port)  # Read all replies
-    (def results @[])
-    (each cmd in commands
-      (push results (resp-read-raw port)))
-    (freeze results)))
+              :message "no active Redis connection"}))
+    (with-redis-lock
+      (fn []
+        # Send all commands
+        (each cmd in commands
+          (port/write port (apply resp-encode cmd)))
+        (port/flush port)
+        # Read all replies
+        (def results @[])
+        (each cmd in commands
+          (push results (resp-read-raw port)))
+        (freeze results)))))
 
 ## ── Internal self-tests (RESP encoding/decoding, no Redis needed) ─────
 
