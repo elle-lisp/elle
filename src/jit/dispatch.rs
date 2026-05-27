@@ -356,13 +356,21 @@ pub extern "C" fn elle_jit_check_signal_bound(
 
 /// Legacy scope-mark helpers (no-ops — replaced by `DecrefRegion`).
 #[no_mangle]
-pub extern "C" fn elle_jit_region_enter() -> JitValue { JitValue::nil() }
+pub extern "C" fn elle_jit_region_enter() -> JitValue {
+    JitValue::nil()
+}
 #[no_mangle]
-pub extern "C" fn elle_jit_region_exit() -> JitValue { JitValue::nil() }
+pub extern "C" fn elle_jit_region_exit() -> JitValue {
+    JitValue::nil()
+}
 #[no_mangle]
-pub extern "C" fn elle_jit_region_exit_call() -> JitValue { JitValue::nil() }
+pub extern "C" fn elle_jit_region_exit_call() -> JitValue {
+    JitValue::nil()
+}
 #[no_mangle]
-pub extern "C" fn elle_jit_region_rotate() -> JitValue { JitValue::nil() }
+pub extern "C" fn elle_jit_region_rotate() -> JitValue {
+    JitValue::nil()
+}
 
 /// Increment the reference count of a region (cross-region reference).
 #[no_mangle]
@@ -379,6 +387,25 @@ pub extern "C" fn elle_jit_decref_region(region_id: u32) {
     let ptr = crate::value::fiberheap::current_heap_ptr();
     if !ptr.is_null() {
         unsafe { (*ptr).decref_region(region_id as u16) };
+    }
+}
+
+/// Release a value's region if it matches the expected region id.
+///
+/// Mirrors the VM dispatch handler for `ReleaseValueRegion`: read
+/// `region_of(value)`, gate on `region_id != 0 && region_id == expected`,
+/// and decref only on match. Passthrough call results (where the returned
+/// value lives in a different region than the one this call allocated) skip
+/// the decref.
+#[no_mangle]
+pub extern "C" fn elle_jit_release_value_region(tag: u64, payload: u64, expected_region_id: u32) {
+    let value = Value { tag, payload };
+    let region_id = crate::value::arena::region_of(value);
+    if region_id != 0 && region_id == expected_region_id as u16 {
+        let ptr = crate::value::fiberheap::current_heap_ptr();
+        if !ptr.is_null() {
+            unsafe { (*ptr).decref_region(region_id) };
+        }
     }
 }
 

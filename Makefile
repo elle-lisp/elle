@@ -89,7 +89,7 @@ smoke-vm: elle
 	@echo "=== elle tests (VM, no JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off --mlir=off {}' \
 		|| { echo "FAILED: elle tests VM-only pass (no JIT)"; exit 1; }
 
@@ -97,7 +97,7 @@ smoke-checked: elle
 	@echo "=== elle tests (checked intrinsics) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_JIT) | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT_CHECKED) $(ELLE) --checked-intrinsics {}' \
 		|| { echo "FAILED: elle tests checked-intrinsics pass"; exit 1; }
 
@@ -109,7 +109,7 @@ smoke-noffi: elle-noffi
 	@echo "=== elle tests (VM, no features) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | grep -v $(ELLE_SKIP_FFI) | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off {}' \
 		|| { echo "FAILED: elle tests VM-only pass (no features)"; exit 1; }
 
@@ -117,7 +117,7 @@ smoke-jit: elle
 	@echo "=== elle tests (eager JIT) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_JIT) | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=eager {}' \
 		|| { echo "FAILED: elle tests JIT pass (eager)"; exit 1; }
 
@@ -129,7 +129,7 @@ smoke-mlir: elle-mlir
 	@echo "=== elle tests (eager MLIR) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_MLIR) | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
 		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
 
@@ -141,21 +141,21 @@ smoke-wasm: elle-wasm
 	@echo "=== elle tests (WASM) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
-		parallel -j $(WASM_JOBS) --halt now,fail=1 --tag \
+		parallel -j $(WASM_JOBS) --tag \
 			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle tests WASM pass (full)"; exit 1; }
 
 doctest:   ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' docs/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
 smoke-diff:    ## Cross-tier differential agreement tests (compile/run-on)
 	@echo "=== differential tier-agreement tests ==="
 	@printf '%s\n' tests/diff/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
+		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: differential tests"; exit 1; }
 
@@ -167,7 +167,7 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
-smoke: smoke-vm smoke-jit smoke-checked doctest smoke-diff embedding
+smoke: smoke-jit smoke-checked smoke-vm doctest smoke-diff embedding
 	@echo "=== all smoke tests passed ==="
 
 MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install

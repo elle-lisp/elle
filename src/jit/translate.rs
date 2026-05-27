@@ -1095,20 +1095,15 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::ReleaseValueRegion {
-                src: _,
-                expected_region_id: _,
+                src,
+                expected_region_id,
             } => {
-                // JIT support for ReleaseValueRegion is not yet
-                // implemented; the new opcode is currently only
-                // emitted on the VM dispatch path. The JIT will need
-                // a runtime helper `elle_jit_release_value_region`
-                // that reads the value, calls `region_of`, and
-                // decrefs. For now, leave a panic so the JIT skips
-                // functions containing this opcode rather than
-                // silently producing wrong code.
-                return Err(crate::jit::JitError::InvalidLir(
-                    "ReleaseValueRegion not yet supported in JIT".to_string(),
-                ));
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.release_value_region, builder.func);
+                let rid = builder.ins().iconst(I32, *expected_region_id as i64);
+                builder.ins().call(func_ref, &[st, sp, rid]);
             }
 
             LirInstr::PushParamFrame { pairs } => {
