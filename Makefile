@@ -1,4 +1,4 @@
-.PHONY: all elle docs docgen smoke test test-git clean help \
+.PHONY: all elle docs docgen smoke test test-git clean space help \
        smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir smoke-diff doctest \
        elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
@@ -178,6 +178,9 @@ test: smoke  ## Rust unit + integration tests + clippy + fmt + rustdoc after smo
 clean:  ## Remove build artifacts and generated docs
 	cargo clean
 	rm -f docs/pipeline.svg
+
+space:  ## Reclaim disk: drop cargo intermediates, keep built executables
+	rm -rf target/{debug,release}/{deps,build,incremental,.fingerprint,examples}
 
 # ── Help ────────────────────────────────────────────────────────────
 
