@@ -32,10 +32,15 @@
   (assert (> result 0) "arena/count is positive after init"))
 
 # test_arena_count_increases_with_allocation
+# items is bound (not `_`) and used after the second arena/count so its
+# region stays alive across the measurement — the unique-region model
+# frees unused bindings at their init, which is the correct semantics
+# but breaks the old "unused `_` still counts" assumption.
 (let* [before (arena/count)
-       _ (list 1 2 3 4 5)
+       items (list 1 2 3 4 5)
        after (arena/count)]
-  (assert (= (> after before) true) "arena count increases after allocation"))
+  (assert (= (> after before) true) "arena count increases after allocation")
+  (assert (= (length items) 5) "items list survives measurement"))
 
 # test_arena_count_overhead_is_zero
 # arena/count operates directly on thread-local state (no SIG_QUERY)
@@ -69,8 +74,9 @@
 # are visible via arena/count on the parent.
 (let* [f (fiber/new (fn ()
                       (let* [before (arena/count)
-                             _ (list 1 2 3 4 5)
+                             items (list 1 2 3 4 5)
                              after (arena/count)]
+                        (assert (= (length items) 5) "items survives")
                         (- after before))) 1)]
   (let [allocs (fiber/resume f)]
     (assert (= allocs 5) "child sees exactly 5 allocations from list")))
