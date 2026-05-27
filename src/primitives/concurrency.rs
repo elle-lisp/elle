@@ -40,8 +40,19 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         // Primitives are in the bytecode constant pool — no globals remapping needed.
         let _signals = register_primitives(&mut vm, &mut symbols);
 
-        // Reconstruct closure from bundle.
-        let closure_val = bundle.into_value();
+        // The spawned thread starts with no active alloc region — into_value's
+        // heap reconstructions and the closure's execution both need a routing
+        // target. Allocate a transient region for the thread's reconstructed
+        // closure and its captures; decref it once we've serialized the
+        // result back into the SendBundle (which clones values out of this
+        // region into its own representation), so the region's RC=1 from
+        // alloc reaches 0 and the table entry is freed before the thread
+        // exits. Without this decref the region accumulates per spawn even
+        // though the thread's heap is dropped at thread-exit — the global
+        // RegionId counter still advances forever.
+        let recv_region = crate::lir::lower::fresh_region_id();
+
+        let closure_val = crate::with_alloc_region!(recv_region => bundle.into_value());
         let closure = closure_val
             .as_closure()
             .expect("bug: SendBundle root was not a closure")
@@ -66,17 +77,23 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         }
 
         let env_rc = std::rc::Rc::new(env_values);
-        let result = vm.execute_bytecode(
+        let result = crate::with_alloc_region!(recv_region => vm.execute_bytecode(
             &closure.template.bytecode,
             &closure.template.constants,
             Some(&env_rc),
-        );
+        ));
 
         let send_result = match result {
             Ok(val) => SendBundle::from_value(val)
                 .map_err(|e| format!("Failed to serialize result: {}", e)),
             Err(e) => Err(e.to_string()),
         };
+
+        // SendBundle::from_value cloned the result out of recv_region into
+        // its own representation; the env, closure value, and captures are
+        // no longer reachable. Decref recv_region to free everything in it
+        // before the thread exits.
+        vm.heap().decref_region(recv_region);
 
         if let Ok(mut holder) = result_clone.lock() {
             *holder = Some(send_result);
