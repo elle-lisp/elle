@@ -1,5 +1,6 @@
 //! Thread-pool backend and stdin thread for async I/O.
 
+use crate::io::grapheme_count_in_valid_prefix;
 use crate::io::request::SocketOptions;
 use std::os::unix::io::{IntoRawFd, RawFd};
 
@@ -8,6 +9,19 @@ pub(super) enum PoolOp {
     Read {
         fd: RawFd,
         size: usize,
+    },
+    /// Read exactly `size` units, looping until full or EOF/error.
+    /// Units are bytes when `graphemes` is false and grapheme clusters
+    /// when true — Elle strings are grapheme-counted, so a text-port
+    /// `port/read-exact 50` must yield a string of `(length 50)`
+    /// regardless of how many kernel bytes that took.  The worker
+    /// keeps calling `read(2)` until the requested count is met,
+    /// the peer closes, or an error fires.  On EOF before `size`,
+    /// the completion path treats the partial result as nil.
+    ReadExact {
+        fd: RawFd,
+        size: usize,
+        graphemes: bool,
     },
     Write {
         fd: RawFd,
@@ -129,6 +143,66 @@ impl ThreadPoolBackend {
                     } else {
                         buf.truncate(ret as usize);
                         (ret as i32, buf)
+                    }
+                }
+                PoolOp::ReadExact {
+                    fd,
+                    size,
+                    graphemes,
+                } => {
+                    // Buffer grows as we go — graphemes mode can't preallocate
+                    // because we don't know the byte count in advance.  In
+                    // bytes mode we still grow into a `size`-capacity Vec so
+                    // the loop's tail-read writes into one buffer.
+                    let mut buf: Vec<u8> = if graphemes {
+                        Vec::with_capacity(size)
+                    } else {
+                        vec![0u8; size]
+                    };
+                    let mut total = 0usize;
+                    // chunk_size is how many bytes we ask the kernel for on
+                    // each iteration.  Bytes mode knows exactly (size - total);
+                    // graphemes mode estimates one byte per missing grapheme
+                    // (ASCII best case) and loops on undershoot.
+                    loop {
+                        let want = if graphemes {
+                            // Re-evaluate progress every iteration.
+                            let g = grapheme_count_in_valid_prefix(&buf[..total]);
+                            if g >= size {
+                                break (total as i32, buf[..total].to_vec());
+                            }
+                            (size - g).max(1)
+                        } else {
+                            if total >= size {
+                                break (total as i32, buf);
+                            }
+                            size - total
+                        };
+                        // Make room for the next read if we're in graphemes
+                        // mode (bytes mode preallocated).
+                        if graphemes && buf.len() < total + want {
+                            buf.resize(total + want, 0);
+                        }
+                        let ret = unsafe {
+                            libc::read(fd, buf[total..].as_mut_ptr() as *mut libc::c_void, want)
+                        };
+                        if ret < 0 {
+                            if total == 0 {
+                                break (
+                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                                    Vec::new(),
+                                );
+                            }
+                            // Partial read then error: surface what we got
+                            // so the completion path treats it as short-then-EOF.
+                            break (total as i32, buf[..total].to_vec());
+                        }
+                        if ret == 0 {
+                            // EOF before full count.  Return short; the
+                            // completion handler maps short-on-ReadExact to nil.
+                            break (total as i32, buf[..total].to_vec());
+                        }
+                        total += ret as usize;
                     }
                 }
                 PoolOp::ReadLine { fd } | PoolOp::ReadAll { fd } => {

@@ -360,13 +360,55 @@ impl AsyncBackend {
                     // will prepend the buffered bytes.
                     read_buffered = state.buffer.len();
                 }
+                IoOp::ReadExact { count } => {
+                    // ReadExact's unit is whatever the port is measured in:
+                    // bytes for Binary, graphemes for Text.  If the buffered
+                    // prefix already contains `count` units, serve from buffer.
+                    let early = match port.encoding() {
+                        Encoding::Binary => {
+                            if state.buffer.len() >= *count {
+                                Some(*count)
+                            } else {
+                                None
+                            }
+                        }
+                        Encoding::Text => crate::io::nth_grapheme_byte_end(&state.buffer, *count),
+                    };
+                    if let Some(take_bytes) = early {
+                        let chunk: Vec<u8> = state.buffer.drain(..take_bytes).collect();
+                        let value = match port.encoding() {
+                            Encoding::Text => {
+                                Value::string(String::from_utf8_lossy(&chunk).as_ref())
+                            }
+                            Encoding::Binary => Value::bytes(chunk),
+                        };
+                        inner.buffer_pool.release(buf_handle);
+                        inner.completions.push_back(Completion {
+                            id,
+                            result: Ok(value),
+                        });
+                        return Ok(id);
+                    }
+                    // Not enough yet — leave buffered bytes in place.  For
+                    // Binary the kernel-read size is reduced by what's
+                    // buffered; for Text we always ask the kernel for
+                    // `count` more bytes (best-case ASCII estimate) and
+                    // resubmit on short reads — see the completion-side
+                    // resubmit gate.
+                    if matches!(port.encoding(), Encoding::Binary) {
+                        read_buffered = state.buffer.len();
+                    }
+                }
                 _ => {}
             }
         }
 
         // Dispatch by operation type
         match &request.op {
-            IoOp::Accept { ref options } => {
+            IoOp::Accept {
+                ref options,
+                encoding,
+            } => {
                 let listener_kind = Some(port.kind());
 
                 let AsyncBackendInner {
@@ -392,6 +434,7 @@ impl AsyncBackend {
                     PendingOp::Port {
                         op: IoOp::Accept {
                             options: options.clone(),
+                            encoding: *encoding,
                         },
                         port_key,
                         port: request.port,
@@ -571,6 +614,28 @@ impl AsyncBackend {
                                 fd,
                                 size: *count - read_buffered,
                             },
+                            IoOp::ReadExact { count } => {
+                                let is_text = matches!(port.encoding(), Encoding::Text);
+                                if is_text {
+                                    // Grapheme-counted: the worker grows its
+                                    // own buffer and loops until `count`
+                                    // graphemes are present.  `read_buffered`
+                                    // bytes already sitting in fd_state are
+                                    // handled by the completion path on the
+                                    // combined buffer.
+                                    PoolOp::ReadExact {
+                                        fd,
+                                        size: *count,
+                                        graphemes: true,
+                                    }
+                                } else {
+                                    PoolOp::ReadExact {
+                                        fd,
+                                        size: *count - read_buffered,
+                                        graphemes: false,
+                                    }
+                                }
+                            }
                             IoOp::Write { data } => {
                                 let bytes = Self::extract_write_bytes(data);
                                 PoolOp::Write { fd, data: bytes }
@@ -588,6 +653,7 @@ impl AsyncBackend {
                         op: match &request.op {
                             IoOp::ReadLine => IoOp::ReadLine,
                             IoOp::Read { count } => IoOp::Read { count: *count },
+                            IoOp::ReadExact { count } => IoOp::ReadExact { count: *count },
                             IoOp::ReadAll => IoOp::ReadAll,
                             IoOp::Write { data } => IoOp::Write { data: *data },
                             IoOp::Flush => IoOp::Flush,
@@ -642,11 +708,14 @@ impl AsyncBackend {
                                 addr: host,
                                 port,
                                 ref options,
+                                ..
                             } => PoolOp::ConnectTcp {
                                 addr: crate::io::sockaddr::format_host_port(host, *port),
                                 options: options.clone(),
                             },
-                            ConnectAddr::Unix { path, ref options } => PoolOp::ConnectUnix {
+                            ConnectAddr::Unix {
+                                path, ref options, ..
+                            } => PoolOp::ConnectUnix {
                                 path: path.clone(),
                                 options: options.clone(),
                             },
@@ -663,11 +732,14 @@ impl AsyncBackend {
                         addr: host,
                         port,
                         ref options,
+                        ..
                     } => PoolOp::ConnectTcp {
                         addr: crate::io::sockaddr::format_host_port(host, *port),
                         options: options.clone(),
                     },
-                    ConnectAddr::Unix { path, ref options } => PoolOp::ConnectUnix {
+                    ConnectAddr::Unix {
+                        path, ref options, ..
+                    } => PoolOp::ConnectUnix {
                         path: path.clone(),
                         options: options.clone(),
                     },
@@ -685,14 +757,21 @@ impl AsyncBackend {
                         addr: host,
                         port,
                         ref options,
+                        encoding,
                     } => ConnectAddr::Tcp {
                         addr: host.clone(),
                         port: *port,
                         options: options.clone(),
+                        encoding: *encoding,
                     },
-                    ConnectAddr::Unix { path, ref options } => ConnectAddr::Unix {
+                    ConnectAddr::Unix {
+                        path,
+                        ref options,
+                        encoding,
+                    } => ConnectAddr::Unix {
                         path: path.clone(),
                         options: options.clone(),
+                        encoding: *encoding,
                     },
                 },
                 buffer_handle: buf_handle,
@@ -1483,7 +1562,8 @@ impl AsyncBackendInner {
             IoOp::ReadLine => StdinOpKind::ReadLine,
             IoOp::Read { count } => StdinOpKind::Read { count: *count },
             IoOp::ReadAll => StdinOpKind::ReadAll,
-            IoOp::Write { .. }
+            IoOp::ReadExact { .. }
+            | IoOp::Write { .. }
             | IoOp::Flush
             | IoOp::Accept { .. }
             | IoOp::Connect { .. }
@@ -1880,6 +1960,7 @@ mod tests {
             .submit(&IoRequest {
                 op: IoOp::Accept {
                     options: Default::default(),
+                    encoding: crate::port::Encoding::Binary,
                 },
                 port: listener_port,
                 timeout: None,
@@ -1973,6 +2054,7 @@ mod tests {
         let accept_req = IoRequest {
             op: IoOp::Accept {
                 options: Default::default(),
+                encoding: crate::port::Encoding::Binary,
             },
             port: listener_port,
             timeout: None,
@@ -2035,6 +2117,7 @@ mod tests {
                     addr: "127.0.0.1".to_string(),
                     port: bound_addr.port(),
                     options: Default::default(),
+                    encoding: crate::port::Encoding::Binary,
                 },
             },
             port: Value::NIL,
@@ -2115,6 +2198,7 @@ mod tests {
             .submit(&IoRequest {
                 op: IoOp::Accept {
                     options: Default::default(),
+                    encoding: crate::port::Encoding::Binary,
                 },
                 port: listener_port,
                 timeout: None,
@@ -2128,6 +2212,7 @@ mod tests {
                         addr: "127.0.0.1".to_string(),
                         port: bound_port,
                         options: Default::default(),
+                        encoding: crate::port::Encoding::Binary,
                     },
                 },
                 port: Value::NIL,

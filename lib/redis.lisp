@@ -16,10 +16,7 @@
 ## RESP framing on the wire.  Without this guard, two concurrent fibers
 ## using a pipeline can each write commands then race on reads — the
 ## RESP parser then tries to parse the middle of a bulk-string payload
-## as the next length prefix and surfaces "integer: cannot parse
-## \"<csv-of-floats>\" as base-10 integer" (or similar) up through the
-## handler.  See grace/research.md "Polish round-2 wedge" for the
-## diagnosis.
+## as the next length prefix.
 
 (def sync ((import "std/sync")))
 
@@ -65,7 +62,7 @@
           (let [len (parse-int body)]
             (if (= len -1)
               nil
-              (let [data (port/read port (+ len 2))]
+              (let [data (port/read-exact port (+ len 2))]
                 (when (nil? data)
                   (error {:error :redis-error
                           :reason :unexpected-eof
@@ -128,6 +125,22 @@
           ((get lk :release))
           (thunk))))))
 
+(defn require-binary-port [port where]
+  "RESP is a byte-framed protocol: bulk-string lengths are byte counts,
+   `\\r\\n` terminators are exact bytes.  A text-mode port would
+   grapheme-count port/read-exact and lossy-decode bulk payloads,
+   silently corrupting framing.  Fail loudly instead."
+  (when (not (= :binary (port/encoding port)))
+    (error {:error :redis-error
+            :reason :wrong-port-encoding
+            :where where
+            :encoding (port/encoding port)
+            :message (string where ": redis requires a binary port (got "
+                             (port/encoding port)
+                             "); open the connection with :encoding :binary "
+                             "(or use tcp/connect's default, or port/open-bytes "
+                             "for file-port test stand-ins)")})))
+
 (defn redis-cmd [& args]
   "Send a command on the current Redis port and read the reply."
   (let [port (*redis-port*)]
@@ -135,6 +148,7 @@
       (error {:error :redis-error
               :reason :no-connection
               :message "no active Redis connection"}))
+    (require-binary-port port "redis-cmd")
     (with-redis-lock
       (fn []
         (port/write port (apply resp-encode args))
@@ -747,6 +761,7 @@
       (error {:error :redis-error
               :reason :no-connection
               :message "no active Redis connection"}))
+    (require-binary-port port "redis-pipeline")
     (with-redis-lock
       (fn []
         # Send all commands
@@ -781,35 +796,35 @@
 
   # resp-read: simple string
   (spit "/tmp/elle-redis-test-simple" "+OK\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-simple" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-simple" :read)]
     (defer
       (port/close p)
       (assert (= (resp-read p) "OK") "resp-read simple string")))
 
   # resp-read: integer
   (spit "/tmp/elle-redis-test-int" ":42\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-int" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-int" :read)]
     (defer
       (port/close p)
       (assert (= (resp-read p) 42) "resp-read integer")))
 
   # resp-read: bulk string
   (spit "/tmp/elle-redis-test-bulk" "$5\r\nhello\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-bulk" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-bulk" :read)]
     (defer
       (port/close p)
       (assert (= (resp-read p) "hello") "resp-read bulk string")))
 
   # resp-read: nil bulk string
   (spit "/tmp/elle-redis-test-nil" "$-1\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-nil" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-nil" :read)]
     (defer
       (port/close p)
       (assert (nil? (resp-read p)) "resp-read nil bulk string")))
 
   # resp-read: array
   (spit "/tmp/elle-redis-test-arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-arr" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-arr" :read)]
     (defer
       (port/close p)
       (let [result (resp-read p)]
@@ -819,7 +834,7 @@
 
   # resp-read: error
   (spit "/tmp/elle-redis-test-err" "-ERR unknown command\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-err" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-err" :read)]
     (defer
       (port/close p)
       (let [[ok? val] (protect (resp-read p))]
@@ -830,7 +845,7 @@
 
   # resp-read-raw: error returns struct instead of signaling
   (spit "/tmp/elle-redis-test-raw-err" "-ERR bad\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-raw-err" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-raw-err" :read)]
     (defer
       (port/close p)
       (let [result (resp-read-raw p)]
@@ -848,7 +863,7 @@
   # resp-read: nested array
   (spit "/tmp/elle-redis-test-nested"
         "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-nested" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-nested" :read)]
     (defer
       (port/close p)
       (let [result (resp-read p)]
@@ -858,7 +873,7 @@
 
   # resp-read: empty array
   (spit "/tmp/elle-redis-test-empty-arr" "*0\r\n")
-  (let [p (port/open "/tmp/elle-redis-test-empty-arr" :read)]
+  (let [p (port/open-bytes "/tmp/elle-redis-test-empty-arr" :read)]
     (defer
       (port/close p)
       (let [result (resp-read p)]
@@ -1001,6 +1016,10 @@
    :resp-encode resp-encode
    :resp-read resp-read
    :resp-read-raw resp-read-raw
+
+   # Port-encoding guard (callable by users who want to assert their
+   # port up front, e.g. when wrapping their own redis connection).
+   :require-binary-port require-binary-port
 
    # Internal tests
    :test run-internal-tests})

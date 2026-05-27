@@ -107,6 +107,7 @@ impl crate::io::IoBackend for MockBackend {
         let op_name = match &request.op {
             IoOp::ReadLine => "read-line",
             IoOp::Read { .. } => "read",
+            IoOp::ReadExact { .. } => "read-exact",
             IoOp::ReadAll => "read-all",
             IoOp::Write { .. } => "write",
             IoOp::Flush => "flush",
@@ -139,7 +140,7 @@ impl crate::io::IoBackend for MockBackend {
             ))
         } else {
             match &request.op {
-                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll => {
+                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll => {
                     if inner.read_cursor < inner.read_data.len() {
                         let data = inner.read_data[inner.read_cursor].clone();
                         inner.read_cursor += 1;

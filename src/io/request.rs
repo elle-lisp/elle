@@ -165,6 +165,13 @@ pub enum IoOp {
     ReadLine,
     /// Read up to `count` bytes. Returns bytes/string or nil (EOF).
     Read { count: usize },
+    /// Read exactly `count` bytes, looping over short reads.  Returns
+    /// bytes/string of length `count`, or nil if the stream ended
+    /// before `count` bytes arrived.  Unlike `Read`, this resubmits
+    /// short reads on stream sockets too — `Read` follows POSIX "up
+    /// to N" semantics on streams; this is the "no, really, exactly
+    /// N" variant for length-prefixed framing.
+    ReadExact { count: usize },
     /// Read everything remaining. Returns string or bytes.
     ReadAll,
     /// Write data to port. Returns bytes written (int).
@@ -179,7 +186,13 @@ pub enum IoOp {
     Tell,
     /// Accept a connection on a listener. Returns new stream port.
     /// Socket options are applied to the accepted fd after accept(2).
-    Accept { options: SocketOptions },
+    /// `encoding` controls the resulting port's text/binary mode —
+    /// callers default to Binary (POSIX sockets are byte streams);
+    /// pass Text for line-oriented protocols (SMTP, IRC, etc.).
+    Accept {
+        options: SocketOptions,
+        encoding: crate::port::Encoding,
+    },
     /// Connect to a remote address. Returns connected stream port.
     Connect { addr: ConnectAddr },
     /// Send data to a remote address via UDP. Returns bytes sent.
@@ -296,10 +309,12 @@ pub enum ConnectAddr {
         addr: String,
         port: u16,
         options: SocketOptions,
+        encoding: crate::port::Encoding,
     },
     Unix {
         path: String,
         options: SocketOptions,
+        encoding: crate::port::Encoding,
     },
 }
 
@@ -308,6 +323,13 @@ impl ConnectAddr {
         match self {
             ConnectAddr::Tcp { options, .. } => options,
             ConnectAddr::Unix { options, .. } => options,
+        }
+    }
+
+    pub fn encoding(&self) -> crate::port::Encoding {
+        match self {
+            ConnectAddr::Tcp { encoding, .. } => *encoding,
+            ConnectAddr::Unix { encoding, .. } => *encoding,
         }
     }
 }

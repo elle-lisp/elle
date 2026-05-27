@@ -104,6 +104,7 @@ pub(crate) fn prim_unix_accept(args: &[Value]) -> (SignalBits, Value) {
         IoRequest::with_timeout(
             IoOp::Accept {
                 options: kwargs.options,
+                encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
             },
             port_val,
             kwargs.timeout,
@@ -111,7 +112,12 @@ pub(crate) fn prim_unix_accept(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (unix/connect path [:sndbuf n] [:rcvbuf n] [:keepalive bool] [:timeout ms]) → stream-port
+/// (unix/connect path [:sndbuf n] [:rcvbuf n] [:keepalive bool]
+///                    [:encoding :text|:binary] [:timeout ms]) → stream-port
+///
+/// `:encoding` controls the resulting stream port's mode.  Default is
+/// `:binary` (Unix-domain stream sockets are byte streams).  Pass
+/// `:text` for line-oriented text protocols carried over Unix sockets.
 pub(crate) fn prim_unix_connect(args: &[Value]) -> (SignalBits, Value) {
     let path = match extract_string(&args[0], "path", "unix/connect") {
         Ok(s) => s,
@@ -128,6 +134,7 @@ pub(crate) fn prim_unix_connect(args: &[Value]) -> (SignalBits, Value) {
                 addr: ConnectAddr::Unix {
                     path,
                     options: kwargs.options,
+                    encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
                 },
             },
             Value::NIL,

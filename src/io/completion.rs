@@ -176,12 +176,15 @@ pub(super) fn process_raw_completion(
                 } => crate::io::sockaddr::format_host_port(host, *port),
                 ConnectAddr::Unix { path, .. } => path.clone(),
             };
+            let encoding = addr.encoding();
             let new_port = match addr {
                 ConnectAddr::Tcp { .. } => {
                     set_tcp_nodelay(&fd);
-                    Port::new_tcp_stream(fd, peer_addr)
+                    Port::new_tcp_stream(fd, peer_addr).with_encoding(encoding)
                 }
-                ConnectAddr::Unix { .. } => Port::new_unix_stream(fd, peer_addr),
+                ConnectAddr::Unix { .. } => {
+                    Port::new_unix_stream(fd, peer_addr).with_encoding(encoding)
+                }
             };
             Completion {
                 id,
@@ -316,7 +319,11 @@ pub(super) fn process_raw_completion(
                 };
             }
 
-            if result_code == 0 && matches!(op, IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll)
+            if result_code == 0
+                && matches!(
+                    op,
+                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
+                )
             {
                 // EOF for read operations
                 let state = fd_states
@@ -352,6 +359,19 @@ pub(super) fn process_raw_completion(
                             }),
                         };
                     }
+                }
+
+                // For ReadExact: EOF before the full count is a failed
+                // read — discard whatever partial sat in the buffer and
+                // return nil so the caller can distinguish "got n bytes"
+                // from "stream ended early".  Callers who want the
+                // partial should use Read.
+                if matches!(op, IoOp::ReadExact { .. }) {
+                    state.buffer.clear();
+                    return Completion {
+                        id,
+                        result: Ok(Value::NIL),
+                    };
                 }
 
                 // For ReadAll: return accumulated buffer on EOF
@@ -400,11 +420,12 @@ pub(super) fn process_raw_completion(
                         Value::string(trimmed)
                     }
                 }
-                IoOp::Read { .. } | IoOp::ReadAll => {
+                IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll => {
                     // Prepend any bytes left in the fd_state buffer from a
                     // previous over-read (e.g. ReadLine read past the line
-                    // boundary). The submit path reduced the kernel read count
-                    // by this amount so the total equals the requested count.
+                    // boundary, or a previous short-read for this op).  The
+                    // submit/resubmit path reduced the kernel read count by
+                    // what was buffered.
                     let state = fd_states
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
@@ -415,7 +436,33 @@ pub(super) fn process_raw_completion(
                     } else {
                         data
                     };
-                    if let Some(p) = port.as_external::<Port>() {
+                    // ReadExact on a text port is grapheme-counted: split
+                    // at the Nth grapheme boundary and stash the trailing
+                    // bytes for the next read.  Other paths (binary Read /
+                    // ReadExact / ReadAll, text Read, text ReadAll) return
+                    // the full combined buffer per their existing contract.
+                    let text_exact_count = match op {
+                        IoOp::ReadExact { count } => port
+                            .as_external::<Port>()
+                            .filter(|p| matches!(p.encoding(), Encoding::Text))
+                            .map(|_| *count),
+                        _ => None,
+                    };
+                    if let Some(n) = text_exact_count {
+                        if let Some(end) = crate::io::nth_grapheme_byte_end(&combined, n) {
+                            let leftover = combined[end..].to_vec();
+                            if !leftover.is_empty() {
+                                state.buffer.extend_from_slice(&leftover);
+                            }
+                            Value::string(String::from_utf8_lossy(&combined[..end]).as_ref())
+                        } else {
+                            // The resubmit gate should have caught this and
+                            // looped; reaching here means the gate's grapheme
+                            // probe and ours disagree (impossible given the
+                            // same input).  Treat defensively as nil.
+                            Value::NIL
+                        }
+                    } else if let Some(p) = port.as_external::<Port>() {
                         match p.encoding() {
                             Encoding::Text => {
                                 let s = String::from_utf8_lossy(&combined);
@@ -429,7 +476,10 @@ pub(super) fn process_raw_completion(
                 }
                 IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
                 IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-                IoOp::Accept { ref options } => {
+                IoOp::Accept {
+                    ref options,
+                    encoding,
+                } => {
                     // Accept: result_code is the new fd (from both io_uring and thread pool).
                     // Peer address is obtained via getpeername() — works uniformly.
                     let fd = result_code;
@@ -440,9 +490,11 @@ pub(super) fn process_raw_completion(
                     let new_port = match listener_kind {
                         Some(PortKind::TcpListener) => {
                             set_tcp_nodelay(&fd);
-                            Port::new_tcp_stream(fd, peer_addr)
+                            Port::new_tcp_stream(fd, peer_addr).with_encoding(*encoding)
                         }
-                        Some(PortKind::UnixListener) => Port::new_unix_stream(fd, peer_addr),
+                        Some(PortKind::UnixListener) => {
+                            Port::new_unix_stream(fd, peer_addr).with_encoding(*encoding)
+                        }
                         _ => {
                             return Completion {
                                 id,
