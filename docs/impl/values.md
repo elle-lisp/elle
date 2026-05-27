@@ -81,8 +81,9 @@ This two-level structure means:
   `Box<[MaybeUninit<u8>]>` at fixed addresses
 - **Batch deallocation** — fiber death runs all destructors then clears the
   arena (keeps one page for reuse)
-- **Scope reclamation** — `RegionExit` runs destructors and rewinds the arena
-  to the scope-entry position (gated by escape analysis)
+- **Region reclamation** — `DecrefRegion` decrements a region's RC; when
+  RC hits 0, the region's pages are freed and contained destructors run
+  (see `docs/regions.md`)
 
 ### Immutable types use InlineSlice
 
@@ -147,4 +148,4 @@ src/value/allocator.rs     ElleAllocator trait, AllocatorBox
 
 - [impl/vm.md](vm.md) — VM that operates on Values
 - [types.md](../types.md) — user-facing type system
-- [memory.md](../memory.md) — memory model, reclamation, and leak-free idioms
+- [regions.md](../regions.md) — region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging

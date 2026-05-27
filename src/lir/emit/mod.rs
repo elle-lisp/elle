@@ -930,14 +930,20 @@ impl Emitter {
                 self.pop(); // func
             }
 
-            LirInstr::FreeRegion { region_id } => {
-                self.bytecode.emit(Instruction::FreeRegion);
-                self.bytecode.emit_u16(*region_id);
-            }
-
             LirInstr::IncrefRegion { region_id } => {
                 self.bytecode.emit(Instruction::IncrefRegion);
                 self.bytecode.emit_u16(*region_id);
+            }
+
+            LirInstr::ReleaseValueRegion {
+                src,
+                expected_region_id,
+            } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::ReleaseValueRegion);
+                self.bytecode.emit_u16(*expected_region_id);
+                // Value popped by the release handler.
+                self.pop();
             }
 
             LirInstr::DecrefRegion { region_id } => {

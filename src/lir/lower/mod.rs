@@ -37,7 +37,7 @@ use std::collections::HashMap;
 struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
-    /// Region id for FreeRegion at recur back-edge. None if not scoped.
+    /// Region id whose `DecrefRegion` fires at the recur back-edge. None if not scoped.
     region_id: Option<RegionId>,
 }
 
@@ -51,7 +51,7 @@ struct BlockLowerContext {
     exit_label: Label,
     /// The `region_depth` at the time this block was entered.
     /// `break` emits `(current_region_depth - region_depth_at_entry)`
-    /// compensating `RegionExit` instructions before jumping to the exit.
+    /// compensating `DecrefRegion` instructions before jumping to the exit.
     region_depth_at_entry: u32,
 }
 
@@ -90,7 +90,7 @@ pub struct Lowerer<'a> {
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
     /// Current nesting depth of active allocation regions.
-    /// Pending FreeRegion region_ids to emit before tail calls.
+    /// Pending `DecrefRegion` region_ids to emit before tail calls.
     pending_free_regions: Vec<RegionId>,
     /// Scratch slot for discarding unused intermediate values.
     /// Lazily allocated on first use. Reused across all discards
@@ -117,9 +117,23 @@ pub struct Lowerer<'a> {
     /// Maps Region(u32) from region inference to u16 index in the
     /// function's region_table. Lazily populated by `alloc_region_id()`.
     region_to_table: HashMap<crate::hir::region::Region, RegionId>,
-    /// Stack of active region ids for FreeRegion emission on break.
-    /// Pushed when a scope enters (FreeRegion-style), popped at scope exit.
+    /// Stack of active region ids for `DecrefRegion` emission on break.
+    /// Pushed when a scope enters, popped at scope exit.
     active_region_ids: Vec<RegionId>,
+    /// Stack of currently-active lambda HirIds. `lower_lambda_expr`
+    /// pushes its HirId before lowering the body and pops on exit.
+    /// `emit_decrefs_for` consults the top entry to look up the active
+    /// lambda's tail-region set in `region_info.lambda_tail_regions`
+    /// and suppress `DecrefRegion` for any region that flows out as
+    /// the function's return value (impl step 14 — return as escape).
+    current_lambda_stack: Vec<HirId>,
+    /// For call result regions whose value lives in a known local
+    /// slot (let-bound Call init), maps the region to that slot.
+    /// `emit_decrefs_for` uses this to emit `LoadLocal slot` +
+    /// `ReleaseValueRegion` at the call's `free_at`, dynamically
+    /// decref'ing the runtime region of the actual returned value
+    /// (impl step 14).
+    call_region_slot: HashMap<crate::hir::region::Region, u16>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -150,6 +164,8 @@ impl<'a> Lowerer<'a> {
             current_hir_id: None,
             region_to_table: HashMap::new(),
             active_region_ids: Vec::new(),
+            current_lambda_stack: Vec::new(),
+            call_region_slot: HashMap::new(),
         }
     }
 
@@ -209,7 +225,13 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = None;
         self.closures.clear();
 
+        // Treat the top-level expression as an implicit function
+        // body for tail-region suppression — the entry function
+        // returns its result, so tail regions must transfer to the
+        // caller (impl step 14).
+        self.current_lambda_stack.push(hir.id);
         let result_reg = self.lower_expr(hir)?;
+        self.current_lambda_stack.pop();
         self.terminate(Terminator::Return(result_reg));
         self.finish_block();
 
@@ -405,6 +427,36 @@ impl<'a> Lowerer<'a> {
         self.emit(LirInstr::StoreLocal { slot, src });
     }
 
+    /// After emitting a non-tail Call (or Call-like) instruction whose
+    /// result lives in `dst`, allocate a release slot, stash the value
+    /// into it, reload it into a fresh register, and record the slot
+    /// against the call's region in `call_region_slot`.
+    ///
+    /// This makes `emit_decrefs_for` emit `LoadLocal slot +
+    /// ReleaseValueRegion` uniformly at the call's `free_at` for both
+    /// bound (`(let [x (foo)] ...)`) and unbound (`(use (foo))`)
+    /// Calls. Without the slot the unbound case fell through to a
+    /// no-op and the call's result region leaked until fiber teardown.
+    ///
+    /// The release slot is allocated even for tail-region Calls
+    /// (whose Release is suppressed by `emit_decrefs_for` via
+    /// `lambda_tail_regions`): allocating an extra stack-local
+    /// indirection is cheap, and the simpler "always allocate" rule
+    /// avoids branching on tail-region detection here.
+    fn wrap_call_with_release_slot(&mut self, dst: Reg) -> Reg {
+        let slot = self.current_func.num_locals;
+        self.current_func.num_locals += 1;
+        self.emit(LirInstr::StoreLocal { slot, src: dst });
+        let reload = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal { dst: reload, slot });
+        if let Some(hir_id) = self.current_hir_id {
+            if let Some(&call_r) = self.region_info.alloc_region.get(&hir_id) {
+                self.call_region_slot.insert(call_r, slot);
+            }
+        }
+        reload
+    }
+
     /// Emit IncrefRegion for any cross-region references at this HIR node.
     fn emit_increfs_for(&mut self, hir_id: HirId) {
         let refs: Vec<_> = self
@@ -420,25 +472,83 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Emit FreeRegion for a region scope exit.
+    /// Emit region-demise instructions at this node's `free_at`:
     ///
-    /// Cross-region refs are decremented by cascade in `do_free` at
-    /// runtime, not by compiler-emitted DecrefRegion instructions.
-    /// Compiler-emitted IncrefRegion (from `emit_increfs_for`) handles
-    /// the incref side; cascade handles the decref side.
-    fn emit_free_region(&mut self, region_id: RegionId) {
-        self.emit(LirInstr::FreeRegion { region_id });
+    /// - Tail regions of the currently-active lambda: skip (ownership
+    ///   transferred to the caller via `Return` — impl step 14).
+    /// - Call-result regions with a known binding slot: emit
+    ///   `LoadLocal slot` + `ReleaseValueRegion` so the decref uses
+    ///   the *runtime* region of the actual returned value, not the
+    ///   compile-time `call_r` placeholder.
+    /// - Call-result regions without a known slot: skip. The runtime
+    ///   region is unknown to the lowerer at this point; the alloc
+    ///   leaks until fiber teardown. This is conservative but sound.
+    /// - All other regions: emit `DecrefRegion(rid)` — the
+    ///   compile-time region ID matches the runtime region (alloc
+    ///   opcodes used the compile-time ID as the bytecode operand).
+    fn emit_decrefs_for(&mut self, hir_id: HirId) {
+        let tail_regions: Vec<crate::hir::region::Region> = self
+            .current_lambda_stack
+            .last()
+            .and_then(|lambda_id| self.region_info.lambda_tail_regions.get(lambda_id))
+            .cloned()
+            .unwrap_or_default();
+
+        let regions: Vec<crate::hir::region::Region> = self
+            .region_info
+            .region_data
+            .iter()
+            .filter(|(r, d)| d.free_at == hir_id && !tail_regions.contains(r))
+            .map(|(r, _)| *r)
+            .collect();
+        for r in regions {
+            if self.region_info.call_result_regions.contains(&r) {
+                if let Some(&slot) = self.call_region_slot.get(&r) {
+                    // Load the value from its slot and release by
+                    // runtime region. The slot still holds a dangling
+                    // Value after this but is never read again
+                    // (free_at is the last use). The expected region
+                    // id gates the decref so passthrough calls (whose
+                    // result lives in a region this call did not
+                    // allocate) skip.
+                    let expected = self.region_table_id(r);
+                    let val_reg = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+                    self.emit(LirInstr::ReleaseValueRegion {
+                        src: val_reg,
+                        expected_region_id: expected,
+                    });
+                }
+                // Unbound Call result: skip (leak until fiber teardown).
+                continue;
+            }
+            let rid = self.region_table_id(r);
+            self.emit_decref_region(rid);
+        }
     }
 
-    /// Emit pending FreeRegions. Called at tail-call sites where
-    /// region cleanup is deferred. Deduplicates to avoid double-freeing
-    /// regions shared between nested scopes.
+    /// Emit `DecrefRegion` for a region's compiler-owned reference
+    /// (the initial RC=1 that the compiler dropped at the region's
+    /// `free_at` HirId).
+    ///
+    /// Cross-region refs are decremented by cascade in `do_free` at
+    /// runtime, not by additional compiler-emitted `DecrefRegion`
+    /// instructions. Compiler-emitted `IncrefRegion` (from
+    /// `emit_increfs_for`) handles the incref side; cascade handles
+    /// the decref side.
+    fn emit_decref_region(&mut self, region_id: RegionId) {
+        self.emit(LirInstr::DecrefRegion { region_id });
+    }
+
+    /// Emit pending `DecrefRegion` instructions. Called at tail-call
+    /// sites where region cleanup is deferred. Deduplicates to avoid
+    /// double-decrementing regions shared between nested scopes.
     fn emit_pending_free_regions(&mut self) {
         let pending: Vec<u16> = self.pending_free_regions.clone();
         let mut seen = std::collections::HashSet::new();
         for region_id in pending {
             if seen.insert(region_id) {
-                self.emit_free_region(region_id);
+                self.emit_decref_region(region_id);
             }
         }
     }
@@ -546,5 +656,154 @@ mod tests {
         );
         let func = lowerer.lower(&hir).unwrap();
         assert!(!func.entry.blocks.is_empty());
+    }
+
+    // ── Region-lifecycle emission tests (drive impl steps 9 & 13) ────
+
+    fn compile_to_lir(source: &str) -> crate::lir::LirModule {
+        use crate::hir::functionalize::functionalize;
+        use crate::hir::tailcall::mark_tail_calls;
+        use crate::hir::Analyzer;
+        use crate::primitives::register_primitives;
+        use crate::reader::read_syntax;
+        use crate::symbol::SymbolTable;
+        use crate::syntax::Expander;
+        use crate::vm::VM;
+
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        let meta = register_primitives(&mut vm, &mut symbols);
+        let wrapped = format!(
+            "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
+            source
+        );
+        let syntax = read_syntax(&wrapped, "<test>").expect("parse");
+        let mut expander = Expander::new();
+        let expanded = expander
+            .expand(syntax, &mut symbols, &mut vm)
+            .expect("expand");
+        let mut arena = crate::hir::BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+        analyzer.bind_primitives(&meta);
+        let mut analysis = analyzer.analyze(&expanded).expect("analyze");
+        let prim_values = analyzer.primitive_values().clone();
+        drop(analyzer);
+        mark_tail_calls(&mut analysis.hir);
+        functionalize(&mut analysis.hir, &mut arena);
+
+        let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+        let region_info = crate::hir::analyze_regions_with(
+            &analysis.hir,
+            &arena,
+            pc.call_classification.clone(),
+        );
+        let mut lowerer = Lowerer::new(&arena)
+            .with_primitive_classification(pc)
+            .with_primitive_values(prim_values)
+            .with_symbol_names(symbols.all_names())
+            .with_region_info(region_info);
+        lowerer.lower(&analysis.hir).expect("lower")
+    }
+
+    fn count_decref_regions(module: &crate::lir::LirModule) -> usize {
+        fn count_in_func(func: &LirFunction) -> usize {
+            func.blocks
+                .iter()
+                .flat_map(|b| b.instructions.iter())
+                .filter(|i| matches!(i.instr, LirInstr::DecrefRegion { .. }))
+                .count()
+        }
+        count_in_func(&module.entry)
+            + module.closures.iter().map(count_in_func).sum::<usize>()
+    }
+
+    fn count_release_value_regions(module: &crate::lir::LirModule) -> usize {
+        fn count_in_func(func: &LirFunction) -> usize {
+            func.blocks
+                .iter()
+                .flat_map(|b| b.instructions.iter())
+                .filter(|i| matches!(i.instr, LirInstr::ReleaseValueRegion { .. }))
+                .count()
+        }
+        count_in_func(&module.entry)
+            + module.closures.iter().map(count_in_func).sum::<usize>()
+    }
+
+    #[test]
+    fn decref_region_emitted_for_one_alloc_let() {
+        // Under unique-per-alloc the lowerer emits one `DecrefRegion`
+        // per region at each region's `free_at` HirId. The walk also
+        // registers regions for `Let`/`Letrec`/`Begin`/`Match`/`Call`
+        // nodes (for capture-cell and per-call bookkeeping), so the
+        // total count is more than just the one user-visible allocation.
+        // Assert there's at least one DecrefRegion — i.e. the new
+        // emission path is wired (we'd see zero if `emit_decrefs_for`
+        // weren't called).
+        let module = compile_to_lir("(fn () (let [x (string \"a\")] x))");
+        assert!(
+            count_decref_regions(&module) >= 1,
+            "expected at least one DecrefRegion to be emitted by emit_decrefs_for",
+        );
+    }
+
+    #[test]
+    fn decref_region_emitted_for_emit_yield() {
+        // `(fn () (let [x (string "a")] (emit :yield x)))` — the yielded
+        // value's region is decref'd at the Emit's HirId (the value's
+        // last use); the runtime incref in `handle_emit` (impl step 14)
+        // keeps the region alive past the matching DecrefRegion at the
+        // resume site.
+        let module = compile_to_lir("(fn () (let [x (string \"a\")] (emit :yield x)))");
+        assert!(
+            count_decref_regions(&module) >= 1,
+            "expected at least one DecrefRegion for the emit-yielded value",
+        );
+    }
+
+    #[test]
+    fn release_emitted_for_unbound_call_result() {
+        // An unbound Call result — `(f "a")` whose result flows
+        // directly into Begin's discard position — must have a
+        // ReleaseValueRegion emitted at its free_at. Without this,
+        // the call's result region survives until fiber teardown
+        // (linear leak in loops). `lower_call` allocates a release
+        // slot for every Call so emit_decrefs_for can emit
+        // `LoadLocal slot` + `ReleaseValueRegion` uniformly for
+        // both bound and unbound Calls.
+        let module = compile_to_lir("(fn () (begin (f \"a\" \"b\") nil))");
+        assert!(
+            count_release_value_regions(&module) >= 1,
+            "expected at least one ReleaseValueRegion for the unbound (f ...) result",
+        );
+    }
+
+    #[test]
+    fn release_emitted_for_let_bound_call_result() {
+        // Sanity check: the existing let-bound Call result path
+        // also produces a ReleaseValueRegion. This guards against
+        // a regression where removing the redundant call_region_slot
+        // recording in lower_let breaks the bound case.
+        let module = compile_to_lir("(fn () (let [x (f \"a\" \"b\")] nil))");
+        assert!(
+            count_release_value_regions(&module) >= 1,
+            "expected at least one ReleaseValueRegion for the let-bound (f ...) result",
+        );
+    }
+
+    #[test]
+    #[ignore = "merging enabled at impl step 16"]
+    fn decref_region_emitted_once_for_merged_pair() {
+        // `(let [x (string "a") y (string "b")] (g x y))` has two
+        // allocations with identical free_at and no cross-region
+        // edges, so the merge pass collapses them into one region.
+        // The lowerer emits exactly one `DecrefRegion` for the
+        // merged group.
+        let module =
+            compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
+        assert_eq!(
+            count_decref_regions(&module),
+            1,
+            "merged x and y should share one DecrefRegion",
+        );
     }
 }

@@ -749,12 +749,6 @@ pub enum LirInstr {
     },
 
     // === Allocation Regions ===
-    /// Free all objects in a specific region. Walks the slab linked
-    /// list and frees every slot whose region_id matches.
-    FreeRegion {
-        region_id: RegionId,
-    },
-
     /// Increment the reference count of a region.
     /// Emitted when a value in one region is stored into a structure
     /// in another region (cross-region reference).
@@ -763,9 +757,31 @@ pub enum LirInstr {
     },
 
     /// Decrement the reference count of a region.
-    /// Emitted at FreeRegion to release cross-region references.
+    /// Emitted by the lowerer at each region's `free_at` HirId
+    /// (the value's last use). Decrements RC; when RC hits 0, the
+    /// region's pages are freed and cascade decrefs fire for any
+    /// cross-region references found in the region's contents.
+    /// The sole region-demise LIR instruction.
     DecrefRegion {
         region_id: RegionId,
+    },
+
+    /// Decrement the reference count of the region of the value in
+    /// `src`. The handler reads the value, calls `region_of` to find
+    /// the runtime region, and decrefs it ONLY IF the runtime region
+    /// matches `expected_region_id`. Used at the caller's free_at for
+    /// Call-result regions: the call's compile-time `call_r` maps to
+    /// a unique runtime region id (passed as `expected_region_id`).
+    /// For an allocating call, the returned value's region is exactly
+    /// that id, so the decref fires (RC 1 → 0, free). For a
+    /// passthrough call (e.g., `(first xs)` returning a value already
+    /// in xs's region, or a primitive returning a value in the
+    /// immortal region 1), the regions differ and the decref is
+    /// skipped — avoids over-decrementing regions this call did not
+    /// allocate.
+    ReleaseValueRegion {
+        src: Reg,
+        expected_region_id: RegionId,
     },
 
     // === Dynamic Parameters ===

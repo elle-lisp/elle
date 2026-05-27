@@ -361,7 +361,7 @@ impl RegionPool {
     /// Teardown: run destructors, return all pages to the pool.
     ///
     /// After this call, the RegionPool is empty and should not be used.
-    pub fn teardown(&mut self, pool: &mut PagePool) {
+    pub fn teardown(&mut self, pool: &mut PagePool) -> usize {
         // Run destructors in reverse allocation order.
         for &ptr in self.dtors.iter().rev() {
             if !ptr.is_null() {
@@ -376,7 +376,9 @@ impl RegionPool {
         for rp in pages {
             pool.release(rp.page);
         }
+        let freed = self.obj_count;
         self.obj_count = 0;
+        freed
     }
 
     /// Add a new page from the pool.

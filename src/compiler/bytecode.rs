@@ -275,10 +275,6 @@ pub enum Instruction {
     /// Arity-checked tail call (arg_count). Compiler verified arity.
     TailCallChecked,
 
-    /// Free all objects in a specific region.
-    /// Operand: u16 region_id.
-    FreeRegion,
-
     /// Append string to @string (pops value, pops string, pushes string)
     IntrStringPush,
     /// Append byte to @bytes (pops value, pops bytes, pushes bytes)
@@ -292,9 +288,18 @@ pub enum Instruction {
 
     /// Decrement the reference count of a region.
     /// Operand: u16 region_id.
-    /// Emitted at FreeRegion(B) to release cross-region references
-    /// that were incremented by IncrefRegion.
+    /// Decrements RC; when RC hits 0, the region's pages are freed and
+    /// cascade decrefs fire for any cross-region references found in
+    /// the region's contents. The sole region-demise bytecode.
     DecrefRegion,
+
+    /// Decrement the reference count of the region of the value on
+    /// top of the operand stack. No operand. Pops the value and
+    /// calls `region_of` + `decref_region` at runtime. Used by the
+    /// caller at a Call-result region's free_at when the compile-time
+    /// region ID doesn't match the runtime region of the actual
+    /// returned value.
+    ReleaseValueRegion,
 }
 
 /// Compiled bytecode with constants
@@ -550,11 +555,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             }
             Instruction::IntToFloat | Instruction::FloatToInt => {
                 // No operands — pop one, push one
-            }
-            Instruction::FreeRegion if i + 1 < instructions.len() => {
-                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (region={})", region_id));
-                i += 2;
             }
             Instruction::IncrefRegion if i + 1 < instructions.len() => {
                 let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);

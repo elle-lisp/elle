@@ -72,7 +72,7 @@ make smoke                 # run all tests (~30s)
 | [runtime](docs/runtime.md) | Runtime signals, fuel budgets |
 | [scheduler](docs/scheduler.md) | Async scheduler, io_uring |
 | [embedding](docs/embedding.md) | Using Elle as a library |
-| [memory](docs/memory.md) | Arenas, scope allocation |
+| [regions](docs/regions.md) | Region-based memory: per-region RC, `IncrefRegion`/`DecrefRegion`, merging |
 | [processes](docs/processes.md) | Erlang-style processes, GenServer, supervisors |
 
 ## Implementation

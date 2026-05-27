@@ -354,7 +354,7 @@ pub extern "C" fn elle_jit_check_signal_bound(
 // Region (scope) helpers for JIT
 // =============================================================================
 
-/// Legacy scope-mark helpers (no-ops — replaced by FreeRegion).
+/// Legacy scope-mark helpers (no-ops — replaced by `DecrefRegion`).
 #[no_mangle]
 pub extern "C" fn elle_jit_region_enter() -> JitValue { JitValue::nil() }
 #[no_mangle]
@@ -363,12 +363,6 @@ pub extern "C" fn elle_jit_region_exit() -> JitValue { JitValue::nil() }
 pub extern "C" fn elle_jit_region_exit_call() -> JitValue { JitValue::nil() }
 #[no_mangle]
 pub extern "C" fn elle_jit_region_rotate() -> JitValue { JitValue::nil() }
-
-/// Free all objects in a specific region by walking the slab linked list.
-#[no_mangle]
-pub extern "C" fn elle_jit_free_region(region_id: u32) {
-    crate::value::fiberheap::free_region(region_id as u16);
-}
 
 /// Increment the reference count of a region (cross-region reference).
 #[no_mangle]

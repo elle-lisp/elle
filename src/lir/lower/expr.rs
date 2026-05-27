@@ -104,9 +104,13 @@ impl<'a> Lowerer<'a> {
             )),
         };
 
-        // Emit IncrefRegion for cross-region references at this node.
+        // Emit IncrefRegion for cross-region references at this node,
+        // then DecrefRegion for every region whose `free_at` HirId is
+        // this node (impl step 13: the lowerer is driven by per-region
+        // last-use, not by scope exits).
         if result.is_ok() {
             self.emit_increfs_for(hir.id);
+            self.emit_decrefs_for(hir.id);
         }
 
         self.current_span = saved_span;
@@ -371,12 +375,12 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.pop();
 
-        if let Some(rid) = region_id {
+        // Region-demise DecrefRegion is emitted by `lower_expr` at each
+        // region's `free_at` HirId (impl step 13). Drop the scope-based
+        // emission here; only keep the active_region_ids bookkeeping so
+        // break compensation (if any) can still walk it.
+        if region_id.is_some() {
             self.active_region_ids.pop();
-            // Only emit FreeRegion if no outer scope also uses this region.
-            if !self.active_region_ids.contains(&rid) {
-                self.emit_free_region(rid);
-            }
         }
 
         // Normal exit: jump to the exit label
@@ -409,22 +413,17 @@ impl<'a> Lowerer<'a> {
             src: value_reg,
         });
 
-        // Emit FreeRegion for each region entered since the target block.
-        // Iterate from innermost (current) to the target's depth.
-        // Deduplicate and skip regions that are also used by outer scopes
-        // (they'll be freed when those outer scopes exit).
-        let regions_to_free: Vec<u16> =
-            self.active_region_ids[target_region_stack_depth..].to_vec();
-        let mut seen = std::collections::HashSet::new();
-        for &rid in regions_to_free.iter().rev() {
-            if seen.insert(rid) {
-                // Only free if no outer scope (below target depth) uses this region.
-                let used_outer = self.active_region_ids[..target_region_stack_depth].contains(&rid);
-                if !used_outer {
-                    self.emit_free_region(rid);
-                }
-            }
-        }
+        // Break compensation: under impl step 13, `DecrefRegion` is
+        // emitted by `lower_expr` at each region's `free_at` HirId.
+        // Break short-circuits past those HirIds — for regions whose
+        // `free_at` lies between the break site and the target block,
+        // the lowerer would need to fire compensating `DecrefRegion`
+        // instructions here. The required logic is non-trivial under
+        // unique-per-alloc; for now we accept that break-skipped
+        // allocations leak until fiber teardown. The unmerged-baseline
+        // verification (step 15) will surface any bounded-loop
+        // regressions; tighten then.
+        let _ = target_region_stack_depth;
 
         self.terminate(Terminator::Jump(target_exit_label));
 
@@ -464,10 +463,10 @@ impl<'a> Lowerer<'a> {
 
         let _body_reg = self.lower_expr(body)?;
 
-        // Back-edge: free the loop body's region (objects from this iteration).
-        if let Some(rid) = region_id {
-            self.emit_free_region(rid);
-        }
+        // Per-iteration DecrefRegion is emitted by `lower_expr` at each
+        // region's `free_at` HirId (impl step 13). No back-edge scope
+        // cleanup needed.
+        let _ = region_id;
 
         self.terminate(Terminator::Jump(cond_label));
         self.finish_block();
@@ -572,10 +571,10 @@ impl<'a> Lowerer<'a> {
             self.emit(LirInstr::StoreLocal { slot, src: *reg });
         }
 
-        // Free the loop body's region at back-edge (replaces RegionRotate).
-        if let Some(rid) = region_id {
-            self.emit_free_region(rid);
-        }
+        // Per-iteration DecrefRegion is emitted by `lower_expr` at each
+        // region's `free_at` HirId (impl step 13). No back-edge scope
+        // cleanup needed.
+        let _ = region_id;
 
         // Jump back to loop header
         self.terminate(Terminator::Jump(loop_label));

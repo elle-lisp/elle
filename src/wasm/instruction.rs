@@ -191,9 +191,7 @@ impl WasmEmitter {
                     self.emit_tail_call_dispatch(f);
                 }
             }
-            LirInstr::FreeRegion { .. }
-            | LirInstr::IncrefRegion { .. }
-            | LirInstr::DecrefRegion { .. } => {}
+            LirInstr::IncrefRegion { .. } | LirInstr::DecrefRegion { .. } => {}
             // Outbox routing is VM-only.
             // OutboxEnter/OutboxExit removed — region stamps replace toggle.
             // Flip rotation is VM-only (the WASM backend uses its own

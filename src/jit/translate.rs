@@ -1078,14 +1078,6 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(true);
             }
 
-            LirInstr::FreeRegion { region_id } => {
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.free_region, builder.func);
-                let rid = builder.ins().iconst(I32, *region_id as i64);
-                builder.ins().call(func_ref, &[rid]);
-            }
-
             LirInstr::IncrefRegion { region_id } => {
                 let func_ref = self
                     .module
@@ -1100,6 +1092,23 @@ impl<'a> FunctionTranslator<'a> {
                     .declare_func_in_func(self.helpers.decref_region, builder.func);
                 let rid = builder.ins().iconst(I32, *region_id as i64);
                 builder.ins().call(func_ref, &[rid]);
+            }
+
+            LirInstr::ReleaseValueRegion {
+                src: _,
+                expected_region_id: _,
+            } => {
+                // JIT support for ReleaseValueRegion is not yet
+                // implemented; the new opcode is currently only
+                // emitted on the VM dispatch path. The JIT will need
+                // a runtime helper `elle_jit_release_value_region`
+                // that reads the value, calls `region_of`, and
+                // decrefs. For now, leave a panic so the JIT skips
+                // functions containing this opcode rather than
+                // silently producing wrong code.
+                return Err(crate::jit::JitError::InvalidLir(
+                    "ReleaseValueRegion not yet supported in JIT".to_string(),
+                ));
             }
 
             LirInstr::PushParamFrame { pairs } => {

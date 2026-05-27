@@ -397,6 +397,213 @@ pub(crate) fn build_binding_index(
     (binding_index, index_binding)
 }
 
+/// Compute per-HirId last-use: for each value-producing HirId, the HirId
+/// at which its value is last referenced.
+///
+/// For an allocation `A`:
+/// - If `A` is bound to some binding `b` (i.e., `A` is a binding's init),
+///   `last_use[A]` is the maximum "effective HirId" over all `Var(b)`
+///   references. The effective HirId of a `Var(b)` is the immediate
+///   parent expression's HirId when the parent *consumes* the value
+///   (Call, Emit, Define, Assign, SetCell, MakeCell, Intrinsic, etc.);
+///   otherwise it is the `Var(b)` HirId itself.
+/// - If `A` has no binding (inline allocation passed as an argument or
+///   value child of a consumer), `last_use[A]` is the consumer's HirId.
+/// - If `A` is bound but the binding has no uses anywhere,
+///   `last_use[A] = A` (decref immediately after the alloc).
+///
+/// The plan's region-inference invariant requires every region to have
+/// exactly one `free_at` HirId; this function produces that mapping for
+/// allocation HirIds.
+pub fn compute_last_use(
+    hir: &Hir,
+    uses: &HashMap<Binding, Vec<HirId>>,
+) -> HashMap<HirId, HirId> {
+    let mut builder = LastUseBuilder {
+        last_use: HashMap::new(),
+        binding_init: HashMap::new(),
+    };
+    // The root has no parent; parent_consumes=false is the conservative
+    // default (the root's value is the program's result, no further use).
+    builder.walk(hir, false, hir.id);
+
+    // Override last_use for binding-bound allocations to span all uses
+    // of the binding.
+    for (binding, init_id) in builder.binding_init.clone() {
+        let max_effective = uses
+            .get(&binding)
+            .into_iter()
+            .flat_map(|v| v.iter())
+            .map(|use_id| {
+                builder
+                    .last_use
+                    .get(use_id)
+                    .copied()
+                    .unwrap_or(*use_id)
+            })
+            .max();
+        let chosen = max_effective.unwrap_or(init_id);
+        builder.last_use.insert(init_id, chosen);
+    }
+
+    builder.last_use
+}
+
+/// Helper for computing per-HirId last-use.
+struct LastUseBuilder {
+    last_use: HashMap<HirId, HirId>,
+    /// For each binding, the HirId of its initializer (Let/Letrec/Loop
+    /// init or Define value).
+    binding_init: HashMap<Binding, HirId>,
+}
+
+impl LastUseBuilder {
+    fn walk(&mut self, hir: &Hir, parent_consumes: bool, parent_id: HirId) {
+        // The "effective last use" of this node's value is the parent's
+        // HirId when the parent consumes (the value flows in and dies);
+        // otherwise it's this node itself (the value either propagates
+        // up through non-consuming wrappers or is the program's result).
+        let my_last = if parent_consumes { parent_id } else { hir.id };
+        self.last_use.insert(hir.id, my_last);
+
+        match &hir.kind {
+            // Consumer parents: every child position is a consumer.
+            HirKind::Call { func, args, .. } => {
+                self.walk(func, true, hir.id);
+                for a in args {
+                    self.walk(&a.expr, true, hir.id);
+                }
+            }
+            HirKind::Emit { value, .. } => self.walk(value, true, hir.id),
+            HirKind::Define { value, binding } => {
+                self.binding_init.insert(*binding, value.id);
+                self.walk(value, true, hir.id);
+            }
+            HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
+            HirKind::SetCell { cell, value } => {
+                self.walk(cell, true, hir.id);
+                self.walk(value, true, hir.id);
+            }
+            HirKind::MakeCell { value } => self.walk(value, true, hir.id),
+            HirKind::DerefCell { cell } => self.walk(cell, true, hir.id),
+            HirKind::Destructure { value, .. } => self.walk(value, true, hir.id),
+            HirKind::Intrinsic { args, .. } => {
+                for a in args {
+                    self.walk(a, true, hir.id);
+                }
+            }
+            HirKind::Recur { args } => {
+                for a in args {
+                    self.walk(a, true, hir.id);
+                }
+            }
+            HirKind::Eval { expr, env } => {
+                self.walk(expr, true, hir.id);
+                self.walk(env, true, hir.id);
+            }
+            HirKind::Break { value, .. } => self.walk(value, true, hir.id),
+
+            // Mixed: cond/scrutinee is consumed; branches/body propagate.
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.walk(cond, true, hir.id);
+                self.walk(then_branch, false, hir.id);
+                self.walk(else_branch, false, hir.id);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (c, b) in clauses {
+                    self.walk(c, true, hir.id);
+                    self.walk(b, false, hir.id);
+                }
+                if let Some(eb) = else_branch {
+                    self.walk(eb, false, hir.id);
+                }
+            }
+            HirKind::Match { value, arms } => {
+                self.walk(value, true, hir.id);
+                for (_pat, guard, body) in arms {
+                    if let Some(g) = guard {
+                        self.walk(g, false, hir.id);
+                    }
+                    self.walk(body, false, hir.id);
+                }
+            }
+            HirKind::While { cond, body } => {
+                self.walk(cond, true, hir.id);
+                self.walk(body, false, hir.id);
+            }
+            HirKind::Parameterize { bindings, body } => {
+                for (k, v) in bindings {
+                    self.walk(k, true, hir.id);
+                    self.walk(v, true, hir.id);
+                }
+                self.walk(body, false, hir.id);
+            }
+
+            // Binding forms: init is consumed (bound to a name); body
+            // propagates (its value is the form's result).
+            HirKind::Let { bindings, body } => {
+                for (b, init) in bindings {
+                    self.binding_init.insert(*b, init.id);
+                    self.walk(init, true, hir.id);
+                }
+                self.walk(body, false, hir.id);
+            }
+            HirKind::Letrec { bindings, body } => {
+                for (b, init) in bindings {
+                    self.binding_init.insert(*b, init.id);
+                    self.walk(init, true, hir.id);
+                }
+                self.walk(body, false, hir.id);
+            }
+            HirKind::Loop { bindings, body } => {
+                for (b, init) in bindings {
+                    self.binding_init.insert(*b, init.id);
+                    self.walk(init, true, hir.id);
+                }
+                self.walk(body, false, hir.id);
+            }
+
+            // Propagating: children flow up.
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
+                for e in exprs {
+                    self.walk(e, false, hir.id);
+                }
+            }
+            HirKind::Block { body, .. } => {
+                for e in body {
+                    self.walk(e, false, hir.id);
+                }
+            }
+
+            // Lambda: body is the closure's return path, not consumed
+            // by the Lambda node itself. Captures generate uses at the
+            // Lambda's own HirId (see DefUseBuilder).
+            HirKind::Lambda { body, .. } => {
+                self.walk(body, false, hir.id);
+            }
+
+            // Leaves.
+            HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Quote(_)
+            | HirKind::Var(_)
+            | HirKind::Error => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,6 +711,237 @@ mod tests {
         assert!(
             is_live_anywhere(&info, x),
             "captured x should be live at lambda"
+        );
+    }
+
+    // ── per-HirId last-use tests (drive impl step 10) ────────────────
+
+    fn analyze_with_hir(
+        source: &str,
+    ) -> (
+        super::Hir,
+        BindingArena,
+        SymbolTable,
+        DataflowInfo,
+    ) {
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        let meta = register_primitives(&mut vm, &mut symbols);
+        let wrapped = format!(
+            "(letrec [cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)] {})",
+            source
+        );
+        let syntax = read_syntax(&wrapped, "<test>").expect("parse");
+        let mut expander = Expander::new();
+        let expanded = expander
+            .expand(syntax, &mut symbols, &mut vm)
+            .expect("expand");
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+        analyzer.bind_primitives(&meta);
+        let mut analysis = analyzer.analyze(&expanded).expect("analyze");
+        mark_tail_calls(&mut analysis.hir);
+        functionalize(&mut analysis.hir, &mut arena);
+        let info = analyze_dataflow(&analysis.hir);
+        (analysis.hir, arena, symbols, info)
+    }
+
+    /// Find every Call whose func is the named primitive.
+    fn find_calls_to_primitive(
+        hir: &super::Hir,
+        name: &str,
+        arena: &BindingArena,
+        symbols: &SymbolTable,
+    ) -> Vec<HirId> {
+        let mut out = Vec::new();
+        fn walk(
+            hir: &super::Hir,
+            name: &str,
+            arena: &BindingArena,
+            symbols: &SymbolTable,
+            out: &mut Vec<HirId>,
+        ) {
+            if let HirKind::Call { func, .. } = &hir.kind {
+                if let HirKind::Var(b) = &func.kind {
+                    if symbols.name(arena.get(*b).name).as_deref() == Some(name) {
+                        out.push(hir.id);
+                    }
+                }
+            }
+            hir.for_each_child(|c| walk(c, name, arena, symbols, out));
+        }
+        walk(hir, name, arena, symbols, &mut out);
+        out
+    }
+
+    /// Find every Var with the given binding name.
+    fn find_vars_by_name(
+        hir: &super::Hir,
+        name: &str,
+        arena: &BindingArena,
+        symbols: &SymbolTable,
+    ) -> Vec<HirId> {
+        let mut out = Vec::new();
+        fn walk(
+            hir: &super::Hir,
+            name: &str,
+            arena: &BindingArena,
+            symbols: &SymbolTable,
+            out: &mut Vec<HirId>,
+        ) {
+            if let HirKind::Var(b) = &hir.kind {
+                if symbols.name(arena.get(*b).name).as_deref() == Some(name) {
+                    out.push(hir.id);
+                }
+            }
+            hir.for_each_child(|c| walk(c, name, arena, symbols, out));
+        }
+        walk(hir, name, arena, symbols, &mut out);
+        out
+    }
+
+    /// Find the first Emit node.
+    fn find_first_emit(hir: &super::Hir) -> Option<HirId> {
+        if matches!(&hir.kind, HirKind::Emit { .. }) {
+            return Some(hir.id);
+        }
+        let mut found = None;
+        hir.for_each_child(|c| {
+            if found.is_none() {
+                found = find_first_emit(c);
+            }
+        });
+        found
+    }
+
+    #[test]
+    fn last_use_let_single_var_in_body() {
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (let [x (string \"a\")] x))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 1, "expected exactly one (string ...) call");
+        let alloc = allocs[0];
+
+        let var_uses = find_vars_by_name(&hir, "x", &arena, &symbols);
+        assert_eq!(var_uses.len(), 1, "expected exactly one Var(x)");
+        let expected = var_uses[0];
+
+        let got = info.last_use.get(&alloc).copied();
+        assert_eq!(
+            got,
+            Some(expected),
+            "alloc @{} should have last_use at Var(x) @{}, got {:?}",
+            alloc.0,
+            expected.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_let_multiple_uses_in_body() {
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (let [x (string \"a\")] (begin x x)))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 1);
+        let alloc = allocs[0];
+
+        let mut var_uses = find_vars_by_name(&hir, "x", &arena, &symbols);
+        assert_eq!(var_uses.len(), 2, "expected two Var(x) uses");
+        // The last use is the one whose live_out has no further reference to x.
+        // Source order: first Var(x) earlier, second Var(x) later. The last
+        // syntactic Var(x) is the second.
+        var_uses.sort_by_key(|id| id.0);
+        let last = *var_uses.last().unwrap();
+
+        let got = info.last_use.get(&alloc).copied();
+        assert_eq!(
+            got,
+            Some(last),
+            "alloc @{} should have last_use at the second Var(x) @{}, got {:?}",
+            alloc.0,
+            last.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_inline_call_arg_no_binding() {
+        // `(string (string "a"))` — the inner string allocation has no
+        // binding; its value flows directly into the outer string call.
+        // Last use is at the outer Call. `string` is a real primitive
+        // so the analyzer does not inline these calls (unlike the
+        // letrec-bound `g` in the test wrapper).
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (string \"a\")))");
+
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 2, "expected two (string ...) calls");
+        // The inner call has the lower HirId; the outer call wraps it.
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let inner = sorted[0];
+        let outer = sorted[1];
+
+        let got = info.last_use.get(&inner).copied();
+        assert_eq!(
+            got,
+            Some(outer),
+            "inline alloc @{} should have last_use at the consuming Call @{}, got {:?}",
+            inner.0,
+            outer.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_emit_yield() {
+        // The yielded value's last use is the Emit node — the runtime
+        // incref at handle_emit (step 14) keeps the region alive past
+        // the matching DecrefRegion.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (emit :yield (string \"a\")))");
+
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 1, "expected exactly one (string ...) call");
+        let alloc = allocs[0];
+
+        let emit = find_first_emit(&hir).expect("expected an Emit node");
+
+        let got = info.last_use.get(&alloc).copied();
+        assert_eq!(
+            got,
+            Some(emit),
+            "emit-yielded alloc @{} should have last_use at Emit @{}, got {:?}",
+            alloc.0,
+            emit.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_across_nested_let() {
+        // `(let [x (string "a")] (let [y 1] x))` — Var(x) lives inside the
+        // inner let. last_use of the alloc must be that Var(x), not the
+        // outer let's exit.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (let [x (string \"a\")] (let [y 1] x)))");
+
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 1);
+        let alloc = allocs[0];
+
+        let var_uses = find_vars_by_name(&hir, "x", &arena, &symbols);
+        assert_eq!(var_uses.len(), 1, "expected exactly one Var(x)");
+        let expected = var_uses[0];
+
+        let got = info.last_use.get(&alloc).copied();
+        assert_eq!(
+            got,
+            Some(expected),
+            "nested-let alloc @{} should have last_use at inner Var(x) @{}, got {:?}",
+            alloc.0,
+            expected.0,
+            got
         );
     }
 

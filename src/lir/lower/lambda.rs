@@ -287,8 +287,23 @@ impl<'a> Lowerer<'a> {
             }
         }
 
+        // Push this lambda's HirId so `emit_decrefs_for` can look up
+        // its tail-region set in `region_info.lambda_tail_regions`
+        // and suppress `DecrefRegion` for those regions inside the
+        // body — ownership of the initial RC=1 is transferred to the
+        // caller (impl step 14, return as escape). `self.current_hir_id`
+        // is the Lambda's id at this point (set by the parent
+        // `lower_expr` before dispatching here).
+        let lambda_id = self
+            .current_hir_id
+            .expect("lower_lambda_expr called outside lower_expr");
+        self.current_lambda_stack.push(lambda_id);
+
         // Lower body
         let result_reg = self.lower_expr(body)?;
+
+        self.current_lambda_stack.pop();
+
         self.terminate(Terminator::Return(result_reg));
         self.finish_block();
 

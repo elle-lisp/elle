@@ -28,17 +28,96 @@ destination.
 
 Every value logically lives in its own region. A region is a physical
 allocation unit — it owns pages of memory. A region has a reference
-count (RC) that starts at 1 when created (the scope reference) and
-tracks cross-region references beyond that.
+count (RC) that starts at 1 when created (the initial reference, owned
+by the compiler) and tracks cross-region references beyond that.
 
-FreeRegion is a decref. When RC reaches 0, the region's pages are
-freed (returned to a page pool) and cascade decrefs fire for any
-cross-region references found in the region's contents.
+`DecrefRegion` decrements RC; when RC reaches 0, the region's pages
+are freed (returned to a page pool) and cascade decrefs fire for any
+cross-region references found in the region's contents. `IncrefRegion`
+explicitly increments RC. The runtime also auto-increfs cross-region
+refs at allocation time (`alloc_obj`) and at mutable-collection
+push/put time. `DecrefRegion` is the only region-demise bytecode —
+there is no separate `FreeRegion`.
 
-The compiler may merge regions whose lifetimes provably coincide (same
-point of demise). This is an optimization that reduces the number of
-physical regions (and thus mmap/munmap overhead). The system must be
-correct without it, but it is required for acceptable performance.
+The compiler may merge regions whose lifetimes provably coincide
+(identical `free_at` and identical incref topology). This is an
+optimization that reduces the number of physical regions (and thus
+mmap/munmap overhead). The system must be correct without it, but it
+is required for acceptable performance.
+
+## Unique regions are the default; merging is the optimization
+
+Every value starts in its own unique region. This is the base
+mechanism, not a fallback. The solver's only job is to *merge* unique
+regions when it can prove their points of demise coincide — pure
+optimization, governed by point-of-demise analysis.
+
+If the solver fails to merge anything, the program is still correct:
+it just runs with more regions than necessary, paying RC bookkeeping
+costs for every cross-region reference. Failure to merge is a
+performance concern, never a correctness concern.
+
+The inverse mistake — starting allocations pre-merged into a "current
+scope region" and trying to *un-merge* values that need to escape — is
+backwards. There is no un-merge primitive. The solver cannot pull a
+value out of a region it was born into. Allocations must start unique
+and stay unique unless the solver actively proves a safe merge.
+
+The Tofte-Talpin region calculus operates on lifetimes, not on
+syntactic scopes. The solver's data structures may use a tree to
+compute lifetime relations, but every allocation site emits a fresh
+region by default, and constraints exist solely to discover which
+regions can be safely identified with which other regions.
+
+## Merge rule: identical free_at AND identical incref topology
+
+Two regions may collapse into one when both hold:
+
+- Identical `free_at` — the same HirId is where the compiler emits
+  their `DecrefRegion`.
+- Identical incref topology — the same set of cross-region edges
+  flows in *and* the same set of runtime-incref sites (push, put,
+  capture, emit) acts on them at the same program points.
+
+Different incref topologies mean the merged region's RC would track
+the union of references, extending one value's lifetime to the
+other's. Even though the user-visible bytecode would still be sound,
+this defeats the point of regions (values stay alive longer than
+necessary).
+
+The conservative starting policy is to merge only regions whose
+`free_at` matches *and* which have no cross-region edges incident to
+either. Tighter conditions await profiling. Failure to merge is a
+performance concern, not a correctness one.
+
+Merging is monotonic and iterative. A region that already contains
+several values may merge again with a third region if the condition
+holds. Once merged, always merged; there is no un-merge.
+
+## DecrefRegion fires at points of demise, not at "scope exits"
+
+A region's compiler-emitted `DecrefRegion` is placed at the program
+point where the value's last use ends — the region's `free_at` HirId.
+That point happens to often *be* a lexical scope exit, but it can
+equally be a loop back-edge, a tail-call boundary, a `break`, a
+function return, or any other program point where the compiler can
+name a moment after which the initial reference is no longer needed.
+
+Saying "the scope emits a `DecrefRegion` for the region" is a
+category error. Scopes don't own regions. The compiler emits
+`DecrefRegion` at program points; the solver merges allocations into
+shared regions only when their `free_at` HirIds and incref
+topologies coincide, so that one `DecrefRegion` suffices for several
+allocations whose initial references are dropped at the same program
+point.
+
+If a value escapes — flowing into a container, captured by a closure,
+yielded to a scheduler — its region's RC has already been incremented
+elsewhere by the time `DecrefRegion` fires. The decref drops the
+compiler's initial reference but the region survives because RC > 0.
+There is no "widening" pass that moves a value to a longer-lived
+region; the region's lifetime is whatever the RC says it is at
+runtime.
 
 ## Region IDs must be valid
 
@@ -83,9 +162,10 @@ the correct region automatically.
 A region is not owned by a fiber. A region is an independent entity.
 
 A value allocated by a child fiber and yielded to the parent lives in
-its own region. That region has RC=1 (scope ref) plus additional increfs
-for cross-region references. When all references are released and the
-scope exits, RC reaches 0 and the region's pages are freed.
+its own region. That region has RC=1 (initial reference) plus
+additional increfs for cross-region references. When all references
+are released — including the compiler-emitted `DecrefRegion` at the
+region's `free_at` — RC reaches 0 and the region's pages are freed.
 
 No copying happened. The parent received a Value (a 16-byte tag+pointer)
 pointing into the region's pages. The region outlived the child fiber
@@ -139,10 +219,10 @@ cross-region references tracked by RC.
 
 A scope is not a region. A region is not a scope. The solver assigns
 allocations to regions based on data flow — where values actually die.
-A scope exit is a program point where FreeRegion fires for some
-region, but the scope doesn't "own" the region. Multiple scopes
+A scope exit can be the `free_at` for some region (so a `DecrefRegion`
+fires there), but the scope doesn't "own" the region. Multiple scopes
 might share a region (after merging), or a scope might have no region
-(no local allocations). The solver links scopes to regions; the
+(no local allocations). The solver links HirIds to regions; the
 runtime sees only flat IDs.
 
 ## Regions in loops
@@ -310,8 +390,8 @@ change to pass an allocator (like Zig), eliminating TLS entirely.
 |-----------|-------|
 | Region solver | ~1500 lines, 56 tests. Generates per-scope region assignments. Populates `cross_region_refs` for IncrefRegion emission. |
 | Physical region allocator | PagePool + RegionPool + RegionStore. Per-region pages, dual-ended layout. `--region-page-size`, `--page-pool-max`. |
-| Per-region RC | RegionStore tracks u32 RC per region. RC starts at 1 (scope ref). FreeRegion = decref; region freed when RC reaches 0. No deferred_free. |
-| FreeRegion | Dispatch uses `self.heap.free_region_physical()` which calls `decref()`. If RC > 0, decrements; frees when 0. |
+| Per-region RC | RegionStore tracks u32 RC per region. RC starts at 1 (the compiler's initial reference). `DecrefRegion` decrements; region freed when RC reaches 0. No deferred_free. |
+| DecrefRegion | Dispatch uses `self.heap.free_region_physical()` which calls `decref()`. If RC > 0, decrements; frees when 0. Single region-demise bytecode — `FreeRegion` is gone. |
 | IncrefRegion | Solver populates `cross_region_refs`; lowerer emits IncrefRegion at constraint sites via `emit_increfs_for` and for cross-region closure captures in `lower_lambda_expr`. |
 | Auto-incref at alloc | `alloc_obj` scans HeapObject for cross-region Value refs and increfs each referenced region. Balances cascade decrefs at free time. |
 | Bytecode handlers | Pair, MakeCapture, MakeClosure, MakeArrayMut use `vm.heap.alloc_in_region()` directly. No TLS. |
@@ -332,8 +412,11 @@ change to pass an allocator (like Zig), eliminating TLS entirely.
    arrays (region_ids, region_next, region_heads, region_bump_marks)
    and the old `free_region()` slab walk have been removed.
 
-3. **Region merging.** Merge regions with identical lifetimes to reduce
-   the number of physical regions. Required for acceptable performance.
+3. **Region merging.** Land the unmerged baseline first (every
+   allocation in its own region; correct but slow), then enable the
+   conservative merge condition (identical `free_at` and no
+   cross-region edges incident to either) iteratively to fixpoint.
+   Required for acceptable performance, but never for correctness.
 
 ## Invariants
 

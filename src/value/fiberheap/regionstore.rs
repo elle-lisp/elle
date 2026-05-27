@@ -71,7 +71,7 @@ impl RegionStore {
             };
             let mut refs = Vec::new();
             RegionPool::collect_value_refs(&obj, id, page_size, &valid_region, &mut refs);
-            if !refs.is_empty() || id == 2414 {
+            if !refs.is_empty() {
                 eprintln!(
                     "[trace:rc] alloc_obj({id}) xrefs={refs:?} tag={:?}",
                     obj.tag()
@@ -106,16 +106,17 @@ impl RegionStore {
 
     /// Decrement the reference count for a region.
     /// If RC is already 0, free the region. Otherwise decrement,
-    /// and free if RC reaches 0.
-    pub fn decref(&mut self, id: u16) {
+    /// and free if RC reaches 0. Returns the number of objects freed.
+    pub fn decref(&mut self, id: u16) -> usize {
         self.decref_with_cascade(id, None)
     }
 
     /// Decrement with optional cascade source (for tracing).
-    fn decref_with_cascade(&mut self, id: u16, from_cascade: Option<u16>) {
+    /// Returns the number of objects freed (0 if RC > 0 after decrement).
+    fn decref_with_cascade(&mut self, id: u16, from_cascade: Option<u16>) -> usize {
         let idx = id as usize;
         if idx >= self.regions.len() {
-            return;
+            return 0;
         }
         let should_free = if let Some(entry) = &mut self.regions[idx] {
             if entry.rc == 0 {
@@ -148,7 +149,9 @@ impl RegionStore {
             false
         };
         if should_free {
-            self.do_free(id);
+            self.do_free(id)
+        } else {
+            0
         }
     }
 
@@ -164,8 +167,9 @@ impl RegionStore {
 
     /// Free a region (decref). If RC == 0, free immediately.
     /// If RC > 0, decrement and free when RC reaches 0.
-    pub fn free_region(&mut self, id: u16) {
-        self.decref(id);
+    /// Returns the number of objects freed.
+    pub fn free_region(&mut self, id: u16) -> usize {
+        self.decref(id)
     }
 
     /// Scan a HeapObject for cross-region Value refs and incref each.
@@ -185,10 +189,10 @@ impl RegionStore {
 
     /// Actually tear down a region: collect cross-region refs, run dtors,
     /// return pages, then decref referenced regions (may cascade).
-    fn do_free(&mut self, id: u16) {
+    fn do_free(&mut self, id: u16) -> usize {
         let idx = id as usize;
         if idx >= self.regions.len() {
-            return;
+            return 0;
         }
         if let Some(mut entry) = self.regions[idx].take() {
             let page_size = self.pool.initial_page_size();
@@ -199,13 +203,16 @@ impl RegionStore {
             let cross_refs = entry
                 .pool
                 .collect_cross_region_refs(id, page_size, &valid_region);
-            entry.pool.teardown(&mut self.pool);
+            let freed = entry.pool.teardown(&mut self.pool);
             if crate::config::get().has_trace("rc") && !cross_refs.is_empty() {
                 eprintln!("[trace:rc] do_free({id}) cascade: {cross_refs:?}");
             }
             for ref_id in cross_refs {
                 self.decref_with_cascade(ref_id, Some(id));
             }
+            freed
+        } else {
+            0
         }
     }
 

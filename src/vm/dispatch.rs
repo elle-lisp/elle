@@ -442,22 +442,60 @@ impl VM {
                     }
                 }
 
-                Instruction::FreeRegion => {
-                    let region_id = self.read_u16(bc, &mut ip);
-                    if std::env::var("ELLE_TRACE_FREE").is_ok() {
-                        eprintln!("[trace] FreeRegion({region_id})");
-                    }
-                    self.heap().free_region_physical(region_id);
-                }
-
                 Instruction::IncrefRegion => {
                     let region_id = self.read_u16(bc, &mut ip);
+                    if crate::config::get().has_trace("rc") {
+                        eprintln!("[trace:rc] IncrefRegion({region_id})");
+                    }
                     self.heap().incref_region(region_id);
                 }
 
                 Instruction::DecrefRegion => {
                     let region_id = self.read_u16(bc, &mut ip);
+                    if crate::config::get().has_trace("rc") {
+                        let rc = self.heap().region_rc(region_id);
+                        let objs = self
+                            .heap()
+                            .region_info_vec()
+                            .iter()
+                            .find(|(id, _, _)| *id == region_id)
+                            .map_or(0, |(_, _, c)| *c);
+                        eprintln!(
+                            "[trace:rc] DecrefRegion({region_id}) rc={rc} objs={objs} alloc_count={}",
+                            self.heap().len()
+                        );
+                    }
                     self.heap().decref_region(region_id);
+                }
+
+                Instruction::ReleaseValueRegion => {
+                    let expected_region_id = self.read_u16(bc, &mut ip);
+                    let value = self
+                        .fiber
+                        .stack
+                        .pop()
+                        .expect("VM bug: stack underflow on ReleaseValueRegion");
+                    let region_id = crate::value::arena::region_of(value);
+                    // Gate the decref on a region match: only decref
+                    // when the value lives in the region this Call
+                    // allocated. Passthrough calls (where the returned
+                    // value lives in a region this call did not
+                    // allocate — e.g., a primitive returning a value
+                    // in the immortal region 1) leave region_id !=
+                    // expected_region_id; skip to avoid over-decref.
+                    if region_id != 0 && region_id == expected_region_id {
+                        if crate::config::get().has_trace("rc") {
+                            let rc = self.heap().region_rc(region_id);
+                            eprintln!(
+                                "[trace:rc] ReleaseValueRegion({region_id}) rc={rc} (matched expected={expected_region_id})"
+                            );
+                        }
+                        self.heap().decref_region(region_id);
+                    } else if crate::config::get().has_trace("rc") {
+                        eprintln!(
+                            "[trace:rc] ReleaseValueRegion: skip (got={region_id}, expected={expected_region_id})"
+                        );
+                    }
                 }
 
                 // Dynamic parameter frame management
@@ -653,6 +691,21 @@ impl VM {
             .stack
             .pop()
             .expect("VM bug: Stack underflow on emit");
+
+        // The compiler emits a `DecrefRegion` at the Emit's `free_at`
+        // HirId (impl step 13), which fires right after this handler
+        // returns. Incref the value's region here so the matching
+        // decref doesn't take RC to zero while the scheduler still
+        // holds the value via `fiber.signal`.
+        let region_id = crate::value::arena::region_of(value);
+        if region_id != 0 {
+            self.heap().incref_region(region_id);
+            if crate::config::get().has_trace("rc") {
+                eprintln!(
+                    "[trace:rc] emit incref({region_id}) — keeps yielded value alive past matching DecrefRegion"
+                );
+            }
+        }
 
         self.fiber.signal = Some((signal_bits, value));
 

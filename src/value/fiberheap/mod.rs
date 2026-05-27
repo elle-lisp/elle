@@ -126,6 +126,13 @@ impl FiberHeap {
             }
         }
 
+        if crate::config::get().has_trace("rc") {
+            eprintln!(
+                "[trace:rc] alloc_in_region({region_id}) tag={:?} count={}",
+                obj.tag(),
+                self.alloc_count
+            );
+        }
         let v = self.region_store.alloc_obj(region_id, obj);
         self.alloc_count += 1;
         if self.alloc_count > self.peak_alloc_count {
@@ -153,13 +160,17 @@ impl FiberHeap {
     }
 
     /// Decrement the reference count for a region.
+    /// Decrements alloc_count if the region is freed.
     pub fn decref_region(&mut self, id: u16) {
-        self.region_store.decref(id);
+        let freed = self.region_store.decref(id);
+        self.alloc_count -= freed;
     }
 
     /// Free a region. Defers if the region's RC > 0.
+    /// Decrements alloc_count by the number of objects freed.
     pub fn free_region_physical(&mut self, region: u16) {
-        self.region_store.free_region(region);
+        let freed = self.region_store.free_region(region);
+        self.alloc_count -= freed;
     }
 
     /// Page size used by the region store's page pool.

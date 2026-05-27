@@ -25,6 +25,9 @@ impl<'a> Lowerer<'a> {
 
             let init_reg = self.lower_expr(init)?;
             let slot = self.allocate_slot(*binding);
+            // lower_call already records call_region_slot before
+            // lower_expr returns, so emit_decrefs_for has the slot
+            // by the time it runs. No need to re-record here.
             let needs_capture = self.arena.get(*binding).needs_capture();
 
             if self.in_lambda && needs_capture {
@@ -66,11 +69,12 @@ impl<'a> Lowerer<'a> {
         }
         if tail_scoped {
             self.pending_free_regions.pop();
-        } else if let Some(rid) = region_id {
-            if !self.active_region_ids.contains(&rid) {
-                self.emit_free_region(rid);
-            }
         }
+        // Region-demise `DecrefRegion` is now emitted by
+        // `lower_expr`'s `emit_decrefs_for` at each region's `free_at`
+        // HirId (impl step 13). The scope-based DecrefRegion emission
+        // here is gone.
+        let _ = region_id;
         Ok(result)
     }
 
@@ -180,11 +184,9 @@ impl<'a> Lowerer<'a> {
         }
         if tail_scoped {
             self.pending_free_regions.pop();
-        } else if let Some(rid) = region_id {
-            if !self.active_region_ids.contains(&rid) {
-                self.emit_free_region(rid);
-            }
         }
+        // Region-demise DecrefRegion emission is in `lower_expr` (step 13).
+        let _ = region_id;
         Ok(result)
     }
 

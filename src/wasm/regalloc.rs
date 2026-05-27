@@ -281,7 +281,6 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::StoreCaptureCell { .. }
         | LirInstr::TailCall { .. }
         | LirInstr::TailCallArrayMut { .. }
-        | LirInstr::FreeRegion { .. }
         | LirInstr::IncrefRegion { .. }
         | LirInstr::DecrefRegion { .. }
         | LirInstr::PushParamFrame { .. }
@@ -437,8 +436,7 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::FreeRegion { .. }
-        | LirInstr::IncrefRegion { .. }
+        LirInstr::IncrefRegion { .. }
         | LirInstr::DecrefRegion { .. }
         | LirInstr::PopParamFrame
     }

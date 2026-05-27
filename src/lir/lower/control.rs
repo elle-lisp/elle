@@ -76,7 +76,13 @@ impl<'a> Lowerer<'a> {
                         arity_checked,
                     });
                 }
-                Ok(dst)
+                // Stash the call's result in a release slot so
+                // emit_decrefs_for at the call's free_at can emit
+                // LoadLocal + ReleaseValueRegion (uniform for bound
+                // and unbound Calls). The Release is gated by the
+                // call's runtime region_id so passthrough calls
+                // (whose result lives in a different region) skip.
+                Ok(self.wrap_call_with_release_slot(dst))
             }
         } else {
             // === Splice path: build args array, then CallArrayMut ===
@@ -162,7 +168,7 @@ impl<'a> Lowerer<'a> {
                     func: func_reg,
                     args: final_args,
                 });
-                Ok(dst)
+                Ok(self.wrap_call_with_release_slot(dst))
             }
         }
     }

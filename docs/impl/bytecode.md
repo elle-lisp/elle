@@ -59,9 +59,11 @@ Emit signal val    emit a signal
 
 ### Regions
 ```text
-RegionEnter        begin scope allocation region
-RegionExit         end scope allocation, free region objects
+IncrefRegion rid   increment region rid's reference count
+DecrefRegion rid   decrement region rid; free pages when RC hits 0
 ```
+`DecrefRegion` is the only region-demise bytecode; there is no
+separate `FreeRegion`. See `docs/regions.md` for the full model.
 
 ## Encoding
 

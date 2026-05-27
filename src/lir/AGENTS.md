@@ -165,11 +165,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
-| `RegionEnter` | (none) | Push scope mark on FiberHeap (effective for all fibers including root) |
-| `RegionExit` | (none) | Pop scope mark and release scoped objects (effective for all fibers including root) |
-| `FreeRegion` | (none) | Release region's allocations (from Tofte-Talpin solver) |
-| `IncrefRegion` | (none) | Increment cross-region reference count |
-| `DecrefRegion` | (none) | Decrement cross-region reference count |
+| `IncrefRegion` | (none) | Increment a region's reference count (cross-region reference taken) |
+| `DecrefRegion` | (none) | Decrement a region's reference count; free pages when RC hits 0 (sole region-demise opcode) |
 
 ## Emit and Call Site Metadata
 
@@ -193,26 +190,29 @@ This matches the interpreter's stack state when yield propagates through a call.
 
 ## Allocation regions
 
-`FreeRegion`, `IncrefRegion`, and `DecrefRegion` instructions manage
-region-allocated objects. The lowerer emits these based on output from
-the Tofte-Talpin region solver (`src/hir/regions.rs`), not a local
-escape analysis pass. The solver determines which scopes can reclaim
-their allocations and which values escape to enclosing regions.
+`IncrefRegion` and `DecrefRegion` are the only region-lifecycle
+bytecodes. The lowerer emits them based on output from the region
+solver (`src/hir/regions.rs`), not a local escape analysis pass.
+`DecrefRegion` is the sole region-demise opcode — there is no
+`FreeRegion`.
 
-The solver produces `RegionInfo` containing `alloc_region` (which region
-each allocation site belongs to) and `scope_region` (which region each
-scope introduced). The lowerer emits `FreeRegion` at scope exits whose
-region has at least one allocation site, `IncrefRegion`/`DecrefRegion`
-pairs for cross-region references, and `MakeCaptureCell` for mutable
-captured bindings that mediate escape the solver cannot track.
+The solver produces `RegionInfo` containing `alloc_region` (which
+region each allocation site is born into) and, per region,
+`RegionData { free_at: HirId, ... }` — the program point at which the
+compiler emits the region's `DecrefRegion`. Plus `cross_region_refs`
+for the cross-region edges that drive `IncrefRegion` emission.
 
-Function bodies never get region instructions — only `Let`, `Letrec`,
-`Block`, and `Loop` scopes do.
+At lowering time the lowerer reverse-indexes `region_data` to ask
+"which regions demise at this HirId?" and emits one `DecrefRegion(rid)`
+per region in that set after lowering the HIR node. This replaces the
+old per-scope `scope_region_id` mechanism — scopes no longer own
+regions.
 
-`break` emits compensating `FreeRegion` instructions for each region
-entered between the break site and the target block. The lowerer tracks
-`scope_region_id` and each `BlockLowerContext` records
-`region_depth_at_entry`.
+`break` emits compensating `DecrefRegion` instructions for each
+region whose `free_at` lies between the break site and the target
+block. The `BlockLowerContext` records the relevant `free_at` set at
+entry so the break path can fire the same decrefs that a fall-through
+exit would have.
 
 **Compile-time scope stats** (`ScopeStats`): The lowerer counts how many
 scopes were analyzed, how many qualified for scope allocation, and the

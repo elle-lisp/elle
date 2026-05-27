@@ -596,15 +596,15 @@ concurrency layer.
 
 ## Memory
 
-- **No garbage collector.** ([docs/memory.md](docs/memory.md)) Memory is reclaimed deterministically through three mechanisms, all derived from the same static analysis that drives the signal system:
+- **No garbage collector.** ([docs/regions.md](docs/regions.md)) Memory is reclaimed deterministically through per-region reference counting:
 
-  - **Per-fiber bump arenas:** Each fiber owns a `FiberHeap` backed by a bump arena (sequential 64KB pages). When a fiber finishes, its entire arena is freed — no traversal, no mark phase, no sweep. Bump allocation is O(1) with strong cache locality and zero fragmentation.
+  - **Every value is born in a region.** A region owns physical pages and a reference count. The compiler assigns each allocation to a region whose lifetime matches the value's actual point of demise — not its syntactic scope.
 
-  - **Zero-copy inter-fiber sharing:** The compiler knows at fiber-creation time whether a fiber can yield (signal inference). Yielding fibers route all allocations to a `SharedAllocator` owned by the parent — the parent reads yielded values directly from shared memory. Silent fibers skip this entirely and allocate into their own arena with no indirection. No deep copy, no serialization, no runtime decision.
+  - **`DecrefRegion` at the point of demise.** The compiler emits one `DecrefRegion` per region at the HirId where the value's last use ends (`free_at`). When the region's RC hits 0, its pages are freed and cascade decrefs fire for any cross-region references found in the region's contents. `IncrefRegion` increments RC at cross-region edges; the runtime also auto-increfs at allocation and at mutable-collection push/put.
 
-  - **Escape-analysis-driven scope reclamation:** The compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it emits `RegionEnter`/`RegionExit` bytecodes that rewind the arena to a mark at scope exit, recycling memory without waiting for fiber death.
+  - **Merging is the optimization.** Regions with identical `free_at` and identical incref topology may be merged so that one `DecrefRegion` covers multiple allocations. Merging is monotonic and iterative; failure to merge is a performance concern, never a correctness one.
 
-- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Scope reclamation recycles memory within a fiber's lifetime. The ownership topology — private arena per fiber, shared arena per yield boundary — is the minimal structure that gives per-fiber lifecycle management and zero-copy yield simultaneously. See [`docs/memory.md`](docs/memory.md) for the full model.
+- **Long-running fiber schedulers don't accumulate garbage.** Each region is freed independently when its RC hits 0 — fibers do not "own" regions, and a value yielded to a parent stays alive as long as the parent references it. See [`docs/regions.md`](docs/regions.md) for the full model.
 
 ## Execution Backends
 

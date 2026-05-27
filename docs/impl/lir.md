@@ -26,8 +26,9 @@ The lowerer (`src/lir/lower/`) transforms HIR trees into LIR:
    register
 3. **Block construction** — control flow (if, loops, match) creates
    basic blocks connected by terminators
-4. **Escape analysis** — determines which scopes can use region-based
-   allocation (RegionEnter/RegionExit)
+4. **Region assignment** — every allocation is routed to a region
+   (see `docs/regions.md`); the lowerer emits `DecrefRegion` at each
+   region's `free_at` HirId and `IncrefRegion` at cross-region edges
 
 ## Emit metadata
 

@@ -78,6 +78,18 @@ pub struct OutlivesConstraint {
     pub source: HirId,
 }
 
+/// Per-region metadata produced by region inference.
+///
+/// `free_at` is the HirId at which the lowerer emits the region's
+/// compiler-owned `DecrefRegion`. Every region has exactly one
+/// `free_at` — there is no `Option<HirId>`. If the region's value
+/// has no use anywhere, `free_at` equals the allocation HirId
+/// itself (decref fires immediately after the alloc).
+#[derive(Debug, Clone)]
+pub struct RegionData {
+    pub free_at: HirId,
+}
+
 /// Results of region inference for a compilation unit.
 ///
 /// Every allocation site has a solved region in `alloc_region`.
@@ -97,9 +109,30 @@ pub struct RegionInfo {
     /// Cross-region references detected by the solver.
     /// Each entry is (store_site, source_region, target_region) where a
     /// value in source_region is stored into a structure in target_region.
-    /// The lowerer emits IncrefRegion(source) at the store site and
-    /// DecrefRegion(source) at FreeRegion(target).
+    /// The lowerer emits IncrefRegion(source) at the store site; the
+    /// runtime cascade at `DecrefRegion(target)` releases the source
+    /// reference when target's RC hits 0.
     pub cross_region_refs: Vec<(HirId, Region, Region)>,
+    /// Per-region metadata (free_at HirId, etc.).
+    ///
+    /// Populated by region inference (impl step 11).
+    pub region_data: HashMap<Region, RegionData>,
+    /// Per-lambda HirId, the set of source regions that flow as the
+    /// lambda body's tail return value. The lowerer uses this to
+    /// suppress the compiler-emitted `DecrefRegion` for those regions
+    /// inside the lambda's body — ownership of the initial RC=1 is
+    /// transferred to the caller, which holds the value through the
+    /// `Return` boundary. Without this transfer, the tail `DecrefRegion`
+    /// would fire after the `LoadLocal` that loads the return value
+    /// and before `Return`, producing a use-after-free.
+    pub lambda_tail_regions: HashMap<HirId, Vec<Region>>,
+    /// Set of regions created by `alloc_here` at a Call HirId. Their
+    /// compile-time region ID is just a placeholder for the runtime
+    /// region of the callee's returned value (which the caller cannot
+    /// statically name). The lowerer emits `ReleaseValueRegion(reg)`
+    /// at these regions' `free_at` instead of `DecrefRegion(rid)`,
+    /// reading the runtime region from the value at last use.
+    pub call_result_regions: FxHashSet<Region>,
     /// Statistics.
     pub stats: RegionStats,
 }
@@ -112,6 +145,9 @@ impl RegionInfo {
             binding_region: HashMap::new(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),
+            region_data: HashMap::new(),
+            lambda_tail_regions: HashMap::new(),
+            call_result_regions: FxHashSet::default(),
             stats: RegionStats::default(),
         }
     }

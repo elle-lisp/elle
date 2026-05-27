@@ -110,7 +110,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) region_exit_call: FuncId,
     #[allow(dead_code)]
     pub(crate) region_rotate: FuncId,
-    pub(crate) free_region: FuncId,
     pub(crate) incref_region: FuncId,
     pub(crate) decref_region: FuncId,
     #[allow(dead_code)]
@@ -355,10 +354,6 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_region_rotate as *const u8,
     );
     builder.symbol(
-        "elle_jit_free_region",
-        dispatch::elle_jit_free_region as *const u8,
-    );
-    builder.symbol(
         "elle_jit_incref_region",
         dispatch::elle_jit_incref_region as *const u8,
     );
@@ -586,7 +581,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
         region_exit_call: declare(module, "elle_jit_region_exit_call", &void_to_value)?,
         region_rotate: declare(module, "elle_jit_region_rotate", &void_to_value)?,
-        free_region: declare(module, "elle_jit_free_region", &make_sig(module, &[I32], &[]))?,
         incref_region: declare(module, "elle_jit_incref_region", &make_sig(module, &[I32], &[]))?,
         decref_region: declare(module, "elle_jit_decref_region", &make_sig(module, &[I32], &[]))?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,

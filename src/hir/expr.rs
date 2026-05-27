@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identifier for a HIR node. Used as a key for analysis side
 /// tables (region assignments, type annotations, etc.).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct HirId(pub u32);
 
 /// Global monotonic counter for HirId assignment.

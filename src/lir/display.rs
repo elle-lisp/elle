@@ -253,9 +253,12 @@ impl fmt::Display for LirInstr {
             }
 
             // === Allocation Regions ===
-            LirInstr::FreeRegion { region_id } => write!(f, "free-region {region_id}"),
             LirInstr::IncrefRegion { region_id } => write!(f, "incref-region {region_id}"),
             LirInstr::DecrefRegion { region_id } => write!(f, "decref-region {region_id}"),
+            LirInstr::ReleaseValueRegion {
+                src,
+                expected_region_id,
+            } => write!(f, "release-value-region {src} ={expected_region_id}"),
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
                 write!(f, "push-param-frame(")?;
@@ -542,8 +545,12 @@ mod tests {
     #[test]
     fn test_region_instructions() {
         assert_eq!(
-            format!("{}", LirInstr::FreeRegion { region_id: 1 }),
-            "free-region 1"
+            format!("{}", LirInstr::DecrefRegion { region_id: 1 }),
+            "decref-region 1"
+        );
+        assert_eq!(
+            format!("{}", LirInstr::IncrefRegion { region_id: 2 }),
+            "incref-region 2"
         );
     }
 }
