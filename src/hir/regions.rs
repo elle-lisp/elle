@@ -549,7 +549,15 @@ impl RegionInference {
                 let val_regions = self.walk(value);
                 for b in pattern.bindings().bindings {
                     self.binding_region.insert(b, self.current_region);
-                    self.binding_regions.insert(b, Vec::new());
+                    // Destructured bindings may hold values that live in
+                    // the source's region(s) — `(rest list)` returns a
+                    // sublist sharing list's region; `(first xs)` on a
+                    // list of heap values returns an element in xs's
+                    // region. Conservatively propagate the source's
+                    // regions so uses of the destructured binding emit
+                    // the right cross-region increfs (and extend
+                    // free_at through binding uses; see liveness.rs).
+                    self.binding_regions.insert(b, val_regions.clone());
                 }
                 val_regions
             }
@@ -1090,6 +1098,9 @@ pub fn analyze_regions_with(
             .or_default()
             .extend(top_level_regions);
     }
+    // Capture binding_regions before build_info consumes ri — used
+    // below to extend free_at through binding chains.
+    let inference_binding_regions = std::mem::take(&mut ri.binding_regions);
     let mut info = ri.build_info();
 
     // Populate `region_data.free_at` from per-HirId last-use analysis.
@@ -1111,6 +1122,43 @@ pub fn analyze_regions_with(
                 }
             })
             .or_insert(RegionData { free_at: lu });
+    }
+
+    // Extend free_at through binding chains: when a binding b holds a
+    // value whose region r is somewhere else (e.g., `(let [result (let
+    // [f ...] (array ok val))])`, `result`'s value lives in `array`'s
+    // region — bound through the inner `let`'s body), the alloc-id
+    // lookup above doesn't see r through b's uses because compute_last_use
+    // only extends last_use for the binding's init HirId, not the
+    // nested allocation's HirId. Without this extension r is freed at
+    // the inner expression's tail, before b is ever read.
+    //
+    // For each binding b, find the max last_use among b's uses, and
+    // extend region_data[r].free_at for every region r in the
+    // inference's binding_regions[b].
+    let binding_uses = &du.uses;
+    for (b, regions) in &inference_binding_regions {
+        if regions.is_empty() {
+            continue;
+        }
+        let max_use = binding_uses
+            .get(b)
+            .into_iter()
+            .flat_map(|v| v.iter())
+            .map(|use_id| last_use.get(use_id).copied().unwrap_or(*use_id))
+            .max();
+        if let Some(lu) = max_use {
+            for &r in regions {
+                info.region_data
+                    .entry(r)
+                    .and_modify(|d| {
+                        if lu > d.free_at {
+                            d.free_at = lu;
+                        }
+                    })
+                    .or_insert(RegionData { free_at: lu });
+            }
+        }
     }
 
     info

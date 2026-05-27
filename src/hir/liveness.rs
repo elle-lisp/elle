@@ -428,8 +428,13 @@ pub fn compute_last_use(
     builder.walk(hir, false, hir.id);
 
     // Override last_use for binding-bound allocations to span all uses
-    // of the binding.
-    for (binding, init_id) in builder.binding_init.clone() {
+    // of the binding. A single binding identity can have multiple init
+    // sites at file scope (top-level re-defs like the destructure tests
+    // that reuse `a`, `r` across `(def (a & r) ...)` and `(def (a b & r)
+    // ...)` share the same Binding via analyze_file_letrec). Extend
+    // last_use for every init site so each value's region survives
+    // until the latest binding reference.
+    for (binding, init_ids) in builder.binding_init.clone() {
         let max_effective = uses
             .get(&binding)
             .into_iter()
@@ -442,8 +447,10 @@ pub fn compute_last_use(
                     .unwrap_or(*use_id)
             })
             .max();
-        let chosen = max_effective.unwrap_or(init_id);
-        builder.last_use.insert(init_id, chosen);
+        for init_id in init_ids {
+            let chosen = max_effective.unwrap_or(init_id);
+            builder.last_use.insert(init_id, chosen);
+        }
     }
 
     builder.last_use
@@ -452,9 +459,12 @@ pub fn compute_last_use(
 /// Helper for computing per-HirId last-use.
 struct LastUseBuilder {
     last_use: HashMap<HirId, HirId>,
-    /// For each binding, the HirId of its initializer (Let/Letrec/Loop
-    /// init or Define value).
-    binding_init: HashMap<Binding, HirId>,
+    /// For each binding, the HirIds of its initializers (Let/Letrec/Loop
+    /// init or Define value). A single Binding can have multiple init
+    /// sites at file scope (top-level re-defs share the same Binding
+    /// via analyze_file_letrec), so this is a Vec rather than a single
+    /// id; compute_last_use extends last_use for every init.
+    binding_init: HashMap<Binding, Vec<HirId>>,
 }
 
 impl LastUseBuilder {
@@ -476,7 +486,7 @@ impl LastUseBuilder {
             }
             HirKind::Emit { value, .. } => self.walk(value, true, hir.id),
             HirKind::Define { value, binding } => {
-                self.binding_init.insert(*binding, value.id);
+                self.binding_init.entry(*binding).or_default().push(value.id);
                 self.walk(value, true, hir.id);
             }
             HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
@@ -486,7 +496,19 @@ impl LastUseBuilder {
             }
             HirKind::MakeCell { value } => self.walk(value, true, hir.id),
             HirKind::DerefCell { cell } => self.walk(cell, true, hir.id),
-            HirKind::Destructure { value, .. } => self.walk(value, true, hir.id),
+            HirKind::Destructure { pattern, value, .. } => {
+                // Register each destructured binding as bound to this
+                // value's init id so the last-use override picks up
+                // uses of the destructured names — same mechanism as
+                // Let/Letrec. Without this, the value's allocation's
+                // last_use stops at the destructure node and any
+                // region it lives in is freed before the destructured
+                // bindings are read.
+                for b in pattern.bindings().bindings {
+                    self.binding_init.entry(b).or_default().push(value.id);
+                }
+                self.walk(value, true, hir.id);
+            }
             HirKind::Intrinsic { args, .. } => {
                 for a in args {
                     self.walk(a, true, hir.id);
@@ -550,21 +572,21 @@ impl LastUseBuilder {
             // propagates (its value is the form's result).
             HirKind::Let { bindings, body } => {
                 for (b, init) in bindings {
-                    self.binding_init.insert(*b, init.id);
+                    self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
                 self.walk(body, false, hir.id);
             }
             HirKind::Letrec { bindings, body } => {
                 for (b, init) in bindings {
-                    self.binding_init.insert(*b, init.id);
+                    self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
                 self.walk(body, false, hir.id);
             }
             HirKind::Loop { bindings, body } => {
                 for (b, init) in bindings {
-                    self.binding_init.insert(*b, init.id);
+                    self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
                 self.walk(body, false, hir.id);
