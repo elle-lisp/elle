@@ -964,7 +964,19 @@ impl AsyncBackend {
                 crate::io::uring::submit_uring_watch_next(ring, id, fd, buffer_pool, buf_handle)?;
             }
             PlatformBackend::ThreadPool(_) => {
+                #[cfg(any(target_os = "linux", target_os = "android"))]
                 network_pool.submit(id, PoolOp::SigfdRead { fd })?;
+                #[cfg(target_os = "macos")]
+                network_pool.submit(id, PoolOp::KqSigRead { fd })?;
+                #[cfg(not(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "macos"
+                )))]
+                {
+                    let _ = (id, fd);
+                    return Err("sig-next: not supported on this platform".into());
+                }
             }
         }
 
