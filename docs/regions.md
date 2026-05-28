@@ -137,6 +137,57 @@ allocations and silently never frees them. This is wrong. It allows
 analysis gaps to hide as leaks instead of surfacing as crashes. Every
 occurrence of region 0 in the codebase is a defect to be eliminated.
 
+## Every region must correspond to a real allocation
+
+The dual of the above: every region the solver hands out must
+correspond to an `alloc_in_region` instruction the lowerer actually
+emits. A region with no allocation is just as broken as an allocation
+with no region: its `DecrefRegion` decrements a counter that no
+`IncrefRegion` ever raised, producing underflows or — worse — silent
+conflations with neighbouring region IDs reused by other allocations.
+
+The criterion for "this HIR node allocates" is therefore not
+syntactic ("DerefCell looks like it produces a value") but
+operational: **does the lowerer emit an instruction at this HirId
+that increments a region's RC?** If yes, the node allocates and the
+solver must assign it a region. If no, the node is transparent at
+this layer and the solver must not manufacture a region for it — pass
+the child's regions through instead.
+
+Concretely:
+
+- `Call`, `Eval`: opaque. The result lives in a region the outer
+  compilation didn't allocate. The solver hands out a placeholder
+  region and registers it in `call_result_regions`; the lowerer
+  emits `ReleaseValueRegion(expected)` at the free_at, value-gated so
+  the runtime skips the decref when `region_of(value)` doesn't match
+  the placeholder.
+- `Lambda`, allocating `Intrinsic` (`%pair`, `%freeze`, `%thaw`):
+  real allocation. Solver assigns a region; lowerer emits
+  `MakeClosure`/`List`/`Freeze`/`Thaw` via `emit_alloc`, stamping
+  the bytecode with the region.
+- `MakeCell`, `DerefCell`, `SetCell`: **transparent** under the
+  current double-handling contract (see `src/lir/lower/binding.rs`
+  lines 698-718). The actual cell allocation happens implicitly in
+  `lower_let`/`lower_letrec` at the binding site (`MakeCaptureCell`
+  emitted via `emit_alloc` at the *Let's* HirId); the unwrap at
+  reads happens implicitly in `lower_var` via `LoadCapture`. The
+  `MakeCell`/`DerefCell`/`SetCell` HIR markers exist only for the
+  analyses between functionalize and the lowerer; the lowerer emits
+  zero instructions for them. The solver must not call `alloc_here`
+  at these nodes.
+- `Intrinsic` ops that do not allocate (`%get`, `%put`, `%del`,
+  `%length`, `%type-of`): the result is an existing value (or an
+  immediate). `%get`/`%put`/`%del` pass through `arg_regions[0]` —
+  the result lives in the input collection's region. `%length`/
+  `%type-of` return no region.
+
+The same rule will eventually retire the `MakeCell`/`DerefCell`/
+`SetCell` HIR markers entirely (Phase 3 of the binding-lowerer
+work) — they're scaffolding that survives only as long as the
+lowerer's "implicit cell creation" path coexists with
+functionalize's "explicit cell ops" path.
+
 ## Region assignment is compile-time
 
 The solver analyzes data flow in the functionalized HIR and assigns

@@ -47,36 +47,44 @@ floor we ship.
 
 ## Findings that should inform Step 2's redesign
 
-### Finding 1: the plan's `Hir::allocates` is wrong about DerefCell
+### Finding 1: phantom regions — RESOLVED in commit 558f2746
 
-`anf-plan.md` lists `DerefCell{..}` as allocating. Wrapping it broke
-core.lisp's compile: the exports closure came back with NIL for every
-captured binding.
+Original framing (kept for history): `anf-plan.md` listed `DerefCell`
+as allocating. Wrapping it broke core.lisp's compile (exports came
+back NIL) because the lowerer emits no instruction at the DerefCell
+node — `lower_deref_cell` is transparent and `lower_var` auto-unwraps
+needs-capture bindings via `LoadCapture`. The region the solver
+manufactured had no allocation behind it; its `DecrefRegion`
+decremented a counter that no `IncrefRegion` had ever raised.
 
-Why: `src/lir/lower/binding.rs::lower_deref_cell` is *transparent* — it
-delegates straight to `lower_expr(cell)`, and `lower_var` auto-unwraps
-needs-capture bindings via `LoadCapture`. There is no real heap alloc
-at the DerefCell node. Region inference at
-`src/hir/regions.rs:501-507` calls `alloc_here(hir.id)` anyway,
-treating it as a *phantom* region — "opaque, treat as a fresh
-allocation; the runtime tracks the actual referent." So the region
-exists at compile time but corresponds to no runtime allocation.
+What landed: the audit generalized to a rule and fixed six places
+that violated it. See `docs/regions.md` § "Every region must
+correspond to a real allocation." Summary of the changes:
 
-When ANF wraps `(deref-cell x)` → `(let [t (deref-cell x)] t)`:
-- `t`'s binding gets that phantom region in `binding_regions[t]`.
-- Chain extension at `src/hir/regions.rs:1140` extends the phantom
-  region's `free_at` to wherever `t` is consumed.
-- `emit_decrefs_for` at that `free_at` emits `DecrefRegion(phantom)`.
-- At runtime, decref'ing a region that holds zero objects either
-  goes negative or double-counts neighbouring regions.
+- `MakeCell`, `DerefCell`: walk passes child regions through; no
+  `alloc_here`. (The actual cell allocation lives at the Let's
+  `MakeCaptureCell`, not at these HIR markers.)
+- `Eval`: keeps `alloc_here` but now registers in
+  `call_result_regions`, mirroring `Call`. `lower_eval` wraps the
+  result with `wrap_call_with_release_slot`, so `emit_decrefs_for`
+  emits `LoadLocal + ReleaseValueRegion(expected)` (value-gated;
+  runtime skips the decref when `region_of(value)` doesn't match
+  the placeholder — safe by construction, since Eval's result
+  always lives in a region the outer compilation didn't allocate).
+- `IntrinsicOp::allocates`: trimmed to `{Pair, Freeze, Thaw}`.
+  Only `Pair` was using `emit_alloc`; `Freeze` and `Thaw` now do
+  too. `Put`/`Del` mutate in place; `Get` returns an existing
+  value; `Length`/`TypeOf` return immediates / interned values.
+- Intrinsic walk: `Get`/`Put`/`Del` pass through `arg_regions[0]`
+  (their result lives in the input collection's region).
 
-Empirically: removing DerefCell from `Hir::allocates()` is what made
-core.lisp's exports come back as proper closures instead of all-nil.
-
-**Action for Step 2**: drop DerefCell from `Hir::allocates()`. Add a
-comment that ties it to `regions.rs:501-507`. Likely also worth
-auditing `MakeCell` and `Eval` against the same "phantom region vs.
-real allocation" question before keeping them in the predicate.
+For ANF Step 2 going forward: `Hir::allocates()` should be defined
+operationally — true iff the lowerer emits an instruction at this
+HirId that increments a region's RC — *not* by HIR shape. Under that
+rule, `MakeCell`/`DerefCell` are NOT in `allocates()`. `Eval` and
+`Call` are. Allocating intrinsics are per `IntrinsicOp::allocates`,
+which now matches what `lir/lower/expr.rs` actually does with
+`emit_alloc`.
 
 ### Finding 2: `liveness::walk` needs to propagate `parent_consumes` through Let body
 

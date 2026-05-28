@@ -792,6 +792,32 @@ mod tests {
     }
 
     #[test]
+    fn release_emitted_for_eval_result() {
+        // `(fn () (begin (eval 1) nil))` — the Eval's result is
+        // discarded. Eval's result region is a placeholder in the
+        // outer compilation (the actual value lives in the inner
+        // compilation's region). The regions walk registers Eval's
+        // placeholder in `call_result_regions`, mirroring Call, and
+        // `lower_eval` wraps the result with
+        // `wrap_call_with_release_slot`. `emit_decrefs_for` then
+        // emits `LoadLocal slot + ReleaseValueRegion(expected)` at
+        // the Eval's free_at; the runtime gate skips the decref when
+        // `region_of(value)` doesn't match the placeholder — safe by
+        // construction.
+        //
+        // Without this wiring (pre-fix), the walk's `alloc_here` for
+        // Eval's HirId would land in the else branch of
+        // `emit_decrefs_for`, which emits raw `DecrefRegion(rid)` for
+        // a region the runtime never allocated into — counter
+        // underflow or conflation with a neighbouring region id.
+        let module = compile_to_lir("(fn () (begin (eval 1) nil))");
+        assert!(
+            count_release_value_regions(&module) >= 1,
+            "expected at least one ReleaseValueRegion for the (eval ...) result",
+        );
+    }
+
+    #[test]
     #[ignore = "merging enabled at impl step 16"]
     fn decref_region_emitted_once_for_merged_pair() {
         // `(let [x (string "a") y (string "b")] (g x y))` has two
