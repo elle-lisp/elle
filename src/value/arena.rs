@@ -197,7 +197,27 @@ pub fn tracked_extend(collection: Value, elems: &[Value]) -> Value {
 #[inline]
 pub unsafe fn deref(value: Value) -> &'static HeapObject {
     let ptr = value.as_heap_ptr().unwrap() as *const HeapObject;
-    &*ptr
+    let obj = &*ptr;
+    // Tag/object agreement: the Value's tag bits must match the heap
+    // object's discriminant. A mismatch is the canonical signature
+    // of a use-after-free: the original allocation was freed (region
+    // teardown, slab reuse) and the same address was repurposed for
+    // a different HeapObject variant. The stale Value still has the
+    // original tag but the memory now holds something else.
+    //
+    // Caught telemetry.lisp's bug (LStructMut tagged TAG_STRUCT after
+    // an over-eager region free). If you hit this in debug, walk back
+    // to find what freed the region while a Value still referenced it.
+    debug_assert!(
+        value.tag == obj.value_tag(),
+        "tag/object mismatch — use-after-free? value.tag=0x{:x} object={} \
+         (variant's expected tag=0x{:x}); see docs/regions.md and \
+         CONTRIBUTING.md on progressive constraint",
+        value.tag,
+        obj.type_name(),
+        obj.value_tag(),
+    );
+    obj
 }
 
 /// Current number of live objects in the thread-local (root) heap.
@@ -340,5 +360,44 @@ mod tests {
             0,
             "pop should decref val's region to 0 (freed)"
         );
+    }
+
+    #[test]
+    fn deref_accepts_consistent_tag_and_object() {
+        // Sanity: a Value constructed via the safe constructor has
+        // matching tag/object — deref does not panic.
+        crate::value::fiberheap::ensure_and_install_root_heap();
+        let (val, _rid) =
+            alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+        let obj = unsafe { deref(val) };
+        assert!(matches!(obj, HeapObject::Pair(_)));
+    }
+
+    #[test]
+    #[should_panic(expected = "tag/object mismatch")]
+    fn deref_panics_on_tag_object_mismatch() {
+        // Construct a Value whose tag bits disagree with the heap
+        // object's discriminant by reaching in directly. This is the
+        // canonical signature of a use-after-free: the original
+        // allocation was freed and the same address was repurposed
+        // for a different HeapObject variant; the stale Value still
+        // carries the original tag.
+        //
+        // Caught telemetry.lisp's bug — type_name returned "@struct"
+        // (heap object IS LStructMut) but is_struct_mut() returned
+        // false (Value's tag bits said TAG_STRUCT, immutable). The
+        // assertion fires at the deref boundary, closest to the
+        // observable symptom and farthest from the manual instrument-
+        // and-trace investigation it used to require.
+        crate::value::fiberheap::ensure_and_install_root_heap();
+        let (good, _rid) =
+            alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+        // Swap the tag to something other than TAG_CONS to induce
+        // mismatch. TAG_STRUCT (14) is the symptom from telemetry.
+        let bad = Value {
+            tag: crate::value::repr::TAG_STRUCT,
+            payload: good.payload,
+        };
+        let _ = unsafe { deref(bad) };
     }
 }
