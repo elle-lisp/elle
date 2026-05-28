@@ -334,7 +334,12 @@ impl<'a> Lowerer<'a> {
             expr: expr_reg,
             env: env_reg,
         });
-        Ok(dst)
+        // Mirror Call: stash the result in a release slot so
+        // `emit_decrefs_for` can emit `LoadLocal + ReleaseValueRegion`
+        // (value-gated) at the Eval's free_at. Eval's result lives in
+        // a region the outer compilation didn't allocate; the runtime
+        // gate skips the decref when the regions don't match.
+        Ok(self.wrap_call_with_release_slot(dst))
     }
 
     pub(super) fn lower_emit(

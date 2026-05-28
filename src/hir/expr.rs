@@ -560,19 +560,18 @@ impl IntrinsicOp {
         }
     }
 
-    /// Does this intrinsic allocate heap memory?
+    /// Does this intrinsic allocate heap memory at this HIR node?
+    ///
+    /// True iff the lowerer for this op uses `emit_alloc` (which
+    /// annotates the resulting instruction with a region id) — i.e.
+    /// the runtime creates a new heap value in a region owned by
+    /// this HIR node. `Put`/`Del` mutate the input collection
+    /// in place; `Get`/`Length`/`TypeOf` return a value or
+    /// immediate that already lives somewhere (or doesn't need a
+    /// region at all); see the Intrinsic walk in `regions.rs` for
+    /// how those flow.
     pub fn allocates(self) -> bool {
-        matches!(
-            self,
-            Self::Pair
-                | Self::Freeze
-                | Self::Thaw
-                | Self::Put
-                | Self::Del
-                | Self::TypeOf
-                | Self::Length
-                | Self::Get
-        )
+        matches!(self, Self::Pair | Self::Freeze | Self::Thaw)
     }
 }
 

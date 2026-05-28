@@ -1267,13 +1267,13 @@ impl<'a> Lowerer<'a> {
             }
             // Mutability
             IntrinsicOp::Freeze => {
-                self.emit(LirInstr::Freeze {
+                self.emit_alloc(LirInstr::Freeze {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::Thaw => {
-                self.emit(LirInstr::Thaw {
+                self.emit_alloc(LirInstr::Thaw {
                     dst,
                     src: arg_regs[0],
                 });

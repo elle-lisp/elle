@@ -209,8 +209,12 @@ impl RegionInference {
             | HirKind::Quote(_) => Vec::new(),
 
             HirKind::MakeCell { value } => {
-                let _ = self.walk(value);
-                vec![self.alloc_here(hir.id)]
+                // Transparent at the lowerer: `lower_make_cell` delegates
+                // to `lower_expr(value)` and the actual cell allocation
+                // happens implicitly in `lower_let`/`lower_letrec` at the
+                // binding site. So MakeCell introduces no instruction at
+                // this HirId — pass the value's regions through.
+                self.walk(value)
             }
 
             HirKind::Lambda {
@@ -499,11 +503,14 @@ impl RegionInference {
             }
 
             HirKind::DerefCell { cell } => {
-                let _ = self.walk(cell);
-                // Result is opaque (cell contents may have been written
-                // from any region). Treat as a fresh allocation at this
-                // node; the runtime tracks the actual referent.
-                vec![self.alloc_here(hir.id)]
+                // Transparent at the lowerer: `lower_deref_cell` delegates
+                // to `lower_expr(cell)` and `lower_var` auto-unwraps the
+                // CaptureCell via `LoadCapture`. No instruction is emitted
+                // at this HirId. The loaded value lives in whichever
+                // region(s) flowed into the cell via its initial value
+                // or SetCell — walking the cell-Var returns exactly that
+                // set via `binding_regions[b]`.
+                self.walk(cell)
             }
 
             HirKind::Emit { value, .. } => {
@@ -517,7 +524,16 @@ impl RegionInference {
             HirKind::Eval { expr, env } => {
                 let _ = self.walk(expr);
                 let _ = self.walk(env);
-                vec![self.alloc_here(hir.id)]
+                // Eval runs an inner compilation whose allocations live
+                // in regions opaque to the outer. Mirror Call: allocate
+                // a placeholder region and register it as a Call-result
+                // so the lowerer emits `ReleaseValueRegion(expected)`
+                // (value-gated) at the Eval's free_at. The runtime
+                // skips the decref when `region_of(value)` doesn't
+                // match the placeholder — safe by construction here.
+                let result_r = self.alloc_here(hir.id);
+                self.call_result_regions.insert(result_r);
+                vec![result_r]
             }
 
             HirKind::Assign { target, value } => {
@@ -616,11 +632,20 @@ impl RegionInference {
                     }
                 }
 
+                // Pass-through ops: result is the input collection
+                // (or a value already living in some region the input
+                // names). No new allocation; the region of the result
+                // is the region of arg 0.
+                use crate::hir::expr::IntrinsicOp;
+                if matches!(op, IntrinsicOp::Get | IntrinsicOp::Put | IntrinsicOp::Del) {
+                    return arg_regions.into_iter().next().unwrap_or_default();
+                }
+
                 if op.allocates() {
                     let result_r = self.alloc_here(hir.id);
                     // %pair: car and cdr are stored inside the Pair.
                     // Edge from each arg's regions to the pair's region.
-                    if *op == crate::hir::expr::IntrinsicOp::Pair {
+                    if *op == IntrinsicOp::Pair {
                         for ars in &arg_regions {
                             for &r in ars {
                                 self.record_edge(hir.id, r, result_r);
