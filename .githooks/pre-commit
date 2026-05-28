@@ -1,6 +1,11 @@
 #!/bin/sh
-# Auto-format staged .lisp files with elle fmt
+# Pre-commit hook:
+#   1. Auto-format staged .lisp files with `elle fmt` and re-stage.
+#   2. If staged .rs files exist, gate on cargo fmt / clippy / rustdoc —
+#      same checks `make test` runs, scoped to Rust-touching commits so
+#      Lisp-only commits don't pay the Cargo cost.
 
+# ── Lisp ────────────────────────────────────────────────────────────
 if [ -n "$ELLE" ]; then
   ELLE="$ELLE"
 elif [ -x ./target/release/elle ]; then
@@ -11,9 +16,27 @@ else
   ELLE=elle
 fi
 
-staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.lisp')
-[ -z "$staged" ] && exit 0
+staged_lisp=$(git diff --cached --name-only --diff-filter=ACM -- '*.lisp')
+if [ -n "$staged_lisp" ]; then
+  for f in $staged_lisp; do
+    "$ELLE" fmt "$f" && git add "$f"
+  done
+fi
 
-for f in $staged; do
-  "$ELLE" fmt "$f" && git add "$f"
-done
+# ── Rust ────────────────────────────────────────────────────────────
+if git diff --cached --name-only | grep -q '\.rs$'; then
+  if ! cargo fmt -- --check; then
+    echo "pre-commit: cargo fmt check failed. Run 'cargo fmt' and re-stage."
+    exit 1
+  fi
+
+  if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
+    echo "pre-commit: clippy failed. Fix warnings and re-stage."
+    exit 1
+  fi
+
+  if ! RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps; then
+    echo "pre-commit: rustdoc failed. Fix doc warnings and re-stage."
+    exit 1
+  fi
+fi

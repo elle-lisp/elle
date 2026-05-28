@@ -762,17 +762,40 @@ fn watch_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
 /// read return 0 (EOF) and the receiver is dead.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
+    // The signalfd is created with SFD_NONBLOCK (see src/io/sigfd.rs) so the
+    // io_uring path can rely on the kernel's poll-then-read pipeline. The
+    // threadpool path has no such pipeline: a bare read(2) on a non-blocking
+    // fd before the signal arrives returns -1/EAGAIN. Wait for POLLIN first,
+    // looping on EINTR. POLLHUP on signalfd is unusual (no shutdown(2)
+    // analogue) but we treat it as EOF for parity with WatchRead.
     let entry_size = std::mem::size_of::<libc::signalfd_siginfo>();
-    let mut buf = vec![0u8; entry_size * 8];
-    let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-    if ret < 0 {
-        (
-            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-            Vec::new(),
-        )
-    } else {
+    loop {
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let pret = unsafe { libc::poll(&mut pfd, 1, -1) };
+        if pret < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            if errno == libc::EINTR {
+                continue;
+            }
+            return (-errno, Vec::new());
+        }
+        let mut buf = vec![0u8; entry_size * 8];
+        let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        if ret < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            // Racy: a different reader may have drained the queue between
+            // poll and read. Loop back to poll.
+            if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK || errno == libc::EINTR {
+                continue;
+            }
+            return (-errno, Vec::new());
+        }
         buf.truncate(ret as usize);
-        (ret as i32, buf)
+        return (ret as i32, buf);
     }
 }
 
