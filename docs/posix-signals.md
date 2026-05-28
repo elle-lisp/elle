@@ -105,13 +105,20 @@ automatically. The policy:
    any other Unix program. The first `os/sig-watch` atomically blocks
    the requested signals on the main thread and opens the
    signalfd / kqueue.
-3. **Refcounted block; unblock when refcount hits zero.** A signal
-   stays blocked as long as at least one receiver watches it.
-   `os/sig-close` decrements; when the last watcher for a signal
-   closes, the signal is unblocked. Any instance pending in the
-   kernel queue at the moment of unblock fires its default
-   disposition immediately — this matches plain POSIX semantics and
-   is preferred to silently swallowing the event.
+3. **Refcounted block; drain-then-unblock when refcount hits zero.**
+   A signal stays blocked as long as at least one receiver watches
+   it. `os/sig-close` decrements; when the last watcher for a signal
+   closes, elle drains any instances still pending on the calling
+   thread / process queue (via `sigwait`, which dequeues without
+   invoking a handler) and only then unblocks. This is the only safe
+   order: signals queued during the watch that the user never
+   consumed via `os/sig-next` — and on macOS the kqueue-coalesced
+   leftover from a multi-`kill` burst whose worker delivery only
+   drained one instance — would otherwise fire the signal's default
+   disposition on the unblocking thread, terminating the process
+   mid-close. Signals generated *after* the unblock fire whatever
+   disposition was in effect before the watch started (saved by
+   `os/sig-watch`, restored before unblocking).
 4. **macOS: per-receive worker unblock + no-op handler.** Linux's
    `signalfd` reads pending signals directly from the kernel queue
    even when every thread blocks the signal, so the worker only

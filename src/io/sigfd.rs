@@ -151,11 +151,74 @@ pub fn currently_watched() -> Vec<libc::c_int> {
     out
 }
 
+/// Drain any of `signals` still pending on the calling thread or the
+/// process-shared queue, using `sigwait`. The signals must still be
+/// blocked on the calling thread for `sigwait` to consume from the
+/// queue without invoking a handler.
+///
+/// Called from each platform's `rollback` immediately before the saved
+/// disposition is restored and the signals are unblocked. Without this
+/// drain, a signal queued during the watch that the watcher never
+/// consumed (e.g. macOS test 5: two kill(SIGUSR1) calls, kqueue
+/// `EVFILT_SIGNAL` reported count=2 but only one delivery actually
+/// drained the process pending queue) would fire its now-restored
+/// default disposition on `pthread_sigmask(SIG_UNBLOCK, …)` and
+/// terminate the process mid-close. On Linux the situation is the same
+/// when a user opens a `SignalReceiver`, the kernel queues a signal
+/// they intentionally chose to watch, and they close without ever
+/// calling `os/sig-next`: the unblock would Term them on the way out.
+///
+/// `sigwait` is POSIX and present on both Linux and macOS. It blocks
+/// until a signal in `set` becomes pending — we gate every call on
+/// `sigpending` so it returns immediately. The dequeued signum is
+/// discarded; this is the close path, no one is left to observe it.
+fn drain_pending_blocked(signals: &[libc::c_int]) {
+    if signals.is_empty() {
+        return;
+    }
+    let mut drain_set: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(&mut drain_set) };
+    for &s in signals {
+        unsafe { libc::sigaddset(&mut drain_set, s) };
+    }
+    // Bounded loop — defends against a kernel that somehow keeps
+    // re-queuing the same signal while we drain. We've never observed
+    // more than 2 queued for a non-realtime signal in practice; 64 is
+    // a generous ceiling.
+    for _ in 0..64 {
+        let mut pending: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigemptyset(&mut pending) };
+        unsafe { libc::sigpending(&mut pending) };
+        let any = signals
+            .iter()
+            .any(|&s| unsafe { libc::sigismember(&pending, s) } == 1);
+        if !any {
+            return;
+        }
+        let mut sig_dequeued: libc::c_int = 0;
+        let ret = unsafe { libc::sigwait(&drain_set, &mut sig_dequeued) };
+        posix_trace(format_args!(
+            "rollback: drained pending signum={} via sigwait (ret={})",
+            sig_dequeued, ret
+        ));
+        if ret != 0 {
+            // sigwait shouldn't fail for a blocked, already-pending
+            // signal. If it does, fall through to the unblock rather
+            // than spinning.
+            return;
+        }
+    }
+    posix_trace(format_args!(
+        "rollback: drain loop hit ceiling for signals={:?}; pending instances may remain",
+        signals
+    ));
+}
+
 // ── Linux: signalfd ────────────────────────────────────────────────────
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod platform {
-    use super::{posix_trace, watched_set, SigEvent};
+    use super::{drain_pending_blocked, posix_trace, watched_set, SigEvent};
     use std::cell::RefCell;
     use std::os::unix::io::RawFd;
 
@@ -317,7 +380,7 @@ mod platform {
         // zero so we can pthread_sigmask-unblock them.
         let mut to_unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
         unsafe { libc::sigemptyset(&mut to_unblock) };
-        let mut any = false;
+        let mut newly_freed: Vec<libc::c_int> = Vec::new();
         {
             let mut set = watched_set().lock().unwrap();
             for &s in signals {
@@ -327,12 +390,24 @@ mod platform {
                     }
                     if *c == 0 {
                         unsafe { libc::sigaddset(&mut to_unblock, s) };
-                        any = true;
+                        newly_freed.push(s);
                     }
                 }
             }
         }
-        if any {
+        if !newly_freed.is_empty() {
+            // Drain pending watched signals BEFORE unblocking. If a
+            // watcher closes with signals still queued (signalfd was
+            // never read for them, or the user `kill`d after the
+            // last sig-next), the unblock would otherwise fire each
+            // one's default disposition on this thread — Term for
+            // most. See `drain_pending_blocked` for the failure mode
+            // this defends against.
+            posix_trace(format_args!(
+                "linux: rollback draining + unblocking newly_freed={:?}",
+                newly_freed
+            ));
+            drain_pending_blocked(&newly_freed);
             unsafe {
                 libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
             }
@@ -344,7 +419,7 @@ mod platform {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{posix_trace, saved_dispositions, watched_set, SigEvent};
+    use super::{drain_pending_blocked, posix_trace, saved_dispositions, watched_set, SigEvent};
     use std::cell::RefCell;
     use std::os::unix::io::RawFd;
 
@@ -609,25 +684,48 @@ mod platform {
                 }
             }
         }
-        // Restore the saved disposition for every signal we just
-        // released — opposite of the install in `SignalReceiver::new`.
-        // Done before the unblock so any signal already pending in the
-        // process queue when unblock takes effect fires its true
-        // default disposition (matches the documented contract in
-        // docs/posix-signals.md: "pending instances … fire their
-        // default disposition immediately").
-        if !newly_freed.is_empty() {
+        if newly_freed.is_empty() {
+            return;
+        }
+        // Drain pending watched signals via sigwait BEFORE we restore
+        // the saved disposition or unblock. macOS's EVFILT_SIGNAL
+        // only counts kill() generations on the knote — it does NOT
+        // consume from the process pending queue — and the kqueue
+        // worker's brief pthread_sigmask SIG_UNBLOCK + no-op-handler
+        // delivery only drains at most one queued instance. Test 5
+        // (two kill(SIGUSR1) calls in a row, one sig-next read
+        // reporting count=2) leaves a SIGUSR1 in the pending queue
+        // even after the worker reports the event. Restoring the
+        // default disposition (Term for SIGUSR1) and then
+        // unblocking would deliver that orphan to this thread with
+        // its newly-restored default and kill the process mid-close.
+        // sigwait consumes pending instances without invoking the
+        // (still no-op) handler. Done while the signals are still
+        // blocked, so sigwait returns immediately for already-pending
+        // entries.
+        posix_trace(format_args!(
+            "macos: rollback draining + restoring + unblocking newly_freed={:?}",
+            newly_freed
+        ));
+        drain_pending_blocked(&newly_freed);
+        // Restore the saved sigactions, then unblock. Order matters:
+        // any signal generated AFTER the unblock should fire the
+        // user's original disposition (typically the default), not
+        // our no-op.
+        {
             let mut saved = saved_dispositions().lock().unwrap();
             for &s in &newly_freed {
                 if let Some(old) = saved.remove(&s) {
                     unsafe { libc::sigaction(s, &old, std::ptr::null_mut()) };
+                    posix_trace(format_args!(
+                        "macos: rollback restored sigaction for signum={}",
+                        s
+                    ));
                 }
             }
         }
-        if !newly_freed.is_empty() {
-            unsafe {
-                libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
-            }
+        unsafe {
+            libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
         }
     }
 }
