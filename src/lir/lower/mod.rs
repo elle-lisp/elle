@@ -134,6 +134,18 @@ pub struct Lowerer<'a> {
     /// decref'ing the runtime region of the actual returned value
     /// (impl step 14).
     call_region_slot: HashMap<crate::hir::region::Region, u16>,
+    /// RegionIds the lowerer has stamped onto at least one
+    /// instruction via `emit_in_region` (i.e., regions the runtime
+    /// will actually have a slot for after `alloc_in_region`).
+    /// Used by `emit_decref_region` to suppress phantom DecrefRegion
+    /// emissions — the analysis may yield a `free_at` for a region
+    /// whose alloc never landed in the bytecode (legitimately, for
+    /// `call_result_regions` going through `ReleaseValueRegion`
+    /// instead; less legitimately, when the regions walk assigned a
+    /// region to a node the lowerer is transparent for). Emitting
+    /// `DecrefRegion(r)` for an unstamped r would decrement an RC
+    /// the runtime never raised.
+    emitted_alloc_regions: rustc_hash::FxHashSet<RegionId>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -166,6 +178,7 @@ impl<'a> Lowerer<'a> {
             active_region_ids: Vec::new(),
             current_lambda_stack: Vec::new(),
             call_region_slot: HashMap::new(),
+            emitted_alloc_regions: rustc_hash::FxHashSet::default(),
         }
     }
 
@@ -331,6 +344,7 @@ impl<'a> Lowerer<'a> {
     /// Emit an instruction with a specific region id.
     /// Used for heap-allocating instructions that belong to a non-default region.
     fn emit_in_region(&mut self, instr: LirInstr, region: RegionId) {
+        self.emitted_alloc_regions.insert(region);
         self.current_block
             .instructions
             .push(SpannedInstr::with_region(
@@ -537,6 +551,17 @@ impl<'a> Lowerer<'a> {
     /// `emit_increfs_for`) handles the incref side; cascade handles
     /// the decref side.
     fn emit_decref_region(&mut self, region_id: RegionId) {
+        // Suppress phantom DecrefRegion: if the lowerer never stamped
+        // an instruction with this region id via `emit_in_region`,
+        // then the runtime has no entry for it and the DecrefRegion
+        // would target the wrong region (or fail an assertion in
+        // debug builds). Phantom regions can arise from regions-walk
+        // assignments to nodes whose lowering layer is transparent
+        // (DerefCell, MakeCell) or from analysis gaps that the
+        // ongoing audit hasn't yet closed.
+        if !self.emitted_alloc_regions.contains(&region_id) {
+            return;
+        }
         self.emit(LirInstr::DecrefRegion { region_id });
     }
 

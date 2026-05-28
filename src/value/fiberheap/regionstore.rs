@@ -115,6 +115,23 @@ impl RegionStore {
     /// Returns the number of objects freed (0 if RC > 0 after decrement).
     fn decref_with_cascade(&mut self, id: u16, from_cascade: Option<u16>) -> usize {
         let idx = id as usize;
+        // Direct decrefs (not from cascade) must hit a region that
+        // was actually allocated. A miss here means either (a) the
+        // solver assigned a region id that no instruction
+        // alloc_in_region'd (the phantom-region class of bug —
+        // see docs/regions.md § "Every region must correspond to a
+        // real allocation"), or (b) a double-free. Cascade decrefs
+        // are exempt because a single region may be referenced
+        // multiple times by another's contents and may have already
+        // been freed by an earlier cascade visit.
+        debug_assert!(
+            from_cascade.is_some()
+                || (idx < self.regions.len() && self.regions[idx].is_some()),
+            "DecrefRegion({id}) but region was never alloc_in_region'd \
+             (or already freed) — phantom region or double-free; \
+             see docs/regions.md § 'Every region must correspond to a \
+             real allocation'",
+        );
         if idx >= self.regions.len() {
             return 0;
         }
@@ -165,10 +182,26 @@ impl RegionStore {
         }
     }
 
-    /// Free a region (decref). If RC == 0, free immediately.
-    /// If RC > 0, decrement and free when RC reaches 0.
-    /// Returns the number of objects freed.
+    /// Free a region — tolerant of "never alloc'd" callers.
+    ///
+    /// This is the entry point for runtime/macro callers
+    /// (`with_transient_region!`, `vm/call.rs` alloc-region cleanup,
+    /// embedding API) that reserve a region id without necessarily
+    /// allocating into it: the block may end without producing any
+    /// heap value, in which case there is no slot in the store. That
+    /// is a legitimate pattern, not a bug, so this path silently
+    /// skips when the slot is absent.
+    ///
+    /// For the bytecode `DecrefRegion` path — the one the regions
+    /// audit covers — use `decref`, which asserts the slot exists
+    /// (debug builds only). The split keeps the strict invariant on
+    /// the path it applies to without breaking the tolerant runtime
+    /// pattern.
     pub fn free_region(&mut self, id: u16) -> usize {
+        let idx = id as usize;
+        if idx >= self.regions.len() || self.regions[idx].is_none() {
+            return 0;
+        }
         self.decref(id)
     }
 
@@ -334,9 +367,33 @@ mod tests {
     }
 
     #[test]
-    fn free_region_no_op_for_absent() {
+    #[should_panic(expected = "DecrefRegion(99) but region was never alloc_in_region'd")]
+    fn decref_of_unallocated_region_panics_in_debug() {
+        // Decref of a region id that was never alloc_in_region'd
+        // is the "phantom region" class of bug — solver assigned a
+        // region id to a node whose lowerer emits no alloc
+        // instruction (DerefCell, MakeCell pre-fix; Eval without
+        // call_result_regions registration). docs/regions.md
+        // § "Every region must correspond to a real allocation"
+        // documents the rule; this debug_assert! catches violators
+        // at the runtime boundary.
         let mut store = RegionStore::default();
-        store.decref(99); // should not panic
+        store.decref(99); // never allocated — debug build panics
+    }
+
+    #[test]
+    #[should_panic(expected = "DecrefRegion(1) but region was never alloc_in_region'd")]
+    fn double_decref_panics_in_debug() {
+        // A region freed once must not be decref'd again. The
+        // bytecode emitter must not produce two DecrefRegion(N)
+        // instructions for the same N along the same path. The
+        // saturating-arithmetic tolerance the data structure used
+        // to provide hid bugs that the regions audit was exactly
+        // chasing — replace tolerance with loud failure in debug.
+        let mut store = RegionStore::default();
+        store.alloc_obj(1, cons_obj());
+        store.decref(1); // rc=1 → 0, region freed, slot becomes None
+        store.decref(1); // debug build panics on the second decref
     }
 
     #[test]
