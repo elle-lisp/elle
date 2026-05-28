@@ -582,7 +582,12 @@ impl<'a> Lowerer<'a> {
         // debug builds). Phantom regions can arise from regions-walk
         // assignments to nodes whose lowering layer is transparent
         // (DerefCell, MakeCell) or from analysis gaps that the
-        // ongoing audit hasn't yet closed.
+        // ongoing audit hasn't yet closed. Begin/Letrec phantoms (the
+        // if-phi-merge case) were fixed at the analysis layer in
+        // src/hir/regions.rs by gating alloc_here on the lowerer's
+        // emit predicate; other classes (Match without captured pattern
+        // bindings, etc.) remain to be audited — the guard stays as
+        // defense in depth until that audit is complete.
         if !self.emitted_alloc_regions.contains(&region_id) {
             return;
         }

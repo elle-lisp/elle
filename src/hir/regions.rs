@@ -138,6 +138,13 @@ struct RegionInference {
     binding_lambda: HashMap<Binding, *const Hir>,
     /// Depth counter to prevent infinite recursion during inlining.
     inline_depth: u32,
+    /// Lambda nesting depth — incremented around lambda body walks.
+    /// Used to mirror the lowerer's `!self.in_lambda` predicate: inside
+    /// a lambda body, MakeCaptureCell is not emitted by `lower_begin` /
+    /// `lower_letrec` (the VM materializes cells via the closure-
+    /// construction path), so the regions walker must not register an
+    /// alloc_region for Begin/Letrec inside a lambda either.
+    in_lambda_depth: u32,
 }
 
 impl RegionInference {
@@ -158,7 +165,42 @@ impl RegionInference {
             arena: arena as *const BindingArena,
             binding_lambda: HashMap::new(),
             inline_depth: 0,
+            in_lambda_depth: 0,
         }
+    }
+
+    fn in_lambda(&self) -> bool {
+        self.in_lambda_depth > 0
+    }
+
+    /// Mirror of `lower_begin`'s collect_preallocate_bindings: a Begin
+    /// emits MakeCaptureCell at its HirId iff some reachable Define or
+    /// Destructure binding (reachable via Let/Begin/Loop/Block, NOT via
+    /// If/Match/Cond/Lambda) has `needs_capture()` true.
+    fn begin_has_capturable_binding(&self, exprs: &[Hir]) -> bool {
+        fn walk(arena: &BindingArena, h: &Hir) -> bool {
+            match &h.kind {
+                HirKind::Define { binding, .. } => arena.get(*binding).needs_capture(),
+                HirKind::Destructure { pattern, .. } => pattern
+                    .bindings()
+                    .bindings
+                    .iter()
+                    .any(|b| arena.get(*b).needs_capture()),
+                HirKind::Lambda { .. } => false,
+                HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                    bindings.iter().any(|(_, init)| walk(arena, init))
+                        || walk(arena, body)
+                }
+                HirKind::Loop { bindings, body } => {
+                    bindings.iter().any(|(_, init)| walk(arena, init))
+                        || walk(arena, body)
+                }
+                HirKind::Begin(es) => es.iter().any(|e| walk(arena, e)),
+                HirKind::Block { body, .. } => body.iter().any(|e| walk(arena, e)),
+                _ => false,
+            }
+        }
+        exprs.iter().any(|e| walk(self.arena(), e))
     }
 
     fn arena(&self) -> &BindingArena {
@@ -253,7 +295,9 @@ impl RegionInference {
                     self.binding_regions.insert(*rp, Vec::new());
                 }
 
+                self.in_lambda_depth += 1;
                 let body_regions = self.walk(body);
+                self.in_lambda_depth -= 1;
                 // Record the tail regions so the lowerer can suppress
                 // the compiler-emitted `DecrefRegion` for any region
                 // that flows out of the body as the function's return
@@ -299,9 +343,17 @@ impl RegionInference {
             }
 
             HirKind::Letrec { bindings, body } => {
-                // Always register so the lowerer can find a region for
-                // MakeCaptureCell emissions.
-                self.alloc_here(hir.id);
+                // Register iff lower_letrec will emit MakeCaptureCell:
+                // (a) NOT inside a lambda body AND (b) at least one
+                // letrec binding has `needs_capture()` true. Unconditional
+                // alloc_here here would create phantom regions.
+                if !self.in_lambda()
+                    && bindings
+                        .iter()
+                        .any(|(b, _)| self.arena().get(*b).needs_capture())
+                {
+                    self.alloc_here(hir.id);
+                }
 
                 let scope_region = self.fresh_region(self.current_region);
                 self.scope_region.insert(hir.id, scope_region);
@@ -412,7 +464,20 @@ impl RegionInference {
                 // Register Begin for pre-allocated capture cells
                 // (MakeCaptureCell in lower_begin for Define bindings
                 // with needs_capture).
-                self.alloc_here(hir.id);
+                //
+                // Predicate mirrors lower_begin: emit MakeCaptureCell iff
+                // (a) we are NOT inside a lambda body (the VM materializes
+                // cells via the closure-construction path inside lambdas),
+                // AND (b) at least one reachable Define/Destructure binding
+                // has `needs_capture()` true (reachable via Let/Begin/Loop/
+                // Block, NOT via If/Match/Cond/Lambda — see
+                // `collect_preallocate_bindings`). Unconditional alloc_here
+                // here would create phantom regions whose DecrefRegion is
+                // emitted at the Begin's free_at but never paired with a
+                // runtime alloc_in_region.
+                if !self.in_lambda() && self.begin_has_capturable_binding(exprs) {
+                    self.alloc_here(hir.id);
+                }
                 let mut last = Vec::new();
                 for e in exprs {
                     last = self.walk(e);
@@ -1824,16 +1889,22 @@ mod tests {
     }
 
     #[test]
-    fn loop_with_string_alloc_is_live() {
-        // String allocation inside a loop → the loop's region is live.
+    fn loop_with_pair_alloc_is_live() {
+        // %pair inside a loop allocates inside the loop's scope → the
+        // loop's region must show local allocs. (Originally written as
+        // `(assign s "x")` with `s` mutable, but string literals are
+        // constant-pool — they don't allocate, and the test was passing
+        // only because an unconditional phantom Begin alloc descended
+        // from the loop scope. With the conditional Begin/Letrec
+        // alloc_here fix, the only real alloc must be the %pair.)
         let (hir, _, info) = pipeline(
-            "(def @s \"\")\n(def @i 0)\n\
-             (while (%lt i 10) (begin (assign s \"x\") (assign i (%add i 1))))",
+            "(def @i 0)\n\
+             (while (%lt i 10) (begin (%pair i i) (assign i (%add i 1))))",
         );
         let loops = find_loops(&hir);
         assert!(!loops.is_empty(), "should have a Loop node");
         let any_live = loops.iter().any(|id| info.scope_has_local_allocs(*id));
-        assert!(any_live, "loop with string alloc should have local allocs");
+        assert!(any_live, "loop with %pair alloc should have local allocs");
     }
 
     #[test]
@@ -2844,6 +2915,121 @@ mod tests {
         assert!(
             info.alloc_region.contains_key(&thaw_id),
             "%thaw must have an alloc_region — it really allocates"
+        );
+    }
+
+    // ── Begin/Letrec alloc_region only when MakeCaptureCell will be emitted ──
+    //
+    // The Begin and Letrec walkers register an alloc_region so the lowerer's
+    // `emit_alloc(MakeCaptureCell)` can find a region. But the lowerer's
+    // `lower_begin`/`lower_letrec` only emit MakeCaptureCell when (a) there
+    // is at least one reachable binding with `needs_capture()` true and (b)
+    // the current lowering is NOT inside a lambda body (inside a lambda the
+    // VM materializes cells via the closure-construction path). When neither
+    // condition holds, no emit_alloc fires — and an unconditional alloc_here
+    // produces a phantom region whose later DecrefRegion targets a region
+    // the runtime never created. The lowerer's `emit_decref_region` guard
+    // silently swallows the phantom in release builds, but the runtime
+    // debug_assert in `regionstore.decref` catches it in debug.
+    //
+    // Surfaced by hir::functionalize::tests::if_phi_merge_with_continuation_still_works:
+    // the synthetic phi-merge let inserted by functionalize introduces a Begin
+    // wrapper, and even the outer Letrec wrapping the test's top-level form
+    // has no needs_capture binding when the test's `(var x 0)` isn't captured
+    // by any lambda — so all three of (Letrec, outer Begin, inner Begin)
+    // produce phantom regions.
+
+    fn find_begins(hir: &Hir) -> Vec<HirId> {
+        let mut out = Vec::new();
+        fn walk(hir: &Hir, out: &mut Vec<HirId>) {
+            if matches!(&hir.kind, HirKind::Begin(_)) {
+                out.push(hir.id);
+            }
+            hir.for_each_child(|c| walk(c, out));
+        }
+        walk(hir, &mut out);
+        out
+    }
+
+    fn find_letrecs(hir: &Hir) -> Vec<HirId> {
+        let mut out = Vec::new();
+        fn walk(hir: &Hir, out: &mut Vec<HirId>) {
+            if matches!(&hir.kind, HirKind::Letrec { .. }) {
+                out.push(hir.id);
+            }
+            hir.for_each_child(|c| walk(c, out));
+        }
+        walk(hir, &mut out);
+        out
+    }
+
+    #[test]
+    fn begin_with_no_captured_binding_has_no_alloc_region() {
+        // `(do (var x 0) (if true (assign x 42) (assign x 99)) x)` — the
+        // var x is never captured by a closure, so `needs_capture()` is
+        // false for every binding reachable from any Begin in this tree.
+        // The lowerer will not emit MakeCaptureCell for any Begin here;
+        // the regions walker must not assign an alloc_region to any Begin.
+        let (hir, _arena, info) = pipeline(
+            "(do (var x 0) (if true (assign x 42) (assign x 99)) x)",
+        );
+        let begins = find_begins(&hir);
+        assert!(!begins.is_empty(), "expected at least one Begin in the functionalized HIR");
+        for begin_id in &begins {
+            assert!(
+                !info.alloc_region.contains_key(begin_id),
+                "Begin @{} should not have an alloc_region — no reachable binding needs_capture",
+                begin_id.0
+            );
+        }
+    }
+
+    #[test]
+    fn letrec_with_no_captured_binding_has_no_alloc_region() {
+        // Same shape, but checking the Letrec — file-scope wrappers like
+        // the synthetic `(letrec [__file_expr_0 ...] __file_expr_0)` that
+        // `compile_file_to_fhir` inserts have no captured binding either.
+        // (Lowerer only emits MakeCaptureCell when a letrec binding's
+        // `needs_capture()` is true and we're not inside a lambda.)
+        let (hir, arena, info) = pipeline(
+            "(do (var x 0) (if true (assign x 42) (assign x 99)) x)",
+        );
+        fn check<'a>(h: &'a Hir, arena: &BindingArena, info: &RegionInfo) {
+            if let HirKind::Letrec { bindings, .. } = &h.kind {
+                let any_captured = bindings
+                    .iter()
+                    .any(|(b, _)| arena.get(*b).needs_capture());
+                if !any_captured {
+                    assert!(
+                        !info.alloc_region.contains_key(&h.id),
+                        "Letrec @{} should not have an alloc_region — no binding needs_capture",
+                        h.id.0
+                    );
+                }
+            }
+            h.for_each_child(|c| check(c, arena, info));
+        }
+        check(&hir, &arena, &info);
+    }
+
+    #[test]
+    fn begin_with_captured_define_has_alloc_region() {
+        // Positive: when a Begin contains a Define for a binding that IS
+        // captured by a nested lambda, the lowerer DOES emit MakeCaptureCell;
+        // the regions walker must register the Begin in alloc_region.
+        // Using `def @x` (mutable) + `(fn () x)` (captures x) makes
+        // `needs_capture()` true for x.
+        let (hir, _arena, info) = pipeline(
+            "(do (var x 0) (def f (fn () x)) (assign x 1) (f))",
+        );
+        let begins = find_begins(&hir);
+        assert!(!begins.is_empty(), "expected at least one Begin");
+        let any_alloc = begins
+            .iter()
+            .any(|id| info.alloc_region.contains_key(id));
+        assert!(
+            any_alloc,
+            "at least one Begin must have an alloc_region — a captured Define is present"
         );
     }
 }
