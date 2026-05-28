@@ -25,27 +25,26 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-/// Print a diagnostic line to stderr when the `ELLE_POSIX_DEBUG`
-/// environment variable is set. Used to triage the macOS EVFILT_SIGNAL
-/// hang and any future POSIX-signal regressions without rebuilding —
-/// run `ELLE_POSIX_DEBUG=1 elle tests/elle/posix.lisp` and correlate
-/// the Rust trace lines (prefixed `[posix]`) with the eprintln
-/// progress lines emitted by posix.lisp itself.
+/// Emit a `[trace:posix] …` line to stderr when the `posix` trace bit
+/// is active (set via `--trace=posix`, `--trace=all`, or `(vm/config)`
+/// at runtime). Used to triage POSIX-signal regressions — correlate
+/// these with the per-test progress lines emitted by
+/// `tests/elle/posix.lisp` to pinpoint exactly which kernel call
+/// diverges between Linux and macOS.
 ///
-/// Direct `write(2, …)` to fd 2 bypasses the elle scheduler and Rust's
-/// stdio buffering so trace output survives even when the process is
-/// about to be killed by an outer timeout. Cheap when the env var is
-/// unset (single relaxed atomic load).
-fn debug_enabled() -> bool {
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| std::env::var_os("ELLE_POSIX_DEBUG").is_some())
-}
-
+/// Gated on the process-global `crate::config::GLOBAL_TRACE_BITS`
+/// mirror so threadpool worker threads and other off-VM callers (which
+/// have no `&VM` and therefore can't use the per-VM `etrace!` macro)
+/// can still gate cheaply.
+///
+/// Output goes via a direct `write(2, …)` syscall, bypassing the elle
+/// scheduler and Rust's stdio buffering, so trace lines survive even
+/// when the process is about to be killed by an outer timeout.
 pub(crate) fn posix_trace(args: std::fmt::Arguments<'_>) {
-    if !debug_enabled() {
+    if !crate::config::global_trace_bit_enabled(crate::config::trace_bits::POSIX) {
         return;
     }
-    let line = format!("[posix] {}\n", args);
+    let line = format!("[trace:posix] {}\n", args);
     unsafe {
         libc::write(2, line.as_ptr() as *const libc::c_void, line.len());
     }

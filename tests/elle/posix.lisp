@@ -8,13 +8,14 @@
 #
 # INSTRUMENTATION POLICY: every step that talks to the kernel about
 # signals (watch, send, raise, next, close) prints a tag-and-state
-# line to *stderr* via eprintln BEFORE the call. Every sig-next is
+# line to *stderr* via eprintln BEFORE the call.  Every sig-next is
 # bounded with (ev/timeout 5 …) so a stuck delivery fails fast with a
 # pinpointed "timed out at <site>" message instead of hanging the
-# whole suite under the outer 30s wall.  When ELLE_POSIX_DEBUG=1 the
-# Rust side (src/io/sigfd.rs, src/io/threadpool.rs) emits matching
-# kernel-level trace lines so a triage on macOS can correlate the two
-# halves without a rebuild.
+# whole suite under the outer 30s wall.  When run with
+# `--trace=posix` the Rust side (src/io/sigfd.rs, src/io/threadpool.rs,
+# src/primitives/posix.rs, src/io/completion.rs) emits matching
+# `[trace:posix] …` kernel-level lines so triage can correlate the
+# two halves at sub-syscall granularity without a rebuild.
 
 (eprintln "posix.lisp: starting; pid=" (sys/pid) "; initial mask=" (os/sig-mask)
           "; initial watching=" (os/sig-watching))
@@ -71,7 +72,10 @@
         (let [sp (get ev :sender-pid)]
           (assert (or (nil? sp) (= sp (sys/pid)))
                   "2: :sender-pid is nil or equal to (sys/pid)")))))
-  (os/sig-close r))
+  (eprintln "test 2: closing receiver; mask=" (os/sig-mask) "; pending="
+            (os/sig-pending))
+  (os/sig-close r)
+  (eprintln "test 2: closed; mask=" (os/sig-mask) "; pending=" (os/sig-pending)))
 (eprintln "test 2: done")
 
 # ── 3. invalid pid errors ────────────────────────────────────────────────
@@ -96,7 +100,11 @@
     (assert (not (nil? evs))
             "5: os/sig-next must return events, not nil (timeout)")
     (assert (>= (length evs) 1) "5: at least one event after two sends"))
-  (os/sig-close r))
+  (eprintln "test 5: pre-close; mask=" (os/sig-mask) "; pending="
+            (os/sig-pending))
+  (os/sig-close r)
+  (eprintln "test 5: post-close; mask=" (os/sig-mask) "; pending="
+            (os/sig-pending)))
 (eprintln "test 5: done")
 
 # ── 6. capability denial: :os-signal blocks os/sig-send ──────────────────
@@ -136,7 +144,9 @@
 
 (eprintln "test 8: starting")
 (let [r (os/sig-watch |:sigwinch|)]
+  (eprintln "test 8: first close")
   (assert (nil? (os/sig-close r)) "8a: first close returns nil")
+  (eprintln "test 8: second close (idempotency)")
   (assert (nil? (os/sig-close r)) "8b: second close also returns nil"))
 (eprintln "test 8: done")
 
@@ -154,7 +164,11 @@
     (assert ok? "10a: keyword signum accepted"))  # Drain so the queued signal doesn't fire when we close.
   (let [_ (ev/join (ev/spawn (fn [] (bounded-next r "test 10 drain"))))]
     nil)
-  (os/sig-close r))
+  (eprintln "test 10: pre-close; mask=" (os/sig-mask) "; pending="
+            (os/sig-pending))
+  (os/sig-close r)
+  (eprintln "test 10: post-close; mask=" (os/sig-mask) "; pending="
+            (os/sig-pending)))
 
 (let [[ok? val] (protect ((fn [] (os/sig-send (sys/pid) 99))))]
   (assert (not ok?) "10b: unnamed integer signum 99 rejected")
