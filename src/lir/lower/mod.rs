@@ -690,6 +690,7 @@ mod tests {
         drop(analyzer);
         mark_tail_calls(&mut analysis.hir);
         functionalize(&mut analysis.hir, &mut arena);
+        crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
         let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
         let region_info = crate::hir::analyze_regions_with(

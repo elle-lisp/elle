@@ -10,6 +10,7 @@
 //! ```
 
 mod analyze;
+pub mod anf;
 pub mod arena;
 pub mod binding;
 pub mod dataflow;

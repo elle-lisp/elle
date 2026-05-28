@@ -59,9 +59,10 @@ fn compile_inner(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
 
-    // Phase 3.5: Mark tail calls + functionalize + type inference
+    // Phase 3.5: Mark tail calls + functionalize + ANF + type inference
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut analysis.hir, &arena, symbols);
 
     // Phase 4: Lower to LIR with intrinsic specialization
@@ -217,6 +218,7 @@ fn compile_file_to_lir_inner(
 
     mark_tail_calls(&mut hir);
     functionalize(&mut hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
     let meta = cached_primitive_meta(symbols);
@@ -353,6 +355,7 @@ fn compile_file_frontend_inner(
 
     mark_tail_calls(&mut hir);
     functionalize(&mut hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
     Ok((hir, arena, expander, prim_values, signal_projection))

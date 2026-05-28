@@ -151,6 +151,7 @@ fn eval_inner(
     // Mark tail calls
     mark_tail_calls(&mut analysis.hir);
     crate::hir::functionalize::functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
     // Lower
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);

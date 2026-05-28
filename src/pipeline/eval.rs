@@ -50,6 +50,7 @@ pub fn eval_syntax(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
@@ -114,6 +115,7 @@ pub fn eval(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());

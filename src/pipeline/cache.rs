@@ -124,6 +124,7 @@ fn compile_core(
 
     mark_tail_calls(&mut hir);
     functionalize(&mut hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut hir, &mut arena);
     crate::hir::typeinfer::infer_and_rewrite(&mut hir, &arena, symbols);
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, meta);

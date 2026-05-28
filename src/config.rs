@@ -269,7 +269,8 @@ pub mod trace_bits {
     pub const CHAN: u32 = 1 << 18;
     pub const RC: u32 = 1 << 19;
     pub const REGIONS: u32 = 1 << 20;
-    pub const ALL: u32 = (1 << 21) - 1;
+    pub const ANF: u32 = 1 << 21;
+    pub const ALL: u32 = (1 << 22) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -295,6 +296,7 @@ pub mod trace_bits {
             "chan" => CHAN,
             "rc" => RC,
             "regions" => REGIONS,
+            "anf" => ANF,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }

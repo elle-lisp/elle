@@ -381,6 +381,7 @@ mod tests {
         let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
         mark_tail_calls(&mut analysis.hir);
         functionalize(&mut analysis.hir, &mut arena);
+        crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
         let info = analyze_dataflow(&analysis.hir);
         (arena, symbols, info)

@@ -37,11 +37,13 @@ fn print_help() {
     println!("                          call, signal, compile, fiber, hir, lir,");
     println!("                          emit, jit, io, gc, import, macro, wasm,");
     println!("                          capture, arena, escape, bytecode, posix,");
-    println!("                          chan");
+    println!("                          chan, rc, regions, anf");
     println!("  --trace=all           Trace everything");
     println!("  --checked-intrinsics  Route %-intrinsics through type-checked NativeFn");
     println!("                          (implies --jit=off --mlir=off)");
     println!("  --stats               Print compilation stats on exit");
+    println!("  --no-stdlib           Skip loading stdlib (debugging compile_core / prelude)");
+    println!("  --no-uring            Linux: disable io_uring; route I/O through the thread pool");
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
     println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
