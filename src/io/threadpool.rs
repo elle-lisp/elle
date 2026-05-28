@@ -96,9 +96,20 @@ pub(super) enum PoolOp {
     },
     /// Blocking kevent() on a kqueue fd registered with EVFILT_SIGNAL (macOS).
     /// On Linux the corresponding op is `SigfdRead`.
+    ///
+    /// `signals` is the set the watcher is interested in. The worker
+    /// unblocks them on its own thread before calling kevent() because
+    /// kqueue's `EVFILT_SIGNAL` fires from the in-kernel delivery path
+    /// — when every thread in the process blocks the signal the kernel
+    /// parks it on the process pending list and the knote never
+    /// activates (no thread is selected for delivery, so the kqueue
+    /// hook in psignal_internal is never reached). `SignalReceiver::new`
+    /// installs a process-wide no-op sigaction handler so the signal
+    /// delivered to this thread does no harm.
     #[cfg_attr(any(target_os = "linux", target_os = "android"), allow(dead_code))]
     KqSigRead {
         fd: RawFd,
+        signals: Vec<libc::c_int>,
     },
     /// Poll a raw fd for readiness via libc::poll(). Returns revents mask.
     PollFd {
@@ -511,7 +522,7 @@ impl ThreadPoolBackend {
                     b"sig-next: signalfd not supported on this platform".to_vec(),
                 ),
                 #[cfg(target_os = "macos")]
-                PoolOp::KqSigRead { fd } => kq_sig_read_blocking(fd),
+                PoolOp::KqSigRead { fd, signals } => kq_sig_read_blocking(fd, &signals),
                 #[cfg(not(target_os = "macos"))]
                 PoolOp::KqSigRead { .. } => (
                     -libc::ENOTSUP,
@@ -802,33 +813,70 @@ fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
 /// Blocking kevent() on a kqueue fd registered with EVFILT_SIGNAL (macOS).
 /// Encodes results as (signum:i32, count:u32) LE pairs for
 /// SignalReceiver::parse_events().
+///
+/// `signals` is the set the receiver registered with kqueue. The worker
+/// `pthread_sigmask`-UNBLOCKs them on itself before kevent() so the
+/// kernel can pick this thread as the delivery target — kqueue's
+/// `EVFILT_SIGNAL` is driven by the in-kernel delivery path, not by
+/// signal generation. With every other thread in the process blocking
+/// the signal (the threadpool worker default + the main thread's
+/// `os/sig-watch` mask), parking SIGUSR1 on the process pending list
+/// without any unblocked thread leaves no delivery path and the knote
+/// never activates — exactly the macOS hang
+/// `tests/elle/posix.lisp` test #1 was timing out on.
+///
+/// `SignalReceiver::new` installs a process-wide no-op sigaction
+/// handler for each watched signal at refcount 0 → 1 (and restores at
+/// 1 → 0) so that the delivery the kernel makes to this worker is a
+/// harmless return-through-the-trampoline rather than the default
+/// disposition (Term for SIGUSR1, etc.).
 #[cfg(target_os = "macos")]
-fn kq_sig_read_blocking(kq: RawFd) -> (i32, Vec<u8>) {
-    let mut eventlist: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
-    let n = unsafe {
-        libc::kevent(
-            kq,
-            std::ptr::null(),
-            0,
-            eventlist.as_mut_ptr(),
-            eventlist.len() as i32,
-            std::ptr::null(),
-        )
-    };
-    if n < 0 {
-        return (
-            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-            Vec::new(),
-        );
+fn kq_sig_read_blocking(kq: RawFd, signals: &[libc::c_int]) -> (i32, Vec<u8>) {
+    // Unblock the watched signals on this thread for the lifetime of the
+    // worker. The worker is single-use (each PoolOp spawns a fresh
+    // thread that exits after sending the completion), so we don't
+    // bother restoring on return.
+    let mut to_unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(&mut to_unblock) };
+    for &s in signals {
+        unsafe { libc::sigaddset(&mut to_unblock, s) };
     }
-    let mut data = Vec::with_capacity(n as usize * 8);
-    for event in &eventlist[..n as usize] {
-        let signum = event.ident as i32;
-        let count = event.data as u32;
-        data.extend_from_slice(&signum.to_le_bytes());
-        data.extend_from_slice(&count.to_le_bytes());
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
     }
-    (data.len() as i32, data)
+
+    loop {
+        let mut eventlist: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
+        let n = unsafe {
+            libc::kevent(
+                kq,
+                std::ptr::null(),
+                0,
+                eventlist.as_mut_ptr(),
+                eventlist.len() as i32,
+                std::ptr::null(),
+            )
+        };
+        if n < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            // If the no-op handler ran without SA_RESTART (or some other
+            // signal interrupted kevent), retry. The knote state is
+            // preserved across EINTR, so a subsequent kevent picks up
+            // the same event.
+            if errno == libc::EINTR {
+                continue;
+            }
+            return (-errno, Vec::new());
+        }
+        let mut data = Vec::with_capacity(n as usize * 8);
+        for event in &eventlist[..n as usize] {
+            let signum = event.ident as i32;
+            let count = event.data as u32;
+            data.extend_from_slice(&signum.to_le_bytes());
+            data.extend_from_slice(&count.to_le_bytes());
+        }
+        return (data.len() as i32, data);
+    }
 }
 
 /// Blocking kevent() on a kqueue fd (macOS). Encodes results as
@@ -952,5 +1000,147 @@ mod tests {
             "expected negative errno for nonexistent path, got {}",
             completions[0].result_code
         );
+    }
+
+    /// Regression test for the macOS `EVFILT_SIGNAL` hang that prevented
+    /// tests/elle/posix.lisp from passing on macOS, and a counter-factual
+    /// guard for the Linux signalfd EAGAIN fix from commit f7aed410.
+    ///
+    /// Forks a child process so we get a clean thread topology that
+    /// mirrors production: only the main thread plus our intentionally-
+    /// spawned threadpool worker, all with the watched signal masked.
+    /// In the cargo test runner this isn't true — peer test threads have
+    /// SIGUSR1 unmasked and would absorb the `kill()` before our
+    /// signalfd/kqueue worker reads it.
+    ///
+    /// Child flow:
+    ///   1. Open a `SignalReceiver` for SIGUSR1 (blocks it on this
+    ///      thread; the threadpool worker spawned in step 2 inherits the
+    ///      mask).
+    ///   2. Submit the platform's blocking signal-read op (`SigfdRead` on
+    ///      Linux, `KqSigRead` on macOS) — the same threadpool primitive
+    ///      `submit_sig_next` uses in production.
+    ///   3. `kill(getpid(), SIGUSR1)` from the main thread.
+    ///   4. Wait up to 5 s for a completion; assert it parses to a
+    ///      single SIGUSR1 event.
+    ///
+    /// Child exits 0 on success, a small positive code on failure.
+    ///
+    /// On macOS this gates the fix: kqueue's `EVFILT_SIGNAL` fires from
+    /// the in-kernel delivery path, so if every thread in the process
+    /// blocks the signal the kernel parks it on the process pending list
+    /// and the knote is never activated. Without the fix the child hangs
+    /// past the parent's wait timeout (waitpid loop bounded at 10 s).
+    #[test]
+    fn sig_read_returns_after_kill_to_self() {
+        use std::time::{Duration, Instant};
+
+        let pid = unsafe { libc::fork() };
+        if pid < 0 {
+            panic!("fork failed: {}", std::io::Error::last_os_error());
+        }
+        if pid == 0 {
+            // CHILD: run the test logic and _exit. Use _exit to skip
+            // atexit/destructors — Rust drop glue across the fork
+            // boundary is unsupported in general.
+            let code = sig_read_child_logic();
+            unsafe { libc::_exit(code) };
+        }
+
+        // PARENT: bounded waitpid so a regression surfaces fast instead
+        // of wedging the test runner.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut status: libc::c_int = 0;
+        loop {
+            let wret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+            if wret == pid {
+                break;
+            }
+            if wret < 0 {
+                let errno = std::io::Error::last_os_error();
+                panic!("waitpid({}): {}", pid, errno);
+            }
+            if Instant::now() >= deadline {
+                // Kill the child so we don't leak the process and panic
+                // with a meaningful message.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
+                panic!("sig_read child hung past 10s");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        if libc::WIFSIGNALED(status) {
+            panic!("sig_read child died from signal {}", libc::WTERMSIG(status));
+        }
+        let code = libc::WEXITSTATUS(status);
+        assert_eq!(
+            code, 0,
+            "sig_read child failed with code {} (see codes in sig_read_child_logic)",
+            code
+        );
+    }
+
+    /// Body of the forked child for `sig_read_returns_after_kill_to_self`.
+    /// Returns a small positive exit code identifying which step failed,
+    /// or 0 on success. Kept narrow on purpose: no allocations between
+    /// fork and the kernel calls beyond what `SignalReceiver` and
+    /// `ThreadPoolBackend` already do.
+    fn sig_read_child_logic() -> i32 {
+        use crate::io::sigfd::SignalReceiver;
+        use std::time::Duration;
+
+        let r = match SignalReceiver::new(vec![libc::SIGUSR1]) {
+            Ok(r) => r,
+            Err(_) => return 11,
+        };
+        let fd = match r.raw_fd() {
+            Ok(f) => f,
+            Err(_) => return 12,
+        };
+
+        let mut pool = ThreadPoolBackend::new();
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let submit = pool.submit(1, PoolOp::SigfdRead { fd });
+        #[cfg(target_os = "macos")]
+        let submit = pool.submit(
+            1,
+            PoolOp::KqSigRead {
+                fd,
+                signals: vec![libc::SIGUSR1],
+            },
+        );
+        if submit.is_err() {
+            return 13;
+        }
+
+        // Let the worker enter the blocking syscall first — matches the
+        // (ev/sleep 0.05) preamble in tests/elle/posix.lisp test #1.
+        std::thread::sleep(Duration::from_millis(50));
+
+        if unsafe { libc::kill(libc::getpid(), libc::SIGUSR1) } != 0 {
+            return 14;
+        }
+
+        let completions = match pool.wait(Some(5000)) {
+            Ok(c) => c,
+            Err(_) => return 15,
+        };
+        if completions.is_empty() {
+            return 16;
+        }
+        let pc = &completions[0];
+        if pc.result_code <= 0 {
+            return 17;
+        }
+        let events = r.parse_events(&pc.data[..pc.result_code as usize]);
+        if events.is_empty() {
+            return 18;
+        }
+        if events[0].signum != libc::SIGUSR1 {
+            return 19;
+        }
+        r.close();
+        0
     }
 }

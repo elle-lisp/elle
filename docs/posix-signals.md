@@ -112,10 +112,28 @@ automatically. The policy:
    kernel queue at the moment of unblock fires its default
    disposition immediately — this matches plain POSIX semantics and
    is preferred to silently swallowing the event.
+4. **macOS: per-receive worker unblock + no-op handler.** Linux's
+   `signalfd` reads pending signals directly from the kernel queue
+   even when every thread blocks the signal, so the worker only
+   needs to call `read(2)`. macOS's `EVFILT_SIGNAL` fires from the
+   in-kernel signal-delivery path: when every thread blocks the
+   signal the kernel parks it on the process pending list and the
+   knote never activates. Elle works around this on macOS by
+   installing a process-wide no-op `sigaction` handler for each
+   newly-watched signal (refcounted; restored to the saved
+   disposition when the last watcher closes), and by
+   `pthread_sigmask`-unblocking the watched signals on the
+   threadpool worker thread that calls `kevent()`. The kernel picks
+   that worker as the delivery target, runs the no-op, and the
+   knote activates so `kevent()` returns. None of this is visible to
+   Lisp.
 
 `(os/sig-mask)` always reflects the actual `pthread_sigmask` on the
-calling thread. `(os/sig-watching)` returns the set of signals
-currently held by at least one receiver.
+calling thread — i.e. the main thread (and other elle-spawned
+threads) after `os/sig-watch`. It does not reflect the per-worker
+unblock used to feed `kevent()` on macOS.
+`(os/sig-watching)` returns the set of signals currently held by at
+least one receiver.
 
 ## Documented limitations
 

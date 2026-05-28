@@ -967,7 +967,17 @@ impl AsyncBackend {
                 #[cfg(any(target_os = "linux", target_os = "android"))]
                 network_pool.submit(id, PoolOp::SigfdRead { fd })?;
                 #[cfg(target_os = "macos")]
-                network_pool.submit(id, PoolOp::KqSigRead { fd })?;
+                network_pool.submit(
+                    id,
+                    PoolOp::KqSigRead {
+                        fd,
+                        // Worker pthread_sigmask-unblocks these so kqueue's
+                        // EVFILT_SIGNAL has a thread the kernel can pick
+                        // as the delivery target — see kq_sig_read_blocking
+                        // in src/io/threadpool.rs.
+                        signals: receiver.signals(),
+                    },
+                )?;
                 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
                 {
                     let _ = (id, fd);

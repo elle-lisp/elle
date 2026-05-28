@@ -55,6 +55,17 @@ fn watched_set() -> &'static Mutex<WatchedSet> {
     })
 }
 
+/// Process-wide table of saved sigaction dispositions for signals on
+/// which we installed a no-op handler. macOS only — Linux's signalfd
+/// reads pending signals directly without needing a handler to be
+/// installed. Keyed by signum; populated on refcount 0→1, restored and
+/// removed on 1→0. See `mod platform`'s `new` and `rollback`.
+#[cfg(target_os = "macos")]
+fn saved_dispositions() -> &'static Mutex<HashMap<libc::c_int, libc::sigaction>> {
+    static DISP: OnceLock<Mutex<HashMap<libc::c_int, libc::sigaction>>> = OnceLock::new();
+    DISP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Mask all maskable signals on the calling thread. Workers call this
 /// as their first action after spawn so the kernel never selects them
 /// as a signal delivery target. Must not be called on the main VM
@@ -289,7 +300,7 @@ mod platform {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{watched_set, SigEvent};
+    use super::{saved_dispositions, watched_set, SigEvent};
     use std::cell::RefCell;
     use std::os::unix::io::RawFd;
 
@@ -301,6 +312,26 @@ mod platform {
         kq: RawFd,
         signals: Vec<libc::c_int>,
         closed: bool,
+    }
+
+    /// No-op signal handler installed on the watched signals so kqueue's
+    /// `EVFILT_SIGNAL` can fire without the kernel running the default
+    /// disposition (Term for SIGUSR1, etc.). `kq_sig_read_blocking` in
+    /// `src/io/threadpool.rs` unmasks the watched signals on its own
+    /// thread; the kernel then picks that thread for delivery and runs
+    /// this no-op before `kevent()` returns.
+    extern "C" fn noop_handler(_signum: libc::c_int) {}
+
+    /// Build a `sigaction` that points at `noop_handler` with SA_RESTART
+    /// so the no-op delivery doesn't surface as EINTR on long-running
+    /// syscalls elsewhere in the process. Empty `sa_mask` — we don't
+    /// want to compound the watcher mask while the handler runs.
+    fn noop_sigaction() -> libc::sigaction {
+        let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+        sa.sa_sigaction = noop_handler as *const () as libc::sighandler_t;
+        sa.sa_flags = libc::SA_RESTART;
+        unsafe { libc::sigemptyset(&mut sa.sa_mask) };
+        sa
     }
 
     impl SignalReceiver {
@@ -316,18 +347,49 @@ mod platform {
 
             let mut mask: libc::sigset_t = unsafe { std::mem::zeroed() };
             unsafe { libc::sigemptyset(&mut mask) };
+            // Track which signals transitioned 0 → 1 so we install the
+            // no-op handler exactly once per signal, holding the
+            // `WatchedSet` lock for the duration to serialise with
+            // concurrent `SignalReceiver::new` / drop on other receivers.
+            let mut newly_watched: Vec<libc::c_int> = Vec::new();
             {
                 let mut set = watched_set().lock().unwrap();
                 for &s in &signals {
                     let entry = set.refcount.entry(s).or_insert(0);
                     if *entry == 0 {
                         unsafe { libc::sigaddset(&mut mask, s) };
+                        newly_watched.push(s);
                     }
                     *entry += 1;
                 }
             }
             unsafe {
                 libc::pthread_sigmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
+            }
+
+            // Install the no-op handler on each newly-watched signal,
+            // saving the old disposition so `rollback` can restore it
+            // when the refcount drops back to zero.
+            //
+            // sigaction is process-wide; both the install here and the
+            // unblock done by `kq_sig_read_blocking` are required for
+            // EVFILT_SIGNAL to fire (delivery requires both: a thread
+            // with the signal unmasked, and a handler that doesn't
+            // terminate the process).
+            if !newly_watched.is_empty() {
+                let new_sa = noop_sigaction();
+                let mut saved = saved_dispositions().lock().unwrap();
+                for &s in &newly_watched {
+                    let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+                    let ret = unsafe { libc::sigaction(s, &new_sa, &mut old) };
+                    if ret == 0 {
+                        saved.insert(s, old);
+                    }
+                    // sigaction failure on a watchable signal is rare;
+                    // fall back to whatever disposition was already in
+                    // place. EVFILT_SIGNAL will still fire if a user
+                    // handler exists, which is acceptable here.
+                }
             }
 
             let kq = unsafe { libc::kqueue() };
@@ -448,7 +510,11 @@ mod platform {
     fn rollback(signals: &[libc::c_int]) {
         let mut to_unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
         unsafe { libc::sigemptyset(&mut to_unblock) };
-        let mut any = false;
+        // Collect signals whose refcount fell to zero so we can both
+        // restore their saved sigaction and unblock them on the calling
+        // thread. We have to drop the WatchedSet lock before doing the
+        // sigaction restore to avoid holding two global locks in series.
+        let mut newly_freed: Vec<libc::c_int> = Vec::new();
         {
             let mut set = watched_set().lock().unwrap();
             for &s in signals {
@@ -458,12 +524,27 @@ mod platform {
                     }
                     if *c == 0 {
                         unsafe { libc::sigaddset(&mut to_unblock, s) };
-                        any = true;
+                        newly_freed.push(s);
                     }
                 }
             }
         }
-        if any {
+        // Restore the saved disposition for every signal we just
+        // released — opposite of the install in `SignalReceiver::new`.
+        // Done before the unblock so any signal already pending in the
+        // process queue when unblock takes effect fires its true
+        // default disposition (matches the documented contract in
+        // docs/posix-signals.md: "pending instances … fire their
+        // default disposition immediately").
+        if !newly_freed.is_empty() {
+            let mut saved = saved_dispositions().lock().unwrap();
+            for &s in &newly_freed {
+                if let Some(old) = saved.remove(&s) {
+                    unsafe { libc::sigaction(s, &old, std::ptr::null_mut()) };
+                }
+            }
+        }
+        if !newly_freed.is_empty() {
             unsafe {
                 libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
             }

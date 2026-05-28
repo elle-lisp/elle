@@ -17,18 +17,28 @@ fn get_elle_binary() -> &'static str {
 ///
 /// Panics with stdout+stderr output if the script exits non-zero or fails to spawn.
 fn run_elle_script(name: &str) {
+    run_elle_script_with_args(name, &[]);
+}
+
+/// Like `run_elle_script` but passes extra args to the elle binary.
+/// Used to gate scripts under non-default backends (e.g. `--no-uring`
+/// for the threadpool I/O path, which is the only path on macOS and a
+/// distinct codepath from io_uring on Linux).
+fn run_elle_script_with_args(name: &str, extra_args: &[&str]) {
     let elle_bin = get_elle_binary();
     let script = format!("tests/elle/{}.lisp", name);
 
-    let output = Command::new(elle_bin)
-        .arg(&script)
+    let mut cmd = Command::new(elle_bin);
+    cmd.args(extra_args).arg(&script);
+    let output = cmd
         .output()
-        .unwrap_or_else(|e| panic!("Failed to spawn elle for {}: {}", script, e));
+        .unwrap_or_else(|e| panic!("Failed to spawn elle for {} {:?}: {}", script, extra_args, e));
 
     assert!(
         output.status.success(),
-        "Elle script {} failed (exit {:?}):\nstdout: {}\nstderr: {}",
+        "Elle script {} {:?} failed (exit {:?}):\nstdout: {}\nstderr: {}",
         script,
+        extra_args,
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
@@ -98,4 +108,16 @@ fn parameters() {
 #[test]
 fn posix() {
     run_elle_script("posix");
+}
+
+/// Same script as `posix`, but forces the threadpool I/O backend on
+/// Linux via `--no-uring`. The threadpool path uses the same
+/// `SignalReceiver` / `kq_sig_read_blocking` / `sigfd_read_blocking`
+/// machinery as macOS does, so this gates the threadpool signal flow
+/// — the f7aed410 signalfd EAGAIN-poll fix on Linux and the EVFILT_SIGNAL
+/// worker-unblock + no-op sigaction fix on macOS. Without this we'd
+/// only exercise the io_uring path on the Linux runner.
+#[test]
+fn posix_threadpool() {
+    run_elle_script_with_args("posix", &["--no-uring"]);
 }
