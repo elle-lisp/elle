@@ -54,6 +54,13 @@ pub(crate) fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
     (SIG_HALT, value)
 }
 
+/// Return the current process's pid.
+///
+/// (sys/pid) => int
+pub(crate) fn prim_sys_pid(_args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::int(std::process::id() as i64))
+}
+
 /// Return user-provided command-line arguments as a list.
 /// Arguments are those that follow the source file (or `-` for stdin)
 /// in the process argv. Returns an empty list if no args follow.
@@ -482,37 +489,26 @@ fn prim_subprocess_wait(args: &[Value]) -> (SignalBits, Value) {
     (SIG_YIELD | SIG_IO | SIG_EXEC, request)
 }
 
-/// Map a signal name keyword (without the colon) to its libc constant.
-fn keyword_to_signal(name: &str) -> Option<libc::c_int> {
-    match name {
-        "sigterm" => Some(libc::SIGTERM),
-        "sigkill" => Some(libc::SIGKILL),
-        "sighup" => Some(libc::SIGHUP),
-        "sigint" => Some(libc::SIGINT),
-        "sigquit" => Some(libc::SIGQUIT),
-        "sigpipe" => Some(libc::SIGPIPE),
-        "sigalrm" => Some(libc::SIGALRM),
-        "sigusr1" => Some(libc::SIGUSR1),
-        "sigusr2" => Some(libc::SIGUSR2),
-        "sigchld" => Some(libc::SIGCHLD),
-        "sigcont" => Some(libc::SIGCONT),
-        "sigstop" => Some(libc::SIGSTOP),
-        "sigtstp" => Some(libc::SIGTSTP),
-        "sigttin" => Some(libc::SIGTTIN),
-        "sigttou" => Some(libc::SIGTTOU),
-        "sigwinch" => Some(libc::SIGWINCH),
-        _ => None,
-    }
-}
-
 /// Send a signal to a subprocess.
 ///
 /// (subprocess/kill handle-or-struct)           ; sends SIGTERM
-/// (subprocess/kill handle-or-struct 15)        ; integer signal number
+/// (subprocess/kill handle-or-struct 15)        ; integer (must round-trip to a named signal)
 /// (subprocess/kill handle-or-struct :sigterm)  ; keyword signal name
 ///
 /// Synchronous — returns (SIG_OK, nil) on success, (SIG_ERROR, error) on failure.
 fn prim_subprocess_kill(args: &[Value]) -> (SignalBits, Value) {
+    if !(1..=2).contains(&args.len()) {
+        return (
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                format!(
+                    "subprocess/kill: expected 1 or 2 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
     let handle_val = match extract_process_handle(&args[0], "subprocess/kill") {
         Ok(v) => v,
         Err(e) => return e,
@@ -527,34 +523,12 @@ fn prim_subprocess_kill(args: &[Value]) -> (SignalBits, Value) {
         }
     };
     let signal = if args.len() > 1 {
-        if let Some(n) = args[1].as_int() {
-            n as i32
-        } else if let Some(name) = args[1].as_keyword_name() {
-            match keyword_to_signal(&name) {
-                Some(sig) => sig,
-                None => {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!(
-                                "subprocess/kill: unknown signal keyword :{name}; expected integer or one of :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch"
-                            ),
-                        ),
-                    )
-                }
+        match crate::io::sigmap::resolve(&args[1], "subprocess/kill") {
+            Ok(s) => s,
+            Err(e) => {
+                let (kind, msg) = e.parts("subprocess/kill");
+                return (SIG_ERROR, error_val(kind, msg));
             }
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "subprocess/kill: signal must be integer or keyword, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
         }
     } else {
         libc::SIGTERM
@@ -642,6 +616,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "sys",
         example: "(sys/argv)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "sys/pid",
+        func: prim_sys_pid,
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Return the current process's pid as an integer.",
+        params: &[],
+        category: "sys",
+        example: "(sys/pid)",
         aliases: &[],
     },
     PrimitiveDef {

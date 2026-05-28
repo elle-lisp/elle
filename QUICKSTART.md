@@ -60,6 +60,7 @@ make smoke                 # run all tests (~30s)
 | [traits](docs/traits.md) | with-traits, trait dispatch |
 | [portrait](docs/analysis/portrait.md) | Semantic analysis and portraits |
 | [io](docs/io.md) | Ports, file I/O, subprocesses |
+| [posix-signals](docs/posix-signals.md) | POSIX signals: `os/sig-send`, `os/sig-watch`, etc. |
 | [ffi](docs/ffi.md) | C interop, libloading, callbacks |
 | [lua](docs/lua.md) | Lua syntax mode |
 | [epochs](docs/epochs.md) | Epoch migration system |

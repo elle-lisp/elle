@@ -1,6 +1,6 @@
 use super::{
-    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO, SIG_WAIT,
-    SIG_YIELD,
+    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO, SIG_OS_SIGNAL,
+    SIG_WAIT, SIG_YIELD,
 };
 /// Signal registry for mapping signal keywords to bit positions.
 ///
@@ -64,6 +64,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("fuel", SIG_FUEL.trailing_zeros());
         let _ = registry.register_builtin("wait", SIG_WAIT.trailing_zeros());
         let _ = registry.register_builtin("gpu", SIG_GPU.trailing_zeros());
+        let _ = registry.register_builtin("os-signal", SIG_OS_SIGNAL.trailing_zeros());
         registry
     }
 

@@ -199,7 +199,7 @@ impl MlirPolicy {
 /// silently (forward compat for :spirv, :mlir, :gpu).
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode",
+    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix",
     // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
@@ -266,7 +266,13 @@ pub mod trace_bits {
     pub const ARENA: u32 = 1 << 14;
     pub const ESCAPE: u32 = 1 << 15;
     pub const BYTECODE: u32 = 1 << 16;
-    pub const ALL: u32 = (1 << 17) - 1;
+    /// POSIX-signal subsystem (os/sig-* primitives, signalfd / kqueue
+    /// EVFILT_SIGNAL plumbing, threadpool blocking sig reads). Read both
+    /// from a per-VM `RuntimeConfig` via `has_trace_bit` and from the
+    /// process-global mirror `GLOBAL_TRACE_BITS` (below) — threadpool
+    /// worker threads and other off-VM call sites have no VM reference.
+    pub const POSIX: u32 = 1 << 17;
+    pub const ALL: u32 = (1 << 18) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -288,10 +294,26 @@ pub mod trace_bits {
             "arena" => ARENA,
             "escape" => ESCAPE,
             "bytecode" => BYTECODE,
+            "posix" => POSIX,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }
     }
+}
+
+/// Process-global mirror of the active VM's trace bits, kept in sync by
+/// `RuntimeConfig::set_trace` and `from_static_config`. Threadpool
+/// worker threads, signal-handler-adjacent code, and other off-VM call
+/// sites (which can't carry a `&VM` reference) check this directly via
+/// `global_trace_bit_enabled`. In a multi-VM process the most recent
+/// `set_trace` wins — adequate for the diagnostic use case.
+pub static GLOBAL_TRACE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Fast check for off-VM trace gates. Single relaxed atomic load when
+/// the bit is off; format args are only evaluated when the bit is on.
+#[inline]
+pub fn global_trace_bit_enabled(bit: u32) -> bool {
+    GLOBAL_TRACE_BITS.load(std::sync::atomic::Ordering::Relaxed) & bit != 0
 }
 
 // ── RuntimeConfig ─────────────────────────────────────────────────
@@ -328,6 +350,9 @@ impl RuntimeConfig {
             trace.insert(kw.clone());
             bits |= trace_bits::from_name(kw);
         }
+        // Mirror to the process-global so off-VM call sites can gate
+        // tracing without a VM reference. See `GLOBAL_TRACE_BITS`.
+        GLOBAL_TRACE_BITS.store(bits, std::sync::atomic::Ordering::Relaxed);
 
         RuntimeConfig {
             trace,
@@ -348,6 +373,8 @@ impl RuntimeConfig {
         }
         self.trace = keywords;
         self.trace_bits = bits;
+        // Keep the off-VM mirror in sync.
+        GLOBAL_TRACE_BITS.store(bits, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Check if a trace bit is set (fast path — no HashSet lookup).

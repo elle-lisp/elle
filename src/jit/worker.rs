@@ -63,6 +63,7 @@ impl JitWorker {
         let handle = std::thread::Builder::new()
             .name("elle-jit".into())
             .spawn(move || {
+                crate::io::sigfd::mask_all_signals_on_this_thread();
                 // Install a persistent fiber heap on this thread.
                 // translate_const allocates String/Keyword/Symbol Values
                 // in the thread-local heap. Since the heap is never freed,

@@ -177,6 +177,11 @@ impl AsyncBackend {
             return self.submit_watch_next(&request.port);
         }
 
+        // SigNext is portless — the SignalReceiver External is in request.port.
+        if let IoOp::SigNext = request.op {
+            return self.submit_sig_next(&request.port);
+        }
+
         // Open is portless — creates a new port rather than operating on one.
         if let IoOp::Open {
             ref path,
@@ -925,6 +930,73 @@ impl AsyncBackend {
         Ok(id)
     }
 
+    /// Submit a sig-next operation. Reads from the signalfd / kqueue fd.
+    /// Buffer is sized for several batched signalfd_siginfo structs (Linux)
+    /// or several kevent result pairs (macOS).
+    #[allow(unused_variables)]
+    fn submit_sig_next(&self, receiver_val: &Value) -> Result<u64, String> {
+        use crate::io::sigfd::{posix_trace, SignalReceiver};
+
+        let receiver = receiver_val
+            .as_external::<SignalReceiver>()
+            .ok_or("sig-next: expected a signal receiver handle")?;
+        let fd = receiver.raw_fd()?;
+        posix_trace(format_args!("submit_sig_next fd={}", fd));
+
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        // signalfd_siginfo is 128 bytes on Linux; round up generously.
+        let buf_handle = inner.buffer_pool.alloc(1024);
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ref mut buffer_pool,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                // signalfd reads behave like a regular fd read; reuse the
+                // watch-next submission path which is also a portless read.
+                crate::io::uring::submit_uring_watch_next(ring, id, fd, buffer_pool, buf_handle)?;
+            }
+            PlatformBackend::ThreadPool(_) => {
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                network_pool.submit(id, PoolOp::SigfdRead { fd })?;
+                #[cfg(target_os = "macos")]
+                network_pool.submit(
+                    id,
+                    PoolOp::KqSigRead {
+                        fd,
+                        // Worker pthread_sigmask-unblocks these so kqueue's
+                        // EVFILT_SIGNAL has a thread the kernel can pick
+                        // as the delivery target — see kq_sig_read_blocking
+                        // in src/io/threadpool.rs.
+                        signals: receiver.signals(),
+                    },
+                )?;
+                #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+                {
+                    let _ = (id, fd);
+                    return Err("sig-next: not supported on this platform".into());
+                }
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::SigNext {
+                receiver: *receiver_val,
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
     /// Submit a file open operation. Open creates a new port, so
     /// request.port is Value::NIL — we handle it before the port guard.
     #[allow(unused_variables)]
@@ -1579,6 +1651,7 @@ impl AsyncBackendInner {
             | IoOp::Task(_)
             | IoOp::Resolve { .. }
             | IoOp::WatchNext
+            | IoOp::SigNext
             | IoOp::Close
             | IoOp::PollFd { .. } => return Err("io/submit: unsupported operation on stdin".into()),
         };

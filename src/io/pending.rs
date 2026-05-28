@@ -64,6 +64,11 @@ pub(crate) enum PendingOp {
         watcher: Value,
         buffer_handle: BufferHandle,
     },
+    /// Waiting for POSIX signal deliveries (signalfd/kqueue).
+    SigNext {
+        receiver: Value,
+        buffer_handle: BufferHandle,
+    },
     /// Poll a raw fd for readiness. Portless.
     PollFd { buffer_handle: BufferHandle },
 }
@@ -79,6 +84,7 @@ impl PendingOp {
             PendingOp::Task { buffer_handle, .. } => *buffer_handle,
             PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
             PendingOp::WatchNext { buffer_handle, .. } => *buffer_handle,
+            PendingOp::SigNext { buffer_handle, .. } => *buffer_handle,
             PendingOp::PollFd { buffer_handle, .. } => *buffer_handle,
         }
     }
@@ -93,6 +99,7 @@ impl PendingOp {
             PendingOp::Task { buffer_handle, .. } => buffer_handle,
             PendingOp::Resolve { buffer_handle, .. } => buffer_handle,
             PendingOp::WatchNext { buffer_handle, .. } => buffer_handle,
+            PendingOp::SigNext { buffer_handle, .. } => buffer_handle,
             PendingOp::PollFd { buffer_handle, .. } => buffer_handle,
         }
     }
