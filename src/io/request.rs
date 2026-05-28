@@ -236,6 +236,10 @@ pub enum IoOp {
     /// Wait for filesystem events from an FsWatcher (inotify/kqueue).
     /// Portless — the FsWatcher External is in the IoRequest.port field.
     WatchNext,
+    /// Wait for POSIX signal deliveries from a SignalReceiver
+    /// (signalfd on Linux, kqueue+EVFILT_SIGNAL on macOS).
+    /// Portless — the SignalReceiver External is in IoRequest.port.
+    SigNext,
     /// Close a port: cancel pending I/O ops on its fd, then close the fd.
     /// The scheduler handles the cancel-then-close sequence so that
     /// io_uring operations are properly cancelled before the fd is dropped.

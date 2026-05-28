@@ -247,6 +247,66 @@ pub(super) fn process_raw_completion(
                 result: Ok(Value::array(event_values)),
             }
         }
+        PendingOp::SigNext { receiver, .. } => {
+            if result_code <= 0 {
+                let msg = if result_code == 0 {
+                    "signal receiver closed".to_string()
+                } else {
+                    format!(
+                        "sig-next read error: {}",
+                        std::io::Error::from_raw_os_error(-result_code)
+                    )
+                };
+                return Completion {
+                    id,
+                    result: Err(error_val("io-error", msg)),
+                };
+            }
+            let events = if let Some(r) = receiver.as_external::<crate::io::sigfd::SignalReceiver>()
+            {
+                r.parse_events(&data[..result_code as usize])
+            } else {
+                Vec::new()
+            };
+            let event_values: Vec<Value> = events
+                .iter()
+                .map(|ev| {
+                    let name = crate::io::sigmap::signum_to_keyword(ev.signum).unwrap_or("unknown");
+                    let mut fields = std::collections::BTreeMap::new();
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("signal".into()),
+                        Value::keyword(name),
+                    );
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("sender-pid".into()),
+                        match ev.sender_pid {
+                            Some(p) => Value::int(p as i64),
+                            None => Value::NIL,
+                        },
+                    );
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("sender-uid".into()),
+                        match ev.sender_uid {
+                            Some(u) => Value::int(u as i64),
+                            None => Value::NIL,
+                        },
+                    );
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("code".into()),
+                        Value::int(ev.code as i64),
+                    );
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("count".into()),
+                        Value::int(ev.count as i64),
+                    );
+                    Value::struct_from(fields)
+                })
+                .collect();
+            Completion {
+                id,
+                result: Ok(Value::array(event_values)),
+            }
+        }
         PendingOp::PollFd { .. } => {
             // result_code is the revents mask (positive) or negative errno.
             if result_code < 0 {
@@ -533,6 +593,9 @@ pub(super) fn process_raw_completion(
                 }
                 IoOp::WatchNext => {
                     unreachable!("WatchNext uses PendingOp::WatchNext, not PendingOp::Port")
+                }
+                IoOp::SigNext => {
+                    unreachable!("SigNext uses PendingOp::SigNext, not PendingOp::Port")
                 }
                 IoOp::PollFd { .. } => {
                     unreachable!("PollFd is portless; cannot reach PendingOp::Port")

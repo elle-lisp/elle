@@ -738,6 +738,10 @@ pub(super) fn drain_cqes(
                     let buf = buffer_pool.get_mut(buf_handle);
                     buf[..result_code as usize].to_vec()
                 }
+                PendingOp::SigNext { .. } if result_code > 0 => {
+                    let buf = buffer_pool.get_mut(buf_handle);
+                    buf[..result_code as usize].to_vec()
+                }
                 _ => Vec::new(),
             };
 

@@ -17,8 +17,10 @@ to a backend for execution.
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
 | `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
+| `sigfd.rs` | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
+| `sigmap.rs` | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
 | `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
-| `threadpool.rs` | `ThreadPoolBackend`, `PoolOp`, `PoolCompletion` — typed thread-pool I/O |
+| `threadpool.rs` | `ThreadPoolBackend`, `PoolOp`, `PoolCompletion` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
 | `uring.rs` | io_uring SQE submission and CQE processing (Linux only) |
 
 
@@ -50,6 +52,10 @@ Enum of I/O operations (16 variants):
 **Timer:** `Sleep { duration }`
 
 **Subprocess operations:** `Spawn { program, args, env, cwd, stdin, stdout, stderr }`, `ProcessWait`
+
+**Filesystem watch:** `WatchNext` — portless; the `FsWatcher` external lives in `IoRequest.port`. Read from the inotify (Linux) or kqueue (macOS) fd.
+
+**POSIX signal reception:** `SigNext` — portless; the `SignalReceiver` external lives in `IoRequest.port`. Reads from the signalfd (Linux) / kqueue fd (macOS) opened by `os/sig-watch`. Completion is an array of structs `{:signal :sigterm :sender-pid n :sender-uid n :code n :count n}`. See `docs/posix-signals.md` for the mask policy that backs this op.
 
 **Background task:** `Task(TaskFn)` — run an arbitrary closure on a background thread. `TaskFn` wraps a `FnOnce() -> (i32, Vec<u8>) + Send` in `RefCell<Option<...>>` for take-once semantics. Non-negative result_code = success (data returned as `Value::bytes`), negative = error (data is UTF-8 error message). `IoRequest::task()` is the convenience constructor.
 

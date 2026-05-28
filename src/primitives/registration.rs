@@ -7,7 +7,7 @@ use super::{
     allocator, arena, arithmetic, array, bitwise, bytes, chan, comparison, compile, concurrency,
     config, convert, debug, disassembly, display, fiber_introspect, fibers, fileio, format,
     intrinsics, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
-    modules, net, package, parameters, path, ports, r#box, read, sets, sort, stream, string,
+    modules, net, package, parameters, path, ports, posix, r#box, read, sets, sort, stream, string,
     structs, subprocess, time, traits, types, unix, watch,
 };
 
@@ -54,6 +54,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     parameters::PRIMITIVES,
     path::PRIMITIVES,
     ports::PRIMITIVES,
+    posix::PRIMITIVES,
     subprocess::PRIMITIVES,
     read::PRIMITIVES,
     sets::PRIMITIVES,

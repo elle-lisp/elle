@@ -11,6 +11,8 @@ pub(crate) mod mock;
 pub(crate) mod pending;
 pub(crate) mod pool;
 pub mod request;
+pub(crate) mod sigfd;
+pub(crate) mod sigmap;
 pub(crate) mod sockaddr;
 pub(crate) mod threadpool;
 pub(crate) mod types;

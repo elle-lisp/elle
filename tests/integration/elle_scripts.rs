@@ -94,3 +94,8 @@ fn table_key_expand() {
 fn parameters() {
     run_elle_script("parameters");
 }
+
+#[test]
+fn posix() {
+    run_elle_script("posix");
+}

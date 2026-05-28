@@ -48,7 +48,8 @@ use std::fmt;
 //   Bit  13:    Switch - fiber switch trampoline
 //   Bit  14:    Wait - structured concurrency wait request
 //   Bit  15:    GPU
-//   Bits 16-31: Runtime-reserved (future runtime signals)
+//   Bit  16:    OsSignal — POSIX signal send/raise capability (access control; NOT a dispatch bit)
+//   Bits 17-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
@@ -68,6 +69,7 @@ pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget
 pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch trampoline (VM-internal)
 pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurrency wait request
 pub const SIG_GPU: SignalBits = SignalBits::new(1 << 15); // GPU hardware dispatch (capability bit)
+pub const SIG_OS_SIGNAL: SignalBits = SignalBits::new(1 << 16); // POSIX signal send/raise (capability bit)
 
 /// VM-internal signal bits: infrastructure signals that user code cannot
 /// produce. These are emitted exclusively by the VM's own dispatch machinery.
@@ -167,6 +169,15 @@ impl Signal {
     pub const fn ffi_errors() -> Self {
         Signal {
             bits: SIG_FFI.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Sends a POSIX signal (capability-gated) and may error (SIG_OS_SIGNAL | SIG_ERROR).
+    /// Used by os/sig-send and os/sig-raise.
+    pub const fn os_signal_errors() -> Self {
+        Signal {
+            bits: SIG_OS_SIGNAL.union(SIG_ERROR),
             propagates: 0,
         }
     }

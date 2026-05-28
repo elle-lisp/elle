@@ -88,6 +88,18 @@ pub(super) enum PoolOp {
     WatchRead {
         fd: RawFd,
     },
+    /// Blocking read on a signalfd (Linux) for POSIX signal deliveries.
+    /// On macOS the corresponding op is `KqSigRead`.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    SigfdRead {
+        fd: RawFd,
+    },
+    /// Blocking kevent() on a kqueue fd registered with EVFILT_SIGNAL (macOS).
+    /// On Linux the corresponding op is `SigfdRead`.
+    #[cfg_attr(any(target_os = "linux", target_os = "android"), allow(dead_code))]
+    KqSigRead {
+        fd: RawFd,
+    },
     /// Poll a raw fd for readiness via libc::poll(). Returns revents mask.
     PollFd {
         fd: RawFd,
@@ -130,6 +142,10 @@ impl ThreadPoolBackend {
         let sender = self.sender.clone();
         self.in_flight += 1;
         std::thread::spawn(move || {
+            // Block all signals on this worker so the kernel never selects
+            // it as the delivery target for a watched POSIX signal.
+            // See src/io/sigfd.rs and docs/posix-signals.md.
+            crate::io::sigfd::mask_all_signals_on_this_thread();
             let (result_code, data) = match op {
                 PoolOp::Read { fd, size } => {
                     let mut buf = vec![0u8; size];
@@ -487,6 +503,20 @@ impl ThreadPoolBackend {
                     }
                 }
                 PoolOp::WatchRead { fd } => watch_read_blocking(fd),
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                PoolOp::SigfdRead { fd } => sigfd_read_blocking(fd),
+                #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                PoolOp::SigfdRead { .. } => (
+                    -libc::ENOTSUP,
+                    b"sig-next: signalfd not supported on this platform".to_vec(),
+                ),
+                #[cfg(target_os = "macos")]
+                PoolOp::KqSigRead { fd } => kq_sig_read_blocking(fd),
+                #[cfg(not(target_os = "macos"))]
+                PoolOp::KqSigRead { .. } => (
+                    -libc::ENOTSUP,
+                    b"sig-next: kqueue signal mode not supported on this platform".to_vec(),
+                ),
                 PoolOp::PollFd {
                     fd,
                     events,
@@ -644,6 +674,7 @@ impl StdinThread {
         let handle = std::thread::Builder::new()
             .name("elle-stdin".into())
             .spawn(move || {
+                crate::io::sigfd::mask_all_signals_on_this_thread();
                 use std::io::{BufRead, Read};
                 while let Ok(req) = request_rx.recv() {
                     let result = match req.op_kind {
@@ -723,6 +754,58 @@ fn watch_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
         buf.truncate(ret as usize);
         (ret as i32, buf)
     }
+}
+
+/// Blocking read on a signalfd (Linux). Reads up to 8 signalfd_siginfo
+/// structs per call; signalfd has no shutdown(2)-equivalent, so a cancel
+/// triggered by the scheduler closes the signalfd, which makes this
+/// read return 0 (EOF) and the receiver is dead.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
+    let entry_size = std::mem::size_of::<libc::signalfd_siginfo>();
+    let mut buf = vec![0u8; entry_size * 8];
+    let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+    if ret < 0 {
+        (
+            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+            Vec::new(),
+        )
+    } else {
+        buf.truncate(ret as usize);
+        (ret as i32, buf)
+    }
+}
+
+/// Blocking kevent() on a kqueue fd registered with EVFILT_SIGNAL (macOS).
+/// Encodes results as (signum:i32, count:u32) LE pairs for
+/// SignalReceiver::parse_events().
+#[cfg(target_os = "macos")]
+fn kq_sig_read_blocking(kq: RawFd) -> (i32, Vec<u8>) {
+    let mut eventlist: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
+    let n = unsafe {
+        libc::kevent(
+            kq,
+            std::ptr::null(),
+            0,
+            eventlist.as_mut_ptr(),
+            eventlist.len() as i32,
+            std::ptr::null(),
+        )
+    };
+    if n < 0 {
+        return (
+            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+            Vec::new(),
+        );
+    }
+    let mut data = Vec::with_capacity(n as usize * 8);
+    for event in &eventlist[..n as usize] {
+        let signum = event.ident as i32;
+        let count = event.data as u32;
+        data.extend_from_slice(&signum.to_le_bytes());
+        data.extend_from_slice(&count.to_le_bytes());
+    }
+    (data.len() as i32, data)
 }
 
 /// Blocking kevent() on a kqueue fd (macOS). Encodes results as

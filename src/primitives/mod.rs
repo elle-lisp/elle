@@ -44,6 +44,7 @@ pub mod package;
 pub mod parameters;
 pub mod path;
 pub mod ports;
+pub mod posix;
 pub mod read;
 pub mod registration;
 pub mod seq;
