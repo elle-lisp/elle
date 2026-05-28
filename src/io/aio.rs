@@ -935,12 +935,13 @@ impl AsyncBackend {
     /// or several kevent result pairs (macOS).
     #[allow(unused_variables)]
     fn submit_sig_next(&self, receiver_val: &Value) -> Result<u64, String> {
-        use crate::io::sigfd::SignalReceiver;
+        use crate::io::sigfd::{posix_trace, SignalReceiver};
 
         let receiver = receiver_val
             .as_external::<SignalReceiver>()
             .ok_or("sig-next: expected a signal receiver handle")?;
         let fd = receiver.raw_fd()?;
+        posix_trace(format_args!("submit_sig_next fd={}", fd));
 
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;

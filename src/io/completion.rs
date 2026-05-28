@@ -248,6 +248,12 @@ pub(super) fn process_raw_completion(
             }
         }
         PendingOp::SigNext { receiver, .. } => {
+            crate::io::sigfd::posix_trace(format_args!(
+                "completion: SigNext id={} result_code={} data_len={}",
+                id,
+                result_code,
+                data.len()
+            ));
             if result_code <= 0 {
                 let msg = if result_code == 0 {
                     "signal receiver closed".to_string()
@@ -268,6 +274,10 @@ pub(super) fn process_raw_completion(
             } else {
                 Vec::new()
             };
+            crate::io::sigfd::posix_trace(format_args!(
+                "completion: SigNext parsed {} events",
+                events.len()
+            ));
             let event_values: Vec<Value> = events
                 .iter()
                 .map(|ev| {

@@ -773,12 +773,14 @@ fn watch_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
 /// read return 0 (EOF) and the receiver is dead.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
+    use crate::io::sigfd::posix_trace;
     // The signalfd is created with SFD_NONBLOCK (see src/io/sigfd.rs) so the
     // io_uring path can rely on the kernel's poll-then-read pipeline. The
     // threadpool path has no such pipeline: a bare read(2) on a non-blocking
     // fd before the signal arrives returns -1/EAGAIN. Wait for POLLIN first,
     // looping on EINTR. POLLHUP on signalfd is unusual (no shutdown(2)
     // analogue) but we treat it as EOF for parity with WatchRead.
+    posix_trace(format_args!("linux: sigfd_read_blocking entered fd={}", fd));
     let entry_size = std::mem::size_of::<libc::signalfd_siginfo>();
     loop {
         let mut pfd = libc::pollfd {
@@ -786,18 +788,34 @@ fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
             events: libc::POLLIN,
             revents: 0,
         };
+        posix_trace(format_args!(
+            "linux: sigfd_read_blocking poll(fd={}, POLLIN, -1)",
+            fd
+        ));
         let pret = unsafe { libc::poll(&mut pfd, 1, -1) };
         if pret < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            posix_trace(format_args!(
+                "linux: sigfd_read_blocking poll errno={}",
+                errno
+            ));
             if errno == libc::EINTR {
                 continue;
             }
             return (-errno, Vec::new());
         }
+        posix_trace(format_args!(
+            "linux: sigfd_read_blocking poll returned, revents=0x{:x}",
+            pfd.revents
+        ));
         let mut buf = vec![0u8; entry_size * 8];
         let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
         if ret < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            posix_trace(format_args!(
+                "linux: sigfd_read_blocking read errno={}",
+                errno
+            ));
             // Racy: a different reader may have drained the queue between
             // poll and read. Loop back to poll.
             if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK || errno == libc::EINTR {
@@ -806,6 +824,10 @@ fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
             return (-errno, Vec::new());
         }
         buf.truncate(ret as usize);
+        posix_trace(format_args!(
+            "linux: sigfd_read_blocking returning n={}",
+            ret
+        ));
         return (ret as i32, buf);
     }
 }
@@ -832,6 +854,11 @@ fn sigfd_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
 /// disposition (Term for SIGUSR1, etc.).
 #[cfg(target_os = "macos")]
 fn kq_sig_read_blocking(kq: RawFd, signals: &[libc::c_int]) -> (i32, Vec<u8>) {
+    use crate::io::sigfd::posix_trace;
+    posix_trace(format_args!(
+        "macos: kq_sig_read_blocking entered kq={} signals={:?}",
+        kq, signals
+    ));
     // Unblock the watched signals on this thread for the lifetime of the
     // worker. The worker is single-use (each PoolOp spawns a fresh
     // thread that exits after sending the completion), so we don't
@@ -841,12 +868,19 @@ fn kq_sig_read_blocking(kq: RawFd, signals: &[libc::c_int]) -> (i32, Vec<u8>) {
     for &s in signals {
         unsafe { libc::sigaddset(&mut to_unblock, s) };
     }
-    unsafe {
-        libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
-    }
+    let unblock_ret =
+        unsafe { libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut()) };
+    posix_trace(format_args!(
+        "macos: kq_sig_read_blocking pthread_sigmask SIG_UNBLOCK ret={}",
+        unblock_ret
+    ));
 
     loop {
         let mut eventlist: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
+        posix_trace(format_args!(
+            "macos: kq_sig_read_blocking calling kevent(kq={})",
+            kq
+        ));
         let n = unsafe {
             libc::kevent(
                 kq,
@@ -859,6 +893,10 @@ fn kq_sig_read_blocking(kq: RawFd, signals: &[libc::c_int]) -> (i32, Vec<u8>) {
         };
         if n < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+            posix_trace(format_args!(
+                "macos: kq_sig_read_blocking kevent returned -1, errno={}",
+                errno
+            ));
             // If the no-op handler ran without SA_RESTART (or some other
             // signal interrupted kevent), retry. The knote state is
             // preserved across EINTR, so a subsequent kevent picks up
@@ -868,10 +906,18 @@ fn kq_sig_read_blocking(kq: RawFd, signals: &[libc::c_int]) -> (i32, Vec<u8>) {
             }
             return (-errno, Vec::new());
         }
+        posix_trace(format_args!(
+            "macos: kq_sig_read_blocking kevent returned n={} events",
+            n
+        ));
         let mut data = Vec::with_capacity(n as usize * 8);
         for event in &eventlist[..n as usize] {
             let signum = event.ident as i32;
             let count = event.data as u32;
+            posix_trace(format_args!(
+                "macos: kq_sig_read_blocking event signum={} count={}",
+                signum, count
+            ));
             data.extend_from_slice(&signum.to_le_bytes());
             data.extend_from_slice(&count.to_le_bytes());
         }

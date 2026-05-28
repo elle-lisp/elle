@@ -25,6 +25,32 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+/// Print a diagnostic line to stderr when the `ELLE_POSIX_DEBUG`
+/// environment variable is set. Used to triage the macOS EVFILT_SIGNAL
+/// hang and any future POSIX-signal regressions without rebuilding —
+/// run `ELLE_POSIX_DEBUG=1 elle tests/elle/posix.lisp` and correlate
+/// the Rust trace lines (prefixed `[posix]`) with the eprintln
+/// progress lines emitted by posix.lisp itself.
+///
+/// Direct `write(2, …)` to fd 2 bypasses the elle scheduler and Rust's
+/// stdio buffering so trace output survives even when the process is
+/// about to be killed by an outer timeout. Cheap when the env var is
+/// unset (single relaxed atomic load).
+fn debug_enabled() -> bool {
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| std::env::var_os("ELLE_POSIX_DEBUG").is_some())
+}
+
+pub(crate) fn posix_trace(args: std::fmt::Arguments<'_>) {
+    if !debug_enabled() {
+        return;
+    }
+    let line = format!("[posix] {}\n", args);
+    unsafe {
+        libc::write(2, line.as_ptr() as *const libc::c_void, line.len());
+    }
+}
+
 /// A parsed signal delivery.
 #[derive(Debug, Clone)]
 pub(crate) struct SigEvent {
@@ -130,7 +156,7 @@ pub fn currently_watched() -> Vec<libc::c_int> {
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod platform {
-    use super::{watched_set, SigEvent};
+    use super::{posix_trace, watched_set, SigEvent};
     use std::cell::RefCell;
     use std::os::unix::io::RawFd;
 
@@ -146,6 +172,10 @@ mod platform {
 
     impl SignalReceiver {
         pub fn new(signals: Vec<libc::c_int>) -> Result<Self, String> {
+            posix_trace(format_args!(
+                "linux: SignalReceiver::new signals={:?}",
+                signals
+            ));
             // Reject sigkill/sigstop — kernel forbids blocking them.
             for &s in &signals {
                 if s == libc::SIGKILL || s == libc::SIGSTOP {
@@ -175,6 +205,9 @@ mod platform {
             unsafe {
                 libc::pthread_sigmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
             }
+            posix_trace(format_args!(
+                "linux: blocked newly-watched signals on main thread"
+            ));
 
             // Build the signalfd mask: all watched signals (including
             // ones that were already blocked by some other receiver).
@@ -188,9 +221,14 @@ mod platform {
             if fd < 0 {
                 // Roll back refcounts and unblock the signals we just blocked.
                 let err = std::io::Error::last_os_error();
+                posix_trace(format_args!("linux: signalfd() failed: {}", err));
                 rollback(&signals);
                 return Err(format!("os/sig-watch: signalfd: {}", err));
             }
+            posix_trace(format_args!(
+                "linux: signalfd opened fd={} for {:?}",
+                fd, signals
+            ));
 
             Ok(SignalReceiver {
                 inner: RefCell::new(SignalReceiverInner {
@@ -217,8 +255,15 @@ mod platform {
         pub fn close(&self) {
             let mut inner = self.inner.borrow_mut();
             if inner.closed {
+                posix_trace(format_args!(
+                    "linux: SignalReceiver::close already closed (idempotent)"
+                ));
                 return;
             }
+            posix_trace(format_args!(
+                "linux: SignalReceiver::close fd={} signals={:?}",
+                inner.fd, inner.signals
+            ));
             unsafe { libc::close(inner.fd) };
             inner.closed = true;
             rollback(&inner.signals);
@@ -300,7 +345,7 @@ mod platform {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{saved_dispositions, watched_set, SigEvent};
+    use super::{posix_trace, saved_dispositions, watched_set, SigEvent};
     use std::cell::RefCell;
     use std::os::unix::io::RawFd;
 
@@ -336,6 +381,10 @@ mod platform {
 
     impl SignalReceiver {
         pub fn new(signals: Vec<libc::c_int>) -> Result<Self, String> {
+            posix_trace(format_args!(
+                "macos: SignalReceiver::new signals={:?}",
+                signals
+            ));
             for &s in &signals {
                 if s == libc::SIGKILL || s == libc::SIGSTOP {
                     return Err(format!(
@@ -366,6 +415,10 @@ mod platform {
             unsafe {
                 libc::pthread_sigmask(libc::SIG_BLOCK, &mask, std::ptr::null_mut());
             }
+            posix_trace(format_args!(
+                "macos: pthread_sigmask blocked newly_watched={:?} on main thread",
+                newly_watched
+            ));
 
             // Install the no-op handler on each newly-watched signal,
             // saving the old disposition so `rollback` can restore it
@@ -384,6 +437,17 @@ mod platform {
                     let ret = unsafe { libc::sigaction(s, &new_sa, &mut old) };
                     if ret == 0 {
                         saved.insert(s, old);
+                        posix_trace(format_args!(
+                            "macos: installed no-op sigaction for signum={}",
+                            s
+                        ));
+                    } else {
+                        let err = std::io::Error::last_os_error();
+                        posix_trace(format_args!(
+                            "macos: sigaction install FAILED for signum={}: {} — kqueue may not fire",
+                            s,
+                            err
+                        ));
                     }
                     // sigaction failure on a watchable signal is rare;
                     // fall back to whatever disposition was already in
@@ -395,10 +459,12 @@ mod platform {
             let kq = unsafe { libc::kqueue() };
             if kq < 0 {
                 let err = std::io::Error::last_os_error();
+                posix_trace(format_args!("macos: kqueue() failed: {}", err));
                 rollback(&signals);
                 return Err(format!("os/sig-watch: kqueue: {}", err));
             }
             unsafe { libc::fcntl(kq, libc::F_SETFD, libc::FD_CLOEXEC) };
+            posix_trace(format_args!("macos: kqueue() opened kq={}", kq));
 
             // Register one EVFILT_SIGNAL filter per signal.
             let changelist: Vec<libc::kevent> = signals
@@ -424,10 +490,18 @@ mod platform {
             };
             if ret < 0 {
                 let err = std::io::Error::last_os_error();
+                posix_trace(format_args!(
+                    "macos: kevent EV_ADD EVFILT_SIGNAL FAILED for {:?}: {}",
+                    signals, err
+                ));
                 unsafe { libc::close(kq) };
                 rollback(&signals);
                 return Err(format!("os/sig-watch: kevent register: {}", err));
             }
+            posix_trace(format_args!(
+                "macos: kevent EV_ADD EVFILT_SIGNAL registered {:?} on kq={}",
+                signals, kq
+            ));
 
             Ok(SignalReceiver {
                 inner: RefCell::new(SignalReceiverInner {
@@ -454,8 +528,15 @@ mod platform {
         pub fn close(&self) {
             let mut inner = self.inner.borrow_mut();
             if inner.closed {
+                posix_trace(format_args!(
+                    "macos: SignalReceiver::close already closed (idempotent)"
+                ));
                 return;
             }
+            posix_trace(format_args!(
+                "macos: SignalReceiver::close kq={} signals={:?}",
+                inner.kq, inner.signals
+            ));
             unsafe { libc::close(inner.kq) };
             inner.closed = true;
             rollback(&inner.signals);

@@ -190,9 +190,14 @@ fn prim_sig_send(args: &[Value]) -> (SignalBits, Value) {
             return (SIG_ERROR, error_val(kind, msg));
         }
     };
+    crate::io::sigfd::posix_trace(format_args!(
+        "prim_sig_send kill(pid={}, signum={})",
+        pid, signum
+    ));
     let ret = unsafe { libc::kill(pid, signum) };
     if ret < 0 {
         let err = std::io::Error::last_os_error();
+        crate::io::sigfd::posix_trace(format_args!("prim_sig_send kill FAILED errno={}", err));
         return (
             SIG_ERROR,
             error_val("os-signal-error", format!("os/sig-send: {}", err)),
@@ -214,9 +219,14 @@ fn prim_sig_raise(args: &[Value]) -> (SignalBits, Value) {
     // libc::raise sends to the calling thread; for kqueue/signalfd we want
     // it delivered to the process, so use kill(getpid()) instead. On
     // single-threaded targets they're equivalent.
+    crate::io::sigfd::posix_trace(format_args!(
+        "prim_sig_raise kill(getpid(), signum={})",
+        signum
+    ));
     let ret = unsafe { libc::kill(libc::getpid(), signum) };
     if ret < 0 {
         let err = std::io::Error::last_os_error();
+        crate::io::sigfd::posix_trace(format_args!("prim_sig_raise kill FAILED errno={}", err));
         return (
             SIG_ERROR,
             error_val("os-signal-error", format!("os/sig-raise: {}", err)),
