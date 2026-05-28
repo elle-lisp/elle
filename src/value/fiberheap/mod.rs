@@ -126,14 +126,17 @@ impl FiberHeap {
             }
         }
 
-        if crate::config::get().has_trace("rc") {
+        let trace_rc = crate::config::get().has_trace("rc");
+        let tag_dbg = if trace_rc { Some(obj.tag()) } else { None };
+        let v = self.region_store.alloc_obj(region_id, obj);
+        if trace_rc {
             eprintln!(
-                "[trace:rc] alloc_in_region({region_id}) tag={:?} count={}",
-                obj.tag(),
+                "[trace:rc] alloc_in_region({region_id}) tag={:?} payload=0x{:x} count={}",
+                tag_dbg.unwrap(),
+                v.payload,
                 self.alloc_count
             );
         }
-        let v = self.region_store.alloc_obj(region_id, obj);
         self.alloc_count += 1;
         if self.alloc_count > self.peak_alloc_count {
             self.peak_alloc_count = self.alloc_count;

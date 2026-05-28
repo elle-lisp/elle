@@ -211,11 +211,12 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
     debug_assert!(
         value.tag == obj.value_tag(),
         "tag/object mismatch — use-after-free? value.tag=0x{:x} object={} \
-         (variant's expected tag=0x{:x}); see docs/regions.md and \
+         (variant's expected tag=0x{:x}) payload=0x{:x}; see docs/regions.md and \
          CONTRIBUTING.md on progressive constraint",
         value.tag,
         obj.type_name(),
         obj.value_tag(),
+        value.payload,
     );
     obj
 }
