@@ -525,15 +525,18 @@ impl LastUseBuilder {
             }
             HirKind::Break { value, .. } => self.walk(value, true, hir.id),
 
-            // Mixed: cond/scrutinee is consumed; branches/body propagate.
+            // Mixed: cond/scrutinee is consumed; branches/body propagate
+            // through to the OUTER consumer — `(@struct :a (if c {} {}))`
+            // means whichever branch evaluates, its value is consumed by
+            // the @struct call, not by the If itself.
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
                 self.walk(cond, true, hir.id);
-                self.walk(then_branch, false, hir.id);
-                self.walk(else_branch, false, hir.id);
+                self.walk(then_branch, parent_consumes, parent_id);
+                self.walk(else_branch, parent_consumes, parent_id);
             }
             HirKind::Cond {
                 clauses,
@@ -541,10 +544,10 @@ impl LastUseBuilder {
             } => {
                 for (c, b) in clauses {
                     self.walk(c, true, hir.id);
-                    self.walk(b, false, hir.id);
+                    self.walk(b, parent_consumes, parent_id);
                 }
                 if let Some(eb) = else_branch {
-                    self.walk(eb, false, hir.id);
+                    self.walk(eb, parent_consumes, parent_id);
                 }
             }
             HirKind::Match { value, arms } => {
@@ -553,7 +556,7 @@ impl LastUseBuilder {
                     if let Some(g) = guard {
                         self.walk(g, false, hir.id);
                     }
-                    self.walk(body, false, hir.id);
+                    self.walk(body, parent_consumes, parent_id);
                 }
             }
             HirKind::While { cond, body } => {
@@ -565,48 +568,73 @@ impl LastUseBuilder {
                     self.walk(k, true, hir.id);
                     self.walk(v, true, hir.id);
                 }
-                self.walk(body, false, hir.id);
+                self.walk(body, parent_consumes, parent_id);
             }
 
             // Binding forms: init is consumed (bound to a name); body
-            // propagates (its value is the form's result).
+            // propagates (its value is the form's result) — and propagates
+            // through to the OUTER consumer, not just to the let itself.
             HirKind::Let { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
-                self.walk(body, false, hir.id);
+                self.walk(body, parent_consumes, parent_id);
             }
             HirKind::Letrec { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
-                self.walk(body, false, hir.id);
+                self.walk(body, parent_consumes, parent_id);
             }
             HirKind::Loop { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
-                self.walk(body, false, hir.id);
+                self.walk(body, parent_consumes, parent_id);
             }
 
-            // Propagating: children flow up.
-            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
+            // Begin: only the LAST expression propagates (its value is
+            // the form's value). Earlier expressions are statements;
+            // their values die at their own ids.
+            HirKind::Begin(exprs) => {
+                let last_ix = exprs.len().saturating_sub(1);
+                for (i, e) in exprs.iter().enumerate() {
+                    if i == last_ix {
+                        self.walk(e, parent_consumes, parent_id);
+                    } else {
+                        self.walk(e, false, hir.id);
+                    }
+                }
+            }
+            // And/Or: ANY child can become the form's value via short-
+            // circuit. A `(or x (alloc-something))` where `x` is nil
+            // makes the alloc the form's value, which flows to the outer
+            // consumer. All children must see the outer consumer.
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
-                    self.walk(e, false, hir.id);
+                    self.walk(e, parent_consumes, parent_id);
                 }
             }
             HirKind::Block { body, .. } => {
-                for e in body {
-                    self.walk(e, false, hir.id);
+                let last_ix = body.len().saturating_sub(1);
+                for (i, e) in body.iter().enumerate() {
+                    if i == last_ix {
+                        self.walk(e, parent_consumes, parent_id);
+                    } else {
+                        self.walk(e, false, hir.id);
+                    }
                 }
             }
 
             // Lambda: body is the closure's return path, not consumed
             // by the Lambda node itself. Captures generate uses at the
-            // Lambda's own HirId (see DefUseBuilder).
+            // Lambda's own HirId (see DefUseBuilder). The body's tail
+            // regions escape via Return and are tracked separately by
+            // `lambda_tail_regions` in regions analysis — not by
+            // propagating `parent_consumes` here.
             HirKind::Lambda { body, .. } => {
                 self.walk(body, false, hir.id);
             }
@@ -966,6 +994,170 @@ mod tests {
             alloc.0,
             expected.0,
             got
+        );
+    }
+
+    // ── propagation through Or/And/If/Let body/Begin tail ───────────
+    //
+    // Invariant: when a propagating form (Or/And, If/Cond/Match branches,
+    // Let/Letrec/Loop body, Begin tail, Block tail, Parameterize body)
+    // is consumed by an outer call, the propagating form's tail children
+    // must see THAT outer call as their last-use, not the propagating
+    // form itself. A call-result region whose `free_at` is set too early
+    // releases its slot before the outer consumer reads it — the slot's
+    // memory then gets reused for the next allocation and the stale
+    // Value's tag bits no longer match the heap object's discriminant.
+    // (Surfaced at tests/elle/telemetry.lisp:135 via
+    // `@{:attrs (or attrs {})}` — see tests/elle/bug-propagate-free-at.lisp.)
+
+    #[test]
+    fn last_use_or_propagates_to_outer_consumer() {
+        // (string (or true (string "x")))
+        // The inner (string "x") flows up through `or` to the outer
+        // (string ...) Call; its last_use must be the outer Call.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (or true (string \"x\"))))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 2);
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let inner = sorted[0];
+        let outer = sorted[1];
+
+        let got = info.last_use.get(&inner).copied();
+        assert_eq!(
+            got,
+            Some(outer),
+            "(or _ (string ...)) inner alloc @{} should free at outer Call @{}, got {:?}",
+            inner.0,
+            outer.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_and_propagates_to_outer_consumer() {
+        // (string (and true (string "x")))
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (and true (string \"x\"))))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 2);
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let inner = sorted[0];
+        let outer = sorted[1];
+
+        let got = info.last_use.get(&inner).copied();
+        assert_eq!(
+            got,
+            Some(outer),
+            "(and _ (string ...)) inner alloc @{} should free at outer Call @{}, got {:?}",
+            inner.0,
+            outer.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_if_branch_propagates_to_outer_consumer() {
+        // (string (if true (string "a") (string "b")))
+        // Both branches' allocs flow to the outer (string ...) Call.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (if true (string \"a\") (string \"b\"))))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 3, "outer + then + else");
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let then_alloc = sorted[0];
+        let else_alloc = sorted[1];
+        let outer = sorted[2];
+
+        for (label, branch) in [("then", then_alloc), ("else", else_alloc)] {
+            let got = info.last_use.get(&branch).copied();
+            assert_eq!(
+                got,
+                Some(outer),
+                "{} branch alloc @{} should free at outer Call @{}, got {:?}",
+                label,
+                branch.0,
+                outer.0,
+                got
+            );
+        }
+    }
+
+    #[test]
+    fn last_use_let_body_propagates_to_outer_consumer() {
+        // (string (let [y 1] (string "x")))
+        // The inner (string "x") is the let body's tail; it flows up
+        // to the outer (string ...) — its last_use must be the outer Call.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (let [y 1] (string \"x\"))))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 2);
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let inner = sorted[0];
+        let outer = sorted[1];
+
+        let got = info.last_use.get(&inner).copied();
+        assert_eq!(
+            got,
+            Some(outer),
+            "let-body alloc @{} should free at outer Call @{}, got {:?}",
+            inner.0,
+            outer.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_begin_tail_propagates_to_outer_consumer() {
+        // (string (begin 1 (string "x")))
+        // Begin's last expr is the tail; flows up to the outer Call.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (begin 1 (string \"x\"))))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 2);
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let inner = sorted[0];
+        let outer = sorted[1];
+
+        let got = info.last_use.get(&inner).copied();
+        assert_eq!(
+            got,
+            Some(outer),
+            "begin-tail alloc @{} should free at outer Call @{}, got {:?}",
+            inner.0,
+            outer.0,
+            got
+        );
+    }
+
+    #[test]
+    fn last_use_begin_non_tail_dies_at_its_own_id() {
+        // (string (begin (string "discarded") "ret"))
+        // The first (string "discarded") is a statement; its value is
+        // discarded. last_use should be its own id (so its region is
+        // freed at the statement boundary), NOT the outer Call.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (string (begin (string \"discarded\") \"ret\")))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 2);
+        let mut sorted = allocs.clone();
+        sorted.sort_by_key(|id| id.0);
+        let discarded = sorted[0];
+        let outer = sorted[1];
+
+        let got = info.last_use.get(&discarded).copied();
+        assert_eq!(
+            got,
+            Some(discarded),
+            "begin-statement alloc @{} should die at its own id, got {:?} (outer is @{})",
+            discarded.0,
+            got,
+            outer.0
         );
     }
 
