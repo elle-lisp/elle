@@ -23,6 +23,61 @@ use crate::value::heap::TableKey;
 use crate::value::Value;
 use std::collections::BTreeMap;
 
+/// Byte offset where the Nth grapheme cluster ends in `buf` (treated
+/// as UTF-8).  Used by text-port `ReadExact` to count progress in
+/// graphemes — the unit Elle strings are measured in — instead of
+/// bytes, so `(port/read-exact text-port 50)` returns a string of
+/// `(length 50)` regardless of how many kernel bytes that needed.
+///
+/// Returns:
+/// - `Some(offset)` when at least `n` graphemes have been assembled;
+///   `offset` is the byte position one past the Nth grapheme so the
+///   caller can split into `buf[..offset]` (the result) and
+///   `buf[offset..]` (leftover to stash for the next read).
+/// - `None` when `buf` doesn't yet contain `n` graphemes.  This also
+///   covers the trailing-partial-codepoint case (final bytes don't
+///   form a complete UTF-8 sequence) — the caller resubmits for more
+///   bytes.  Mid-buffer invalid UTF-8 is conservatively treated the
+///   same way (stop at the last valid prefix); in practice this never
+///   fires for well-formed text.
+pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8]) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    let valid = match std::str::from_utf8(buf) {
+        Ok(s) => s,
+        Err(e) => {
+            let upto = e.valid_up_to();
+            unsafe { std::str::from_utf8_unchecked(&buf[..upto]) }
+        }
+    };
+    valid.graphemes(true).count()
+}
+
+pub(crate) fn nth_grapheme_byte_end(buf: &[u8], n: usize) -> Option<usize> {
+    use unicode_segmentation::UnicodeSegmentation;
+    if n == 0 {
+        return Some(0);
+    }
+    let valid = match std::str::from_utf8(buf) {
+        Ok(s) => s,
+        Err(e) => {
+            let upto = e.valid_up_to();
+            // SAFETY: valid_up_to() is by definition the length of the
+            // longest valid UTF-8 prefix.
+            unsafe { std::str::from_utf8_unchecked(&buf[..upto]) }
+        }
+    };
+    let mut pos = 0usize;
+    let mut count = 0usize;
+    for g in valid.graphemes(true) {
+        pos += g.len();
+        count += 1;
+        if count == n {
+            return Some(pos);
+        }
+    }
+    None
+}
+
 /// Completion from an async I/O operation.
 pub(crate) struct Completion {
     pub(crate) id: u64,

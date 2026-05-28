@@ -234,6 +234,17 @@ impl Port {
         self.direction
     }
 
+    /// Builder: set the port's encoding.  Used by `tcp/connect` /
+    /// `tcp/accept` / `unix/connect` / `unix/accept` to honor an
+    /// explicit `:encoding text|binary` keyword override; the raw
+    /// stream constructors default to `Binary` (the bytes-stream
+    /// interpretation of POSIX sockets) but line-oriented text
+    /// protocols (SMTP, IRC, plain HTTP/1.x) want `Text`.
+    pub fn with_encoding(mut self, enc: Encoding) -> Self {
+        self.encoding = enc;
+        self
+    }
+
     /// The port encoding.
     pub fn encoding(&self) -> Encoding {
         self.encoding

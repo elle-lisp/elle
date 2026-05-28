@@ -40,7 +40,7 @@ pub(super) fn submit_uring_stream(
                 .build()
                 .user_data(id)
         }
-        IoOp::Read { count } => {
+        IoOp::Read { count } | IoOp::ReadExact { count } => {
             let buf = buffer_pool.get_mut(buf_handle);
             buf.resize(*count - read_buffered, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
@@ -726,7 +726,9 @@ pub(super) fn drain_cqes(
                         encoded.extend_from_slice(&payload);
                         encoded
                     }
-                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll if result_code > 0 => {
+                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
+                        if result_code > 0 =>
+                    {
                         let buf = buffer_pool.get_mut(buf_handle);
                         buf[..result_code as usize].to_vec()
                     }
@@ -773,37 +775,80 @@ pub(super) fn drain_cqes(
             // Read short-read re-submission: regular files may return short
             // reads before EOF (rare but POSIX-legal). Buffer partial data
             // and resubmit for the remainder. Stream sockets (TCP, Unix)
-            // are excluded — port/read returns "up to N bytes" per POSIX
-            // semantics, so a short read is a normal completion.
-            if let PendingOp::Port {
-                op: IoOp::Read { count },
-                ref port_key,
-                ref port,
-                ..
-            } = pending_op
-            {
-                let is_stream = port
-                    .as_external::<Port>()
+            // are excluded for plain `Read` — port/read returns "up to N
+            // bytes" per POSIX semantics, so a short read is a normal
+            // completion.  `ReadExact` is the strict variant: we resubmit
+            // for stream sockets too, so callers get exactly N units (or
+            // nil if the stream ended early).  Units are bytes on binary
+            // ports, graphemes on text ports — strings under Elle are
+            // measured in graphemes, so `(length (port/read-exact text 50))`
+            // must be 50 graphemes regardless of how many kernel bytes
+            // that took.
+            let (read_count, is_exact) = match pending_op {
+                PendingOp::Port {
+                    op: IoOp::Read { count },
+                    ..
+                } => (Some(count), false),
+                PendingOp::Port {
+                    op: IoOp::ReadExact { count },
+                    ..
+                } => (Some(count), true),
+                _ => (None, false),
+            };
+            if let Some(count) = read_count {
+                let (port_key_ref, port_ref) = match &pending_op {
+                    PendingOp::Port {
+                        ref port_key,
+                        ref port,
+                        ..
+                    } => (port_key, port),
+                    _ => unreachable!(),
+                };
+                let port_ext = port_ref.as_external::<Port>();
+                let is_stream = port_ext
                     .map(|p| matches!(p.kind(), PortKind::TcpStream | PortKind::UnixStream))
                     .unwrap_or(false);
-                if !is_stream && result_code > 0 {
+                let is_text = is_exact
+                    && port_ext
+                        .map(|p| matches!(p.encoding(), crate::port::Encoding::Text))
+                        .unwrap_or(false);
+                if (is_exact || !is_stream) && result_code > 0 {
                     let got = result_code as usize;
                     let state = fd_states
-                        .entry(port_key.clone())
+                        .entry(port_key_ref.clone())
                         .or_insert_with(FdState::new);
-                    let total = state.buffer.len() + got;
-                    if total < count {
-                        // Short read — buffer and resubmit for remainder.
+                    let needs_more = if is_text {
+                        // Combined buffer (already-buffered + freshly read) —
+                        // check it has `count` graphemes.  We don't extend
+                        // state.buffer yet; only extend if we need to resubmit.
+                        let mut probe = Vec::with_capacity(state.buffer.len() + data.len());
+                        probe.extend_from_slice(&state.buffer);
+                        probe.extend_from_slice(&data);
+                        crate::io::nth_grapheme_byte_end(&probe, count).is_none()
+                    } else {
+                        state.buffer.len() + got < count
+                    };
+                    if needs_more {
+                        // Short read — buffer and resubmit for more bytes.
                         state.buffer.extend_from_slice(&data);
                         buffer_pool.release(buf_handle);
-                        let fd = match port_key {
+                        let fd = match port_key_ref {
                             PortKey::Fd(raw) => *raw,
                             PortKey::Stdout => 1,
                             PortKey::Stderr => 2,
                             PortKey::Stdin => unreachable!(),
                         };
-                        let remaining = count - total;
-                        read_resubmits.push((id, fd, remaining, pending_op));
+                        // For binary the remaining count is exact bytes.
+                        // For text we estimate one byte per missing
+                        // grapheme (ASCII best case) — if that under-reads,
+                        // we'll loop on the next short.
+                        let request = if is_text {
+                            let g_so_far = crate::io::grapheme_count_in_valid_prefix(&state.buffer);
+                            (count - g_so_far).max(1)
+                        } else {
+                            count - state.buffer.len()
+                        };
+                        read_resubmits.push((id, fd, request, pending_op));
                         continue;
                     }
                 }

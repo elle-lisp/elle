@@ -244,7 +244,14 @@ fn prim_tcp_listen(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (tcp/accept listener [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool] [:timeout ms]) → stream-port
+/// (tcp/accept listener [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool]
+///                       [:encoding :text|:binary] [:timeout ms]) → stream-port
+///
+/// `:encoding` controls the resulting stream port's mode.  Default is
+/// `:binary` (POSIX-style: a TCP connection is a byte stream).  Pass
+/// `:text` for line-oriented text protocols (SMTP, IRC, plain HTTP/1.x)
+/// — then `port/read` and `port/read-exact` return strings and treat
+/// `n` as graphemes (the unit Elle strings are measured in).
 fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
     let port_val = match extract_port_of_kind(&args[0], PortKind::TcpListener, "tcp/accept") {
         Ok(v) => v,
@@ -259,6 +266,7 @@ fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
         IoRequest::with_timeout(
             IoOp::Accept {
                 options: kwargs.options,
+                encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
             },
             port_val,
             kwargs.timeout,
@@ -266,7 +274,12 @@ fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (tcp/connect addr port [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool] [:timeout ms]) → stream-port
+/// (tcp/connect addr port [:sndbuf n] [:rcvbuf n] [:nodelay bool] [:keepalive bool]
+///                         [:encoding :text|:binary] [:timeout ms]) → stream-port
+///
+/// `:encoding` controls the resulting stream port's mode.  Default is
+/// `:binary` (POSIX-style: a TCP connection is a byte stream).  Pass
+/// `:text` for line-oriented text protocols (SMTP, IRC, plain HTTP/1.x).
 fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
     let addr = match extract_string(&args[0], "addr", "tcp/connect") {
         Ok(s) => s,
@@ -288,6 +301,7 @@ fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
                     addr,
                     port,
                     options: kwargs.options,
+                    encoding: kwargs.encoding.unwrap_or(crate::port::Encoding::Binary),
                 },
             },
             Value::NIL,

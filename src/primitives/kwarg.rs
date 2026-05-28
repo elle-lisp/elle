@@ -4,6 +4,7 @@
 //! keyword arguments from primitive arg slices.
 
 use crate::io::request::SocketOptions;
+use crate::port::Encoding;
 use crate::value::fiber::{SignalBits, SIG_ERROR};
 use crate::value::{error_val, Value};
 use std::time::Duration;
@@ -12,6 +13,11 @@ use std::time::Duration;
 pub(crate) struct ConnectKwargs {
     pub timeout: Option<Duration>,
     pub options: SocketOptions,
+    /// Port encoding for the resulting stream.  `None` => caller's default
+    /// (binary for raw socket primitives).  Explicit `:text` opts into
+    /// grapheme-mode reads / `port/read-exact` graphemes / etc., for
+    /// line-oriented text protocols (SMTP, IRC, plain HTTP/1.x).
+    pub encoding: Option<Encoding>,
 }
 
 /// Scan args starting at `start` for keyword-value pairs.
@@ -112,6 +118,7 @@ pub(crate) fn extract_connect_kwargs(
     let mut result = ConnectKwargs {
         timeout: None,
         options: SocketOptions::default(),
+        encoding: None,
     };
 
     if args.len() <= start {
@@ -176,6 +183,38 @@ pub(crate) fn extract_connect_kwargs(
             }
             Some("keepalive") => {
                 result.options.keepalive = Some(extract_bool(val, "keepalive", prim_name)?);
+            }
+            Some("encoding") => {
+                let enc = match val.as_keyword_name().as_deref() {
+                    Some("text") => Encoding::Text,
+                    Some("binary") => Encoding::Binary,
+                    Some(other) => {
+                        return Err((
+                            SIG_ERROR,
+                            error_val(
+                                "value-error",
+                                format!(
+                                    "{}: :encoding must be :text or :binary, got :{}",
+                                    prim_name, other
+                                ),
+                            ),
+                        ));
+                    }
+                    None => {
+                        return Err((
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!(
+                                    "{}: :encoding value must be keyword (:text or :binary), got {}",
+                                    prim_name,
+                                    val.type_name()
+                                ),
+                            ),
+                        ));
+                    }
+                };
+                result.encoding = Some(enc);
             }
             Some(other) => {
                 return Err((

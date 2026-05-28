@@ -84,6 +84,47 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// (port/read-exact port n [:timeout ms]) → bytes | nil
+fn prim_stream_read_exact(args: &[Value]) -> (SignalBits, Value) {
+    let port = match extract_port_value(&args[0], "port/read-exact") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    let count = match args[1].as_int() {
+        Some(n) if n > 0 => n as usize,
+        Some(0) => return (SIG_OK, Value::bytes(vec![])),
+        Some(n) => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "value-error",
+                    format!("port/read-exact: count must be non-negative, got {}", n),
+                ),
+            )
+        }
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "port/read-exact: expected integer for count, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    let timeout = match extract_keyword_timeout(args, 2, "port/read-exact") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::with_timeout(IoOp::ReadExact { count }, port, timeout),
+    )
+}
+
 /// (port/read-all port [:timeout ms]) → string | bytes
 fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
     let port = match extract_port_value(&args[0], "port/read-all") {
@@ -169,6 +210,24 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "port",
         example: "(port/read (port/open \"file.txt\" :read) 1024)",
         aliases: &["stream/read"],
+    },
+    PrimitiveDef {
+        name: "port/read-exact",
+        func: prim_stream_read_exact,
+        signal: Signal {
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
+            propagates: 0,
+        },
+        arity: Arity::AtLeast(2),
+        doc: "Read exactly n bytes from port, looping over short reads. \
+              Returns bytes/string of length n, or nil if EOF arrived first. \
+              Unlike port/read (which is 'up to n' per POSIX), this resubmits \
+              short reads on stream sockets too — use it for length-prefixed \
+              binary framing (RESP, gRPC, h2 DATA, etc.).",
+        params: &["port", "n"],
+        category: "port",
+        example: "(port/read-exact tcp-sock 1024)",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "port/read-all",

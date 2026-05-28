@@ -313,6 +313,30 @@ fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (port/encoding port) → :text | :binary
+///
+/// Returns the port's encoding mode as a keyword.  `:text` ports return
+/// strings from read operations and treat `port/read-exact`'s count as
+/// graphemes (the unit Elle strings are measured in).  `:binary` ports
+/// return bytes and treat the count as bytes — what byte-framed
+/// protocols (RESP, gRPC, HTTP/2, length-prefixed everything) need.
+///
+/// Use this to guard protocol-implementing code that requires one or
+/// the other.  Example: a RESP reader can assert
+/// `(= :binary (port/encoding port))` up front and fail with a clear
+/// error instead of silently corrupting bulk-string framing.
+fn prim_port_encoding(args: &[Value]) -> (SignalBits, Value) {
+    let port = match extract_port(&args[0], "port/encoding") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    let kw = match port.encoding() {
+        crate::port::Encoding::Text => "text",
+        crate::port::Encoding::Binary => "binary",
+    };
+    (SIG_OK, Value::keyword(kw))
+}
+
 /// (port/seek port offset)
 /// (port/seek port offset :from :start|:current|:end)
 ///
@@ -564,6 +588,19 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["port"],
         category: "port",
         example: "(port/set-options p :timeout 5000)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "port/encoding",
+        func: prim_port_encoding,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the port's encoding as a keyword: :text or :binary. \
+              :text ports return strings and grapheme-count read-exact; \
+              :binary ports return bytes and byte-count.",
+        params: &["port"],
+        category: "port",
+        example: "(port/encoding (tcp/connect \"127.0.0.1\" 6379)) #=> :binary",
         aliases: &[],
     },
     PrimitiveDef {
