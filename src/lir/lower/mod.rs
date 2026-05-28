@@ -366,6 +366,16 @@ impl<'a> Lowerer<'a> {
                 self.current_hir_id
             )
         });
+        if crate::config::get().has_trace("rc") {
+            // Correlates runtime [trace:rc] alloc_in_region(R) events back
+            // to a HirId and source span. Pair with grep on the region id
+            // to find the full lifecycle (incref/decref/FREE/cascade), or
+            // grep on the payload address from a deref-mismatch panic.
+            eprintln!(
+                "[trace:rc:emit] emit_alloc hir_id={:?} region={} span={}",
+                self.current_hir_id, rid, self.current_span
+            );
+        }
         self.emit_in_region(instr, rid);
     }
 
@@ -532,6 +542,20 @@ impl<'a> Lowerer<'a> {
                         src: val_reg,
                         expected_region_id: expected,
                     });
+                    if crate::config::get().has_trace("rc") {
+                        // The hir_id here is the `free_at` HirId — where
+                        // the regions analysis placed the release. Pair
+                        // with [trace:rc:emit] emit_alloc on the same
+                        // region id to spot the alloc-then-release-at-
+                        // same-HirId pattern (the bug class fixed by
+                        // propagating parent_consumes through Or/And/
+                        // If branches/Let body/Begin tail in
+                        // src/hir/liveness.rs).
+                        eprintln!(
+                            "[trace:rc:emit] emit_release_value_region hir_id={:?} region={} span={}",
+                            hir_id, expected, self.current_span
+                        );
+                    }
                 }
                 // Unbound Call result: skip (leak until fiber teardown).
                 continue;
