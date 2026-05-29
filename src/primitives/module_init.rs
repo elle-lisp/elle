@@ -50,24 +50,22 @@ fn call_closure(vm: &mut VM, closure_val: Value) -> Value {
 }
 /// Build the local environment for calling a closure with the given args.
 ///
-/// Layout: [params..., locals..., captures...]
-/// For a zero-arg closure: [locals..., captures...]
+/// Layout: `[captures..., params..., locals...]` — matches `populate_env`
+/// (`src/vm/env.rs`).  `LoadUpvalue` indexes the env from zero, so the
+/// captures must come first; any local slots reserved by the closure
+/// (including ANF-lifted temporaries) sit at the tail of the buffer and
+/// are filled by the runtime as the body executes.
 pub fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Vec<Value> {
     let template = &closure.template;
-    let total = template.num_locals + template.num_captures;
-    let mut env = vec![Value::NIL; total];
-    // Copy args into param slots
-    for (i, arg) in args.iter().enumerate() {
-        if i < total {
-            env[i] = *arg;
-        }
+    let num_locally_defined = template.num_locals.saturating_sub(template.num_params);
+    let total = closure.env.len() + template.num_params + num_locally_defined;
+    let mut env = Vec::with_capacity(total);
+    env.extend(closure.env.iter().copied());
+    for i in 0..template.num_params {
+        env.push(args.get(i).copied().unwrap_or(Value::NIL));
     }
-    // Copy captures into capture slots (after locals)
-    let capture_start = template.num_locals;
-    for (i, cap) in closure.env.iter().enumerate() {
-        if capture_start + i < total {
-            env[capture_start + i] = *cap;
-        }
+    for _ in 0..num_locally_defined {
+        env.push(Value::NIL);
     }
     env
 }
@@ -123,5 +121,70 @@ fn register_stdlib_exports(
         // Already interned by extract_exports, but ensure the caller's
         // symbol table has them too.
         let _ = symbols.name(*sym_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::compile_file;
+    use crate::primitives::registration::register_primitives;
+
+    #[test]
+    fn build_closure_call_env_places_captures_before_locals() {
+        // Regression test for Finding 4.
+        //
+        // `build_closure_call_env` constructs the env that the stdlib's
+        // tail export closure receives at call time. The VM's
+        // `LoadUpvalue` instruction indexes the env from zero, so the
+        // captures must sit at the front. The old layout reserved
+        // `num_locals` nil slots in front of the captures — invisible
+        // while `num_locals == 0` (its assumed state for a trivial
+        // `(fn [] {...})`), but the ANF lift introduces one local for
+        // every allocating subexpression in the closure body. The stdlib
+        // export closure contains an inline `(fn [port] ...)`, which the
+        // lift names into a local. That local then occupied env[0] and
+        // shifted every capture by one slot, so every capture read as
+        // nil — which is why `(+ 1 2)` came back nil during
+        // `init_stdlib`.
+        let mut vm = VM::new();
+        let mut symbols = SymbolTable::new();
+        let _ = register_primitives(&mut vm, &mut symbols);
+
+        // A captured outer binding (`outer`) and an allocating let
+        // inside the returned closure (`(fn [x] x)` allocates a
+        // closure → ANF lifts it into a local).
+        let source = "(letrec [outer (fn [n] n)] \
+                      (fn [] (let [inner (fn [x] x)] outer)))";
+        let compiled = compile_file(source, &mut symbols, "<test>").expect("source must compile");
+        let closure_val = vm
+            .execute(&compiled.bytecode)
+            .expect("top-level execution must succeed");
+        let closure = closure_val
+            .as_closure()
+            .expect("top-level must evaluate to a closure");
+
+        assert!(
+            closure.template.num_captures >= 1,
+            "the test source must produce a closure with captures; got num_captures={}",
+            closure.template.num_captures
+        );
+        assert!(
+            closure.template.num_locals >= 1,
+            "the test source must produce a closure with at least one local \
+             (otherwise the bug condition isn't exercised); got num_locals={}",
+            closure.template.num_locals
+        );
+
+        let env = build_closure_call_env(closure, &[]);
+        assert!(
+            !env[0].is_nil(),
+            "env[0] must be the first capture — a nil here means locals \
+             were placed before captures and `LoadUpvalue(0)` reads nil. \
+             num_captures={}, num_locals={}, env[0]={}",
+            closure.template.num_captures,
+            closure.template.num_locals,
+            env[0],
+        );
     }
 }
