@@ -843,12 +843,19 @@ pub extern "C" fn elle_jit_bytes_push(
 }
 
 /// Pop — panics on type error or empty (intrinsic contract).
+///
+/// Routes through `arena::tracked_pop` so the popped value's source
+/// region RC is dropped, mirroring `handle_intr_pop` in
+/// `src/vm/types.rs` which calls `track_remove(popped)`. Skipping the
+/// decref is the leak counterpart of the Family D `track_insert` skip
+/// fixed in commit 1a0d9e4c: the matching `track_insert` from the
+/// original `tracked_push` stays in effect and the source region's RC
+/// never returns to zero.
 #[no_mangle]
 pub extern "C" fn elle_jit_pop(tag: u64, payload: u64) -> JitValue {
     let v = Value { tag, payload };
-    let arr = v.as_array_mut().expect("%pop: expected @array");
-    let popped = arr.borrow_mut().pop().expect("%pop: empty @array");
-    JitValue::from_value(popped)
+    assert!(v.is_array_mut(), "%pop: expected @array");
+    JitValue::from_value(crate::value::arena::tracked_pop(v))
 }
 
 /// Freeze — pass-through for already-immutable types.
@@ -1114,5 +1121,53 @@ mod tests {
             elle_jit_lt(b.tag, b.payload, a.tag, a.payload),
             JitValue::bool_val(false)
         );
+    }
+
+    /// elle_jit_pop must drop the popped value's region RC, mirroring
+    /// handle_intr_pop in src/vm/types.rs which calls
+    /// arena::track_remove(popped). Without the decref, popping a
+    /// cross-region heap value leaves the source region's RC bumped by
+    /// the matching track_insert (from the original push) — a region-RC
+    /// leak: the source region never reaches RC=0 and its allocations
+    /// outlive their last reference. Same VM-vs-JIT contract drift
+    /// shape as the Family D push/extend UAF (commit 1a0d9e4c), but
+    /// the symptom here is a leak rather than corruption.
+    #[test]
+    fn pop_track_removes_cross_region_value() {
+        use crate::value::arena::{alloc_in_fresh_region, region_rc, tracked_push};
+        use crate::value::heap::{HeapObject, Pair};
+        crate::value::arena::with_test_region(|| {
+            let arr = Value::array_mut(vec![]);
+            let (cross, source_rid) =
+                alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+            let rc_baseline = region_rc(source_rid);
+            // Push goes through tracked_push, which calls track_insert →
+            // source region RC is now baseline + 1.
+            let _ = tracked_push(arr, cross);
+            let rc_after_push = region_rc(source_rid);
+            assert_eq!(
+                rc_after_push,
+                rc_baseline + 1,
+                "precondition: tracked_push must bump source region RC"
+            );
+            // Pop via the JIT helper. It must call track_remove to undo
+            // the push-side track_insert, returning the RC to baseline.
+            let popped = elle_jit_pop(arr.tag, arr.payload);
+            let popped_val = Value {
+                tag: popped.tag,
+                payload: popped.payload,
+            };
+            assert_eq!(
+                (popped_val.tag, popped_val.payload),
+                (cross.tag, cross.payload),
+                "elle_jit_pop must return the popped Value"
+            );
+            let rc_after_pop = region_rc(source_rid);
+            assert_eq!(
+                rc_after_pop,
+                rc_baseline,
+                "elle_jit_pop must decref the popped cross-region value's source region (track_remove)"
+            );
+        });
     }
 }
