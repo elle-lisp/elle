@@ -214,6 +214,41 @@ impl AsyncBackend {
         // when close is requested.
         if matches!(&request.op, IoOp::Close) {
             let port_key = PortKey::from_port(port);
+            // Stdin close has its own path: the dedicated stdin worker
+            // thread reads via blocking poll(2)+read(2) on fd 0, not
+            // through io_uring. Signal the thread to shut down — the
+            // worker detects the self-pipe wakeup inside its next
+            // `poll(2)`, sends a `stdin closed` error completion for
+            // whatever read was in flight, drains any further
+            // requests as cancelled, and exits.
+            //
+            // We do NOT take/drop `stdin_thread` here: dropping joins
+            // the worker, which would block the scheduler **on this
+            // very thread** before the worker's cancellation
+            // completion can be drained by the main poll loop and
+            // delivered to the fiber waiting on the read. The fiber
+            // would then sit in `ev/join` indefinitely. Leave the
+            // struct in place; the worker reaps itself via channel
+            // disconnect at AsyncBackend drop time.
+            //
+            // See `docs/io.md` "Closing `*stdin*`".
+            if matches!(port_key, PortKey::Stdin) {
+                {
+                    let inner = self.inner.borrow();
+                    if let Some(ref st) = inner.stdin_thread {
+                        st.shutdown();
+                    }
+                }
+                port.close();
+                let mut inner = self.inner.borrow_mut();
+                let id = inner.next_id;
+                inner.next_id += 1;
+                inner.completions.push_back(Completion {
+                    id,
+                    result: Ok(Value::NIL),
+                });
+                return Ok(id);
+            }
             if let PortKey::Fd(fd) = &port_key {
                 let mut inner = self.inner.borrow_mut();
                 // Cancel all pending ops on this fd
@@ -960,9 +995,12 @@ impl AsyncBackend {
         match platform {
             #[cfg(target_os = "linux")]
             PlatformBackend::Uring(ring) => {
-                // signalfd reads behave like a regular fd read; reuse the
-                // watch-next submission path which is also a portless read.
-                crate::io::uring::submit_uring_watch_next(ring, id, fd, buffer_pool, buf_handle)?;
+                // Dedicated io_uring + signalfd path: a single
+                // IORING_OP_READ on the signalfd, completing via the
+                // kernel's poll pipeline with no elle-side worker
+                // thread. Threadpool is reached only when --no-uring
+                // is in effect (see PlatformBackend::ThreadPool arm).
+                crate::io::uring::submit_uring_sig_next(ring, id, fd, buffer_pool, buf_handle)?;
             }
             PlatformBackend::ThreadPool(_) => {
                 #[cfg(any(target_os = "linux", target_os = "android"))]

@@ -91,6 +91,164 @@ fn saved_dispositions() -> &'static Mutex<HashMap<libc::c_int, libc::sigaction>>
     DISP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Process-wide signal trap installation, called exactly once from
+/// `main()` before any worker thread spawns. Workers call
+/// `mask_all_signals_on_this_thread` on entry and thereby inherit a
+/// no-signal-delivery posture; the *main* thread is what this function
+/// configures, and the policy below decides which signals get a
+/// sigaction handler (delivered to the main thread by the kernel
+/// because everyone else has them masked) and which are
+/// `pthread_sigmask`-blocked on the main thread (queued by the kernel
+/// for `signalfd`-style consumption).
+///
+/// ## Disposition table
+///
+/// | Set | Signals | What we do |
+/// |-----|---------|------------|
+/// | Terminate | TERM, INT, QUIT, HUP | `sigaction(SA_RESTART)` to a handler that writes a tagged line to stderr via `write(2)` and `_exit(128 + signum)`. The handler is async-signal-safe — no allocation, no Rust stdio, no locks. |
+/// | Job control | TSTP, TTIN, TTOU | `sigaction` to a handler that calls `raise(SIGSTOP)`. The kernel stops the process; the shell can later `bg`/`fg` it. On `SIGCONT` the process resumes mid-handler and returns normally. |
+/// | Resume | CONT | `sigaction` to an empty handler so the delivery is consumed and the kernel doesn't try anything else. (No state to clean up — io_uring + signalfd survive across SIGSTOP/SIGCONT untouched.) |
+/// | Pipe | PIPE | `sigaction(SIG_IGN)`. Writes to broken pipes surface as `EPIPE`. |
+/// | Absorb | USR1, USR2, CHLD, URG, WINCH, ALRM | `pthread_sigmask(SIG_BLOCK)` on the main thread. With every worker also masking on spawn, no thread has these unblocked, the kernel queues them, and nobody reads. They are silently absorbed unless a user `os/sig-watch` opens a `signalfd` to drain. |
+/// | Fault | SEGV, BUS, FPE, ILL, ABRT, TRAP, SYS | Untouched. These are synchronous fault signals; intercepting them only obscures real bugs. The kernel default (core/term) runs. |
+/// | Uncatchable | KILL, STOP | Kernel forbids touching these. Pass through. |
+///
+/// ## Watcher override semantics
+///
+/// A user `os/sig-watch :sigterm` (etc.) lazily `pthread_sigmask`-blocks
+/// the watched signal on the main thread before opening its
+/// per-receiver `signalfd`. With the main thread blocking the signal
+/// and every worker thread already masking everything, the kernel has
+/// no delivery target — the sigaction handler installed here cannot
+/// fire while a watcher is alive. The signalfd reads it instead.
+/// When the last watcher closes, the lazy-block unblocks the signal,
+/// the kernel can again pick the main thread, and the sigaction handler
+/// re-arms. No explicit watcher-vs-builtin coordination logic in user
+/// space — the kernel's delivery rules do it for free.
+///
+/// ## Counter-cases this defends against
+///
+/// 1. **Startup race**: a `SIGTERM` arriving between `config::init` and
+///    the first `os/sig-watch` no longer kills the program — the
+///    handler runs.
+/// 2. **C-spawned thread inheritance**: Cranelift / FFI cdylib threads
+///    inherit the main thread's startup mask. After this function,
+///    that mask blocks the absorb-set, narrowing the window where a
+///    rogue thread could absorb a signal the user intended to watch.
+/// 3. **Accidental `kill -USR1`**: previously killed the process
+///    (kernel default Term). Now absorbed by the startup mask.
+///
+/// Idempotent: safe to call multiple times. (`sigaction` overwrites the
+/// previous handler; `pthread_sigmask(SIG_BLOCK)` is additive but the
+/// set is constant.) Tests fork and call it in each child.
+pub fn init_process_signals() {
+    install_terminate_handlers();
+    install_job_control_handlers();
+    install_cont_handler();
+    install_pipe_ignore();
+    block_absorb_set_on_main_thread();
+}
+
+extern "C" fn terminate_handler(signum: libc::c_int) {
+    // Async-signal-safe. No allocation, no Rust stdio, no locks.
+    // `write(2)` and `_exit(2)` are on the POSIX async-signal-safe list.
+    // Tag the message so a user staring at unfamiliar `^elle:
+    // terminated by SIGTERM` output can correlate with this code.
+    let tag: &[u8] = match signum {
+        s if s == libc::SIGTERM => b"elle: terminated by SIGTERM\n",
+        s if s == libc::SIGINT => b"elle: interrupted by SIGINT\n",
+        s if s == libc::SIGQUIT => b"elle: quit by SIGQUIT\n",
+        s if s == libc::SIGHUP => b"elle: hung up by SIGHUP\n",
+        _ => b"elle: terminated\n",
+    };
+    unsafe {
+        libc::write(2, tag.as_ptr() as *const libc::c_void, tag.len());
+        libc::_exit(128 + signum);
+    }
+}
+
+extern "C" fn job_control_handler(_signum: libc::c_int) {
+    // SIGTSTP / SIGTTIN / SIGTTOU all map to "actually stop the
+    // process". `raise(SIGSTOP)` is async-signal-safe and the kernel
+    // honours it even from inside a signal handler.
+    unsafe {
+        libc::raise(libc::SIGSTOP);
+    }
+}
+
+extern "C" fn cont_handler(_signum: libc::c_int) {
+    // Nothing to do — the kernel already resumed us. The handler
+    // exists so the kernel has a delivery target for SIGCONT instead
+    // of running the (no-op) default disposition; without it, a tool
+    // that expects a SIGCONT round-trip (e.g. `kill -CONT` from a
+    // shell-script supervisor) sees the signal vanish.
+}
+
+/// Build a `sigaction` pointing at `handler` with `SA_RESTART` so the
+/// handler running on a syscall doesn't surface as `EINTR` to the
+/// caller (we use io_uring and a few raw `libc::poll` calls; both can
+/// handle EINTR but auto-restart is friendlier).
+fn build_sigaction(handler: extern "C" fn(libc::c_int)) -> libc::sigaction {
+    let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+    sa.sa_sigaction = handler as *const () as libc::sighandler_t;
+    sa.sa_flags = libc::SA_RESTART;
+    unsafe { libc::sigemptyset(&mut sa.sa_mask) };
+    sa
+}
+
+fn install_terminate_handlers() {
+    let sa = build_sigaction(terminate_handler);
+    for s in [libc::SIGTERM, libc::SIGINT, libc::SIGQUIT, libc::SIGHUP] {
+        unsafe { libc::sigaction(s, &sa, std::ptr::null_mut()) };
+    }
+}
+
+fn install_job_control_handlers() {
+    let sa = build_sigaction(job_control_handler);
+    for s in [libc::SIGTSTP, libc::SIGTTIN, libc::SIGTTOU] {
+        unsafe { libc::sigaction(s, &sa, std::ptr::null_mut()) };
+    }
+}
+
+fn install_cont_handler() {
+    let sa = build_sigaction(cont_handler);
+    unsafe { libc::sigaction(libc::SIGCONT, &sa, std::ptr::null_mut()) };
+}
+
+fn install_pipe_ignore() {
+    let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+    sa.sa_sigaction = libc::SIG_IGN;
+    sa.sa_flags = 0;
+    unsafe {
+        libc::sigemptyset(&mut sa.sa_mask);
+        libc::sigaction(libc::SIGPIPE, &sa, std::ptr::null_mut());
+    }
+}
+
+/// Signals that should be silently absorbed unless a `SignalReceiver`
+/// is actively watching them. Blocked process-wide on the main thread
+/// at startup; workers already mask everything on spawn, so the kernel
+/// has no delivery target and the signals just queue.
+const ABSORB_SET: &[libc::c_int] = &[
+    libc::SIGUSR1,
+    libc::SIGUSR2,
+    libc::SIGCHLD,
+    libc::SIGURG,
+    libc::SIGWINCH,
+    libc::SIGALRM,
+];
+
+fn block_absorb_set_on_main_thread() {
+    let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(&mut set) };
+    for &s in ABSORB_SET {
+        unsafe { libc::sigaddset(&mut set, s) };
+    }
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+}
+
 /// Mask all maskable signals on the calling thread. Workers call this
 /// as their first action after spawn so the kernel never selects them
 /// as a signal delivery target. Must not be called on the main VM
@@ -378,9 +536,22 @@ mod platform {
     fn rollback(signals: &[libc::c_int]) {
         // Decrement refcounts; collect signals whose refcount fell to
         // zero so we can pthread_sigmask-unblock them.
+        //
+        // Signals in the eager-trap absorb set
+        // (`crate::io::sigfd::ABSORB_SET`) are intentionally blocked
+        // process-wide by `init_process_signals`. The rollback must
+        // NOT unblock them — otherwise an external `kill -USR1`
+        // arriving between close and process exit would be delivered
+        // by the kernel to the main thread (the only thread without
+        // the signal masked), find no sigaction handler, and run the
+        // kernel default disposition (Term for USR1/USR2/ALRM). We
+        // still drain any pending instances before returning so the
+        // signalfd close doesn't leave them dangling, but we leave
+        // the mask bit set.
         let mut to_unblock: libc::sigset_t = unsafe { std::mem::zeroed() };
         unsafe { libc::sigemptyset(&mut to_unblock) };
-        let mut newly_freed: Vec<libc::c_int> = Vec::new();
+        let mut newly_freed_drainable: Vec<libc::c_int> = Vec::new();
+        let mut newly_freed_unblockable: Vec<libc::c_int> = Vec::new();
         {
             let mut set = watched_set().lock().unwrap();
             for &s in signals {
@@ -389,27 +560,35 @@ mod platform {
                         *c -= 1;
                     }
                     if *c == 0 {
-                        unsafe { libc::sigaddset(&mut to_unblock, s) };
-                        newly_freed.push(s);
+                        newly_freed_drainable.push(s);
+                        if !super::ABSORB_SET.contains(&s) {
+                            unsafe { libc::sigaddset(&mut to_unblock, s) };
+                            newly_freed_unblockable.push(s);
+                        }
                     }
                 }
             }
         }
-        if !newly_freed.is_empty() {
-            // Drain pending watched signals BEFORE unblocking. If a
-            // watcher closes with signals still queued (signalfd was
-            // never read for them, or the user `kill`d after the
-            // last sig-next), the unblock would otherwise fire each
-            // one's default disposition on this thread — Term for
-            // most. See `drain_pending_blocked` for the failure mode
-            // this defends against.
+        if !newly_freed_drainable.is_empty() {
+            // Drain pending watched signals BEFORE any (selective)
+            // unblock. If a watcher closes with signals still queued
+            // (signalfd was never read for them, or the user `kill`d
+            // after the last sig-next), the unblock — for the
+            // unblockable subset — would otherwise fire each one's
+            // default disposition on this thread.  Absorb-set
+            // signals also benefit from the drain: leaving instances
+            // queued is harmless on its own, but a future user
+            // os/sig-watch on the same signum would observe stale
+            // pending state. See `drain_pending_blocked`.
             posix_trace(format_args!(
-                "linux: rollback draining + unblocking newly_freed={:?}",
-                newly_freed
+                "linux: rollback draining newly_freed={:?}; unblocking subset {:?}",
+                newly_freed_drainable, newly_freed_unblockable
             ));
-            drain_pending_blocked(&newly_freed);
-            unsafe {
-                libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
+            drain_pending_blocked(&newly_freed_drainable);
+            if !newly_freed_unblockable.is_empty() {
+                unsafe {
+                    libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
+                }
             }
         }
     }
@@ -669,7 +848,18 @@ mod platform {
         // restore their saved sigaction and unblock them on the calling
         // thread. We have to drop the WatchedSet lock before doing the
         // sigaction restore to avoid holding two global locks in series.
+        //
+        // Signals in `crate::io::sigfd::ABSORB_SET` are kept masked at
+        // process scope by `init_process_signals`; the rollback must
+        // not unblock them on close even when refcount hits zero. On
+        // macOS the leak that would otherwise happen is identical to
+        // Linux: a future `kill -USR1 $pid` would, after the close,
+        // find the kqueue no-op handler restored to default (Term)
+        // *and* the main-thread mask cleared, and terminate the
+        // process. We still drain + sigaction-restore for absorb-set
+        // signums; we just skip the pthread_sigmask unblock.
         let mut newly_freed: Vec<libc::c_int> = Vec::new();
+        let mut newly_freed_unblockable: Vec<libc::c_int> = Vec::new();
         {
             let mut set = watched_set().lock().unwrap();
             for &s in signals {
@@ -678,8 +868,11 @@ mod platform {
                         *c -= 1;
                     }
                     if *c == 0 {
-                        unsafe { libc::sigaddset(&mut to_unblock, s) };
                         newly_freed.push(s);
+                        if !super::ABSORB_SET.contains(&s) {
+                            unsafe { libc::sigaddset(&mut to_unblock, s) };
+                            newly_freed_unblockable.push(s);
+                        }
                     }
                 }
             }
@@ -688,30 +881,31 @@ mod platform {
             return;
         }
         // Drain pending watched signals via sigwait BEFORE we restore
-        // the saved disposition or unblock. macOS's EVFILT_SIGNAL
-        // only counts kill() generations on the knote — it does NOT
-        // consume from the process pending queue — and the kqueue
-        // worker's brief pthread_sigmask SIG_UNBLOCK + no-op-handler
-        // delivery only drains at most one queued instance. Test 5
-        // (two kill(SIGUSR1) calls in a row, one sig-next read
-        // reporting count=2) leaves a SIGUSR1 in the pending queue
-        // even after the worker reports the event. Restoring the
-        // default disposition (Term for SIGUSR1) and then
-        // unblocking would deliver that orphan to this thread with
-        // its newly-restored default and kill the process mid-close.
-        // sigwait consumes pending instances without invoking the
-        // (still no-op) handler. Done while the signals are still
-        // blocked, so sigwait returns immediately for already-pending
-        // entries.
+        // the saved disposition or (selectively) unblock. macOS's
+        // EVFILT_SIGNAL only counts kill() generations on the knote —
+        // it does NOT consume from the process pending queue — and
+        // the kqueue worker's brief pthread_sigmask SIG_UNBLOCK +
+        // no-op-handler delivery only drains at most one queued
+        // instance. Test 5 (two kill(SIGUSR1) calls in a row, one
+        // sig-next read reporting count=2) leaves a SIGUSR1 in the
+        // pending queue even after the worker reports the event.
+        // Restoring the default disposition (Term for SIGUSR1) and
+        // then unblocking would deliver that orphan to this thread
+        // with its newly-restored default and kill the process
+        // mid-close. sigwait consumes pending instances without
+        // invoking the (still no-op) handler. Done while the signals
+        // are still blocked, so sigwait returns immediately for
+        // already-pending entries.
         posix_trace(format_args!(
-            "macos: rollback draining + restoring + unblocking newly_freed={:?}",
-            newly_freed
+            "macos: rollback draining newly_freed={:?}; unblocking subset {:?}",
+            newly_freed, newly_freed_unblockable
         ));
         drain_pending_blocked(&newly_freed);
-        // Restore the saved sigactions, then unblock. Order matters:
-        // any signal generated AFTER the unblock should fire the
-        // user's original disposition (typically the default), not
-        // our no-op.
+        // Restore the saved sigactions, then unblock the subset of
+        // signums that should re-arm their kernel default. Order
+        // matters: any signal generated AFTER the unblock should
+        // fire the user's original disposition (typically the
+        // default), not our no-op.
         {
             let mut saved = saved_dispositions().lock().unwrap();
             for &s in &newly_freed {
@@ -724,8 +918,10 @@ mod platform {
                 }
             }
         }
-        unsafe {
-            libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
+        if !newly_freed_unblockable.is_empty() {
+            unsafe {
+                libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
+            }
         }
     }
 }
@@ -801,11 +997,19 @@ mod tests {
         assert_eq!(events[1].code, 1);
     }
 
+    /// Refcount accounting + absorb-set unblock suppression. SIGURG is
+    /// in the eager-trap absorb set (`ABSORB_SET`) so once a watcher
+    /// blocks it, close-time rollback intentionally does NOT unblock —
+    /// otherwise the kernel default (Term) would be reachable on the
+    /// main thread after the last watcher closes. The refcount itself
+    /// transitions correctly (0 → 1 → 2 → 1 → 0) and is observable
+    /// via `currently_watched`; only the mask bit is sticky.
+    ///
+    /// SIGURG is rarely touched by the runtime or other tests; safer
+    /// than SIGWINCH (which the parse_events test below also opens
+    /// a receiver for, racing against the WatchedSet refcount).
     #[test]
-    fn refcount_blocks_and_unblocks() {
-        // SIGURG is rarely touched by the runtime or other tests; safer
-        // than SIGWINCH (which the parse_events test below also opens
-        // a receiver for, racing against the WatchedSet refcount).
+    fn refcount_block_while_watched_absorb_set_stays_blocked_after_close() {
         let h = std::thread::spawn(|| {
             unsafe {
                 let mut empty: libc::sigset_t = std::mem::zeroed();
@@ -816,17 +1020,26 @@ mod tests {
 
             let r1 = SignalReceiver::new(vec![libc::SIGURG]).unwrap();
             assert!(current_thread_blocked().contains(&libc::SIGURG));
+            assert!(currently_watched().contains(&libc::SIGURG));
 
             let r2 = SignalReceiver::new(vec![libc::SIGURG]).unwrap();
             assert!(current_thread_blocked().contains(&libc::SIGURG));
 
             r1.close();
-            // Still blocked because r2 holds it.
+            // Still blocked because r2 holds the refcount > 0.
             assert!(current_thread_blocked().contains(&libc::SIGURG));
+            assert!(currently_watched().contains(&libc::SIGURG));
 
             r2.close();
-            // Both released — unblocked.
-            assert!(!current_thread_blocked().contains(&libc::SIGURG));
+            // Refcount transitioned 1 → 0, but SIGURG is in ABSORB_SET
+            // so rollback skips the unblock — see `rollback` in this
+            // file. The mask bit stays set; `currently_watched` flips
+            // off as the source of truth for "is anyone watching this?".
+            assert!(
+                current_thread_blocked().contains(&libc::SIGURG),
+                "ABSORB_SET signal must stay masked after last close"
+            );
+            assert!(!currently_watched().contains(&libc::SIGURG));
         });
         h.join().unwrap();
     }
@@ -841,5 +1054,306 @@ mod tests {
     fn cannot_watch_sigstop() {
         let r = SignalReceiver::new(vec![libc::SIGSTOP]);
         assert!(r.is_err());
+    }
+
+    // ── Eager-trap (init_process_signals) regression tests ──────────────
+    //
+    // These tests fork because the test runner has many peer threads with
+    // various signal masks and unmasked signals would be absorbed by
+    // them before `init_process_signals` could install the disposition we
+    // want to assert. Inside the forked child there is exactly one thread,
+    // making the kernel's signal-delivery target deterministic.
+    //
+    // All five tests follow the same shape:
+    //
+    //   1. fork().
+    //   2. Child calls `init_process_signals()` to install the eager
+    //      sigaction handlers + the absorb-set mask.
+    //   3. Child triggers the scenario (e.g. raise(SIGTERM)).
+    //   4. Parent observes the child via waitpid and asserts on the
+    //      exit status.
+    //
+    // The exit codes are conventional `128 + signum` for terminate-class
+    // signals — matches what the sigaction handlers will encode in their
+    // `_exit()` call. A `WIFSIGNALED` parent status means the kernel
+    // default fired instead of our handler — that's the regression we're
+    // pinning against.
+
+    /// Run `child_logic` in a forked child with a `deadline_secs` timeout.
+    /// Returns the child's exit status struct so individual tests can
+    /// assert on it without each one reimplementing the fork dance.
+    fn fork_run(deadline_secs: u64, child_logic: fn() -> i32) -> libc::c_int {
+        use std::time::{Duration, Instant};
+        let pid = unsafe { libc::fork() };
+        if pid < 0 {
+            panic!("fork failed: {}", std::io::Error::last_os_error());
+        }
+        if pid == 0 {
+            let code = child_logic();
+            unsafe { libc::_exit(code) };
+        }
+        let deadline = Instant::now() + Duration::from_secs(deadline_secs);
+        let mut status: libc::c_int = 0;
+        loop {
+            let wret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+            if wret == pid {
+                return status;
+            }
+            if wret < 0 {
+                panic!("waitpid({}): {}", pid, std::io::Error::last_os_error());
+            }
+            if Instant::now() >= deadline {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
+                panic!("fork_run child hung past {}s", deadline_secs);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// SIGTERM must run the built-in sigaction handler and produce a
+    /// clean `WIFEXITED == 143` (= `128 + SIGTERM`), not a
+    /// `WIFSIGNALED` death. Counter-factual: comment out the SIGTERM
+    /// branch in `install_terminate_handlers` and this test fails
+    /// because the kernel default (Term) fires instead.
+    #[test]
+    fn sigterm_terminates_via_handler_with_code_143() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            unsafe { libc::raise(libc::SIGTERM) };
+            // The handler should have called _exit before we get here.
+            // If we reach this line the handler is broken — return a
+            // distinguishable code so the parent's assertion message
+            // makes it clear.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            91
+        });
+        assert!(
+            !libc::WIFSIGNALED(status),
+            "child died from signal {} — sigaction handler did not fire",
+            libc::WTERMSIG(status),
+        );
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            128 + libc::SIGTERM,
+            "SIGTERM handler must _exit(128 + SIGTERM)"
+        );
+    }
+
+    /// Same as SIGTERM but for SIGINT / SIGQUIT / SIGHUP — they all
+    /// share the terminate-class dispatch.
+    #[test]
+    fn sigint_terminates_via_handler_with_code_130() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            unsafe { libc::raise(libc::SIGINT) };
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            91
+        });
+        assert!(!libc::WIFSIGNALED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 128 + libc::SIGINT);
+    }
+
+    #[test]
+    fn sigquit_terminates_via_handler_with_code_131() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            unsafe { libc::raise(libc::SIGQUIT) };
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            91
+        });
+        assert!(!libc::WIFSIGNALED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 128 + libc::SIGQUIT);
+    }
+
+    #[test]
+    fn sighup_terminates_via_handler_with_code_129() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            unsafe { libc::raise(libc::SIGHUP) };
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            91
+        });
+        assert!(!libc::WIFSIGNALED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 128 + libc::SIGHUP);
+    }
+
+    /// SIGTSTP must translate into a `raise(SIGSTOP)` from the handler,
+    /// the kernel stops the process, and after the parent sends
+    /// SIGCONT execution resumes. We verify resumption by having the
+    /// child write a sentinel to a pipe AFTER the SIGTSTP raise: if
+    /// the sigaction handler is missing, the kernel default for
+    /// SIGTSTP (also Stop, but no sigaction means we never write the
+    /// sentinel because Continue-only-on-cont still works); to make
+    /// this a sharp test we instead assert the child exits 0 within
+    /// the timeout AFTER parent sends SIGCONT — without the SIGCONT
+    /// the child would hang in the kernel-imposed stop and the
+    /// timeout would fire.
+    ///
+    /// Counter-factual: with no SIGTSTP handler we'd still get a
+    /// kernel-imposed stop (same observed result). So this test
+    /// uniquely pins SIGTSTP → SIGSTOP-via-handler only when paired
+    /// with the next test (sigtstp_handler_returns_to_caller).
+    #[test]
+    fn sigtstp_pauses_and_sigcont_resumes() {
+        use std::time::{Duration, Instant};
+        let pid = unsafe { libc::fork() };
+        if pid < 0 {
+            panic!("fork: {}", std::io::Error::last_os_error());
+        }
+        if pid == 0 {
+            init_process_signals();
+            unsafe { libc::raise(libc::SIGTSTP) };
+            // After SIGCONT we should reach this line and exit cleanly.
+            unsafe { libc::_exit(0) };
+        }
+
+        // Parent: wait until child is stopped, then SIGCONT it.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut status: libc::c_int = 0;
+        let mut stopped = false;
+        loop {
+            let wret = unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED | libc::WNOHANG) };
+            if wret == pid {
+                if libc::WIFSTOPPED(status) && !stopped {
+                    // Now resume it.
+                    stopped = true;
+                    unsafe { libc::kill(pid, libc::SIGCONT) };
+                } else if libc::WIFEXITED(status) {
+                    break;
+                }
+            } else if wret < 0 {
+                panic!("waitpid: {}", std::io::Error::last_os_error());
+            }
+            if Instant::now() >= deadline {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
+                panic!("child hung in stop state past 5s");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 0);
+        assert!(
+            stopped,
+            "child must have transitioned through stopped state"
+        );
+    }
+
+    /// SIGPIPE must be installed as SIG_IGN at startup. Write on a
+    /// closed pipe should return -1/EPIPE rather than terminating
+    /// the process.
+    ///
+    /// Counter-factual: removing the SIG_IGN install would cause the
+    /// child to die with SIGPIPE (WIFSIGNALED, WTERMSIG=SIGPIPE).
+    #[test]
+    fn sigpipe_is_ignored_at_startup() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            let mut fds: [libc::c_int; 2] = [0; 2];
+            if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+                return 71;
+            }
+            // Close the read end first.
+            unsafe { libc::close(fds[0]) };
+            let buf = [0u8; 4];
+            let ret =
+                unsafe { libc::write(fds[1], buf.as_ptr() as *const libc::c_void, buf.len()) };
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            unsafe { libc::close(fds[1]) };
+            if ret == -1 && errno == libc::EPIPE {
+                0
+            } else {
+                72
+            }
+        });
+        assert!(
+            !libc::WIFSIGNALED(status),
+            "child died from signal {} — SIGPIPE not ignored",
+            libc::WTERMSIG(status),
+        );
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 0);
+    }
+
+    /// When nothing watches SIGUSR1, the eager-trap policy is "absorb":
+    /// the signal is blocked at startup, the kernel queues it but no
+    /// thread reads it, and the process keeps running. Counter-factual:
+    /// without the absorb-set block, the kernel default for SIGUSR1
+    /// (Term) fires and the child dies signalled.
+    #[test]
+    fn sigusr1_absorbed_when_unwatched() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            unsafe { libc::raise(libc::SIGUSR1) };
+            // Give the kernel a beat to deliver if it were going to.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            0
+        });
+        assert!(
+            !libc::WIFSIGNALED(status),
+            "child died from signal {} — SIGUSR1 was not absorbed",
+            libc::WTERMSIG(status),
+        );
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 0);
+    }
+
+    /// Watcher overrides built-in: a live `SignalReceiver` on SIGTERM
+    /// must keep the process alive even after SIGTERM is raised — the
+    /// signal goes to the receiver's signalfd instead of the sigaction
+    /// handler. Counter-factual: without the watcher-override
+    /// mechanism (i.e. if the sigaction handler fires regardless), the
+    /// child terminates with code 143 before it can read the receiver.
+    #[test]
+    fn watcher_overrides_builtin_for_sigterm() {
+        let status = fork_run(5, || {
+            init_process_signals();
+            let r = match SignalReceiver::new(vec![libc::SIGTERM]) {
+                Ok(r) => r,
+                Err(_) => return 81,
+            };
+            unsafe { libc::raise(libc::SIGTERM) };
+            // Poll signalfd directly for the event — we don't need the
+            // full async-backend pipeline here.
+            let fd = match r.raw_fd() {
+                Ok(f) => f,
+                Err(_) => return 82,
+            };
+            let mut pfd = libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let pret = unsafe { libc::poll(&mut pfd, 1, 1000) };
+            if pret <= 0 {
+                return 83;
+            }
+            let mut buf = vec![0u8; std::mem::size_of::<libc::signalfd_siginfo>() * 4];
+            let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if n <= 0 {
+                return 84;
+            }
+            buf.truncate(n as usize);
+            let events = r.parse_events(&buf);
+            if events.is_empty() || events[0].signum != libc::SIGTERM {
+                return 85;
+            }
+            r.close();
+            0
+        });
+        assert!(
+            !libc::WIFSIGNALED(status),
+            "child died from signal {} — watcher did not override built-in handler",
+            libc::WTERMSIG(status),
+        );
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(
+            libc::WEXITSTATUS(status),
+            0,
+            "child exited with {} (see codes 81-85 in test)",
+            libc::WEXITSTATUS(status)
+        );
     }
 }

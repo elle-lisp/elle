@@ -185,29 +185,48 @@
           "10c: error kind is :argument-error"))
 (eprintln "test 10: done")
 
-# ── 11. refcount-driven unblock ──────────────────────────────────────────
+# ── 11. refcount tracking for absorb-set signals (post eager-trap) ───────
+#
+# Under eager trapping (see docs/posix-signals.md "Disposition table"),
+# absorb-set signals (SIGUSR1, SIGUSR2, SIGCHLD, SIGURG, SIGWINCH,
+# SIGALRM) are pthread_sigmask-blocked process-wide at startup so an
+# unwatched delivery is silently absorbed. The mask bit therefore
+# stays set across the entire watcher lifecycle — open(0→1) finds it
+# already blocked, close(1→0) intentionally does NOT unblock it
+# because doing so would let a subsequent `kill -USR1 $pid` run the
+# kernel default (Term) on the main thread. Refcount accounting is
+# instead observable via `os/sig-watching` (see test 14).
 
-(eprintln "test 11: starting (refcount unblock)")
-(assert (not (contains? (os/sig-mask) :sigusr1))
-        "11a: :sigusr1 not masked initially")
+(eprintln "test 11: starting (refcount tracking for absorb-set)")
+(assert (contains? (os/sig-mask) :sigusr1)
+        "11a: :sigusr1 always masked (absorb-set, blocked at startup)")
+(assert (not (contains? (os/sig-watching) :sigusr1))
+        "11b: nothing watches :sigusr1 initially")
 (let [r (os/sig-watch |:sigusr1|)]
-  (assert (contains? (os/sig-mask) :sigusr1) "11b: :sigusr1 masked after watch")
+  (assert (contains? (os/sig-mask) :sigusr1) "11c: :sigusr1 still masked")
+  (assert (contains? (os/sig-watching) :sigusr1) "11d: refcount > 0 -> watched")
   (os/sig-close r))
-(assert (not (contains? (os/sig-mask) :sigusr1))
-        "11c: :sigusr1 unmasked after close")
+(assert (contains? (os/sig-mask) :sigusr1)
+        "11e: :sigusr1 stays masked after close (eager-trap absorb)")
+(assert (not (contains? (os/sig-watching) :sigusr1))
+        "11f: refcount back to 0 -> unwatched")
 (eprintln "test 11: done")
 
-# ── 12. multiple watchers share the block ────────────────────────────────
+# ── 12. multiple watchers track via refcount (absorb-set stays masked) ───
 
 (eprintln "test 12: starting")
 (let [a (os/sig-watch |:sigusr2|)
       b (os/sig-watch |:sigusr2|)]
   (os/sig-close a)
   (assert (contains? (os/sig-mask) :sigusr2)
-          "12a: :sigusr2 still masked while b holds it")
+          "12a: :sigusr2 always masked (absorb-set)")
+  (assert (contains? (os/sig-watching) :sigusr2)
+          "12b: refcount > 0 while b holds it")
   (os/sig-close b)
-  (assert (not (contains? (os/sig-mask) :sigusr2))
-          "12b: :sigusr2 unmasked after both close"))
+  (assert (contains? (os/sig-mask) :sigusr2)
+          "12c: still masked after both close (eager-trap absorb)")
+  (assert (not (contains? (os/sig-watching) :sigusr2))
+          "12d: refcount back to 0 after both close"))
 (eprintln "test 12: done")
 
 # ── 13. os/sig-pending reflects queued state ─────────────────────────────

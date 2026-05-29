@@ -12,6 +12,17 @@ pub(crate) mod pending;
 pub(crate) mod pool;
 pub mod request;
 pub(crate) mod sigfd;
+
+/// Install process-wide POSIX signal traps. Called once from
+/// `main()` before any thread spawns. Installs sigaction handlers
+/// for the terminate (TERM/INT/QUIT/HUP), job-control (TSTP/TTIN/TTOU),
+/// and resume (CONT) sets; `SIG_IGN` for SIGPIPE; and
+/// `pthread_sigmask(SIG_BLOCK)` for the absorb set (USR1/USR2/CHLD/
+/// URG/WINCH/ALRM) on the main thread. See `docs/posix-signals.md`
+/// for the full disposition table.
+pub fn init_process_signals() {
+    sigfd::init_process_signals();
+}
 pub(crate) mod sigmap;
 pub(crate) mod sockaddr;
 pub(crate) mod threadpool;

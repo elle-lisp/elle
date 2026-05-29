@@ -158,13 +158,22 @@ fn prim_port_close(args: &[Value]) -> (SignalBits, Value) {
     if port.is_closed() {
         return (SIG_OK, Value::NIL);
     }
-    // Stdio ports don't own their fd — close synchronously.
-    if !port.has_fd() {
+    // Stdout/stderr don't own their fd and have no async resource to
+    // tear down — close synchronously. Stdin DOES have an async
+    // resource: a dedicated worker thread parked in `libc::read(0, …)`.
+    // Even though the port doesn't own fd 0, the close must reach the
+    // AsyncBackend so the worker is signalled out of its blocking read
+    // and the fiber waiting on the in-flight read is resumed with a
+    // `stdin closed` error. See `docs/io.md` and the close branch in
+    // `AsyncBackend::submit` for the full path.
+    if !port.has_fd() && !matches!(port.kind(), crate::port::PortKind::Stdin) {
         port.close();
         return (SIG_OK, Value::NIL);
     }
-    // Ports with an fd: yield to the I/O scheduler so it can cancel
-    // pending operations before the fd is dropped.
+    // Stdin and ports with an owned fd: yield to the I/O scheduler so
+    // it can cancel pending operations / shut down the stdin worker
+    // before the fd is dropped (or, for stdin, the port is marked
+    // closed and any in-flight read is woken).
     (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::Close, args[0]))
 }
 
