@@ -104,6 +104,18 @@ pub struct RegionInfo {
     pub scope_region: HashMap<HirId, Region>,
     /// Binding → region where the binding lives.
     pub binding_region: HashMap<Binding, Region>,
+    /// Binding → source regions the binding's value may point into.
+    ///
+    /// Populated from the inference's `binding_regions` after the walk;
+    /// used by the `free_at` extension pass so a binding's last use
+    /// keeps its source regions alive. Exposed publicly because tests
+    /// pin the invariant that a side-effecting destructure inside a
+    /// letrec init does not get its `binding_regions[b]` overwritten by
+    /// a subsequent placeholder init (e.g. `r = nil`) for the same
+    /// binding — without this, the source region's `free_at` is left
+    /// at the destructure's id and a stale ptr survives to a later
+    /// use of `r`, panicking in arena::deref.
+    pub binding_source_regions: HashMap<Binding, Vec<Region>>,
     /// Regions that have at least one allocation assigned to them.
     pub live_regions: FxHashSet<Region>,
     /// Cross-region references detected by the solver.
@@ -143,6 +155,7 @@ impl RegionInfo {
             alloc_region: HashMap::new(),
             scope_region: HashMap::new(),
             binding_region: HashMap::new(),
+            binding_source_regions: HashMap::new(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),
             region_data: HashMap::new(),

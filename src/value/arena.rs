@@ -208,15 +208,24 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
     // Caught telemetry.lisp's bug (LStructMut tagged TAG_STRUCT after
     // an over-eager region free). If you hit this in debug, walk back
     // to find what freed the region while a Value still referenced it.
+    // The first 8-byte block of the payload is dumped so a UAF panic
+    // shows what's actually at the slot: all-zero distinguishes
+    // "page reclaimed by madvise(MADV_DONTNEED) and re-zeroed" from
+    // stale-data (slab slot reused for a different HeapObject with
+    // its own discriminant bits in place). Without it the variant
+    // reported by `type_name()` is misleading — a zero-filled page
+    // reads as whichever variant Rust's enum repr assigns to the
+    // all-zero discriminant.
     debug_assert!(
         value.tag == obj.value_tag(),
         "tag/object mismatch — use-after-free? value.tag=0x{:x} object={} \
-         (variant's expected tag=0x{:x}) payload=0x{:x}; see docs/regions.md and \
-         CONTRIBUTING.md on progressive constraint",
+         (variant's expected tag=0x{:x}) payload=0x{:x} first8=0x{:016x}; \
+         see docs/regions.md and CONTRIBUTING.md on progressive constraint",
         value.tag,
         obj.type_name(),
         obj.value_tag(),
         value.payload,
+        unsafe { *(value.payload as *const u64) },
     );
     obj
 }

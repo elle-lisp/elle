@@ -367,7 +367,28 @@ impl RegionInference {
                         self.binding_lambda.insert(*b, init as *const Hir);
                     }
                     let init_regions = self.walk(init);
-                    self.binding_regions.insert(*b, init_regions);
+                    // Union with any existing entry instead of
+                    // overwriting. An earlier init's walk may have
+                    // side-effected `binding_regions[b]` via a
+                    // destructure whose pattern targets a name later
+                    // bound (or pre-bound) in this same letrec — the
+                    // file-scope shape `[__file_expr_0 (begin
+                    // (destructure (a & r) ...) ...) a nil b nil
+                    // r nil ...]` emitted by compile_file_to_fhir is
+                    // the canonical case. Overwriting drops the
+                    // destructure's contribution and the post-pass
+                    // skip-empty short-circuit then leaves the source
+                    // region's free_at at the destructure id,
+                    // letting it be freed before `r`'s use reads
+                    // through to a stale ptr (counter-factual:
+                    // `letrec_init_does_not_overwrite_destructure_
+                    // binding_regions`).
+                    let entry = self.binding_regions.entry(*b).or_default();
+                    for r in init_regions {
+                        if !entry.contains(&r) {
+                            entry.push(r);
+                        }
+                    }
                 }
 
                 let body_regions = self.walk(body);
@@ -634,7 +655,27 @@ impl RegionInference {
                     // regions so uses of the destructured binding emit
                     // the right cross-region increfs (and extend
                     // free_at through binding uses; see liveness.rs).
-                    self.binding_regions.insert(b, val_regions.clone());
+                    //
+                    // Union with any existing entry instead of
+                    // overwriting: the same pattern Binding id can be
+                    // assigned by multiple destructures in the same
+                    // file (top-level re-defs like the destructure.lisp
+                    // tests rebind `r` across many `(def (… & r) …)`
+                    // forms — sometimes at the file's letrec level,
+                    // sometimes nested inside begins; both share the
+                    // arena's `r` Binding id). Overwriting drops the
+                    // earlier source region and the post-pass
+                    // free_at extension never reaches the earlier
+                    // list, leaving it freed before its in-begin
+                    // consumer reads `r` (counter-factual:
+                    // `letrec_init_does_not_overwrite_destructure_
+                    // binding_regions`).
+                    let entry = self.binding_regions.entry(b).or_default();
+                    for r in val_regions.iter().copied() {
+                        if !entry.contains(&r) {
+                            entry.push(r);
+                        }
+                    }
                 }
                 val_regions
             }
@@ -932,6 +973,7 @@ impl RegionInference {
             alloc_region: self.alloc_region,
             scope_region: self.scope_region,
             binding_region: self.binding_region,
+            binding_source_regions: HashMap::new(),
             live_regions,
             cross_region_refs,
             region_data: HashMap::new(),
@@ -1185,6 +1227,11 @@ pub fn analyze_regions_with(
     // below to extend free_at through binding chains.
     let inference_binding_regions = std::mem::take(&mut ri.binding_regions);
     let mut info = ri.build_info();
+    // Mirror to the public surface so tests and downstream consumers can
+    // inspect which source regions each binding may point into without
+    // re-running the inference. Single owner; clone is cheap relative
+    // to the cost of re-doing the walk.
+    info.binding_source_regions = inference_binding_regions.clone();
 
     // Populate `region_data.free_at` from per-HirId last-use analysis.
     // For each region r, `free_at` is the maximum `last_use[alloc_id]`
@@ -2998,6 +3045,85 @@ mod tests {
         assert!(
             any_alloc,
             "at least one Begin must have an alloc_region — a captured Define is present"
+        );
+    }
+
+    /// Counter-factual for the destructure-binding-regions overwrite bug.
+    ///
+    /// At top level, `(begin (def (a & r) (list 1 2 3)) (length r))` lowers
+    /// to a letrec whose first init is the begin (which side-effects
+    /// `binding_regions[r] = [list_region]` via the destructure) and whose
+    /// subsequent inits include `r = nil` as the placeholder for the
+    /// pattern binding. The letrec walk used to unconditionally
+    /// `binding_regions.insert(b, init_regions)` for every binding, so the
+    /// `r = nil` walk produced `binding_regions[r] = []`, overwriting the
+    /// destructure's assignment. The post-pass that extends `free_at` via
+    /// binding uses then skipped `r` (regions empty), leaving the list's
+    /// region's `free_at` at the destructure's id. The runtime symptom
+    /// (only with consumers that traverse the list via traits, like
+    /// `(println r)`) is an arena::deref panic on a stale ptr — but the
+    /// underlying analysis bug is independent of which consumer is used.
+    ///
+    /// This test pins the analysis invariant directly: after region
+    /// inference, every destructured binding's `binding_source_regions`
+    /// must include the source value's region(s). Pre-fix the letrec
+    /// init's `r = nil` walk wiped it; post-fix it is preserved.
+    #[test]
+    fn letrec_init_does_not_overwrite_destructure_binding_regions() {
+        use crate::symbol::SymbolTable;
+        let mut symbols = SymbolTable::new();
+        // Multi-form source. The top-level compile-file-to-fhir letrec
+        // declares placeholder `r = nil` initializers for each pattern
+        // binding introduced by destructures across the whole file —
+        // that is what overwrites the destructure-assigned
+        // binding_regions[r] under the pre-fix walk.
+        let source =
+            "(begin (def (a & r) (list 1 2 3)) (length r)) (def (a b & r) (list 1 2)) (length r)";
+        let (hir, arena, _) =
+            crate::pipeline::compile_file_to_fhir(source, &mut symbols, "<test>").expect("compile");
+        let info = analyze_regions(&hir, &arena);
+        // Find the pattern binding `r` introduced by the destructure.
+        // The arena names it from the source symbol, so we look it up
+        // by name. The letrec also declares it; the destructure's
+        // pattern shares the same Binding id.
+        let r_binding =
+            find_binding_by_name(&hir, "r", &arena, &symbols).expect("expected binding `r`");
+        let r_regions = info
+            .binding_source_regions
+            .get(&r_binding)
+            .cloned()
+            .unwrap_or_default();
+        // Both `(list ...)` allocations feed `r` via destructure-rest
+        // at the same Binding id. Post-fix, the letrec walk unions
+        // per-init contributions so r tracks BOTH list regions. Pre-fix
+        // the second init's walk overwrote the first's contribution,
+        // leaving r tracking only the latest list — so the FIRST
+        // list's region's free_at is left at its destructure id and
+        // `(length r)` inside the begin (which uses r while r still
+        // points into the first list) reads a freed page.
+        let list_calls = find_calls_to_primitive(&hir, "list", &arena, &symbols);
+        assert_eq!(
+            list_calls.len(),
+            2,
+            "expected exactly two (list ...) calls in the test source"
+        );
+        let list_regions: Vec<_> = list_calls
+            .iter()
+            .filter_map(|id| info.alloc_region.get(id).copied())
+            .collect();
+        let r_covers: Vec<_> = list_regions
+            .iter()
+            .filter(|lr| r_regions.contains(lr))
+            .copied()
+            .collect();
+        assert_eq!(
+            r_covers.len(),
+            list_regions.len(),
+            "r's binding_source_regions={:?} must include EVERY list region the \
+             destructure could have bound it from; got list_regions={:?}, covered={:?}",
+            r_regions,
+            list_regions,
+            r_covers,
         );
     }
 }
