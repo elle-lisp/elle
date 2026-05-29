@@ -180,6 +180,16 @@ impl<'a> Lowerer<'a> {
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
         let saved_discard_slot = self.discard_slot;
         let saved_region_to_table = std::mem::take(&mut self.region_to_table);
+        // `region_to_slot` is the post-ANF replacement for the
+        // retired `call_region_slot` shadow map: it lets
+        // `emit_decrefs_for` find the slot owning a
+        // call_result_region. Slots are per-function (LIR's local
+        // slot index space is per-function), so the map must be
+        // empty inside the new lambda body and the parent's map
+        // must be restored on exit. Without this, an outer Call's
+        // region could be associated with a stale slot index from
+        // the inner function.
+        let saved_region_to_slot = std::mem::take(&mut self.region_to_slot);
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
         // self-tail-calls. We save it here and restore it for the
@@ -328,6 +338,7 @@ impl<'a> Lowerer<'a> {
         self.upvalue_bindings = saved_upvalue_bindings;
         self.discard_slot = saved_discard_slot;
         self.region_to_table = saved_region_to_table;
+        self.region_to_slot = saved_region_to_slot;
 
         Ok(func)
     }

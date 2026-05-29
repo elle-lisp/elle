@@ -127,13 +127,26 @@ pub struct Lowerer<'a> {
     /// and suppress `DecrefRegion` for any region that flows out as
     /// the function's return value (impl step 14 — return as escape).
     current_lambda_stack: Vec<HirId>,
-    /// For call result regions whose value lives in a known local
-    /// slot (let-bound Call init), maps the region to that slot.
-    /// `emit_decrefs_for` uses this to emit `LoadLocal slot` +
-    /// `ReleaseValueRegion` at the call's `free_at`, dynamically
-    /// decref'ing the runtime region of the actual returned value
-    /// (impl step 14).
-    call_region_slot: HashMap<crate::hir::region::Region, u16>,
+    /// For each allocating HIR node's region, the slot of the
+    /// binding that names its result. Populated by `lower_let`,
+    /// `lower_letrec`, `lower_define`, and other binding sites by
+    /// reading `region_info.alloc_region.get(&init.id)` after the
+    /// slot is allocated. Saved/restored across lambda boundaries
+    /// (see `lower_lambda_body`).
+    ///
+    /// `emit_decrefs_for` consults this map for `call_result_regions`:
+    /// it emits `LoadLocal slot` + `ReleaseValueRegion` so the
+    /// release uses the *runtime* region of the actual returned value,
+    /// not the compile-time placeholder. The expected region id gates
+    /// the decref so passthrough calls (whose result lives in a
+    /// different region) skip.
+    ///
+    /// After the ANF lift (`src/hir/anf.rs`) every allocating
+    /// expression in a consumer position is bound to a synthetic
+    /// `Let`, so the binding-slot path now covers cases that the
+    /// retired shadow `call_region_slot` mechanism used to handle
+    /// via a stash-and-reload slot allocated at the Call site.
+    region_to_slot: HashMap<crate::hir::region::Region, u16>,
     /// RegionIds the lowerer has stamped onto at least one
     /// instruction via `emit_in_region` (i.e., regions the runtime
     /// will actually have a slot for after `alloc_in_region`).
@@ -177,7 +190,7 @@ impl<'a> Lowerer<'a> {
             region_to_table: HashMap::new(),
             active_region_ids: Vec::new(),
             current_lambda_stack: Vec::new(),
-            call_region_slot: HashMap::new(),
+            region_to_slot: HashMap::new(),
             emitted_alloc_regions: rustc_hash::FxHashSet::default(),
         }
     }
@@ -451,34 +464,18 @@ impl<'a> Lowerer<'a> {
         self.emit(LirInstr::StoreLocal { slot, src });
     }
 
-    /// After emitting a non-tail Call (or Call-like) instruction whose
-    /// result lives in `dst`, allocate a release slot, stash the value
-    /// into it, reload it into a fresh register, and record the slot
-    /// against the call's region in `call_region_slot`.
-    ///
-    /// This makes `emit_decrefs_for` emit `LoadLocal slot +
-    /// ReleaseValueRegion` uniformly at the call's `free_at` for both
-    /// bound (`(let [x (foo)] ...)`) and unbound (`(use (foo))`)
-    /// Calls. Without the slot the unbound case fell through to a
-    /// no-op and the call's result region leaked until fiber teardown.
-    ///
-    /// The release slot is allocated even for tail-region Calls
-    /// (whose Release is suppressed by `emit_decrefs_for` via
-    /// `lambda_tail_regions`): allocating an extra stack-local
-    /// indirection is cheap, and the simpler "always allocate" rule
-    /// avoids branching on tail-region detection here.
-    fn wrap_call_with_release_slot(&mut self, dst: Reg) -> Reg {
-        let slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal { slot, src: dst });
-        let reload = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal { dst: reload, slot });
-        if let Some(hir_id) = self.current_hir_id {
-            if let Some(&call_r) = self.region_info.alloc_region.get(&hir_id) {
-                self.call_region_slot.insert(call_r, slot);
-            }
+    /// Record the slot owning the result of an allocating
+    /// expression at `hir_id`, keyed by its allocation region.
+    /// Called from `lower_let` / `lower_letrec` / `lower_define`
+    /// after `allocate_slot`. After ANF, every Call/Lambda/Eval/
+    /// allocating-intrinsic in a consumer position is bound to a
+    /// synthetic Let — so this map covers what the retired
+    /// `call_region_slot` shadow mechanism used to handle via
+    /// stash-and-reload.
+    fn record_region_slot(&mut self, hir_id: HirId, slot: u16) {
+        if let Some(&r) = self.region_info.alloc_region.get(&hir_id) {
+            self.region_to_slot.insert(r, slot);
         }
-        reload
     }
 
     /// Emit IncrefRegion for any cross-region references at this HIR node.
@@ -527,7 +524,7 @@ impl<'a> Lowerer<'a> {
             .collect();
         for r in regions {
             if self.region_info.call_result_regions.contains(&r) {
-                if let Some(&slot) = self.call_region_slot.get(&r) {
+                if let Some(&slot) = self.region_to_slot.get(&r) {
                     // Load the value from its slot and release by
                     // runtime region. The slot still holds a dangling
                     // Value after this but is never read again
@@ -626,6 +623,12 @@ impl<'a> Lowerer<'a> {
     /// positions are tail calls). Used to relax the suspension check: a
     /// tail call replaces the frame, so its signal doesn't affect the
     /// enclosing scope's lifetime.
+    ///
+    /// After the ANF lift, a tail call previously of the form `(f x)`
+    /// becomes `(let [t (f x)] t)`. Recognise this single-binding shape
+    /// where the body is `Var(b)` and check the init for tail-callness
+    /// — `mark_tail_calls` runs before ANF, so `is_tail` is preserved
+    /// on the wrapped Call.
     fn body_is_tail_call(hir: &Hir) -> bool {
         match &hir.kind {
             HirKind::Call { is_tail: true, .. } => true,
@@ -646,7 +649,17 @@ impl<'a> Lowerer<'a> {
                         .is_some_and(|b| Self::body_is_tail_call(b))
             }
             HirKind::Begin(exprs) => exprs.last().is_some_and(Self::body_is_tail_call),
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                // ANF wrap shape: `(let [b e] (var b))` is tail-equivalent
+                // to `e`.
+                if bindings.len() == 1 {
+                    let (b, init) = (&bindings[0].0, &bindings[0].1);
+                    if matches!(&body.kind, HirKind::Var(v) if v == b)
+                        && Self::body_is_tail_call(init)
+                    {
+                        return true;
+                    }
+                }
                 Self::body_is_tail_call(body)
             }
             HirKind::Match { arms, .. } => arms

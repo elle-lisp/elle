@@ -23,11 +23,22 @@ impl<'a> Lowerer<'a> {
         for (binding, init) in bindings {
             self.try_seed_immutable(*binding, init);
 
-            let init_reg = self.lower_expr(init)?;
+            // Allocate the binding's slot BEFORE lowering the init,
+            // and register `region_to_slot[r] = slot` so that the
+            // `emit_decrefs_for(init.id)` call inside `lower_expr` —
+            // which fires for unused bindings whose `free_at` is the
+            // init's own HirId — can find the slot it needs to load
+            // the value from for `ReleaseValueRegion`. Without this
+            // pre-allocation, an unused let-bound Call result leaks
+            // because the slot only exists after `lower_expr` returns.
+            //
+            // `allocate_slot` stamps the slot with `StoreLocal(slot,
+            // nil)` so the slot is always a valid Value at the point
+            // we'd load from it; the init's actual value overwrites
+            // the nil shortly after.
             let slot = self.allocate_slot(*binding);
-            // lower_call already records call_region_slot before
-            // lower_expr returns, so emit_decrefs_for has the slot
-            // by the time it runs. No need to re-record here.
+            self.record_region_slot(init.id, slot);
+            let init_reg = self.lower_expr(init)?;
             let needs_capture = self.arena.get(*binding).needs_capture();
 
             if self.in_lambda && needs_capture {
@@ -128,10 +139,14 @@ impl<'a> Lowerer<'a> {
                 self.current_function_binding = Some(*binding);
                 self.current_function_params = Some(params.clone());
             }
+            let slot = self.binding_to_slot[binding];
+            // Record the slot BEFORE lowering the init so
+            // `emit_decrefs_for(init.id)` inside `lower_expr` can
+            // find it (matches `lower_let`'s ordering).
+            self.record_region_slot(init.id, slot);
             let init_reg = self.lower_expr(init)?;
             self.current_function_binding = None;
             self.current_function_params = None;
-            let slot = self.binding_to_slot[binding];
 
             // Seed immutable_values after init so subsequent bindings
             // and the body can use LoadConst for this constant.
@@ -215,6 +230,11 @@ impl<'a> Lowerer<'a> {
             self.current_function_binding = Some(binding);
             self.current_function_params = Some(params.clone());
         }
+
+        // Record the slot BEFORE lowering the value so
+        // `emit_decrefs_for(value.id)` inside `lower_expr` can find
+        // it (matches `lower_let`'s ordering).
+        self.record_region_slot(value.id, slot);
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;

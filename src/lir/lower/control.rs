@@ -76,13 +76,14 @@ impl<'a> Lowerer<'a> {
                         arity_checked,
                     });
                 }
-                // Stash the call's result in a release slot so
-                // emit_decrefs_for at the call's free_at can emit
-                // LoadLocal + ReleaseValueRegion (uniform for bound
-                // and unbound Calls). The Release is gated by the
-                // call's runtime region_id so passthrough calls
-                // (whose result lives in a different region) skip.
-                Ok(self.wrap_call_with_release_slot(dst))
+                // After ANF (`src/hir/anf.rs`), every consumer position
+                // for a Call has a synthetic `Let` binding owning the
+                // result. The enclosing `lower_let` / `lower_letrec` /
+                // `lower_define` records `region_to_slot[r]` so
+                // `emit_decrefs_for` at the Call's `free_at` can emit
+                // `LoadLocal slot + ReleaseValueRegion` — no shadow
+                // stash slot needed at the Call site.
+                Ok(dst)
             }
         } else {
             // === Splice path: build args array, then CallArrayMut ===
@@ -168,7 +169,10 @@ impl<'a> Lowerer<'a> {
                     func: func_reg,
                     args: final_args,
                 });
-                Ok(self.wrap_call_with_release_slot(dst))
+                // ANF binds this Call's result; the binding's slot is
+                // recorded in `region_to_slot` by the enclosing
+                // `lower_let` / `lower_letrec` / `lower_define`.
+                Ok(dst)
             }
         }
     }
@@ -334,12 +338,11 @@ impl<'a> Lowerer<'a> {
             expr: expr_reg,
             env: env_reg,
         });
-        // Mirror Call: stash the result in a release slot so
-        // `emit_decrefs_for` can emit `LoadLocal + ReleaseValueRegion`
-        // (value-gated) at the Eval's free_at. Eval's result lives in
-        // a region the outer compilation didn't allocate; the runtime
-        // gate skips the decref when the regions don't match.
-        Ok(self.wrap_call_with_release_slot(dst))
+        // Eval's result lives in a region the outer compilation
+        // didn't allocate; `emit_decrefs_for` uses `region_to_slot`
+        // (recorded by the enclosing binding site after ANF) and
+        // gates the runtime decref on the actual region.
+        Ok(dst)
     }
 
     pub(super) fn lower_emit(

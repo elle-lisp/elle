@@ -477,6 +477,24 @@ pub struct Config {
     /// BinOp/CmpOp/etc. Implies jit=off, mlir=off.
     pub checked_intrinsics: bool,
 
+    /// Enable the A-normal form lift pass (`src/hir/anf.rs`).
+    ///
+    /// Default: on. `--anf=off` short-circuits `anf_lift` to a
+    /// no-op — i.e. the HIR is handed to region inference exactly as
+    /// `functionalize` produced it, with allocating call results
+    /// unnamed and the lowerer falling back on the shadow
+    /// `call_region_slot` mechanism (`src/lir/lower/mod.rs`).
+    ///
+    /// Provided as a counter-factual switch. With `--anf=off` the
+    /// closure-binding-overwrite bug (Family C in
+    /// `tests/integration/anf_counterfactual.rs`) returns; without
+    /// the flag the same scripts pass. This is the canonical proof
+    /// that the ANF transform is what closes the bug class — not some
+    /// other change between the failing and passing trees.
+    ///
+    /// Should be removed in a follow-up once causality is reviewed.
+    pub anf: bool,
+
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
     /// are listed in `DUMP_KEYWORDS`. When non-empty, the compiler runs up
     /// to each requested stage, prints its artifact, and exits without
@@ -514,6 +532,7 @@ impl Default for Config {
             wasm_chunk: false,
             wasm_sparse_spill: true,
             checked_intrinsics: false,
+            anf: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
             region_page_size: 4096,
@@ -644,6 +663,20 @@ impl Config {
                                 threshold: (n - 1) as usize,
                             }
                         }
+                    }
+                };
+                i += 1;
+                continue;
+            }
+            if let Some(rest) = arg.strip_prefix("--anf=") {
+                config.anf = match rest {
+                    "on" | "true" | "1" => true,
+                    "off" | "false" | "0" => false,
+                    _ => {
+                        return Err(format!(
+                            "--anf: expected on/off (or true/false, 1/0), got '{}'",
+                            rest
+                        ));
                     }
                 };
                 i += 1;
