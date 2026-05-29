@@ -267,7 +267,12 @@ impl Emitter {
         self.emit_terminator(&block.terminator.terminator);
     }
 
-    fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction, region: Option<crate::hir::region::RegionId>) {
+    fn emit_instr(
+        &mut self,
+        instr: &LirInstr,
+        func: &LirFunction,
+        region: Option<crate::hir::region::RegionId>,
+    ) {
         let region: crate::hir::region::RegionId = region.unwrap_or(0);
         match instr {
             LirInstr::Const { dst, value } => {
@@ -426,7 +431,9 @@ impl Emitter {
                 };
 
                 // Add closure template to constants
-                let const_idx = self.bytecode.add_constant(Value::closure_permanent(closure));
+                let const_idx = self
+                    .bytecode
+                    .add_constant(Value::closure_permanent(closure));
 
                 // Emit MakeClosure instruction (region first so VM can set TLS before alloc)
                 self.bytecode.emit(Instruction::MakeClosure);
@@ -1313,7 +1320,9 @@ impl Emitter {
                 self.bytecode.emit_u16(idx);
             }
             LirConst::String(s) => {
-                let idx = self.bytecode.add_constant(Value::string_permanent(s.clone()));
+                let idx = self
+                    .bytecode
+                    .add_constant(Value::string_permanent(s.clone()));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }

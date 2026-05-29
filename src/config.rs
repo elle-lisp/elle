@@ -710,9 +710,9 @@ impl Config {
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--region-page-size=") {
-                let n: usize = rest.parse().map_err(|_| {
-                    format!("--region-page-size: expected integer, got '{}'", rest)
-                })?;
+                let n: usize = rest
+                    .parse()
+                    .map_err(|_| format!("--region-page-size: expected integer, got '{}'", rest))?;
                 if n < 4096 || !n.is_power_of_two() {
                     return Err(format!(
                         "--region-page-size: must be a power of two >= 4096, got {}",
@@ -724,9 +724,9 @@ impl Config {
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--page-pool-max=") {
-                let n: usize = rest.parse().map_err(|_| {
-                    format!("--page-pool-max: expected integer, got '{}'", rest)
-                })?;
+                let n: usize = rest
+                    .parse()
+                    .map_err(|_| format!("--page-pool-max: expected integer, got '{}'", rest))?;
                 config.page_pool_max = n;
                 i += 1;
                 continue;

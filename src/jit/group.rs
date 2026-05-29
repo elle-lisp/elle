@@ -355,7 +355,8 @@ mod tests {
                 },
                 Span::synthetic(),
             ));
-            entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
+            entry.terminator =
+                SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
             callee.blocks.push(entry);
             callee.entry = Label(0);
 
@@ -591,7 +592,8 @@ mod tests {
                 },
                 Span::synthetic(),
             ));
-            entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
+            entry.terminator =
+                SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
             func.blocks.push(entry);
             func.entry = Label(0);
 

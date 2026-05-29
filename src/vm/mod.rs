@@ -62,7 +62,8 @@ macro_rules! with_transient_region {
 #[macro_export]
 macro_rules! with_alloc_region {
     ($rid:expr => $body:expr) => {{
-        let __saved = $crate::value::fiberheap::read_alloc_region_FOR_USE_IN_with_alloc_region_ONLY();
+        let __saved =
+            $crate::value::fiberheap::read_alloc_region_FOR_USE_IN_with_alloc_region_ONLY();
         $crate::value::fiberheap::set_alloc_region($rid);
         let __result = $body;
         $crate::value::fiberheap::set_alloc_region(__saved);

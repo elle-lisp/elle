@@ -279,8 +279,6 @@ impl VM {
             closure.env.as_ptr()
         };
 
-        
-
         unsafe {
             jit_code.call(
                 env_ptr,

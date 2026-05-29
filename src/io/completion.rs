@@ -142,7 +142,9 @@ pub(super) fn process_raw_completion(
             // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
             let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
             // Fill the fd into the pre-allocated port (born in the solver's region).
-            let port_ref = port_val.as_external::<Port>().expect("PendingOp::Open port must be a Port");
+            let port_ref = port_val
+                .as_external::<Port>()
+                .expect("PendingOp::Open port must be a Port");
             port_ref.set_fd(fd);
             Completion {
                 id,
@@ -175,10 +177,15 @@ pub(super) fn process_raw_completion(
             // encoding already set on the Port — see prim_tcp_connect /
             // prim_unix_connect). Set the fd on the existing port; no
             // need to recreate it here.
-            if matches!(port_val.as_external::<Port>().map(|p| p.kind()), Some(PortKind::TcpStream)) {
+            if matches!(
+                port_val.as_external::<Port>().map(|p| p.kind()),
+                Some(PortKind::TcpStream)
+            ) {
                 set_tcp_nodelay(&fd);
             }
-            let port_ref = port_val.as_external::<Port>().expect("PendingOp::Connect port must be a Port");
+            let port_ref = port_val
+                .as_external::<Port>()
+                .expect("PendingOp::Connect port must be a Port");
             port_ref.set_fd(fd);
             Completion {
                 id,
@@ -404,7 +411,10 @@ pub(super) fn process_raw_completion(
             if result_code == 0
                 && matches!(
                     op,
-                    IoOp::ReadLine { .. } | IoOp::Read { .. } | IoOp::ReadExact { .. } | IoOp::ReadAll
+                    IoOp::ReadLine { .. }
+                        | IoOp::Read { .. }
+                        | IoOp::ReadExact { .. }
+                        | IoOp::ReadAll
                 )
             {
                 // EOF for read operations
@@ -692,7 +702,11 @@ pub(super) fn process_raw_completion(
                 }
                 IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
                 IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-                IoOp::Accept { ref options, ref accept_port, .. } => {
+                IoOp::Accept {
+                    ref options,
+                    ref accept_port,
+                    ..
+                } => {
                     // Accept: result_code is the new fd (from both io_uring and thread pool).
                     // The accept_port was pre-allocated by the caller with the
                     // requested encoding already set (see prim_tcp_accept /
@@ -705,7 +719,8 @@ pub(super) fn process_raw_completion(
                     if let Some(PortKind::TcpListener) = listener_kind {
                         set_tcp_nodelay(&fd);
                     }
-                    let port_ref = accept_port.as_external::<Port>()
+                    let port_ref = accept_port
+                        .as_external::<Port>()
                         .expect("accept_port must be a Port");
                     port_ref.set_fd(fd);
                     *accept_port

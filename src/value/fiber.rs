@@ -822,5 +822,4 @@ mod tests {
         assert!(fiber.mask.contains(SIG_DEBUG));
         assert!(fiber.mask.contains(SIG_RESUME));
     }
-
 }

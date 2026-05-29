@@ -8,9 +8,7 @@ use super::binding::Binding;
 use super::defuse::DefUseBuilder;
 use super::expr::{Hir, HirId, HirKind};
 use super::liveness::compute_last_use;
-use super::region::{
-    CallClassification, Region, RegionData, RegionInfo, RegionStats,
-};
+use super::region::{CallClassification, Region, RegionData, RegionInfo, RegionStats};
 
 use std::collections::HashMap;
 
@@ -22,6 +20,7 @@ struct RegionTree {
     depth: HashMap<Region, u32>,
 }
 
+#[allow(dead_code)]
 impl RegionTree {
     fn new() -> Self {
         RegionTree {
@@ -188,12 +187,10 @@ impl RegionInference {
                     .any(|b| arena.get(*b).needs_capture()),
                 HirKind::Lambda { .. } => false,
                 HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                    bindings.iter().any(|(_, init)| walk(arena, init))
-                        || walk(arena, body)
+                    bindings.iter().any(|(_, init)| walk(arena, init)) || walk(arena, body)
                 }
                 HirKind::Loop { bindings, body } => {
-                    bindings.iter().any(|(_, init)| walk(arena, init))
-                        || walk(arena, body)
+                    bindings.iter().any(|(_, init)| walk(arena, init)) || walk(arena, body)
                 }
                 HirKind::Begin(es) => es.iter().any(|e| walk(arena, e)),
                 HirKind::Block { body, .. } => body.iter().any(|e| walk(arena, e)),
@@ -538,8 +535,7 @@ impl RegionInference {
 
                 // Fully-opaque fallback: each pair of heap args may
                 // store the other. Mutual edges between heap args.
-                let heap_args: Vec<Region> =
-                    arg_regions.iter().flatten().copied().collect();
+                let heap_args: Vec<Region> = arg_regions.iter().flatten().copied().collect();
                 for i in 0..heap_args.len() {
                     for j in (i + 1)..heap_args.len() {
                         self.record_edge(hir.id, heap_args[i], heap_args[j]);
@@ -669,13 +665,11 @@ impl RegionInference {
             }
 
             HirKind::Intrinsic { op, args } => {
-                let arg_regions: Vec<Vec<Region>> =
-                    args.iter().map(|a| self.walk(a)).collect();
+                let arg_regions: Vec<Vec<Region>> = args.iter().map(|a| self.walk(a)).collect();
 
                 // %array-push(coll, val): val flows into coll
                 if *op == crate::hir::expr::IntrinsicOp::Push {
-                    if let (Some(coll_rs), Some(val_rs)) =
-                        (arg_regions.first(), arg_regions.get(1))
+                    if let (Some(coll_rs), Some(val_rs)) = (arg_regions.first(), arg_regions.get(1))
                     {
                         for &coll in coll_rs {
                             for &val in val_rs {
@@ -686,8 +680,7 @@ impl RegionInference {
                 }
                 // %put(obj, key, val): val flows into obj
                 if *op == crate::hir::expr::IntrinsicOp::Put {
-                    if let (Some(coll_rs), Some(val_rs)) =
-                        (arg_regions.first(), arg_regions.get(2))
+                    if let (Some(coll_rs), Some(val_rs)) = (arg_regions.first(), arg_regions.get(2))
                     {
                         for &coll in coll_rs {
                             for &val in val_rs {
@@ -823,6 +816,7 @@ impl RegionInference {
 
     /// Check if a call's callee is known to escape its heap arguments
     /// (store them in a collection, fiber, or external structure).
+    #[allow(dead_code)]
     fn call_escapes_args(&self, func: &Hir) -> bool {
         if let HirKind::Var(binding) = &func.kind {
             let bi = self.arena().get(*binding);
@@ -892,8 +886,7 @@ impl RegionInference {
         // `scope_has_local_allocs` and the legacy tests, `live_regions`
         // becomes the transitive union: alloc regions + their ancestor
         // scope_regions in the tree.
-        let scope_regions: FxHashSet<Region> =
-            self.scope_region.values().copied().collect();
+        let scope_regions: FxHashSet<Region> = self.scope_region.values().copied().collect();
         let mut live_regions: FxHashSet<Region> = FxHashSet::default();
         for &alloc_r in self.alloc_region.values() {
             live_regions.insert(alloc_r);
@@ -2106,12 +2099,12 @@ mod tests {
         let (_, _, info) = analyze("(let [x (f 1 2)] x)");
         // The call to f should have an alloc_region entry.
         // It must NOT be in any scope_region (it escapes).
-        for (hir_id, region) in &info.alloc_region {
+        for region in info.alloc_region.values() {
             if info.scope_region.values().any(|r| r == region) {
                 // This allocation is in a scope region.
                 // Check if a let scope owns it — if so, the escape
                 // constraint failed to widen it.
-                let scope_owner = info
+                let _scope_owner = info
                     .scope_region
                     .iter()
                     .find(|(_, r)| *r == region)
@@ -2280,11 +2273,12 @@ mod tests {
         inner_lets.sort_by_key(|id| info.scope_region[id].0);
         assert!(inner_lets.len() >= 2, "need at least 2 scoped lets");
         let inner_let_id = inner_lets.last().unwrap();
-        let inner_scope_r = info.scope_region[inner_let_id];
+        let _inner_scope_r = info.scope_region[inner_let_id];
 
         // Find chunk's @array Call node — it's the init of the inner let.
         // Walk the HIR to find the inner let's binding init and check its
         // alloc_region resolves outside the inner scope.
+        #[allow(dead_code)]
         fn find_let_init_region(hir: &Hir, inner_let_id: HirId) -> Option<Region> {
             if let HirKind::Let { bindings, .. } = &hir.kind {
                 if hir.id == inner_let_id {
@@ -2303,6 +2297,7 @@ mod tests {
             });
             result
         }
+        #[allow(dead_code)]
         fn find_call_alloc(hir: &Hir) -> Option<Region> {
             // unused — we check via binding_region instead
             let _ = hir;
@@ -2383,7 +2378,7 @@ mod tests {
         // Verify that a struct created inside a let inside a while (which
         // functionalizes to loop/recur) resolves to the loop's scope region.
         // This is critical for per-iteration FreeRegion reclamation.
-        let (hir, arena, info, names) = pipeline_with_names(
+        let (hir, _arena, info, _names) = pipeline_with_names(
             "(defn test []\n\
               \x20 (def @i 0)\n\
               \x20 (while (%lt i 3)\n\
@@ -2436,6 +2431,7 @@ mod tests {
     }
 
     /// Find the HirId of the value child of the first Emit node in `hir`.
+    #[allow(dead_code)]
     fn find_first_emit_value_id(hir: &Hir) -> Option<HirId> {
         if let HirKind::Emit { value, .. } = &hir.kind {
             return Some(value.id);
@@ -2451,9 +2447,7 @@ mod tests {
 
     // ── Region inference tests for unique-region default model ──────
 
-    fn analyze_with_hir(
-        source: &str,
-    ) -> (Hir, BindingArena, SymbolTable, RegionInfo) {
+    fn analyze_with_hir(source: &str) -> (Hir, BindingArena, SymbolTable, RegionInfo) {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let meta = register_primitives(&mut vm, &mut symbols);
@@ -2493,7 +2487,7 @@ mod tests {
         ) {
             if let HirKind::Call { func, .. } = &hir.kind {
                 if let HirKind::Var(b) = &func.kind {
-                    if symbols.name(arena.get(*b).name).as_deref() == Some(name) {
+                    if symbols.name(arena.get(*b).name) == Some(name) {
                         out.push(hir.id);
                     }
                 }
@@ -2504,6 +2498,7 @@ mod tests {
         out
     }
 
+    #[allow(dead_code)]
     fn find_binding_by_name(
         hir: &Hir,
         name: &str,
@@ -2517,7 +2512,7 @@ mod tests {
             symbols: &SymbolTable,
         ) -> Option<Binding> {
             if let HirKind::Var(b) = &hir.kind {
-                if symbols.name(arena.get(*b).name).as_deref() == Some(name) {
+                if symbols.name(arena.get(*b).name) == Some(name) {
                     return Some(*b);
                 }
             }
@@ -2538,8 +2533,7 @@ mod tests {
         // is at the inner Var(x), NOT a Let HirId. Under the new model,
         // a value's "scope" is just its last-use HirId; the let does
         // not own a region.
-        let (hir, arena, symbols, info) =
-            analyze_with_hir("(fn () (let [x (string \"a\")] x))");
+        let (hir, arena, symbols, info) = analyze_with_hir("(fn () (let [x (string \"a\")] x))");
         let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
         assert_eq!(allocs.len(), 1, "expected one (string ...) call");
         let alloc = allocs[0];
@@ -2549,9 +2543,10 @@ mod tests {
             .get(&alloc)
             .copied()
             .expect("alloc must have a region");
-        let region_data = info.region_data.get(&region).unwrap_or_else(|| {
-            panic!("region r{} must have RegionData (impl step 11)", region.0)
-        });
+        let region_data = info
+            .region_data
+            .get(&region)
+            .unwrap_or_else(|| panic!("region r{} must have RegionData (impl step 11)", region.0));
 
         let lets = find_lets(&hir);
         assert!(
@@ -2580,9 +2575,10 @@ mod tests {
             .get(&alloc)
             .copied()
             .expect("alloc must have a region");
-        let region_data = info.region_data.get(&region).unwrap_or_else(|| {
-            panic!("region r{} must have RegionData (impl step 11)", region.0)
-        });
+        let region_data = info
+            .region_data
+            .get(&region)
+            .unwrap_or_else(|| panic!("region r{} must have RegionData (impl step 11)", region.0));
 
         assert_eq!(
             region_data.free_at, emit,
@@ -2639,17 +2635,12 @@ mod tests {
         // from the pushed value's region to the collection's value
         // region (NOT the collection's binding region — under
         // unique-per-alloc those are distinct).
-        let (hir, arena, symbols, info) = analyze_with_hir(
-            "(let [acc @[] x (string \"a\")] (begin (%array-push acc x) acc))",
-        );
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(let [acc @[] x (string \"a\")] (begin (%array-push acc x) acc))");
         let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
         assert_eq!(allocs.len(), 1, "expected one (string ...) call");
         let x_alloc = allocs[0];
-        let x_region = info
-            .alloc_region
-            .get(&x_alloc)
-            .copied()
-            .expect("x region");
+        let x_region = info.alloc_region.get(&x_alloc).copied().expect("x region");
 
         // Any edge whose source is x's region is a valid hit for this
         // test — the destination is the @[] allocation's region, which
@@ -2777,8 +2768,7 @@ mod tests {
         // AND registers it in call_result_regions so the lowerer
         // emits ReleaseValueRegion (value-gated) instead of
         // DecrefRegion (id-based).
-        let (hir, _arena, _symbols, info) =
-            analyze_with_hir("(eval 1)");
+        let (hir, _arena, _symbols, info) = analyze_with_hir("(eval 1)");
         let eval_id = find_first(&hir, |h| matches!(&h.kind, HirKind::Eval { .. }))
             .expect("expected an Eval node in the HIR");
         let eval_region = *info
@@ -2799,8 +2789,7 @@ mod tests {
         // region (or one of its referent regions, for heap-valued
         // entries). The walk must pass through arg_regions[0] rather
         // than manufacturing a fresh region with no allocation.
-        let (hir, _arena, _symbols, info) =
-            analyze_with_hir("(let [s (string \"x\")] (%get s 0))");
+        let (hir, _arena, _symbols, info) = analyze_with_hir("(let [s (string \"x\")] (%get s 0))");
         let get_id = find_first(&hir, |h| {
             matches!(
                 &h.kind,
@@ -2822,9 +2811,7 @@ mod tests {
     fn put_intrinsic_passes_through_collection_region() {
         // %put mutates a mutable collection in place; result is the
         // same collection. Must not manufacture a fresh region.
-        let (hir, _arena, _symbols, info) = analyze_with_hir(
-            "(let [m @{:a 1}] (%put m :b 2))",
-        );
+        let (hir, _arena, _symbols, info) = analyze_with_hir("(let [m @{:a 1}] (%put m :b 2))");
         let put_id = find_first(&hir, |h| {
             matches!(
                 &h.kind,
@@ -2885,9 +2872,8 @@ mod tests {
         // uses emit_alloc, so the regions walk must assign each its
         // own alloc_region. (This complements the negative tests
         // above: these two intrinsics ARE allocating.)
-        let (hir, _arena, _symbols, info) = analyze_with_hir(
-            "(let [m @[1 2]] (let [f (%freeze m)] (%thaw f)))",
-        );
+        let (hir, _arena, _symbols, info) =
+            analyze_with_hir("(let [m @[1 2]] (let [f (%freeze m)] (%thaw f)))");
         let freeze_id = find_first(&hir, |h| {
             matches!(
                 &h.kind,
@@ -2951,18 +2937,6 @@ mod tests {
         out
     }
 
-    fn find_letrecs(hir: &Hir) -> Vec<HirId> {
-        let mut out = Vec::new();
-        fn walk(hir: &Hir, out: &mut Vec<HirId>) {
-            if matches!(&hir.kind, HirKind::Letrec { .. }) {
-                out.push(hir.id);
-            }
-            hir.for_each_child(|c| walk(c, out));
-        }
-        walk(hir, &mut out);
-        out
-    }
-
     #[test]
     fn begin_with_no_captured_binding_has_no_alloc_region() {
         // `(do (var x 0) (if true (assign x 42) (assign x 99)) x)` — the
@@ -2970,11 +2944,13 @@ mod tests {
         // false for every binding reachable from any Begin in this tree.
         // The lowerer will not emit MakeCaptureCell for any Begin here;
         // the regions walker must not assign an alloc_region to any Begin.
-        let (hir, _arena, info) = pipeline(
-            "(do (var x 0) (if true (assign x 42) (assign x 99)) x)",
-        );
+        let (hir, _arena, info) =
+            pipeline("(do (var x 0) (if true (assign x 42) (assign x 99)) x)");
         let begins = find_begins(&hir);
-        assert!(!begins.is_empty(), "expected at least one Begin in the functionalized HIR");
+        assert!(
+            !begins.is_empty(),
+            "expected at least one Begin in the functionalized HIR"
+        );
         for begin_id in &begins {
             assert!(
                 !info.alloc_region.contains_key(begin_id),
@@ -2991,14 +2967,10 @@ mod tests {
         // `compile_file_to_fhir` inserts have no captured binding either.
         // (Lowerer only emits MakeCaptureCell when a letrec binding's
         // `needs_capture()` is true and we're not inside a lambda.)
-        let (hir, arena, info) = pipeline(
-            "(do (var x 0) (if true (assign x 42) (assign x 99)) x)",
-        );
-        fn check<'a>(h: &'a Hir, arena: &BindingArena, info: &RegionInfo) {
+        let (hir, arena, info) = pipeline("(do (var x 0) (if true (assign x 42) (assign x 99)) x)");
+        fn check(h: &Hir, arena: &BindingArena, info: &RegionInfo) {
             if let HirKind::Letrec { bindings, .. } = &h.kind {
-                let any_captured = bindings
-                    .iter()
-                    .any(|(b, _)| arena.get(*b).needs_capture());
+                let any_captured = bindings.iter().any(|(b, _)| arena.get(*b).needs_capture());
                 if !any_captured {
                     assert!(
                         !info.alloc_region.contains_key(&h.id),
@@ -3019,14 +2991,10 @@ mod tests {
         // the regions walker must register the Begin in alloc_region.
         // Using `def @x` (mutable) + `(fn () x)` (captures x) makes
         // `needs_capture()` true for x.
-        let (hir, _arena, info) = pipeline(
-            "(do (var x 0) (def f (fn () x)) (assign x 1) (f))",
-        );
+        let (hir, _arena, info) = pipeline("(do (var x 0) (def f (fn () x)) (assign x 1) (f))");
         let begins = find_begins(&hir);
         assert!(!begins.is_empty(), "expected at least one Begin");
-        let any_alloc = begins
-            .iter()
-            .any(|id| info.alloc_region.contains_key(id));
+        let any_alloc = begins.iter().any(|id| info.alloc_region.contains_key(id));
         assert!(
             any_alloc,
             "at least one Begin must have an alloc_region — a captured Define is present"

@@ -219,12 +219,10 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
         print!("{}", elle::hir::format_regions(&info, &arena, &names));
     }
 
-    let needs_pipeline = cfg.dump.iter().any(|k| {
-        matches!(
-            k.as_str(),
-            "hir" | "lir" | "cfg" | "dfa" | "jit" | "git"
-        )
-    });
+    let needs_pipeline = cfg
+        .dump
+        .iter()
+        .any(|k| matches!(k.as_str(), "hir" | "lir" | "cfg" | "dfa" | "jit" | "git"));
     if !needs_pipeline {
         return Ok(());
     }
@@ -405,11 +403,7 @@ fn print_dfa_function(tag: &str, f: &elle::lir::LirFunction) {
     println!(
         "; {} {}: signal={:?} \
          capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
-        tag,
-        name,
-        f.signal,
-        f.capture_params_mask,
-        f.capture_locals_mask,
+        tag, name, f.signal, f.capture_params_mask, f.capture_locals_mask,
     );
 }
 

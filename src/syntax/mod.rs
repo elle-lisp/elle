@@ -509,63 +509,63 @@ mod tests {
     #[test]
     fn test_macro_definition_and_expansion() {
         crate::value::arena::with_test_region(|| {
-        let mut expander = Expander::new();
-        let mut symbols = crate::symbol::SymbolTable::new();
-        let mut vm = crate::vm::VM::new();
-        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
-        let span = Span::new(0, 5, 1, 1);
+            let mut expander = Expander::new();
+            let mut symbols = crate::symbol::SymbolTable::new();
+            let mut vm = crate::vm::VM::new();
+            let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
+            let span = Span::new(0, 5, 1, 1);
 
-        // Define a simple macro: (defmacro double (x) `(+ ,x ,x))
-        let template = Syntax::new(
-            SyntaxKind::Quasiquote(Box::new(Syntax::new(
-                SyntaxKind::List(vec![
-                    Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
-                    Syntax::new(
-                        SyntaxKind::Unquote(Box::new(Syntax::new(
-                            SyntaxKind::Symbol("x".to_string()),
+            // Define a simple macro: (defmacro double (x) `(+ ,x ,x))
+            let template = Syntax::new(
+                SyntaxKind::Quasiquote(Box::new(Syntax::new(
+                    SyntaxKind::List(vec![
+                        Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
+                        Syntax::new(
+                            SyntaxKind::Unquote(Box::new(Syntax::new(
+                                SyntaxKind::Symbol("x".to_string()),
+                                span.clone(),
+                            ))),
                             span.clone(),
-                        ))),
-                        span.clone(),
-                    ),
-                    Syntax::new(
-                        SyntaxKind::Unquote(Box::new(Syntax::new(
-                            SyntaxKind::Symbol("x".to_string()),
+                        ),
+                        Syntax::new(
+                            SyntaxKind::Unquote(Box::new(Syntax::new(
+                                SyntaxKind::Symbol("x".to_string()),
+                                span.clone(),
+                            ))),
                             span.clone(),
-                        ))),
-                        span.clone(),
-                    ),
-                ]),
+                        ),
+                    ]),
+                    span.clone(),
+                ))),
                 span.clone(),
-            ))),
-            span.clone(),
-        );
+            );
 
-        let macro_def = MacroDef {
-            name: "double".to_string(),
-            params: vec!["x".to_string()],
-            optional_params: vec![],
-            rest_param: None,
-            template,
-            definition_scope: ScopeId(0),
-            cached_transformer: std::cell::RefCell::new(None),
-        };
+            let macro_def = MacroDef {
+                name: "double".to_string(),
+                params: vec!["x".to_string()],
+                optional_params: vec![],
+                rest_param: None,
+                template,
+                definition_scope: ScopeId(0),
+                cached_transformer: std::cell::RefCell::new(None),
+            };
 
-        expander.define_macro(macro_def);
+            expander.define_macro(macro_def);
 
-        // Expand (double 5)
-        let call = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("double".to_string()), span.clone()),
-                Syntax::new(SyntaxKind::Int(5), span.clone()),
-            ]),
-            span,
-        );
+            // Expand (double 5)
+            let call = Syntax::new(
+                SyntaxKind::List(vec![
+                    Syntax::new(SyntaxKind::Symbol("double".to_string()), span.clone()),
+                    Syntax::new(SyntaxKind::Int(5), span.clone()),
+                ]),
+                span,
+            );
 
-        let result = expander.expand(call, &mut symbols, &mut vm);
-        assert!(result.is_ok());
-        let expanded = result.unwrap();
-        // The result should be (+ 5 5)
-        assert_eq!(expanded.to_string(), "(+ 5 5)");
+            let result = expander.expand(call, &mut symbols, &mut vm);
+            assert!(result.is_ok());
+            let expanded = result.unwrap();
+            // The result should be (+ 5 5)
+            assert_eq!(expanded.to_string(), "(+ 5 5)");
         });
     }
 

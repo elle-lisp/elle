@@ -747,11 +747,8 @@ mod tests {
         crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
         let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
-        let region_info = crate::hir::analyze_regions_with(
-            &analysis.hir,
-            &arena,
-            pc.call_classification.clone(),
-        );
+        let region_info =
+            crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
         let mut lowerer = Lowerer::new(&arena)
             .with_primitive_classification(pc)
             .with_primitive_values(prim_values)
@@ -768,8 +765,7 @@ mod tests {
                 .filter(|i| matches!(i.instr, LirInstr::DecrefRegion { .. }))
                 .count()
         }
-        count_in_func(&module.entry)
-            + module.closures.iter().map(count_in_func).sum::<usize>()
+        count_in_func(&module.entry) + module.closures.iter().map(count_in_func).sum::<usize>()
     }
 
     fn count_release_value_regions(module: &crate::lir::LirModule) -> usize {
@@ -780,8 +776,7 @@ mod tests {
                 .filter(|i| matches!(i.instr, LirInstr::ReleaseValueRegion { .. }))
                 .count()
         }
-        count_in_func(&module.entry)
-            + module.closures.iter().map(count_in_func).sum::<usize>()
+        count_in_func(&module.entry) + module.closures.iter().map(count_in_func).sum::<usize>()
     }
 
     #[test]
@@ -879,8 +874,7 @@ mod tests {
         // edges, so the merge pass collapses them into one region.
         // The lowerer emits exactly one `DecrefRegion` for the
         // merged group.
-        let module =
-            compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
+        let module = compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
         assert_eq!(
             count_decref_regions(&module),
             1,

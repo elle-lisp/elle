@@ -110,7 +110,10 @@ fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits
         Err(e) => return e,
     };
 
-    let port_val = Value::external("port", Port::new_unopened(PortKind::File, direction, encoding, path.clone()));
+    let port_val = Value::external(
+        "port",
+        Port::new_unopened(PortKind::File, direction, encoding, path.clone()),
+    );
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(

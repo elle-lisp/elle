@@ -105,9 +105,15 @@ pub(crate) fn prim_unix_accept(args: &[Value]) -> (SignalBits, Value) {
             IoOp::Accept {
                 options: kwargs.options,
                 encoding,
-                accept_port: Value::external("port", Port::new_unopened(
-                    PortKind::UnixStream, Direction::ReadWrite, encoding, String::new(),
-                )),
+                accept_port: Value::external(
+                    "port",
+                    Port::new_unopened(
+                        PortKind::UnixStream,
+                        Direction::ReadWrite,
+                        encoding,
+                        String::new(),
+                    ),
+                ),
             },
             port_val,
             kwargs.timeout,
@@ -131,9 +137,15 @@ pub(crate) fn prim_unix_connect(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
     let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
-    let port_val = Value::external("port", Port::new_unopened(
-        PortKind::UnixStream, Direction::ReadWrite, encoding, path.clone(),
-    ));
+    let port_val = Value::external(
+        "port",
+        Port::new_unopened(
+            PortKind::UnixStream,
+            Direction::ReadWrite,
+            encoding,
+            path.clone(),
+        ),
+    );
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(

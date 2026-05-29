@@ -826,27 +826,51 @@ pub(super) fn drain_cqes(
             // completion. `ReadExact` is the strict variant: resubmit for
             // stream sockets too so callers get exactly N bytes (or nil if
             // the stream ended early).
-            let (count, buffer_ref, port_key_for_resubmit, port_for_resubmit, filled_for_resubmit, is_exact) =
-                match &mut pending_op {
-                    PendingOp::Port {
-                        op: IoOp::Read { count, buffer },
-                        port_key,
-                        port,
-                        filled,
-                        ..
-                    } => (Some(*count), Some(*buffer), Some(port_key.clone()), Some(*port), Some(filled), false),
-                    PendingOp::Port {
-                        op: IoOp::ReadExact { count, buffer },
-                        port_key,
-                        port,
-                        filled,
-                        ..
-                    } => (Some(*count), Some(*buffer), Some(port_key.clone()), Some(*port), Some(filled), true),
-                    _ => (None, None, None, None, None, false),
-                };
-            if let (Some(count), Some(buffer), Some(port_key), Some(port), Some(filled)) =
-                (count, buffer_ref, port_key_for_resubmit, port_for_resubmit, filled_for_resubmit)
-            {
+            let (
+                count,
+                buffer_ref,
+                port_key_for_resubmit,
+                port_for_resubmit,
+                filled_for_resubmit,
+                is_exact,
+            ) = match &mut pending_op {
+                PendingOp::Port {
+                    op: IoOp::Read { count, buffer },
+                    port_key,
+                    port,
+                    filled,
+                    ..
+                } => (
+                    Some(*count),
+                    Some(*buffer),
+                    Some(port_key.clone()),
+                    Some(*port),
+                    Some(filled),
+                    false,
+                ),
+                PendingOp::Port {
+                    op: IoOp::ReadExact { count, buffer },
+                    port_key,
+                    port,
+                    filled,
+                    ..
+                } => (
+                    Some(*count),
+                    Some(*buffer),
+                    Some(port_key.clone()),
+                    Some(*port),
+                    Some(filled),
+                    true,
+                ),
+                _ => (None, None, None, None, None, false),
+            };
+            if let (Some(count), Some(buffer), Some(port_key), Some(port), Some(filled)) = (
+                count,
+                buffer_ref,
+                port_key_for_resubmit,
+                port_for_resubmit,
+                filled_for_resubmit,
+            ) {
                 let is_stream = port
                     .as_external::<Port>()
                     .map(|p| matches!(p.kind(), PortKind::TcpStream | PortKind::UnixStream))

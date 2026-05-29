@@ -430,7 +430,8 @@ mod tests {
                 num_locals: 0,
             };
 
-            let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) =
+                setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
             let spilled: Vec<Value> = vec![Value::int(1), Value::int(2)];
 
@@ -462,7 +463,8 @@ mod tests {
                 num_locals: 3,
             };
 
-            let (mut vm, closure_val) = setup_yield_test(vec![0x02], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) =
+                setup_yield_test(vec![0x02], vec![], vec![], vec![yield_meta]);
 
             let spilled: Vec<Value> = vec![Value::int(100), Value::int(200), Value::int(300)];
 
@@ -498,7 +500,8 @@ mod tests {
                 num_locals: 10,
             };
 
-            let (mut vm, closure_val) = setup_yield_test(vec![0xFF], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) =
+                setup_yield_test(vec![0xFF], vec![], vec![], vec![yield_meta]);
 
             let spilled: Vec<Value> = (0..30).map(Value::int).collect();
 
@@ -588,7 +591,8 @@ mod tests {
                 num_locals: 2,
             };
 
-            let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
+            let (mut vm, closure_val) =
+                setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
             let spilled: Vec<Value> = vec![
                 Value::NIL,

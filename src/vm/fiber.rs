@@ -104,7 +104,6 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-
         // 7. Swap back: parent in, child out; restore handle
         std::mem::swap(&mut self.fiber, &mut child_fiber);
         self.current_fiber_handle = parent_handle;

@@ -30,8 +30,8 @@ use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
 use crate::syntax::Syntax;
 use crate::value::Value;
-use crate::with_transient_region;
 use crate::vm::VM;
+use crate::with_transient_region;
 
 /// Convert a macro argument Syntax node directly to a Value for passing
 /// to a cached closure call. Mirrors `wrap_macro_arg` but produces a
@@ -180,8 +180,7 @@ impl Expander {
                 // go into the caller's TLS region. They survive as bytecode
                 // constants in the cached closure, so they must NOT be in a
                 // transient region that gets freed.
-                let closure_val =
-                    crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
+                let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
 
                 // Store in this MacroDef instance's cache.
                 *macro_def.cached_transformer.borrow_mut() = Some(closure_val);
@@ -204,9 +203,9 @@ impl Expander {
         // (Value::syntax wrappers, string allocations, etc.).
         // populate_env's capture cells use the region_id directly.
         // The transient region is freed after converting the result to Syntax.
-        let closure = transformer.as_closure().ok_or_else(|| {
-            format!("Macro '{}': transformer is not a closure", macro_def.name)
-        })?;
+        let closure = transformer
+            .as_closure()
+            .ok_or_else(|| format!("Macro '{}': transformer is not a closure", macro_def.name))?;
 
         let opt_start = macro_def.params.len();
         let opt_end = opt_start + macro_def.optional_params.len();

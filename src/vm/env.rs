@@ -27,7 +27,14 @@ impl VM {
         args: &[Value],
         region_id: RegionId,
     ) -> Option<Rc<Vec<Value>>> {
-        if !Self::populate_env(&mut self.env_cache, unsafe { &mut *self.heap_ptr }, &mut self.fiber, closure, args, region_id) {
+        if !Self::populate_env(
+            &mut self.env_cache,
+            unsafe { &mut *self.heap_ptr },
+            &mut self.fiber,
+            closure,
+            args,
+            region_id,
+        ) {
             return None;
         }
         Some(Rc::new(self.env_cache.clone()))

@@ -349,7 +349,8 @@ mod tests {
                 fields: vec![TypeDesc::I32, TypeDesc::Double, TypeDesc::I64],
             };
             let desc = TypeDesc::Struct(sd.clone());
-            let values = Value::array_mut(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
+            let values =
+                Value::array_mut(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
 
             let (offsets, total_size) = sd.field_offsets().unwrap();
             let align = desc.align().unwrap();
@@ -465,7 +466,8 @@ mod tests {
 
             let arr = outer_val.as_array_mut().unwrap();
             let elems = arr.borrow();
-            for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate() {
+            for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate()
+            {
                 let _ = write_value_to_buffer(
                     unsafe { buf.as_mut_ptr().add(offset) },
                     &elems[i],

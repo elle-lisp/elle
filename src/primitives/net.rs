@@ -261,9 +261,15 @@ fn prim_tcp_accept(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
     let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
-    let accept_port = Value::external("port", Port::new_unopened(
-        PortKind::TcpStream, Direction::ReadWrite, encoding, String::new(),
-    ));
+    let accept_port = Value::external(
+        "port",
+        Port::new_unopened(
+            PortKind::TcpStream,
+            Direction::ReadWrite,
+            encoding,
+            String::new(),
+        ),
+    );
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(
@@ -299,9 +305,10 @@ fn prim_tcp_connect(args: &[Value]) -> (SignalBits, Value) {
     };
     let peer = crate::io::sockaddr::format_host_port(&addr, port);
     let encoding = kwargs.encoding.unwrap_or(crate::port::Encoding::Binary);
-    let port_val = Value::external("port", Port::new_unopened(
-        PortKind::TcpStream, Direction::ReadWrite, encoding, peer,
-    ));
+    let port_val = Value::external(
+        "port",
+        Port::new_unopened(PortKind::TcpStream, Direction::ReadWrite, encoding, peer),
+    );
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(

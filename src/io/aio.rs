@@ -282,7 +282,15 @@ impl AsyncBackend {
             encoding,
         } = request.op
         {
-            return self.submit_open(path, flags, mode, direction, encoding, request.timeout, request.port);
+            return self.submit_open(
+                path,
+                flags,
+                mode,
+                direction,
+                encoding,
+                request.timeout,
+                request.port,
+            );
         }
 
         // Task: run closure on thread pool.
@@ -858,7 +866,12 @@ impl AsyncBackend {
     /// Submit a Connect operation. Connect creates a new port, so
     /// request.port is Value::NIL — we handle it separately.
     #[allow(unused_variables)]
-    fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>, port: Value) -> Result<u64, String> {
+    fn submit_connect(
+        &self,
+        addr: &ConnectAddr,
+        timeout: Option<Duration>,
+        port: Value,
+    ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
@@ -2296,9 +2309,15 @@ mod tests {
             );
 
             let backend = AsyncBackend::new().unwrap();
-            let accept_port_val = Value::external("port", Port::new_unopened(
-                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary, String::new(),
-            ));
+            let accept_port_val = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::TcpStream,
+                    Direction::ReadWrite,
+                    Encoding::Binary,
+                    String::new(),
+                ),
+            );
             let accept_id = backend
                 .submit(
                     &IoRequest {
@@ -2400,9 +2419,15 @@ mod tests {
             let backend = AsyncBackend::new().unwrap();
 
             // Submit Accept
-            let accept_port_val = Value::external("port", Port::new_unopened(
-                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary, String::new(),
-            ));
+            let accept_port_val = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::TcpStream,
+                    Direction::ReadWrite,
+                    Encoding::Binary,
+                    String::new(),
+                ),
+            );
             let accept_req = IoRequest {
                 op: IoOp::Accept {
                     options: Default::default(),
@@ -2419,7 +2444,8 @@ mod tests {
             let handle = std::thread::spawn(move || {
                 // Small delay to ensure accept is submitted
                 std::thread::sleep(std::time::Duration::from_millis(10));
-                let _stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port_copy)).unwrap();
+                let _stream =
+                    std::net::TcpStream::connect(format!("127.0.0.1:{}", port_copy)).unwrap();
             });
 
             // Wait for the accept completion
@@ -2466,10 +2492,15 @@ mod tests {
             let backend = AsyncBackend::new().unwrap();
 
             // Submit Connect
-            let connect_port = Value::external("port", Port::new_unopened(
-                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary,
-                format!("127.0.0.1:{}", bound_addr.port()),
-            ));
+            let connect_port = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::TcpStream,
+                    Direction::ReadWrite,
+                    Encoding::Binary,
+                    format!("127.0.0.1:{}", bound_addr.port()),
+                ),
+            );
             let connect_req = IoRequest {
                 op: IoOp::Connect {
                     addr: crate::io::request::ConnectAddr::Tcp {
@@ -2555,9 +2586,15 @@ mod tests {
 
             let backend = AsyncBackend::new().unwrap();
 
-            let accept_port_val = Value::external("port", Port::new_unopened(
-                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary, String::new(),
-            ));
+            let accept_port_val = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::TcpStream,
+                    Direction::ReadWrite,
+                    Encoding::Binary,
+                    String::new(),
+                ),
+            );
             let accept_id = backend
                 .submit(
                     &IoRequest {
@@ -2573,10 +2610,15 @@ mod tests {
                 )
                 .unwrap();
 
-            let connect_port = Value::external("port", Port::new_unopened(
-                PortKind::TcpStream, Direction::ReadWrite, Encoding::Binary,
-                format!("127.0.0.1:{}", bound_port),
-            ));
+            let connect_port = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::TcpStream,
+                    Direction::ReadWrite,
+                    Encoding::Binary,
+                    format!("127.0.0.1:{}", bound_port),
+                ),
+            );
             let connect_id = backend
                 .submit(
                     &IoRequest {
@@ -2799,9 +2841,15 @@ mod tests {
             let path = format!("/tmp/elle-test-async-open-{}", std::process::id());
             std::fs::write(&path, "async open test").unwrap();
 
-            let port_val = Value::external("port", Port::new_unopened(
-                PortKind::File, Direction::Read, Encoding::Text, path.clone(),
-            ));
+            let port_val = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::File,
+                    Direction::Read,
+                    Encoding::Text,
+                    path.clone(),
+                ),
+            );
             let backend = AsyncBackend::new().unwrap();
             let req = IoRequest {
                 op: IoOp::Open {
@@ -2868,9 +2916,15 @@ mod tests {
             let path = format!("/tmp/elle-test-async-open-timeout-{}", std::process::id());
             std::fs::write(&path, "timeout test").unwrap();
 
-            let port_val = Value::external("port", Port::new_unopened(
-                PortKind::File, Direction::Read, Encoding::Text, path.clone(),
-            ));
+            let port_val = Value::external(
+                "port",
+                Port::new_unopened(
+                    PortKind::File,
+                    Direction::Read,
+                    Encoding::Text,
+                    path.clone(),
+                ),
+            );
             let backend = AsyncBackend::new().unwrap();
             let req = IoRequest {
                 op: IoOp::Open {

@@ -125,8 +125,7 @@ impl RegionStore {
         // multiple times by another's contents and may have already
         // been freed by an earlier cascade visit.
         debug_assert!(
-            from_cascade.is_some()
-                || (idx < self.regions.len() && self.regions[idx].is_some()),
+            from_cascade.is_some() || (idx < self.regions.len() && self.regions[idx].is_some()),
             "DecrefRegion({id}) but region was never alloc_in_region'd \
              (or already freed) — phantom region or double-free; \
              see docs/regions.md § 'Every region must correspond to a \

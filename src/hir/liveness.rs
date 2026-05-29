@@ -415,10 +415,7 @@ pub(crate) fn build_binding_index(
 /// The plan's region-inference invariant requires every region to have
 /// exactly one `free_at` HirId; this function produces that mapping for
 /// allocation HirIds.
-pub fn compute_last_use(
-    hir: &Hir,
-    uses: &HashMap<Binding, Vec<HirId>>,
-) -> HashMap<HirId, HirId> {
+pub fn compute_last_use(hir: &Hir, uses: &HashMap<Binding, Vec<HirId>>) -> HashMap<HirId, HirId> {
     let mut builder = LastUseBuilder {
         last_use: HashMap::new(),
         binding_init: HashMap::new(),
@@ -439,13 +436,7 @@ pub fn compute_last_use(
             .get(&binding)
             .into_iter()
             .flat_map(|v| v.iter())
-            .map(|use_id| {
-                builder
-                    .last_use
-                    .get(use_id)
-                    .copied()
-                    .unwrap_or(*use_id)
-            })
+            .map(|use_id| builder.last_use.get(use_id).copied().unwrap_or(*use_id))
             .max();
         for init_id in init_ids {
             let chosen = max_effective.unwrap_or(init_id);
@@ -486,7 +477,10 @@ impl LastUseBuilder {
             }
             HirKind::Emit { value, .. } => self.walk(value, true, hir.id),
             HirKind::Define { value, binding } => {
-                self.binding_init.entry(*binding).or_default().push(value.id);
+                self.binding_init
+                    .entry(*binding)
+                    .or_default()
+                    .push(value.id);
                 self.walk(value, true, hir.id);
             }
             HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
@@ -767,14 +761,7 @@ mod tests {
 
     // ── per-HirId last-use tests (drive impl step 10) ────────────────
 
-    fn analyze_with_hir(
-        source: &str,
-    ) -> (
-        super::Hir,
-        BindingArena,
-        SymbolTable,
-        DataflowInfo,
-    ) {
+    fn analyze_with_hir(source: &str) -> (super::Hir, BindingArena, SymbolTable, DataflowInfo) {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let meta = register_primitives(&mut vm, &mut symbols);
@@ -815,7 +802,7 @@ mod tests {
         ) {
             if let HirKind::Call { func, .. } = &hir.kind {
                 if let HirKind::Var(b) = &func.kind {
-                    if symbols.name(arena.get(*b).name).as_deref() == Some(name) {
+                    if symbols.name(arena.get(*b).name) == Some(name) {
                         out.push(hir.id);
                     }
                 }
@@ -842,7 +829,7 @@ mod tests {
             out: &mut Vec<HirId>,
         ) {
             if let HirKind::Var(b) = &hir.kind {
-                if symbols.name(arena.get(*b).name).as_deref() == Some(name) {
+                if symbols.name(arena.get(*b).name) == Some(name) {
                     out.push(hir.id);
                 }
             }
@@ -868,8 +855,7 @@ mod tests {
 
     #[test]
     fn last_use_let_single_var_in_body() {
-        let (hir, arena, symbols, info) =
-            analyze_with_hir("(fn () (let [x (string \"a\")] x))");
+        let (hir, arena, symbols, info) = analyze_with_hir("(fn () (let [x (string \"a\")] x))");
         let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
         assert_eq!(allocs.len(), 1, "expected exactly one (string ...) call");
         let alloc = allocs[0];
@@ -923,8 +909,7 @@ mod tests {
         // Last use is at the outer Call. `string` is a real primitive
         // so the analyzer does not inline these calls (unlike the
         // letrec-bound `g` in the test wrapper).
-        let (hir, arena, symbols, info) =
-            analyze_with_hir("(fn () (string (string \"a\")))");
+        let (hir, arena, symbols, info) = analyze_with_hir("(fn () (string (string \"a\")))");
 
         let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
         assert_eq!(allocs.len(), 2, "expected two (string ...) calls");
@@ -950,8 +935,7 @@ mod tests {
         // The yielded value's last use is the Emit node — the runtime
         // incref at handle_emit (step 14) keeps the region alive past
         // the matching DecrefRegion.
-        let (hir, arena, symbols, info) =
-            analyze_with_hir("(fn () (emit :yield (string \"a\")))");
+        let (hir, arena, symbols, info) = analyze_with_hir("(fn () (emit :yield (string \"a\")))");
 
         let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
         assert_eq!(allocs.len(), 1, "expected exactly one (string ...) call");

@@ -79,7 +79,12 @@ impl Port {
     }
 
     /// Create an unopened port (fd filled in later by IO completion).
-    pub fn new_unopened(kind: PortKind, direction: Direction, encoding: Encoding, path: String) -> Self {
+    pub fn new_unopened(
+        kind: PortKind,
+        direction: Direction,
+        encoding: Encoding,
+        path: String,
+    ) -> Self {
         Port {
             fd: RefCell::new(None),
             kind,
@@ -261,6 +266,7 @@ impl Port {
     /// stream constructors default to `Binary` (the bytes-stream
     /// interpretation of POSIX sockets) but line-oriented text
     /// protocols (SMTP, IRC, plain HTTP/1.x) want `Text`.
+    #[allow(dead_code)]
     pub fn with_encoding(mut self, enc: Encoding) -> Self {
         self.encoding = enc;
         self

@@ -447,5 +447,4 @@ mod tests {
             .expect("Should have definition for my-fn");
         assert_eq!(def.documentation, None);
     }
-
 }

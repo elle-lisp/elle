@@ -816,10 +816,12 @@ pub extern "C" fn elle_jit_bytes_push(
         tag: val_tag,
         payload: val_pay,
     };
-    let byte = val
-        .as_int()
-        .unwrap_or_else(|| panic!("%bytes-push: value must be integer, got {}", val.type_name()))
-        as u8;
+    let byte = val.as_int().unwrap_or_else(|| {
+        panic!(
+            "%bytes-push: value must be integer, got {}",
+            val.type_name()
+        )
+    }) as u8;
     if let Some(buf_ref) = coll.as_bytes_mut() {
         buf_ref.borrow_mut().push(byte);
         JitValue::from_value(coll)
