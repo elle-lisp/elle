@@ -419,6 +419,7 @@ pub fn compute_last_use(hir: &Hir, uses: &HashMap<Binding, Vec<HirId>>) -> HashM
     let mut builder = LastUseBuilder {
         last_use: HashMap::new(),
         binding_init: HashMap::new(),
+        iter_scope_stack: Vec::new(),
     };
     // The root has no parent; parent_consumes=false is the conservative
     // default (the root's value is the program's result, no further use).
@@ -456,6 +457,15 @@ struct LastUseBuilder {
     /// via analyze_file_letrec), so this is a Vec rather than a single
     /// id; compute_last_use extends last_use for every init.
     binding_init: HashMap<Binding, Vec<HirId>>,
+    /// Stack of iterative-scope HirIds (Loop / While) currently being
+    /// walked. Outermost-first. Used to extend `last_use` for `Var`
+    /// nodes so a binding bound OUTSIDE an iterative scope but
+    /// REFERENCED inside it survives across iterations: without this
+    /// the binding's region's `free_at` lands inside the loop body
+    /// and per-iteration DecrefRegion frees the binding's value after
+    /// the first iteration (the phantom-region symptom on
+    /// `tests/elle/jit-lbox-param-repro.lisp`).
+    iter_scope_stack: Vec<HirId>,
 }
 
 impl LastUseBuilder {
@@ -464,7 +474,26 @@ impl LastUseBuilder {
         // HirId when the parent consumes (the value flows in and dies);
         // otherwise it's this node itself (the value either propagates
         // up through non-consuming wrappers or is the program's result).
-        let my_last = if parent_consumes { parent_id } else { hir.id };
+        let mut my_last = if parent_consumes { parent_id } else { hir.id };
+        // Loop/While propagation: a Var node inside an iterative scope
+        // refers to a binding that may have been bound outside that
+        // scope. Its containing iteration body executes many times, so
+        // the binding's value must survive at least until the outermost
+        // iteration completes. Extending my_last to the outermost
+        // containing iter_scope is sound: it can never shrink last_use
+        // (HirIds are assigned outer-after-inner during HIR construction,
+        // so an enclosing Loop's id is strictly greater than any HirId
+        // inside its body). For Var nodes referring to bindings bound
+        // INSIDE the iteration this over-extends — sound but slightly
+        // less precise (the region's runtime lifetime is the union of
+        // iterations rather than per-iteration).
+        if matches!(&hir.kind, HirKind::Var(_)) {
+            if let Some(&outermost) = self.iter_scope_stack.first() {
+                if outermost > my_last {
+                    my_last = outermost;
+                }
+            }
+        }
         self.last_use.insert(hir.id, my_last);
 
         match &hir.kind {
@@ -555,7 +584,9 @@ impl LastUseBuilder {
             }
             HirKind::While { cond, body } => {
                 self.walk(cond, true, hir.id);
+                self.iter_scope_stack.push(hir.id);
                 self.walk(body, false, hir.id);
+                self.iter_scope_stack.pop();
             }
             HirKind::Parameterize { bindings, body } => {
                 for (k, v) in bindings {
@@ -587,7 +618,9 @@ impl LastUseBuilder {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.walk(init, true, hir.id);
                 }
+                self.iter_scope_stack.push(hir.id);
                 self.walk(body, parent_consumes, parent_id);
+                self.iter_scope_stack.pop();
             }
 
             // Begin: only the LAST expression propagates (its value is
@@ -629,8 +662,17 @@ impl LastUseBuilder {
             // regions escape via Return and are tracked separately by
             // `lambda_tail_regions` in regions analysis — not by
             // propagating `parent_consumes` here.
+            //
+            // Save/restore `iter_scope_stack` across the Lambda body: a
+            // Var inside the lambda body refers to bindings looked up
+            // through the closure's env, and the lambda's body executes
+            // when the closure is *called*, not during the enclosing
+            // loop's iteration. So outer-loop iter-scopes don't apply
+            // to uses inside the lambda body.
             HirKind::Lambda { body, .. } => {
+                let saved = std::mem::take(&mut self.iter_scope_stack);
                 self.walk(body, false, hir.id);
+                self.iter_scope_stack = saved;
             }
 
             // Leaves.
@@ -1153,6 +1195,71 @@ mod tests {
             discarded.0,
             outer.0,
             got
+        );
+    }
+
+    // ── propagation through iterative scopes (While / Loop) ─────────
+    //
+    // A binding bound OUTSIDE a `while` body but referenced INSIDE the
+    // body must outlive the entire while — not die at the immediate
+    // consumer inside the body. Otherwise the per-iteration decref of
+    // the binding's region triggers UAF on iteration 2 (the canonical
+    // symptom that surfaces as the phantom-region panic on
+    // tests/elle/jit-lbox-param-repro.lisp).
+    //
+    // Counterfactual: with the current `walk` for While (`walk(body,
+    // false, hir.id)`), uses inside the body have last_use set to the
+    // immediate consumer (e.g., the Call's HirId), which is strictly
+    // less than the While's HirId. The binding-chain extension then
+    // sets `last_use[init_id] = call.id`, leaking the bug into
+    // regions analysis (`r.free_at = call.id`, inside the while body).
+    //
+    // Fix: when walking a use inside a While/Loop body, the effective
+    // last_use for binding-extension purposes must be at LEAST the
+    // While/Loop's HirId (or anything that survives a single iteration).
+
+    fn find_first_loop(hir: &super::Hir) -> Option<HirId> {
+        if matches!(&hir.kind, HirKind::Loop { .. }) {
+            return Some(hir.id);
+        }
+        let mut found = None;
+        hir.for_each_child(|c| {
+            if found.is_none() {
+                found = find_first_loop(c);
+            }
+        });
+        found
+    }
+
+    #[test]
+    fn last_use_binding_used_in_loop_body_extends_to_loop() {
+        // (let [s (string "a")] (while true (f s)))
+        //
+        // Macro-expansion of `(while c body)` introduces a Loop wrapping
+        // the body, so the structurally relevant scope is the Loop node.
+        // `s` is bound by the outer let. The body uses `s`. The
+        // `s`-bound value (the string alloc) must survive the loop,
+        // not die at the inner (f s) Call inside the body.
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (let [s (string \"a\")] (while true (f s))))");
+        let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
+        assert_eq!(allocs.len(), 1, "expected exactly one (string ...) alloc");
+        let alloc = allocs[0];
+        let loop_id = find_first_loop(&hir).expect("expected a Loop node");
+
+        let got = info
+            .last_use
+            .get(&alloc)
+            .copied()
+            .expect("missing last_use");
+        assert!(
+            got >= loop_id,
+            "(string \"a\") alloc @{} bound to a let-binding used inside loop @{} \
+             must have last_use >= loop-node HirId so the region survives \
+             across iterations; got last_use=@{}",
+            alloc.0,
+            loop_id.0,
+            got.0,
         );
     }
 

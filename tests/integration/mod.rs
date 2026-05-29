@@ -92,9 +92,11 @@ mod string {
 //     include!("allocator.rs");
 // }
 
-mod anf_counterfactual {
-    include!("anf_counterfactual.rs");
-}
+// anf_counterfactual tests migrated to tests/elle/ (the three scripts
+// jit-lbox-param-repro, jit-lbox-param-noyield, letstar-yield-repro are
+// already run by smoke-vm). The ANF-causality framing is obsolete: the
+// liveness extension in src/hir/liveness.rs (iter_scope_stack) closes
+// the bug independently of the ANF lift.
 // parameters tests migrated to tests/elle/parameters.lisp
 // ports tests migrated to tests/elle/ports.lisp
 mod io {
