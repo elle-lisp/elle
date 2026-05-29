@@ -439,6 +439,21 @@ impl Default for Bytecode {
 
 // ── Debug formatting ────────────────────────────────────────────────
 
+/// Safely decode an opcode byte. Returns `None` when the byte is
+/// outside the valid `Instruction` discriminant range so the
+/// disassembler can walk past corrupted or unrecognized bytecode
+/// without invoking UB / panicking in `mem::transmute`.
+fn decode_opcode(byte: u8) -> Option<Instruction> {
+    // `#[repr(u8)]` with no explicit discriminants assigns variants
+    // 0..=N sequentially; the last variant in source order is the
+    // current high-water mark.
+    if byte <= Instruction::ReleaseValueRegion as u8 {
+        Some(unsafe { std::mem::transmute::<u8, Instruction>(byte) })
+    } else {
+        None
+    }
+}
+
 /// Disassemble bytecode and return one string per instruction
 pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
     let mut lines = Vec::new();
@@ -446,7 +461,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
 
     while i < instructions.len() {
         let byte = instructions[i];
-        let instr: Instruction = unsafe { std::mem::transmute(byte) };
+        let Some(instr) = decode_opcode(byte) else {
+            lines.push(format!("[{}] Unknown(0x{:02x})", i, byte));
+            i += 1;
+            continue;
+        };
         let mut line = format!("[{}] {:?}", i, instr);
         i += 1;
 
@@ -564,6 +583,26 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (region={})", region_id));
                 i += 2;
             }
+            Instruction::ReleaseValueRegion if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (expected_region={})", region_id));
+                i += 2;
+            }
+            Instruction::Emit if i + 1 < instructions.len() => {
+                let signal_bits = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (signal_bits=0x{:04x})", signal_bits));
+                i += 2;
+            }
+            Instruction::CheckSignalBound if i + 7 < instructions.len() => {
+                let mut raw: u64 = 0;
+                for word in 0..4 {
+                    let w = ((instructions[i + word * 2] as u16) << 8)
+                        | (instructions[i + word * 2 + 1] as u16);
+                    raw |= (w as u64) << (word * 16);
+                }
+                line.push_str(&format!(" (allowed_bits=0x{:016x})", raw));
+                i += 8;
+            }
             Instruction::PushParamFrame if i < instructions.len() => {
                 let count = instructions[i];
                 line.push_str(&format!(" (count={})", count));
@@ -662,6 +701,62 @@ mod tests {
             let decoded: Instruction = unsafe { std::mem::transmute(byte) };
             assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
         }
+    }
+
+    #[test]
+    fn disassemble_skips_release_value_region_operand() {
+        // ReleaseValueRegion carries a 2-byte expected-region operand.
+        // The disassembler must advance past it, otherwise the operand
+        // bytes are misread as the next opcode (and may panic via the
+        // discriminant transmute on an out-of-range byte).
+        let mut bc = Bytecode::new();
+        bc.emit(Instruction::ReleaseValueRegion);
+        bc.emit_u16(0xb600);
+        bc.emit(Instruction::Return);
+        let lines = disassemble_lines(&bc.instructions);
+        assert_eq!(lines.len(), 2, "got: {lines:?}");
+        assert!(lines[0].contains("ReleaseValueRegion"), "got: {lines:?}");
+        assert!(lines[1].contains("Return"), "got: {lines:?}");
+    }
+
+    #[test]
+    fn disassemble_skips_emit_operand() {
+        // Emit carries a 2-byte signal-bits operand.
+        let mut bc = Bytecode::new();
+        bc.emit(Instruction::Emit);
+        bc.emit_u16(0xb600);
+        bc.emit(Instruction::Return);
+        let lines = disassemble_lines(&bc.instructions);
+        assert_eq!(lines.len(), 2, "got: {lines:?}");
+        assert!(lines[0].contains("Emit"), "got: {lines:?}");
+        assert!(lines[1].contains("Return"), "got: {lines:?}");
+    }
+
+    #[test]
+    fn disassemble_skips_check_signal_bound_operand() {
+        // CheckSignalBound carries an 8-byte (4 × u16) operand.
+        let mut bc = Bytecode::new();
+        bc.emit(Instruction::CheckSignalBound);
+        bc.emit_u16(0xb600);
+        bc.emit_u16(0xb601);
+        bc.emit_u16(0xb602);
+        bc.emit_u16(0xb603);
+        bc.emit(Instruction::Return);
+        let lines = disassemble_lines(&bc.instructions);
+        assert_eq!(lines.len(), 2, "got: {lines:?}");
+        assert!(lines[0].contains("CheckSignalBound"), "got: {lines:?}");
+        assert!(lines[1].contains("Return"), "got: {lines:?}");
+    }
+
+    #[test]
+    fn disassemble_does_not_panic_on_unknown_opcode() {
+        // A byte that does not map to any Instruction variant must not
+        // panic the disassembler. This guards against the
+        // mem::transmute UB / panic when new opcodes are added without
+        // updating the operand-size match arm.
+        let bogus = [0xb6u8, 0xff];
+        let lines = disassemble_lines(&bogus);
+        assert_eq!(lines.len(), 2, "got: {lines:?}");
     }
 
     #[test]
