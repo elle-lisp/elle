@@ -88,38 +88,70 @@ several):
 | `:code` | int | `siginfo.ssi_code` (`SI_USER=0`, `SI_KERNEL=128`, `CLD_EXITED=1`, …). `0` on macOS. |
 | `:count` | int | Always `1` on Linux. On macOS the kevent coalesced count. |
 
+## Disposition table (eager trap at startup)
+
+`elle::io::init_process_signals` runs from `main()` immediately after
+`elle::config::init` and before `VM::new` (`src/main.rs`). It installs
+process-wide POSIX traps before any worker thread spawns:
+
+| Set | Signals | What we do |
+|-----|---------|------------|
+| Terminate | `TERM`, `INT`, `QUIT`, `HUP` | `sigaction(SA_RESTART)` to a handler that writes a tagged line to stderr (`elle: terminated by SIGTERM\n`, etc.) and calls `_exit(128 + signum)`. The handler is async-signal-safe — no Rust stdio, no allocation, no locks. Conventional shell exit codes: `143`, `130`, `131`, `129`. |
+| Job control | `TSTP`, `TTIN`, `TTOU` | `sigaction` to a handler that calls `raise(SIGSTOP)`. The kernel stops the process; the shell can `bg`/`fg` it. On `SIGCONT` the process resumes mid-handler and returns normally. io_uring + signalfd state survive across SIGSTOP/SIGCONT untouched. |
+| Resume | `CONT` | `sigaction` to an empty handler so the kernel has a delivery target. Nothing to clean up. |
+| Pipe | `PIPE` | `sigaction(SIG_IGN)`. Writes to broken pipes surface as `EPIPE`; nothing entered the kernel queue. |
+| Absorb | `USR1`, `USR2`, `CHLD`, `URG`, `WINCH`, `ALRM` | `pthread_sigmask(SIG_BLOCK)` on the main thread. With every worker also masking on spawn, no thread has these unblocked; the kernel queues them and nobody reads. Silently absorbed unless `os/sig-watch` opens a `signalfd` to drain. Accidental `kill -USR1 $pid` becomes a no-op. |
+| Fault | `SEGV`, `BUS`, `FPE`, `ILL`, `ABRT`, `TRAP`, `SYS` | Untouched. Synchronous fault signals; intercepting them only obscures real bugs. |
+| Uncatchable | `KILL`, `STOP` | Kernel forbids touching these. Pass through. |
+
+## Watcher override
+
+The terminate-set handlers are installed *process-wide* — but only
+fire when the kernel can deliver the signal. With every worker thread
+masking everything and `os/sig-watch :sigterm` adding SIGTERM to the
+main thread's mask, **no thread has SIGTERM unblocked**. The kernel
+parks the signal on the process pending queue, the sigaction handler
+cannot fire, and the watcher's `signalfd` reads the event instead.
+When the last watcher closes, the lazy-unblock on the main thread
+re-enables kernel delivery, and the next SIGTERM runs the handler.
+
+No explicit "watcher overrides built-in" coordination logic in user
+space — the kernel's delivery rules do it for free. Signals in the
+absorb set get a stricter version of the same trick: their close-time
+unblock is suppressed (see "Mask policy" below), because there is no
+sigaction handler to take over, and the kernel default for them is
+Term — we'd be replacing a quietly-blocked queue with an active
+process killer.
+
 ## Mask policy
 
-POSIX signalfd and kqueue both require the target signal to be
-blocked process-wide first — otherwise the default disposition fires
-in some thread before the watcher reads it. Elle handles the mask
-automatically. The policy:
-
 1. **Worker threads block everything.** Every thread Elle spawns
-   internally (the I/O thread pool, the stdin reader, etc.) masks
-   all maskable signals as its first action. Workers are never the
-   kernel's chosen signal delivery target.
-2. **The main thread blocks lazily.** Before the first
-   `os/sig-watch` call, default disposition is in force for every
-   signal — `kill -TERM $pid` terminates an elle program just like
-   any other Unix program. The first `os/sig-watch` atomically blocks
-   the requested signals on the main thread and opens the
-   signalfd / kqueue.
-3. **Refcounted block; drain-then-unblock when refcount hits zero.**
-   A signal stays blocked as long as at least one receiver watches
-   it. `os/sig-close` decrements; when the last watcher for a signal
-   closes, elle drains any instances still pending on the calling
-   thread / process queue (via `sigwait`, which dequeues without
-   invoking a handler) and only then unblocks. This is the only safe
-   order: signals queued during the watch that the user never
-   consumed via `os/sig-next` — and on macOS the kqueue-coalesced
-   leftover from a multi-`kill` burst whose worker delivery only
-   drained one instance — would otherwise fire the signal's default
-   disposition on the unblocking thread, terminating the process
-   mid-close. Signals generated *after* the unblock fire whatever
-   disposition was in effect before the watch started (saved by
-   `os/sig-watch`, restored before unblocking).
-4. **macOS: per-receive worker unblock + no-op handler.** Linux's
+   internally (the I/O thread pool, the stdin reader, the JIT worker,
+   the user `(spawn closure)` worker) masks all maskable signals as
+   its first action. Workers are never the kernel's chosen signal
+   delivery target.
+2. **The main thread blocks the absorb set at startup.** `USR1`,
+   `USR2`, `CHLD`, `URG`, `WINCH`, `ALRM` are masked before `VM::new`
+   runs. The terminate, job-control, resume, and pipe sets are
+   *not* masked at startup — they are dispatched by the sigaction
+   handlers installed alongside.
+3. **`os/sig-watch` lazy-blocks the watched set on the main thread.**
+   The first receiver for a signum bumps the refcount 0→1 and
+   blocks the signal on the main thread (idempotent for absorb-set
+   signums, which are already blocked).
+4. **`os/sig-close` decrements the refcount.** When the last watcher
+   for a signum closes, elle drains any instances still pending on
+   the calling thread / process queue (via `sigwait`, which dequeues
+   without invoking a handler). The unblock is then performed
+   **only for signums outside the absorb set** — absorb-set signums
+   stay masked so a subsequent `kill -USR1 $pid` doesn't escape via
+   the kernel default (which is Term) onto a now-unblocked main
+   thread. The drain still runs so a future watcher doesn't see
+   stale pending state.
+5. **macOS: per-receive worker unblock + no-op handler.**
+   `init_process_signals` is currently Linux-shape on macOS too
+   (sigaction installed, absorb set blocked on the main thread); the
+   per-receiver kqueue path layers on top. Linux's
    `signalfd` reads pending signals directly from the kernel queue
    even when every thread blocks the signal, so the worker only
    needs to call `read(2)`. macOS's `EVFILT_SIGNAL` fires from the
@@ -142,6 +174,21 @@ unblock used to feed `kevent()` on macOS.
 `(os/sig-watching)` returns the set of signals currently held by at
 least one receiver.
 
+## Backend dispatch
+
+Elle's async backend chooses how to wait on a `SignalReceiver`'s
+kernel fd based on platform and CLI flags:
+
+| Platform | Default | `--no-uring` |
+|----------|---------|--------------|
+| Linux | `IORING_OP_READ` on the signalfd, via the dedicated `submit_uring_sig_next` SQE helper. The read is queued on the io_uring instance and the kernel completes a CQE when one or more `signalfd_siginfo` records become available. No worker thread is involved on the elle side. | The threadpool worker calls `poll(POLLIN, -1)` and then `read(2)` on the signalfd. Uses one OS thread per outstanding `os/sig-next`. |
+| macOS | n/a — io_uring is Linux-only | A threadpool worker calls `kevent()` on a per-receiver kqueue registered with `EVFILT_SIGNAL`. The worker temporarily `pthread_sigmask`-unblocks the watched signals on itself so the kernel can pick it as the delivery target (see "macOS: per-receive worker unblock + no-op handler" above). |
+
+The threadpool path on Linux is exercised only when `--no-uring` is
+passed on the CLI or `io_uring_setup(2)` fails on the host kernel
+(extremely old / locked-down kernels). Production Linux always rides
+the dedicated io_uring path.
+
 ## Documented limitations
 
 These three are inherent to the chosen mechanism, not bugs.
@@ -154,20 +201,28 @@ Programs that need sender identity — for example, SIGCHLD-driven
 targeted child reaping — must call `subprocess/wait`-style logic to
 recover it. Linux signalfd populates both fields.
 
-### Library-spawned threads can defeat the worker-mask invariant
+### Library-spawned threads inherit the startup mask, not later watches
 
-Elle masks all signals on every thread it spawns directly. Threads
-spawned by C dependencies (the cranelift JIT codegen threads, libffi
-callbacks, future plugin cdylibs, anything called via FFI) inherit
-whatever the *main thread's* mask was at *their* spawn time. If you
-call `os/sig-watch` after such a thread has spawned, the kernel may
-still select that thread as the delivery target and fire the default
-disposition.
+Elle masks all signals on every thread it spawns directly (threadpool,
+stdin reader, JIT worker, user `(spawn closure)` worker). Threads
+spawned by C dependencies (Cranelift codegen auxiliary threads,
+libffi callbacks, future plugin cdylibs, anything called via FFI)
+inherit whatever the *main thread's* mask was at *their* spawn time.
 
-Practical mitigation: call `os/sig-watch` early in your program,
-before triggering JIT compilation, before loading FFI plugins. There
-is no portable way to retroactively change another thread's signal
-mask.
+Under the eager-trap policy, the main thread's startup mask already
+includes the absorb set (`USR1`, `USR2`, `CHLD`, `URG`, `WINCH`,
+`ALRM`) — so a C-spawned thread post-`init_process_signals` has all
+of those blocked, and an `os/sig-watch` on any of them
+deterministically routes to the watcher's signalfd. The remaining
+hole is the terminate/job-control/resume sets: a C-spawned thread has
+them unblocked, and a `kill -TERM` could pick that thread to run the
+sigaction handler (which still terminates correctly — just on the
+"wrong" thread).
+
+Practical impact is now minimal: the sigaction handler is identical
+regardless of which thread runs it (`_exit(128 + signum)`). The
+historical risk of a C-thread defeating `os/sig-watch` for a
+controlled-disposition signal (USR1, etc.) is closed.
 
 ### Standard signals coalesce
 

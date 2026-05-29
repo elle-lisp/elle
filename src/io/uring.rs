@@ -990,6 +990,55 @@ pub(super) fn wait_uring(
     Ok(())
 }
 
+/// Submit a read on a signalfd to wait for the next POSIX signal
+/// delivery. Linux-only — io_uring is not available on macOS.
+///
+/// signalfd is a regular pollable kernel fd: io_uring's
+/// `IORING_OP_READ` is internally driven by the kernel's poll
+/// pipeline, so a CQE fires as soon as the kernel queues a
+/// `signalfd_siginfo` record without ever parking an elle-side
+/// thread. This is the production path used by `submit_sig_next`
+/// (`src/io/aio.rs`) on the `PlatformBackend::Uring` arm.
+///
+/// `signalfd(2)` writes one fixed-size `signalfd_siginfo` (128 bytes
+/// on every Linux ABI we target) per queued signal. We size the read
+/// for eight entries — enough to batch a `kill -USR1` burst without
+/// re-submitting, while keeping per-watcher buffer cost bounded. The
+/// CQE returns the byte count, which `SignalReceiver::parse_events`
+/// (`src/io/sigfd.rs`) carves back into `SigEvent`s.
+///
+/// `buf_handle` is the buffer pool slot already allocated by the
+/// caller (so the buffer survives until the CQE arrives even if the
+/// fiber is suspended). We resize it to the entry-aligned size here
+/// rather than leaving sizing to the caller — the size is a property
+/// of signalfd, not of submit_sig_next.
+pub(super) fn submit_uring_sig_next(
+    ring: &mut io_uring::IoUring,
+    id: u64,
+    fd: RawFd,
+    buffer_pool: &mut BufferPool,
+    buf_handle: BufferHandle,
+) -> Result<(), String> {
+    use io_uring::opcode;
+    use io_uring::types::Fd;
+
+    let entry_size = std::mem::size_of::<libc::signalfd_siginfo>();
+    let buf = buffer_pool.get_mut(buf_handle);
+    buf.resize(entry_size * 8, 0);
+    let sqe = opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+        .build()
+        .user_data(id);
+
+    unsafe {
+        ring.submission()
+            .push(&sqe)
+            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+    }
+    ring.submit()
+        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
+    Ok(())
+}
+
 /// Submit a read on an inotify fd to wait for filesystem events.
 pub(super) fn submit_uring_watch_next(
     ring: &mut io_uring::IoUring,
@@ -1020,7 +1069,151 @@ pub(super) fn submit_uring_watch_next(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::pool::BufferPool;
     use crate::io::request::SocketOptions;
+    use crate::io::sigfd::SignalReceiver;
+
+    /// End-to-end regression: a SIGUSR1 delivered to the process must
+    /// surface as a CQE on the io_uring instance via the dedicated
+    /// `submit_uring_sig_next` helper, with no threadpool worker
+    /// involved on the elle side.
+    ///
+    /// This is the production Linux path: `submit_sig_next` (in
+    /// `src/io/aio.rs`) on the `PlatformBackend::Uring` arm calls
+    /// `submit_uring_sig_next`, the kernel completes the signalfd read
+    /// asynchronously, and the resulting CQE flows through
+    /// `drain_cqes` → `PendingOp::SigNext` → `parse_events`. The diff
+    /// for #856 used `submit_uring_watch_next` (the fs-watcher helper)
+    /// here, which was structurally correct but hid the io_uring +
+    /// signalfd path inside an unrelated abstraction. This test pins
+    /// the dedicated path so a future refactor can't quietly drop us
+    /// back onto the threadpool fallback without the build breaking.
+    ///
+    /// Forks so the child has a clean thread topology: post-fork there
+    /// is one thread, SIGUSR1 is blocked on it (via
+    /// `SignalReceiver::new`), and the kernel parks the kill() on the
+    /// process pending queue where signalfd can read it. In the cargo
+    /// test runner without the fork, peer threads with SIGUSR1
+    /// unmasked would absorb the kill before our io_uring read sees
+    /// it. Child exits 0 on success, small positive code on failure.
+    #[test]
+    fn sig_next_via_uring_returns_after_kill_to_self() {
+        use std::time::{Duration, Instant};
+
+        let pid = unsafe { libc::fork() };
+        if pid < 0 {
+            panic!("fork failed: {}", std::io::Error::last_os_error());
+        }
+        if pid == 0 {
+            let code = sig_next_uring_child_logic();
+            unsafe { libc::_exit(code) };
+        }
+
+        // PARENT: bounded waitpid so an io_uring regression (CQE never
+        // arrives, ring fd closed early, helper rewires onto something
+        // that doesn't actually submit, etc.) surfaces as a hung child
+        // panic rather than wedging the whole `cargo test` run.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut status: libc::c_int = 0;
+        loop {
+            let wret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+            if wret == pid {
+                break;
+            }
+            if wret < 0 {
+                let errno = std::io::Error::last_os_error();
+                panic!("waitpid({}): {}", pid, errno);
+            }
+            if Instant::now() >= deadline {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                let _ = unsafe { libc::waitpid(pid, &mut status, 0) };
+                panic!("sig_next via uring child hung past 10s");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        if libc::WIFSIGNALED(status) {
+            panic!(
+                "sig_next via uring child died from signal {}",
+                libc::WTERMSIG(status)
+            );
+        }
+        let code = libc::WEXITSTATUS(status);
+        assert_eq!(
+            code, 0,
+            "sig_next via uring child failed with code {} (see codes in sig_next_uring_child_logic)",
+            code
+        );
+    }
+
+    /// Body of the forked child for the io_uring sig-next test.
+    /// Returns small positive codes identifying the failing step so
+    /// the parent's panic message points at the broken kernel call.
+    fn sig_next_uring_child_logic() -> i32 {
+        let r = match SignalReceiver::new(vec![libc::SIGUSR1]) {
+            Ok(r) => r,
+            Err(_) => return 31,
+        };
+        let fd = match r.raw_fd() {
+            Ok(f) => f,
+            Err(_) => return 32,
+        };
+
+        let mut ring = match io_uring::IoUring::new(8) {
+            Ok(ring) => ring,
+            // If io_uring_setup fails on this host kernel we have
+            // nothing to test — skip with success rather than
+            // pretending we covered the path.
+            Err(_) => return 0,
+        };
+        let mut pool = BufferPool::new();
+        // 1024 bytes ≈ 8 signalfd_siginfo entries; matches the size
+        // submit_sig_next in aio.rs allocates.
+        let buf_handle = pool.alloc(1024);
+
+        if super::submit_uring_sig_next(&mut ring, 1, fd, &mut pool, buf_handle).is_err() {
+            return 33;
+        }
+
+        if unsafe { libc::kill(libc::getpid(), libc::SIGUSR1) } != 0 {
+            return 34;
+        }
+
+        // Bounded wait via io_uring's own timespec — if no CQE
+        // arrives within 5 s the helper is broken (or io_uring on
+        // this host doesn't poll signalfd correctly, which would be a
+        // real bug to surface).
+        let ts = io_uring::types::Timespec::new().sec(5).nsec(0);
+        let args = io_uring::types::SubmitArgs::new().timespec(&ts);
+        match ring.submitter().submit_with_args(1, &args) {
+            Ok(_) => {}
+            Err(e) if e.raw_os_error() == Some(libc::ETIME) => return 35,
+            Err(_) => return 36,
+        }
+
+        let cqe = match ring.completion().next() {
+            Some(c) => c,
+            None => return 37,
+        };
+        let n = cqe.result();
+        if cqe.user_data() != 1 {
+            return 38;
+        }
+        if n <= 0 {
+            return 39;
+        }
+
+        let buf = pool.get_mut(buf_handle);
+        let events = r.parse_events(&buf[..n as usize]);
+        if events.is_empty() {
+            return 40;
+        }
+        if events[0].signum != libc::SIGUSR1 {
+            return 41;
+        }
+        r.close();
+        0
+    }
 
     /// Verify apply_socket_options actually sets SO_SNDBUF on a socket fd.
     #[test]

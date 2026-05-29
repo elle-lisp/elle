@@ -609,6 +609,20 @@ fn main() {
     });
     elle::config::init(config);
 
+    // Trap POSIX signals at startup, before any thread spawn. This
+    // installs sigaction handlers for TERM/INT/QUIT/HUP (clean exit),
+    // TSTP/TTIN/TTOU (raise SIGSTOP), CONT (consume), SIGPIPE (ignore),
+    // and pthread_sigmask-blocks the absorb-set (USR1/USR2/CHLD/URG/
+    // WINCH/ALRM) on the main thread. See `init_process_signals` in
+    // src/io/sigfd.rs and docs/posix-signals.md for the full table.
+    //
+    // Must run before VM::new() because VM construction may spawn
+    // worker threads (currently it doesn't, but the JIT worker spawned
+    // later inherits whatever mask the main thread holds at its spawn
+    // time). Workers' own `mask_all_signals_on_this_thread()` calls
+    // are belt-and-suspenders but are not the primary defence.
+    elle::io::init_process_signals();
+
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
 

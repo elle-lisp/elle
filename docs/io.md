@@ -57,6 +57,25 @@ with `port/close`.
 # (port/writer p)              — writable stream
 ```
 
+### Closing `*stdin*`
+
+`(port/close *stdin*)` is supported and does what you'd expect:
+
+- Any in-flight `(port/read-line *stdin*)` / `(port/read …)` /
+  `(port/read-all *stdin*)` is cancelled. The waiting fiber resumes
+  with an `:io-error` whose message is `stdin closed`.
+- The dedicated stdin worker thread (which sits on `read(2)` against
+  fd 0) is signalled via an internal self-pipe, returns from its
+  syscall, drains any further pending requests as cancelled, and
+  exits cleanly. No leaked OS thread.
+- Subsequent stdin reads error from the `port is closed` check
+  in `AsyncBackend::submit`.
+- The OS file descriptor for stdin is *not* itself closed (the
+  stdio ports never owned it). This matches the existing
+  `*stdout*` / `*stderr*` close semantics.
+
+`port/close` on `*stdin*` is idempotent.
+
 ## Output
 
 ```lisp

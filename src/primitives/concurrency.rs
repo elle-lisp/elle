@@ -23,6 +23,18 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     let result_clone = result_holder.clone();
 
     let _handle = std::thread::spawn(move || {
+        // Mask all POSIX signals on this worker so the kernel never
+        // selects it as a delivery target. Without this, a user
+        // `(spawn closure)` thread inherits the main thread's signal
+        // mask at spawn time (typically just the absorb-set from
+        // `init_process_signals`) — TERM/INT/QUIT/HUP are unblocked
+        // on it, and the kernel may pick it to run the terminate
+        // sigaction handler. The handler still calls `_exit`, which
+        // is correct end-state, but masking here keeps delivery on
+        // the main thread where the rest of the runtime expects it
+        // (REPL ^C, watcher-override semantics). Matches the
+        // threadpool/JIT/stdin worker discipline.
+        crate::io::sigfd::mask_all_signals_on_this_thread();
         let mut vm = VM::new();
         let mut symbols = SymbolTable::new();
         // Register primitives so docs are available in the spawned thread.
