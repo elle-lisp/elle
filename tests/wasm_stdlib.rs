@@ -1,7 +1,7 @@
 //! Test: can we compile and run stdlib.lisp through WASM?
 #![cfg(feature = "wasm")]
 
-const STDLIB: &str = include_str!("../stdlib.lisp");
+const STDLIB: &str = include_str!("../src/stdlib.lisp");
 
 /// Set up a VM + symbols like the real elle binary does.
 fn setup() -> (elle::VM, Box<elle::SymbolTable>) {
