@@ -1120,11 +1120,21 @@ mod tests {
     }
 
     #[test]
-    fn last_use_begin_non_tail_dies_at_its_own_id() {
+    fn last_use_begin_non_tail_dies_at_statement_boundary() {
         // (string (begin (string "discarded") "ret"))
+        //
         // The first (string "discarded") is a statement; its value is
-        // discarded. last_use should be its own id (so its region is
-        // freed at the statement boundary), NOT the outer Call.
+        // discarded. Its region must die at the statement boundary —
+        // NOT propagate up to the outer Call.
+        //
+        // Post-ANF, `Hir::for_each_child` shows the discarded Call
+        // wrapped in a synthetic `Let([t = Call], Var(t))`. The Call's
+        // last_use is now the Let's id (the wrap); the Let's id is
+        // inside the Begin (well below the outer Call). The region
+        // release fires at the Let's id via `region_to_slot` —
+        // same statement-boundary semantics as before, just keyed off
+        // the wrap binding's slot instead of the shadow `call_region_slot`
+        // mechanism that this branch retired.
         let (hir, arena, symbols, info) =
             analyze_with_hir("(fn () (string (begin (string \"discarded\") \"ret\")))");
         let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
@@ -1135,13 +1145,14 @@ mod tests {
         let outer = sorted[1];
 
         let got = info.last_use.get(&discarded).copied();
-        assert_eq!(
-            got,
-            Some(discarded),
-            "begin-statement alloc @{} should die at its own id, got {:?} (outer is @{})",
+        assert!(
+            got.is_some_and(|id| id != outer),
+            "begin-statement alloc @{} must NOT die at the outer Call @{} \
+             (the statement value flows to a wrap binding, not to the \
+              outer consumer). got={:?}",
             discarded.0,
-            got,
-            outer.0
+            outer.0,
+            got
         );
     }
 
