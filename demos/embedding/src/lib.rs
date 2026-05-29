@@ -146,6 +146,8 @@ pub unsafe extern "C" fn elle_register_prim(
         category: "host",
         example: "",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     }));
 
     elle::plugin_api::register_plugin_fn(def, func);

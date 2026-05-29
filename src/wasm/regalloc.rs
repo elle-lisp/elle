@@ -277,15 +277,17 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::Identical { dst, .. } => f(*dst),
 
         LirInstr::StoreLocal { .. }
+        | LirInstr::StoreLocalRefcounted { .. }
         | LirInstr::StoreCapture { .. }
         | LirInstr::StoreCaptureCell { .. }
         | LirInstr::TailCall { .. }
         | LirInstr::TailCallArrayMut { .. }
         | LirInstr::IncrefRegion { .. }
         | LirInstr::DecrefRegion { .. }
+        | LirInstr::ReleaseValueRegion { .. }
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
-        | LirInstr::CheckSignalBound { .. }
+        | LirInstr::CheckSignalBound { .. } => {}
     }
 }
 
@@ -436,9 +438,11 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::IncrefRegion { .. }
-        | LirInstr::DecrefRegion { .. }
-        | LirInstr::PopParamFrame
+        LirInstr::IncrefRegion { .. } | LirInstr::DecrefRegion { .. } | LirInstr::PopParamFrame => {
+        }
+
+        LirInstr::StoreLocalRefcounted { src, .. } => f(*src),
+        LirInstr::ReleaseValueRegion { src, .. } => f(*src),
     }
 }
 

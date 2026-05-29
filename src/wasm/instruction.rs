@@ -192,6 +192,20 @@ impl WasmEmitter {
                 }
             }
             LirInstr::IncrefRegion { .. } | LirInstr::DecrefRegion { .. } => {}
+            // Region/refcount support is VM-only in this backend.
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                // Treat as a plain StoreLocal — wasm doesn't track refcounts.
+                if self.is_closure {
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
+                    f.instruction(&Instruction::LocalSet(self.local_slot_tag(*slot)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*src)));
+                    f.instruction(&Instruction::LocalSet(self.local_slot_pay(*slot)));
+                } else {
+                    let dst = Reg(*slot as u32);
+                    self.copy_reg(f, *src, dst);
+                }
+            }
+            LirInstr::ReleaseValueRegion { .. } => {}
             // Outbox routing is VM-only.
             // OutboxEnter/OutboxExit removed — region stamps replace toggle.
             // Flip rotation is VM-only (the WASM backend uses its own

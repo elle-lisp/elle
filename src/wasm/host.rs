@@ -265,7 +265,7 @@ impl ElleHost {
 
         if let Some(backend_val) = self.find_io_backend() {
             if let Some(async_be) = backend_val.as_external::<AnyBackend>() {
-                if let Ok(_id) = async_be.0.submit(request) {
+                if let Ok(_id) = async_be.0.submit(request, std::ptr::null_mut()) {
                     if let Ok(completions) = async_be.0.wait(-1) {
                         if let Some(c) = completions.into_iter().next() {
                             return match c.result {
@@ -304,7 +304,7 @@ impl ElleHost {
                 }
             },
         };
-        if let Ok(_id) = backend.0.submit(request) {
+        if let Ok(_id) = backend.0.submit(request, std::ptr::null_mut()) {
             if let Ok(completions) = backend.0.wait(-1) {
                 if let Some(c) = completions.into_iter().next() {
                     return match c.result {

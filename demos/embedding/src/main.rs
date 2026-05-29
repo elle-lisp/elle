@@ -33,6 +33,8 @@ static HOST_ADD_TEN: PrimitiveDef = PrimitiveDef {
     category: "host",
     example: "(host/add-ten 32)",
     aliases: &[],
+    returns_immediate: true,
+    escapes_args: false,
 };
 
 // ── Main ────────────────────────────────────────────────────────────

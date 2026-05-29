@@ -23,6 +23,8 @@ static HOST_ADD_TEN: PrimitiveDef = PrimitiveDef {
     category: "host",
     example: "(host/add-ten 32)",
     aliases: &[],
+    returns_immediate: true,
+    escapes_args: false,
 };
 
 #[test]
@@ -96,6 +98,8 @@ fn test_value_round_trip() {
         category: "host",
         example: "(host/identity 1)",
         aliases: &[],
+        returns_immediate: false,
+        escapes_args: false,
     };
     let sym_id = symbols.intern("host/identity");
     let native = Value::native_fn(&IDENTITY);
