@@ -158,13 +158,21 @@ pub enum SendValue {
     /// Meaningful only within a `SendBundle`; a bare `Ref` without a bundle is invalid.
     Ref(usize),
 
-    /// Cloned crossbeam channel sender (Send + Clone).
+    /// Cloned crossbeam channel sender plus the shared `WakeList` so a
+    /// `chan/send` on the receiving thread can wake any `chan/select`
+    /// parked on the original-thread receiver.
     #[allow(private_interfaces)]
-    ChanSender(crossbeam_channel::Sender<crate::primitives::chan::SendableValue>),
+    ChanSender(
+        crossbeam_channel::Sender<crate::primitives::chan::SendableValue>,
+        std::sync::Arc<crate::primitives::chan::WakeList>,
+    ),
 
-    /// Cloned crossbeam channel receiver (Send + Clone).
+    /// Cloned crossbeam channel receiver plus the shared `WakeList`.
     #[allow(private_interfaces)]
-    ChanReceiver(crossbeam_channel::Receiver<crate::primitives::chan::SendableValue>),
+    ChanReceiver(
+        crossbeam_channel::Receiver<crate::primitives::chan::SendableValue>,
+        std::sync::Arc<crate::primitives::chan::WakeList>,
+    ),
 }
 
 /// Unit of cross-thread value transfer.
@@ -466,10 +474,10 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         // External objects: channels are sendable, others are not
         HeapObject::External { obj, .. } => match obj.type_name {
             "chan/sender" => crate::primitives::chan::clone_sender(&value)
-                .map(SendValue::ChanSender)
+                .map(|(tx, wake)| SendValue::ChanSender(tx, wake))
                 .ok_or_else(|| "Cannot send closed channel sender".to_string()),
             "chan/receiver" => crate::primitives::chan::clone_receiver(&value)
-                .map(SendValue::ChanReceiver)
+                .map(|(rx, wake)| SendValue::ChanReceiver(rx, wake))
                 .ok_or_else(|| "Cannot send closed channel receiver".to_string()),
             _ => Err(format!("Cannot send external object: {}", obj.type_name)),
         },
@@ -665,8 +673,8 @@ impl SendValue {
                 })
             }
             SendValue::NativeFn(f) => Value::native_fn(f),
-            SendValue::ChanSender(tx) => crate::primitives::chan::sender_value(tx),
-            SendValue::ChanReceiver(rx) => crate::primitives::chan::receiver_value(rx),
+            SendValue::ChanSender(tx, wake) => crate::primitives::chan::sender_value(tx, wake),
+            SendValue::ChanReceiver(rx, wake) => crate::primitives::chan::receiver_value(rx, wake),
             SendValue::Closure(_box_val) => {
                 panic!("bug: bare SendValue::Closure; use SendBundle::into_value")
             }
@@ -863,8 +871,8 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             })
         }
         SendValue::NativeFn(f) => Value::native_fn(f),
-        SendValue::ChanSender(tx) => crate::primitives::chan::sender_value(tx),
-        SendValue::ChanReceiver(rx) => crate::primitives::chan::receiver_value(rx),
+        SendValue::ChanSender(tx, wake) => crate::primitives::chan::sender_value(tx, wake),
+        SendValue::ChanReceiver(rx, wake) => crate::primitives::chan::receiver_value(rx, wake),
 
         // Closure variant: only appears stored directly in SendBundle::closures.
         // At the top-level call it means the bundle was constructed incorrectly.

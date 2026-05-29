@@ -338,6 +338,20 @@ pub(super) fn process_raw_completion(
                 result: Ok(Value::int(result_code as i64)),
             }
         }
+        PendingOp::ChanSelectPark { .. } => {
+            // The guard inside this PendingOp owns the fd(s) and the
+            // wake-list registrations; its Drop runs when the caller
+            // removes this PendingOp from the pending map after we
+            // return.  We don't care which path fired (POLLIN, timeout,
+            // or cancellation) — the wrapper distinguishes "got a
+            // value" from "timed out" via chan/try-select + its own
+            // deadline tracking.  Returning nil keeps the protocol
+            // stateless.
+            Completion {
+                id,
+                result: Ok(Value::NIL),
+            }
+        }
         PendingOp::Resolve { .. } => {
             if result_code < 0 {
                 let msg = if data.is_empty() {
@@ -609,6 +623,11 @@ pub(super) fn process_raw_completion(
                 }
                 IoOp::PollFd { .. } => {
                     unreachable!("PollFd is portless; cannot reach PendingOp::Port")
+                }
+                IoOp::ChanSelectPark(_) => {
+                    unreachable!(
+                        "ChanSelectPark uses PendingOp::ChanSelectPark, not PendingOp::Port"
+                    )
                 }
                 // Close completion: port already closed in submit. Return nil.
                 IoOp::Close => Value::NIL,

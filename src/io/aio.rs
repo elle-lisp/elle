@@ -204,6 +204,18 @@ impl AsyncBackend {
             return self.submit_poll_fd(fd, events, request.timeout);
         }
 
+        // ChanSelectPark: poll a chan/wait-ready eventfd until any
+        // registered sender signals it or the timeout elapses.  The
+        // guard owns the fd(s) and the wake-list registrations and is
+        // transferred into PendingOp::ChanSelectPark so cleanup runs
+        // exactly once on completion / cancellation.
+        if let IoOp::ChanSelectPark(ref guard_cell) = request.op {
+            let guard = guard_cell
+                .take()
+                .ok_or_else(|| "io/submit: ChanSelectPark guard already consumed".to_string())?;
+            return self.submit_chan_select_park(guard, request.timeout);
+        }
+
         let port = request
             .port
             .as_external::<Port>()
@@ -820,6 +832,60 @@ impl AsyncBackend {
         Ok(id)
     }
 
+    /// Submit a ChanSelectPark operation — wait for a `chan/wait-ready`
+    /// wake fd to become readable, or for the timeout to elapse.
+    /// Internally the same shape as `submit_poll_fd` (POLL_ADD on uring,
+    /// `poll(2)` on the thread pool) but the `PendingOp::ChanSelectPark`
+    /// retains the guard so its Drop closes the fd and deregisters from
+    /// every `WakeList` exactly once.
+    fn submit_chan_select_park(
+        &self,
+        guard: crate::primitives::chan::ChanSelectGuard,
+        timeout: Option<Duration>,
+    ) -> Result<u64, String> {
+        let fd = guard.poll_fd();
+        let events = libc::POLLIN as u32;
+
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                crate::io::uring::submit_uring_poll_add(ring, id, fd, events, timeout)?;
+            }
+            PlatformBackend::ThreadPool(_) => {
+                let timeout_ms = timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
+                network_pool.submit(
+                    id,
+                    PoolOp::PollFd {
+                        fd,
+                        events,
+                        timeout_ms,
+                    },
+                )?;
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::ChanSelectPark {
+                buffer_handle: buf_handle,
+                guard,
+            },
+        );
+        Ok(id)
+    }
+
     /// Submit a PollFd operation — wait for a raw fd to become ready.
     fn submit_poll_fd(
         &self,
@@ -842,7 +908,7 @@ impl AsyncBackend {
         match platform {
             #[cfg(target_os = "linux")]
             PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_poll_add(ring, id, fd, events)?;
+                crate::io::uring::submit_uring_poll_add(ring, id, fd, events, timeout)?;
             }
             PlatformBackend::ThreadPool(_) => {
                 let timeout_ms = timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
@@ -1653,7 +1719,10 @@ impl AsyncBackendInner {
             | IoOp::WatchNext
             | IoOp::SigNext
             | IoOp::Close
-            | IoOp::PollFd { .. } => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::PollFd { .. }
+            | IoOp::ChanSelectPark(_) => {
+                return Err("io/submit: unsupported operation on stdin".into())
+            }
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)
