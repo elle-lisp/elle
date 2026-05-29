@@ -37,7 +37,8 @@ fn print_help() {
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
     println!("                          call, signal, compile, fiber, hir, lir,");
     println!("                          emit, jit, io, gc, import, macro, wasm,");
-    println!("                          capture, arena, escape, bytecode, posix");
+    println!("                          capture, arena, escape, bytecode, posix,");
+    println!("                          chan");
     println!("  --trace=all           Trace everything");
     println!("  --checked-intrinsics  Route %-intrinsics through type-checked NativeFn");
     println!("                          (implies --jit=off --mlir=off)");
