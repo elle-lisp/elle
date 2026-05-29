@@ -124,10 +124,19 @@ impl VM {
                 .runtime_config
                 .has_trace_bit(crate::config::trace_bits::JIT)
             {
+                let span = closure
+                    .template
+                    .location_map
+                    .iter()
+                    .min_by_key(|(off, _)| **off)
+                    .map(|(_, loc)| format!("{}", loc))
+                    .unwrap_or_else(|| "<no-loc>".to_string());
                 eprintln!(
-                    "[jit] submitted background compilation: name={} bc_ptr={:#x}",
+                    "[jit] submitted background compilation: name={} bc_ptr={:#x} span={} bclen={}",
                     closure.template.name.as_deref().unwrap_or("<anon>"),
                     bytecode_ptr as usize,
+                    span,
+                    closure.template.bytecode.len(),
                 );
             }
         }

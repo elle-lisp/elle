@@ -717,6 +717,12 @@ pub extern "C" fn elle_jit_has(obj_tag: u64, obj_pay: u64, key_tag: u64, key_pay
 }
 
 /// Push — panics on type error (intrinsic contract).
+///
+/// Mirrors `handle_intr_push` in `src/vm/types.rs`. For @array we go
+/// through `arena::tracked_push` so cross-region values inserted into
+/// the @array keep their source region alive — skipping `track_insert`
+/// here causes the source region to be freed early and leaves the
+/// @array holding a dangling pointer, eventually corrupting the C heap.
 #[no_mangle]
 pub extern "C" fn elle_jit_push(
     arr_tag: u64,
@@ -732,9 +738,8 @@ pub extern "C" fn elle_jit_push(
         tag: val_tag,
         payload: val_pay,
     };
-    if let Some(vec_ref) = arr.as_array_mut() {
-        vec_ref.borrow_mut().push(val);
-        JitValue::from_value(arr)
+    if arr.is_array_mut() {
+        JitValue::from_value(crate::value::arena::tracked_push(arr, val))
     } else if let Some(elems) = arr.as_array() {
         let mut new = elems.to_vec();
         new.push(val);

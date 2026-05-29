@@ -19,7 +19,13 @@ pub use super::suspend::*;
 // =============================================================================
 // Array and Collection Mutation Helpers
 // =============================================================================
-/// Push a value onto a mutable @array. Returns new @array or NIL on error.
+/// Push a value onto a mutable @array (splice path). Mutates in place
+/// and returns the same @array Value, mirroring `handle_array_push` in
+/// `src/vm/data.rs` which goes through `arena::tracked_push`. Must call
+/// `track_insert` so cross-region references the @array now holds keep
+/// the source region alive — without this, the source region can drop
+/// to RC=0 and be freed while the @array still references its values,
+/// corrupting the C heap on subsequent allocations.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_push(
     array_tag: u64,
@@ -37,17 +43,15 @@ pub extern "C" fn elle_jit_array_push(
         tag: val_tag,
         payload: val_payload,
     };
-    if let Some(arr) = array_val.as_array_mut() {
-        let mut vec = arr.borrow().to_vec();
-        vec.push(value_val);
-        JitValue::from_value(Value::array_mut(vec))
+    if array_val.as_array_mut().is_some() {
+        JitValue::from_value(crate::value::arena::tracked_push(array_val, value_val))
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
                 "type-error",
                 format!(
-                    "splice: expected array as accumulator, got {}",
+                    "splice: expected @array as accumulator, got {}",
                     array_val.type_name()
                 ),
             ),
@@ -56,8 +60,11 @@ pub extern "C" fn elle_jit_array_push(
     }
 }
 
-/// Extend a mutable @array with elements from another array/list.
-/// Returns new @array or NIL on error.
+/// Extend a mutable @array with the elements of another array/list,
+/// mutating in place. Returns the same @array Value. Mirrors
+/// `handle_array_extend` in `src/vm/data.rs` which goes through
+/// `arena::tracked_extend`; the per-element `track_insert` keeps any
+/// cross-region source values alive.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_extend(
     array_tag: u64,
@@ -108,10 +115,11 @@ pub extern "C" fn elle_jit_array_extend(
         return JitValue::nil();
     };
 
-    if let Some(arr) = array_val.as_array_mut() {
-        let mut vec = arr.borrow().to_vec();
-        vec.extend(source_elems);
-        JitValue::from_value(Value::array_mut(vec))
+    if array_val.as_array_mut().is_some() {
+        JitValue::from_value(crate::value::arena::tracked_extend(
+            array_val,
+            &source_elems,
+        ))
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -432,6 +440,140 @@ mod tests {
     use super::*;
     use crate::jit::value::JitValue;
     use crate::vm::VM;
+
+    /// Regression: elle_jit_array_push must MUTATE the input @array in place
+    /// and return the same Value, matching the VM's handle_array_push contract
+    /// in `src/vm/data.rs` (`tracked_push`). The earlier implementation cloned
+    /// the contents and returned a freshly-allocated @array, which (a) gave
+    /// the user-visible wrong semantics for `(push @arr x)` and (b) skipped
+    /// the cross-region RC accounting (`track_insert`), letting the source
+    /// region of inserted heap values be freed while the @array still held
+    /// dangling pointers — eventually corrupting the C heap. Counterfactual
+    /// for the corruption in tests/elle/jit-double-import-uaf.lisp.
+    #[test]
+    fn array_push_mutates_in_place_and_returns_same_value() {
+        crate::value::arena::with_test_region(|| {
+            use crate::primitives::register_primitives;
+            use crate::symbol::SymbolTable;
+
+            let mut symbols = SymbolTable::new();
+            let mut vm = VM::new();
+            let _signals = register_primitives(&mut vm, &mut symbols);
+
+            let arr = Value::array_mut(vec![]);
+            let v = Value::int(42);
+            let ret = elle_jit_array_push(
+                arr.tag,
+                arr.payload,
+                v.tag,
+                v.payload,
+                &mut vm as *mut VM as *mut (),
+            );
+            let ret_val = Value {
+                tag: ret.tag,
+                payload: ret.payload,
+            };
+            // Returned Value must be identical (same heap object) to the input.
+            assert_eq!(
+                ret_val.tag, arr.tag,
+                "elle_jit_array_push must return the same @array (tag mismatch)"
+            );
+            assert_eq!(
+                ret_val.payload, arr.payload,
+                "elle_jit_array_push must return the same @array (payload mismatch)"
+            );
+            // Input @array must reflect the push.
+            let inner = arr.as_array_mut().expect("input is @array");
+            assert_eq!(
+                inner.borrow().len(),
+                1,
+                "@array length should be 1 after push"
+            );
+            assert_eq!(
+                inner.borrow()[0],
+                v,
+                "@array element should be the pushed value"
+            );
+        });
+    }
+
+    /// elle_jit_array_push must bump the source region's RC when a heap
+    /// Value is inserted into an @array that lives in a different region.
+    /// This is what keeps the source region alive across the insertion;
+    /// without it the source region can drop to RC=0 and be freed while
+    /// the @array still references it, producing the heap corruption that
+    /// tests/elle/jit-double-import-uaf.lisp reproduced.
+    #[test]
+    fn array_push_track_inserts_cross_region_value() {
+        use crate::value::arena::{alloc_in_fresh_region, region_rc};
+        use crate::value::heap::{HeapObject, Pair};
+        crate::value::arena::with_test_region(|| {
+            use crate::primitives::register_primitives;
+            use crate::symbol::SymbolTable;
+
+            let mut symbols = SymbolTable::new();
+            let mut vm = VM::new();
+            let _signals = register_primitives(&mut vm, &mut symbols);
+
+            let arr = Value::array_mut(vec![]);
+            // Allocate a heap value in a different fresh region.
+            let (cross, source_rid) =
+                alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+            let rc_before = region_rc(source_rid);
+            let _ret = elle_jit_array_push(
+                arr.tag,
+                arr.payload,
+                cross.tag,
+                cross.payload,
+                &mut vm as *mut VM as *mut (),
+            );
+            let rc_after = region_rc(source_rid);
+            assert_eq!(
+                rc_after,
+                rc_before + 1,
+                "elle_jit_array_push must incref the source region of an inserted cross-region value"
+            );
+        });
+    }
+
+    /// elle_jit_push (the IntrPush intrinsic helper) shares the same
+    /// contract: @array mutate-in-place plus track_insert for cross-region
+    /// values. Mirrors elle_jit_array_push's tests.
+    #[test]
+    fn intr_push_track_inserts_cross_region_value() {
+        use crate::jit::runtime::elle_jit_push;
+        use crate::value::arena::{alloc_in_fresh_region, region_rc};
+        use crate::value::heap::{HeapObject, Pair};
+        crate::value::arena::with_test_region(|| {
+            use crate::primitives::register_primitives;
+            use crate::symbol::SymbolTable;
+
+            let mut symbols = SymbolTable::new();
+            let mut vm = VM::new();
+            let _signals = register_primitives(&mut vm, &mut symbols);
+
+            let arr = Value::array_mut(vec![]);
+            let (cross, source_rid) =
+                alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+            let rc_before = region_rc(source_rid);
+            let ret = elle_jit_push(arr.tag, arr.payload, cross.tag, cross.payload);
+            let ret_val = Value {
+                tag: ret.tag,
+                payload: ret.payload,
+            };
+            assert_eq!(
+                (ret_val.tag, ret_val.payload),
+                (arr.tag, arr.payload),
+                "elle_jit_push must return the same @array Value"
+            );
+            let rc_after = region_rc(source_rid);
+            assert_eq!(
+                rc_after,
+                rc_before + 1,
+                "elle_jit_push must incref the source region of an inserted cross-region value"
+            );
+        });
+    }
 
     #[test]
     fn test_has_exception() {
