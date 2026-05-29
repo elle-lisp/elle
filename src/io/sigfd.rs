@@ -848,7 +848,18 @@ mod platform {
         // restore their saved sigaction and unblock them on the calling
         // thread. We have to drop the WatchedSet lock before doing the
         // sigaction restore to avoid holding two global locks in series.
+        //
+        // Signals in `crate::io::sigfd::ABSORB_SET` are kept masked at
+        // process scope by `init_process_signals`; the rollback must
+        // not unblock them on close even when refcount hits zero. On
+        // macOS the leak that would otherwise happen is identical to
+        // Linux: a future `kill -USR1 $pid` would, after the close,
+        // find the kqueue no-op handler restored to default (Term)
+        // *and* the main-thread mask cleared, and terminate the
+        // process. We still drain + sigaction-restore for absorb-set
+        // signums; we just skip the pthread_sigmask unblock.
         let mut newly_freed: Vec<libc::c_int> = Vec::new();
+        let mut newly_freed_unblockable: Vec<libc::c_int> = Vec::new();
         {
             let mut set = watched_set().lock().unwrap();
             for &s in signals {
@@ -857,8 +868,11 @@ mod platform {
                         *c -= 1;
                     }
                     if *c == 0 {
-                        unsafe { libc::sigaddset(&mut to_unblock, s) };
                         newly_freed.push(s);
+                        if !super::ABSORB_SET.contains(&s) {
+                            unsafe { libc::sigaddset(&mut to_unblock, s) };
+                            newly_freed_unblockable.push(s);
+                        }
                     }
                 }
             }
@@ -867,30 +881,31 @@ mod platform {
             return;
         }
         // Drain pending watched signals via sigwait BEFORE we restore
-        // the saved disposition or unblock. macOS's EVFILT_SIGNAL
-        // only counts kill() generations on the knote — it does NOT
-        // consume from the process pending queue — and the kqueue
-        // worker's brief pthread_sigmask SIG_UNBLOCK + no-op-handler
-        // delivery only drains at most one queued instance. Test 5
-        // (two kill(SIGUSR1) calls in a row, one sig-next read
-        // reporting count=2) leaves a SIGUSR1 in the pending queue
-        // even after the worker reports the event. Restoring the
-        // default disposition (Term for SIGUSR1) and then
-        // unblocking would deliver that orphan to this thread with
-        // its newly-restored default and kill the process mid-close.
-        // sigwait consumes pending instances without invoking the
-        // (still no-op) handler. Done while the signals are still
-        // blocked, so sigwait returns immediately for already-pending
-        // entries.
+        // the saved disposition or (selectively) unblock. macOS's
+        // EVFILT_SIGNAL only counts kill() generations on the knote —
+        // it does NOT consume from the process pending queue — and
+        // the kqueue worker's brief pthread_sigmask SIG_UNBLOCK +
+        // no-op-handler delivery only drains at most one queued
+        // instance. Test 5 (two kill(SIGUSR1) calls in a row, one
+        // sig-next read reporting count=2) leaves a SIGUSR1 in the
+        // pending queue even after the worker reports the event.
+        // Restoring the default disposition (Term for SIGUSR1) and
+        // then unblocking would deliver that orphan to this thread
+        // with its newly-restored default and kill the process
+        // mid-close. sigwait consumes pending instances without
+        // invoking the (still no-op) handler. Done while the signals
+        // are still blocked, so sigwait returns immediately for
+        // already-pending entries.
         posix_trace(format_args!(
-            "macos: rollback draining + restoring + unblocking newly_freed={:?}",
-            newly_freed
+            "macos: rollback draining newly_freed={:?}; unblocking subset {:?}",
+            newly_freed, newly_freed_unblockable
         ));
         drain_pending_blocked(&newly_freed);
-        // Restore the saved sigactions, then unblock. Order matters:
-        // any signal generated AFTER the unblock should fire the
-        // user's original disposition (typically the default), not
-        // our no-op.
+        // Restore the saved sigactions, then unblock the subset of
+        // signums that should re-arm their kernel default. Order
+        // matters: any signal generated AFTER the unblock should
+        // fire the user's original disposition (typically the
+        // default), not our no-op.
         {
             let mut saved = saved_dispositions().lock().unwrap();
             for &s in &newly_freed {
@@ -903,8 +918,10 @@ mod platform {
                 }
             }
         }
-        unsafe {
-            libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
+        if !newly_freed_unblockable.is_empty() {
+            unsafe {
+                libc::pthread_sigmask(libc::SIG_UNBLOCK, &to_unblock, std::ptr::null_mut());
+            }
         }
     }
 }
