@@ -33,44 +33,82 @@ use crate::value::{error_val, Value};
 
 /// Shared wake state between a channel's sender and receiver halves.
 ///
-/// Stores the eventfds of any fibers currently parked in `chan/select` on
-/// this channel.  `chan/send` writes a wake byte to each one after a
-/// successful `try_send`; `nonempty` is an atomic fast-path so the common
-/// case (nobody is selecting) takes no lock.
+/// Stores the **write-side** fds of any fibers currently parked in
+/// `chan/select` on this channel.  On Linux these are eventfds (poll
+/// and wake share one fd); on other Unix these are the write ends of
+/// the per-park pipe2 — confusing the two breaks the wake protocol on
+/// macOS (the producer would `write(2)` to a pipe's read end).
+/// `chan/send` writes a wake byte to each registered fd after a
+/// successful `try_send`; `nonempty` is an atomic fast-path so the
+/// common case (nobody is selecting) takes no lock.
 pub struct WakeList {
-    fds: Mutex<Vec<RawFd>>,
+    /// Write-side fds.  Iterated under `fds` lock from `wake_all`.
+    wake_fds: Mutex<Vec<RawFd>>,
     nonempty: AtomicBool,
+}
+
+/// Helper: trace registers/wakes/deregisters to stderr when
+/// `ELLE_CHAN_TRACE` is set in the environment.  Cheap when disabled
+/// (one `getenv` per event; on hot paths the fast-path skip in
+/// `wake_all` runs before any tracing).
+fn chan_trace_enabled() -> bool {
+    std::env::var_os("ELLE_CHAN_TRACE").is_some()
 }
 
 impl WakeList {
     pub fn new() -> Arc<Self> {
         Arc::new(WakeList {
-            fds: Mutex::new(Vec::new()),
+            wake_fds: Mutex::new(Vec::new()),
             nonempty: AtomicBool::new(false),
         })
     }
 
-    fn register(&self, fd: RawFd) {
-        let mut fds = self.fds.lock().expect("WakeList lock poisoned");
-        fds.push(fd);
+    /// Register a wake fd (the write side of the per-park wake pair —
+    /// same as the poll fd only on Linux).
+    fn register(&self, wake_fd: RawFd) {
+        debug_assert!(wake_fd >= 0, "WakeList::register: invalid fd {}", wake_fd);
+        let mut fds = self.wake_fds.lock().expect("WakeList lock poisoned");
+        fds.push(wake_fd);
         self.nonempty.store(true, Ordering::Release);
-    }
-
-    fn deregister(&self, fd: RawFd) {
-        let mut fds = self.fds.lock().expect("WakeList lock poisoned");
-        fds.retain(|&f| f != fd);
-        if fds.is_empty() {
-            self.nonempty.store(false, Ordering::Release);
+        if chan_trace_enabled() {
+            eprintln!(
+                "chan/wake: register fd={} (wake-list len now {})",
+                wake_fd,
+                fds.len()
+            );
         }
     }
 
-    /// Signal every registered eventfd. Called after a successful send (or
-    /// a sender/receiver close) so parked selectors re-evaluate.
+    fn deregister(&self, wake_fd: RawFd) {
+        debug_assert!(wake_fd >= 0, "WakeList::deregister: invalid fd {}", wake_fd);
+        let mut fds = self.wake_fds.lock().expect("WakeList lock poisoned");
+        let before = fds.len();
+        fds.retain(|&f| f != wake_fd);
+        if fds.is_empty() {
+            self.nonempty.store(false, Ordering::Release);
+        }
+        if chan_trace_enabled() {
+            eprintln!(
+                "chan/wake: deregister fd={} ({}→{} entries)",
+                wake_fd,
+                before,
+                fds.len()
+            );
+        }
+    }
+
+    /// Signal every registered wake fd.  Called after a successful
+    /// send (or a sender/receiver close) so parked selectors
+    /// re-evaluate.  Skipped via the `nonempty` atomic when no one is
+    /// selecting on this channel.
     fn wake_all(&self) {
         if !self.nonempty.load(Ordering::Acquire) {
             return;
         }
-        let fds = self.fds.lock().expect("WakeList lock poisoned");
+        let fds = self.wake_fds.lock().expect("WakeList lock poisoned");
+        if chan_trace_enabled() {
+            eprintln!("chan/wake: wake_all signaling {} fd(s)", fds.len());
+        }
         for &fd in fds.iter() {
             wake_fd_signal(fd);
         }
@@ -79,65 +117,115 @@ impl WakeList {
 
 /// Write a wake byte to a `WakeList` fd.  On Linux the fd is an eventfd
 /// (8-byte counter write); on other Unix the fd is the write end of a
-/// pipe2 (single-byte write).  Either way the matching poll on the
+/// pipe (single-byte write).  Either way the matching poll on the
 /// scheduler thread observes POLLIN and resumes the parked fiber.
 #[cfg(target_os = "linux")]
 fn wake_fd_signal(fd: RawFd) {
+    debug_assert!(fd >= 0, "wake_fd_signal: invalid fd {}", fd);
     let one: u64 = 1;
     // SAFETY: writing 8 bytes to an eventfd is always valid; failures
     // (EAGAIN if counter would overflow, EBADF on already-closed) are
     // benign for the wake protocol — a parked poll either already
     // observed POLLIN or no longer cares.
-    unsafe {
+    let ret = unsafe {
         libc::write(
             fd,
             &one as *const u64 as *const libc::c_void,
             std::mem::size_of::<u64>(),
+        )
+    };
+    if chan_trace_enabled() {
+        let err = if ret < 0 {
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+        } else {
+            0
+        };
+        eprintln!(
+            "chan/wake: write(eventfd={}, 1) -> {} errno={}",
+            fd, ret, err
         );
     }
 }
 
 #[cfg(not(target_os = "linux"))]
 fn wake_fd_signal(fd: RawFd) {
+    debug_assert!(fd >= 0, "wake_fd_signal: invalid fd {}", fd);
     let one: u8 = 1;
-    // SAFETY: a single-byte write to a pipe2 fd is always valid;
+    // SAFETY: a single-byte write to a pipe fd is always valid;
     // failures are benign — see Linux variant.
-    unsafe {
-        libc::write(fd, &one as *const u8 as *const libc::c_void, 1);
+    let ret = unsafe { libc::write(fd, &one as *const u8 as *const libc::c_void, 1) };
+    if chan_trace_enabled() {
+        let err = if ret < 0 {
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+        } else {
+            0
+        };
+        eprintln!("chan/wake: write(pipe={}, 1) -> {} errno={}", fd, ret, err);
     }
 }
 
 /// Allocate a wake fd usable for `IoOp::ChanSelectPark`.
 ///
-/// Returns `(poll_fd, wake_fd)`.  On Linux both are the same eventfd; on
-/// other Unix `poll_fd` is the read end and `wake_fd` is the write end of
-/// a pipe2.
+/// Returns `(poll_fd, wake_fd)`.  On Linux both are the same eventfd
+/// (counter semantics); on other Unix `poll_fd` is the read end and
+/// `wake_fd` is the write end of a pipe — they are distinct fds and
+/// senders MUST write to `wake_fd`, not `poll_fd`.  Both ends are set
+/// `O_NONBLOCK | O_CLOEXEC`.
 #[cfg(target_os = "linux")]
 fn make_wake_fd() -> std::io::Result<(RawFd, RawFd)> {
     let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
     if fd < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok((fd, fd))
+        return Err(std::io::Error::last_os_error());
     }
+    if chan_trace_enabled() {
+        eprintln!("chan/wake: alloc eventfd={}", fd);
+    }
+    Ok((fd, fd))
 }
 
 #[cfg(not(target_os = "linux"))]
 fn make_wake_fd() -> std::io::Result<(RawFd, RawFd)> {
-    let mut fds = [0 as RawFd; 2];
+    let mut fds: [libc::c_int; 2] = [-1, -1];
+    // SAFETY: fds is a 2-element c_int array; pipe(2) writes both
+    // entries on success and neither on failure.
     let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
     if ret < 0 {
         return Err(std::io::Error::last_os_error());
     }
-    for &fd in &fds {
+    let (read_fd, write_fd) = (fds[0] as RawFd, fds[1] as RawFd);
+    assert!(
+        read_fd >= 0 && write_fd >= 0,
+        "make_wake_fd: pipe(2) returned 0 but produced invalid fds {:?}",
+        fds
+    );
+    // Set O_NONBLOCK + FD_CLOEXEC on both ends.  Failure here would
+    // leave us with blocking/inheritable fds, which could deadlock
+    // wake_all if a pipe buffer fills.  Treat as a hard error.
+    for &fd in &[read_fd, write_fd] {
         unsafe {
             let flags = libc::fcntl(fd, libc::F_GETFL);
-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            if flags < 0 || libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(read_fd);
+                libc::close(write_fd);
+                return Err(err);
+            }
             let cflags = libc::fcntl(fd, libc::F_GETFD);
-            libc::fcntl(fd, libc::F_SETFD, cflags | libc::FD_CLOEXEC);
+            if cflags < 0 || libc::fcntl(fd, libc::F_SETFD, cflags | libc::FD_CLOEXEC) < 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(read_fd);
+                libc::close(write_fd);
+                return Err(err);
+            }
         }
     }
-    Ok((fds[0], fds[1]))
+    if chan_trace_enabled() {
+        eprintln!(
+            "chan/wake: alloc pipe poll_fd(read)={} wake_fd(write)={}",
+            read_fd, write_fd
+        );
+    }
+    Ok((read_fd, write_fd))
 }
 
 /// RAII guard for one parked `chan/select`.
@@ -162,12 +250,30 @@ impl ChanSelectGuard {
 
 impl Drop for ChanSelectGuard {
     fn drop(&mut self) {
-        // Wake any in-flight poll first so it returns before we close
+        debug_assert!(
+            self.poll_fd >= 0 && self.wake_fd >= 0,
+            "ChanSelectGuard::drop: invalid fds poll={} wake={}",
+            self.poll_fd,
+            self.wake_fd
+        );
+        // Deregister our wake fd from every receiver's WakeList first
+        // — once deregistered no new sender will signal this fd.
+        // Senders that loaded a stale fd just before deregister still
+        // race to write to it; the write happens against a fd that
+        // may close at any moment.  Both paths (eventfd / pipe write
+        // to a closed fd) return EBADF which wake_fd_signal swallows.
+        for wl in &self.wake_lists {
+            wl.deregister(self.wake_fd);
+        }
+        // Then wake any in-flight poll so it returns before we close
         // the fd — critical on the thread-pool backend where a worker
         // may still be in libc::poll(2).
         wake_fd_signal(self.wake_fd);
-        for wl in &self.wake_lists {
-            wl.deregister(self.poll_fd);
+        if chan_trace_enabled() {
+            eprintln!(
+                "chan/wake: close poll_fd={} wake_fd={}",
+                self.poll_fd, self.wake_fd
+            );
         }
         // SAFETY: we own both fds; closing twice (same value on Linux)
         // is guarded by a wake_fd == poll_fd check.
@@ -658,14 +764,16 @@ fn prim_chan_wait_ready(args: &[Value]) -> (SignalBits, Value) {
             }
         };
 
-        // Register the poll_fd in every receiver's wake list *before* the
-        // post-register re-check below.  Any send happening from this
-        // moment on writes to our wake fd (which has counter semantics
-        // on Linux's eventfd, byte-buffer semantics on pipe2), so the
-        // upcoming POLL_ADD returns POLLIN immediately even if the kernel
-        // hasn't yet armed the poll when the send fires.
+        // Register the *wake* fd in every receiver's wake list — the
+        // write-side fd (same as poll_fd on Linux's eventfd, distinct
+        // on pipe-based platforms).  Doing this *before* the
+        // post-register re-check below means any send happening from
+        // this moment on writes to our wake fd (counter semantics on
+        // eventfd, byte-buffer semantics on pipe), so the upcoming
+        // POLL_ADD / poll(2) returns POLLIN immediately even if the
+        // kernel hasn't yet armed the poll when the send fires.
         for wl in &wake_lists {
-            wl.register(poll_fd);
+            wl.register(wake_fd);
         }
 
         // Close the cross-thread race window between the wrapper's first
