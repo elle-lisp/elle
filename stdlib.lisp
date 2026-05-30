@@ -1537,10 +1537,34 @@
         (push runnable fiber)
         fiber)
      :step step
-     :pump  # pump-fn: event loop
-      (fn ()
-        (block :loop
-          (forever (when (= (step (- 0 1)) :done) (break :loop nil))))  # Crash on unjoined errored fibers — never swallow errors silently.
+     :pump  # pump-fn: event loop.
+     # Program-completion teardown: when called with the program's
+     # fibers (its thunks), the loop ends as soon as THEY have all
+     # completed.  Each iteration first drains runnable work without
+     # blocking (step 0); once the program's fibers are done it shuts
+     # the scheduler down — aborting every remaining fiber uniformly
+     # (do-shutdown) rather than blocking forever on orphans that can
+     # never complete on their own (a futex never woken, a reader on a
+     # socket the program never closed).  This is NOT a fiber taxonomy:
+     # `entry` is simply the program; everything else is torn down
+     # identically.  Called with no fibers it runs until the scheduler
+     # is globally idle (legacy behaviour, e.g. ev/run-on).
+      (fn (& entry)
+        (let [have-entry (> (length entry) 0)
+              all-done? (fn (fs)
+                          (let [@d true]
+                            (each f in fs
+                              (let [s (fiber/status f)]
+                                (unless (or (= s :dead) (= s :error))
+                                  (assign d false))))
+                            d))]
+          (block :loop
+            (forever  # Drain all currently-runnable work without blocking on I/O.
+              (when (= (step 0) :done) (break :loop nil))  # Program complete?  Tear down instead of waiting on orphans.
+              (when (and have-entry (all-done? entry))
+                (do-shutdown 100)
+                (break :loop nil))  # Live program work remains — block for the next I/O event.
+              (when (= (step (- 0 1)) :done) (break :loop nil)))))  # Crash on unjoined errored fibers — never swallow errors silently.
         # scheduler-killed fibers are excluded: we injected their :shutdown
         # at teardown time, so re-raising would surface our own signal as a
         # user error.
@@ -1588,7 +1612,19 @@
 (defn ev/run (& thunks)
   "Create an async scheduler, run thunks, return the last thunk's result.
    Used internally by the compiler to wrap top-level code in a scheduler.
-   Propagates errors from fibers — unjoined errored fibers crash the process."
+
+   Program-completion teardown: the program is its thunks.  Once they
+   complete, the scheduler is shut down and every remaining fiber is
+   aborted uniformly (do-shutdown) — ev/run does NOT wait for the
+   scheduler to go globally idle.  A background fiber that never
+   completes on its own (e.g. the reader of a connection the program
+   never closed) therefore cannot keep the process alive past the
+   program.  Fibers the program explicitly joins (ev/join, ev/scope)
+   still complete first: the thunk fiber doesn't go :dead until its
+   joins return.  Only genuinely un-awaited fibers are cancelled.
+
+   Propagates errors from fibers — unjoined errored fibers crash the
+   process."
   (let [sched (make-async-scheduler)]
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
@@ -1597,13 +1633,18 @@
       (let [mark (get sched :mark-joined)
             fibers @[]]
         (each t in thunks
-          (push fibers (ev/spawn t)))
-        ((get sched :pump))  # Mark all entry-point fibers as joined — they're owned by ev/run,
-        # not orphaned.  Propagate the first error we find among them.
+          (push fibers (ev/spawn t)))  # ev/run owns its thunk fibers: mark them joined so :pump's
+        # unjoined-error tail won't re-raise them — we surface the first
+        # error ourselves below.
+        (each f in fibers
+          (mark f))  # Run the program; :pump drains runnable work, and once these
+        # fibers complete it tears the scheduler down, aborting every
+        # remaining (un-awaited) fiber uniformly — see :pump's note.
+        (apply (get sched :pump) fibers)  # Propagate the first error among our thunks; else the last
+        # thunk's value.
         (def @result nil)
         (def @first-error nil)
         (each f in fibers
-          (mark f)
           (let [s (fiber/status f)]
             (when (and (nil? first-error)
                        (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1)))))
