@@ -475,9 +475,6 @@ fn test_or_short_circuit() {
 
 #[test]
 fn test_trace_vm_execution() {
-    // Enable some form of debug if available
-    std::env::set_var("ELLE_DEBUG", "1");
-
     let code = r#"(begin
         (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
         (def my-fold (fn (f init lst)

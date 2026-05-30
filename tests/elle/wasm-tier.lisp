@@ -1,6 +1,6 @@
 (elle/epoch 11)
 # Test tiered WASM compilation.
-# Run with: ELLE_WASM_TIER=1 elle tests/elle/wasm-tier.lisp
+# Run with: elle --wasm=lazy tests/elle/wasm-tier.lisp
 
 # ── fib: recursive closure, should be WASM-compiled after threshold ──
 
