@@ -475,7 +475,12 @@
 
 (defn put [coll key & rest]
   "Associate key with val in coll. For sets, (put s val) delegates to add."
-  (if (empty? rest) (add coll key) (%put coll key (first rest))))
+  (if (empty? rest)
+    (add coll key)
+    (if (%gt (%length rest) 1)
+      (error {:error :arity-error
+              :message "put: too many arguments (expected 2 or 3)"})
+      (%put coll key (first rest)))))
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
