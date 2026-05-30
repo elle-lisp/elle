@@ -131,6 +131,16 @@ pub struct Lowerer<'a> {
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
+    /// `cross_region_refs` indexed by their site HirId — source regions
+    /// to `IncrefRegion` at that node. Built once in `with_region_info`
+    /// so `emit_increfs_for` is an O(1) lookup rather than a linear scan
+    /// of every cross-region ref per HIR node (an O(n²) over stdlib).
+    increfs_by_site: HashMap<HirId, Vec<crate::hir::region::Region>>,
+    /// `region_data` indexed by `free_at` HirId — regions whose demise
+    /// lands at that node. Built once in `with_region_info` so
+    /// `emit_decrefs_for` is an O(1) lookup (then a small per-call
+    /// tail-region filter) rather than scanning all regions per node.
+    decrefs_by_free_at: HashMap<HirId, Vec<crate::hir::region::Region>>,
     /// Current HIR node being lowered. Set at the top of `lower_expr`.
     /// Used by `alloc_region_id()` to look up the region for allocations.
     current_hir_id: Option<HirId>,
@@ -206,6 +216,8 @@ impl<'a> Lowerer<'a> {
             current_function_binding: None,
             current_function_params: None,
             region_info: RegionInfo::empty(),
+            increfs_by_site: HashMap::new(),
+            decrefs_by_free_at: HashMap::new(),
             current_hir_id: None,
             region_to_table: HashMap::new(),
             active_region_ids: Vec::new(),
@@ -243,6 +255,21 @@ impl<'a> Lowerer<'a> {
 
     /// Set Tofte-Talpin region inference results.
     pub fn with_region_info(mut self, info: RegionInfo) -> Self {
+        // Pre-index the two collections that `emit_increfs_for` /
+        // `emit_decrefs_for` consult per HIR node, so each lookup is O(1)
+        // instead of a linear scan (which made lowering O(n²) over a
+        // large compilation unit like the stdlib).
+        let mut increfs_by_site: HashMap<HirId, Vec<crate::hir::region::Region>> = HashMap::new();
+        for &(site, src, _dst) in &info.cross_region_refs {
+            increfs_by_site.entry(site).or_default().push(src);
+        }
+        let mut decrefs_by_free_at: HashMap<HirId, Vec<crate::hir::region::Region>> =
+            HashMap::new();
+        for (&r, d) in &info.region_data {
+            decrefs_by_free_at.entry(d.free_at).or_default().push(r);
+        }
+        self.increfs_by_site = increfs_by_site;
+        self.decrefs_by_free_at = decrefs_by_free_at;
         self.region_info = info;
         self
     }
@@ -506,13 +533,13 @@ impl<'a> Lowerer<'a> {
 
     /// Emit IncrefRegion for any cross-region references at this HIR node.
     fn emit_increfs_for(&mut self, hir_id: HirId) {
-        let refs: Vec<_> = self
-            .region_info
-            .cross_region_refs
-            .iter()
-            .filter(|(site, _, _)| *site == hir_id)
-            .map(|&(_, src, _)| src)
-            .collect();
+        // O(1) lookup into the site-indexed map built in
+        // `with_region_info` (was a linear scan of every cross-region ref
+        // per node — O(n²) over a large compilation unit).
+        let refs: Vec<_> = match self.increfs_by_site.get(&hir_id) {
+            Some(srcs) => srcs.clone(),
+            None => return,
+        };
         for src in refs {
             let src_id = self.region_table_id(src);
             self.emit(LirInstr::IncrefRegion { region_id: src_id });
@@ -541,13 +568,19 @@ impl<'a> Lowerer<'a> {
             .cloned()
             .unwrap_or_default();
 
+        // O(1) lookup into the free_at-indexed map built in
+        // `with_region_info` (was a linear scan of all regions per node).
+        // The small per-call tail-region filter still applies.
         let regions: Vec<crate::hir::region::Region> = self
-            .region_info
-            .region_data
-            .iter()
-            .filter(|(r, d)| d.free_at == hir_id && !tail_regions.contains(r))
-            .map(|(r, _)| *r)
-            .collect();
+            .decrefs_by_free_at
+            .get(&hir_id)
+            .map(|rs| {
+                rs.iter()
+                    .copied()
+                    .filter(|r| !tail_regions.contains(r))
+                    .collect()
+            })
+            .unwrap_or_default();
         for r in regions {
             if self.region_info.call_result_regions.contains(&r) {
                 if let Some(&slot) = self.region_to_slot.get(&r) {
