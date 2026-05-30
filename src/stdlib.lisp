@@ -1779,10 +1779,13 @@
       "Abort all pending fibers, pump for timeout-ms, cancel stragglers."
 
       # Phase 1: abort all pending fibers (inject error, let defer run).
+      # Record them as scheduler-killed so the unjoined-error tail does
+      # not re-surface our injected :shutdown as a user error.
       (each [id fiber] in (pairs pending)
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
+        (add scheduler-killed fiber)
         (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
           (when ok? (handle-fiber-after-resume fiber))))
 
@@ -1819,9 +1822,11 @@
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
+        (add scheduler-killed fiber)
         (protect (fiber/cancel fiber {:error :shutdown})))
       (while (> (length runnable) 0)
         (let [fiber (pop runnable)]
+          (add scheduler-killed fiber)
           (protect (fiber/cancel fiber {:error :shutdown})))))
 
     (defn step [timeout-ms]

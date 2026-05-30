@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 11)
 ## tests/elle/ev-run-teardown.lisp
 ##
 ## Regression test for ev/run "program-completion teardown".
@@ -97,5 +97,42 @@
                   "(teardown must not kill awaited work); got " (string result))))
 
 (println "  PASS: explicitly-joined work completes before teardown")
+
+## ── 4. A timer-parked orphan's injected :shutdown must not re-raise ──────
+##
+## do-shutdown reaps a fiber by injecting {:error :shutdown}.  A fiber
+## parked on a TIMER (ev/sleep) is in `pending` (SIG_IO), so it is aborted
+## in Phase 1 — distinct from a futex-parked fiber (Phase 1b) or one whose
+## body protects the abort point (test 2 wraps accept in `protect`, so its
+## fiber completes :ok and is never re-raised).  Here the orphan does NOT
+## protect: the injected :shutdown propagates and the fiber ends :error.
+##
+## Every teardown kill site must record the fiber as scheduler-killed so
+## the unjoined-error tail excludes it; otherwise ev/run re-surfaces our
+## own :shutdown signal as a spurious user error.  Pre-fix, Phase 1 did
+## not record, so this orphan crashed ev/run with {:error :shutdown}.
+##
+## Counter to test 2 (joined-work) below: a genuine unjoined *user* error
+## must still crash — that invariant is covered by ev-unjoined-error.lisp;
+## here we assert only that OUR injected teardown signal is suppressed.
+
+(let* [outcome (protect (ev/timeout 5.0
+                                    (fn []
+                                      (ev/run (fn []
+                                        (ev/spawn (fn []
+                                          (ev/sleep 10.0)  ## parks on a timer far past program end
+                                          (println "  BUG: timer orphan resumed")))  ## Let the orphan submit its timer (land in `pending`).
+                                        (ev/sleep 0.02)
+                                        :program-done)))))
+       [ok? result] outcome]
+  (assert ok?
+          (concat "4a: a timer-parked (pending I/O) orphan aborted at "
+                  "teardown must not re-raise its injected :shutdown as a "
+                  "user error; ev/run errored with " (string result)))
+  (assert (= result :program-done)
+          (concat "4b: ev/run must return its thunk's value after reaping a "
+                  "timer-parked orphan; got " (string result))))
+
+(println "  PASS: timer-parked orphan's injected :shutdown suppressed")
 
 (println "ev-run-teardown: all tests passed")
