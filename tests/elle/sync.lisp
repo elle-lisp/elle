@@ -375,4 +375,47 @@
   (assert (not ok?) "10d: monitor with propagates error")
   (assert (= :boom val:error) "10e: error value preserved"))
 
+# ============================================================================
+# 11. Cross-instance futex isolation
+# ============================================================================
+#
+# Two independently-imported sync modules must not collide in the
+# process-global scheduler park-queue.  Each (import-file ...) returns a
+# fresh module instance, so any module-LOCAL futex-id counter restarts at
+# the same values — a futex from instance A and a futex from instance B
+# then share a key.  Waking B's futex must wake B's waiter and ONLY B's
+# waiter; under a colliding key it wakes whichever waiter is first in the
+# shared park slot (instance A's), which re-checks its own unchanged value
+# and re-parks, so B's waiter is never woken.  That lost wakeup deadlocks
+# any program that imports sync (or a sync-using module like lib/fserver)
+# more than once — e.g. an orchestrator whose simulator, trader, and main
+# fiber each import the server module separately.  Futex keys must be
+# process-globally unique.
+#
+# Tested at the futex layer so the main fiber never parks (it only
+# set+wakes); the waiters that stay parked are aborted at teardown.
+
+(let [syncA ((import-file "lib/sync.lisp"))
+      syncB ((import-file "lib/sync.lisp"))
+      fxA (syncA:make-futex :a)
+      fxB (syncB:make-futex :b)
+      log @[]]
+  (ev/spawn (fn []
+              (fxA:wait :a)
+              (push log :A-woke)))
+  (ev/sleep 0.05)  # let waiter A reach its park
+  (ev/spawn (fn []
+              (fxB:wait :b)
+              (push log :B-woke)))
+  (ev/sleep 0.05)  # let waiter B reach its park
+  # Wake ONLY fxB, the proper way (change value, then wake the key).
+  (fxB:set :b2)
+  (fxB:wake 1)
+  (ev/sleep 0.1)  # let the woken waiter run
+  (assert (= [:B-woke] (freeze log))
+          "11a: waking instance-B futex wakes B's waiter, not A's (cross-instance futex keys must be unique)")  # Drain waiter A so it does not orphan into teardown.
+  (fxA:set :a2)
+  (fxA:wake 1)
+  (ev/sleep 0.05))
+
 (println "All sync tests passed.")
