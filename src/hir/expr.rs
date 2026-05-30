@@ -10,7 +10,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identifier for a HIR node. Used as a key for analysis side
 /// tables (region assignments, type annotations, etc.).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+///
+/// Deliberately NOT `Ord`/`PartialOrd`: a `HirId` is an identity, not a
+/// position. The global counter assigns ids monotonically, but the ANF
+/// lift appends synthetic nodes whose ids do not reflect structural or
+/// execution order, so comparing `HirId` magnitudes is meaningless and
+/// was the source of a phantom-region class. Code that needs program
+/// order must use the explicit index from
+/// `crate::hir::liveness::compute_order` instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HirId(pub u32);
 
 /// Global monotonic counter for HirId assignment.

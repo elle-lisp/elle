@@ -7,7 +7,7 @@ use super::arena::BindingArena;
 use super::binding::Binding;
 use super::defuse::DefUseBuilder;
 use super::expr::{Hir, HirId, HirKind};
-use super::liveness::compute_last_use;
+use super::liveness::{compute_last_use, compute_order};
 use super::region::{CallClassification, Region, RegionData, RegionInfo, RegionStats};
 
 use std::collections::HashMap;
@@ -1335,13 +1335,18 @@ pub fn analyze_regions_with(
     // multiple allocs may share a region and the max wins.
     let mut du = DefUseBuilder::new();
     du.walk(hir);
-    let last_use = compute_last_use(hir, &du.uses);
+    // Explicit structural execution-order index. `free_at` selection
+    // below compares these indices, never `HirId` magnitude (which ANF
+    // makes meaningless — see `compute_order`).
+    let order = compute_order(hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let last_use = compute_last_use(hir, &du.uses, &order);
     for (alloc_id, &region) in &info.alloc_region {
         let lu = last_use.get(alloc_id).copied().unwrap_or(*alloc_id);
         info.region_data
             .entry(region)
             .and_modify(|d| {
-                if lu > d.free_at {
+                if ord(lu) > ord(d.free_at) {
                     d.free_at = lu;
                 }
             })
@@ -1370,13 +1375,13 @@ pub fn analyze_regions_with(
             .into_iter()
             .flat_map(|v| v.iter())
             .map(|use_id| last_use.get(use_id).copied().unwrap_or(*use_id))
-            .max();
+            .max_by_key(|id| ord(*id));
         if let Some(lu) = max_use {
             for &r in regions {
                 info.region_data
                     .entry(r)
                     .and_modify(|d| {
-                        if lu > d.free_at {
+                        if ord(lu) > ord(d.free_at) {
                             d.free_at = lu;
                         }
                     })
@@ -3306,14 +3311,16 @@ mod tests {
         // check: region_data[cell_region].free_at >= last_use_of(x).
         let mut du = DefUseBuilder::new();
         du.walk(&hir);
-        let last_use = crate::hir::liveness::compute_last_use(&hir, &du.uses);
+        let order = crate::hir::liveness::compute_order(&hir);
+        let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+        let last_use = crate::hir::liveness::compute_last_use(&hir, &du.uses, &order);
         let x_last_use = du
             .uses
             .get(&x)
             .into_iter()
             .flat_map(|v| v.iter())
             .map(|u| last_use.get(u).copied().unwrap_or(*u))
-            .max()
+            .max_by_key(|id| ord(*id))
             .expect("x must have at least one use (the final top-level `x`)");
 
         let cell_free_at = info
@@ -3322,8 +3329,10 @@ mod tests {
             .map(|d| d.free_at)
             .expect("cell region must have RegionData populated by analyze_regions");
 
+        // Ordering compared via the structural index, not HirId
+        // magnitude (which ANF makes meaningless — see compute_order).
         assert!(
-            cell_free_at.0 >= x_last_use.0,
+            ord(cell_free_at) >= ord(x_last_use),
             "cell region r{} (CaptureCell for x, pre-allocated at Begin @{}) \
              must have free_at >= x's last use @{}; got free_at @{}",
             cell_region.0,

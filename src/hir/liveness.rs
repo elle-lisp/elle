@@ -415,12 +415,52 @@ pub(crate) fn build_binding_index(
 /// The plan's region-inference invariant requires every region to have
 /// exactly one `free_at` HirId; this function produces that mapping for
 /// allocation HirIds.
-pub fn compute_last_use(hir: &Hir, uses: &HashMap<Binding, Vec<HirId>>) -> HashMap<HirId, HirId> {
+/// Assign every HIR node an explicit structural execution-order index.
+///
+/// `HirId` is an *identity* — a global allocation counter — not an
+/// order. Earlier code leaned on the accident that HIR construction
+/// happened to assign ids "outer-after-inner" (a post-order: a node's
+/// id greater than all its descendants', a later sibling's greater than
+/// an earlier's) and compared `HirId` magnitudes to answer both
+/// ordering ("which use is last?") and scope-containment ("is this
+/// binding inside the loop?") questions. The ANF lift
+/// (`src/hir/anf.rs`) breaks that accident: it appends synthetic `let`
+/// bindings with fresh ids drawn from the end of the counter, so a
+/// binding bound *inside* a loop body can carry an id *larger* than the
+/// loop. Comparing magnitudes then misclassifies it as bound outside —
+/// the closure-in-loop phantom-region trap.
+///
+/// This recomputes a real post-order index over the *current*
+/// (post-ANF) tree, so `order[ancestor] > order[descendant]` and
+/// `order[later_sibling] > order[earlier_sibling]` hold by construction
+/// regardless of how the HirIds were assigned. All ordering and
+/// containment logic in liveness and region inference compares these
+/// indices; `HirId` stays pure identity (it does not even implement
+/// `Ord`). Built on `Hir::for_each_child` so the child enumeration is
+/// identical to every other analysis walk.
+pub fn compute_order(hir: &Hir) -> HashMap<HirId, u32> {
+    fn visit(h: &Hir, order: &mut HashMap<HirId, u32>, next: &mut u32) {
+        h.for_each_child(|c| visit(c, order, next));
+        order.insert(h.id, *next);
+        *next += 1;
+    }
+    let mut order = HashMap::new();
+    let mut next = 0;
+    visit(hir, &mut order, &mut next);
+    order
+}
+
+pub fn compute_last_use(
+    hir: &Hir,
+    uses: &HashMap<Binding, Vec<HirId>>,
+    order: &HashMap<HirId, u32>,
+) -> HashMap<HirId, HirId> {
     let mut builder = LastUseBuilder {
         last_use: HashMap::new(),
         binding_init: HashMap::new(),
         binding_scope: HashMap::new(),
         iter_scope_stack: Vec::new(),
+        order,
     };
     // The root has no parent; parent_consumes=false is the conservative
     // default (the root's value is the program's result, no further use).
@@ -439,7 +479,7 @@ pub fn compute_last_use(hir: &Hir, uses: &HashMap<Binding, Vec<HirId>>) -> HashM
             .into_iter()
             .flat_map(|v| v.iter())
             .map(|use_id| builder.last_use.get(use_id).copied().unwrap_or(*use_id))
-            .max();
+            .max_by_key(|id| order.get(id).copied().unwrap_or(0));
         for init_id in init_ids {
             let chosen = max_effective.unwrap_or(init_id);
             builder.last_use.insert(init_id, chosen);
@@ -450,7 +490,7 @@ pub fn compute_last_use(hir: &Hir, uses: &HashMap<Binding, Vec<HirId>>) -> HashM
 }
 
 /// Helper for computing per-HirId last-use.
-struct LastUseBuilder {
+struct LastUseBuilder<'a> {
     last_use: HashMap<HirId, HirId>,
     /// For each binding, the HirIds of its initializers (Let/Letrec/Loop
     /// init or Define value). A single Binding can have multiple init
@@ -463,9 +503,11 @@ struct LastUseBuilder {
     /// `binding_init`: index N of this vec is the scope id for the
     /// N-th entry of `binding_init`. Used by the iter-scope Var
     /// extension to ask "was this binding bound outside the current
-    /// loop?" — answered by comparing scope.id to the loop's hir.id
-    /// (outer-after-inner HirId assignment means an outside scope has
-    /// a greater HirId than an inside loop).
+    /// loop?" — answered by comparing the scope's execution-order index
+    /// to the loop's (`order[scope] > order[loop]` means the scope
+    /// encloses the loop, i.e. bound outside). NOT a `HirId` magnitude
+    /// comparison: ANF appends synthetic bindings with large ids, so
+    /// magnitude is meaningless — see `compute_order`.
     binding_scope: HashMap<Binding, Vec<HirId>>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked. Outermost-first. Used to extend `last_use` for `Var`
@@ -476,9 +518,19 @@ struct LastUseBuilder {
     /// the first iteration (the phantom-region symptom on
     /// `tests/elle/jit-lbox-param-repro.lisp`).
     iter_scope_stack: Vec<HirId>,
+    /// Structural execution-order index (see `compute_order`). Every
+    /// ordering/containment decision compares these indices, never
+    /// `HirId` magnitude.
+    order: &'a HashMap<HirId, u32>,
 }
 
-impl LastUseBuilder {
+impl LastUseBuilder<'_> {
+    /// Execution-order index of a node. Unknown ids (should not occur —
+    /// `compute_order` covers the whole tree) sort first.
+    fn ord(&self, id: HirId) -> u32 {
+        self.order.get(&id).copied().unwrap_or(0)
+    }
+
     fn walk(&mut self, hir: &Hir, parent_consumes: bool, parent_id: HirId) {
         // The "effective last use" of this node's value is the parent's
         // HirId when the parent consumes (the value flows in and dies);
@@ -490,13 +542,9 @@ impl LastUseBuilder {
         // scope. Its containing iteration body executes many times, so
         // the binding's value must survive at least until the outermost
         // iteration completes. Extending my_last to the outermost
-        // containing iter_scope is sound: it can never shrink last_use
-        // (HirIds are assigned outer-after-inner during HIR construction,
-        // so an enclosing Loop's id is strictly greater than any HirId
-        // inside its body). For Var nodes referring to bindings bound
-        // INSIDE the iteration this over-extends — sound but slightly
-        // less precise (the region's runtime lifetime is the union of
-        // iterations rather than per-iteration).
+        // containing iter_scope can never shrink last_use: an enclosing
+        // Loop has a strictly greater execution-order index than
+        // anything inside its body.
         if let HirKind::Var(b) = &hir.kind {
             if let Some(&outermost) = self.iter_scope_stack.first() {
                 // Only extend when the binding was bound OUTSIDE the
@@ -511,24 +559,24 @@ impl LastUseBuilder {
                 // does — RegionStore::decref_with_cascade panics on
                 // the phantom-region debug_assert.
                 //
-                // HirIds are assigned outer-after-inner during HIR
-                // construction (an enclosing form's id is strictly
-                // greater than any HirId inside it). A binding's
-                // SCOPE id (Let/Letrec/Loop/Define hir.id) being
-                // GREATER than the iter scope's hir.id means the
-                // binding's scope contains the iter scope — bound
-                // outside. Use the binding's init id is NOT a valid
-                // proxy because the init expression's hir.id is a
-                // child of the let and is therefore smaller than the
-                // let; a let bound OUTSIDE the loop can still have a
-                // small init HirId, e.g.
-                // `(let [s (string "a")] (while ... (... s ...)))`.
+                // "Bound outside" is a structural-containment question,
+                // answered with the execution-order index, NOT HirId
+                // magnitude. The binding's SCOPE node
+                // (Let/Letrec/Loop/Define) encloses the loop iff its
+                // post-order index is greater than the loop's
+                // (`order[scope] > order[loop]`). ANF appends synthetic
+                // `let` bindings with large HirIds even when they sit
+                // INSIDE the loop body, so comparing `HirId` magnitude
+                // would misclassify them as outside and re-introduce the
+                // phantom (see `compute_order`). The init id is also not
+                // a valid proxy: it's a child of the scope node and so
+                // has a smaller index than the scope itself.
                 let bound_outside = self
                     .binding_scope
                     .get(b)
                     .and_then(|scopes| scopes.last())
-                    .is_none_or(|&id| id > outermost);
-                if bound_outside && outermost > my_last {
+                    .is_none_or(|&id| self.ord(id) > self.ord(outermost));
+                if bound_outside && self.ord(outermost) > self.ord(my_last) {
                     my_last = outermost;
                 }
             }
@@ -1296,11 +1344,13 @@ mod tests {
             .get(&alloc)
             .copied()
             .expect("missing last_use");
+        let order = compute_order(&hir);
+        let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
         assert!(
-            got >= loop_id,
+            ord(got) >= ord(loop_id),
             "(string \"a\") alloc @{} bound to a let-binding used inside loop @{} \
-             must have last_use >= loop-node HirId so the region survives \
-             across iterations; got last_use=@{}",
+             must have last_use at or after the loop in execution order so the \
+             region survives across iterations; got last_use=@{}",
             alloc.0,
             loop_id.0,
             got.0,
@@ -1360,17 +1410,78 @@ mod tests {
             .get(&var_id)
             .copied()
             .expect("missing last_use for Var inside loop");
+        let order = compute_order(&hir);
+        let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
         assert!(
-            got < loop_id,
+            ord(got) < ord(loop_id),
             "Var @{} (name=f) references a binding bound INSIDE the loop body @{}; \
-             its last_use must NOT be extended to the loop's HirId \
-             (got last_use=@{}). Over-extension here makes the lowerer \
-             emit DecrefRegion outside the loop body, panicking on the \
-             phantom-region debug_assert when the loop never executes \
-             (e.g. empty iterator).",
+             its last_use must NOT be extended to the loop (got last_use=@{}, \
+             which is at or after the loop in execution order). Over-extension \
+             here makes the lowerer emit DecrefRegion outside the loop body, \
+             panicking on the phantom-region debug_assert when the loop never \
+             executes (e.g. empty iterator).",
             var_id.0,
             loop_id.0,
             got.0,
+        );
+    }
+
+    // Direct guard on the property that makes the loop-extension logic
+    // robust: an execution-order index must rank by STRUCTURE, not by
+    // HirId magnitude. ANF appends synthetic `let` bindings with fresh,
+    // high HirIds even when they sit inside a loop body — so a binding
+    // bound INSIDE a loop can carry an id LARGER than the loop. The old
+    // logic compared HirId magnitude and misclassified such a binding as
+    // "bound outside", over-extending its region's free_at to the loop
+    // and producing a phantom DecrefRegion on an empty iterator. A
+    // degenerate compute_order that returned HirId.0 would fail this.
+    #[test]
+    fn compute_order_ranks_by_structure_not_hirid_magnitude() {
+        use crate::syntax::Span;
+        let sp = Span::synthetic();
+        let mk = |kind, id| {
+            let mut h = Hir::silent(kind, sp.clone());
+            h.id = HirId(id);
+            h
+        };
+        let b = Binding(0);
+        let acc = Binding(1);
+        // Loop(id=10) { [acc = Int(3)] body:
+        //   Let(id=99) { [b = Int(98)] body: Var(b)(id=97) } }
+        // The inner Let's id (99) is LARGER than the enclosing Loop's
+        // (10), exactly as ANF would assign them.
+        let var = mk(HirKind::Var(b), 97);
+        let let_init = mk(HirKind::Int(0), 98);
+        let let_node = mk(
+            HirKind::Let {
+                bindings: vec![(b, let_init)],
+                body: Box::new(var),
+            },
+            99,
+        );
+        let loop_init = mk(HirKind::Int(0), 3);
+        let loop_node = mk(
+            HirKind::Loop {
+                bindings: vec![(acc, loop_init)],
+                body: Box::new(let_node),
+            },
+            10,
+        );
+
+        let order = compute_order(&loop_node);
+        let loop_ord = order[&HirId(10)];
+        let let_ord = order[&HirId(99)];
+        let var_ord = order[&HirId(97)];
+        assert!(
+            loop_ord > let_ord,
+            "loop (ancestor, HirId 10) must rank after the inner let \
+             (descendant, HirId 99) in execution order despite the smaller \
+             HirId; got loop_ord={loop_ord} let_ord={let_ord}"
+        );
+        assert!(
+            let_ord > var_ord,
+            "let must rank after its body Var in execution order; \
+             got let_ord={let_ord} var_ord={var_ord}"
         );
     }
 

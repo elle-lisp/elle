@@ -7,7 +7,9 @@ use super::arena::BindingArena;
 use super::binding::Binding;
 use super::defuse::{DefUseBuilder, ValueOrigin};
 use super::expr::{Hir, HirId};
-use super::liveness::{build_binding_index, compute_last_use, BitSet, LivenessAnalyzer};
+use super::liveness::{
+    build_binding_index, compute_last_use, compute_order, BitSet, LivenessAnalyzer,
+};
 
 use std::collections::HashMap;
 
@@ -47,7 +49,8 @@ pub fn analyze_dataflow(hir: &Hir) -> DataflowInfo {
     la.analyze(hir, &empty);
 
     // Phase 4: per-HirId last-use (drives region `free_at` placement)
-    let last_use = compute_last_use(hir, &du.uses);
+    let order = compute_order(hir);
+    let last_use = compute_last_use(hir, &du.uses, &order);
 
     DataflowInfo {
         def_site: du.def_site,
