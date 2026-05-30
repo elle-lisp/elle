@@ -12,6 +12,14 @@ use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
+/// Upper bound on a single kernel read, in bytes. A `read-exact` whose
+/// buffer is larger (e.g. a text read of many graphemes, sized at
+/// 4 bytes/grapheme) is filled by several page-sized reads plus the
+/// resubmit loop rather than one oversized syscall. 64 KiB matches the
+/// default Linux loopback recv buffer, so a single read rarely returns
+/// less anyway.
+const MAX_READ_CHUNK: usize = 64 * 1024;
+
 /// Submit a stream I/O operation (Read, ReadLine, ReadAll, Write, Flush).
 ///
 /// `read_buffered`: for Read ops, the number of bytes already sitting in the
@@ -53,7 +61,14 @@ pub(super) fn submit_uring_stream(
         }
         IoOp::Read { count, buffer } | IoOp::ReadExact { count, buffer } => {
             let (dst, dst_cap) = unsafe { crate::io::request::writeable_buffer_ptr(buffer) };
-            let read_size = (*count - read_buffered).min(dst_cap - read_buffered);
+            // Fill to buffer capacity. For binary Read/ReadExact the buffer
+            // is sized to `count`, so this reads exactly `count` bytes. For a
+            // text ReadExact the buffer is oversized (4 bytes/grapheme), so
+            // this reads as many bytes as the buffer holds in one shot — the
+            // gate then stops once `count` graphemes are assembled and the
+            // completion splits + stashes the remainder.
+            let _ = count;
+            let read_size = dst_cap.saturating_sub(read_buffered).min(MAX_READ_CHUNK);
             unsafe {
                 opcode::Read::new(Fd(fd), dst.add(read_buffered), read_size as u32)
                     .offset(u64::MAX)
@@ -882,7 +897,29 @@ pub(super) fn drain_cqes(
                         .or_insert_with(FdState::new);
                     let total_in_fiber = *filled + got;
                     let total = state.buffer.len() + total_in_fiber;
-                    if total < count {
+                    // Text ReadExact counts grapheme clusters, not bytes: a
+                    // multibyte grapheme spans several bytes, so reading `count`
+                    // bytes can leave a grapheme split mid-sequence (the
+                    // "invalid UTF-8 in N bytes" symptom).  Decide "enough yet?"
+                    // in the port's own unit, then let completion split at the
+                    // Nth grapheme boundary and stash the remainder.
+                    let text_exact = is_exact
+                        && port
+                            .as_external::<Port>()
+                            .map(|p| p.encoding() == crate::port::Encoding::Text)
+                            .unwrap_or(false);
+                    let need_more = if text_exact {
+                        let fiber_bytes = unsafe {
+                            let (dst, _) = crate::io::request::writeable_buffer_ptr(&buffer);
+                            std::slice::from_raw_parts(dst, total_in_fiber)
+                        };
+                        let mut combined = state.buffer.clone();
+                        combined.extend_from_slice(fiber_bytes);
+                        crate::io::grapheme_count_in_valid_prefix(&combined) < count
+                    } else {
+                        total < count
+                    };
+                    if need_more {
                         // Short read — copy from fiber buffer into state.buffer and resubmit.
                         unsafe {
                             let (dst, _) = crate::io::request::writeable_buffer_ptr(&buffer);
@@ -898,8 +935,10 @@ pub(super) fn drain_cqes(
                             PortKey::Stderr => 2,
                             PortKey::Stdin => unreachable!(),
                         };
-                        let request = count - state.buffer.len();
-                        read_resubmits.push((id, fd, request, pending_op));
+                        // The resubmit loop reads `buf_len - filled` bytes into
+                        // the fiber buffer (filled was just reset to 0), so the
+                        // size passed here is unused — kept 0 for clarity.
+                        read_resubmits.push((id, fd, 0, pending_op));
                         continue;
                     }
                 }
@@ -955,13 +994,29 @@ pub(super) fn drain_cqes(
     // space in the fiber's buffer (advance past filled bytes).
     for (id, fd, _size, mut pending_op) in read_resubmits {
         if let PendingOp::Port {
-            op: IoOp::ReadLine { ref buffer } | IoOp::Read { ref buffer, .. },
+            op:
+                IoOp::ReadLine { ref buffer }
+                | IoOp::Read { ref buffer, .. }
+                | IoOp::ReadExact { ref buffer, .. },
             ref mut filled,
+            ref port_key,
             ..
         } = pending_op
         {
+            // The completion will prepend whatever is already stashed in the
+            // fd_state buffer (e.g. a ReadExact whose earlier short reads were
+            // moved there) ahead of the bytes this read produces. Subtract
+            // both the in-fiber `filled` prefix and that stash from the
+            // capacity so the assembled total never exceeds the fixed buffer
+            // — otherwise read-exact overflows when the peer has more bytes
+            // available than `count` (e.g. a fixed header followed by a body).
+            let buffered = fd_states.get(port_key).map(|s| s.buffer.len()).unwrap_or(0);
             let buf_bytes = buffer.as_bytes().unwrap();
-            let remaining = buf_bytes.len().saturating_sub(*filled);
+            let remaining = buf_bytes
+                .len()
+                .saturating_sub(*filled)
+                .saturating_sub(buffered)
+                .min(MAX_READ_CHUNK);
             if remaining == 0 {
                 // Buffer full — return what we have as a partial result.
                 // Don't re-submit; let process_raw_completion handle it.

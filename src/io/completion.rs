@@ -674,6 +674,28 @@ pub(super) fn process_raw_completion(
                         crate::io::request::truncate_buffer(buffer, total);
                     }
                     if encoding == Encoding::Text {
+                        // ReadExact on a text port is grapheme-counted: return
+                        // exactly `count` grapheme clusters and stash the
+                        // trailing bytes (extra graphemes the resubmit gate
+                        // over-read, or a partial trailing grapheme) in the
+                        // fd_state buffer for the next read.  Plain Read and
+                        // ReadAll keep the full buffer.  `bytes_to_string_in_place`
+                        // is retained so the result lands in the buffer's region
+                        // (s11 region routing) rather than a fresh allocation.
+                        if let IoOp::ReadExact { count, .. } = op {
+                            let (end, leftover) = {
+                                let bytes = buffer.as_bytes().unwrap_or(&[]);
+                                let end = crate::io::nth_grapheme_byte_end(bytes, *count)
+                                    .unwrap_or(bytes.len());
+                                (end, bytes[end..].to_vec())
+                            };
+                            if !leftover.is_empty() {
+                                state.buffer.extend_from_slice(&leftover);
+                            }
+                            unsafe {
+                                crate::io::request::truncate_buffer(buffer, end);
+                            }
+                        }
                         return Completion {
                             id,
                             result: unsafe {

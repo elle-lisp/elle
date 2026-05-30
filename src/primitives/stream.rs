@@ -126,7 +126,24 @@ fn prim_stream_read_exact(args: &[Value]) -> (SignalBits, Value) {
         Ok(t) => t,
         Err(e) => return e,
     };
-    let buffer = Value::bytes(vec![0u8; count]);
+    // `count` is the number of *units* to read: bytes on a binary port,
+    // grapheme clusters on a text port. A grapheme can span several
+    // UTF-8 bytes, so a text read reserves 4 bytes per grapheme (the
+    // UTF-8 codepoint upper bound, ample for the common case) so the
+    // backend can fill it in one read; the completion path splits at the
+    // Nth grapheme boundary and stashes any remainder for the next read.
+    // The buffer is allocated in the caller's region so the resulting
+    // string stays in-region (bytes_to_string_in_place).
+    let is_text = port
+        .as_external::<Port>()
+        .map(|p| p.encoding() == crate::port::Encoding::Text)
+        .unwrap_or(false);
+    let buf_len = if is_text {
+        count.saturating_mul(4)
+    } else {
+        count
+    };
+    let buffer = Value::bytes(vec![0u8; buf_len]);
     (
         SIG_YIELD | SIG_IO,
         IoRequest::with_timeout(IoOp::ReadExact { count, buffer }, port, timeout),
