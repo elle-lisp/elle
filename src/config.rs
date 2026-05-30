@@ -188,8 +188,8 @@ impl MlirPolicy {
 /// silently (forward compat for :spirv, :mlir, :gpu).
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix", "rc", "regions",
-    // Future: accepted without error
+    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix", "chan", "rc", "regions",
+    "anf", // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
 
@@ -833,5 +833,51 @@ impl Config {
         }
 
         Ok((config, remaining))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every defined trace bit must be reachable via `--trace=all`.
+    ///
+    /// `--trace=all` expands to exactly `TRACE_KEYWORDS` (see `Config::parse`),
+    /// then each keyword is OR'd through `trace_bits::from_name`. If a real
+    /// keyword (one that maps to a non-zero bit) is missing from the array,
+    /// `--trace=all` silently skips that subsystem even though `--trace=<kw>`
+    /// works when named explicitly. This guards against re-introducing that
+    /// drift (e.g. `chan` and `anf`, which were each added with a bit +
+    /// `from_name` entry + `--help` line but originally forgotten here).
+    #[test]
+    fn trace_all_covers_every_defined_bit() {
+        let from_all: u32 = TRACE_KEYWORDS
+            .iter()
+            .fold(0, |acc, kw| acc | trace_bits::from_name(kw));
+        assert_eq!(
+            from_all,
+            trace_bits::ALL,
+            "--trace=all does not cover every defined trace bit; \
+             missing bits: {:#b}",
+            trace_bits::ALL & !from_all
+        );
+    }
+
+    /// Conversely, every keyword listed in `TRACE_KEYWORDS` must either map to
+    /// a real bit or be one of the documented forward-compat placeholders.
+    /// Catches typos in the array that would make `--trace=all` a silent no-op
+    /// for that entry.
+    #[test]
+    fn trace_keywords_are_known() {
+        const FORWARD_COMPAT: &[&str] = &["spirv", "mlir", "gpu"];
+        for kw in TRACE_KEYWORDS {
+            let recognized = trace_bits::from_name(kw) != 0 || FORWARD_COMPAT.contains(kw);
+            assert!(
+                recognized,
+                "TRACE_KEYWORDS entry {:?} maps to no trace bit and is not a \
+                 documented forward-compat placeholder",
+                kw
+            );
+        }
     }
 }
