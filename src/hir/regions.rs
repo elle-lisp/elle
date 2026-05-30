@@ -200,6 +200,61 @@ impl RegionInference {
         exprs.iter().any(|e| walk(self.arena(), e))
     }
 
+    /// Mirror of `lower_begin`'s collect_preallocate_bindings: collect
+    /// every Define/Destructure binding reachable via Let/Begin/Loop/Block
+    /// (NOT via If/Match/Cond/Lambda) whose `needs_capture()` is true.
+    /// Each of these gets a MakeCaptureCell at the Begin's HirId during
+    /// lowering, so the Begin's alloc region must outlive each binding's
+    /// last use. This populates `binding_regions[b]` with the Begin's
+    /// alloc region so the post-pass `free_at` extension covers them.
+    fn collect_begin_capturable_bindings(
+        arena: &BindingArena,
+        exprs: &[Hir],
+        out: &mut Vec<Binding>,
+    ) {
+        fn walk(arena: &BindingArena, h: &Hir, out: &mut Vec<Binding>) {
+            match &h.kind {
+                HirKind::Define { binding, .. } if arena.get(*binding).needs_capture() => {
+                    out.push(*binding);
+                }
+                HirKind::Destructure { pattern, .. } => {
+                    for b in &pattern.bindings().bindings {
+                        if arena.get(*b).needs_capture() {
+                            out.push(*b);
+                        }
+                    }
+                }
+                HirKind::Lambda { .. } => {}
+                HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                    for (_, init) in bindings {
+                        walk(arena, init, out);
+                    }
+                    walk(arena, body, out);
+                }
+                HirKind::Loop { bindings, body } => {
+                    for (_, init) in bindings {
+                        walk(arena, init, out);
+                    }
+                    walk(arena, body, out);
+                }
+                HirKind::Begin(es) => {
+                    for e in es {
+                        walk(arena, e, out);
+                    }
+                }
+                HirKind::Block { body, .. } => {
+                    for e in body {
+                        walk(arena, e, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for e in exprs {
+            walk(arena, e, out);
+        }
+    }
+
     fn arena(&self) -> &BindingArena {
         // SAFETY: the arena outlives RegionInference (both created in analyze_regions)
         unsafe { &*self.arena }
@@ -494,7 +549,32 @@ impl RegionInference {
                 // emitted at the Begin's free_at but never paired with a
                 // runtime alloc_in_region.
                 if !self.in_lambda() && self.begin_has_capturable_binding(exprs) {
-                    self.alloc_here(hir.id);
+                    let cell_region = self.alloc_here(hir.id);
+                    // The MakeCaptureCells emitted at this HirId hold the
+                    // values for every pre-allocated capturable binding
+                    // reachable from this Begin. The cells must outlive
+                    // each binding's last use — including uses in
+                    // sibling top-level forms (the file-letrec lifts
+                    // every top-level form into a sibling init, and
+                    // bindings introduced inside one form's Begin can
+                    // still be referenced by a later sibling). Recording
+                    // `cell_region` in `binding_regions[b]` for each
+                    // pre-allocated binding lets the post-pass
+                    // `free_at` extension (compute_last_use over a
+                    // binding's uses) cover this region — without this,
+                    // the cell is freed at the Begin's own free_at and
+                    // the next access reads a dangling CaptureCell into
+                    // a region that's been reclaimed (the
+                    // tag=0x22 TAG_CAPTURE_CELL UAF seen at
+                    // `as_capture_cell` in handle_update_capture).
+                    let mut capturable = Vec::new();
+                    Self::collect_begin_capturable_bindings(self.arena(), exprs, &mut capturable);
+                    for b in capturable {
+                        let entry = self.binding_regions.entry(b).or_default();
+                        if !entry.contains(&cell_region) {
+                            entry.push(cell_region);
+                        }
+                    }
                 }
                 let mut last = Vec::new();
                 for e in exprs {
@@ -639,7 +719,21 @@ impl RegionInference {
             HirKind::Define { binding, value } => {
                 let val_regions = self.walk(value);
                 self.binding_region.insert(*binding, self.current_region);
-                self.binding_regions.insert(*binding, val_regions.clone());
+                // Union with any existing entry instead of overwriting:
+                // the same Binding id can be re-assigned by sibling
+                // top-level (def …) forms (the file-letrec lifts each
+                // top-level form into its own init, so two forms that
+                // both `(def x …)` share the same Binding id), and an
+                // earlier Begin-pre-pass insertion of a CaptureCell
+                // region must be preserved across the later Define's
+                // walk. Same overwrite-vs-union class as Destructure
+                // (commit 204e5ebb) and Letrec.
+                let entry = self.binding_regions.entry(*binding).or_default();
+                for r in val_regions.iter().copied() {
+                    if !entry.contains(&r) {
+                        entry.push(r);
+                    }
+                }
                 val_regions
             }
 
@@ -3124,6 +3218,118 @@ mod tests {
             r_regions,
             list_regions,
             r_covers,
+        );
+    }
+
+    /// Counter-factual for the Family E capture-cell UAF: a `(begin (def x
+    /// v) (defn f [] x) ...)` form pre-allocates a `MakeCaptureCell` for
+    /// `x` at the Begin's HirId, and a sibling top-level form re-uses the
+    /// same binding (here, the final `x` reference at the file's top level).
+    /// The cell's region must outlive every use of `x`, including the
+    /// sibling form's. Without this, the cell is freed at the Begin's
+    /// `free_at` and the next top-level access reads through a dangling
+    /// `CaptureCell` Value into a region that's been reclaimed — canonical
+    /// UAF caught by `as_capture_cell` at `handle_update_capture` /
+    /// `handle_unwrap_capture`. Minimal in-file reproducer matches
+    /// `tests/elle/destructuring.lisp` forms 70 + 187.
+    #[test]
+    fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() {
+        use crate::symbol::SymbolTable;
+        let mut symbols = SymbolTable::new();
+        // Two top-level forms:
+        //   1) `(begin (def x 100) (defn f [] x) (f))` — x is captured by f
+        //      → MakeCaptureCell stamped at this Begin's HirId.
+        //   2) `x` — a sibling top-level use of x, lexically after the begin.
+        let source = "(begin (def x 100) (defn f [] x) (f)) x";
+        let (hir, arena, _) =
+            crate::pipeline::compile_file_to_fhir(source, &mut symbols, "<test>").expect("compile");
+        let info = analyze_regions(&hir, &arena);
+
+        // x's binding.
+        let x = find_binding_by_name(&hir, "x", &arena, &symbols).expect("expected binding `x`");
+
+        // Find the Begin node that pre-allocates a CaptureCell because it
+        // contains a `(define x …)` whose binding `needs_capture()`.
+        fn find_capture_pre_pass_begin(
+            hir: &Hir,
+            target: Binding,
+            arena: &BindingArena,
+        ) -> Option<HirId> {
+            fn contains_capturable_define(h: &Hir, target: Binding, arena: &BindingArena) -> bool {
+                match &h.kind {
+                    HirKind::Define { binding, .. } => {
+                        *binding == target && arena.get(*binding).needs_capture()
+                    }
+                    HirKind::Lambda { .. } => false,
+                    _ => {
+                        let mut found = false;
+                        h.for_each_child(|c| {
+                            if !found {
+                                found = contains_capturable_define(c, target, arena);
+                            }
+                        });
+                        found
+                    }
+                }
+            }
+            fn walk(hir: &Hir, target: Binding, arena: &BindingArena, out: &mut Option<HirId>) {
+                if out.is_some() {
+                    return;
+                }
+                if let HirKind::Begin(exprs) = &hir.kind {
+                    if exprs
+                        .iter()
+                        .any(|e| contains_capturable_define(e, target, arena))
+                    {
+                        *out = Some(hir.id);
+                        return;
+                    }
+                }
+                hir.for_each_child(|c| walk(c, target, arena, out));
+            }
+            let mut out = None;
+            walk(hir, target, arena, &mut out);
+            out
+        }
+        let begin_id = find_capture_pre_pass_begin(&hir, x, &arena)
+            .expect("expected a Begin pre-allocating a CaptureCell for x");
+
+        // The cell's region: stamped via `alloc_here` in the Begin walk.
+        let cell_region = info.alloc_region.get(&begin_id).copied().expect(
+            "Begin with capturable Define must register an alloc_region (for MakeCaptureCell)",
+        );
+
+        // The post-pass extends region_data[r].free_at via binding uses
+        // when r ∈ binding_source_regions[x]. The invariant under test is
+        // that the cell's region is covered, so its free_at reaches x's
+        // last use, not just the Begin's tail. Equivalent end-state
+        // check: region_data[cell_region].free_at >= last_use_of(x).
+        let mut du = DefUseBuilder::new();
+        du.walk(&hir);
+        let last_use = crate::hir::liveness::compute_last_use(&hir, &du.uses);
+        let x_last_use = du
+            .uses
+            .get(&x)
+            .into_iter()
+            .flat_map(|v| v.iter())
+            .map(|u| last_use.get(u).copied().unwrap_or(*u))
+            .max()
+            .expect("x must have at least one use (the final top-level `x`)");
+
+        let cell_free_at = info
+            .region_data
+            .get(&cell_region)
+            .map(|d| d.free_at)
+            .expect("cell region must have RegionData populated by analyze_regions");
+
+        assert!(
+            cell_free_at.0 >= x_last_use.0,
+            "cell region r{} (CaptureCell for x, pre-allocated at Begin @{}) \
+             must have free_at >= x's last use @{}; got free_at @{}",
+            cell_region.0,
+            begin_id.0,
+            x_last_use.0,
+            cell_free_at.0,
         );
     }
 }
