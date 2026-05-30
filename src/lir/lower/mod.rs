@@ -21,6 +21,26 @@ use crate::hir::{Binding, BlockId, Hir, HirId, HirKind, HirPattern};
 /// pipeline for transient compile-time regions.
 static NEXT_REGION_ID: AtomicU16 = AtomicU16::new(2);
 
+/// Short, stable name for an allocating `LirInstr` variant — used only
+/// in the `--trace=rc:emit` lines to disambiguate which kind of alloc
+/// was stamped on a phantom region's HirId.
+fn instr_kind_name(instr: &LirInstr) -> &'static str {
+    match instr {
+        LirInstr::MakeClosure { .. } => "MakeClosure",
+        LirInstr::MakeCaptureCell { .. } => "MakeCaptureCell",
+        LirInstr::MakeArrayMut { .. } => "MakeArrayMut",
+        LirInstr::List { .. } => "List",
+        LirInstr::Call { .. } => "Call",
+        LirInstr::SuspendingCall { .. } => "SuspendingCall",
+        LirInstr::TailCall { .. } => "TailCall",
+        LirInstr::CallArrayMut { .. } => "CallArrayMut",
+        LirInstr::TailCallArrayMut { .. } => "TailCallArrayMut",
+        LirInstr::Freeze { .. } => "Freeze",
+        LirInstr::Thaw { .. } => "Thaw",
+        _ => "other",
+    }
+}
+
 /// Mint a fresh globally-unique runtime region ID.
 pub fn fresh_region_id() -> RegionId {
     let id = NEXT_REGION_ID.fetch_add(1, Ordering::Relaxed);
@@ -384,9 +404,15 @@ impl<'a> Lowerer<'a> {
             // to a HirId and source span. Pair with grep on the region id
             // to find the full lifecycle (incref/decref/FREE/cascade), or
             // grep on the payload address from a deref-mismatch panic.
+            // The instr kind helps disambiguate which LIR variant the
+            // alloc was for when multiple are emit_alloc'd at the same
+            // HirId (e.g. lambda capture cell + lambda body alloc).
             eprintln!(
-                "[trace:rc:emit] emit_alloc hir_id={:?} region={} span={}",
-                self.current_hir_id, rid, self.current_span
+                "[trace:rc:emit] emit_alloc hir_id={:?} region={} instr={} span={}",
+                self.current_hir_id,
+                rid,
+                instr_kind_name(&instr),
+                self.current_span,
             );
         }
         self.emit_in_region(instr, rid);
@@ -587,6 +613,12 @@ impl<'a> Lowerer<'a> {
         // defense in depth until that audit is complete.
         if !self.emitted_alloc_regions.contains(&region_id) {
             return;
+        }
+        if crate::config::get().has_trace("rc") {
+            eprintln!(
+                "[trace:rc:emit] emit_decref_region hir_id={:?} region={} span={}",
+                self.current_hir_id, region_id, self.current_span,
+            );
         }
         self.emit(LirInstr::DecrefRegion { region_id });
     }
