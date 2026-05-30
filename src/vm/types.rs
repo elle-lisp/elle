@@ -295,12 +295,15 @@ pub(crate) fn handle_intr_put(vm: &mut VM) {
     let key = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     // Delegate to prim_put — it handles all the polymorphic cases.
-    // On correct types it never errors; wrong types → panic.
+    // Runtime type errors (e.g. unhashable key) propagate via
+    // fiber.signal so `protect` can observe them, matching the
+    // NativeFn `prim_put` path used under --checked-intrinsics.
     let (bits, result) = crate::primitives::access::prim_put(&[obj, key, val]);
-    assert!(
-        !bits.contains(crate::value::SIG_ERROR),
-        "%put: type error (intrinsic contract violated)"
-    );
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    }
     vm.fiber.stack.push(result);
 }
 
@@ -308,10 +311,11 @@ pub(crate) fn handle_intr_del(vm: &mut VM) {
     let key = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let (bits, result) = crate::primitives::lstruct::prim_del(&[obj, key]);
-    assert!(
-        !bits.contains(crate::value::SIG_ERROR),
-        "%del: type error (intrinsic contract violated)"
-    );
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    }
     vm.fiber.stack.push(result);
 }
 
@@ -319,10 +323,11 @@ pub(crate) fn handle_intr_has(vm: &mut VM) {
     let key = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let (bits, result) = crate::primitives::lstruct::prim_has_key(&[obj, key]);
-    assert!(
-        !bits.contains(crate::value::SIG_ERROR),
-        "%has?: type error (intrinsic contract violated)"
-    );
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    }
     vm.fiber.stack.push(result);
 }
 
