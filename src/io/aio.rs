@@ -536,9 +536,19 @@ impl AsyncBackend {
                         inner.completions.push_back(Completion { id, result });
                         return Ok(id);
                     }
+                    // Buffered prefix is shorter than the request.  Move it
+                    // into the fiber buffer at offset 0 and clear it (see the
+                    // ReadExact branch below for why leaving it in state.buffer
+                    // while offsetting the kernel write corrupts the result).
+                    unsafe {
+                        let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                        let copy_len = state.buffer.len().min(dst_cap);
+                        std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
+                    }
                     read_buffered = state.buffer.len();
+                    state.buffer.clear();
                 }
-                IoOp::ReadExact { count, .. } => {
+                IoOp::ReadExact { count, buffer } => {
                     // ReadExact's unit is whatever the port is measured in:
                     // bytes for Binary, graphemes for Text.  If the buffered
                     // prefix already contains `count` units, serve from buffer.
@@ -569,14 +579,32 @@ impl AsyncBackend {
                         });
                         return Ok(id);
                     }
-                    // Not enough yet — leave buffered bytes in place.  For
-                    // Binary the kernel-read size is reduced by what's
-                    // buffered; for Text we always ask the kernel for
-                    // `count` more bytes (best-case ASCII estimate) and
-                    // resubmit on short reads — see the completion-side
-                    // resubmit gate.
+                    // Not enough yet.  For Binary, move the buffered prefix
+                    // into the fiber buffer at offset 0 and clear it — exactly
+                    // the ReadLine no-newline branch above.  The kernel then
+                    // writes at dst+read_buffered, so the completion sees an
+                    // empty fd_state buffer and needs no shift.
+                    //
+                    // Leaving the prefix in state.buffer while ALSO offsetting
+                    // the kernel write (read_buffered) double-handled it: the
+                    // completion's shift-prepend branch moves kernel data as if
+                    // it sat at dst[0] when it actually sits at dst+filled,
+                    // stranding `read_buffered` zero bytes in the middle of the
+                    // reassembled result.  That corrupted any read-exact that
+                    // followed a read-line whose recv over-read past the line
+                    // (the redis bulk-string framing bug — corruption at the
+                    // byte offset equal to the over-read length).
+                    //
+                    // Text stays as-is: its buffer is oversized (4 B/grapheme)
+                    // and the completion grapheme-splits the combined buffer.
                     if matches!(port.encoding(), Encoding::Binary) {
+                        unsafe {
+                            let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+                            let copy_len = state.buffer.len().min(dst_cap);
+                            std::ptr::copy_nonoverlapping(state.buffer.as_ptr(), dst, copy_len);
+                        }
                         read_buffered = state.buffer.len();
+                        state.buffer.clear();
                     }
                 }
                 _ => {}
