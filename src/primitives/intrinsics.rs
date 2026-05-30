@@ -453,9 +453,11 @@ fn prim_has(args: &[Value]) -> (SignalBits, Value) {
 fn prim_push(args: &[Value]) -> (SignalBits, Value) {
     let collection = &args[0];
     let value = args[1];
-    if let Some(vec_ref) = collection.as_array_mut() {
-        vec_ref.borrow_mut().push(value);
-        (SIG_OK, *collection)
+    if collection.is_array_mut() {
+        (
+            SIG_OK,
+            crate::value::arena::tracked_push(*collection, value),
+        )
     } else if let Some(elems) = collection.as_array() {
         let mut new = elems.to_vec();
         new.push(value);
@@ -466,13 +468,13 @@ fn prim_push(args: &[Value]) -> (SignalBits, Value) {
 }
 
 fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
-    match args[0].as_array_mut() {
-        Some(arr) => match arr.borrow_mut().pop() {
-            Some(v) => (SIG_OK, v),
-            None => (SIG_ERROR, error_val("type-error", "%pop: empty @array")),
-        },
-        None => type_err("%pop", "@array", &args[0]),
+    let Some(arr) = args[0].as_array_mut() else {
+        return type_err("%pop", "@array", &args[0]);
+    };
+    if arr.borrow().is_empty() {
+        return (SIG_ERROR, error_val("type-error", "%pop: empty @array"));
     }
+    (SIG_OK, crate::value::arena::tracked_pop(args[0]))
 }
 
 fn prim_string_push(args: &[Value]) -> (SignalBits, Value) {
@@ -897,5 +899,75 @@ primitive! {
         doc: "Pointer identity",
         params: &["a", "b"],
         category: "intrinsic",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::arena::{alloc_in_fresh_region, region_rc};
+    use crate::value::heap::{HeapObject, Pair};
+
+    /// Counterfactual: `%array-push` (the NativeFn `prim_push` reached
+    /// under `--checked-intrinsics`) must call `track_insert` on the
+    /// pushed value so its source region's RC accounts for the new
+    /// reference from the destination @array. Without this, the source
+    /// region's RC stays at its baseline; when the destination @array
+    /// is later freed, cascade decref drops the entry's source region
+    /// RC and frees it while the pushed value is still live elsewhere
+    /// — UAF. Same VM-vs-NativeFn contract drift shape as the Family
+    /// D push/extend UAF (commit 1a0d9e4c) which fixed the JIT path:
+    /// `handle_intr_push` (VM bytecode) and `elle_jit_push` (JIT both
+    /// route through `tracked_push`; the NativeFn here didn't, so
+    /// `--checked-intrinsics` re-introduced the same class.
+    #[test]
+    fn push_track_inserts_cross_region_value() {
+        crate::value::arena::with_test_region(|| {
+            let arr = Value::array_mut(vec![]);
+            let (cross, source_rid) =
+                alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+            let rc_baseline = region_rc(source_rid);
+            let (bits, _) = prim_push(&[arr, cross]);
+            assert_eq!(bits, SIG_OK);
+            assert_eq!(
+                region_rc(source_rid),
+                rc_baseline + 1,
+                "prim_push must call track_insert on cross-region value (RC=baseline+1)"
+            );
+        });
+    }
+
+    /// Counterfactual: `%pop` (the NativeFn `prim_pop` reached under
+    /// `--checked-intrinsics`) must call `track_remove` on the popped
+    /// value to undo the `track_insert` from the matching push. Without
+    /// it, the source region's RC stays bumped — region-RC leak. The
+    /// symmetric defect of `push_track_inserts_cross_region_value`.
+    #[test]
+    fn pop_track_removes_cross_region_value() {
+        use crate::value::arena::tracked_push;
+        crate::value::arena::with_test_region(|| {
+            let arr = Value::array_mut(vec![]);
+            let (cross, source_rid) =
+                alloc_in_fresh_region(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
+            let rc_baseline = region_rc(source_rid);
+            let _ = tracked_push(arr, cross);
+            assert_eq!(
+                region_rc(source_rid),
+                rc_baseline + 1,
+                "precondition: tracked_push bumps source region RC"
+            );
+            let (bits, popped) = prim_pop(&[arr]);
+            assert_eq!(bits, SIG_OK);
+            assert_eq!(
+                (popped.tag, popped.payload),
+                (cross.tag, cross.payload),
+                "prim_pop must return the popped Value"
+            );
+            assert_eq!(
+                region_rc(source_rid),
+                rc_baseline,
+                "prim_pop must call track_remove on cross-region value (RC=baseline)"
+            );
+        });
     }
 }
