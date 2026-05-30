@@ -11,12 +11,19 @@
 
 ## ── Layer 1: Futex ──────────────────────────────────────────────────
 
-(def @*futex-id* 0)
-
+## Futex identity must be unique across the WHOLE process, not just
+## within this module instance.  `(import ...)` returns a fresh module
+## each call, so a module-local counter restarts at 0 in every importer
+## — two independently-imported sync modules would then hand out
+## colliding keys, and since the scheduler's park-queue is process-global
+## (one key → one wait list), a wake on one futex would unpark a waiter
+## on the other (which re-checks its unchanged value and re-parks),
+## losing the intended wakeup.  `gensym` is a process-global primitive
+## counter, so keys are globally unique regardless of how many times the
+## module is imported.
 (defn make-futex [initial]
   "Low-level futex. Wraps a box with park/notify."
-  (assign *futex-id* (inc *futex-id*))
-  (let [key *futex-id*
+  (let [key (gensym)
         bx (box initial)]
     {:wait (fn [expected]
              (while (= (unbox bx) expected) (ev/futex-wait key bx expected)))
