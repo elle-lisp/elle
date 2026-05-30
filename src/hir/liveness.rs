@@ -419,6 +419,7 @@ pub fn compute_last_use(hir: &Hir, uses: &HashMap<Binding, Vec<HirId>>) -> HashM
     let mut builder = LastUseBuilder {
         last_use: HashMap::new(),
         binding_init: HashMap::new(),
+        binding_scope: HashMap::new(),
         iter_scope_stack: Vec::new(),
     };
     // The root has no parent; parent_consumes=false is the conservative
@@ -457,6 +458,15 @@ struct LastUseBuilder {
     /// via analyze_file_letrec), so this is a Vec rather than a single
     /// id; compute_last_use extends last_use for every init.
     binding_init: HashMap<Binding, Vec<HirId>>,
+    /// For each binding, the HirIds of the enclosing binding forms
+    /// (Let/Letrec/Loop hir.id, or the Define's hir.id). Parallel to
+    /// `binding_init`: index N of this vec is the scope id for the
+    /// N-th entry of `binding_init`. Used by the iter-scope Var
+    /// extension to ask "was this binding bound outside the current
+    /// loop?" — answered by comparing scope.id to the loop's hir.id
+    /// (outer-after-inner HirId assignment means an outside scope has
+    /// a greater HirId than an inside loop).
+    binding_scope: HashMap<Binding, Vec<HirId>>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked. Outermost-first. Used to extend `last_use` for `Var`
     /// nodes so a binding bound OUTSIDE an iterative scope but
@@ -487,9 +497,38 @@ impl LastUseBuilder {
         // INSIDE the iteration this over-extends — sound but slightly
         // less precise (the region's runtime lifetime is the union of
         // iterations rather than per-iteration).
-        if matches!(&hir.kind, HirKind::Var(_)) {
+        if let HirKind::Var(b) = &hir.kind {
             if let Some(&outermost) = self.iter_scope_stack.first() {
-                if outermost > my_last {
+                // Only extend when the binding was bound OUTSIDE the
+                // outermost iter scope: such a binding's value must
+                // outlive the loop because the body re-reads it each
+                // iteration. For bindings bound INSIDE the iter scope
+                // the body re-allocates per iteration; over-extending
+                // forces the lowerer to emit DecrefRegion outside the
+                // loop body, and the decref then targets a region
+                // whose alloc lives inside the body. With an empty
+                // iterator the alloc never fires while the decref
+                // does — RegionStore::decref_with_cascade panics on
+                // the phantom-region debug_assert.
+                //
+                // HirIds are assigned outer-after-inner during HIR
+                // construction (an enclosing form's id is strictly
+                // greater than any HirId inside it). A binding's
+                // SCOPE id (Let/Letrec/Loop/Define hir.id) being
+                // GREATER than the iter scope's hir.id means the
+                // binding's scope contains the iter scope — bound
+                // outside. Use the binding's init id is NOT a valid
+                // proxy because the init expression's hir.id is a
+                // child of the let and is therefore smaller than the
+                // let; a let bound OUTSIDE the loop can still have a
+                // small init HirId, e.g.
+                // `(let [s (string "a")] (while ... (... s ...)))`.
+                let bound_outside = self
+                    .binding_scope
+                    .get(b)
+                    .and_then(|scopes| scopes.last())
+                    .is_none_or(|&id| id > outermost);
+                if bound_outside && outermost > my_last {
                     my_last = outermost;
                 }
             }
@@ -510,6 +549,7 @@ impl LastUseBuilder {
                     .entry(*binding)
                     .or_default()
                     .push(value.id);
+                self.binding_scope.entry(*binding).or_default().push(hir.id);
                 self.walk(value, true, hir.id);
             }
             HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
@@ -529,6 +569,7 @@ impl LastUseBuilder {
                 // bindings are read.
                 for b in pattern.bindings().bindings {
                     self.binding_init.entry(b).or_default().push(value.id);
+                    self.binding_scope.entry(b).or_default().push(hir.id);
                 }
                 self.walk(value, true, hir.id);
             }
@@ -602,6 +643,7 @@ impl LastUseBuilder {
             HirKind::Let { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
+                    self.binding_scope.entry(*b).or_default().push(hir.id);
                     self.walk(init, true, hir.id);
                 }
                 self.walk(body, parent_consumes, parent_id);
@@ -609,6 +651,7 @@ impl LastUseBuilder {
             HirKind::Letrec { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
+                    self.binding_scope.entry(*b).or_default().push(hir.id);
                     self.walk(init, true, hir.id);
                 }
                 self.walk(body, parent_consumes, parent_id);
@@ -616,6 +659,7 @@ impl LastUseBuilder {
             HirKind::Loop { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
+                    self.binding_scope.entry(*b).or_default().push(hir.id);
                     self.walk(init, true, hir.id);
                 }
                 self.iter_scope_stack.push(hir.id);
@@ -1258,6 +1302,73 @@ mod tests {
              must have last_use >= loop-node HirId so the region survives \
              across iterations; got last_use=@{}",
             alloc.0,
+            loop_id.0,
+            got.0,
+        );
+    }
+
+    // ── over-extension: bindings bound INSIDE the loop body must NOT
+    // extend to the loop's HirId ────────────────────────────────────
+    //
+    // Companion to last_use_binding_used_in_loop_body_extends_to_loop.
+    // The original fix in ab5c23bf intentionally over-extended Var
+    // last_use to the outermost iter_scope's HirId to cover bindings
+    // bound OUTSIDE the loop. For bindings bound INSIDE the loop body
+    // that over-extension is unsound: the lowerer emits a DecrefRegion
+    // for the binding's region at the (now extended) free_at — outside
+    // the loop body — but the bytecode alloc lives inside the loop
+    // body. When the iterator is empty (or no iteration produces the
+    // alloc), the alloc never fires but the decref still does, hitting
+    // the phantom-region debug_assert in
+    // `RegionStore::decref_with_cascade`.
+    //
+    // Minimal repro: `(each x in @[] (let [f (fn () 1)] f))`. The each
+    // macro lowers to a while; `f`'s init `(fn () 1)` is INSIDE the
+    // while body. With the over-extension, `f`'s region's free_at
+    // lands at the while's HirId — outside the body. Empty input → no
+    // MakeClosure → DecrefRegion fires on a never-allocated slot.
+    #[test]
+    fn last_use_var_to_binding_bound_inside_loop_does_not_extend() {
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (let [seq @[1]] (while (%lt 0 1) (let [f (fn () 1)] f))))");
+        let loop_id = find_first_loop(&hir).expect("expected a Loop node");
+        // Find the `f` Var — the binding whose name resolves to "f".
+        let var_id = {
+            fn find_var_named(
+                h: &super::Hir,
+                arena: &BindingArena,
+                symbols: &SymbolTable,
+                name: &str,
+            ) -> Option<HirId> {
+                if let HirKind::Var(b) = &h.kind {
+                    if symbols.name(arena.get(*b).name) == Some(name) {
+                        return Some(h.id);
+                    }
+                }
+                let mut found = None;
+                h.for_each_child(|c| {
+                    if found.is_none() {
+                        found = find_var_named(c, arena, symbols, name);
+                    }
+                });
+                found
+            }
+            find_var_named(&hir, &arena, &symbols, "f").expect("expected a Var(f)")
+        };
+        let got = info
+            .last_use
+            .get(&var_id)
+            .copied()
+            .expect("missing last_use for Var inside loop");
+        assert!(
+            got < loop_id,
+            "Var @{} (name=f) references a binding bound INSIDE the loop body @{}; \
+             its last_use must NOT be extended to the loop's HirId \
+             (got last_use=@{}). Over-extension here makes the lowerer \
+             emit DecrefRegion outside the loop body, panicking on the \
+             phantom-region debug_assert when the loop never executes \
+             (e.g. empty iterator).",
+            var_id.0,
             loop_id.0,
             got.0,
         );
