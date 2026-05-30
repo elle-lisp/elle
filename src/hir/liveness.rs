@@ -450,17 +450,51 @@ pub fn compute_order(hir: &Hir) -> HashMap<HirId, u32> {
     order
 }
 
+/// Subtree low-watermark: for each node, the minimum `compute_order`
+/// index over the node and all its descendants. With `order` (the node's
+/// own index, the maximum in its subtree by post-order construction),
+/// this gives each node the contiguous post-order interval
+/// `[low[N], order[N]]` covering exactly its subtree. Containment is then
+/// a range test: node `X` is inside `N`'s subtree iff
+/// `low[N] <= order[X] <= order[N]`.
+///
+/// This is what distinguishes a *descendant* of a loop (its scope node is
+/// inside the loop body) from a *preceding sibling* of a loop (a `def`
+/// bound earlier in the same body): both have `order < order[loop]`, but
+/// only the descendant has `order >= low[loop]`. The plain `order`
+/// comparison cannot tell them apart, which is why a `def`-bound closure
+/// referenced inside a loop was misclassified as bound-inside and freed
+/// per iteration (`loop-def-closure-uaf.lisp`).
+pub fn compute_subtree_low(hir: &Hir, order: &HashMap<HirId, u32>) -> HashMap<HirId, u32> {
+    fn visit(h: &Hir, order: &HashMap<HirId, u32>, low: &mut HashMap<HirId, u32>) -> u32 {
+        let mut m = order.get(&h.id).copied().unwrap_or(u32::MAX);
+        h.for_each_child(|c| {
+            let cl = visit(c, order, low);
+            if cl < m {
+                m = cl;
+            }
+        });
+        low.insert(h.id, m);
+        m
+    }
+    let mut low = HashMap::new();
+    visit(hir, order, &mut low);
+    low
+}
+
 pub fn compute_last_use(
     hir: &Hir,
     uses: &HashMap<Binding, Vec<HirId>>,
     order: &HashMap<HirId, u32>,
 ) -> HashMap<HirId, HirId> {
+    let low = compute_subtree_low(hir, order);
     let mut builder = LastUseBuilder {
         last_use: HashMap::new(),
         binding_init: HashMap::new(),
         binding_scope: HashMap::new(),
         iter_scope_stack: Vec::new(),
         order,
+        low: &low,
     };
     // The root has no parent; parent_consumes=false is the conservative
     // default (the root's value is the program's result, no further use).
@@ -522,6 +556,11 @@ struct LastUseBuilder<'a> {
     /// ordering/containment decision compares these indices, never
     /// `HirId` magnitude.
     order: &'a HashMap<HirId, u32>,
+    /// Subtree low-watermark (see `compute_subtree_low`). Pairs with
+    /// `order` to give each node the post-order interval `[low, order]`
+    /// covering its subtree, so containment ("is this scope inside the
+    /// loop body?") is an interval test, not just a magnitude compare.
+    low: &'a HashMap<HirId, u32>,
 }
 
 impl LastUseBuilder<'_> {
@@ -529,6 +568,18 @@ impl LastUseBuilder<'_> {
     /// `compute_order` covers the whole tree) sort first.
     fn ord(&self, id: HirId) -> u32 {
         self.order.get(&id).copied().unwrap_or(0)
+    }
+
+    /// True if `inner`'s scope node lies inside `outer`'s subtree, tested
+    /// over the post-order interval `[low[outer], order[outer]]` (see
+    /// `compute_subtree_low`). Distinguishes a binding bound *inside* a
+    /// loop body (a descendant — re-allocated each iteration) from one
+    /// bound *outside* it (an enclosing ancestor OR a preceding sibling
+    /// `def`/`let*` in the same body — must outlive the loop).
+    fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
+        let low = self.low.get(&outer).copied().unwrap_or(0);
+        let oi = self.ord(inner);
+        oi >= low && oi <= self.ord(outer)
     }
 
     fn walk(&mut self, hir: &Hir, parent_consumes: bool, parent_id: HirId) {
@@ -560,22 +611,34 @@ impl LastUseBuilder<'_> {
                 // the phantom-region debug_assert.
                 //
                 // "Bound outside" is a structural-containment question,
-                // answered with the execution-order index, NOT HirId
-                // magnitude. The binding's SCOPE node
-                // (Let/Letrec/Loop/Define) encloses the loop iff its
-                // post-order index is greater than the loop's
-                // (`order[scope] > order[loop]`). ANF appends synthetic
-                // `let` bindings with large HirIds even when they sit
-                // INSIDE the loop body, so comparing `HirId` magnitude
-                // would misclassify them as outside and re-introduce the
-                // phantom (see `compute_order`). The init id is also not
-                // a valid proxy: it's a child of the scope node and so
-                // has a smaller index than the scope itself.
+                // answered with execution-order indices, NOT HirId
+                // magnitude. The binding is bound INSIDE the loop iff its
+                // SCOPE node (Let/Letrec/Loop/Define) is a descendant of
+                // the loop — i.e. lies in the loop's post-order subtree
+                // interval `[low[loop], order[loop]]` (see `in_subtree`).
+                //
+                // A plain `order[scope] > order[loop]` test only catches
+                // a scope that ENCLOSES the loop (an ancestor `let` with
+                // the loop in its body). It misses a binding bound by a
+                // PRECEDING SIBLING `def`/`let*` in the same body: that
+                // scope node has a *smaller* post-order index than the
+                // loop yet is still outside it, so the magnitude test
+                // wrongly classified it as bound-inside and let the
+                // lowerer free it per iteration (`loop-def-closure-uaf`,
+                // the minimized supervisor.lisp UAF). The interval test
+                // sees it sits below `low[loop]` and extends correctly.
+                //
+                // ANF appends synthetic `let` bindings with large HirIds
+                // even when they sit INSIDE the loop body, so comparing
+                // `HirId` magnitude would misclassify them as outside and
+                // re-introduce the phantom (see `compute_order`). The init
+                // id is also not a valid proxy: it's a child of the scope
+                // node and so has a smaller index than the scope itself.
                 let bound_outside = self
                     .binding_scope
                     .get(b)
                     .and_then(|scopes| scopes.last())
-                    .is_none_or(|&id| self.ord(id) > self.ord(outermost));
+                    .is_none_or(|&id| !self.in_subtree(id, outermost));
                 if bound_outside && self.ord(outermost) > self.ord(my_last) {
                     my_last = outermost;
                 }
@@ -1420,6 +1483,68 @@ mod tests {
              here makes the lowerer emit DecrefRegion outside the loop body, \
              panicking on the phantom-region debug_assert when the loop never \
              executes (e.g. empty iterator).",
+            var_id.0,
+            loop_id.0,
+            got.0,
+        );
+    }
+
+    // Counterpart to the previous test: a binding bound OUTSIDE the loop
+    // by a PRECEDING SIBLING (a `def` earlier in the same body, not an
+    // enclosing `let`) and referenced inside the loop MUST have its
+    // last_use extended to the loop — its value is re-read every
+    // iteration, so freeing it after the first use dangles it (the
+    // minimized supervisor.lisp UAF, `loop-def-closure-uaf.lisp`).
+    //
+    // The `def` node is a sibling that precedes the loop, so its
+    // post-order index is SMALLER than the loop's — the old
+    // `order[scope] > order[loop]` test (which only recognises an
+    // enclosing ancestor) classified it as bound-inside and did NOT
+    // extend. The interval test (`low[loop] <= order[scope]`) sees the
+    // `def` sits below the loop's subtree and extends correctly.
+    #[test]
+    fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
+        let (hir, arena, symbols, info) =
+            analyze_with_hir("(fn () (def helper (fn (x) x)) (while (%lt 0 1) (helper 1)))");
+        let loop_id = find_first_loop(&hir).expect("expected a Loop node");
+        let var_id = {
+            fn find_var_named(
+                h: &super::Hir,
+                arena: &BindingArena,
+                symbols: &SymbolTable,
+                name: &str,
+            ) -> Option<HirId> {
+                if let HirKind::Var(b) = &h.kind {
+                    if symbols.name(arena.get(*b).name) == Some(name) {
+                        return Some(h.id);
+                    }
+                }
+                let mut found = None;
+                h.for_each_child(|c| {
+                    if found.is_none() {
+                        found = find_var_named(c, arena, symbols, name);
+                    }
+                });
+                found
+            }
+            find_var_named(&hir, &arena, &symbols, "helper")
+                .expect("expected a Var(helper) inside the loop")
+        };
+        let got = info
+            .last_use
+            .get(&var_id)
+            .copied()
+            .expect("missing last_use for Var inside loop");
+        let order = compute_order(&hir);
+        let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+        assert!(
+            ord(got) >= ord(loop_id),
+            "Var @{} (name=helper) references `helper`, bound by a `def` that \
+             PRECEDES the loop @{} in the same body; its last_use must be \
+             extended to the loop so the binding survives every iteration \
+             (got last_use=@{}, which is BEFORE the loop in execution order — \
+             the lowerer would free it after the first iteration, dangling \
+             the closure: the supervisor.lisp use-after-free).",
             var_id.0,
             loop_id.0,
             got.0,
