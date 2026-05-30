@@ -352,31 +352,18 @@ pub(crate) fn handle_intr_push(vm: &mut VM) {
 pub(crate) fn handle_intr_string_push(vm: &mut VM) {
     let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    // Extract the string content from the value.
-    let s = value.with_string(|s| s.to_string()).unwrap_or_else(|| {
-        panic!(
-            "%string-push: value must be string, got {}",
-            value.type_name()
-        )
-    });
-    if let Some(buf_ref) = collection.as_string_mut() {
-        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
-        vm.fiber.stack.push(collection);
-    } else {
-        let new = collection
-            .with_string(|base| {
-                let mut r = base.to_string();
-                r.push_str(&s);
-                Value::string(r)
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "%string-push: expected string or @string, got {}",
-                    collection.type_name()
-                )
-            });
-        vm.fiber.stack.push(new);
+    // Delegate to prim_string_push — runtime type errors (e.g. a
+    // non-string value) propagate via fiber.signal so `protect` can
+    // observe them, matching the NativeFn path used under
+    // --checked-intrinsics. A bare panic here can't be caught by
+    // Elle-level `protect`.
+    let (bits, result) = crate::primitives::intrinsics::prim_string_push(&[collection, value]);
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
     }
+    vm.fiber.stack.push(result);
 }
 
 pub(crate) fn handle_intr_bytes_push(vm: &mut VM) {

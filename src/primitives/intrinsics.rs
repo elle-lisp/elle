@@ -477,7 +477,7 @@ fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, crate::value::arena::tracked_pop(args[0]))
 }
 
-fn prim_string_push(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_push(args: &[Value]) -> (SignalBits, Value) {
     let collection = &args[0];
     let value = args[1];
     let s = match value.with_string(|s| s.to_string()) {
