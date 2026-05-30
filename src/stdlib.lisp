@@ -1528,6 +1528,7 @@
         select-sets @{}  # waiting-fiber → @{:candidates [...] :woken @[false]}
         completed @{}  # fiber → :ok | :error (already-completed fibers)
         joined @||  # set of fibers whose result was observed
+        scheduler-killed @||  # set of fibers we aborted at teardown (suppress their injected :shutdown)
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
         park-queues @{}
         forwarded-pending @{}]
