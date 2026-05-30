@@ -1122,12 +1122,14 @@ impl Emitter {
             LirInstr::Freeze { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrFreeze);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }
             LirInstr::Thaw { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrThaw);
+                self.bytecode.emit_u16(region);
                 self.pop();
                 self.push_reg(*dst);
             }

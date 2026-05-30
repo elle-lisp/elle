@@ -618,6 +618,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
                 i += 2;
             }
+            Instruction::IntrFreeze | Instruction::IntrThaw if i + 1 < instructions.len() => {
+                let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (region={})", region_id));
+                i += 2;
+            }
             Instruction::MakeArrayMut if i + 2 < instructions.len() => {
                 let region_id = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let size = instructions[i + 2];

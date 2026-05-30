@@ -618,10 +618,26 @@ impl VM {
                     types::handle_intr_pop(self);
                 }
                 Instruction::IntrFreeze => {
-                    types::handle_intr_freeze(self);
+                    // IntrFreeze allocates a fresh immutable container
+                    // holding the source's entries. The lowerer's
+                    // emit_alloc assigns it a region (so a matching
+                    // DecrefRegion fires at scope exit); the runtime
+                    // must alloc into that same region or the decref
+                    // hits an empty slot and the phantom-region
+                    // debug_assert panics.
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::with_alloc_region!(region_id => {
+                        types::handle_intr_freeze(self);
+                    });
                 }
                 Instruction::IntrThaw => {
-                    types::handle_intr_thaw(self);
+                    // Same accounting as IntrFreeze: the new mutable
+                    // container must land in the lowerer-assigned
+                    // region.
+                    let region_id = self.read_u16(bc, &mut ip);
+                    crate::with_alloc_region!(region_id => {
+                        types::handle_intr_thaw(self);
+                    });
                 }
                 Instruction::Identical => {
                     types::handle_identical(self);
