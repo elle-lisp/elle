@@ -107,7 +107,7 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 | `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `struct?`, `bytes?`, `mutable?`, `type-of` |
 | `cell.rs` | `box`, `unbox`, `rebox`, `box?` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
-| `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
+| `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` (see "Channel select wake protocol" below for the `chan/select` Lisp wrapper) |
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `emit`, `fiber/status`, `fiber/value` |
 | `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `parameters.rs` | `make-parameter`, `parameter?` |
@@ -469,6 +469,58 @@ converts them to `:error` with kind `"signal-violation"`.
 3. **Line and col are integers.** `:line` is the 1-based line number; `:col` is the 0-based column offset within the line.
 4. **Result is an immutable struct.** The returned value is a `{...}` struct, not a mutable `@{...}`.
 
+## Channel select wake protocol
+
+**Location:** `src/primitives/chan.rs`, with the public wrapper in `stdlib.lisp`.
+
+`chan/select` cannot use crossbeam's blocking `Select::select_timeout`: that
+parks the OS thread the fiber scheduler runs on, starving any `ev/spawn`'d
+producer fiber that would have unblocked the select. Instead the chan
+primitives carry a per-channel waker layer on top of crossbeam:
+
+- Each channel's sender and receiver halves share an `Arc<WakeList>`
+  containing `(Mutex<Vec<RawFd>>, AtomicBool)`. The atomic is a fast-path
+  skip: if no fiber is selecting, `chan/send` does not even acquire the
+  mutex.
+- `chan/wait-ready` allocates a wake fd (`eventfd(2)` on Linux, `pipe2(2)`
+  on other Unix) and registers `poll_fd` in every candidate receiver's
+  `WakeList`. The fd is owned by a `ChanSelectGuard`; its `Drop`
+  deregisters, signals `wake_fd` (so any worker thread parked in
+  `poll(2)` returns before we close the fd), and closes the fd(s).
+- `chan/send` (and `chan/close{,recv}`), after a successful `try_send`,
+  loads the atomic; if non-zero, locks and `write(fd, &1u64)` to every
+  registered wake fd. Cross-thread sends from `sys/spawn` Just Work —
+  the write is thread-safe and the scheduler thread observes POLLIN via
+  the same `IORING_OP_POLL_ADD` (or thread-pool `poll(2)`) it uses for
+  `ev/poll-fd`.
+
+Three primitives back the Lisp `chan/select`:
+
+- `chan/try-select rxs` — non-blocking `Select::try_select`. Returns
+  `[i v]`, `[:empty]`, or `[:disconnected]`. Errors if any receiver was
+  explicitly closed via `chan/close-recv`.
+- `chan/wait-ready rxs &opt timeout-ms` — yielding park. Allocates the
+  wake fd, registers, does a post-register `try_select` to close the
+  cross-thread race between the wrapper's first `chan/try-select` and
+  the register. Returns `[:ready i v]` (post-register fast hit, no
+  yield), `[:disconnected]`, or yields `SIG_YIELD|SIG_IO` carrying an
+  `IoOp::ChanSelectPark(ChanSelectGuardCell)`. The IoRequest's timeout
+  flows through to a linked `LinkTimeout` SQE on uring or to the
+  thread-pool `poll(2)` timeout.
+- `chan/select` (Lisp wrapper in `stdlib.lisp`) — runs `chan/try-select`
+  for the fast path, then loops: compute the remaining deadline,
+  short-circuit if exhausted, call `chan/wait-ready`, match its result
+  (`:ready` → return `[i v]`; `:disconnected` → return `[:disconnected]`;
+  nil → `chan/try-select` and re-park on `:empty`).
+
+Cancellation: if the fiber is aborted while parked, the scheduler
+removes the `PendingOp::ChanSelectPark` entry, which drops the guard,
+which closes the fd and deregisters. No leak.
+
+The same plumbing made `submit_uring_poll_add` accept an
+`Option<Duration>` (linked `LinkTimeout` SQE) — `ev/poll-fd`'s timeout
+was previously dropped on uring; that path now honors it.
+
 ## Stream Primitive Timeout Support
 
 **Location:** `src/primitives/stream.rs`
@@ -497,7 +549,7 @@ Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is 
 | `loading.rs` | ~330 | FFI library loading, symbol lookup, signatures, callbacks |
 | `calling.rs` | ~95 | FFI function call dispatch |
 | `memory.rs` | ~530 | FFI memory management, typed access, type construction |
-| `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
+| `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/try-select`, `chan/wait-ready` |
 | `format.rs` | ~525 | `string/format` entry point, template parsing, value formatting, mode dispatch |
 | `formatspec.rs` | ~202 | `FormatSpec` type, `Align`, `FormatType`, `parse_format_spec`, `spec_type_char` |
 | `net.rs` | ~683 | TCP and UDP primitives, shared helpers, PRIMITIVES array, tests |

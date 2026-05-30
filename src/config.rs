@@ -272,7 +272,13 @@ pub mod trace_bits {
     /// process-global mirror `GLOBAL_TRACE_BITS` (below) — threadpool
     /// worker threads and other off-VM call sites have no VM reference.
     pub const POSIX: u32 = 1 << 17;
-    pub const ALL: u32 = (1 << 18) - 1;
+    /// Channel wake protocol (`chan/wait-ready` register/deregister,
+    /// `chan/send` wake_all, wake-fd write/close).  Read both from
+    /// per-VM `RuntimeConfig` and from `GLOBAL_TRACE_BITS` — `chan/send`
+    /// can fire from any thread (including `sys/spawn`'d OS threads)
+    /// which has no `&VM` reference.
+    pub const CHAN: u32 = 1 << 18;
+    pub const ALL: u32 = (1 << 19) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -295,6 +301,7 @@ pub mod trace_bits {
             "escape" => ESCAPE,
             "bytecode" => BYTECODE,
             "posix" => POSIX,
+            "chan" => CHAN,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }

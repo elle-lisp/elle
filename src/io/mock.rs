@@ -128,6 +128,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::SigNext => "sig-next",
             IoOp::Close => "close",
             IoOp::PollFd { .. } => "poll-fd",
+            IoOp::ChanSelectPark(_) => "chan-select-park",
         };
         inner.log.push(op_name.to_string());
 
@@ -209,6 +210,9 @@ impl crate::io::IoBackend for MockBackend {
                 IoOp::WatchNext => Err(error_val("io-error", "mock: watch not supported")),
                 IoOp::SigNext => Err(error_val("io-error", "mock: sig-next not supported")),
                 IoOp::PollFd { .. } => Err(error_val("io-error", "mock: poll-fd not supported")),
+                IoOp::ChanSelectPark(_) => {
+                    Err(error_val("io-error", "mock: chan/wait-ready not supported"))
+                }
                 // Close completes synchronously in submit
                 IoOp::Close => Ok(Value::NIL),
             }

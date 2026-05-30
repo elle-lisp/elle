@@ -251,6 +251,13 @@ pub enum IoOp {
         fd: std::os::unix::io::RawFd,
         events: u32,
     },
+    /// Park a fiber on a `chan/wait-ready` wake fd until any sender
+    /// signals it or `timeout` (carried in `IoRequest.timeout`) elapses.
+    /// Portless.  The guard owns the eventfd / pipe2 fds and the Arc
+    /// clones of each receiver's `WakeList`; its Drop deregisters and
+    /// closes when the op completes, is cancelled, or never makes it
+    /// past submit.
+    ChanSelectPark(crate::primitives::chan::ChanSelectGuardCell),
 }
 
 /// Socket options for connect operations.

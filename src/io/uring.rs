@@ -483,22 +483,47 @@ pub(super) fn submit_uring_sleep(
 /// Submit IORING_OP_POLL_ADD to wait for a raw fd to become ready.
 ///
 /// The CQE result contains the revents mask (which events are ready).
-/// Used by `ev/poll-fd` for waiting on display connections, eventfds, etc.
+/// Used by `ev/poll-fd` for waiting on display connections, eventfds, etc.,
+/// and by `chan/wait-ready` to park on a chan-select wake fd.
+///
+/// `timeout` plumbs through as a linked LinkTimeout SQE (same pattern
+/// as Accept/Connect): when the timeout fires first, the kernel
+/// cancels the poll and the CQE returns `-ECANCELED` (errno 125),
+/// which downstream completion handlers map to a timeout result.
 pub(super) fn submit_uring_poll_add(
     ring: &mut io_uring::IoUring,
     id: u64,
     fd: std::os::unix::io::RawFd,
     events: u32,
+    timeout: Option<Duration>,
 ) -> Result<(), String> {
     use io_uring::opcode;
 
-    let sqe = opcode::PollAdd::new(io_uring::types::Fd(fd), events)
+    let poll_sqe = opcode::PollAdd::new(io_uring::types::Fd(fd), events)
         .build()
         .user_data(id);
+    let poll_sqe = if timeout.is_some() {
+        poll_sqe.flags(io_uring::squeue::Flags::IO_LINK)
+    } else {
+        poll_sqe
+    };
     unsafe {
         ring.submission()
-            .push(&sqe)
+            .push(&poll_sqe)
             .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+    }
+    if let Some(dur) = timeout {
+        let ts = io_uring::types::Timespec::new()
+            .sec(dur.as_secs())
+            .nsec(dur.subsec_nanos());
+        let timeout_sqe = opcode::LinkTimeout::new(&ts)
+            .build()
+            .user_data(id | TIMEOUT_USER_DATA_TAG);
+        unsafe {
+            ring.submission()
+                .push(&timeout_sqe)
+                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+        }
     }
     ring.submit()
         .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;

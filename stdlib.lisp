@@ -1218,7 +1218,7 @@
         scheduler-killed @||  # set of fibers the scheduler aborted during shutdown
         shutdown-req @[nil]  # nil = running, integer = shutdown requested with timeout
         park-queues @{}
-        forwarded-pending @{}]  # id → {:queue @[] :wake-box box} (process scheduler I/O)
+        forwarded-pending @{}]
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
       (del select-sets waiter))
@@ -1432,9 +1432,6 @@
       "Wait for I/O completions and route fibers."
       (let [completions (io/wait backend timeout-ms)
             @has-forwarded false]
-        # Process all completions — push forwarded ones to queue without
-        # waking the process scheduler yet (it would run and miss later
-        # completions in this batch).
         (each c in completions
           (let* [id (get c :id)
                  fiber (get pending id)]
@@ -1454,15 +1451,13 @@
                   (del forwarded-pending id)
                   (push fwd:queue c)
                   (rebox fwd:wake-box (+ (unbox fwd:wake-box) 1))
-                  (assign has-forwarded true))))))
-        # After all completions are queued, wake parked process schedulers
+                  (assign has-forwarded true))))))  # After all completions are queued, wake parked process schedulers
         (when has-forwarded
           (let [q (get park-queues :io-forward-wakeup)]
             (when (and q (> (length q) 0))
               (let [parked (get q 0)]
                 (remove q 0)
-                (when (= (length q) 0)
-                  (del park-queues :io-forward-wakeup))
+                (when (= (length q) 0) (del park-queues :io-forward-wakeup))
                 (fiber/resume parked nil)
                 (handle-fiber-after-resume parked)))))))
 
@@ -1486,7 +1481,8 @@
       # fibers blocked on (chan:take), sync locks, etc. never get cleaned
       # up and `step` never sees park-queues empty.
       (let [snapshot (pairs park-queues)]
-        (each [k _] in snapshot (del park-queues k))
+        (each [k _] in snapshot
+          (del park-queues k))
         (each [_ q] in snapshot
           (each fiber in q
             (add scheduler-killed fiber)
@@ -1549,8 +1545,7 @@
         # at teardown time, so re-raising would surface our own signal as a
         # user error.
         (each [fiber status] in (pairs completed)
-          (when (and (= status :error)
-                     (not (contains? joined fiber))
+          (when (and (= status :error) (not (contains? joined fiber))
                      (not (contains? scheduler-killed fiber)))
             (error (fiber/value fiber)))))
      :shutdown  # shutdown-fn: signal shutdown
@@ -1772,6 +1767,63 @@
               (assign n (+ n 1))))))  # Collect in input order
       (map (fn [i] (get results i)) (range 0 n)))))
 
+## ── Channel select ──────────────────────────────────────────────────
+
+(defn chan/select [rxs &opt timeout-ms]
+  "Wait for one receiver in rxs to have a message ready, or for
+   timeout-ms milliseconds to elapse.  Returns [index msg] when a
+   receiver has a value, [:timeout] on timeout, or [:disconnected] if
+   the first ready receiver was found disconnected.
+
+   Cooperatively yields to the scheduler: the OS thread is not parked,
+   so any fiber producing on rxs (or an OS thread sending via sys/spawn
+   + chan/send) continues to run.  Without timeout-ms, waits forever.
+
+   Builds on chan/try-select (non-blocking poll) and chan/wait-ready
+   (yielding park on a wake fd).  After each wake, re-parks with the
+   remaining timeout so a spurious wake — e.g. another fiber stole the
+   value via chan/recv between the send and our re-poll — does not
+   collapse the deadline.  Skips the eventfd allocation entirely if the
+   deadline is already exhausted on entry to a loop iteration."
+  (let [first (chan/try-select rxs)]
+    (match (get first 0)
+      :empty
+        (let [deadline (when timeout-ms
+                         (+ (clock/monotonic) (/ timeout-ms 1000.0)))]
+          (def @result nil)
+          (forever
+            (let [remaining-ms (when deadline
+                                 (int (* (- deadline (clock/monotonic)) 1000)))]
+              (if (and remaining-ms (<= remaining-ms 0))  ## Deadline exhausted — skip the wake fd allocation.
+                (begin
+                  (assign result [:timeout])
+                  (break))
+                (let [wr (chan/wait-ready rxs remaining-ms)  ## chan/wait-ready returns nil after parking,
+                      ## [:ready i v] if a value was found by the
+                      ## post-register re-check (no yield), or
+                      ## [:disconnected] if the re-check observed a
+                      ## disconnect.
+                      tag (when (array? wr) (get wr 0))]
+                  (match tag
+                    :ready
+                      (begin
+                        (assign result [(get wr 1) (get wr 2)])
+                        (break))
+                    :disconnected
+                      (begin
+                        (assign result [:disconnected])
+                        (break))
+                    _  ## Woken or timed out at the scheduler — pick a
+                    ## ready receiver or loop again.
+                    (let [r (chan/try-select rxs)]
+                      (match (get r 0)
+                        :empty nil  ## spurious wake — re-park
+                        _ (begin
+                            (assign result r)
+                            (break)))))))))
+          result)
+      _ first)))
+
 (defn inc [x]
   "Return x + 1."
   (+ x 1))
@@ -1991,6 +2043,7 @@
    :ev/abort ev/abort
    :ev/as-completed ev/as-completed
    :ev/select ev/select
+   :chan/select chan/select
    :ev/race ev/race
    :ev/timeout ev/timeout
    :ev/scope ev/scope

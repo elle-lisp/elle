@@ -71,6 +71,15 @@ pub(crate) enum PendingOp {
     },
     /// Poll a raw fd for readiness. Portless.
     PollFd { buffer_handle: BufferHandle },
+    /// Park a `chan/wait-ready` selector on its wake fd.  Portless.
+    /// The guard owns the wake fd(s) and the wake-list registrations;
+    /// dropping this PendingOp (completion, cancellation, or backend
+    /// teardown) closes the fd(s) and deregisters automatically.
+    ChanSelectPark {
+        buffer_handle: BufferHandle,
+        #[allow(dead_code)] // kept alive for its Drop side effect
+        guard: crate::primitives::chan::ChanSelectGuard,
+    },
 }
 
 impl PendingOp {
@@ -86,6 +95,7 @@ impl PendingOp {
             PendingOp::WatchNext { buffer_handle, .. } => *buffer_handle,
             PendingOp::SigNext { buffer_handle, .. } => *buffer_handle,
             PendingOp::PollFd { buffer_handle, .. } => *buffer_handle,
+            PendingOp::ChanSelectPark { buffer_handle, .. } => *buffer_handle,
         }
     }
 
@@ -101,6 +111,7 @@ impl PendingOp {
             PendingOp::WatchNext { buffer_handle, .. } => buffer_handle,
             PendingOp::SigNext { buffer_handle, .. } => buffer_handle,
             PendingOp::PollFd { buffer_handle, .. } => buffer_handle,
+            PendingOp::ChanSelectPark { buffer_handle, .. } => buffer_handle,
         }
     }
 }
