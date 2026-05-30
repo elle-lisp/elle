@@ -76,13 +76,17 @@
 ## before we ask `(jit? f)`. If IntrStringPush is unimplemented, the worker
 ## panics — no rejection is recorded, but the cache stays empty, so
 ## `(jit? f)` returns false. This is the real counterfactual gate.
-(jit/rejections)
-
-(assert (not (has-rejection? "IntrStringPush"))
-        "IntrStringPush is JIT-supported (not in rejections list)")
-(assert (jit? push-mut-hot)
-        "push-mut-hot was JIT-compiled (mutable @string-push path)")
-(assert (jit? push-returns-same?)
-        "push-returns-same? was JIT-compiled (identity check path)")
-(assert (jit? push-imm-hot)
-        "push-imm-hot was JIT-compiled (immutable string-push path)")
+## These compilation checks are only meaningful when a JIT policy is
+## active. Under --jit=off and --checked-intrinsics (which forces JIT
+## off) nothing compiles, so (jit? f) is always false; the behavioral
+## %string-push assertions above already cover those modes.
+(when (not (= (vm/config :jit) :off))
+  (jit/rejections)
+  (assert (not (has-rejection? "IntrStringPush"))
+          "IntrStringPush is JIT-supported (not in rejections list)")
+  (assert (jit? push-mut-hot)
+          "push-mut-hot was JIT-compiled (mutable @string-push path)")
+  (assert (jit? push-returns-same?)
+          "push-returns-same? was JIT-compiled (identity check path)")
+  (assert (jit? push-imm-hot)
+          "push-imm-hot was JIT-compiled (immutable string-push path)"))
