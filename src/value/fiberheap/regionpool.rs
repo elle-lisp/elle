@@ -146,7 +146,11 @@ impl RegionPool {
         debug_assert_eq!(
             unsafe { region_of_page_ptr(ptr as *const (), self.pages.last().unwrap().page.len(),) },
             self.region_id,
-            "alloc_obj: page header region mismatch",
+            "alloc_obj: page header region mismatch (region {}, {} pages, {} bytes — \
+             run with --trace=pages to see the growth)",
+            self.region_id,
+            self.pages.len(),
+            self.allocated_bytes(),
         );
         if drop {
             self.dtors.push(ptr);
@@ -384,7 +388,19 @@ impl RegionPool {
     /// Add a new page from the pool.
     fn add_page(&mut self, pool: &mut PagePool) {
         let page = pool.claim(self.next_page_size);
+        let claimed = page.len();
         self.pages.push(RegionPage::new(page, self.region_id));
+        if crate::config::global_trace_bit_enabled(crate::config::trace_bits::PAGES) {
+            eprintln!(
+                "[trace:pages] add_page region={} requested={} claimed={} page_count={} total_bytes={} obj_count={}",
+                self.region_id,
+                self.next_page_size,
+                claimed,
+                self.pages.len(),
+                self.allocated_bytes(),
+                self.obj_count,
+            );
+        }
         // Geometric growth: double for next claim.
         self.next_page_size = self.next_page_size.saturating_mul(2);
     }

@@ -189,7 +189,7 @@ impl MlirPolicy {
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
     "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix", "chan", "rc", "regions",
-    "anf", // Future: accepted without error
+    "anf", "pages", // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
 
@@ -270,7 +270,8 @@ pub mod trace_bits {
     pub const RC: u32 = 1 << 19;
     pub const REGIONS: u32 = 1 << 20;
     pub const ANF: u32 = 1 << 21;
-    pub const ALL: u32 = (1 << 22) - 1;
+    pub const PAGES: u32 = 1 << 22;
+    pub const ALL: u32 = (1 << 23) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -297,6 +298,7 @@ pub mod trace_bits {
             "rc" => RC,
             "regions" => REGIONS,
             "anf" => ANF,
+            "pages" => PAGES,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }
