@@ -7,9 +7,15 @@
 ##
 ## No sync dependency — uses bare ev/futex-wait and ev/futex-wake.
 ##
+## Futex keys come from `(gensym)`, a process-global primitive counter,
+## NOT a module-local counter.  `(import ...)` returns a fresh module
+## instance each call, so a module-local counter would restart at 0 in
+## every importer and hand out colliding keys — and since the scheduler's
+## park-queue is process-global (one key -> one wait list), a wake on one
+## channel/flow-control futex would unpark a waiter on another instance's
+## (same elle bug class as the lib/sync futex-key collision, #861).
+##
 ## Exports: {:make-stream :make-channel :transition :make-flow-control :test}
-
-(def @*chan-id* 0)
 
 (fn [&named frame]
 
@@ -18,8 +24,11 @@
   ## single-threaded cooperative runtime.
 
   (defn make-channel []
-    (assign *chan-id* (inc *chan-id*))
-    (let [key *chan-id* bx (box 0) buf @[] @closed false @waiting false]
+    (let [key (gensym)
+          bx (box 0)
+          buf @[]
+          @closed false
+          @waiting false]
       {:put (fn [val]
               (push buf val)
               (when waiting
@@ -30,8 +39,7 @@
                (while (and (not closed) (= (length buf) 0))
                  (assign waiting true)
                  (let [gen (unbox bx)]
-                   (when (= (length buf) 0)
-                     (ev/futex-wait key bx gen)))
+                   (when (= (length buf) 0) (ev/futex-wait key bx gen)))
                  (assign waiting false))
                (when (> (length buf) 0)
                  (let [val (get buf 0)]
@@ -99,8 +107,8 @@
   ## ── Flow control ───────────────────────────────────────────────────────
 
   (defn make-flow-control [initial-window]
-    (assign *chan-id* (inc *chan-id*))
-    (let [key *chan-id* bx (box 0)]
+    (let [key (gensym)
+          bx (box 0)]
       @{:send-window initial-window
         :recv-window initial-window
         :futex-key key
@@ -151,7 +159,8 @@
       (stream-transition s :recv-headers)
       (assert (= s:state :open) "stream server: idle->open")
       (stream-transition s :recv-end-stream)
-      (assert (= s:state :half-closed-remote) "stream server: open->half-closed-remote")
+      (assert (= s:state :half-closed-remote)
+              "stream server: open->half-closed-remote")
       (stream-transition s :send-end-stream)
       (assert (= s:state :closed) "stream server: half-closed-remote->closed"))
 
