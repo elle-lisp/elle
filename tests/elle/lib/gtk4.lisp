@@ -91,6 +91,18 @@
 
 (println "gtk4: json-escape OK")
 
+# ── exported surface (pure — no display) ─────────────────────────
+# on-key-release pairs with on-key for hold-to-act keys (push-to-talk): the
+# console must see the key go UP to stop recording. Guard the export so a
+# refactor that drops it fails here, not silently at the call site.
+
+(println "gtk4: testing exported handlers")
+
+(assert (not (nil? gtk:on-key)) "on-key exported")
+(assert (not (nil? gtk:on-key-release)) "on-key-release exported")
+
+(println "gtk4: exported handlers OK")
+
 # ── Integration tests (require display) ──────────────────────────
 
 (def [live-ok win]
@@ -176,6 +188,17 @@
 (gtk:set win :spnr false)
 
 (println "gtk4: set/get OK")
+
+# ── key controllers ──────────────────────────────────────────────
+# Attaching both press and release controllers to a live widget must succeed
+# (the callbacks are registered, not fired here — firing needs real input).
+
+(println "gtk4: testing key controllers")
+
+(let [[ok? _] (protect (gtk:on-key win :inp (fn [k c s] 0)))]
+  (assert ok? "on-key attaches without error"))
+(let [[ok? _] (protect (gtk:on-key-release win :inp (fn [k c s] nil)))]
+  (assert ok? "on-key-release attaches without error"))
 
 # ── poll ─────────────────────────────────────────────────────────
 

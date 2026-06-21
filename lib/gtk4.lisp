@@ -363,8 +363,14 @@
     (when-let [wgt (handle:widgets id)] (w:add-scroll handle wgt:ptr handler)))
 
   (defn gtk4/on-key (handle id handler)
-    "Add a key handler to a widget. handler: (fn [keyval keycode state]) → int."
+    "Add a key-press handler to a widget. handler: (fn [keyval keycode state]) → int."
     (when-let [wgt (handle:widgets id)] (w:add-key handle wgt:ptr handler)))
+
+  (defn gtk4/on-key-release (handle id handler)
+    "Add a key-release handler to a widget. handler: (fn [keyval keycode state]);
+     return ignored. Pairs with on-key for hold-to-act keys (push-to-talk)."
+    (when-let [wgt (handle:widgets id)]
+              (w:add-key-release handle wgt:ptr handler)))
 
   # ── Export ────────────────────────────────────────────────────────
 
@@ -388,6 +394,7 @@
    :on-click gtk4/on-click
    :on-scroll gtk4/on-scroll
    :on-key gtk4/on-key
+   :on-key-release gtk4/on-key-release
    :eval gtk4/eval
    :send gtk4/send
    :load-html gtk4/load-html
