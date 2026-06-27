@@ -35,8 +35,10 @@ Does NOT:
 | `CallbackStore` | `callback.rs` | Storage for active callbacks, keyed by code pointer |
 | `CallbackData` | `callback.rs` | Closure + signature captured by a trampoline |
 | `ActiveCallback` | `callback.rs` | Keeps a libffi closure alive; holds code pointer |
-| `load_library` | `loader.rs` | Load a `.so` file via libloading |
+| `load_library` | `loader.rs` | Load a shared library, trying host-native names |
 | `load_self` | `loader.rs` | Load the current process (dlopen(NULL)) |
+| `library_candidates` | `loader.rs` | Rewrite a Linux `.so` spec to host-native names |
+| `current_dl_os` | `loader.rs` | Host OS family (`DlOs`) for naming |
 | `LibraryHandle` | `loader.rs` | Handle to a loaded shared library |
 
 ## Data flow
@@ -44,7 +46,7 @@ Does NOT:
 ```
 Elle code
   │
-  ├─ ffi/native "libm.so.6"  →  loader::load_library()  →  LibraryHandle  →  FFISubsystem
+  ├─ ffi/native "libm.so.6"  →  loader::load_library()  →  library_candidates() (host-native names)  →  LibraryHandle  →  FFISubsystem
   ├─ ffi/lookup lib "sqrt"    →  LibraryHandle::get_symbol()  →  Value::pointer(addr)
   ├─ ffi/signature :double [:double]  →  Signature  →  Value::ffi_signature()
   │                                                      └─ HeapObject::FFISignature(sig, RefCell<Option<Cif>>)
@@ -90,7 +92,7 @@ Elle code
 | `from_c.rs` | 99 | `read_value_from_buffer` — C → Value unmarshalling |
 | `call.rs` | 221 | `prepare_cif`, `ffi_call` — CIF preparation and C function dispatch |
 | `callback.rs` | 556 | `create_callback`, `free_callback`, `CallbackStore`, `ActiveCallback`, `trampoline_callback`, thread-local error flag |
-| `loader.rs` | 192 | `load_library`, `load_self`, `LibraryHandle` — platform-guarded (Linux only) |
+| `loader.rs` | ~290 | `load_library`, `load_self`, `library_candidates`, `LibraryHandle` — Unix dlopen, Linux→host name rewriting |
 | `primitives/mod.rs` | 7 | Re-exports from `primitives/context.rs` |
 | `primitives/context.rs` | 13 | Re-exports from `crate::context`, `register_ffi_primitives` (no-op) |
 
@@ -193,8 +195,11 @@ Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
    Elle arrays map to C structs (positional fields) and C arrays (uniform
    elements). Field count must match exactly.
 
-9. **Platform-guarded loading.** `loader.rs` uses `#[cfg(target_os = "linux")]`
-   guards. Non-Linux platforms get stub implementations that return errors.
+9. **Platform-guarded loading.** `loader.rs` uses `#[cfg(unix)]` guards
+   (Linux, macOS, BSD); non-Unix platforms get stub implementations that
+   return errors. Library specs are written Linux-style and rewritten to the
+   host's native form (`.dylib`/`.dll`) by `library_candidates` before the
+   `dlopen`, so a single `(ffi/native "libfoo.so")` call is portable.
 
 ## Dependents
 

@@ -46,6 +46,38 @@ This document describes the implemented system.
 ```
 
 
+## Loading Libraries
+
+`ffi/native` loads a shared library and returns a handle for `ffi/lookup`.
+Pass `nil` to load the current process (`dlopen(NULL)`), which exposes libc
+and anything statically linked into the binary.
+
+Library names are written **Linux-style** (`libfoo.so`, `libfoo.so.2`) and
+resolved to the host's native form at load time, so a single call is portable:
+
+| Spec written in Elle | Linux           | macOS                | Windows   |
+|----------------------|-----------------|----------------------|-----------|
+| `"libz.so"`          | `libz.so`       | `libz.dylib`         | `z.dll`   |
+| `"libcairo.so.2"`    | `libcairo.so.2` | `libcairo.2.dylib`   | `cairo.dll` |
+
+Note that the soname version moves: Linux appends it after `.so`
+(`libz.so.1`), macOS embeds it before the extension (`libz.1.dylib`). The
+loader tries the host-native name first and falls back through the
+unversioned form to the original spec, so existing `.so` names keep working
+on Linux while the same code loads `.dylib`/`.dll` elsewhere. The name
+rewriting lives in `library_candidates` (`src/ffi/loader.rs`); if you already
+hold a host-native name (a full path to a `.dylib`, say), pass it directly and
+it is used unchanged.
+
+```lisp
+(def self (ffi/native nil))         # current process, all platforms
+
+# "libz.so" resolves to libz.dylib on macOS and z.dll on Windows. Guarded
+# with protect here because libz may not be installed in every environment.
+(protect (ffi/native "libz.so"))
+```
+
+
 ## Type Descriptors
 
 C types are described by keywords at the Elle level. The `TypeDesc` enum in
@@ -467,6 +499,9 @@ that's kept alive alongside the buffer.
 
 5. **Platform-guarded loading.** Library loading requires Unix
    (`#[cfg(unix)]` — Linux, macOS, BSD). Non-Unix platforms get error stubs.
+   Linux-style `.so` specs are rewritten to the host's native form
+   (`.dylib`/`.dll`) by `library_candidates` before loading (see
+   [Loading Libraries](#loading-libraries)), so the same call is portable.
 
 6. **No automatic memory management.** `ffi/malloc` memory must be
    explicitly freed with `ffi/free`. Callbacks must be freed with
