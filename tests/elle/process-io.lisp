@@ -30,25 +30,24 @@
 (println "  2. process:self works: ok")
 
 ## ── 3. ev/spawn inside process:start creates a sub-fiber ──────────
-## DIAGNOSTIC INSTRUMENTATION (temporary): step 3 hangs on macOS but
-## passes on x86-Linux and arm64-Linux (verified under qemu). debug/trace
-## writes SYNCHRONOUSLY to stderr (it is not the async println path), so
-## the last [TRACE] step3-* line emitted before the SIGTERM timeout marks
-## exactly where Darwin wedges. Revert once the stall point is known.
+## DIAGNOSTIC BISECTION (temporary): step 3 is a macOS-only Heisenbug —
+## it hangs un-instrumented but passes when synchronous debug/trace
+## markers are interleaved (their write(2) syscalls perturb scheduling
+## enough to close a lost-wakeup race window). This variant keeps a
+## SINGLE sync marker, placed AFTER process:start returns and right
+## before the trailing async println, with NOTHING inside the process.
+##   - if macOS now PASSES → the race is the trailing async println write
+##   - if macOS still HANGS → the race is inside process:start (sub-fiber
+##     scheduling); the inside markers were the load-bearing ones.
+## Revert once localized.
 
-(debug/trace "step3-A-before-start" nil)
 (def @spawn-ran false)
 (process:start (fn []
-                 (debug/trace "step3-B-inside-closure" nil)
-                 (ev/spawn (fn []
-                             (debug/trace "step3-C-inside-subfiber" nil)
-                             (assign spawn-ran true)))
-                 (debug/trace "step3-D-after-spawn-before-self" nil)
-                 (process:self)  # yield to let scheduler pump sub-fibers
-                 (debug/trace "step3-E-after-self" nil)))
-(debug/trace "step3-F-start-returned" nil)
+                 (ev/spawn (fn [] (assign spawn-ran true)))
+                 (process:self)))
+# yield to let scheduler pump sub-fibers
 (assert spawn-ran "ev/spawn sub-fiber ran")
-(debug/trace "step3-G-after-assert-before-println" nil)
+(debug/trace "step3-single-marker-before-println" nil)
 (println "  3. ev/spawn in process runs sub-fiber: ok")
 
 ## ── 4. Sub-fiber can do I/O ───────────────────────────────────────
