@@ -33,12 +33,12 @@
 ## DIAGNOSTIC BISECTION (temporary): step 3 is a macOS-only Heisenbug —
 ## it hangs un-instrumented but passes when synchronous debug/trace
 ## markers are interleaved (their write(2) syscalls perturb scheduling
-## enough to close a lost-wakeup race window). This variant keeps a
-## SINGLE sync marker, placed AFTER process:start returns and right
-## before the trailing async println, with NOTHING inside the process.
-##   - if macOS now PASSES → the race is the trailing async println write
-##   - if macOS still HANGS → the race is inside process:start (sub-fiber
-##     scheduling); the inside markers were the load-bearing ones.
+## enough to close a lost-wakeup race window). This variant removes the
+## last remaining sync marker so the step runs fully un-instrumented.
+##   - if macOS now PASSES → the marker was not load-bearing; the earlier
+##     red was something else (flake or unrelated).
+##   - if macOS now HANGS → the marker was load-bearing; the race is real
+##     and the trace was masking it.
 ## Revert once localized.
 
 (def @spawn-ran false)
@@ -47,7 +47,6 @@
                  (process:self)))
 # yield to let scheduler pump sub-fibers
 (assert spawn-ran "ev/spawn sub-fiber ran")
-(debug/trace "step3-single-marker-before-println" nil)
 (println "  3. ev/spawn in process runs sub-fiber: ok")
 
 ## ── 4. Sub-fiber can do I/O ───────────────────────────────────────
