@@ -297,6 +297,10 @@ pub(super) fn format_let(
 
     let head = format_annotated(&children[0], source, config);
     let bindings_doc = format_bindings(&children[1], source, config);
+    // format_bindings works on the vector's elements, so an inline comment
+    // trailing the bindings vector itself (after `]`) must be emitted here
+    // — otherwise it is dropped.
+    let bindings_trivia = format_trailing_trivia(&children[1]);
 
     // Header: (let [...])
     let header = Doc::concat([head, Doc::text(" "), bindings_doc]);
@@ -306,7 +310,7 @@ pub(super) fn format_let(
 
     Doc::align(Doc::concat([
         Doc::text("("),
-        Doc::concat([header, Doc::HardBreak, body]).nest(1),
+        Doc::concat([header, bindings_trivia, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
     ]))
 }
@@ -636,11 +640,23 @@ pub(super) fn format_parameterize(
         ])
     };
 
+    // Emit the bindings list's own trailing inline comment (built from its
+    // children above, which skips the node's trailing trivia).
+    let bindings_trivia = format_trailing_trivia(bindings_node);
+
     let body = format_body(&children[2..], source, config);
 
     Doc::align(Doc::concat([
         Doc::text("("),
-        Doc::concat([head, Doc::text(" "), bindings, Doc::HardBreak, body]).nest(1),
+        Doc::concat([
+            head,
+            Doc::text(" "),
+            bindings,
+            bindings_trivia,
+            Doc::HardBreak,
+            body,
+        ])
+        .nest(1),
         Doc::text(")"),
     ]))
 }
