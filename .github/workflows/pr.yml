@@ -254,6 +254,24 @@ jobs:
         run: brew install parallel coreutils
       - name: make elle
         run: make elle
+      - name: Diagnose process-io.lisp hang (ELLE_TRACE=io)
+        # TEMPORARY (remove with the io_trace instrumentation once test 18 is
+        # fixed): the macOS smoke wedges in tests/elle/process-io.lisp on the
+        # threadpool backend (no io_uring). ELLE_TRACE=io turns on [trace:io]
+        # (raw write(2), survives the timeout's SIGTERM); the last
+        # `tp-submit` / `close … shutdown` with no matching `tp-complete`
+        # names the stuck op and fd. Kept untraced in `make smoke` below so
+        # the two runs give a differential if tracing perturbs the timing.
+        # See src/io/AGENTS.md "Diagnostics".
+        continue-on-error: true
+        run: |
+          set +e
+          ELLE_TRACE=io timeout 40s ./target/release/elle \
+            --checked-intrinsics --jit=off --mlir=off \
+            tests/elle/process-io.lisp > pio.out 2>&1
+          echo "process-io.lisp exit=$? (124 = timeout/hang)"
+          echo "==== last 80 lines ([trace:io] to the wedge) ===="
+          tail -80 pio.out
       - name: make doctest
         run: make doctest
       - name: make smoke
