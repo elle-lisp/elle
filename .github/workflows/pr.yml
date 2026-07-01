@@ -254,24 +254,46 @@ jobs:
         run: brew install parallel coreutils
       - name: make elle
         run: make elle
-      - name: Diagnose process-io.lisp hang (ELLE_TRACE=io)
+      - name: Diagnose process-io.lisp hang (timing loop)
         # TEMPORARY (remove with the io_trace instrumentation once test 18 is
-        # fixed): the macOS smoke wedges in tests/elle/process-io.lisp on the
-        # threadpool backend (no io_uring). ELLE_TRACE=io turns on [trace:io]
-        # (raw write(2), survives the timeout's SIGTERM); the last
-        # `tp-submit` / `close … shutdown` with no matching `tp-complete`
-        # names the stuck op and fd. Kept untraced in `make smoke` below so
-        # the two runs give a differential if tracing perturbs the timing.
-        # See src/io/AGENTS.md "Diagnostics".
+        # fixed): the macOS smoke wedges in tests/elle/process-io.lisp (test
+        # 18) on the threadpool backend. It is a TIGHT TIMING RACE — a single
+        # ELLE_TRACE=io run passed, because the per-op write(2) widens the
+        # loser's window enough to close the race. So probe the timing
+        # dependence directly: run untraced N times to measure the hang rate,
+        # then traced N times to try to catch a hung run with its [trace:io]
+        # tail. The last `tp-submit`/`close … shutdown` with no matching
+        # `tp-complete` in a hung trace names the stuck op and fd.
         continue-on-error: true
         run: |
           set +e
-          ELLE_TRACE=io timeout 40s ./target/release/elle \
-            --checked-intrinsics --jit=off --mlir=off \
-            tests/elle/process-io.lisp > pio.out 2>&1
-          echo "process-io.lisp exit=$? (124 = timeout/hang)"
-          echo "==== last 80 lines ([trace:io] to the wedge) ===="
-          tail -80 pio.out
+          BIN=./target/release/elle
+          FLAGS="--checked-intrinsics --jit=off --mlir=off"
+          T=tests/elle/process-io.lisp
+          echo "==== untraced: hang rate ===="
+          uh=0
+          for i in $(seq 1 8); do
+            timeout 30s $BIN $FLAGS $T >/dev/null 2>&1
+            [ $? -eq 124 ] && uh=$((uh+1)) && echo "  untraced run $i: HANG"
+          done
+          echo "untraced hangs: $uh/8"
+          echo "==== traced: try to catch a hung run ===="
+          th=0
+          for i in $(seq 1 8); do
+            ELLE_TRACE=io timeout 30s $BIN $FLAGS $T >run.out 2>&1
+            if [ $? -eq 124 ]; then
+              th=$((th+1)); echo "  traced run $i: HANG (captured)"
+              cp run.out hung-trace.txt
+            fi
+          done
+          echo "traced hangs: $th/8"
+          if [ -f hung-trace.txt ]; then
+            echo "==== last 60 lines of a HUNG traced run ===="
+            tail -60 hung-trace.txt
+          else
+            echo "(no traced run hung: tracing masks the race — next step is a"
+            echo " near-zero-overhead in-memory ring dumped on SIGTERM)"
+          fi
       - name: make doctest
         run: make doctest
       - name: make smoke
