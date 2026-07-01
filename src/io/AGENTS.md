@@ -94,7 +94,7 @@ Enum tracking in-flight async operations (5 variants):
 
 Typed thread-pool submission and completion:
 
-- `PoolOp` — enum with 11 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses, or closures). Replaces the old `(fd, op_kind: u8, data: Vec<u8>, size: usize)` untyped submission.
+- `PoolOp` — enum with 21 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses, or closures). Replaces the old `(fd, op_kind: u8, data: Vec<u8>, size: usize)` untyped submission.
 - `PoolCompletion { id, result_code, data }` — typed completion struct. Replaces the old `(u64, i32, Vec<u8>)` tuple.
 
 ### ConnectAddr
@@ -149,6 +149,32 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 `io/cancel` submits `IORING_OP_ASYNC_CANCEL` on io_uring, or removes the pending entry on thread pool. The cancel SQE's CQE uses the high-bit tag (same as timeout CQEs) and is skipped by `drain_cqes`. The cancelled operation generates a CQE with `result = -ECANCELED`.
 
 Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling fibers.
+
+## Diagnostics: `--trace=io`
+
+`io_trace` (in `mod.rs`) emits `[trace:io]` lines to fd 2 via a raw
+`write(2)` — async-signal-safe and callable from threadpool worker threads
+(no `&VM`; reads the process-global trace mirror). Gated on the `io` trace
+bit, so it is a single atomic load when `--trace=io` is absent.
+
+It logs the threadpool op lifecycle and the close/cancel reaping:
+
+| Line | Meaning |
+|------|---------|
+| `tp-submit id=N op=KIND fd=F in_flight=K` | worker started for submission `N` |
+| `tp-complete id=N op=KIND fd=F rc=R` | that worker's syscall returned `R` |
+| `close fd=F: reaping K pending op(s)` | `port/close` found `K` in-flight ops on `F` |
+| `close fd=F: shutdown(SHUT_RDWR) … id=N` | threadpool close woke pending `N` via `shutdown` |
+| `cancel id=N` | `io/cancel` on submission `N` |
+
+This exists to pin threadpool hangs that only manifest on macOS (no
+io_uring). Because normal teardown *abandons* the reads of force-unwound
+fibers (the process exits and kills their blocked workers), a lone
+`tp-submit` without `tp-complete` is expected and not itself a bug. The
+hang fingerprint is the **last lines before the `SIGTERM` timeout**: an op
+whose worker never returns after a `close … shutdown` — e.g. a
+`op=accept` on a listening socket, which macOS/BSD `shutdown()` does not
+wake (returns `ENOTCONN`) whereas Linux does (returns `EINVAL`).
 
 ## Buffer Drain Invariant
 

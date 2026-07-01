@@ -36,6 +36,28 @@ use crate::value::heap::TableKey;
 use crate::value::Value;
 use std::collections::BTreeMap;
 
+/// Emit an `[trace:io]` diagnostic line to stderr when the `io` trace bit
+/// (`--trace=io`) is set; otherwise a single relaxed atomic load and return.
+///
+/// Uses a raw `write(2)` rather than `eprintln!` deliberately. It must be
+/// callable from threadpool worker threads, which hold no `&VM` and so read
+/// the process-global trace mirror (`GLOBAL_TRACE_BITS`); and it must be
+/// async-signal-safe, so the *last* line emitted before a `SIGTERM`-at-
+/// timeout survives — which is exactly the line that names a stuck I/O op
+/// when the threadpool scheduler wedges (e.g. a macOS `accept()` a
+/// listening-socket `shutdown()` failed to wake). See `docs/scheduler.md`.
+pub(crate) fn io_trace(args: std::fmt::Arguments<'_>) {
+    if !crate::config::global_trace_bit_enabled(crate::config::trace_bits::IO) {
+        return;
+    }
+    let line = format!("[trace:io] {}\n", args);
+    // SAFETY: writing a byte buffer to fd 2 is always sound; a short or
+    // failed write is ignored — tracing is best-effort diagnostics.
+    unsafe {
+        libc::write(2, line.as_ptr() as *const libc::c_void, line.len());
+    }
+}
+
 /// Byte offset where the Nth grapheme cluster ends in `buf` (treated
 /// as UTF-8).  Used by text-port `ReadExact` to count progress in
 /// graphemes — the unit Elle strings are measured in — instead of
