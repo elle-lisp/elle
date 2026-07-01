@@ -25,12 +25,10 @@
   (def stream ((import "std/http2/stream") :frame frame))
   (def transport ((import "std/http2/transport") :tls tls))
   (def session
-    ((import "std/http2/session") :frame frame :stream stream
-                                  :hpack hpack))
+    ((import "std/http2/session") :frame frame :stream stream :hpack hpack))
   (def server
-    ((import "std/http2/server") :hpack hpack :frame frame
-                                 :stream stream :session session :tls tls
-                                 :transport transport))
+    ((import "std/http2/server") :hpack hpack :frame frame :stream stream
+                                 :session session :tls tls :transport transport))
 
   ## ── Convenience aliases ────────────────────────────────────────────────
 
@@ -311,14 +309,17 @@
         (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
-      # Abort reader before closing transport — the reader may have a pending
+      (io/trace "h2-close: join-writer")
+      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))  # Abort reader before closing transport — the reader may have a pending
       # read on the socket (started by fuel preemption or concurrent sub-fiber).
       # Closing the fd while a read is in-flight causes partial-read errors.
+      (io/trace "h2-close: abort+join-reader")
       (when sess:reader-fiber
         (protect (ev/abort sess:reader-fiber))
         (ev/join-protected sess:reader-fiber))
-      (protect (sess:transport:close)))
+      (io/trace "h2-close: close-transport")
+      (protect (sess:transport:close))
+      (io/trace "h2-close: done"))
     nil)
 
   ## ── Tests ──────────────────────────────────────────────────────────────

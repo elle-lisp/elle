@@ -187,6 +187,17 @@ fn prim_io_cancel(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (io/trace msg) → nil. Emit `[trace:io] <msg>` to stderr when the `io`
+/// trace bit is set (`--trace=io` or `ELLE_TRACE=io`); otherwise a single
+/// relaxed atomic load and no-op. Lets Elle-level scheduler/library markers
+/// (e.g. h2-close steps) interleave with the threadpool op trace when
+/// pinning a hang, via the same async-signal-safe `write(2)` path so the
+/// last marker survives a `SIGTERM` at timeout. `msg` is shown as-is.
+fn prim_io_trace(args: &[Value]) -> (SignalBits, Value) {
+    crate::io::io_trace(format_args!("{}", args[0]));
+    (SIG_OK, Value::NIL)
+}
+
 // ── Scheduler-yielding I/O primitives ────────────────────────────────
 
 /// Async sleep — yields to the scheduler with a timer IoRequest.
@@ -386,6 +397,19 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["backend", "id"],
         category: "io",
         example: "(io/cancel backend id)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "io/trace",
+        func: prim_io_trace,
+        signal: Signal::silent(),
+        arity: Arity::Exact(1),
+        doc: "Emit a diagnostic line to stderr when the `io` trace bit is set \
+              (--trace=io or ELLE_TRACE=io); otherwise a no-op. Interleaves \
+              Elle-level markers with the threadpool op trace.",
+        params: &["msg"],
+        category: "io",
+        example: "(io/trace \"h2-close: join-writer\")",
         aliases: &[],
     },
     PrimitiveDef {
