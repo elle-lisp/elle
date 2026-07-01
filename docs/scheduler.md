@@ -54,6 +54,22 @@ for spawned fibers).
 `ev/sleep` and `ev/timeout` use `io_uring` timeout operations for
 precise timer support without polling.
 
+## Diagnosing threadpool hangs (`--trace=io`)
+
+On the threadpool backend (macOS, or Linux with `--no-uring`), a blocking
+`read`/`accept`/`write` runs on a worker thread that can only be woken by
+data, EOF, or a `shutdown(fd)` from the close path — there is no async
+cancel. A wakeup gap (notably: macOS `shutdown()` does **not** wake a
+blocked `accept()` on a listening socket) can wedge the scheduler at
+teardown until the CI `timeout` sends `SIGTERM`.
+
+Run with `--trace=io` (or set `ELLE_TRACE=io` when the command line is
+fixed, e.g. a CI job) to emit the threadpool op lifecycle
+(`tp-submit`/`tp-complete`) plus close/cancel reaping to stderr via
+async-signal-safe `write(2)`, so the last line before `SIGTERM` survives
+and names the wedged op and fd. See the *Diagnostics* section of
+[`src/io/AGENTS.md`](../src/io/AGENTS.md) for how to read the output.
+
 ---
 
 ## See also

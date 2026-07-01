@@ -128,7 +128,9 @@
                          :on-goaway (fn [sess payload]
                                       (sess:write-queue:put :shutdown)
                                       true))  # Wait for writer to drain queued frames before returning
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))))
+      (io/trace "server-conn: read-loop done; join-writer")
+      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
+      (io/trace "server-conn: done")))
 
   ## ── h2-serve ───────────────────────────────────────────────────────────
 

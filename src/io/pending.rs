@@ -99,6 +99,10 @@ impl PendingOp {
         }
     }
 
+    /// Only the io_uring backend rebinds a pending op's buffer (buffer
+    /// reinsertion on short reads, `uring.rs`), so this is unused where
+    /// io_uring isn't compiled — the thread-pool backend never moves buffers.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(super) fn buffer_handle_mut(&mut self) -> &mut BufferHandle {
         match self {
             PendingOp::Port { buffer_handle, .. } => buffer_handle,

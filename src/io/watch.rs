@@ -16,6 +16,10 @@ pub(crate) struct WatchEvent {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum WatchEventKind {
+    /// inotify `IN_CREATE` (Linux/Android). kqueue's `EVFILT_VNODE` has no
+    /// create notification for a watched file, so this is never constructed
+    /// on macOS/BSD — but it stays in `as_keyword` for a uniform mapping.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "android")), allow(dead_code))]
     Create,
     Modify,
     Remove,

@@ -399,7 +399,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_ffi_native,
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
-        doc: "Load a shared library. Pass nil for the current process.",
+        doc: "Load a shared library by Linux-style name (resolved to the host's .dylib/.dll). Pass nil for the current process.",
         params: &["path"],
         category: "ffi",
         example: "(ffi/native \"libm.so.6\")",

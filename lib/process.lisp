@@ -911,6 +911,90 @@
             (> (length join-waiting) 0) (> (length select-sets) 0)
             (> (length futex-parked) 0))))
 
+    (def @any-alive?
+      (fn []
+        (def @found false)
+        (each p in procs
+          (when (= (get p :status) :alive) (assign found true)))
+        found))
+
+    # These bindings hold mutable collections but are themselves immutable
+    # (unlike @ready/@waiting, which are @-mutable), so empty them in place
+    # the way the rest of the scheduler does with del/pop.
+    (def @clear-map (fn [m] (each k in (keys m) (del m k))))
+    (def @clear-vec (fn [v] (while (> (length v) 0) (pop v))))
+
+    # Cancel every forwarded I/O submission (process- and sub-fiber-owned
+    # alike) so the root scheduler's forwarded-pending doesn't leak, then
+    # empty io-pending.
+    (def @cancel-all-io
+      (fn []
+        (each [id _entry] in (pairs io-pending)
+          (emit :wait {:op :io-forward-cancel :id id}))
+        (clear-map io-pending)))
+
+    # Snapshot every sub-fiber the scheduler is still tracking, as
+    # {:fiber :pid} entries. At teardown (no process alive) each is an
+    # orphan to abort. Sources, in order: waiting on forwarded I/O; parked
+    # on a futex (only :is-sub waiters remain — a parked process is :alive,
+    # so none exist once any-alive? is false); queued but not yet run;
+    # awaited join targets and their sub-fiber joiners; select candidates.
+    (def @collect-orphan-subs
+      (fn []
+        (def @vs @[])
+        (each [_id e] in (pairs io-pending)
+          (when (get e :fiber)
+            (push vs @{:fiber (get e :fiber) :pid (get e :pid)})))
+        (each [_key waiters] in (pairs futex-parked)
+          (each w in (->list waiters)
+            (when (get w :fiber) (push vs w))))
+        (each e in (->list sub-runnable)
+          (push vs e))
+        (each [target waiters] in (pairs join-waiting)
+          (push vs @{:fiber target :pid 0})
+          (each w in (->list waiters)
+            (when (and (not (integer? w)) (get w :fiber)) (push vs w))))
+        (each [_pid e] in (pairs select-sets)
+          (each f in (get e :candidates)
+            (push vs @{:fiber f :pid 0})))
+        vs))
+
+    (def @clear-sub-state
+      (fn []
+        (cancel-all-io)
+        (clear-vec sub-runnable)
+        (clear-map futex-parked)
+        (clear-map join-waiting)
+        (clear-map select-sets)))
+
+    # Program-completion teardown, mirroring ev/run's make-async-scheduler.
+    # Once no process is alive, every remaining sub-fiber is an orphan: no
+    # live process can wake a parked futex, deliver its I/O, or observe its
+    # result. Left alone they keep has-work? true forever, so sched-run
+    # spins (futex orphan) or blocks on io/wait (I/O orphan). Abort each so
+    # its defer/protect cleanup runs, cancel its forwarded I/O, and empty
+    # the sub-fiber state so has-work? goes false and sched-run returns.
+    #
+    # Aborting runs defers, which may submit fresh I/O or re-park on a
+    # futex; those land back in the tracked collections and are caught the
+    # next round. Bounded so a defer that stubbornly re-parks can't
+    # reintroduce the very hang we're removing; a final clear-sub-state
+    # drops anything still lingering past the round bound.
+    (def @abort-orphan-subs
+      (fn []
+        (def @rounds 0)
+        (while (and (< rounds 64) (has-work?))
+          (assign rounds (+ rounds 1))
+          (let [victims (collect-orphan-subs)]
+            (clear-sub-state)
+            (each v in victims
+              (let [f (get v :fiber)]
+                (when (= (fiber/status f) :paused)
+                  (protect (fiber/abort f {:error :shutdown}))
+                  (handle-sub-fiber-after-resume f (or (get v :pid) 0)))))
+            (reap-io)))
+        (clear-sub-state)))
+
     (def @sched-run
       (fn [init]
         # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
@@ -935,6 +1019,15 @@
               (drain-sub-runnable)))
           (wake-futex-ready)
           (wake-waiting)
+
+          # No process left alive: every remaining sub-fiber is an orphan
+          # (nothing can wake its futex, deliver its I/O, or read its
+          # result). Tear them down here — after draining, so a fire-and-
+          # forget sub-fiber still runs once, but before the idle handler
+          # below would otherwise spin on a futex orphan or block on
+          # io/wait for an I/O orphan that never completes.
+          (when (not (any-alive?))
+            (abort-orphan-subs))
 
           (when (empty? ready)
             (cond  # Nothing alive anywhere — done

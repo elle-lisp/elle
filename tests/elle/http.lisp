@@ -242,8 +242,9 @@
   (assert (= (get gzip-call 1) "hi") "compress-log recorded the data"))
 
 # :compress true ⇒ module imports std/compress itself. Only meaningful
-# when libz/libzstd are available — on macOS the FFI loader expects
-# libz.dylib, which lib/compress.lisp doesn't currently probe for.
+# when libz/libzstd are actually installed. The FFI loader rewrites the
+# Linux-style "libz.so" spec to the host's native name (libz.dylib on
+# macOS), so this guard probes for the real library rather than a name.
 # Mirror the skip guard from tests/elle/compress.lisp.
 (let [[libz-ok? _] (protect ((fn [] (ffi/native "libz.so"))))
       [zstd-ok? _] (protect ((fn [] (ffi/native "libzstd.so"))))]
