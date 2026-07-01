@@ -1468,7 +1468,7 @@
        'we injected :shutdown' — defer-time errors during shutdown are
        dropped here rather than misattributed to user code."
 
-      # Phase 1a: abort pending-I/O fibers (inject error, let defer run).
+      (io/trace "do-shutdown: enter")  # Phase 1a: abort pending-I/O fibers (inject error, let defer run).
       (each [id fiber] in (pairs pending)
         (del pending id)
         (del fiber-io fiber)
@@ -1515,7 +1515,8 @@
       (while (> (length runnable) 0)
         (let [fiber (pop runnable)]
           (add scheduler-killed fiber)
-          (protect (fiber/cancel fiber {:error :shutdown})))))
+          (protect (fiber/cancel fiber {:error :shutdown}))))
+      (io/trace "do-shutdown: exit"))
 
     (defn step [timeout-ms]
       "Execute one tick of the event loop. Returns :done or :pending."
@@ -1564,6 +1565,11 @@
               (when (and have-entry (all-done? entry))
                 (do-shutdown 100)
                 (break :loop nil))  # Live program work remains — block for the next I/O event.
+              (when (and (= (length pending) 0) (> (length park-queues) 0))
+                (io/trace (concat "pump: block pending=0 park="
+                                  (string (length park-queues)) " run="
+                                  (string (length runnable)) " done="
+                                  (string (all-done? entry)))))
               (when (= (step (- 0 1)) :done) (break :loop nil)))))  # Crash on unjoined errored fibers — never swallow errors silently.
         # scheduler-killed fibers are excluded: we injected their :shutdown
         # at teardown time, so re-raising would surface our own signal as a
