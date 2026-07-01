@@ -645,4 +645,114 @@ nil
         let second = format_code(&formatted, &config).unwrap();
         assert_eq!(formatted, second, "must be idempotent");
     }
+
+    // ── Comment preservation ────────────────────────────────────
+    //
+    // Idempotency (above) does NOT catch comment loss: a formatter that
+    // deletes a comment is still idempotent (deleting twice == deleting
+    // once). These assert the comment text actually survives, and that a
+    // standalone comment stays on its own line rather than being glued to
+    // the previous form as a trailing comment.
+
+    /// Assert every `#`-comment in `input` appears in the formatted output,
+    /// and the result is idempotent.
+    fn assert_preserves_comments(input: &str) -> String {
+        let config = FormatterConfig::default();
+        let out = format_code(input, &config).unwrap();
+        for line in input.lines() {
+            let t = line.trim_start();
+            if let Some(hash) = t.find('#') {
+                // Only whole-line comments (the line is just a comment).
+                if t.starts_with('#') {
+                    let comment = t[hash..].trim_end();
+                    assert!(
+                        out.contains(comment),
+                        "comment lost: {:?}\n--- input ---\n{}\n--- output ---\n{}",
+                        comment,
+                        input,
+                        out
+                    );
+                }
+            }
+        }
+        let second = format_code(&out, &config).unwrap();
+        assert_eq!(out, second, "not idempotent:\n{}", out);
+        out
+    }
+
+    #[test]
+    fn test_comment_preserved_in_let_body() {
+        // Regression: a standalone comment between the let bindings and the
+        // body form was deleted entirely.
+        let out = assert_preserves_comments("(let [x 1]\n  # leading comment\n  (+ x 1))");
+        // It must be on its own line, not glued as a trailing comment onto
+        // the bindings line.
+        assert!(
+            out.contains("]\n  # leading comment"),
+            "comment should stay on its own line, got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_comment_preserved_in_fn_body_first() {
+        let out = assert_preserves_comments("(defn f []\n  # first body comment\n  (+ 1 2))");
+        assert!(
+            out.contains("[]\n  # first body comment"),
+            "comment should be a leading comment on its own line, got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_comment_preserved_stacked_in_begin() {
+        let out = assert_preserves_comments("(begin\n  # line one\n  # line two\n  (+ 1 2))");
+        assert!(out.contains("# line one"), "lost line one:\n{}", out);
+        assert!(out.contains("# line two"), "lost line two:\n{}", out);
+    }
+
+    #[test]
+    fn test_comment_between_body_forms_own_line() {
+        // A standalone comment between two body forms stays a leading comment
+        // of the following form, on its own line — not glued to the previous.
+        let out = assert_preserves_comments("(begin\n  (a)\n  # between\n  (b))");
+        assert!(
+            out.contains("(a)\n  # between\n  (b)"),
+            "comment should be on its own line between the forms, got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_comment_preserved_in_let_binding_and_body() {
+        // Comment on the bindings line (inline) plus a body comment.
+        assert_preserves_comments(
+            "(let [x 1  # inline on binding\n      y 2]\n  # body comment\n  (+ x y))",
+        );
+    }
+
+    #[test]
+    fn test_comment_preserved_nested_forms() {
+        assert_preserves_comments(
+            "(defn outer [a]\n  (let [b 1]\n    # inner leading\n    (when (> b 0)\n      # deep\n      (inner b))))",
+        );
+    }
+
+    #[test]
+    fn test_comment_preserved_inline_after_let_bindings() {
+        // Regression: an inline comment trailing the bindings vector (after
+        // `]`, on the same line) was dropped by format_let.
+        let out =
+            assert_preserves_comments("(let [a 1\n      b 2]  # trailing bindings\n  (+ a b))");
+        assert!(
+            out.contains("]  # trailing bindings"),
+            "inline comment should trail the bindings, got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_comment_preserved_inline_after_parameterize_bindings() {
+        assert_preserves_comments("(parameterize ((*x* 1))  # trailing bindings\n  (body))");
+    }
 }

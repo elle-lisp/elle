@@ -34,10 +34,11 @@ pub fn format_forms(
 ) -> Doc {
     let mut all_docs: Vec<Doc> = Vec::new();
 
-    // Format all forms. Between forms, add a HardBreak only if the
-    // next form has no leading trivia (which provides its own spacing).
+    // Format all forms, separated by a HardBreak. Leading trivia no longer
+    // supplies its own preceding break (see format_annotated), so the
+    // separator is emitted unconditionally between siblings.
     for (i, form) in forms.iter().enumerate() {
-        if i > 0 && form.leading.is_empty() {
+        if i > 0 {
             all_docs.push(Doc::hardbreak());
         }
         all_docs.push(format_annotated(form, source, config));
@@ -77,6 +78,27 @@ pub fn format_forms(
 
 // ── Core recursive walk ────────────────────────────────────────
 
+/// Emit leading trivia (comments + blank lines) into `parts`.
+///
+/// Each comment becomes `text + HardBreak`; blank lines become HardBreaks.
+/// The break that puts the first comment on its own line is the caller's
+/// inter-sibling separator, not emitted here — see `format_annotated`.
+fn emit_leading(leading: &[Trivia], parts: &mut Vec<Doc>) {
+    for t in leading {
+        match t {
+            Trivia::Comment { text, .. } => {
+                parts.push(Doc::text(text));
+                parts.push(Doc::hardbreak());
+            }
+            Trivia::BlankLines { count, .. } => {
+                for _ in 0..(*count).min(2) {
+                    parts.push(Doc::hardbreak());
+                }
+            }
+        }
+    }
+}
+
 /// Format a node with its leading and trailing trivia.
 ///
 /// Every AnnotatedSyntax passes through here to ensure trivia is
@@ -90,30 +112,13 @@ pub(super) fn format_annotated(
 
     // Leading trivia: comments and blank lines before this node.
     //
-    // The inter-form HardBreak from format_forms provides the newline
-    // that ends the previous form's line. Leading trivia adds to that:
-    // - BlankLines(n): emit n HardBreaks (n blank lines in output)
-    // - Comment: emit HardBreak + text (comment on its own line)
-    //
-    // After all trivia, one final HardBreak separates the last trivia
-    // from the form itself.
-    if !node.leading.is_empty() {
-        for t in &node.leading {
-            match t {
-                Trivia::Comment { text, .. } => {
-                    parts.push(Doc::hardbreak());
-                    parts.push(Doc::text(text));
-                }
-                Trivia::BlankLines { count, .. } => {
-                    for _ in 0..(*count).min(2) {
-                        parts.push(Doc::hardbreak());
-                    }
-                }
-            }
-        }
-        // Separate from the form
-        parts.push(Doc::hardbreak());
-    }
+    // The break BEFORE this trivia is supplied by the caller — the
+    // inter-sibling separator in format_forms/format_body, a form's
+    // header→body break, or a collection's element separator. So each
+    // comment emits `text + HardBreak` (ending its own line) and blank
+    // lines emit their own HardBreaks. Emitting a leading HardBreak here
+    // too would double the newline (a blank line) after that separator.
+    emit_leading(&node.leading, &mut parts);
 
     // The node itself
     parts.push(format_syntax(node, source, config));
@@ -178,22 +183,7 @@ pub(super) fn format_without_trailing(
     let mut parts = Vec::new();
 
     // Leading trivia (same as format_annotated)
-    if !node.leading.is_empty() {
-        for t in &node.leading {
-            match t {
-                Trivia::Comment { text, .. } => {
-                    parts.push(Doc::hardbreak());
-                    parts.push(Doc::text(text));
-                }
-                Trivia::BlankLines { count, .. } => {
-                    for _ in 0..(*count).min(2) {
-                        parts.push(Doc::hardbreak());
-                    }
-                }
-            }
-        }
-        parts.push(Doc::hardbreak());
-    }
+    emit_leading(&node.leading, &mut parts);
 
     // The node itself — no trailing trivia
     parts.push(format_syntax(node, source, config));
