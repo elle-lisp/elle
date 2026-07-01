@@ -121,3 +121,17 @@ fn posix() {
 fn posix_threadpool() {
     run_elle_script_with_args("posix", &["--no-uring"]);
 }
+
+#[test]
+fn process_teardown() {
+    run_elle_script("process-teardown");
+}
+
+/// Same script on the threadpool I/O backend (`--no-uring`) — the backend
+/// macOS uses, where the `process:start` orphan-sub-fiber teardown
+/// deadlock was found. Without this the Linux runner would only exercise
+/// the io_uring path, missing the threadpool teardown the fix targets.
+#[test]
+fn process_teardown_threadpool() {
+    run_elle_script_with_args("process-teardown", &["--no-uring"]);
+}

@@ -523,6 +523,29 @@ tracked by the scheduler and participate in I/O completion.
     (assert (= r2 70) "f2 = 70"))))
 ```
 
+## Orphan sub-fibers and teardown
+
+A sub-fiber outlives the code that spawned it only as long as some
+process is alive to observe it. Once **every** process has terminated,
+any sub-fiber still running — a fire-and-forget `ev/spawn` that parked on
+a futex, a background server blocked in `accept`, an un-joined worker
+waiting on I/O — is an *orphan*: no live process can ever wake it or read
+its result. `process:start` tears these orphans down (aborting them so
+their `defer`/`protect` cleanup runs and cancelling their in-flight I/O)
+rather than blocking forever waiting on work that can never complete.
+This mirrors `ev/run`'s program-completion teardown for the root
+scheduler (see [concurrency.md](concurrency.md)).
+
+```text
+(process:start (fn []
+  ## fire-and-forget background server; the body never joins or stops it
+  (ev/spawn (fn [] (protect (http2:serve listener handler))))
+  nil))   ## body returns → server sub-fiber is orphaned and torn down
+```
+
+A sub-fiber the body **joins** (`ev/join`) is not an orphan: the process
+stays alive until the join returns, so the sub-fiber completes first.
+
 
 # Process API reference
 
