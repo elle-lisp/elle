@@ -199,7 +199,7 @@ impl MlirPolicy {
 /// silently (forward compat for :spirv, :mlir, :gpu).
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix",
+    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix", "ioring",
     // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
@@ -278,7 +278,12 @@ pub mod trace_bits {
     /// can fire from any thread (including `sys/spawn`'d OS threads)
     /// which has no `&VM` reference.
     pub const CHAN: u32 = 1 << 18;
-    pub const ALL: u32 = (1 << 19) - 1;
+    /// In-memory I/O event ring, dumped to stderr only on `SIGTERM` (the CI
+    /// timeout signal). Unlike `io` (a `write(2)` per event) this adds no
+    /// syscall on the hot path, so it can pin a hang too timing-tight to
+    /// survive `--trace=io`'s per-op latency. See `io_trace`/`io_ring_dump`.
+    pub const IORING: u32 = 1 << 19;
+    pub const ALL: u32 = (1 << 20) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -302,6 +307,7 @@ pub mod trace_bits {
             "bytecode" => BYTECODE,
             "posix" => POSIX,
             "chan" => CHAN,
+            "ioring" => IORING,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }

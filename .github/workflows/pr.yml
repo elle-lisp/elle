@@ -254,32 +254,31 @@ jobs:
         run: brew install parallel coreutils
       - name: make elle
         run: make elle
-      - name: Diagnose process-io.lisp hang (traced smoke-vm)
+      - name: Diagnose process-io.lisp hang (ioring smoke-vm)
         # TEMPORARY (remove with the io_trace instrumentation once test 18 is
-        # fixed): test 18 wedges only under `make smoke`'s BOUNDED parallel
-        # contention. A hand-rolled 40-wide background load over-starved it —
-        # it timed out during startup with an empty trace, not at test 18. So
-        # run the exact failing target, `make smoke-vm`, with ELLE_TRACE=io a
-        # few times; `parallel --tag` prefixes every line with the filename,
-        # so grep pulls out process-io.lisp's own [trace:io] tail. The last
-        # `h2-close:`/`server-conn:` marker with no following `done` (or the
-        # last `tp-submit` with no `tp-complete`) names the stuck step.
-        # `make smoke` below stays as the real gate.
+        # fixed): `--trace=io`'s per-op write(2) perturbed the timing-tight
+        # test-18 race away (5 traced smoke-vm rounds stayed green). Use
+        # ELLE_TRACE=ioring instead: events go to an in-memory ring with NO
+        # syscall on the hot path, dumped to stderr only when a `timeout`
+        # SIGTERM kills the hung process. So only the wedged process-io.lisp
+        # dumps (no flood), and the ring adds ~no perturbation. `parallel
+        # --tag` prefixes each line with the file; grep pulls process-io's
+        # ring tail. Last `h2-close:`/`server-conn:` marker with no following
+        # `done` (or last `tp-submit` with no `tp-complete`) = the stuck step.
         continue-on-error: true
         run: |
           set +e
-          for round in 1 2 3 4 5; do
-            ELLE_TRACE=io timeout 200s make smoke-vm > smoke.out 2>&1
+          for round in 1 2 3 4 5 6; do
+            ELLE_TRACE=ioring timeout 200s make smoke-vm > smoke.out 2>&1
             if grep -F 'process-io.lisp' smoke.out | grep -q 'terminated by SIGTERM'; then
-              echo "round $round: process-io.lisp HUNG in smoke-vm (traced)"
-              echo "==== process-io.lisp [trace:io] tail (last 90 lines) ===="
-              grep -F 'process-io.lisp' smoke.out | tail -90
+              echo "round $round: process-io.lisp HUNG in smoke-vm (ioring)"
+              echo "==== process-io.lisp [trace:io ring] tail (last 100) ===="
+              grep -F 'process-io.lisp' smoke.out | tail -100
               exit 0
             fi
             echo "round $round: process-io.lisp did not hang"
           done
-          echo "no process-io hang in 5 traced smoke-vm rounds — tracing may"
-          echo "mask it even under bounded load; next is a SIGTERM-dumped ring"
+          echo "no process-io hang in 6 ioring smoke-vm rounds"
       - name: make doctest
         run: make doctest
       - name: make smoke

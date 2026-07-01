@@ -36,25 +36,83 @@ use crate::value::heap::TableKey;
 use crate::value::Value;
 use std::collections::BTreeMap;
 
-/// Emit an `[trace:io]` diagnostic line to stderr when the `io` trace bit
-/// (`--trace=io`) is set; otherwise a single relaxed atomic load and return.
+/// Bounded in-memory ring of recent `[trace:io]` lines for `--trace=ioring`.
+/// Raw bytes so `io_ring_dump` can hand the whole tail to one `write(2)` from
+/// the `SIGTERM` handler without touching the allocator. A plain `Mutex`
+/// (not a lock-free ring) keeps it simple: the recorder takes it only to
+/// `extend`/`drain`, and the dump uses `try_lock`, so a signal landing on a
+/// recorder mid-append degrades to a skipped dump rather than a deadlock.
+static IO_RING: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
+
+/// Trim the ring from the front once it exceeds `CAP`, back down to `KEEP`
+/// (~the last few thousand events) — enough tail to name a wedge.
+const IO_RING_CAP: usize = 512 * 1024;
+const IO_RING_KEEP: usize = 384 * 1024;
+
+/// Emit an `[trace:io]` diagnostic line when the `io` or `ioring` trace bit
+/// is set; otherwise two relaxed atomic loads and return.
 ///
-/// Uses a raw `write(2)` rather than `eprintln!` deliberately. It must be
-/// callable from threadpool worker threads, which hold no `&VM` and so read
-/// the process-global trace mirror (`GLOBAL_TRACE_BITS`); and it must be
-/// async-signal-safe, so the *last* line emitted before a `SIGTERM`-at-
-/// timeout survives — which is exactly the line that names a stuck I/O op
-/// when the threadpool scheduler wedges (e.g. a macOS `accept()` a
-/// listening-socket `shutdown()` failed to wake). See `docs/scheduler.md`.
+/// Uses a raw `write(2)` rather than `eprintln!` deliberately: it must be
+/// callable from threadpool worker threads (no `&VM`; they read the
+/// process-global trace mirror `GLOBAL_TRACE_BITS`), and async-signal-safe
+/// so the last line before a `SIGTERM`-at-timeout survives.
+///
+/// Two modes, independent:
+/// - `io` (`--trace=io` / `ELLE_TRACE=io`): write each line to fd 2
+///   immediately. One syscall per event — visible live, but the per-op
+///   latency can perturb a timing-tight hang away.
+/// - `ioring` (`--trace=ioring`): append to an in-memory ring instead, with
+///   no syscall on the hot path; `io_ring_dump` flushes it once on `SIGTERM`.
+///   For hangs too tight to survive `io`'s per-op writes.
 pub(crate) fn io_trace(args: std::fmt::Arguments<'_>) {
-    if !crate::config::global_trace_bit_enabled(crate::config::trace_bits::IO) {
+    let write = crate::config::global_trace_bit_enabled(crate::config::trace_bits::IO);
+    let ring = crate::config::global_trace_bit_enabled(crate::config::trace_bits::IORING);
+    if !write && !ring {
         return;
     }
     let line = format!("[trace:io] {}\n", args);
-    // SAFETY: writing a byte buffer to fd 2 is always sound; a short or
-    // failed write is ignored — tracing is best-effort diagnostics.
+    if ring {
+        if let Ok(mut buf) = IO_RING.lock() {
+            buf.extend_from_slice(line.as_bytes());
+            if buf.len() > IO_RING_CAP {
+                let cut = buf.len() - IO_RING_KEEP;
+                buf.drain(..cut);
+            }
+        }
+    }
+    if write {
+        // SAFETY: writing a byte buffer to fd 2 is always sound; a short or
+        // failed write is ignored — tracing is best-effort diagnostics.
+        unsafe {
+            libc::write(2, line.as_ptr() as *const libc::c_void, line.len());
+        }
+    }
+}
+
+/// Flush the `--trace=ioring` buffer to fd 2. Called from the `SIGTERM`
+/// terminate handler (async-signal context): `try_lock` avoids a deadlock if
+/// the signal landed on a thread mid-append, and the tail is emitted with a
+/// single `write(2)` of already-allocated bytes (no formatting, no alloc).
+/// No-op unless the `ioring` bit is set.
+pub(crate) fn io_ring_dump() {
+    if !crate::config::global_trace_bit_enabled(crate::config::trace_bits::IORING) {
+        return;
+    }
+    let hdr = b"---- [trace:io ring] tail (events before SIGTERM) ----\n";
+    // SAFETY: bare write(2) of a static byte buffer — async-signal-safe.
     unsafe {
-        libc::write(2, line.as_ptr() as *const libc::c_void, line.len());
+        libc::write(2, hdr.as_ptr() as *const libc::c_void, hdr.len());
+    }
+    match IO_RING.try_lock() {
+        Ok(buf) => unsafe {
+            libc::write(2, buf.as_ptr() as *const libc::c_void, buf.len());
+        },
+        Err(_) => {
+            let m = b"---- [trace:io ring] (locked mid-append; skipped) ----\n";
+            unsafe {
+                libc::write(2, m.as_ptr() as *const libc::c_void, m.len());
+            }
+        }
     }
 }
 
