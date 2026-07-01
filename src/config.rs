@@ -551,6 +551,30 @@ impl Config {
     /// `remaining_args` contains file args and everything after `--`.
     pub fn parse(args: &[String]) -> Result<(Config, Vec<String>), String> {
         let mut config = Config::default();
+
+        // `ELLE_TRACE=io,chan` seeds trace keywords from the environment so a
+        // diagnostic trace can be switched on where the command line is fixed
+        // — e.g. a CI job that invokes `elle <script>` verbatim. CLI
+        // `--trace=` appends to this; both feed the same trace-bit set (and
+        // the process-global mirror) via `from_static_config`. `all` expands
+        // to every keyword; unknown keywords are ignored, exactly as for
+        // `--trace=`.
+        if let Ok(v) = std::env::var("ELLE_TRACE") {
+            let v = v.trim();
+            if v == "all" {
+                for kw in TRACE_KEYWORDS {
+                    config.trace_keywords.push(kw.to_string());
+                }
+            } else {
+                for kw in v.split(',') {
+                    let kw = kw.trim();
+                    if !kw.is_empty() {
+                        config.trace_keywords.push(kw.to_string());
+                    }
+                }
+            }
+        }
+
         let mut remaining = Vec::new();
         let mut i = 0;
         let mut eval_exprs: Vec<String> = Vec::new();

@@ -155,7 +155,12 @@ Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling
 `io_trace` (in `mod.rs`) emits `[trace:io]` lines to fd 2 via a raw
 `write(2)` — async-signal-safe and callable from threadpool worker threads
 (no `&VM`; reads the process-global trace mirror). Gated on the `io` trace
-bit, so it is a single atomic load when `--trace=io` is absent.
+bit, so it is a single atomic load when the bit is unset.
+
+Enable it with `--trace=io`, or — where the command line is fixed (a CI job
+that runs `elle <script>` verbatim) — with the `ELLE_TRACE=io` environment
+variable (see `Config::parse`). Both feed the same trace-bit set and the
+global mirror.
 
 It logs the threadpool op lifecycle and the close/cancel reaping:
 

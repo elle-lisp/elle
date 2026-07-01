@@ -63,7 +63,8 @@ cancel. A wakeup gap (notably: macOS `shutdown()` does **not** wake a
 blocked `accept()` on a listening socket) can wedge the scheduler at
 teardown until the CI `timeout` sends `SIGTERM`.
 
-Run with `--trace=io` to emit the threadpool op lifecycle
+Run with `--trace=io` (or set `ELLE_TRACE=io` when the command line is
+fixed, e.g. a CI job) to emit the threadpool op lifecycle
 (`tp-submit`/`tp-complete`) plus close/cancel reaping to stderr via
 async-signal-safe `write(2)`, so the last line before `SIGTERM` survives
 and names the wedged op and fd. See the *Diagnostics* section of
