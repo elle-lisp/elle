@@ -59,44 +59,44 @@
     (cond
       (fn? expr)  # Wrap a raw predicate: truthy = pass, falsy = fail.
       # Use protect to treat thrown errors as failures (e.g. odd? on non-integer).
-      (let [desc (string expr)]
-        (make-validator (fn [value]
-                          (let [[ok result] (protect (expr value))]
-                            (if (and ok result)
-                              nil
-                              {:error :validation
-                               :expected desc
-                               :got (type-of value)}))) desc))
+        (let [desc (string expr)]
+          (make-validator (fn [value]
+                            (let [[ok result] (protect (expr value))]
+                              (if (and ok result)
+                                nil
+                                {:error :validation
+                                 :expected desc
+                                 :got (type-of value)}))) desc))
       (validator? expr)  # Already a compiled validator — pass through unchanged.
        expr
       (struct? expr)  # Struct shape: compile each declared key's validator recursively.
       # Extra keys in the value are allowed (open-world).
-      # Missing keys pass nil to the sub-validator (nil will typically fail).
-      (let* [shape-keys (keys expr)
-             compiled-shape (let [s @{}]
-                              (each k in shape-keys
-                                (put s k (compile-validator (get expr k))))
-                              (freeze s))
-             desc (let [parts @[]]
-                    (each k in shape-keys
-                      (push parts
-                            (append (append (string k) " ")
-                                    (get (get compiled-shape k) :describe))))
-                    (append (append "{" (string/join parts ", ")) "}"))]
-        (make-validator (fn [value]
-                          (if (not (struct? value))
-                            {:error :validation
-                             :expected desc
-                             :got (type-of value)}
-                            (let [failures @[]]
-                              (each k in shape-keys
-                                (let* [sub-v (get compiled-shape k)
-                                       result ((get sub-v :check) (get value k))]
-                                  (when (not (nil? result))
-                                    (push failures {:key k :failure result}))))
-                              (if (> (length failures) 0)
-                                {:error :validation :fields (freeze failures)}
-                                nil)))) desc))
+        # Missing keys pass nil to the sub-validator (nil will typically fail).
+        (let* [shape-keys (keys expr)
+               compiled-shape (let [s @{}]
+                                (each k in shape-keys
+                                  (put s k (compile-validator (get expr k))))
+                                (freeze s))
+               desc (let [parts @[]]
+                      (each k in shape-keys
+                        (push parts
+                              (append (append (string k) " ")
+                                      (get (get compiled-shape k) :describe))))
+                      (append (append "{" (string/join parts ", ")) "}"))]
+          (make-validator (fn [value]
+                            (if (not (struct? value))
+                              {:error :validation
+                               :expected desc
+                               :got (type-of value)}
+                              (let [failures @[]]
+                                (each k in shape-keys
+                                  (let* [sub-v (get compiled-shape k)
+                                    result ((get sub-v :check) (get value k))]
+                                    (when (not (nil? result))
+                                      (push failures {:key k :failure result}))))
+                                (if (> (length failures) 0)
+                                  {:error :validation :fields (freeze failures)}
+                                  nil)))) desc))
       true
         (error {:error :type-error
                 :reason :unsupported-type

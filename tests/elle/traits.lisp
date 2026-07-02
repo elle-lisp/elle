@@ -169,7 +169,7 @@
   (def b (make2 1))
   (assert (= (traits a) (traits b))  # identical? uses value equality (= semantics)
           # not pointer identity
-           "independently created tables with same structure are equal")
+          "independently created tables with same structure are equal")
   (assert (identical? (traits a) (traits b))
           "independently created tables with same content are identical? (value equality)"))
 

@@ -77,8 +77,7 @@
 
   # ── Export ───────────────────────────────────────────────────────
 
-  {
-   # constants
+  {# constants
    :FORMAT_ARGB32 FORMAT_ARGB32
    :FORMAT_RGB24 FORMAT_RGB24
    :FORMAT_A8 FORMAT_A8

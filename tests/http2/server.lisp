@@ -254,15 +254,15 @@
                  {:status 200 :body "ok"})
                (fn [session]  # Server allows 100 concurrent streams by default
                # Send 3 concurrent requests — all should succeed
-               (let [fibers (map (fn [i]
-                                   (ev/spawn (fn []
-                                     (http2:send session "GET"
-                                     (concat "/conc-" (string i))))))
-                                 (range 0 3))
-                     results (map ev/join fibers)]
-                 (each r in results
-                   (assert (= r:status 200) "concurrent: status 200"))
-                 true))))
+                 (let [fibers (map (fn [i]
+                                     (ev/spawn (fn []
+                                       (http2:send session "GET"
+                                       (concat "/conc-" (string i))))))
+                                   (range 0 3))
+                       results (map ev/join fibers)]
+                   (each r in results
+                     (assert (= r:status 200) "concurrent: status 200"))
+                   true))))
 
 ## ── Run ──────────────────────────────────────────────────────────────────
 

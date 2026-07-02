@@ -159,8 +159,8 @@
 (let [r (os/sig-watch |:sigusr1|)]
   (let [[ok? _] (protect ((fn []  # Re-query the integer at runtime by sending the
                           # keyword first, then asserting the integer form
-                          # is accepted on the same kernel.
-                           (os/sig-send (sys/pid) :sigusr1))))]
+                            # is accepted on the same kernel.
+                            (os/sig-send (sys/pid) :sigusr1))))]
     (assert ok? "10a: keyword signum accepted"))  # Drain so the queued signal doesn't fire when we close.
   (let [_ (ev/join (ev/spawn (fn [] (bounded-next r "test 10 drain"))))]
     nil)

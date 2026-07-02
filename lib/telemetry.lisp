@@ -476,8 +476,7 @@
 # ============================================================================
 
 (fn []
-  {
-   # Meter lifecycle
+  {# Meter lifecycle
    :meter telemetry-meter
    :flush telemetry-flush
    :shutdown telemetry-shutdown

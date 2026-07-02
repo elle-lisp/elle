@@ -35,9 +35,7 @@
 (def n-rounds 200)
 (def test-key "test:redis-short-read:big")
 
-(let [[ok? _] (protect
-                (redis:with "127.0.0.1" 6379
-                  (fn [] (redis:ping))))]
+(let [[ok? _] (protect (redis:with "127.0.0.1" 6379 (fn [] (redis:ping))))]
   (when (not ok?)
     (eprintln "SKIP: Redis not available at 127.0.0.1:6379")
     (exit 0)))
@@ -52,54 +50,54 @@
     (freeze buf)))
 
 (redis:with "127.0.0.1" 6379
-  (fn []
-    (redis:set test-key big-value)
-    (println "  seeded " value-size "-byte value")
+            (fn []
+              (redis:set test-key big-value)
+              (println "  seeded " value-size "-byte value")
 
-    (def @ok true)
-    (def @fail-msgs @[])
-    (let [@r 0]
-      (while (< r n-rounds)
-        (let [[gok val] (protect (redis:get test-key))]
-          (cond
-            (not gok)
-              (begin
-                (assign ok false)
-                (push fail-msgs (string "round " r ": get raised "
-                                        val)))
-            (nil? val)
-              (begin
-                (assign ok false)
-                (push fail-msgs (string "round " r ": got nil")))
-            (not (= (string/size-of val) value-size))
-              (begin
-                (assign ok false)
-                (push fail-msgs (string "round " r ": short reply, got "
-                                        (string/size-of val) " want "
-                                        value-size)))
-            (not (= val big-value))
-              (begin
-                (assign ok false)
-                (push fail-msgs (string "round " r
-                                        ": reply does not byte-match")))))
-        (assign r (+ r 1))))
+              (def @ok true)
+              (def @fail-msgs @[])
+              (let [@r 0]
+                (while (< r n-rounds)
+                  (let [[gok val] (protect (redis:get test-key))]
+                    (cond
+                      (not gok)
+                        (begin
+                          (assign ok false)
+                          (push fail-msgs
+                                (string "round " r ": get raised " val)))
+                      (nil? val)
+                        (begin
+                          (assign ok false)
+                          (push fail-msgs (string "round " r ": got nil")))
+                      (not (= (string/size-of val) value-size))
+                        (begin
+                          (assign ok false)
+                          (push fail-msgs
+                                (string "round " r ": short reply, got "
+                                        (string/size-of val) " want " value-size)))
+                      (not (= val big-value))
+                        (begin
+                          (assign ok false)
+                          (push fail-msgs
+                                (string "round " r ": reply does not byte-match")))))
+                  (assign r (+ r 1))))
 
-    (redis:del test-key)
+              (redis:del test-key)
 
-    (if ok
-      (println "  " n-rounds " rounds × " value-size
-               "-byte get: all byte-exact")
-      (begin
-        (eprintln "FAIL: redis-short-read detected "
-                  (length fail-msgs) " corruption(s)")
-        (let [@i 0]
-          (while (and (< i (length fail-msgs)) (< i 10))
-            (eprintln "  " (get fail-msgs i))
-            (assign i (+ i 1))))
-        (when (> (length fail-msgs) 10)
-          (eprintln "  ... (" (- (length fail-msgs) 10) " more)"))
-        (assert false
-                "redis-short-read: bulk-string framing corrupted by short read")))))
+              (if ok
+                (println "  " n-rounds " rounds × " value-size
+                         "-byte get: all byte-exact")
+                (begin
+                  (eprintln "FAIL: redis-short-read detected "
+                            (length fail-msgs) " corruption(s)")
+                  (let [@i 0]
+                    (while (and (< i (length fail-msgs)) (< i 10))
+                      (eprintln "  " (get fail-msgs i))
+                      (assign i (+ i 1))))
+                  (when (> (length fail-msgs) 10)
+                    (eprintln "  ... (" (- (length fail-msgs) 10) " more)"))
+                  (assert false
+                          "redis-short-read: bulk-string framing corrupted by short read")))))
 
 (println "")
 (println "redis-short-read test passed.")
