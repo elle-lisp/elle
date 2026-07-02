@@ -96,7 +96,7 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 | `access.rs` | `get`, `put` — polymorphic collection access; @string `put` uses grapheme-cluster indexing (matching immutable `string`), value must be a string |
 | `sets.rs` | `set`, `@set`, `set?`, `contains?`, `add`, `del`, `union`, `intersection`, `difference`, `set->array`, `seq->set` |
 | `structs.rs` | `struct` |
-| `fileio.rs` | `file/read` (`slurp`), `file/write` (`spit`), `file/append`, `file/delete`, `file/delete-dir`, `file/mkdir`, `file/mkdir-all`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
+| `fileio.rs` | `file/read` (`slurp`), `file/write` (`spit`), `file/append`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/mkdir`, `file/mkdir-all`, `file/mktempdir`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
 | `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
 | `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/path`, `port/seek`, `port/tell` |
 | `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from` |
