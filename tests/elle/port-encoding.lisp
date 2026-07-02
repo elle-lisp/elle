@@ -20,17 +20,15 @@
 
 (def accepted-port-keyword (box nil))
 (def server-fiber
-  (ev/spawn
-    (fn []
-      (let [c (tcp/accept listener)]
-        (rebox accepted-port-keyword (port/encoding c))
-        (protect (port/close c))))))
+  (ev/spawn (fn []
+              (let [c (tcp/accept listener)]
+                (rebox accepted-port-keyword (port/encoding c))
+                (protect (port/close c))))))
 
 (let [c (tcp/connect "127.0.0.1" listener-port)]
   (defer
     (protect (port/close c))
-    (assert (= :binary (port/encoding c))
-            "1a: tcp/connect defaults to :binary")
+    (assert (= :binary (port/encoding c)) "1a: tcp/connect defaults to :binary")
     # let accept finish
     (ev/sleep 0.05)
     (assert (= :binary (unbox accepted-port-keyword))
@@ -45,20 +43,18 @@
     (parse-int (slice p (+ 1 (string/find p ":"))))))
 
 (def server-fiber2
-  (ev/spawn
-    (fn []
-      (let [c (tcp/accept listener2)]
-        # Server side writes a 4-grapheme word that's also 5 bytes — the
-        # multibyte é confirms we're grapheme-counting on the client
-        (port/write c "café!")
-        (port/flush c)
-        (protect (port/close c))))))
+  (ev/spawn (fn []
+              (let [c (tcp/accept listener2)]
+                # Server side writes a 4-grapheme word that's also 5 bytes — the
+                # multibyte é confirms we're grapheme-counting on the client
+                (port/write c "café!")
+                (port/flush c)
+                (protect (port/close c))))))
 
 (let [c (tcp/connect "127.0.0.1" listener2-port :encoding :text)]
   (defer
     (protect (port/close c))
-    (assert (= :text (port/encoding c))
-            "2a: :encoding :text honored")
+    (assert (= :text (port/encoding c)) "2a: :encoding :text honored")
     # 4 graphemes = "café", leftover "!" stays in the per-fd buffer
     (let [d (port/read-exact c 4)]
       (assert (string? d) "2b: text-port read returns string")
@@ -78,12 +74,11 @@
 (def accepted-enc (box nil))
 (def accepted-read (box nil))
 (def server-fiber3
-  (ev/spawn
-    (fn []
-      (let [c (tcp/accept listener3 :encoding :text)]
-        (rebox accepted-enc (port/encoding c))
-        (rebox accepted-read (port/read-exact c 3))
-        (protect (port/close c))))))
+  (ev/spawn (fn []
+              (let [c (tcp/accept listener3 :encoding :text)]
+                (rebox accepted-enc (port/encoding c))
+                (rebox accepted-read (port/read-exact c 3))
+                (protect (port/close c))))))
 
 (let [c (tcp/connect "127.0.0.1" listener3-port)]
   (defer
@@ -93,17 +88,14 @@
     (ev/sleep 0.05)))
 (protect (ev/join-protected server-fiber3))
 (protect (port/close listener3))
-(assert (= :text (unbox accepted-enc))
-        "3a: tcp/accept :encoding :text honored")
+(assert (= :text (unbox accepted-enc)) "3a: tcp/accept :encoding :text honored")
 (let [r (unbox accepted-read)]
   (assert (string? r) "3b: accepted-port read returns string")
   (assert (= (length r) 3) "3c: 3 graphemes")
   (assert (= r "héy") "3d: bytes correct"))
 
 # ── 4. Bad :encoding value raises ────────────────────────────────────
-(let [[ok? err] (protect
-                  (tcp/connect "127.0.0.1" 1
-                               :encoding :utf8))]
+(let [[ok? err] (protect (tcp/connect "127.0.0.1" 1 :encoding :utf8))]
   (assert (not ok?) "4a: bogus :encoding raises")
   (assert (string/contains? err:message ":encoding must be")
           (concat "4b: error mentions :encoding (" err:message ")")))
@@ -121,17 +113,15 @@
     # any wire byte is parsed under grapheme semantics.
     (let [bogus-listener (tcp/listen "127.0.0.1" 0)
           bogus-port (let [p (port/path bogus-listener)]
-                      (parse-int (slice p (+ 1 (string/find p ":")))))
+                       (parse-int (slice p (+ 1 (string/find p ":")))))
           _accept-f (ev/spawn (fn []
-                                (protect (port/close
-                                          (tcp/accept bogus-listener)))))
+                                (protect (port/close (tcp/accept bogus-listener)))))
           text-port (tcp/connect "127.0.0.1" bogus-port :encoding :text)]
       (defer
         (begin
           (protect (port/close text-port))
           (protect (port/close bogus-listener)))
-        (let [[g-ok g-err]
-              (protect (redis:require-binary-port text-port "test"))]
+        (let [[g-ok g-err] (protect (redis:require-binary-port text-port "test"))]
           (assert (not g-ok) "5a: guard rejects text port")
           (assert (= :wrong-port-encoding (get g-err :reason))
                   "5b: reason is :wrong-port-encoding")

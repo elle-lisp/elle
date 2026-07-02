@@ -88,8 +88,8 @@
       (assert (= hdr "header") "3d1: read-line returns first line"))
     (let [chunk (port/read-exact p 4)]
       (assert (= (length chunk) 4)
-              (concat "3d2: 4 graphemes, got " (string (length chunk))
-                      " (" chunk ")"))
+              (concat "3d2: 4 graphemes, got " (string (length chunk)) " ("
+                      chunk ")"))
       (assert (= chunk "body") "3d3: chunk = 'body'"))
     (let [chunk (port/read-exact p 1)]
       (assert (= chunk "-") "3d4: next read sees the '-' that was buffered"))
@@ -118,26 +118,24 @@
 
 (def server-fiber
   (ev/spawn (fn []
-    (let [client (tcp/accept listener)]
-      (port/write client big-bytes)
-      (port/flush client)
-      (port/close client)))))
+              (let [client (tcp/accept listener)]
+                (port/write client big-bytes)
+                (port/flush client)
+                (port/close client)))))
 
 (let [sock (tcp/connect "127.0.0.1" server-port)]
   (defer
     (protect (port/close sock))
     (let [d (port/read-exact sock value-size)]
-      (assert (not (nil? d))
-              "4a: port/read-exact on 200KB returns non-nil")
+      (assert (not (nil? d)) "4a: port/read-exact on 200KB returns non-nil")
       (assert (= (length d) value-size)
-              (concat "4b: got " (string (length d))
-                      " bytes, want " (string value-size)))
+              (concat "4b: got " (string (length d)) " bytes, want "
+                      (string value-size)))
       # Spot-check bytes at the boundaries and around the expected
       # short-read split points.  d is bytes (TCP is Binary encoding);
       # walking every index would dominate the test runtime in the
       # VM-only path, so we sample.  '0'..'9' as bytes is 48+(i mod 10).
-      (let [check-at @[0 1 2 100 1000 65535 65536 65537
-                       131071 131072 131073
+      (let [check-at @[0 1 2 100 1000 65535 65536 65537 131071 131072 131073
                        (- value-size 1)]
             @j 0
             @mismatch nil]
@@ -145,12 +143,11 @@
           (let [i (get check-at j)
                 expected (+ 48 (mod i 10))]
             (when (not (= (get d i) expected))
-              (assign mismatch
-                      (string "byte " i ": got " (get d i)
-                              " want " expected))))
+              (assign
+                mismatch
+                (string "byte " i ": got " (get d i) " want " expected))))
           (assign j (+ j 1)))
-        (assert (nil? mismatch)
-                (concat "4c: " (or mismatch "")))))))
+        (assert (nil? mismatch) (concat "4c: " (or mismatch "")))))))
 
 (protect (port/close listener))
 (protect (ev/join-protected server-fiber))

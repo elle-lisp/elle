@@ -136,12 +136,10 @@
 
 (def pc (parameter :default))
 (let [outer (parameterize ((pc :outer-set))
-              (fiber/new
-                (fn ()
-                  (let [inner (fiber/new (fn () (pc)) 1)]
-                    (fiber/resume inner nil)
-                    (fiber/value inner)))
-                1))]
+              (fiber/new (fn ()
+                           (let [inner (fiber/new (fn () (pc)) 1)]
+                             (fiber/resume inner nil)
+                             (fiber/value inner))) 1))]
   (fiber/resume outer nil)
   (assert (= (fiber/value outer) :outer-set)
           "grandchild fiber sees grandparent's parameterize binding"))

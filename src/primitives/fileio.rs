@@ -186,6 +186,95 @@ pub(crate) fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// Delete a directory and everything under it (need not be empty)
+pub(crate) fn prim_delete_directory_all(args: &[Value]) -> (SignalBits, Value) {
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match std::fs::remove_dir_all(path) {
+                Ok(_) => (SIG_OK, Value::TRUE),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val_extra(
+                        "io-error",
+                        format!("delete-directory-all: failed to delete '{}': {}", path, e),
+                        &[("path", Value::string(path))],
+                    ),
+                ),
+            })
+            .unwrap()
+    } else {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "delete-directory-all: expected string, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        )
+    }
+}
+
+/// Create a uniquely-named directory under the platform temp root.
+///
+/// The root is `std::env::temp_dir()`, so `TMPDIR` (Unix) or `%TEMP%`
+/// (Windows) redirects it — the seam for pointing scratch space at a
+/// tmpfs like /dev/shm without any path appearing in Elle code.
+/// Uniqueness is pid + a process-local counter; `create_dir` is the
+/// atomic claim, and an `AlreadyExists` (a recycled pid meeting a
+/// leftover from a dead process) just advances the counter.
+pub(crate) fn prim_make_temp_directory(_args: &[Value]) -> (SignalBits, Value) {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let base = std::env::temp_dir();
+    let pid = std::process::id();
+    for _ in 0..1024 {
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let candidate = base.join(format!("elle-{pid}-{n}"));
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => {
+                let Some(path) = candidate.to_str() else {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "io-error",
+                            format!(
+                                "mktempdir: temp root is not UTF-8: '{}'",
+                                candidate.display()
+                            ),
+                        ),
+                    );
+                };
+                return (SIG_OK, Value::string(path));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "io-error",
+                        format!(
+                            "mktempdir: failed to create '{}': {}",
+                            candidate.display(),
+                            e
+                        ),
+                    ),
+                );
+            }
+        }
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "io-error",
+            format!(
+                "mktempdir: exhausted unique-name attempts under '{}'",
+                base.display()
+            ),
+        ),
+    )
+}
+
 /// Create a directory
 pub(crate) fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_string() {
@@ -609,6 +698,29 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/delete-dir \"empty-dir\")",
         aliases: &["delete-directory"],
+    },
+    PrimitiveDef {
+        name: "file/delete-dir-all",
+        func: prim_delete_directory_all,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Delete a directory and everything under it (need not be empty)",
+        params: &["path"],
+        category: "file",
+        example: "(file/delete-dir-all \"scratch\")",
+        aliases: &["delete-directory-all"],
+    },
+    PrimitiveDef {
+        name: "file/mktempdir",
+        func: prim_make_temp_directory,
+        signal: Signal::errors(),
+        arity: Arity::Exact(0),
+        doc: "Create a uniquely-named directory under the platform temp root \
+              (TMPDIR on Unix, %TEMP% on Windows) and return its path",
+        params: &[],
+        category: "file",
+        example: "(file/mktempdir)",
+        aliases: &["make-temp-directory"],
     },
     PrimitiveDef {
         name: "file/mkdir",

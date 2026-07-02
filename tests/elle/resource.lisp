@@ -82,28 +82,28 @@
    ["tco-alloc-10000"
     (fn []  # Per-parameter independence: {:a i :b (pair i nil)} does not
     # reference prev, so no cross-generation chain. Rotation safe.
-    (letrec [loop (fn [i prev]
-                    (if (= i 0)
-                      prev
-                      (loop (%sub i 1) {:a i :b (pair i nil)})))]
-      (loop 10000 nil)))]
+      (letrec [loop (fn [i prev]
+                      (if (= i 0)
+                        prev
+                        (loop (%sub i 1) {:a i :b (pair i nil)})))]
+        (loop 10000 nil)))]
 
    ["tco-replace-10000"
     (fn []  # Struct replaced each iteration, no accumulation.
     # prev is overwritten, never referenced by the new struct.
-    (letrec [loop (fn [i prev]
-                    (if (= i 0)
-                      prev
-                      (loop (%sub i 1) {:x i :y (%add i 1)})))]
-      (loop 10000 nil)))]
+      (letrec [loop (fn [i prev]
+                      (if (= i 0)
+                        prev
+                        (loop (%sub i 1) {:x i :y (%add i 1)})))]
+        (loop 10000 nil)))]
 
    ["tco-mixed-10000"
     (fn []  # Mixed: param 1 (prev) is replaced each iteration (rotation-safe),
     # param 2 (acc) accumulates via pair (rotation-unsafe because
-    # (pair i acc) references acc).
-    (letrec [loop (fn [i prev acc]
-                    (if (= i 0) acc (loop (%sub i 1) {:x i} (pair i acc))))]
-      (loop 10000 nil nil)))]
+      # (pair i acc) references acc).
+      (letrec [loop (fn [i prev acc]
+                      (if (= i 0) acc (loop (%sub i 1) {:x i} (pair i acc))))]
+        (loop 10000 nil nil)))]
 
    ["let-no-escape"
     (fn []
@@ -119,20 +119,21 @@
    ["let-drop-struct"
     (fn []  # Two struct bindings: a used in expr 0 only, b used in expr 1 only.
     # DropValue should fire for a after expr 0, for b after expr 1.
-    (letrec [loop (fn [i]
-                    (if (= i 0)
-                      :done
-                      (let [a {:x i}
-                            b {:y (%add i 1)}]
-                        (%add (a :x) (b :y))
-                        (loop (%sub i 1)))))]
-      (loop 100)))]
+      (letrec [loop (fn [i]
+                      (if (= i 0)
+                        :done
+                        (let [a {:x i}
+                              b {:y (%add i 1)}]
+                          (%add (a :x) (b :y))
+                          (loop (%sub i 1)))))]
+        (loop 100)))]
 
    ["tco-pair-replace"
     (fn []  # Each iteration replaces prev with a new pair cell.
     # DropValue + Cons fuses into ReuseSlotCons (in-place reuse).
-    (letrec [loop (fn [i prev] (if (= i 0) prev (loop (%sub i 1) (pair i nil))))]
-      (loop 10000 nil)))]
+      (letrec [loop (fn [i prev]
+                      (if (= i 0) prev (loop (%sub i 1) (pair i nil))))]
+        (loop 10000 nil)))]
 
    ["string-build-100"
     (fn []

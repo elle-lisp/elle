@@ -159,6 +159,27 @@ The supervisor automatically restarts them on crash:
 
 See [processes.md](processes.md) for the full supervisor API.
 
+## Temporary files
+
+`file/mktempdir` creates a uniquely-named directory under the platform
+temp root and returns its path. The root is the runtime's native temp
+location — `TMPDIR` on Unix (the per-user folder on macOS), `%TEMP%` on
+Windows — so scripts never hardcode `/tmp`; point `TMPDIR` at a tmpfs
+such as `/dev/shm` to keep scratch I/O in RAM. Uniqueness is made in
+the runtime (pid + counter, retried on collision), so concurrent
+processes cannot race each other to the same name the way fixed
+scratch filenames do.
+
+`with-temp-dir` scopes one to a body and deletes it on the way out —
+recursively, error or not. `file/delete-dir-all` is the underlying
+recursive delete (`file/delete-dir` only removes empty directories).
+
+```lisp
+(with-temp-dir dir
+  (file/write (path/join dir "scratch.txt") "data")
+  (assert (= (file/read (path/join dir "scratch.txt")) "data")))
+```
+
 ## System args and environment
 
 ```lisp

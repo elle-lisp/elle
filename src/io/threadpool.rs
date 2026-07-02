@@ -135,39 +135,6 @@ pub(crate) struct ThreadPoolBackend {
 /// Maximum concurrent thread-pool operations.
 pub(super) const MAX_THREAD_POOL_OPS: usize = 64;
 
-/// A short `(kind, fd)` description of a `PoolOp` for `io_trace`. `fd` is
-/// `-1` for ops that carry no fd (connect-by-name, sleep, resolve, …).
-/// Diagnostics only: a `tp-submit` line with no matching `tp-complete`
-/// names the exact syscall a worker is wedged in — the signal that pins a
-/// macOS threadpool hang (e.g. an `accept()` that a listening-socket
-/// `shutdown()` failed to wake). Exhaustive on purpose so a new `PoolOp`
-/// variant forces a decision here.
-fn pool_op_desc(op: &PoolOp) -> (&'static str, RawFd) {
-    match op {
-        PoolOp::Read { fd, .. } => ("read", *fd),
-        PoolOp::ReadExact { fd, .. } => ("read-exact", *fd),
-        PoolOp::Write { fd, .. } => ("write", *fd),
-        PoolOp::Flush { fd } => ("flush", *fd),
-        PoolOp::Accept { fd } => ("accept", *fd),
-        PoolOp::ConnectTcp { .. } => ("connect-tcp", -1),
-        PoolOp::ConnectUnix { .. } => ("connect-unix", -1),
-        PoolOp::SendTo { fd, .. } => ("sendto", *fd),
-        PoolOp::RecvFrom { fd, .. } => ("recvfrom", *fd),
-        PoolOp::Shutdown { fd, .. } => ("shutdown", *fd),
-        PoolOp::Sleep { .. } => ("sleep", -1),
-        PoolOp::ProcessWait { .. } => ("process-wait", -1),
-        PoolOp::Open { .. } => ("open", -1),
-        PoolOp::Task(_) => ("task", -1),
-        PoolOp::Resolve { .. } => ("resolve", -1),
-        PoolOp::ReadLine { fd } => ("read-line", *fd),
-        PoolOp::ReadAll { fd } => ("read-all", *fd),
-        PoolOp::WatchRead { fd } => ("watch-read", *fd),
-        PoolOp::SigfdRead { fd } => ("sigfd-read", *fd),
-        PoolOp::KqSigRead { fd, .. } => ("kq-sig-read", *fd),
-        PoolOp::PollFd { fd, .. } => ("poll-fd", *fd),
-    }
-}
-
 impl ThreadPoolBackend {
     pub(super) fn new() -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
@@ -183,13 +150,8 @@ impl ThreadPoolBackend {
         if self.in_flight >= MAX_THREAD_POOL_OPS {
             return Err("async I/O: too many concurrent operations (max 64)".into());
         }
-        let (op_kind, op_fd) = pool_op_desc(&op);
         let sender = self.sender.clone();
         self.in_flight += 1;
-        crate::io::io_trace(format_args!(
-            "tp-submit   id={id} op={op_kind} fd={op_fd} in_flight={}",
-            self.in_flight
-        ));
         std::thread::spawn(move || {
             // Block all signals on this worker so the kernel never selects
             // it as the delivery target for a watched POSIX signal.
@@ -585,9 +547,6 @@ impl ThreadPoolBackend {
                     }
                 }
             };
-            crate::io::io_trace(format_args!(
-                "tp-complete id={id} op={op_kind} fd={op_fd} rc={result_code}"
-            ));
             let _ = sender.send(PoolCompletion {
                 id,
                 result_code,

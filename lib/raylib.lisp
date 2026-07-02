@@ -1016,8 +1016,7 @@
 
   # ── Export ───────────────────────────────────────────────────────────
 
-  {
-   # constructors
+  {# constructors
    :color color
    :vec2 vec2
    :vec3 vec3

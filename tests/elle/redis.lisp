@@ -12,8 +12,12 @@
 
 # Delete only keys created by this test (prefix "test:redis:"), so we never run
 # FLUSHDB / FLUSHALL against a shared Redis. Safe to call when no keys match.
+# COUNT 1000: SCAN pages the whole keyspace and MATCH filters each page, so the
+# server-default page size (10) costs one round trip per ~10 ambient keys. On a
+# shared Redis with tens of thousands of keys that is thousands of round trips
+# per call — this file calls it four times — enough to trip the smoke timeout.
 (defn clear-test-keys []
-  (let [keys (redis:scan-all redis:scan :match "test:redis:*")]
+  (let [keys (redis:scan-all redis:scan :match "test:redis:*" :count 1000)]
     (when (not (empty? keys)) (apply redis:del keys))))
 
 # RESP self-tests (no Redis needed)
@@ -66,20 +70,24 @@
               (assert (= (redis:strlen "test:redis:str") 11) "strlen")
 
               (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
-              (let [vals (redis:mget "test:redis:m1" "test:redis:m2" "test:redis:nonexistent")]
+              (let [vals (redis:mget "test:redis:m1" "test:redis:m2"
+                                     "test:redis:nonexistent")]
                 (assert (= (get vals 0) "a") "mget 0")
                 (assert (= (get vals 1) "b") "mget 1")
                 (assert (nil? (get vals 2)) "mget nil"))
 
-              (assert (= (redis:setnx "test:redis:setnx" "val") true) "setnx new")
-              (assert (= (redis:setnx "test:redis:setnx" "val2") false) "setnx exists")
+              (assert (= (redis:setnx "test:redis:setnx" "val") true)
+                      "setnx new")
+              (assert (= (redis:setnx "test:redis:setnx" "val2") false)
+                      "setnx exists")
 
               (println "  string commands: ok")
 
               # ── Key commands ────────────────────────────────────────────────
 
               (assert (= (redis:exists "test:redis:k1") true) "exists true")
-              (assert (= (redis:exists "test:redis:nonexistent") false) "exists false")
+              (assert (= (redis:exists "test:redis:nonexistent") false)
+                      "exists false")
 
               (redis:set "test:redis:exp" "val")
               (assert (= (redis:expire "test:redis:exp" 100) true) "expire")
@@ -91,12 +99,14 @@
               (assert (= (redis:type "test:redis:k1") "string") "type")
 
               (redis:set "test:redis:rename" "val")
-              (assert (= (redis:rename "test:redis:rename" "test:redis:renamed") true)
-                      "rename")
+              (assert (= (redis:rename "test:redis:rename" "test:redis:renamed")
+                         true) "rename")
               (assert (= (redis:get "test:redis:renamed") "val") "get renamed")
 
-              (assert (>= (redis:del "test:redis:k1" "test:redis:renamed") 1) "del")
-              (assert (= (redis:exists "test:redis:k1") false) "exists after del")
+              (assert (>= (redis:del "test:redis:k1" "test:redis:renamed") 1)
+                      "del")
+              (assert (= (redis:exists "test:redis:k1") false)
+                      "exists after del")
 
               (println "  key commands: ok")
 
@@ -107,7 +117,8 @@
 
               (assert (= (redis:hget "test:redis:hash" "name") "Alice") "hget")
               (assert (nil? (redis:hget "test:redis:hash" "missing")) "hget nil")
-              (assert (= (redis:hexists "test:redis:hash" "name") true) "hexists true")
+              (assert (= (redis:hexists "test:redis:hash" "name") true)
+                      "hexists true")
               (assert (= (redis:hexists "test:redis:hash" "missing") false)
                       "hexists false")
 
@@ -251,10 +262,12 @@
               (redis:get "test:redis:str")
               (redis:strlen "test:redis:str")
               (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
-              (redis:mget "test:redis:m1" "test:redis:m2" "test:redis:nonexistent")
+              (redis:mget "test:redis:m1" "test:redis:m2"
+                          "test:redis:nonexistent")
               (redis:setnx "test:redis:setnx" "val")
               (redis:setnx "test:redis:setnx" "val2")
-              (assert (= (redis:exists "test:redis:k1") true) "stress exists true")
+              (assert (= (redis:exists "test:redis:k1") true)
+                      "stress exists true")
               (assert (= (redis:exists "test:redis:nonexistent") false)
                       "stress exists false")
               (println "  mixed commands: ok")
@@ -272,7 +285,7 @@
               (let [result-box (box nil)
                     f (ev/spawn (fn []
                                   (rebox result-box
-                                         (redis:get "test:redis:spawn-canary"))))]
+                                  (redis:get "test:redis:spawn-canary"))))]
                 (ev/join f)
                 (assert (= (unbox result-box) "preset")
                         "spawned fiber sees *redis-port* inherited from spawner"))

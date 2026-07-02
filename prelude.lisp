@@ -190,6 +190,15 @@
        (,dtor ,binding)
        ,;body)))
 
+## with-temp-dir - fresh scratch directory with guaranteed cleanup
+## Usage: (with-temp-dir binding body...)
+## Binds a uniquely-named directory under the platform temp root
+## (file/mktempdir honors TMPDIR, so scratch space is redirectable
+## without hardcoding /tmp), then deletes the whole tree after body —
+## even when body errors.
+(defmacro with-temp-dir (binding & body)
+  `(with ,binding (file/mktempdir) file/delete-dir-all ,;body))
+
 ## yield* - delegate to sub-fiber
 ## Resumes the sub-fiber, yielding each of its values to the caller.
 ## Resume values from the caller are passed through to the sub-fiber.

@@ -1112,8 +1112,7 @@
 
   # ── Export ─────────────────────────────────────────────────────────────
 
-  {
-   # Lifecycle
+  {# Lifecycle
    :init sdl/init
    :quit sdl/quit
    :error-string sdl/error-string

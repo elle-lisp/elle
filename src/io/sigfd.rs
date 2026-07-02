@@ -161,11 +161,6 @@ extern "C" fn terminate_handler(signum: libc::c_int) {
         s if s == libc::SIGHUP => b"elle: hung up by SIGHUP\n",
         _ => b"elle: terminated\n",
     };
-    // Diagnostic: flush the `--trace=ioring` buffer before we die, so a hang
-    // killed by a `timeout`/CI `SIGTERM` leaves its recent I/O-event tail.
-    // No-op unless the `ioring` bit is set; async-signal-safe (try_lock +
-    // bare write(2)) — see `crate::io::io_ring_dump`.
-    crate::io::io_ring_dump();
     unsafe {
         libc::write(2, tag.as_ptr() as *const libc::c_void, tag.len());
         libc::_exit(128 + signum);

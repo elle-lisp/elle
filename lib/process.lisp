@@ -240,8 +240,9 @@
       (fn [pid reason]
         (put (proc-get pid) :status :dead)
         (when (and (array? reason) (= (first reason) :error))
-          (put (proc-get pid) :exit-reason
-            {:error :process-error :reason (string (get reason 1))}))
+          (put (proc-get pid)
+               :exit-reason {:error :process-error
+                             :reason (string (get reason 1))}))
         (cancel-process-io pid)
         (cancel-process-futex pid)
         (unregister-name pid)
@@ -377,9 +378,9 @@
                  (complete-sub-fiber fiber :error)
                 (not (= 0 (bit/and bits 512)))  # SIG_IO
                 (let [id (emit :wait {:op :io-forward
-                                     :request (fiber/value fiber)
-                                     :queue io-completions
-                                     :wake-box io-wakeup-box})]
+                                      :request (fiber/value fiber)
+                                      :queue io-completions
+                                      :wake-box io-wakeup-box})]
                   (if (and (array? id) (= (first id) :error))
                     (begin
                       (fiber/abort fiber (get id 1))
@@ -398,19 +399,23 @@
                             (fiber/resume fiber nil)
                             (handle-sub-fiber-after-resume fiber pid))
                           (let [waiters (or (get futex-parked key)
-                                            (let [w @[]]
-                                              (put futex-parked key w)
-                                              w))]
-                            (push waiters @{:fiber fiber :pid pid
-                                            :val bx :expected expected
-                                            :is-sub true}))))
+                                (let [w @[]]
+                                  (put futex-parked key w)
+                                  w))]
+                            (push waiters
+                                  @{:fiber fiber
+                                    :pid pid
+                                    :val bx
+                                    :expected expected
+                                    :is-sub true}))))
                     :notify
                       (let [key (get request :key)
                             count (get request :count)
                             waiters (get futex-parked key)
                             @woken 0]
                         (when waiters
-                          (let [@i 0 @keep @[]]
+                          (let [@i 0
+                                @keep @[]]
                             (while (< i (length waiters))
                               (let [w (get waiters i)]
                                 (if (< woken count)
@@ -418,7 +423,8 @@
                                     (if (get w :is-sub)
                                       (when (= (fiber/status w:fiber) :paused)
                                         (fiber/resume w:fiber nil)
-                                        (handle-sub-fiber-after-resume w:fiber w:pid))
+                                        (handle-sub-fiber-after-resume w:fiber
+                                        w:pid))
                                       (when (alive? w:pid)
                                         (put (proc-get w:pid) :resume nil)
                                         (push ready w:pid)))
@@ -437,22 +443,25 @@
                         (let [comp (get sub-completed target)]
                           (if (not (nil? comp))
                             (when (= (fiber/status fiber) :paused)
-                              (fiber/resume fiber [(= comp :ok) (fiber/value target)])
+                              (fiber/resume fiber
+                              [(= comp :ok) (fiber/value target)])
                               (handle-sub-fiber-after-resume fiber pid))
                             (let [status (fiber/status target)]
                               (cond
                                 (= status :dead)
                                   (when (= (fiber/status fiber) :paused)
-                                    (fiber/resume fiber [true (fiber/value target)])
+                                    (fiber/resume fiber
+                                    [true (fiber/value target)])
                                     (handle-sub-fiber-after-resume fiber pid))
                                 (= status :error)
                                   (when (= (fiber/status fiber) :paused)
-                                    (fiber/resume fiber [false (fiber/value target)])
+                                    (fiber/resume fiber
+                                    [false (fiber/value target)])
                                     (handle-sub-fiber-after-resume fiber pid))
                                 (let [ws (or (get join-waiting target)
-                                             (let [w @[]]
-                                               (put join-waiting target w)
-                                               w))]
+                                      (let [w @[]]
+                                        (put join-waiting target w)
+                                        w))]
                                   # Store sub-fiber join entry — use negative PID to distinguish
                                   (push ws @{:fiber fiber :pid pid :is-sub true})
                                   (when (nil? (get sub-completed target))
@@ -469,7 +478,7 @@
                               (def @to-cancel @[])
                               (each [id entry] in (pairs io-pending)
                                 (when (and (get entry :fiber)
-                                           (= (get entry :fiber) target))
+                                  (= (get entry :fiber) target))
                                   (push to-cancel id)))
                               (each id in to-cancel
                                 (del io-pending id)
@@ -589,7 +598,8 @@
                   waiters (get futex-parked key)
                   @woken 0]
               (when waiters
-                (let [@i 0 @keep @[]]
+                (let [@i 0
+                      @keep @[]]
                   (while (< i (length waiters))
                     (let [w (get waiters i)]
                       (if (< woken count)
@@ -621,8 +631,7 @@
     (def @handle-cmd
       (fn [pid cmd]
         (let [tag (get cmd 0)]
-          (case
-            tag
+          (case tag
 
             :send
               (let [target (get cmd 1)
@@ -805,15 +814,16 @@
               (process-exit pid [:error (fiber/value f)])
 
             # Fuel exhaustion — re-queue for next round, mark fuel-only
-            (not (= 0 (bit/and bits 4096)))
-              (begin (push ready pid) (push fuel-preempted pid))
+            (not (= 0 (bit/and bits 4096))) (begin
+              (push ready pid)
+              (push fuel-preempted pid))
 
             # I/O — forward to root scheduler, park process
             (not (= 0 (bit/and bits 512)))
               (let [id (emit :wait {:op :io-forward
-                                   :request (fiber/value f)
-                                   :queue io-completions
-                                   :wake-box io-wakeup-box})]
+                                    :request (fiber/value f)
+                                    :queue io-completions
+                                    :wake-box io-wakeup-box})]
                 (if (and (array? id) (= (first id) :error))
                   (begin
                     (fiber/abort f (get id 1))
@@ -876,8 +886,7 @@
       (fn []
         (when (> (length io-completions) 0)
           (let [batch (->list io-completions)]
-            (while (> (length io-completions) 0)
-              (remove io-completions 0))
+            (while (> (length io-completions) 0) (remove io-completions 0))
             (complete-io batch)))))
 
     # ---- main loop ----
@@ -886,7 +895,8 @@
     (def @wake-futex-ready
       (fn []
         (each [key waiters] in (pairs futex-parked)
-          (let [@keep @[] @changed false]
+          (let [@keep @[]
+                @changed false]
             (each w in (->list waiters)
               (if (not (= (unbox w:val) w:expected))
                 (begin
@@ -921,7 +931,10 @@
     # These bindings hold mutable collections but are themselves immutable
     # (unlike @ready/@waiting, which are @-mutable), so empty them in place
     # the way the rest of the scheduler does with del/pop.
-    (def @clear-map (fn [m] (each k in (keys m) (del m k))))
+    (def @clear-map
+      (fn [m]
+        (each k in (keys m)
+          (del m k))))
     (def @clear-vec (fn [v] (while (> (length v) 0) (pop v))))
 
     # Cancel every forwarded I/O submission (process- and sub-fiber-owned
@@ -1003,85 +1016,83 @@
         # creation time, so sched-spawn (which creates the init fiber) must
         # run with the rebound *spawn*.
         (parameterize ((*spawn* sched-spawn-fn))
-        (sched-spawn init)
-        (while (has-work?)
-          (assign tick (box (+ (unbox tick) 1)))
-          (fire-timers)
-          (reap-io)
-          # Skip draining sub-fibers when ALL ready processes are just
-          # refueling. Pumping sub-fibers (h2 reader, server connection)
-          # during fuel preemption races with process-level h2 setup and
-          # causes protocol errors on shared TCP connections.
-          (let [fuel-only (and (not (empty? ready))
-                               (= (length ready) (length fuel-preempted)))]
-            (assign fuel-preempted @[])
-            (unless fuel-only
-              (drain-sub-runnable)))
-          (wake-futex-ready)
-          (wake-waiting)
+          (sched-spawn init)
+          (while (has-work?)
+            (assign tick (box (+ (unbox tick) 1)))
+            (fire-timers)
+            (reap-io)
+            # Skip draining sub-fibers when ALL ready processes are just
+            # refueling. Pumping sub-fibers (h2 reader, server connection)
+            # during fuel preemption races with process-level h2 setup and
+            # causes protocol errors on shared TCP connections.
+            (let [fuel-only (and (not (empty? ready))
+                                 (= (length ready) (length fuel-preempted)))]
+              (assign fuel-preempted @[])
+              (unless fuel-only (drain-sub-runnable)))
+            (wake-futex-ready)
+            (wake-waiting)
 
-          # No process left alive: every remaining sub-fiber is an orphan
-          # (nothing can wake its futex, deliver its I/O, or read its
-          # result). Tear them down here — after draining, so a fire-and-
-          # forget sub-fiber still runs once, but before the idle handler
-          # below would otherwise spin on a futex orphan or block on
-          # io/wait for an I/O orphan that never completes.
-          (when (not (any-alive?))
-            (abort-orphan-subs))
+            # No process left alive: every remaining sub-fiber is an orphan
+            # (nothing can wake its futex, deliver its I/O, or read its
+            # result). Tear them down here — after draining, so a fire-and-
+            # forget sub-fiber still runs once, but before the idle handler
+            # below would otherwise spin on a futex orphan or block on
+            # io/wait for an I/O orphan that never completes.
+            (when (not (any-alive?)) (abort-orphan-subs))
 
-          (when (empty? ready)
-            (cond  # Nothing alive anywhere — done
-              (not (has-work?)) nil  # while condition will terminate
+            (when (empty? ready)
+              (cond  # Nothing alive anywhere — done
+                (not (has-work?)) nil  # while condition will terminate
 
-              # I/O in flight — park until root delivers completions
-              (> (length io-pending) 0)
-                (begin
-                  (let [expected (unbox io-wakeup-box)]
-                    (reap-io)
-                    (when (empty? ready)
-                      (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
-                      (reap-io)))
-                  (drain-sub-runnable))
+                # I/O in flight — park until root delivers completions
+                (> (length io-pending) 0)
+                  (begin
+                    (let [expected (unbox io-wakeup-box)]
+                      (reap-io)
+                      (when (empty? ready)
+                        (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
+                        (reap-io)))
+                    (drain-sub-runnable))
 
-              # Waiting with timers — fast-forward tick
-              (not (empty? timers))
-                (begin
-                  (def @min-fire (get (get timers 0) :fire-at))
-                  (each timer in timers
-                    (when (< (get timer :fire-at) min-fire)
-                      (assign min-fire (get timer :fire-at))))
-                  (assign tick (box min-fire))
-                  (fire-timers)
-                  (wake-waiting)
-                  (when (and (empty? ready) (not (empty? waiting))
-                             (empty? timers))
-                    (error {:error :deadlock
-                            :message "all processes waiting, no messages pending"})))
+                # Waiting with timers — fast-forward tick
+                (not (empty? timers))
+                  (begin
+                    (def @min-fire (get (get timers 0) :fire-at))
+                    (each timer in timers
+                      (when (< (get timer :fire-at) min-fire)
+                        (assign min-fire (get timer :fire-at))))
+                    (assign tick (box min-fire))
+                    (fire-timers)
+                    (wake-waiting)
+                    (when (and (empty? ready) (not (empty? waiting))
+                               (empty? timers))
+                      (error {:error :deadlock
+                              :message "all processes waiting, no messages pending"})))
 
-              # Waiting with no timers, no I/O — deadlock
-              (not (empty? waiting)) (error {:error :deadlock
-              :message "all processes waiting, no messages pending"})))
+                # Waiting with no timers, no I/O — deadlock
+                (not (empty? waiting)) (error {:error :deadlock
+                :message "all processes waiting, no messages pending"})))
 
-          (let [batch ready]
-            (assign ready @[])
-            (each pid in batch
-              (run-one pid)))
+            (let [batch ready]
+              (assign ready @[])
+              (each pid in batch
+                (run-one pid)))
 
-          # Yield to root scheduler when I/O is pending but only
-          # spinning (fuel-preempted) processes are ready. Without this,
-          # a spinning process keeps ready non-empty and the idle handler
-          # never parks, starving the root scheduler from delivering
-          # I/O completions.
-          (when (and (> (length io-pending) 0) (= (length io-completions) 0)
-                     (not (empty? ready))
-                     (= (length ready) (length fuel-preempted)))
-            (let [expected (unbox io-wakeup-box)]
-              (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
-              (reap-io))))
+            # Yield to root scheduler when I/O is pending but only
+            # spinning (fuel-preempted) processes are ready. Without this,
+            # a spinning process keeps ready non-empty and the idle handler
+            # never parks, starving the root scheduler from delivering
+            # I/O completions.
+            (when (and (> (length io-pending) 0) (= (length io-completions) 0)
+                       (not (empty? ready))
+                       (= (length ready) (length fuel-preempted)))
+              (let [expected (unbox io-wakeup-box)]
+                (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
+                (reap-io))))
 
-        # Propagate PID 0 errors to caller
-        (let [err (get (proc-get 0) :exit-reason)]
-          (when err (error err))))))  # close parameterize
+          # Propagate PID 0 errors to caller
+          (let [err (get (proc-get 0) :exit-reason)]
+            (when err (error err))))))  # close parameterize
 
     # ---- external API ----
 
@@ -1766,8 +1777,7 @@
 # ============================================================================
 
 (fn []
-  {
-   # Process API (used inside processes)
+  {# Process API (used inside processes)
    :send send
    :recv recv
    :recv-match recv-match

@@ -230,8 +230,7 @@
 
   ## ── Export struct ──────────────────────────────────────────────────
 
-  {
-   # lifecycle
+  {# lifecycle
    :open open
    :close close
    :open? open?

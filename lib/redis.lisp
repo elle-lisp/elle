@@ -149,11 +149,10 @@
               :reason :no-connection
               :message "no active Redis connection"}))
     (require-binary-port port "redis-cmd")
-    (with-redis-lock
-      (fn []
-        (port/write port (apply resp-encode args))
-        (port/flush port)
-        (resp-read port)))))
+    (with-redis-lock (fn []
+                       (port/write port (apply resp-encode args))
+                       (port/flush port)
+                       (resp-read port)))))
 
 ## ── Connection ────────────────────────────────────────────────────────
 
@@ -762,17 +761,16 @@
               :reason :no-connection
               :message "no active Redis connection"}))
     (require-binary-port port "redis-pipeline")
-    (with-redis-lock
-      (fn []
-        # Send all commands
-        (each cmd in commands
-          (port/write port (apply resp-encode cmd)))
-        (port/flush port)
-        # Read all replies
-        (def results @[])
-        (each cmd in commands
-          (push results (resp-read-raw port)))
-        (freeze results)))))
+    (with-redis-lock (fn []
+                       # Send all commands
+                       (each cmd in commands
+                         (port/write port (apply resp-encode cmd)))
+                       (port/flush port)
+                       # Read all replies
+                       (def results @[])
+                       (each cmd in commands
+                         (push results (resp-read-raw port)))
+                       (freeze results)))))
 
 ## ── Internal self-tests (RESP encoding/decoding, no Redis needed) ─────
 
@@ -884,8 +882,7 @@
 ## ── Exports ───────────────────────────────────────────────────────────
 
 (fn []
-  {
-   # Connection
+  {# Connection
    :connect redis-connect
    :close redis-close
    :with redis-with

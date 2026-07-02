@@ -1468,7 +1468,7 @@
        'we injected :shutdown' — defer-time errors during shutdown are
        dropped here rather than misattributed to user code."
 
-      (io/trace "do-shutdown: enter")  # Phase 1a: abort pending-I/O fibers (inject error, let defer run).
+      # Phase 1a: abort pending-I/O fibers (inject error, let defer run).
       (each [id fiber] in (pairs pending)
         (del pending id)
         (del fiber-io fiber)
@@ -1515,8 +1515,7 @@
       (while (> (length runnable) 0)
         (let [fiber (pop runnable)]
           (add scheduler-killed fiber)
-          (protect (fiber/cancel fiber {:error :shutdown}))))
-      (io/trace "do-shutdown: exit"))
+          (protect (fiber/cancel fiber {:error :shutdown})))))
 
     (defn step [timeout-ms]
       "Execute one tick of the event loop. Returns :done or :pending."
@@ -1539,7 +1538,7 @@
         fiber)
      :step step
      :pump  # pump-fn: event loop.
-     # Program-completion teardown: when called with the program's
+      # Program-completion teardown: when called with the program's
      # fibers (its thunks), the loop ends as soon as THEY have all
      # completed.  Each iteration first drains runnable work without
      # blocking (step 0); once the program's fibers are done it shuts
@@ -1550,34 +1549,29 @@
      # `entry` is simply the program; everything else is torn down
      # identically.  Called with no fibers it runs until the scheduler
      # is globally idle (legacy behaviour, e.g. ev/run-on).
-      (fn (& entry)
-        (let [have-entry (> (length entry) 0)
-              all-done? (fn (fs)
-                          (let [@d true]
-                            (each f in fs
-                              (let [s (fiber/status f)]
-                                (unless (or (= s :dead) (= s :error))
-                                  (assign d false))))
-                            d))]
-          (block :loop
-            (forever  # Drain all currently-runnable work without blocking on I/O.
-              (when (= (step 0) :done) (break :loop nil))  # Program complete?  Tear down instead of waiting on orphans.
-              (when (and have-entry (all-done? entry))
-                (do-shutdown 100)
-                (break :loop nil))  # Live program work remains — block for the next I/O event.
-              (when (and (= (length pending) 0) (> (length park-queues) 0))
-                (io/trace (concat "pump: block pending=0 park="
-                                  (string (length park-queues)) " run="
-                                  (string (length runnable)) " done="
-                                  (string (all-done? entry)))))
-              (when (= (step (- 0 1)) :done) (break :loop nil)))))  # Crash on unjoined errored fibers — never swallow errors silently.
-        # scheduler-killed fibers are excluded: we injected their :shutdown
-        # at teardown time, so re-raising would surface our own signal as a
-        # user error.
-        (each [fiber status] in (pairs completed)
-          (when (and (= status :error) (not (contains? joined fiber))
-                     (not (contains? scheduler-killed fiber)))
-            (error (fiber/value fiber)))))
+     (fn (& entry)
+       (let [have-entry (> (length entry) 0)
+             all-done? (fn (fs)
+                         (let [@d true]
+                           (each f in fs
+                             (let [s (fiber/status f)]
+                               (unless (or (= s :dead) (= s :error))
+                                 (assign d false))))
+                           d))]
+         (block :loop
+           (forever  # Drain all currently-runnable work without blocking on I/O.
+             (when (= (step 0) :done) (break :loop nil))  # Program complete?  Tear down instead of waiting on orphans.
+             (when (and have-entry (all-done? entry))
+               (do-shutdown 100)
+               (break :loop nil))  # Live program work remains — block for the next I/O event.
+             (when (= (step (- 0 1)) :done) (break :loop nil)))))  # Crash on unjoined errored fibers — never swallow errors silently.
+       # scheduler-killed fibers are excluded: we injected their :shutdown
+       # at teardown time, so re-raising would surface our own signal as a
+       # user error.
+       (each [fiber status] in (pairs completed)
+         (when (and (= status :error) (not (contains? joined fiber))
+                    (not (contains? scheduler-killed fiber)))
+           (error (fiber/value fiber)))))
      :shutdown  # shutdown-fn: signal shutdown
       (fn (timeout-ms) (put shutdown-req 0 timeout-ms))
      :mark-joined  # mark a fiber as observed (suppress unjoined-error crash)
@@ -1862,12 +1856,12 @@
                         (break))
                     _  ## Woken or timed out at the scheduler — pick a
                     ## ready receiver or loop again.
-                    (let [r (chan/try-select rxs)]
-                      (match (get r 0)
-                        :empty nil  ## spurious wake — re-park
-                        _ (begin
-                            (assign result r)
-                            (break)))))))))
+                      (let [r (chan/try-select rxs)]
+                        (match (get r 0)
+                          :empty nil  ## spurious wake — re-park
+                          _ (begin
+                              (assign result r)
+                              (break)))))))))
           result)
       _ first)))
 
