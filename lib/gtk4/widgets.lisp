@@ -209,16 +209,18 @@
       (make-widget win-handle props ptr :spin-button)))
 
   (defn make-combo-box (win-handle props items)
-    (let* [id props:id
-           count (length items)  # build null-terminated string array for gtk_string_list_new
-           ptrs (ffi/malloc (* (+ count 1) (ffi/size :ptr)))
-           _ (each i in (range count)
-               (let [s (ffi/pin (bytes (string (items i) "\0")))]
-                 (ffi/write (ptr/add ptrs (* i (ffi/size :ptr))) :ptr s)))
-           _ (ffi/write (ptr/add ptrs (* count (ffi/size :ptr))) :ptr nil)
-           model (b:gtk-string-list-new ptrs)
+    (let* [id props:id  # Items may come as a :items prop (a list of strings) — the build DSL
+           # routes bare-string children to `text`, so they can't reach here.
+           # Prefer the prop; fall back to any non-string children passed in.
+           items (or props:items items)
+           count (length items)  # Build the model by appending each item through the :string
+           # marshalling (same path as gtk-label-new) rather than hand-rolling a
+           # char** with ffi/pin'd byte buffers: those pins aren't retained, so
+           # gtk_string_list_new read freed/garbage memory → tofu in the dropdown.
+           model (b:gtk-string-list-new nil)
+           _ (each it in items
+               (b:gtk-string-list-append model (string it)))
            ptr (b:gtk-drop-down-new model nil)]
-      (ffi/free ptrs)
       (let [cb (ffi/callback sig-clicked
                              (fn (widget data)
                                (let [idx (b:gtk-drop-down-get-selected ptr)]
@@ -338,7 +340,8 @@
 
   (def sig-click-pressed (ffi/signature :void [:ptr :int :double :double :ptr]))
   (def sig-scroll (ffi/signature :int [:ptr :double :double :ptr]))
-  (def sig-key-pressed (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]))
+  (def sig-key-pressed (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]))  # key-released returns void (unlike key-pressed, which returns int to claim the key)
+  (def sig-key-released (ffi/signature :void [:ptr :u32 :u32 :u32 :ptr]))
 
   (def SCROLL_VERTICAL 2)
 
@@ -361,13 +364,26 @@
       (b:gtk-widget-add-controller ptr scroll)))
 
   (defn add-key (win-handle ptr handler)
-    "Add a key controller. handler: (fn [keyval keycode state]) → int."
+    "Add a key-press controller. handler: (fn [keyval keycode state]) → int
+     (return 1 to claim the key, 0 to let it propagate / insert)."
     (let* [keys (b:gtk-event-controller-key-new)
            cb (ffi/callback sig-key-pressed
                             (fn (ctrl keyval keycode state data)
                               (handler keyval keycode state)))]
       (push win-handle:callbacks cb)
       (b:g-signal-connect-data keys "key-pressed" cb nil nil 0)
+      (b:gtk-widget-add-controller ptr keys)))
+
+  (defn add-key-release (win-handle ptr handler)
+    "Add a key-release controller. handler: (fn [keyval keycode state]); its
+     return is ignored (the GTK key-released signal is void). Needed for
+     hold-to-act keys (e.g. push-to-talk) that must see the key go up."
+    (let* [keys (b:gtk-event-controller-key-new)
+           cb (ffi/callback sig-key-released
+                            (fn (ctrl keyval keycode state data)
+                              (handler keyval keycode state)))]
+      (push win-handle:callbacks cb)
+      (b:g-signal-connect-data keys "key-released" cb nil nil 0)
       (b:gtk-widget-add-controller ptr keys)))
 
   # ── Export ────────────────────────────────────────────────────────
@@ -413,5 +429,6 @@
    :add-click add-click
    :add-scroll add-scroll
    :add-key add-key
+   :add-key-release add-key-release
    :SCROLL_VERTICAL SCROLL_VERTICAL})
 # end (fn [])

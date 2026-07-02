@@ -191,6 +191,8 @@
   # ── GtkDropDown (combo-box) ──────────────────────────────────────
 
   (ffi/defbind gtk-string-list-new libgtk "gtk_string_list_new" :ptr [:ptr])
+  (ffi/defbind gtk-string-list-append libgtk "gtk_string_list_append"
+               :void [:ptr :string])
   (ffi/defbind gtk-drop-down-new libgtk "gtk_drop_down_new" :ptr [:ptr :ptr])
   (ffi/defbind gtk-drop-down-get-selected libgtk "gtk_drop_down_get_selected"
                :uint [:ptr])
@@ -519,6 +521,7 @@
    :gtk-spin-button-get-value gtk-spin-button-get-value
    :gtk-spin-button-set-value gtk-spin-button-set-value  # drop down
    :gtk-string-list-new gtk-string-list-new
+   :gtk-string-list-append gtk-string-list-append
    :gtk-drop-down-new gtk-drop-down-new
    :gtk-drop-down-get-selected gtk-drop-down-get-selected
    :gtk-drop-down-set-selected gtk-drop-down-set-selected  # search
