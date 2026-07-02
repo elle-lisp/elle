@@ -273,11 +273,6 @@ impl AsyncBackend {
                     })
                     .collect();
 
-                crate::io::io_trace(format_args!(
-                    "close fd={fd}: reaping {} pending op(s)",
-                    ids_to_cancel.len()
-                ));
-
                 for _op_id in ids_to_cancel {
                     match inner.platform {
                         #[cfg(target_os = "linux")]
@@ -290,16 +285,10 @@ impl AsyncBackend {
                             // entry — let the thread's error completion flow back
                             // so the fiber resumes and can exit cleanly.
                             //
-                            // Caveat (traced here for the macOS hang hunt):
-                            // shutdown() wakes a blocked read on a *connected*
-                            // socket everywhere, but on macOS/BSD it returns
-                            // ENOTCONN on a *listening* socket and does NOT wake
-                            // a blocked accept() — so a `tp-submit … op=accept`
-                            // with no matching `tp-complete` after this line is
-                            // the fingerprint of that gap.
-                            crate::io::io_trace(format_args!(
-                                "close fd={fd}: shutdown(SHUT_RDWR) to unblock pending id={_op_id}"
-                            ));
+                            // Caveat: shutdown() wakes a blocked read on a
+                            // *connected* socket everywhere, but on macOS/BSD it
+                            // returns ENOTCONN on a *listening* socket and does
+                            // NOT wake a blocked accept() (Linux does, EINVAL).
                             unsafe { libc::shutdown(*fd, libc::SHUT_RDWR) };
                         }
                     }
@@ -1326,7 +1315,6 @@ impl AsyncBackend {
     /// mid-flight; the scheduler removes the pending entry and the completion
     /// is discarded when it arrives).
     pub(crate) fn cancel(&self, id: u64) -> Result<(), String> {
-        crate::io::io_trace(format_args!("cancel id={id}"));
         let mut inner = self.inner.borrow_mut();
         match inner.platform {
             #[cfg(target_os = "linux")]

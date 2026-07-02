@@ -309,17 +309,14 @@
         (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
-      (io/trace "h2-close: join-writer")
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))  # Abort reader before closing transport — the reader may have a pending
+      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
+      # Abort reader before closing transport — the reader may have a pending
       # read on the socket (started by fuel preemption or concurrent sub-fiber).
       # Closing the fd while a read is in-flight causes partial-read errors.
-      (io/trace "h2-close: abort+join-reader")
       (when sess:reader-fiber
         (protect (ev/abort sess:reader-fiber))
         (ev/join-protected sess:reader-fiber))
-      (io/trace "h2-close: close-transport")
-      (protect (sess:transport:close))
-      (io/trace "h2-close: done"))
+      (protect (sess:transport:close)))
     nil)
 
   ## ── Tests ──────────────────────────────────────────────────────────────

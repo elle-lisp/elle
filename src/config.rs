@@ -199,7 +199,7 @@ impl MlirPolicy {
 /// silently (forward compat for :spirv, :mlir, :gpu).
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix", "ioring",
+    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix",
     // Future: accepted without error
     "spirv", "mlir", "gpu",
 ];
@@ -278,12 +278,7 @@ pub mod trace_bits {
     /// can fire from any thread (including `sys/spawn`'d OS threads)
     /// which has no `&VM` reference.
     pub const CHAN: u32 = 1 << 18;
-    /// In-memory I/O event ring, dumped to stderr only on `SIGTERM` (the CI
-    /// timeout signal). Unlike `io` (a `write(2)` per event) this adds no
-    /// syscall on the hot path, so it can pin a hang too timing-tight to
-    /// survive `--trace=io`'s per-op latency. See `io_trace`/`io_ring_dump`.
-    pub const IORING: u32 = 1 << 19;
-    pub const ALL: u32 = (1 << 20) - 1;
+    pub const ALL: u32 = (1 << 19) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -307,7 +302,6 @@ pub mod trace_bits {
             "bytecode" => BYTECODE,
             "posix" => POSIX,
             "chan" => CHAN,
-            "ioring" => IORING,
             // Future keywords — accepted but no bit (traced via HashSet)
             _ => 0,
         }
@@ -557,30 +551,6 @@ impl Config {
     /// `remaining_args` contains file args and everything after `--`.
     pub fn parse(args: &[String]) -> Result<(Config, Vec<String>), String> {
         let mut config = Config::default();
-
-        // `ELLE_TRACE=io,chan` seeds trace keywords from the environment so a
-        // diagnostic trace can be switched on where the command line is fixed
-        // — e.g. a CI job that invokes `elle <script>` verbatim. CLI
-        // `--trace=` appends to this; both feed the same trace-bit set (and
-        // the process-global mirror) via `from_static_config`. `all` expands
-        // to every keyword; unknown keywords are ignored, exactly as for
-        // `--trace=`.
-        if let Ok(v) = std::env::var("ELLE_TRACE") {
-            let v = v.trim();
-            if v == "all" {
-                for kw in TRACE_KEYWORDS {
-                    config.trace_keywords.push(kw.to_string());
-                }
-            } else {
-                for kw in v.split(',') {
-                    let kw = kw.trim();
-                    if !kw.is_empty() {
-                        config.trace_keywords.push(kw.to_string());
-                    }
-                }
-            }
-        }
-
         let mut remaining = Vec::new();
         let mut i = 0;
         let mut eval_exprs: Vec<String> = Vec::new();
