@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http.lisp — Pure Elle HTTP/1.1 client and server
 ##
 ## Plain HTTP only:
@@ -744,7 +744,7 @@
         {:transport t :status status-line:status :headers resp-headers})))
 
   (defn sse-get [url &named headers last-event-id @reconnect]
-    "Open an SSE connection to url and return a coroutine that yields
+    "Open an SSE connection to url and return a fiber that yields
      events until the stream terminates. Each event is a struct:
        {:event \"message\" :data \"...\" :id \"...\" :retry 3000}
 

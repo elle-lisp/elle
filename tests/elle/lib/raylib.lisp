@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/lib/raylib.lisp — raylib module smoke tests
 #
 # Tests module loading, constructors, constants, struct sizes, and accessors.

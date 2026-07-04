@@ -14,6 +14,7 @@ a     # => 1
 c     # => 3
 
 # & rest collects remaining elements into a list
+# (&rest is a synonym for & in every rest-collector position)
 (def (head & tail) (list 1 2 3 4))
 head  # => 1
 tail  # => (2 3)

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 (defn check-safe-helper [col remaining row-offset]
   (if (empty? remaining)
     true

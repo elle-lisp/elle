@@ -12,6 +12,7 @@
 
 mod accessors;
 mod constructors;
+pub(crate) mod eq;
 mod traits;
 
 #[cfg(test)]
@@ -32,9 +33,15 @@ pub const TAG_KEYWORD: u64 = 7;
 pub const TAG_UNDEFINED: u64 = 8;
 pub const TAG_CPOINTER: u64 = 9;
 
+// Native-fns are IMMEDIATE: tag below TAG_HEAP_START, payload is a prim_id
+// (index into the canonical primitives::table()). TAG_NATIVE_FN(10) and
+// TAG_STRING(26) are swapped from their historical values so native-fn sits
+// below the heap boundary; nothing hardcodes the numeric tags (all uses by name).
+pub const TAG_NATIVE_FN: u64 = 10;
+
 // Heap types (tag >= TAG_HEAP_START means is_heap() is true)
-pub const TAG_HEAP_START: u64 = 10;
-pub const TAG_STRING: u64 = 10;
+pub const TAG_HEAP_START: u64 = 11;
+pub const TAG_STRING: u64 = 26;
 pub const TAG_STRING_MUT: u64 = 11;
 pub const TAG_ARRAY: u64 = 12;
 pub const TAG_ARRAY_MUT: u64 = 13;
@@ -50,7 +57,6 @@ pub const TAG_LBOX: u64 = 22;
 pub const TAG_CAPTURE_CELL: u64 = 34;
 pub const TAG_FIBER: u64 = 23;
 pub const TAG_SYNTAX: u64 = 24;
-pub const TAG_NATIVE_FN: u64 = 26;
 pub const TAG_FFI_SIG: u64 = 27;
 pub const TAG_FFI_TYPE: u64 = 28;
 pub const TAG_LIB_HANDLE: u64 = 29;
@@ -58,6 +64,10 @@ pub const TAG_MANAGED_PTR: u64 = 30;
 pub const TAG_EXTERNAL: u64 = 31;
 pub const TAG_PARAMETER: u64 = 32;
 pub const TAG_THREAD: u64 = 33;
+// Region-allocated closure template (HeapObject::ClosureTemplate). Never a
+// user-visible value; tag distinct from TAG_CLOSURE so the arena's tag/object
+// agreement check (UAF oracle) still fires on a template/instance confusion.
+pub const TAG_CLOSURE_TEMPLATE: u64 = 35;
 
 // =============================================================================
 // Value Struct
@@ -199,20 +209,4 @@ impl Value {
             payload: ptr as u64,
         }
     }
-}
-
-/// Create a proper list from values.
-pub fn list(values: impl IntoIterator<Item = Value>) -> Value {
-    values
-        .into_iter()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc))
-}
-
-/// Create a cons cell (convenience function).
-#[inline]
-pub fn pair(head: Value, tail: Value) -> Value {
-    Value::pair(head, tail)
 }

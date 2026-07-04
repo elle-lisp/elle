@@ -43,10 +43,11 @@ Traits do not affect structural equality, ordering, or hashing:
 
 ## Protocol dispatch
 
-Primitives like `first`, `rest`, `length`, `empty?`, `has?`, `last`,
+Primitives like `first`, `rest`, `length`, `empty?`, `has?`, and
 `second` dispatch through trait table lookup instead of hardcoded type
-cascades. Each collection/sequence type gets a shared default traitset
-stamped at allocation time.
+cascades. (`second` dispatches via the `:Sequence` `:nth` method.) Each
+collection/sequence type gets a shared default traitset stamped at
+allocation time.
 
 ### Trait table schema
 
@@ -104,13 +105,16 @@ This means `(with-traits [1 2 3] {:tag :my-type})` still supports
 - **Syntax objects** support `first`, `rest`, `length`, `empty?` via
   pre-checks (used during macro expansion). No traitset.
 - **Symbols and keywords** support `length` via pre-check.
-- **nil** supports `length` (returns 0) and `empty?` (returns true)
-  via pre-check.
+- **nil** supports `length` (returns 0) via pre-check. It does *not*
+  support `empty?` — `(empty? nil)` raises a `:type-error`.
 
 ### Non-overridable operations
 
-`butlast`, `reverse` are defined in terms of the underlying
-implementations, not through trait dispatch. User-defined Sequence
+`last`, `butlast`, `reverse` are defined in terms of the underlying
+implementations (`last`/`butlast` in `core.lisp` via `length`/`get`/
+`slice`), not through trait dispatch. The `:Sequence` protocol carries a
+`:last` method, but the user-facing `last` primitive does not call it, so
+overriding `:last` via `with-traits` has no effect. User-defined Sequence
 types that only implement the trait protocol won't support these.
 
 ## Iterator protocol
@@ -125,6 +129,8 @@ When the fiber completes (status `:dead`), iteration is done.
 (fiber/resume fib)   # => 10
 (fiber/resume fib)   # => 20
 (fiber/resume fib)   # => 30
+(fiber/status fib)   # => :paused (one more resume needed to drain)
+(fiber/resume fib)   # completes the fiber
 (fiber/status fib)   # => :dead
 ```
 
@@ -168,8 +174,8 @@ Any value can implement `:Sequence` via `with-traits`:
 
 ## Cross-thread behavior
 
-Default traitsets are thread-local permanent allocations. When sending
-a value to another thread:
+Default traitsets are thread-local: each thread's VM builds its own via
+`init_default_traits`. When sending a value to another thread:
 
 - Default traits are skipped (sent as NIL). The receiving thread's
   constructors stamp its own registry defaults.
@@ -180,15 +186,21 @@ not a type heuristic. User-attached @struct traits are preserved.
 
 ## Allocation
 
-Default traitsets use `alloc_permanent` (Rc-backed, never reclaimed
-by arena scope operations). This ensures they don't interfere with
-scope-based arena reclamation. The traitset pointer in a heap object
-is just a pointer — no arena bookkeeping overhead.
+Default traitsets are built once per VM into the **root region**
+(`alloc_root`) and held by the trait registry, pinned alive by reference
+count for the lifetime of that VM/run. They are not reclaimed by
+scope-based arena operations, but they are *not* immortal: process
+teardown releases the root region by RC, and `reset_default_traits`
+drops the registry's cached pointers so a fresh VM on the same thread
+rebuilds them. The method handles a traitset carries *are* native-fns:
+immediate `prim_id` values that occupy no region. The traitset pointer in
+a heap object is just a pointer — no arena bookkeeping overhead.
 
-`collect_heap_children` traces the `traits` field for all heap
-variants. Permanent traitsets won't match `slab_owns()` and are
-skipped. User-attached traits (arena-allocated via `with-traits`) are
-properly traced.
+The `traits` side-field is a cross-region edge enumerated for every
+traitable heap variant during region cross-ref accounting
+(`find_object_cross_refs`), so the alloc-time incref and the free-time
+decref balance symmetrically. User-attached traits (arena-allocated via
+`with-traits`) are traced this way.
 
 ## Performance
 

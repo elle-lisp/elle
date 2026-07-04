@@ -79,6 +79,7 @@ impl fmt::Display for LirConst {
             LirConst::Symbol(sid) => write!(f, "sym({})", sid.0),
             LirConst::Keyword(k) => write!(f, ":{}", k),
             LirConst::ClosureRef(idx) => write!(f, "closure-ref({})", idx),
+            LirConst::ValueRef(idx) => write!(f, "value-ref({})", idx),
         }
     }
 }
@@ -102,10 +103,20 @@ impl fmt::Display for LirInstr {
             // === Constants ===
             LirInstr::Const { dst, value } => write!(f, "{} ← {}", dst, value),
             LirInstr::ValueConst { dst, value } => write!(f, "{} ← val({})", dst, value),
+            LirInstr::MaterializeConst {
+                dst,
+                template,
+                region,
+            } => {
+                write!(f, "{} ← materialize({:?}) @r{}", dst, template, region)
+            }
 
             // === Variables ===
             LirInstr::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
             LirInstr::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
+            LirInstr::StoreLocalRefcounted { slot, src } => {
+                write!(f, "local[{}] ←rc {}", slot, src)
+            }
             LirInstr::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
             LirInstr::LoadCaptureRaw { dst, index } => {
                 write!(f, "{} ← cap[{}] (raw)", dst, index)
@@ -118,6 +129,7 @@ impl fmt::Display for LirInstr {
                 fmt_regs(captures, f)?;
                 f.write_str(")")
             }
+            LirInstr::LoadSelf { dst } => write!(f, "{} ← self", dst),
 
             // === Function Calls ===
             LirInstr::Call {
@@ -125,12 +137,14 @@ impl fmt::Display for LirInstr {
                 func,
                 args,
                 arity_checked,
+                ..
             }
             | LirInstr::SuspendingCall {
                 dst,
                 func,
                 args,
                 arity_checked,
+                ..
             } => {
                 write!(f, "{} ← {}(", dst, func)?;
                 fmt_regs(args, f)?;
@@ -144,6 +158,7 @@ impl fmt::Display for LirInstr {
                 func,
                 args,
                 arity_checked,
+                ..
             } => {
                 write!(f, "tailcall {}(", func)?;
                 fmt_regs(args, f)?;
@@ -155,10 +170,12 @@ impl fmt::Display for LirInstr {
             }
 
             // === Data Construction ===
-            LirInstr::List { dst, head, tail } => {
+            LirInstr::List {
+                dst, head, tail, ..
+            } => {
                 write!(f, "{} ← pair({}, {})", dst, head, tail)
             }
-            LirInstr::MakeArrayMut { dst, elements } => {
+            LirInstr::MakeArrayMut { dst, elements, .. } => {
                 write!(f, "{} ← array(", dst)?;
                 fmt_regs(elements, f)?;
                 f.write_str(")")
@@ -192,11 +209,12 @@ impl fmt::Display for LirInstr {
             LirInstr::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
             // === Box Operations ===
-            LirInstr::MakeCaptureCell { dst, value } => write!(f, "{} ← lbox({})", dst, value),
+            LirInstr::MakeCaptureCell { dst, value, .. } => write!(f, "{} ← lbox({})", dst, value),
             LirInstr::LoadCaptureCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
             LirInstr::StoreCaptureCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
             // === Destructuring ===
+            LirInstr::MatchFail { dst, src } => write!(f, "{} ← match-fail!({})", dst, src),
             LirInstr::FirstDestructure { dst, src } => write!(f, "{} ← first!({})", dst, src),
             LirInstr::RestDestructure { dst, src } => write!(f, "{} ← rest!({})", dst, src),
             LirInstr::ArrayMutRefDestructure { dst, src, index } => {
@@ -227,7 +245,7 @@ impl fmt::Display for LirInstr {
                 write!(f, "{} ← {}[{}]?", dst, src, index)
             }
 
-            // === Coroutines ===
+            // === Fibers ===
             LirInstr::LoadResumeValue { dst } => write!(f, "{} ← resume-val", dst),
 
             // === Runtime Eval ===
@@ -242,27 +260,35 @@ impl fmt::Display for LirInstr {
             LirInstr::ArrayMutPush { dst, array, value } => {
                 write!(f, "{} ← push({}, {})", dst, array, value)
             }
-            LirInstr::CallArrayMut { dst, func, args } => {
+            LirInstr::CallArrayMut {
+                dst, func, args, ..
+            } => {
                 write!(f, "{} ← {}(;{})", dst, func, args)
             }
-            LirInstr::TailCallArrayMut { func, args } => {
+            LirInstr::TailCallArrayMut { func, args, .. } => {
                 write!(f, "tailcall {}(;{})", func, args)
             }
 
             // === Allocation Regions ===
-            LirInstr::RegionEnter => f.write_str("region-enter"),
-            LirInstr::RegionExit => f.write_str("region-exit"),
-            LirInstr::RegionExitCall => f.write_str("region-exit-call"),
-            LirInstr::RegionRotate => f.write_str("region-rotate"),
-            LirInstr::RegionRotateDealloc => f.write_str("region-rotate-dealloc"),
-            LirInstr::RegionRotateRefcounted => f.write_str("region-rotate-refcounted"),
-            LirInstr::RegionExitRefcounted => f.write_str("region-exit-refcounted"),
-            LirInstr::OutboxEnter => f.write_str("outbox-enter"),
-            LirInstr::OutboxExit => f.write_str("outbox-exit"),
-            LirInstr::FlipEnter => f.write_str("flip-enter"),
-            LirInstr::FlipSwap => f.write_str("flip-swap"),
-            LirInstr::FlipExit => f.write_str("flip-exit"),
-
+            LirInstr::IncrefRegion { region_id } => write!(f, "incref-region {region_id}"),
+            LirInstr::DecrefRegion { region_id } => write!(f, "decref-region {region_id}"),
+            LirInstr::DecrefValueRegion { src } => write!(f, "decref-value-region {src}"),
+            LirInstr::DecrefCellRegion { src } => write!(f, "decref-cell-region {src}"),
+            LirInstr::IncrefValueRegion { src } => write!(f, "incref-value-region {src}"),
+            LirInstr::AdoptRegion { parent, child } => {
+                write!(f, "adopt-region parent={parent} child={child}")
+            }
+            LirInstr::AdoptIntoActivation { child } => {
+                write!(f, "adopt-into-activation {child}")
+            }
+            LirInstr::FreeRegionGroup { members } => {
+                write!(f, "free-region-group(")?;
+                fmt_regs(members, f)?;
+                f.write_str(")")
+            }
+            LirInstr::AssertRegionMatches { region_id, src } => {
+                write!(f, "assert-region-matches {region_id} {src}")
+            }
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
                 write!(f, "push-param-frame(")?;
@@ -303,11 +329,17 @@ impl fmt::Display for LirInstr {
             LirInstr::IntrPush { dst, array, value } => {
                 write!(f, "{} ← push({}, {})", dst, array, value)
             }
+            LirInstr::IntrStringPush { dst, string, value } => {
+                write!(f, "{} ← string-push({}, {})", dst, string, value)
+            }
+            LirInstr::IntrBytesPush { dst, bytes, value } => {
+                write!(f, "{} ← bytes-push({}, {})", dst, bytes, value)
+            }
             LirInstr::Pop { dst, src } => write!(f, "{} ← pop({})", dst, src),
 
             // Mutability
-            LirInstr::Freeze { dst, src } => write!(f, "{} ← freeze({})", dst, src),
-            LirInstr::Thaw { dst, src } => write!(f, "{} ← thaw({})", dst, src),
+            LirInstr::Freeze { dst, src, .. } => write!(f, "{} ← freeze({})", dst, src),
+            LirInstr::Thaw { dst, src, .. } => write!(f, "{} ← thaw({})", dst, src),
 
             // Identity
             LirInstr::Identical { dst, lhs, rhs } => {
@@ -357,192 +389,4 @@ pub fn terminator_kind(t: &Terminator) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_reg_display() {
-        assert_eq!(format!("{}", Reg(0)), "r0");
-        assert_eq!(format!("{}", Reg(42)), "r42");
-    }
-
-    #[test]
-    fn test_label_display() {
-        assert_eq!(format!("{}", Label(0)), "block0");
-        assert_eq!(format!("{}", Label(5)), "block5");
-    }
-
-    #[test]
-    fn test_binop_display() {
-        assert_eq!(format!("{}", BinOp::Add), "+");
-        assert_eq!(format!("{}", BinOp::Shl), "<<");
-    }
-
-    #[test]
-    fn test_cmpop_display() {
-        assert_eq!(format!("{}", CmpOp::Eq), "=");
-        assert_eq!(format!("{}", CmpOp::Le), "≤");
-    }
-
-    #[test]
-    fn test_const_display() {
-        assert_eq!(format!("{}", LirConst::Nil), "nil");
-        assert_eq!(format!("{}", LirConst::Int(42)), "42");
-        assert_eq!(format!("{}", LirConst::Keyword("lit".into())), ":lit");
-        assert_eq!(format!("{}", LirConst::String("hello".into())), "\"hello\"");
-    }
-
-    #[test]
-    fn test_instr_const() {
-        let instr = LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        };
-        assert_eq!(format!("{}", instr), "r0 ← 42");
-    }
-
-    #[test]
-    fn test_instr_binop() {
-        let instr = LirInstr::BinOp {
-            dst: Reg(2),
-            op: BinOp::Add,
-            lhs: Reg(0),
-            rhs: Reg(1),
-        };
-        assert_eq!(format!("{}", instr), "r2 ← r0 + r1");
-    }
-
-    #[test]
-    fn test_instr_call() {
-        let instr = LirInstr::Call {
-            dst: Reg(5),
-            func: Reg(3),
-            args: vec![Reg(4)],
-            arity_checked: false,
-        };
-        assert_eq!(format!("{}", instr), "r5 ← r3(r4)");
-    }
-
-    #[test]
-    fn test_instr_call_multi_args() {
-        let instr = LirInstr::Call {
-            dst: Reg(5),
-            func: Reg(3),
-            args: vec![Reg(1), Reg(2)],
-            arity_checked: false,
-        };
-        assert_eq!(format!("{}", instr), "r5 ← r3(r1, r2)");
-    }
-
-    #[test]
-    fn test_instr_tailcall() {
-        let instr = LirInstr::TailCall {
-            func: Reg(0),
-            args: vec![Reg(1), Reg(2)],
-            arity_checked: false,
-        };
-        assert_eq!(format!("{}", instr), "tailcall r0(r1, r2)");
-    }
-
-    #[test]
-    fn test_instr_compare() {
-        let instr = LirInstr::Compare {
-            dst: Reg(3),
-            op: CmpOp::Lt,
-            lhs: Reg(1),
-            rhs: Reg(2),
-        };
-        assert_eq!(format!("{}", instr), "r3 ← r1 < r2");
-    }
-
-    #[test]
-    fn test_instr_type_check() {
-        let instr = LirInstr::IsArray {
-            dst: Reg(1),
-            src: Reg(0),
-        };
-        assert_eq!(format!("{}", instr), "r1 ← tuple?(r0)");
-    }
-
-    #[test]
-    fn test_instr_destructuring() {
-        assert_eq!(
-            format!(
-                "{}",
-                LirInstr::ArrayMutRefDestructure {
-                    dst: Reg(2),
-                    src: Reg(0),
-                    index: 1
-                }
-            ),
-            "r2 ← r0[1]!"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                LirInstr::StructGetOrNil {
-                    dst: Reg(3),
-                    src: Reg(0),
-                    key: LirConst::Keyword("name".into())
-                }
-            ),
-            "r3 ← r0.:name?"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                LirInstr::StructGetDestructure {
-                    dst: Reg(3),
-                    src: Reg(0),
-                    key: LirConst::Keyword("name".into())
-                }
-            ),
-            "r3 ← r0.:name!"
-        );
-    }
-
-    #[test]
-    fn test_terminator_return() {
-        assert_eq!(format!("{}", Terminator::Return(Reg(0))), "return r0");
-    }
-
-    #[test]
-    fn test_terminator_branch() {
-        let term = Terminator::Branch {
-            cond: Reg(2),
-            then_label: Label(1),
-            else_label: Label(3),
-        };
-        assert_eq!(format!("{}", term), "branch r2 → block1 / block3");
-    }
-
-    #[test]
-    fn test_terminator_emit() {
-        let term = Terminator::Emit {
-            signal: crate::value::fiber::SIG_YIELD,
-            value: Reg(0),
-            resume_label: Label(5),
-        };
-        assert_eq!(format!("{}", term), "emit 0x2 r0 → block5");
-    }
-
-    #[test]
-    fn test_terminator_kind() {
-        assert_eq!(terminator_kind(&Terminator::Return(Reg(0))), "return");
-        assert_eq!(terminator_kind(&Terminator::Jump(Label(0))), "jump");
-        assert_eq!(
-            terminator_kind(&Terminator::Branch {
-                cond: Reg(0),
-                then_label: Label(1),
-                else_label: Label(2)
-            }),
-            "branch"
-        );
-    }
-
-    #[test]
-    fn test_region_instructions() {
-        assert_eq!(format!("{}", LirInstr::RegionEnter), "region-enter");
-        assert_eq!(format!("{}", LirInstr::RegionExit), "region-exit");
-    }
-}
+mod tests;

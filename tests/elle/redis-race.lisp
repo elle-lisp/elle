@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/redis-race.lisp — fiber-concurrent redis:pipeline must not
 # interleave RESP framing on the wire.
 #

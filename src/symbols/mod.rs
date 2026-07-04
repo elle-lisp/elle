@@ -8,6 +8,26 @@ use crate::reader::SourceLoc;
 use crate::value::SymbolId;
 use std::collections::HashMap;
 
+/// Per-occurrence identity for a symbol within one document's analysis.
+///
+/// Distinct *bindings* get distinct `DefId`s even when they share a name, so
+/// two locals both spelled `x` in different scopes never collapse — the bug
+/// that made rename/find-references over-apply when the index was keyed by the
+/// interned name (`SymbolId`) alone.
+///
+/// Derived from the HIR `Binding` arena index at extraction time (see
+/// `Binding::def_id`). It is opaque afterward — the arena is gone once
+/// extraction finishes; only identity/equality is used. Kept pipeline-agnostic
+/// (a bare `u32`, not a `Binding`) so this module stays free of `hir`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DefId(pub u32);
+
+impl DefId {
+    pub fn new(raw: u32) -> Self {
+        DefId(raw)
+    }
+}
+
 /// Kind of symbol for IDE classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
@@ -34,11 +54,35 @@ impl SymbolKind {
             SymbolKind::Module => "Module",
         }
     }
+
+    /// LSP `CompletionItemKind` numeric code (see the LSP spec enum).
+    pub fn lsp_completion_kind(&self) -> u32 {
+        match self {
+            SymbolKind::Function => 3, // Function
+            SymbolKind::Variable => 6, // Variable
+            SymbolKind::Builtin => 3,  // Function (primitives are callables)
+            SymbolKind::Macro => 14,   // Keyword
+            SymbolKind::Module => 9,   // Module
+        }
+    }
+
+    /// LSP `SymbolKind` numeric code for documentSymbol/workspaceSymbol.
+    pub fn lsp_symbol_kind(&self) -> u32 {
+        match self {
+            SymbolKind::Function => 12, // Function
+            SymbolKind::Variable => 13, // Variable
+            SymbolKind::Builtin => 12,  // Function
+            SymbolKind::Macro => 12,    // Function (no dedicated macro kind)
+            SymbolKind::Module => 2,    // Module
+        }
+    }
 }
 
 /// Information about a symbol definition
 #[derive(Debug, Clone)]
 pub struct SymbolDef {
+    /// Interned name id. Distinct from the index key (`DefId`): many bindings
+    /// can share one `id` (same name) while each has its own `DefId`.
     pub id: SymbolId,
     pub name: String,
     pub kind: SymbolKind,
@@ -75,20 +119,28 @@ impl SymbolDef {
     }
 }
 
-/// Index of symbols extracted from compiled code
+/// Index of symbols extracted from compiled code.
+///
+/// All maps are keyed by [`DefId`] (per-binding identity), so same-named
+/// symbols in different scopes stay distinct. `SymbolDef` still carries the
+/// interned [`SymbolId`] name for callers that group by name.
 #[derive(Debug, Clone)]
 pub struct SymbolIndex {
-    /// All symbol definitions (both builtins and user-defined)
-    pub definitions: HashMap<SymbolId, SymbolDef>,
+    /// Metadata for every binding encountered (both real in-file definitions
+    /// and usage-only references such as primitives). A real definition has
+    /// `location: Some`; a usage-only entry (e.g. a primitive) has
+    /// `location: None`.
+    pub definitions: HashMap<DefId, SymbolDef>,
 
-    /// Symbol locations for go-to-definition
-    pub symbol_locations: HashMap<SymbolId, SourceLoc>,
+    /// Definition site for each defined binding (go-to-definition target).
+    pub symbol_locations: HashMap<DefId, SourceLoc>,
 
-    /// Symbol usages for find-references
-    pub symbol_usages: HashMap<SymbolId, Vec<SourceLoc>>,
+    /// Usage sites for each binding (find-references).
+    pub symbol_usages: HashMap<DefId, Vec<SourceLoc>>,
 
-    /// All available symbols for completion, grouped by kind
-    pub available_symbols: Vec<(String, SymbolId, SymbolKind)>,
+    /// User-defined symbols for completion (name, id, kind). Excludes
+    /// usage-only entries and synthetic compiler temporaries.
+    pub available_symbols: Vec<(String, DefId, SymbolKind)>,
 }
 
 impl SymbolIndex {
@@ -102,36 +154,32 @@ impl SymbolIndex {
     }
 
     /// Get documentation for a symbol
-    pub fn get_documentation(&self, sym_id: SymbolId) -> Option<&str> {
+    pub fn get_documentation(&self, id: DefId) -> Option<&str> {
         self.definitions
-            .get(&sym_id)
+            .get(&id)
             .and_then(|def| def.documentation.as_deref())
     }
 
     /// Get arity of a function
-    pub fn get_arity(&self, sym_id: SymbolId) -> Option<usize> {
-        self.definitions.get(&sym_id).and_then(|def| def.arity)
+    pub fn get_arity(&self, id: DefId) -> Option<usize> {
+        self.definitions.get(&id).and_then(|def| def.arity)
     }
 
     /// Get kind of symbol
-    pub fn get_kind(&self, sym_id: SymbolId) -> Option<SymbolKind> {
-        self.definitions.get(&sym_id).map(|def| def.kind)
+    pub fn get_kind(&self, id: DefId) -> Option<SymbolKind> {
+        self.definitions.get(&id).map(|def| def.kind)
     }
 
-    /// Find symbol at a location (line, col)
-    /// This would require source mapping which we'll implement in the LSP handler
-    /// For now, this is a placeholder
-    #[allow(unused)]
-    pub fn find_symbol_at(&self, _line: usize, _col: usize) -> Option<SymbolId> {
-        None
-    }
-
-    /// Merge another SymbolIndex into this one
+    /// Merge another SymbolIndex into this one.
+    ///
+    /// Caller must ensure the two indices use disjoint `DefId` spaces (each is
+    /// built from its own arena starting at 0, so merging two raw indices
+    /// would collide — there are currently no such callers).
     pub fn merge(&mut self, other: SymbolIndex) {
         self.definitions.extend(other.definitions);
         self.symbol_locations.extend(other.symbol_locations);
-        for (sym_id, usages) in other.symbol_usages {
-            self.symbol_usages.entry(sym_id).or_default().extend(usages);
+        for (id, usages) in other.symbol_usages {
+            self.symbol_usages.entry(id).or_default().extend(usages);
         }
         self.available_symbols.extend(other.available_symbols);
     }
@@ -144,31 +192,4 @@ impl Default for SymbolIndex {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_symbol_kind_lsp_kind() {
-        assert_eq!(SymbolKind::Function.lsp_kind(), "Function");
-        assert_eq!(SymbolKind::Variable.lsp_kind(), "Variable");
-        assert_eq!(SymbolKind::Builtin.lsp_kind(), "Class");
-    }
-
-    #[test]
-    fn test_symbol_def_builder() {
-        let sym_id = SymbolId(1);
-        let def = SymbolDef::new(sym_id, "test-var".to_string(), SymbolKind::Variable)
-            .with_arity(2)
-            .with_documentation("A test variable".to_string());
-
-        assert_eq!(def.arity, Some(2));
-        assert_eq!(def.documentation, Some("A test variable".to_string()));
-    }
-
-    #[test]
-    fn test_symbol_index_creation() {
-        let index = SymbolIndex::new();
-        assert_eq!(index.definitions.len(), 0);
-        assert_eq!(index.available_symbols.len(), 0);
-    }
-}
+mod tests;

@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 12)
 
 # Webserver performance profiling — sweeps concurrency and request
 # count, charts latency distribution and throughput via plotters.

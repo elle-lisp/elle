@@ -174,6 +174,40 @@ unblock used to feed `kevent()` on macOS.
 `(os/sig-watching)` returns the set of signals currently held by at
 least one receiver.
 
+## Subprocess children get a reset mask
+
+The mask policy above is an *elle-internal* device for routing signals
+to `signalfd`. It must never leak into a process elle `exec`s. `fork(2)`
+copies the calling thread's signal mask into the child, and `execve(2)`
+*preserves* that mask (it resets caught handlers to `SIG_DFL`, but the
+mask and any `SIG_IGN` dispositions survive). So a child spawned from a
+thread that masks everything would start life with every maskable signal
+blocked — `sleep` would not die from `subprocess/kill … :sigterm`, only
+from the unblockable `:sigkill`.
+
+`subprocess/exec` therefore installs a `pre_exec` hook (runs in the
+child between fork and exec) that:
+
+1. **Resets the signal mask to empty** (`sigprocmask(SIG_SETMASK, ∅)`),
+   so the child starts with nothing blocked — exactly as a shell would
+   launch it — no matter which (masked) elle thread did the spawn.
+2. **Restores `SIGPIPE` to `SIG_DFL`.** Elle sets `SIGPIPE` to
+   `SIG_IGN` process-wide (see the disposition table); `SIG_IGN`
+   survives `execve`, so without this a child that relies on the default
+   "die on broken pipe" behaviour (e.g. `head` in a pipeline closing
+   early) would instead see `write` fail with `EPIPE` and might loop.
+
+The hook uses only async-signal-safe libc calls (`sigprocmask`,
+`sigemptyset`, `sigaction`) — it runs post-`fork` where the child has a
+single thread, so the usual fork-handler hazards do not apply.
+
+Without this reset the bug is observable two ways: a direct
+`elle script.lisp` run leaks the main thread's *absorb set* (`USR1`,
+`USR2`, `CHLD`, `URG`, `WINCH`, `ALRM`) into every child, and a child
+spawned under the `elle test` runner (whose whole-file thunk runs in an
+`os/spawn` worker that masks **everything**) inherits a fully-blocked
+mask, so `subprocess/kill … 15` hangs `subprocess/wait` forever.
+
 ## Backend dispatch
 
 Elle's async backend chooses how to wait on a `SignalReceiver`'s
@@ -219,10 +253,11 @@ them unblocked, and a `kill -TERM` could pick that thread to run the
 sigaction handler (which still terminates correctly — just on the
 "wrong" thread).
 
-Practical impact is now minimal: the sigaction handler is identical
-regardless of which thread runs it (`_exit(128 + signum)`). The
-historical risk of a C-thread defeating `os/sig-watch` for a
-controlled-disposition signal (USR1, etc.) is closed.
+Practical impact is minimal: the sigaction handler is identical
+regardless of which thread runs it (`_exit(128 + signum)`). A C-spawned
+thread cannot defeat `os/sig-watch` for a controlled-disposition signal
+(USR1, etc.): those are in the absorb set, blocked on every elle thread,
+so they route to the watcher's signalfd.
 
 ### Standard signals coalesce
 

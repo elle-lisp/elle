@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Advanced Runtime Features and Pattern Matching Tests
 ##
 ## Migrated from tests/integration/advanced.rs
@@ -72,8 +72,8 @@
 
 # phase 5 feature availability
 (assert (fn () (import-file "tests/modules/test.lisp")) "import-file available")
-(assert (fn () (spawn (fn () 42))) "spawn available")
-(assert (fn () (join (spawn (fn () 42)))) "join available")
+(assert (fn () (sys/spawn-vm (fn () 42))) "sys/spawn-vm available")
+(assert (fn () (sys/join (sys/spawn-vm (fn () 42)))) "join available")
 (assert (fn () (time/sleep 0)) "time/sleep available")
 (assert (fn () (current-thread-id)) "current-thread-id available")
 (assert (fn () (debug-print 42)) "debug-print available")
@@ -96,23 +96,26 @@
 (let [[ok? _] (protect ((fn () (import-file nil))))]
   (assert (not ok?) "import-file with nil argument fails"))
 
-# spawn wrong argument count
-(let [[ok? _] (protect ((fn () (eval '(spawn)))))]
-  (assert (not ok?) "spawn with no arguments fails"))
-(let [[ok? _] (protect ((fn () (eval '(spawn + *)))))]
-  (assert (not ok?) "spawn with two arguments fails"))
+# sys/spawn-vm wrong argument count
+(let [[ok? _] (protect ((fn () (eval '(sys/spawn-vm)))))]
+  (assert (not ok?) "sys/spawn-vm with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(sys/spawn-vm + *)))))]
+  (assert (not ok?) "sys/spawn-vm with two arguments fails"))
 
-# spawn wrong argument type
-(let [[ok? _] (protect ((fn () (spawn 42))))]
-  (assert (not ok?) "spawn with int argument fails"))
-(let [[ok? _] (protect ((fn () (spawn "not a function"))))]
-  (assert (not ok?) "spawn with string argument fails"))
+# sys/spawn-vm wrong argument type
+(let [[ok? _] (protect ((fn () (sys/spawn-vm 42))))]
+  (assert (not ok?) "sys/spawn-vm with int argument fails"))
+(let [[ok? _] (protect ((fn () (sys/spawn-vm "not a function"))))]
+  (assert (not ok?) "sys/spawn-vm with string argument fails"))
 
-# join wrong argument count
-(let [[ok? _] (protect ((fn () (eval '(join)))))]
+# join arity: a handle is required; the optional timeout-ms makes two args
+# valid, but three is too many. A non-handle first arg also fails the contract.
+(let [[ok? _] (protect ((fn () (eval '(sys/join)))))]
   (assert (not ok?) "join with no arguments fails"))
-(let [[ok? _] (protect ((fn () (eval '(join "a" "b")))))]
-  (assert (not ok?) "join with two arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(sys/join "a" "b" "c")))))]
+  (assert (not ok?) "join with three arguments fails"))
+(let [[ok? _] (protect ((fn () (sys/join "a" 100))))]
+  (assert (not ok?) "join of a non-thread-handle fails"))
 
 # sleep wrong argument count
 (let [[ok? _] (protect ((fn () (eval '(time/sleep)))))]
@@ -185,12 +188,11 @@
                     _ nil)]
             (and (int? v) (> v 0)))) "match returns positive number")
 
-# match clause ordering
-(assert (fn ()
-          (match 5
-            5 true
-            5 false
-            _ nil)) "first matching clause is used")
+# match clause ordering: first matching clause wins (literal beats
+# the catch-all below it; a duplicate literal is a compile error now)
+(assert (= (match 5
+             5 :first
+             x :second) :first) "first matching clause is used")
 
 # match default wildcard
 (assert (fn ()
@@ -406,15 +408,16 @@
              x (+ x 1)) 43) "match variable binding")
 
 # ============================================================================
-# Non-exhaustive match is a compile-time error
+# Match with no catch-all compiles; unmatched value raises :match-error
 # ============================================================================
 
-# match non-exhaustive is error
-(let [[ok? _] (protect ((fn ()
-                          (eval '(match 42
-                                   1 "one"
-                                   2 "two")))))]
-  (assert (not ok?) "non-exhaustive match is error"))
+# unmatched value raises at runtime, not compile time
+(let [[ok? err] (protect (match 42
+                           1 "one"
+                           2 "two"))]
+  (assert (not ok?) "unmatched value raises")
+  (assert (= (get err :error) :match-error) "no-match error kind")
+  (assert (= (get err :value) 42) "error carries the unmatched value"))
 
 # ============================================================================
 # Variadic macro tests
@@ -499,15 +502,16 @@
              (or :a :b :c) :found
              _ :not) :found) "or pattern with keywords")
 
-# or pattern with binding
+# or pattern with binding (alternatives must be disjoint — a pair
+# always takes the first, so (or (x . _) (_ . x)) is a compile error)
 (assert (= (match (pair 1 2)
-             (or (x . _) (_ . x)) x
+             (or [x _] (x . _)) x
              _ 0) 1) "or pattern with binding")
 
-# or pattern with binding second
+# or pattern with binding second (the bare-x alternative is a
+# catch-all, so no arm may follow)
 (assert (= (match 99
-             (or (x . _) x) x
-             _ 0) 99) "or pattern with binding second alternative")
+             (or (x . _) x) x) 99) "or pattern with binding second alternative")
 
 # or pattern different bindings error
 (let [[ok? _] (protect ((fn ()
@@ -627,7 +631,8 @@
                (< threshold 5) :yes
                _ :no)) :yes) "or pattern guard outer var")
 
-# or pattern binding guard
+# or pattern binding guard (overlapping alternatives are legal on a
+# guarded arm — a failed guard retries the remaining alternatives)
 (assert (= (match (pair 6 :x)
              (or (a . _) (_ . a)) when
              (> a 5) :big
@@ -640,41 +645,55 @@
              _ :fallback) :fallback) "or pattern guard fallthrough")
 
 # ============================================================================
-# Exhaustiveness tests
+# No-match semantics: catch-all optional, unmatched value raises
 # ============================================================================
 
-# exhaustive match with wildcard
+# match with wildcard catch-all
 (assert (= (match 42
              1 :one
-             _ :other) :other) "exhaustive match with wildcard")
+             _ :other) :other) "match with wildcard catch-all")
 
-# exhaustive match with variable
+# match with variable catch-all
 (assert (= (match 42
              1 :one
-             x x) 42) "exhaustive match with variable")
+             x x) 42) "match with variable catch-all")
 
-# non-exhaustive match error
-(let [[ok? _] (protect ((fn ()
-                          (eval '(match 42
-                                   1 :one
-                                   2 :two)))))]
-  (assert (not ok?) "non-exhaustive match error"))
+# no catch-all: unmatched value raises :match-error at runtime
+(let [[ok? err] (protect (match 42
+                           1 :one
+                           2 :two))]
+  (assert (not ok?) "unmatched value raises :match-error")
+  (assert (= (get err :error) :match-error) "no-match error kind")
+  (assert (= (get err :value) 42) "no-match error carries the value"))
 
-# exhaustive match booleans
+# bool coverage matches bools
 (assert (= (match true
              true :t
-             false :f) :t) "exhaustive match booleans")
+             false :f) :t) "match booleans")
 
-# exhaustive or pattern booleans
+# or pattern over booleans
 (assert (= (match true
-             (or true false) :both) :both) "exhaustive or pattern booleans")
+             (or true false) :both) :both) "or pattern booleans")
 
-# non-exhaustive guard on last arm
-(let [[ok? _] (protect ((fn ()
-                          (eval '(match 42
-                                   x when
-                                   (> x 0) :pos)))))]
-  (assert (not ok?) "non-exhaustive guard on last arm"))
+# bool arms on a non-bool scrutinee raise (was the silent-nil hole)
+(let [[ok? err] (protect (match 5
+                           true 1
+                           false 2))]
+  (assert (not ok?) "bool arms on non-bool scrutinee raise")
+  (assert (= (get err :error) :match-error) "bool-hole error kind")
+  (assert (= (get err :value) 5) "bool-hole error carries the value"))
+
+# guarded catch-all as last arm compiles; passing guard matches
+(assert (= (match 42
+             x when
+             (> x 0) :pos) :pos) "guarded catch-all compiles")
+
+# failed guard with no fallback raises :match-error
+(let [[ok? err] (protect (match -1
+                           x when
+                           (> x 0) :pos))]
+  (assert (not ok?) "failed guard with no fallback raises")
+  (assert (= (get err :error) :match-error) "guard-fail error kind"))
 
 # ============================================================================
 # Decision tree specific tests

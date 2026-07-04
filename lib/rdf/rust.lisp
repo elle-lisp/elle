@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/rdf/rust.lisp — RDF triple generation for Rust source
 ##
 ## Parses .rs files with the syn plugin and emits N-Triples for functions,

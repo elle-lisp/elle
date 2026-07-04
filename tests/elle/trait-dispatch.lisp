@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Trait-based dispatch test suite
 ##
 ## Tests for dispatching first/rest/length/empty? through trait tables.
@@ -137,8 +137,9 @@
 # ============================================================================
 # Mutating a shared default propagates to all instances
 # ============================================================================
-# Traitsets are permanent @struct allocations shared by all instances of
-# a type. Mutating the shared traitset is visible through all instances.
+# Traitsets are shared @struct allocations (one per type, held by the trait
+# registry) shared by all instances of a type. Mutating the shared traitset is
+# visible through all instances.
 
 (begin
   (def a [1 2 3])

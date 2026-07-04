@@ -5,7 +5,6 @@
 // static analysis doesn't claim code is pure when the callee's effects
 // are indeterminate.
 
-use elle::pipeline::analyze;
 use elle::primitives::register_primitives;
 use elle::signals::Signal;
 use elle::symbol::SymbolTable;
@@ -16,6 +15,20 @@ fn setup() -> (SymbolTable, VM) {
     let mut vm = VM::new();
     let _signals = register_primitives(&mut vm, &mut symbols);
     (symbols, vm)
+}
+
+// Local `analyze` shim preserving the pre-CompileCtx arity. These tests are
+// analyze-only and stdlib-free, so a fresh `CompileCtx` per call (primitives +
+// core + prelude) reproduces the old bare path; signal inference reads only
+// primitive/compile-time metadata, none of which is shared across calls.
+fn analyze(
+    source: &str,
+    symbols: &mut SymbolTable,
+    vm: &mut VM,
+    source_name: &str,
+) -> Result<elle::pipeline::AnalyzeResult, String> {
+    let mut cctx = elle::pipeline::CompileCtx::new();
+    elle::pipeline::analyze(source, symbols, vm, &mut cctx, source_name)
 }
 
 /// After assign, signal tracking is invalidated and the call uses the sound

@@ -5,6 +5,18 @@
 use elle::reader::{Lexer, OwnedToken, Reader};
 use elle::SymbolTable;
 
+// Local `compile` shim preserving the pre-CompileCtx arity. These location-map
+// tests are compile-only and stdlib-free, so a fresh `CompileCtx` per call
+// (primitives + core + prelude) reproduces the old bare-symbols path.
+fn compile(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<elle::CompileResult, String> {
+    let mut cctx = elle::pipeline::CompileCtx::new();
+    elle::pipeline::compile(source, symbols, &mut cctx, source_name)
+}
+
 #[test]
 fn test_parse_error_includes_location() {
     let mut symbols = SymbolTable::new();
@@ -20,7 +32,8 @@ fn test_parse_error_includes_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result = reader.read(&mut symbols);
+    let result =
+        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -43,7 +56,8 @@ fn test_parse_error_column_tracking() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result = reader.read(&mut symbols);
+    let result =
+        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -66,7 +80,8 @@ fn test_unexpected_closing_paren_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result = reader.read(&mut symbols);
+    let result =
+        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -89,7 +104,8 @@ fn test_unterminated_array_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result = reader.read(&mut symbols);
+    let result =
+        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -112,7 +128,8 @@ fn test_unterminated_struct_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result = reader.read(&mut symbols);
+    let result =
+        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -134,7 +151,8 @@ fn test_list_sugar_error_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result = reader.read(&mut symbols);
+    let result =
+        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -166,8 +184,6 @@ fn test_sourceloc_unknown_check() {
 
 #[test]
 fn test_location_map_populated_for_simple_expression() {
-    use elle::pipeline::compile;
-    use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
     let source = "(%add 1 2)";
@@ -185,8 +201,6 @@ fn test_location_map_populated_for_simple_expression() {
 
 #[test]
 fn test_location_map_has_correct_line_numbers() {
-    use elle::pipeline::compile;
-    use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
     // Single expression with nested structure
@@ -214,8 +228,6 @@ fn test_location_map_has_correct_line_numbers() {
 
 #[test]
 fn test_closure_has_location_map() {
-    use elle::pipeline::compile;
-    use elle::SymbolTable;
 
     let mut symbols = SymbolTable::new();
     let source = "(fn (x) (%add x 1))";

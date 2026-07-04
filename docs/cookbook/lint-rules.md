@@ -71,7 +71,8 @@ HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
 
 - `W001` — naming-kebab-case
 - `W002` — arity-mismatch
-- `W003` — non-exhaustive-match
+- `W003` — retired (was reserved for non-exhaustive-match; unreachable
+  match arms are a compile error in the analyzer, not a lint)
 - Use `W004+` for new warnings, `E00x` for errors, `I00x` for info.
 
 ### How linting runs

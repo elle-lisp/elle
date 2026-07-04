@@ -19,6 +19,27 @@ Use intrinsics when:
 Use stdlib wrappers (`+`, `-`, `*`, etc.) in all other code. They validate
 inputs, produce clear error messages, and handle mixed int/float promotion.
 
+## Integer overflow
+
+Integers are 64-bit two's-complement and **wrap on overflow**, in every
+mode and on every tier:
+
+```lisp
+(+ 9223372036854775807 1)   # => -9223372036854775808
+```
+
+This is a consequence of the intrinsic design, not an accident. `%add` is
+signal-free, and the compiler emits it for `+` whenever both operands are
+proven ints — but a type proof cannot exclude overflow, so if overflow were
+an error the specialization would change observable behavior. Wrapping is
+the one semantics the unchecked instruction, the JIT, the GPU tiers, and
+`--checked-intrinsics` (which validates *types*, not ranges) can all agree
+on. Code that needs overflow detection should check its own ranges (see
+`abs` in stdlib.lisp for the pattern).
+
+Integer division and remainder by zero are errors in the stdlib wrappers;
+`(/ i64-min -1)` and `(rem i64-min -1)` wrap (to `i64-min` and `0`).
+
 ## Complete list
 
 ### Arithmetic (2 args)
@@ -129,12 +150,39 @@ inputs, produce clear error messages, and handle mixed int/float promotion.
 
 ## Behavior
 
-### Default mode (unchecked inline)
+Intrinsics have two compilation paths, selected by `--checked-intrinsics`.
+The `elle` CLI defaults to **on**; the library/test baseline
+(`Config::default`, used by the region/anf unit tests and benches) is off.
 
-Intrinsics compile to inline BinOp/CmpOp/UnaryOp instructions with **no
-type validation**. Passing wrong types produces **garbage** (not a crash).
-This matches WASM (`I64Add`) and SPIR-V (`OpIAdd`) semantics: the
-instruction executes on whatever bits are in the operands.
+### Checked (CLI default): validating native calls
+
+By default the compiler routes `%add` etc. through registered `NativeFn`
+primitives. Each primitive validates its argument types and panics on
+mismatch with a clear error message including an Elle stack trace:
+
+```
+$ elle -e '(%add "a" "b")'
+thread 'main' panicked at: +: expected number, got string and string
+```
+
+The point is to **audit that your code passes correct types to
+intrinsics**. Without it there is no runtime way to catch a bad argument
+(short of linting): the unchecked path silently produces garbage, and that
+garbage is undebuggable once the code reaches a JIT/SPIR-V/WASM backend.
+
+Checked intrinsics imply `--jit=off --mlir=off`, because JIT/MLIR would
+inline the same unchecked native ops and bypass the validation path.
+Combining an explicit `--checked-intrinsics` with an explicit
+`--jit=eager`/`--mlir` is rejected; use `--checked-intrinsics=off` (which
+also restores the optimizing tiers) to opt out.
+
+### Unchecked (`--checked-intrinsics=off`): inline opcodes
+
+With `--checked-intrinsics=off`, intrinsics compile to inline
+BinOp/CmpOp/UnaryOp instructions with **no type validation**. Passing
+wrong types produces **garbage** (not a crash). This matches WASM
+(`I64Add`) and SPIR-V (`OpIAdd`) semantics: the instruction executes on
+whatever bits are in the operands.
 
 - `(%add "a" "b")` → `nil` (garbage)
 - `(%div 1 0)` → `0` (garbage)
@@ -144,30 +192,11 @@ The signal system sees intrinsics as `Silent` — they never yield, error,
 or perform IO. **The caller is responsible for ensuring type safety.** If
 the caller cannot guarantee correct types, use the stdlib wrappers.
 
-### `--checked-intrinsics` mode
-
-When `--checked-intrinsics` is active, the compiler routes `%add` etc.
-through registered `NativeFn` primitives instead of inlining to unchecked
-instructions. Each primitive validates argument types and panics on
-mismatch with a clear error message including an Elle stack trace.
-
-```
-$ elle --checked-intrinsics -e '(%add "a" "b")'
-thread 'main' panicked at: +: expected number, got string and string
-```
-
-This mode is for validating code intended for JIT/SPIR-V/WASM backends
-before shipping — catch type errors early instead of debugging garbage.
-
-`--checked-intrinsics` implies `--jit=off --mlir=off` because JIT/MLIR
-would inline the same unchecked native ops, bypassing the validation
-path. Combining `--checked-intrinsics` with `--jit=eager` is rejected.
-
 ### Intrinsics as callable values
 
-Under `--checked-intrinsics`, each `%`-intrinsic is a real `NativeFn` that
-can be passed to higher-order functions, stored in data structures, or
-used in `begin-for-syntax` without stdlib:
+In **both** modes each `%`-intrinsic is a real `NativeFn`, so a bare `%add`
+(anywhere but call position) can be passed to higher-order functions,
+stored in data structures, or used in `begin-for-syntax` without stdlib:
 
 ```lisp
 (def my-add %add)
@@ -175,9 +204,9 @@ used in `begin-for-syntax` without stdlib:
 (assert (= (map (fn [x] (%mul x x)) '(1 2 3)) '(1 4 9)) "intrinsic in map")
 ```
 
-In default mode, `%add` as a bare symbol resolves to the same `NativeFn`
-(it is registered as a primitive), but `(%add a b)` still compiles to an
-inline instruction, not a call.
+The modes differ only in call position: checked (the default) compiles
+`(%add a b)` to a validating native `Call`; `--checked-intrinsics=off`
+compiles it to an inline instruction.
 
 Arithmetic intrinsics operate on integers and floats. Mixed-type operands
 follow the same promotion rules as the VM's arithmetic instructions

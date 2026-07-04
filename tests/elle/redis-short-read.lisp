@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/redis-short-read.lisp — resp-read must reassemble bulk
 # strings that span more than one TCP segment.
 #

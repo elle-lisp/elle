@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## TLS library integration tests — Chunk 4: handshake only
 ##
 ## Requires network access (connects to example.com:443).
@@ -18,9 +18,9 @@
   (let [[ok? r] (protect (import-file "target/release/libelle_tls.so"))]
     (if ok? [ok? r] (protect (import-file "target/debug/libelle_tls.so")))))
 
-(when (not ok?)
-  (print "SKIP: elle-tls plugin not built (run: cargo build -p elle-tls)\n")
-  (exit 0))
+(unless ok?
+  (error (struct :error :gated
+                 :reason "elle-tls plugin not built (run: cargo build -p elle-tls)")))
 
 ## Extract the handshake-complete? primitive for use in assertions.
 ## (Must be accessed via plugin struct — not resolvable as a global name.)

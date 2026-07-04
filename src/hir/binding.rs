@@ -20,6 +20,18 @@ impl fmt::Debug for Binding {
     }
 }
 
+impl Binding {
+    /// Opaque per-binding identity for the symbol index (`crate::symbols`).
+    ///
+    /// The index keeps `hir` at arm's length (it is pipeline-agnostic), so the
+    /// arena index is wrapped in a `DefId` rather than exposing `Binding`.
+    /// Valid as an index only for the arena that created this binding; the
+    /// `DefId` it yields is used purely for identity once extraction is done.
+    pub fn def_id(self) -> crate::symbols::DefId {
+        crate::symbols::DefId::new(self.0)
+    }
+}
+
 /// Information about a captured variable in a closure
 #[derive(Debug, Clone)]
 pub struct CaptureInfo {
@@ -36,4 +48,19 @@ pub enum CaptureKind {
     Local,
     /// Capture from parent's capture (transitive capture)
     Capture { index: u16 },
+    /// A self-reference: the closure captures its **own** enclosing `letrec`/`def`
+    /// binding (`binding`) — the same-binding self-edge in the enclosing SCC. The
+    /// self-edge does **not** mark the binding captured (`hir/arena.rs::mark_captured`
+    /// is skipped for it), so a binding captured only by self-references is cell-free
+    /// (`needs_capture() == false`) and its self-reference resolves to the
+    /// currently-executing closure (`LoadSelf` in value position, a self-call
+    /// re-dispatch in call position — `lir/lower/expr.rs`), never a cell load. The
+    /// lowerer reads this classified fact directly (via `current_self_binding`) instead
+    /// of re-deriving the self-edge from a `current_function_binding` heuristic. Carries
+    /// **no** escape authority — the self-edge is inert in the escape fixpoint
+    /// (docs/impl/escape.md). Where the binding also keeps a cell — because a *sibling*
+    /// closure captures it (mutual recursion / a forward reference) — that cell is
+    /// reached through the binding's own slot as a `Local`/`Capture`, never this
+    /// self-slot, so the self-edge stays cell-free even then.
+    Recursive { binding: Binding },
 }

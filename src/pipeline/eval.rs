@@ -1,12 +1,11 @@
 //! Evaluation pipeline: source -> value.
 
-use super::cache;
 use super::compile::compile_file;
+use super::CompileCtx;
 use crate::hir::functionalize::functionalize;
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
-use crate::primitives::cached_primitive_meta;
 use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
@@ -26,7 +25,9 @@ pub fn eval_syntax(
 ) -> Result<crate::value::Value, String> {
     let expanded = expander.expand(syntax, symbols, vm)?;
 
-    let meta = cached_primitive_meta(symbols);
+    // The macro-body metadata (primitives + stdlib) rides on the expander, so
+    // no separate `CompileCtx` borrow is needed mid-expansion.
+    let meta = expander.eval_meta().clone();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(
         symbols,
@@ -35,18 +36,32 @@ pub fn eval_syntax(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
-    // Make compile-time defs (from begin-for-syntax) visible in macro bodies.
+    // Make core.lisp exports and compile-time defs visible in macro bodies.
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     if !expander.compile_time_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.compile_time_env);
     }
     let mut analysis = analyzer.analyze(&expanded)?;
+    if !analysis.errors.is_empty() {
+        return Err(analysis.errors[0].description());
+    }
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] eval_syntax:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -68,12 +83,13 @@ pub fn eval(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<crate::value::Value, String> {
     let syntax = read_syntax(source, source_name)?;
 
-    // Get cached expander and meta (uses throwaway cache VM only for init)
-    let (mut expander, meta) = cache::get_cached_expander_and_meta();
+    // The instance's expander + compile meta; expansion runs on the caller's vm.
+    let (mut expander, meta) = cctx.expander_and_meta();
 
     let scoped = if source_name.starts_with('<') {
         syntax
@@ -89,15 +105,30 @@ pub fn eval(
         meta.signals.clone(),
         meta.arities.clone(),
     );
+    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
+    if !expander.core_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.core_env);
+    }
     let mut analysis = analyzer.analyze(&expanded)?;
+    if !analysis.errors.is_empty() {
+        return Err(analysis.errors[0].description());
+    }
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
     functionalize(&mut analysis.hir, &mut arena);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
+    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
+        let names = symbols.all_names();
+        eprintln!(
+            "[trace:regions] eval:\n{}",
+            crate::hir::format_regions(&region_info, &arena, &names)
+        );
+    }
     let symbol_names = symbols.all_names();
     let mut lowerer = Lowerer::new(&arena)
         .with_primitive_classification(pc)
@@ -121,10 +152,18 @@ pub fn eval_all(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<crate::value::Value, String> {
-    let result = compile_file(source, symbols, source_name)?;
-    vm.execute(&result.bytecode).map_err(|e| e.to_string())
+    let result = compile_file(source, symbols, cctx, source_name)?;
+    // Run under the async scheduler, exactly as the binary's `run_source`
+    // does — top-level Elle always executes inside `ev/run`. This is what
+    // lets scheduler-cooperative primitives (e.g. `sys/join`'s deadline via
+    // `chan/select`) work in the test harness. `execute_scheduled` falls back
+    // to a plain `execute` when `ev/run` is absent (no stdlib loaded), so
+    // bare-VM callers are unaffected.
+    vm.execute_scheduled(&result.bytecode, symbols, cctx)
+        .map_err(|e| e.to_string())
 }
 
 /// Compile and execute a file as a single synthetic letrec.
@@ -135,8 +174,9 @@ pub fn eval_file(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<crate::value::Value, String> {
-    let result = super::compile::compile_file(source, symbols, source_name)?;
+    let result = super::compile::compile_file(source, symbols, cctx, source_name)?;
     vm.execute(&result.bytecode).map_err(|e| e.to_string())
 }

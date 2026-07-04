@@ -1,29 +1,27 @@
-use elle::context::{set_symbol_table, set_vm_context};
-use elle::{compile_file, init_stdlib, register_primitives, SymbolTable, Value, VM};
+use elle::runtime::Runtime;
+use elle::{compile_file, Value};
 
 /// Evaluate Elle source with `execute_scheduled` so SIG_IO is handled.
 fn eval_scheduled(input: &str) -> Result<Value, String> {
-    let (mut vm, mut symbols) = setup_scheduled();
-    run_scheduled(input, &mut vm, &mut symbols)
+    let mut rt = setup_scheduled();
+    run_scheduled(input, &mut rt)
 }
 
-/// Initialize a VM with primitives and stdlib for scheduled execution.
+/// Initialize a runtime with primitives and stdlib for scheduled execution.
 /// This is the expensive part (~4s) — call it before spawning helper threads.
-fn setup_scheduled() -> (VM, SymbolTable) {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    set_vm_context(&mut vm as *mut VM);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols);
-    (vm, symbols)
+///
+/// `Runtime::new()` installs the VM/symbol thread contexts and loads the stdlib
+/// into its per-instance `CompileCtx`; `run_scheduled` threads that SAME cctx
+/// through `compile_file`/`execute_scheduled`, so stdlib stays visible.
+fn setup_scheduled() -> Runtime {
+    Runtime::new()
 }
 
-/// Compile and execute Elle source on an already-initialized VM.
-fn run_scheduled(input: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
-    let result = compile_file(input, symbols, "<test>")?;
-    let value = vm.execute_scheduled(&result.bytecode, symbols)?;
-    set_vm_context(std::ptr::null_mut());
+/// Compile and execute Elle source on an already-initialized runtime.
+fn run_scheduled(input: &str, rt: &mut Runtime) -> Result<Value, String> {
+    let (vm, symbols, cctx) = rt.parts();
+    let result = compile_file(input, symbols, cctx, "<test>")?;
+    let value = vm.execute_scheduled(&result.bytecode, symbols, cctx)?;
     Ok(value)
 }
 
@@ -50,7 +48,7 @@ fn test_tcp_echo_roundtrip() {
     use std::io::Write;
 
     // Do expensive VM setup before reserving the port.
-    let (mut vm, mut symbols) = setup_scheduled();
+    let mut rt = setup_scheduled();
 
     // Create listener in Rust to get the port number
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -82,20 +80,25 @@ fn test_tcp_echo_roundtrip() {
         port = port
     );
 
-    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
+    let result = run_scheduled(&code, &mut rt).unwrap();
     result.with_string(|s| assert_eq!(s, "hello-net")).unwrap();
 
     connect_thread.join().unwrap();
 }
 
+// Regression: UDP recv data must survive the completion path. The result struct
+// `{:data ...}` is pre-allocated on the requesting fiber's heap
+// (`prim_udp_recv_from`) and filled in place at completion — the iovec receives
+// the payload zero-copy into `:data` — so the region-backed bytes are not freed
+// before `fiber/resume` hands them back (which would be an arena-lifetime /
+// cross-heap UAF). This test asserts the round-tripped bytes survive intact.
 #[test]
-#[ignore] // UDP recv data arrives zeroed — arena lifetime bug for bytes (pre-existing)
 fn test_udp_roundtrip() {
     // Bind two UDP sockets, send from A to B, recv on B.
     use std::net::UdpSocket;
 
     // Do expensive VM setup before reserving the port.
-    let (mut vm, mut symbols) = setup_scheduled();
+    let mut rt = setup_scheduled();
 
     let sock_b = UdpSocket::bind("127.0.0.1:0").unwrap();
     let addr_b = sock_b.local_addr().unwrap();
@@ -122,7 +125,7 @@ fn test_udp_roundtrip() {
         port = port_b
     );
 
-    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
+    let result = run_scheduled(&code, &mut rt).unwrap();
     // Result is a struct with :data, :addr, :port
     let fields = result.as_struct().expect("expected struct result");
     use elle::value::heap::TableKey;
@@ -139,7 +142,7 @@ fn test_unix_echo_roundtrip() {
     use std::io::Write;
 
     // Do expensive VM setup before creating the socket.
-    let (mut vm, mut symbols) = setup_scheduled();
+    let mut rt = setup_scheduled();
 
     let sock_path = format!("/tmp/elle-test-net-unix-{}.sock", std::process::id());
     let _ = std::fs::remove_file(&sock_path);
@@ -169,7 +172,7 @@ fn test_unix_echo_roundtrip() {
         path = sock_path
     );
 
-    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
+    let result = run_scheduled(&code, &mut rt).unwrap();
     result.with_string(|s| assert_eq!(s, "unix-hello")).unwrap();
 
     connect_thread.join().unwrap();
@@ -181,7 +184,7 @@ fn test_tcp_graceful_shutdown() {
     use std::io::Write;
 
     // Do expensive VM setup before reserving the port.
-    let (mut vm, mut symbols) = setup_scheduled();
+    let mut rt = setup_scheduled();
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -214,7 +217,7 @@ fn test_tcp_graceful_shutdown() {
         port = port
     );
 
-    let result = run_scheduled(&code, &mut vm, &mut symbols).unwrap();
+    let result = run_scheduled(&code, &mut rt).unwrap();
     result
         .with_string(|s| assert_eq!(s, "before-shutdown"))
         .unwrap();

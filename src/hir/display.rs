@@ -48,6 +48,7 @@ fn write_hir(
         HirKind::String(s) => write!(buf, "\"{}\"", s.replace('"', "\\\"")).unwrap(),
         HirKind::Keyword(k) => write!(buf, ":{}", k).unwrap(),
         HirKind::Quote(v) => write!(buf, "'{}", v).unwrap(),
+        HirKind::QuoteConst(t) => write!(buf, "'{:?}", t).unwrap(),
         HirKind::Error => buf.push_str("<error>"),
 
         HirKind::Var(b) => {
@@ -260,6 +261,12 @@ fn write_hir(
 
         HirKind::Emit { signal, value } => {
             write!(buf, "(emit {:?} ", signal).unwrap();
+            write_hir(buf, value, arena, names, depth + 1);
+            buf.push(')');
+        }
+
+        HirKind::Return { value } => {
+            buf.push_str("(return ");
             write_hir(buf, value, arena, names, depth + 1);
             buf.push(')');
         }

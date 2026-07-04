@@ -9,70 +9,14 @@ use super::{
     TAG_STRING, TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD, TAG_TRUE,
 };
 
+mod predicates;
+
+mod conversions;
+
 impl Value {
     // =========================================================================
     // Immediate Value Extractors
     // =========================================================================
-
-    /// Extract as boolean if this is a bool.
-    #[inline]
-    pub fn as_bool(&self) -> Option<bool> {
-        match self.tag {
-            TAG_TRUE => Some(true),
-            TAG_FALSE => Some(false),
-            _ => None,
-        }
-    }
-
-    /// Extract as integer if this is an int.
-    #[inline]
-    pub fn as_int(&self) -> Option<i64> {
-        if self.is_int() {
-            Some(self.payload as i64)
-        } else {
-            None
-        }
-    }
-
-    /// Extract as float if this is a float.
-    #[inline]
-    pub fn as_float(&self) -> Option<f64> {
-        if self.is_float() {
-            Some(f64::from_bits(self.payload))
-        } else {
-            None
-        }
-    }
-
-    /// Extract as number (float), coercing integers.
-    #[inline]
-    pub fn as_number(&self) -> Option<f64> {
-        if let Some(i) = self.as_int() {
-            Some(i as f64)
-        } else {
-            self.as_float()
-        }
-    }
-
-    /// Extract symbol ID if this is a symbol.
-    #[inline]
-    pub fn as_symbol(&self) -> Option<u32> {
-        if self.is_symbol() {
-            Some(self.payload as u32)
-        } else {
-            None
-        }
-    }
-
-    /// Extract raw C pointer address if this is a pointer.
-    #[inline]
-    pub fn as_pointer(&self) -> Option<usize> {
-        if self.is_pointer() {
-            Some(self.payload as usize)
-        } else {
-            None
-        }
-    }
 
     /// Extract the keyword hash. Returns None if not a keyword.
     /// Fast path — no lock acquisition, no allocation.
@@ -85,190 +29,9 @@ impl Value {
         }
     }
 
-    /// Extract keyword name if this is a keyword.
-    /// Acquires RwLock read lock and allocates a String.
-    /// Use `keyword_hash()` when only comparing, not displaying.
-    #[inline]
-    pub fn as_keyword_name(&self) -> Option<String> {
-        if self.is_keyword() {
-            crate::value::keyword::keyword_name(self.payload)
-        } else {
-            None
-        }
-    }
-
-    /// Extract heap pointer if this is a heap value.
-    #[inline]
-    pub fn as_heap_ptr(&self) -> Option<*const ()> {
-        if self.is_heap() {
-            Some(self.payload as *const ())
-        } else {
-            None
-        }
-    }
-
     // =========================================================================
     // Heap Type Predicates
     // =========================================================================
-
-    /// Check if this is a string (immutable heap string).
-    #[inline]
-    pub fn is_string(&self) -> bool {
-        self.tag == TAG_STRING
-    }
-
-    /// Check if this is a pair cell.
-    #[inline]
-    pub fn is_pair(&self) -> bool {
-        self.tag == TAG_CONS
-    }
-
-    /// Check if this is a mutable @array.
-    #[inline]
-    pub fn is_array_mut(&self) -> bool {
-        self.tag == TAG_ARRAY_MUT
-    }
-
-    /// Check if this is a mutable @struct.
-    #[inline]
-    pub fn is_struct_mut(&self) -> bool {
-        self.tag == TAG_STRUCT_MUT
-    }
-
-    /// Check if this is an immutable struct.
-    #[inline]
-    pub fn is_struct(&self) -> bool {
-        self.tag == TAG_STRUCT
-    }
-
-    /// Check if this is a closure.
-    #[inline]
-    pub fn is_closure(&self) -> bool {
-        self.tag == TAG_CLOSURE
-    }
-
-    /// Check if this is a user box (LBox).
-    #[inline]
-    pub fn is_lbox(&self) -> bool {
-        self.tag == TAG_LBOX
-    }
-
-    /// Check if this is a compiler capture cell (CaptureCell).
-    #[inline]
-    pub fn is_capture_cell(&self) -> bool {
-        self.tag == TAG_CAPTURE_CELL
-    }
-
-    /// Check if this is a fiber.
-    #[inline]
-    pub fn is_fiber(&self) -> bool {
-        self.tag == TAG_FIBER
-    }
-
-    /// Check if this is an @string.
-    #[inline]
-    pub fn is_string_mut(&self) -> bool {
-        self.tag == TAG_STRING_MUT
-    }
-
-    /// Check if this is a bytes value.
-    #[inline]
-    pub fn is_bytes(&self) -> bool {
-        self.tag == TAG_BYTES
-    }
-
-    /// Check if this is an @bytes value.
-    #[inline]
-    pub fn is_bytes_mut(&self) -> bool {
-        self.tag == TAG_BYTES_MUT
-    }
-
-    /// Check if this is a syntax object.
-    #[inline]
-    pub fn is_syntax(&self) -> bool {
-        self.tag == TAG_SYNTAX
-    }
-
-    /// Check if this is a native function.
-    #[inline]
-    pub fn is_native_fn(&self) -> bool {
-        self.tag == TAG_NATIVE_FN
-    }
-
-    /// Check if this is an immutable array.
-    #[inline]
-    pub fn is_array(&self) -> bool {
-        self.tag == TAG_ARRAY
-    }
-
-    /// Check if this is an immutable set.
-    #[inline]
-    pub fn is_set(&self) -> bool {
-        self.tag == TAG_SET
-    }
-
-    /// Check if this is a mutable set.
-    #[inline]
-    pub fn is_set_mut(&self) -> bool {
-        self.tag == TAG_SET_MUT
-    }
-
-    /// Check if this is a parameter.
-    #[inline]
-    pub fn is_parameter(&self) -> bool {
-        self.tag == TAG_PARAMETER
-    }
-
-    /// Check if this is a managed pointer.
-    #[inline]
-    pub fn is_managed_pointer(&self) -> bool {
-        self.tag == TAG_MANAGED_PTR
-    }
-
-    /// Check if this is an external object.
-    #[inline]
-    pub fn is_external(&self) -> bool {
-        self.tag == TAG_EXTERNAL
-    }
-
-    /// Check if this is a thread handle.
-    #[inline]
-    pub fn is_thread(&self) -> bool {
-        self.tag == TAG_THREAD
-    }
-
-    /// Check if this is a library handle.
-    #[inline]
-    pub fn is_lib_handle(&self) -> bool {
-        self.tag == TAG_LIB_HANDLE
-    }
-
-    /// Check if this is an FFI signature.
-    #[inline]
-    pub fn is_ffi_sig(&self) -> bool {
-        self.tag == TAG_FFI_SIG
-    }
-
-    /// Check if this is an FFI type descriptor.
-    #[inline]
-    pub fn is_ffi_type(&self) -> bool {
-        self.tag == TAG_FFI_TYPE
-    }
-
-    /// Check if this is a proper list (nil or pair ending in nil).
-    pub fn is_list(&self) -> bool {
-        let mut current = *self;
-        loop {
-            if current.is_nil() || current.is_empty_list() {
-                return true;
-            }
-            if let Some(pair) = current.as_pair() {
-                current = pair.rest;
-            } else {
-                return false;
-            }
-        }
-    }
 
     /// Get the heap tag if this is a heap value.
     #[inline]
@@ -320,252 +83,6 @@ impl Value {
         }
     }
 
-    /// Extract as pair if this is a pair cell.
-    #[inline]
-    pub fn as_pair(&self) -> Option<&crate::value::heap::Pair> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_pair() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Pair(c) => Some(c),
-            _ => None,
-        }
-    }
-
-    /// Extract as mutable array if this is one.
-    #[inline]
-    pub fn as_array_mut(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_array_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            // Deref the Rc to expose the inner RefCell directly. Callers
-            // already borrow from the RefCell; the Rc is an implementation
-            // detail that enables cross-fiber sharing (see heap.rs).
-            HeapObject::LArrayMut { data, .. } => Some(&**data),
-            _ => None,
-        }
-    }
-
-    /// Extract as @struct if this is an @struct.
-    #[inline]
-    pub fn as_struct_mut(
-        &self,
-    ) -> Option<&std::cell::RefCell<std::collections::BTreeMap<crate::value::heap::TableKey, Value>>>
-    {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_struct_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LStructMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-
-    /// Extract as struct if this is a struct.
-    /// Returns a sorted slice of (key, value) pairs.
-    #[inline]
-    pub fn as_struct(&self) -> Option<&[(crate::value::heap::TableKey, Value)]> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_struct() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LStruct { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-
-    /// Extract as closure if this is a closure.
-    ///
-    /// Returns a borrow of the arena-resident `Closure`. If you need an
-    /// owned `Rc<Closure>` (e.g. for storing in a `Fiber` or `Frame`),
-    /// clone explicitly: `Rc::new(value.as_closure().unwrap().clone())`.
-    /// `Closure::clone` is O(1) — every non-Copy field is `Rc`-shared.
-    #[inline]
-    pub fn as_closure(&self) -> Option<&crate::value::heap::Closure> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_closure() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Closure { closure, .. } => Some(closure),
-            _ => None,
-        }
-    }
-
-    /// Extract as box (LBox) if this is a user box.
-    #[inline]
-    pub fn as_lbox(&self) -> Option<&std::cell::RefCell<Value>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_lbox() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LBox { cell, .. } => Some(cell),
-            _ => None,
-        }
-    }
-
-    /// Extract as capture cell if this is a compiler capture cell.
-    #[inline]
-    pub fn as_capture_cell(&self) -> Option<&std::cell::RefCell<Value>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_capture_cell() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::CaptureCell { cell, .. } => Some(cell),
-            _ => None,
-        }
-    }
-
-    /// Extract the RefCell from either a user box or a capture cell.
-    #[inline]
-    pub fn as_box_or_capture(&self) -> Option<&std::cell::RefCell<Value>> {
-        self.as_lbox().or_else(|| self.as_capture_cell())
-    }
-
-    /// Extract the primitive definition if this is a native function.
-    #[inline]
-    pub fn as_native_def(&self) -> Option<&'static crate::primitives::def::PrimitiveDef> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_native_fn() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::NativeFn(def) => Some(*def),
-            _ => None,
-        }
-    }
-
-    /// Extract the bare function pointer if this is a native function.
-    #[inline]
-    pub fn as_native_fn(&self) -> Option<crate::value::heap::PrimFn> {
-        self.as_native_def().map(|def| def.func)
-    }
-
-    /// Extract as array (immutable) if this is one.
-    #[inline]
-    pub fn as_array(&self) -> Option<&[Value]> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_array() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LArray { elements, .. } => Some(elements),
-            _ => None,
-        }
-    }
-
-    /// Extract as set if this is a set.
-    /// Returns a sorted slice of values (binary search for membership).
-    #[inline]
-    pub fn as_set(&self) -> Option<&[Value]> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_set() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LSet { data, .. } => Some(data.as_slice()),
-            _ => None,
-        }
-    }
-
-    /// Extract as mutable set if this is a mutable set.
-    #[inline]
-    pub fn as_set_mut(&self) -> Option<&std::cell::RefCell<std::collections::BTreeSet<Value>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_set_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LSetMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-
-    /// Extract as @string if this is an @string.
-    #[inline]
-    pub fn as_string_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_string_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LStringMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-
-    /// Extract as bytes if this is a bytes value.
-    #[inline]
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_bytes() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LBytes { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-
-    /// Extract as @bytes if this is an @bytes value.
-    #[inline]
-    pub fn as_bytes_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_bytes_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LBytesMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-
-    /// Extract as thread handle if this is a thread handle.
-    #[inline]
-    pub fn as_thread_handle(&self) -> Option<&crate::value::heap::ThreadHandle> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_thread() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::ThreadHandle { handle, .. } => Some(handle),
-            _ => None,
-        }
-    }
-
-    /// Extract as fiber handle if this is a fiber.
-    #[inline]
-    pub fn as_fiber(&self) -> Option<&crate::value::fiber::FiberHandle> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_fiber() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Fiber { handle, .. } => Some(handle),
-            _ => None,
-        }
-    }
-
-    /// Extract as syntax if this is a syntax object.
-    #[inline]
-    pub fn as_syntax(&self) -> Option<&crate::syntax::Syntax> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_syntax() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Syntax { syntax, .. } => Some(syntax),
-            _ => None,
-        }
-    }
-
     /// Get a human-readable type name.
     pub fn type_name(&self) -> &'static str {
         use crate::value::heap::deref;
@@ -585,62 +102,13 @@ impl Value {
             "keyword"
         } else if self.is_pointer() {
             "ptr"
+        } else if self.is_native_fn() {
+            // Immediate (tag below the heap boundary) — never deref.
+            "native-fn"
         } else if self.is_heap() {
             unsafe { deref(*self).type_name() }
         } else {
             "unknown"
-        }
-    }
-
-    /// Check if this value is mutable (can be modified in-place).
-    #[inline]
-    pub fn is_mutable(&self) -> bool {
-        self.is_array_mut()
-            || self.is_string_mut()
-            || self.is_bytes_mut()
-            || self.is_struct_mut()
-            || self.is_set_mut()
-            || self.is_lbox()
-            || self.is_capture_cell()
-            || self.is_parameter()
-    }
-
-    /// Extract parameter (id, default) if this is a parameter.
-    #[inline]
-    pub fn as_parameter(&self) -> Option<(u32, Value)> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_parameter() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::Parameter { id, default, .. } => Some((*id, *default)),
-            _ => None,
-        }
-    }
-
-    /// Extract as FFI signature if this is an FFI signature.
-    #[inline]
-    pub fn as_ffi_signature(&self) -> Option<&crate::ffi::types::Signature> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_ffi_sig() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::FFISignature(sig, ..) => Some(sig),
-            _ => None,
-        }
-    }
-
-    /// Extract as FFI type descriptor if this is an FFI type.
-    #[inline]
-    pub fn as_ffi_type(&self) -> Option<&crate::ffi::types::TypeDesc> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_ffi_type() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::FFIType(desc) => Some(desc),
-            _ => None,
         }
     }
 
@@ -668,32 +136,6 @@ impl Value {
                     opt.as_ref().unwrap()
                 }))
             }
-            _ => None,
-        }
-    }
-
-    /// Extract as library handle ID if this is a library handle.
-    #[inline]
-    pub fn as_lib_handle(&self) -> Option<u32> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_lib_handle() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LibHandle(id) => Some(*id),
-            _ => None,
-        }
-    }
-
-    /// Extract the managed pointer cell, if this is a managed pointer.
-    #[inline]
-    pub fn as_managed_pointer(&self) -> Option<&std::cell::Cell<Option<usize>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_managed_pointer() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::ManagedPointer { addr, .. } => Some(addr),
             _ => None,
         }
     }
@@ -726,25 +168,47 @@ impl Value {
         }
     }
 
-    /// Convert a proper list to a Vec.
+    /// Convert a proper cons-list to a `Vec`. Plain lists only: a syntax-wrapped
+    /// list allocates fresh syntax wrappers, so it needs [`Self::list_to_vec_in`], which
+    /// takes the heap. A syntax object here is reported as an improper list.
     pub fn list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
-        // Syntax lists: unwrap SyntaxKind::List items as Value::syntax each
+        if self.as_syntax().is_some() {
+            return Err("Not a proper list");
+        }
+        self.cons_list_to_vec()
+    }
+
+    /// Convert a proper list to a `Vec`, unwrapping a syntax-wrapped list into
+    /// `Value::syntax` items born in one fresh region on `heap`. The explicit heap
+    /// is the allocation this performs made visible in the signature (the honesty
+    /// invariant); a plain cons-list behaves exactly like [`Self::list_to_vec`].
+    pub fn list_to_vec_in(
+        &self,
+        heap: &mut crate::value::fiberheap::FiberHeap,
+    ) -> Result<Vec<Value>, &'static str> {
         if let Some(syntax) = self.as_syntax() {
             if let crate::syntax::SyntaxKind::List(items) = &syntax.kind {
+                let region = heap.new_runtime_region();
                 return Ok(items
                     .iter()
-                    .map(|item| Value::syntax(item.clone()))
+                    .map(|item| crate::value::build::syntax(&mut *heap, item.clone(), region))
                     .collect());
             }
             return Err("Not a proper list");
         }
+        self.cons_list_to_vec()
+    }
+
+    /// The allocation-free cons-list walk shared by [`list_to_vec`] and
+    /// [`list_to_vec_in`]. Handles a syntax-wrapped `nil`/empty list reached as a
+    /// list tail (e.g. from `letrec` in macros).
+    fn cons_list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
         let mut result = Vec::new();
         let mut current = *self;
         loop {
             if current.is_nil() || current.is_empty_list() {
                 return Ok(result);
             }
-            // Syntax-wrapped nil or empty list (e.g. from letrec in macros)
             if let Some(syntax) = current.as_syntax() {
                 match &syntax.kind {
                     crate::syntax::SyntaxKind::Nil => return Ok(result),

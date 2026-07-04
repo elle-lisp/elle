@@ -148,12 +148,3 @@ Expands to:
 
 - `generate.lisp` — Main generator script imports and uses all modules
 - Elle documentation site generation — CI runs `./target/release/elle elle-doc/generate.lisp`
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `html.lisp` | 7 | HTML escaping utility |
-| `css.lisp` | 303 | CSS stylesheet generation |
-| `content.lisp` | 127 | Content block rendering |
-| `template.lisp` | 46 | Page template generation |

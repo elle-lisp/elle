@@ -168,8 +168,7 @@ impl VM {
                 Some(None) // handled, no signal
             }
             Some(Err(_)) => {
-                let err =
-                    crate::value::error_val("mlir-error", "MLIR execution failed".to_string());
+                let err = self.escaping_error("mlir-error", "MLIR execution failed".to_string());
                 self.fiber.signal = Some((SIG_ERROR, err));
                 self.fiber.stack.push(Value::NIL);
                 Some(Some(SIG_ERROR))

@@ -30,7 +30,6 @@ Available trace keywords:
 | `:emit` | Bytecode emission |
 | `:jit` | JIT compilation: decisions, rejections, batch compilation |
 | `:io` | I/O operations |
-| `:gc` | Garbage collection / arena operations |
 | `:import` | Module import resolution |
 | `:macro` | Macro expansion |
 | `:wasm` | WASM backend: host calls, compilation |
@@ -38,6 +37,15 @@ Available trace keywords:
 | `:arena` | Heap allocation, region enter/exit |
 | `:escape` | Escape analysis decisions |
 | `:bytecode` | Bytecode dump before execution |
+| `:posix` | POSIX-signal subsystem (os/sig-* primitives, signalfd/kqueue) |
+| `:chan` | Channel wake protocol (register/deregister, send wake) |
+| `:rc` | Reference-count operations on regions |
+| `:regions` | Region inference and lifetime decisions |
+| `:anf` | A-normal form lift pass |
+| `:pages` | Region page allocation |
+| `:free` | Region free diagnostics (string-traced, no bit) |
+| `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
+| `:freebt` | Free backtrace diagnostics (string-traced, no bit) |
 
 Trace output format: `[trace:KEYWORD] message` on stderr, for easy
 grep filtering.
@@ -174,6 +182,7 @@ The following keywords are accepted in trace sets without error, for
 forward compatibility:
 
 - `:spirv` — SPIR-V shader compilation
+- `:mlir` — MLIR compilation tier
 - `:gpu` — GPU offloading
 
 ## Implementation

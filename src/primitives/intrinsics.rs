@@ -6,27 +6,39 @@
 //! Each validates types and returns `(SIG_ERROR, error_val(...))` on mismatch.
 
 use crate::arithmetic;
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::ctx::NativeCtx;
+use crate::primitives::def::{RegionEffect, RetType};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
+
+mod data;
+mod num;
+pub(crate) use data::*;
+use num::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-fn type_err(name: &str, expected: &str, got: &Value) -> (SignalBits, Value) {
+fn type_err(name: &str, expected: &str, got: &Value, ctx: &mut NativeCtx) -> (SignalBits, Value) {
     (
         SIG_ERROR,
-        error_val(
+        ctx.error(
             "type-error",
             format!("{}: expected {}, got {}", name, expected, got.type_name()),
         ),
     )
 }
 
-fn type_err2(name: &str, expected: &str, a: &Value, b: &Value) -> (SignalBits, Value) {
+fn type_err2(
+    name: &str,
+    expected: &str,
+    a: &Value,
+    b: &Value,
+    ctx: &mut NativeCtx,
+) -> (SignalBits, Value) {
     (
         SIG_ERROR,
-        error_val(
+        ctx.error(
             "type-error",
             format!(
                 "{}: expected {}, got {} and {}",
@@ -41,970 +53,460 @@ fn type_err2(name: &str, expected: &str, a: &Value, b: &Value) -> (SignalBits, V
 
 // ── Arithmetic ──────────────────────────────────────────────────────
 
-fn prim_add(args: &[Value]) -> (SignalBits, Value) {
-    match arithmetic::add_values(&args[0], &args[1]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn prim_sub(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() == 1 {
-        // Unary negation
-        if let Some(n) = args[0].as_int() {
-            return (SIG_OK, Value::int(-n));
-        }
-        if let Some(f) = args[0].as_float() {
-            return (SIG_OK, Value::float(-f));
-        }
-        return type_err("%sub", "number", &args[0]);
-    }
-    match arithmetic::sub_values(&args[0], &args[1]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn prim_mul(args: &[Value]) -> (SignalBits, Value) {
-    match arithmetic::mul_values(&args[0], &args[1]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn prim_div(args: &[Value]) -> (SignalBits, Value) {
-    match arithmetic::div_values(&args[0], &args[1]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn prim_rem(args: &[Value]) -> (SignalBits, Value) {
-    match arithmetic::remainder_values(&args[0], &args[1]) {
-        Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-fn prim_mod(args: &[Value]) -> (SignalBits, Value) {
-    // Floored modulus: ((a % b) + b) % b
-    match arithmetic::remainder_values(&args[0], &args[1]) {
-        Ok(rem) => {
-            // Add divisor to remainder
-            match arithmetic::add_values(&rem, &args[1]) {
-                Ok(sum) => match arithmetic::remainder_values(&sum, &args[1]) {
-                    Ok(v) => (SIG_OK, v),
-                    Err(e) => (SIG_ERROR, e),
-                },
-                Err(e) => (SIG_ERROR, e),
-            }
-        }
-        Err(e) => (SIG_ERROR, e),
-    }
-}
-
-// ── Comparison ──────────────────────────────────────────────────────
-
-fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
-    let a = &args[0];
-    let b = &args[1];
-    if *a == *b {
-        return (SIG_OK, Value::TRUE);
-    }
-    if a.is_number() && b.is_number() {
-        if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-            return (SIG_OK, Value::bool(x == y));
-        }
-        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-            return (SIG_OK, Value::bool(x == y));
-        }
-    }
-    (SIG_OK, Value::FALSE)
-}
-
-fn prim_ne(args: &[Value]) -> (SignalBits, Value) {
-    let (_, eq_result) = prim_eq(args);
-    if eq_result == Value::TRUE {
-        (SIG_OK, Value::FALSE)
-    } else {
-        (SIG_OK, Value::TRUE)
-    }
-}
-
-fn prim_lt(args: &[Value]) -> (SignalBits, Value) {
-    let a = &args[0];
-    let b = &args[1];
-    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-        return (SIG_OK, Value::bool(x < y));
-    }
-    if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-        return (SIG_OK, Value::bool(x < y));
-    }
-    if let Some(ord) = a.compare_str(b) {
-        return (SIG_OK, Value::bool(ord.is_lt()));
-    }
-    if let Some(ord) = a.compare_keyword(b) {
-        return (SIG_OK, Value::bool(ord.is_lt()));
-    }
-    type_err2("%lt", "number, string, or keyword", a, b)
-}
-
-fn prim_gt(args: &[Value]) -> (SignalBits, Value) {
-    let a = &args[0];
-    let b = &args[1];
-    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-        return (SIG_OK, Value::bool(x > y));
-    }
-    if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-        return (SIG_OK, Value::bool(x > y));
-    }
-    if let Some(ord) = a.compare_str(b) {
-        return (SIG_OK, Value::bool(ord.is_gt()));
-    }
-    if let Some(ord) = a.compare_keyword(b) {
-        return (SIG_OK, Value::bool(ord.is_gt()));
-    }
-    type_err2("%gt", "number, string, or keyword", a, b)
-}
-
-fn prim_le(args: &[Value]) -> (SignalBits, Value) {
-    let a = &args[0];
-    let b = &args[1];
-    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-        return (SIG_OK, Value::bool(x <= y));
-    }
-    if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-        return (SIG_OK, Value::bool(x <= y));
-    }
-    if let Some(ord) = a.compare_str(b) {
-        return (SIG_OK, Value::bool(ord.is_le()));
-    }
-    if let Some(ord) = a.compare_keyword(b) {
-        return (SIG_OK, Value::bool(ord.is_le()));
-    }
-    type_err2("%le", "number, string, or keyword", a, b)
-}
-
-fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
-    let a = &args[0];
-    let b = &args[1];
-    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-        return (SIG_OK, Value::bool(x >= y));
-    }
-    if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-        return (SIG_OK, Value::bool(x >= y));
-    }
-    if let Some(ord) = a.compare_str(b) {
-        return (SIG_OK, Value::bool(ord.is_ge()));
-    }
-    if let Some(ord) = a.compare_keyword(b) {
-        return (SIG_OK, Value::bool(ord.is_ge()));
-    }
-    type_err2("%ge", "number, string, or keyword", a, b)
-}
-
-// ── Logical ─────────────────────────────────────────────────────────
-
-fn prim_not(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(!args[0].is_truthy()))
-}
-
-// ── Conversion ──────────────────────────────────────────────────────
-
-fn prim_int(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(f) = args[0].as_float() {
-        return (SIG_OK, Value::int(f as i64));
-    }
-    if args[0].as_int().is_some() {
-        return (SIG_OK, args[0]);
-    }
-    type_err("%int", "number", &args[0])
-}
-
-fn prim_float(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(n) = args[0].as_int() {
-        return (SIG_OK, Value::float(n as f64));
-    }
-    if args[0].as_float().is_some() {
-        return (SIG_OK, args[0]);
-    }
-    type_err("%float", "number", &args[0])
-}
-
-// ── Data ────────────────────────────────────────────────────────────
-
-fn prim_pair(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::pair(args[0], args[1]))
-}
-
-fn prim_first(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(p) = args[0].as_pair() {
-        return (SIG_OK, p.first);
-    }
-    type_err("%first", "pair", &args[0])
-}
-
-fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
-    if let Some(p) = args[0].as_pair() {
-        return (SIG_OK, p.rest);
-    }
-    type_err("%rest", "pair", &args[0])
-}
-
-// ── Bitwise ─────────────────────────────────────────────────────────
-
-fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
-    let a = args[0].as_int().ok_or(()).map_err(|_| ());
-    let b = args[1].as_int().ok_or(()).map_err(|_| ());
-    match (a, b) {
-        (Ok(x), Ok(y)) => (SIG_OK, Value::int(x & y)),
-        _ => type_err2("%bit-and", "integer", &args[0], &args[1]),
-    }
-}
-
-fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
-    match (args[0].as_int(), args[1].as_int()) {
-        (Some(x), Some(y)) => (SIG_OK, Value::int(x | y)),
-        _ => type_err2("%bit-or", "integer", &args[0], &args[1]),
-    }
-}
-
-fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
-    match (args[0].as_int(), args[1].as_int()) {
-        (Some(x), Some(y)) => (SIG_OK, Value::int(x ^ y)),
-        _ => type_err2("%bit-xor", "integer", &args[0], &args[1]),
-    }
-}
-
-fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
-    match args[0].as_int() {
-        Some(n) => (SIG_OK, Value::int(!n)),
-        None => type_err("%bit-not", "integer", &args[0]),
-    }
-}
-
-fn prim_shl(args: &[Value]) -> (SignalBits, Value) {
-    match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => {
-            let shift = b.clamp(0, 63) as u32;
-            (SIG_OK, Value::int(a << shift))
-        }
-        _ => type_err2("%shl", "integer", &args[0], &args[1]),
-    }
-}
-
-fn prim_shr(args: &[Value]) -> (SignalBits, Value) {
-    match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => {
-            let shift = b.clamp(0, 63) as u32;
-            (SIG_OK, Value::int(a >> shift))
-        }
-        _ => type_err2("%shr", "integer", &args[0], &args[1]),
-    }
-}
-
-// ── Type predicates ─────────────────────────────────────────────────
-
-fn prim_nil_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_nil()))
-}
-
-fn prim_empty_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_empty_list()))
-}
-
-fn prim_bool_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_bool()))
-}
-
-fn prim_int_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_int()))
-}
-
-fn prim_float_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_float()))
-}
-
-fn prim_string_q(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_string() || args[0].is_string_mut()),
-    )
-}
-
-fn prim_keyword_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_keyword()))
-}
-
-fn prim_symbol_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_symbol()))
-}
-
-fn prim_pair_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_pair()))
-}
-
-fn prim_array_q(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_array() || args[0].is_array_mut()),
-    )
-}
-
-fn prim_struct_q(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_struct() || args[0].is_struct_mut()),
-    )
-}
-
-fn prim_set_q(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_set() || args[0].is_set_mut()),
-    )
-}
-
-fn prim_bytes_q(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_bytes() || args[0].is_bytes_mut()),
-    )
-}
-
-fn prim_box_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_lbox()))
-}
-
-fn prim_closure_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_closure()))
-}
-
-fn prim_fiber_q(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_fiber()))
-}
-
-fn prim_type_of(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::keyword(args[0].type_name()))
-}
-
-// ── Data access ─────────────────────────────────────────────────────
-
-fn prim_length(args: &[Value]) -> (SignalBits, Value) {
-    use unicode_segmentation::UnicodeSegmentation;
-    let val = &args[0];
-    let len = if val.is_empty_list() || val.is_nil() {
-        0
-    } else if val.is_pair() {
-        match val.list_to_vec() {
-            Ok(v) => v.len(),
-            Err(_) => return (SIG_ERROR, error_val("type-error", "%length: improper list")),
-        }
-    } else if let Some(a) = val.as_array() {
-        a.len()
-    } else if let Some(a) = val.as_array_mut() {
-        a.borrow().len()
-    } else if let Some(s) = val.as_struct() {
-        s.len()
-    } else if let Some(s) = val.as_struct_mut() {
-        s.borrow().len()
-    } else if let Some(s) = val.as_set() {
-        s.len()
-    } else if let Some(s) = val.as_set_mut() {
-        s.borrow().len()
-    } else if let Some(b) = val.as_bytes() {
-        b.len()
-    } else if let Some(b) = val.as_bytes_mut() {
-        b.borrow().len()
-    } else if let Some(r) = val.with_string(|s| s.graphemes(true).count()) {
-        r
-    } else if let Some(buf) = val.as_string_mut() {
-        let b = buf.borrow();
-        match std::str::from_utf8(&b) {
-            Ok(s) => s.graphemes(true).count(),
-            Err(_) => {
-                return (
-                    SIG_ERROR,
-                    error_val("type-error", "%length: @string invalid UTF-8"),
-                )
-            }
-        }
-    } else {
-        return type_err("%length", "collection or string", val);
-    };
-    (SIG_OK, Value::int(len as i64))
-}
-
-fn prim_get(args: &[Value]) -> (SignalBits, Value) {
-    crate::primitives::access::prim_get(args)
-}
-
-fn prim_put(args: &[Value]) -> (SignalBits, Value) {
-    crate::primitives::access::prim_put(args)
-}
-
-fn prim_del(args: &[Value]) -> (SignalBits, Value) {
-    crate::primitives::lstruct::prim_del(args)
-}
-
-fn prim_has(args: &[Value]) -> (SignalBits, Value) {
-    crate::primitives::lstruct::prim_has_key(args)
-}
-
-fn prim_push(args: &[Value]) -> (SignalBits, Value) {
-    let collection = &args[0];
-    let value = args[1];
-    if let Some(vec_ref) = collection.as_array_mut() {
-        vec_ref.borrow_mut().push(value);
-        (SIG_OK, *collection)
-    } else if let Some(elems) = collection.as_array() {
-        let mut new = elems.to_vec();
-        new.push(value);
-        (SIG_OK, Value::array(new))
-    } else {
-        type_err("%push", "array", collection)
-    }
-}
-
-fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
-    match args[0].as_array_mut() {
-        Some(arr) => match arr.borrow_mut().pop() {
-            Some(v) => (SIG_OK, v),
-            None => (SIG_ERROR, error_val("type-error", "%pop: empty @array")),
-        },
-        None => type_err("%pop", "@array", &args[0]),
-    }
-}
-
-// ── Mutability ──────────────────────────────────────────────────────
-
-fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
-    let val = &args[0];
-    let result = if let Some(a) = val.as_array_mut() {
-        Value::array(a.borrow().clone())
-    } else if let Some(t) = val.as_struct_mut() {
-        let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect();
-        Value::struct_from_sorted(entries)
-    } else if let Some(s) = val.as_set_mut() {
-        Value::set(s.borrow().clone())
-    } else if let Some(buf) = val.as_string_mut() {
-        let b = buf.borrow();
-        match std::str::from_utf8(&b) {
-            Ok(s) => Value::string(s),
-            Err(_) => {
-                return (
-                    SIG_ERROR,
-                    error_val("type-error", "%freeze: @string invalid UTF-8"),
-                )
-            }
-        }
-    } else if let Some(b) = val.as_bytes_mut() {
-        Value::bytes(b.borrow().clone())
-    } else {
-        *val // already immutable
-    };
-    (SIG_OK, result)
-}
-
-fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
-    let val = &args[0];
-    let result = if let Some(a) = val.as_array() {
-        Value::array_mut(a.to_vec())
-    } else if let Some(s) = val.as_struct() {
-        let entries: std::collections::BTreeMap<_, _> =
-            s.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        Value::struct_mut_from(entries)
-    } else if let Some(s) = val.as_set() {
-        Value::set_mut(s.iter().cloned().collect())
-    } else if let Some(r) = val.with_string(|s| Value::string_mut(s.as_bytes().to_vec())) {
-        r
-    } else if let Some(b) = val.as_bytes() {
-        Value::bytes_mut(b.to_vec())
-    } else {
-        *val // already mutable
-    };
-    (SIG_OK, result)
-}
-
-// ── Identity ────────────────────────────────────────────────────────
-
-fn prim_identical(args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].tag == args[1].tag && args[0].payload == args[1].payload),
-    )
-}
-
 // ── Registration table ──────────────────────────────────────────────
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    // Arithmetic
-    PrimitiveDef {
-        name: "%add",
-        func: prim_add,
+primitive! {
+    "%add" => prim_add {
         arity: Arity::Exact(2),
         doc: "Add two numbers",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%sub",
-        func: prim_sub,
+        effect: RegionEffect::Immediate,
+    }
+    "%sub" => prim_sub {
         arity: Arity::Range(1, 2),
         doc: "Subtract or negate",
         params: &["a", "b?"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%mul",
-        func: prim_mul,
+        effect: RegionEffect::Immediate,
+    }
+    "%mul" => prim_mul {
         arity: Arity::Exact(2),
         doc: "Multiply two numbers",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%div",
-        func: prim_div,
+        effect: RegionEffect::Immediate,
+    }
+    "%div" => prim_div {
         arity: Arity::Exact(2),
         doc: "Divide two numbers",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%rem",
-        func: prim_rem,
+        effect: RegionEffect::Immediate,
+    }
+    "%rem" => prim_rem {
         arity: Arity::Exact(2),
         doc: "Remainder (sign follows dividend)",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%mod",
-        func: prim_mod,
+        effect: RegionEffect::Immediate,
+    }
+    "%mod" => prim_mod {
         arity: Arity::Exact(2),
         doc: "Floored modulus (sign follows divisor)",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Comparison
-    PrimitiveDef {
-        name: "%eq",
-        func: prim_eq,
+        effect: RegionEffect::Immediate,
+    }
+    "%eq" => prim_eq {
         arity: Arity::Exact(2),
         doc: "Equality",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%ne",
-        func: prim_ne,
+        effect: RegionEffect::Immediate,
+    }
+    "%ne" => prim_ne {
         arity: Arity::Exact(2),
         doc: "Not equal",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%lt",
-        func: prim_lt,
+        effect: RegionEffect::Immediate,
+    }
+    "%lt" => prim_lt {
         arity: Arity::Exact(2),
         doc: "Less than",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%gt",
-        func: prim_gt,
+        effect: RegionEffect::Immediate,
+    }
+    "%gt" => prim_gt {
         arity: Arity::Exact(2),
         doc: "Greater than",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%le",
-        func: prim_le,
+        effect: RegionEffect::Immediate,
+    }
+    "%le" => prim_le {
         arity: Arity::Exact(2),
         doc: "Less than or equal",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%ge",
-        func: prim_ge,
+        effect: RegionEffect::Immediate,
+    }
+    "%ge" => prim_ge {
         arity: Arity::Exact(2),
         doc: "Greater than or equal",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Logical
-    PrimitiveDef {
-        name: "%not",
-        func: prim_not,
+        effect: RegionEffect::Immediate,
+    }
+    "%not" => prim_not {
         arity: Arity::Exact(1),
         doc: "Logical not",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Conversion
-    PrimitiveDef {
-        name: "%int",
-        func: prim_int,
+        effect: RegionEffect::Immediate,
+    }
+    "%int" => prim_int {
         arity: Arity::Exact(1),
         doc: "Convert to integer",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%float",
-        func: prim_float,
+        effect: RegionEffect::Immediate,
+    }
+    "%float" => prim_float {
         arity: Arity::Exact(1),
         doc: "Convert to float",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Data
-    PrimitiveDef {
-        name: "%pair",
-        func: prim_pair,
+        effect: RegionEffect::Immediate,
+    }
+    "%pair" => prim_pair {
         arity: Arity::Exact(2),
         doc: "Construct a pair",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%first",
-        func: prim_first,
+        effect: RegionEffect::Fresh,
+    }
+    "%first" => prim_first {
         arity: Arity::Exact(1),
         doc: "First of pair",
         params: &["p"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%rest",
-        func: prim_rest,
+        effect: RegionEffect::PassThrough,
+    }
+    "%rest" => prim_rest {
         arity: Arity::Exact(1),
         doc: "Rest of pair",
         params: &["p"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Bitwise
-    PrimitiveDef {
-        name: "%bit-and",
-        func: prim_bit_and,
+        effect: RegionEffect::PassThrough,
+    }
+    "%bit-and" => prim_bit_and {
         arity: Arity::Exact(2),
         doc: "Bitwise AND",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bit-or",
-        func: prim_bit_or,
+        effect: RegionEffect::Immediate,
+    }
+    "%bit-or" => prim_bit_or {
         arity: Arity::Exact(2),
         doc: "Bitwise OR",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bit-xor",
-        func: prim_bit_xor,
+        effect: RegionEffect::Immediate,
+    }
+    "%bit-xor" => prim_bit_xor {
         arity: Arity::Exact(2),
         doc: "Bitwise XOR",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bit-not",
-        func: prim_bit_not,
+        effect: RegionEffect::Immediate,
+    }
+    "%bit-not" => prim_bit_not {
         arity: Arity::Exact(1),
         doc: "Bitwise complement",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%shl",
-        func: prim_shl,
+        effect: RegionEffect::Immediate,
+    }
+    "%shl" => prim_shl {
         arity: Arity::Exact(2),
         doc: "Shift left",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%shr",
-        func: prim_shr,
+        effect: RegionEffect::Immediate,
+    }
+    "%shr" => prim_shr {
         arity: Arity::Exact(2),
         doc: "Shift right",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Type predicates
-    PrimitiveDef {
-        name: "%nil?",
-        func: prim_nil_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%nil?" => prim_nil_q {
         arity: Arity::Exact(1),
         doc: "Is nil?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%empty?",
-        func: prim_empty_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%empty?" => prim_empty_q {
         arity: Arity::Exact(1),
         doc: "Is empty list?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bool?",
-        func: prim_bool_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%bool?" => prim_bool_q {
         arity: Arity::Exact(1),
         doc: "Is boolean?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%int?",
-        func: prim_int_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%int?" => prim_int_q {
         arity: Arity::Exact(1),
         doc: "Is integer?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%float?",
-        func: prim_float_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%float?" => prim_float_q {
         arity: Arity::Exact(1),
         doc: "Is float?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%string?",
-        func: prim_string_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%string?" => prim_string_q {
         arity: Arity::Exact(1),
         doc: "Is string?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%keyword?",
-        func: prim_keyword_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%keyword?" => prim_keyword_q {
         arity: Arity::Exact(1),
         doc: "Is keyword?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%symbol?",
-        func: prim_symbol_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%symbol?" => prim_symbol_q {
         arity: Arity::Exact(1),
         doc: "Is symbol?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%pair?",
-        func: prim_pair_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%pair?" => prim_pair_q {
         arity: Arity::Exact(1),
         doc: "Is pair?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%array?",
-        func: prim_array_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%array?" => prim_array_q {
         arity: Arity::Exact(1),
         doc: "Is array?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%struct?",
-        func: prim_struct_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%struct?" => prim_struct_q {
         arity: Arity::Exact(1),
         doc: "Is struct?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%set?",
-        func: prim_set_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%set?" => prim_set_q {
         arity: Arity::Exact(1),
         doc: "Is set?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%bytes?",
-        func: prim_bytes_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%bytes?" => prim_bytes_q {
         arity: Arity::Exact(1),
         doc: "Is bytes?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%box?",
-        func: prim_box_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%box?" => prim_box_q {
         arity: Arity::Exact(1),
         doc: "Is box?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%closure?",
-        func: prim_closure_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%closure?" => prim_closure_q {
         arity: Arity::Exact(1),
         doc: "Is closure?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%fiber?",
-        func: prim_fiber_q,
+        effect: RegionEffect::Immediate,
+    }
+    "%fiber?" => prim_fiber_q {
         arity: Arity::Exact(1),
         doc: "Is fiber?",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%type-of",
-        func: prim_type_of,
+        effect: RegionEffect::Immediate,
+    }
+    "%type-of" => prim_type_of {
         arity: Arity::Exact(1),
         doc: "Type as keyword",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Data access
-    PrimitiveDef {
-        name: "%length",
-        func: prim_length,
+        effect: RegionEffect::Immediate,
+    }
+    "%length" => prim_length {
         arity: Arity::Exact(1),
         doc: "Polymorphic length",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%get",
-        func: prim_get,
+        effect: RegionEffect::Immediate,
+    }
+    "%get" => prim_get {
         arity: Arity::Range(2, 3),
         doc: "Indexed/keyed access",
         params: &["coll", "key"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%put",
-        func: prim_put,
+        effect: RegionEffect::Funnel,
+    }
+    "%put" => prim_put {
         arity: Arity::Range(2, 3),
         doc: "Assoc/set element",
         params: &["coll", "key", "val"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%del",
-        func: prim_del,
+        // Funnel, not Mixed: the mutable-path store goes through the
+        // arena funnels (struct_put/set_at/set_add — runtime-counted);
+        // the immutable path returns a fresh alloc-scan-counted copy.
+        // The result is genuinely mixed (fresh copy vs container), but
+        // no store is uncounted, so no clique edges.
+        effect: RegionEffect::Funnel,
+    }
+    // Monomorphic put twins. Same runtime body
+    // (prim_put) as polymorphic %put; precise RetType is the available win, effect stays
+    // Funnel (no result-side oracle constraint) until the proof obligation makes the
+    // Fresh/funnel split sound. Registration is what makes them usable in checked mode
+    // and as callable values; checked-off lowers them to the Put opcode directly.
+    "%put-struct" => prim_put {
+        arity: Arity::Exact(3),
+        doc: "Assoc into an immutable struct, returning a fresh struct (monomorphic immutable struct put)",
+        params: &["coll", "key", "val"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::Struct,
+    }
+    "%put-struct-mut" => prim_put {
+        arity: Arity::Exact(3),
+        doc: "Assoc into a mutable @struct in place, returning it (monomorphic @struct put)",
+        params: &["coll", "key", "val"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::MutableStruct,
+    }
+    "%put-array" => prim_put {
+        arity: Arity::Exact(3),
+        doc: "Set an index in an immutable array, returning a fresh array (monomorphic immutable array put)",
+        params: &["coll", "key", "val"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::Array,
+    }
+    "%put-array-mut" => prim_put {
+        arity: Arity::Exact(3),
+        doc: "Set an index in a mutable @array in place, returning it (monomorphic @array put)",
+        params: &["coll", "key", "val"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::MutableArray,
+    }
+    "%del" => prim_del {
         arity: Arity::Exact(2),
         doc: "Dissoc/delete key",
         params: &["coll", "key"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%has?",
-        func: prim_has,
+        effect: RegionEffect::Funnel,
+    }
+    "%has?" => prim_has {
         arity: Arity::Exact(2),
         doc: "Key/element exists?",
         params: &["coll", "key"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%push",
-        func: prim_push,
+        effect: RegionEffect::Immediate,
+    }
+    "%array-push" => prim_push {
         arity: Arity::Exact(2),
         doc: "Append element",
         params: &["arr", "val"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%pop",
-        func: prim_pop,
+        // Funnel: the @array store goes through the arena push funnel
+        // (runtime-counted); the immutable path returns a fresh copy.
+        effect: RegionEffect::Funnel,
+    }
+    // Monomorphic array-push twins. Same
+    // runtime body (prim_push) as the polymorphic %array-push; what differs is the
+    // *static* declaration. The NativeFn registration is what makes them usable in
+    // checked mode and as bare callable values (HOF); under --checked-intrinsics=off
+    // they lower to the IntrPush opcode directly. RetType is the monomorphization win
+    // already available: %push-array is a fresh immutable Array, %push-array-mut its
+    // mutable arg0. Effect stays Funnel for now (identical to %array-push, and Funnel
+    // carries no result-side oracle constraint); the precise Fresh-vs-funnel split is
+    // sound only once the proof obligation guarantees the input mutability, so it
+    // lands with that work, not here.
+    "%push-array" => prim_push {
+        arity: Arity::Exact(2),
+        doc: "Append to an immutable array, returning a fresh array (monomorphic immutable array-push)",
+        params: &["arr", "val"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::Array,
+    }
+    "%push-array-mut" => prim_push {
+        arity: Arity::Exact(2),
+        doc: "Append to a mutable @array in place, returning it (monomorphic @array push)",
+        params: &["arr", "val"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::MutableArray,
+    }
+    "%pop" => prim_pop {
         arity: Arity::Exact(1),
         doc: "Remove/return last element",
         params: &["arr"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Mutability
-    PrimitiveDef {
-        name: "%freeze",
-        func: prim_freeze,
+        effect: RegionEffect::PassThrough,
+    }
+    "%string-push" => prim_string_push {
+        arity: Arity::Exact(2),
+        doc: "Append string to string/@string",
+        params: &["s", "val"],
+        category: "intrinsic",
+        // Funnel, not PassThrough: like %put/%array-push this is
+        // conditionally allocating — the @string path appends in place
+        // (pass-through), the immutable string path returns a FRESH copy in
+        // this call's own region. Declaring PassThrough trips the
+        // dispatch_native_call declaration oracle on the immutable case once
+        // the op routes as a real native Call (the default checked path).
+        effect: RegionEffect::Funnel,
+    }
+    "%bytes-push" => prim_bytes_push {
+        arity: Arity::Exact(2),
+        doc: "Append byte to bytes/@bytes",
+        params: &["b", "val"],
+        category: "intrinsic",
+        // Funnel, not PassThrough: @bytes appends in place (pass-through),
+        // the immutable bytes path returns a FRESH copy — same conditional
+        // allocation as %string-push/%put.
+        effect: RegionEffect::Funnel,
+    }
+    "%freeze" => prim_freeze {
         arity: Arity::Exact(1),
         doc: "Mutable to immutable",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    PrimitiveDef {
-        name: "%thaw",
-        func: prim_thaw,
+        effect: RegionEffect::Funnel,
+    }
+    "%thaw" => prim_thaw {
         arity: Arity::Exact(1),
         doc: "Immutable to mutable",
         params: &["x"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-    // Identity
-    PrimitiveDef {
-        name: "%identical?",
-        func: prim_identical,
+        effect: RegionEffect::Funnel,
+    }
+    "%identical?" => prim_identical {
         arity: Arity::Exact(2),
         doc: "Pointer identity",
         params: &["a", "b"],
         category: "intrinsic",
-        ..PrimitiveDef::DEFAULT
-    },
-];
+        effect: RegionEffect::Immediate,
+    }
+}
+
+#[cfg(test)]
+mod tests;

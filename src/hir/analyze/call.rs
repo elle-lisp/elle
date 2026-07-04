@@ -98,7 +98,6 @@ impl<'a> Analyzer<'a> {
         // the target file's signal projection and stash it for the binding
         // analysis to pick up via `last_import_projection`.
         self.last_import_projection = None;
-        self.last_import_escape_projection = None;
         if let HirKind::Call {
             func: inner_func,
             args: inner_args,
@@ -109,10 +108,13 @@ impl<'a> Analyzer<'a> {
                 if let Some(first) = inner_args.first() {
                     if let HirKind::String(spec) = &first.expr.kind {
                         if let Some(resolved) = crate::primitives::modules::resolve_import(spec) {
-                            self.last_import_projection =
-                                crate::pipeline::get_or_compile_projection(&resolved);
-                            self.last_import_escape_projection =
-                                crate::pipeline::get_or_compile_escape_projection(&resolved);
+                            // Resolve via the owning instance's compile context
+                            // (set by the file frontend). Absent it — pure
+                            // analysis — the import keeps the conservative
+                            // `Polymorphic` projection.
+                            self.last_import_projection = self.import_ctx.and_then(|ptr| unsafe {
+                                (*ptr).get_or_compile_projection(&resolved)
+                            });
                         }
                     }
                 }

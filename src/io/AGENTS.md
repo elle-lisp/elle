@@ -20,8 +20,9 @@ to a backend for execution.
 | `sigfd.rs` | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
 | `sigmap.rs` | Shared keyword↔signum mapping; `resolve(value, ctx)` parses a `:sigterm`/integer Value to libc signum |
 | `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
-| `threadpool.rs` | `ThreadPoolBackend`, `PoolOp`, `PoolCompletion` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
-| `uring.rs` | io_uring SQE submission and CQE processing (Linux only) |
+| `threadpool.rs` | `CompletionHub` (the one shared completion channel), `RawCompletion`, `PoolOp`, `PoolCompletion`, `StdinThread` — typed thread-pool I/O. Every spawned worker calls `crate::io::sigfd::mask_all_signals_on_this_thread()` first so the kernel never selects it as a POSIX-signal delivery target. |
+| `uring.rs` | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
+| `eventfd.rs` | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
 
 
 ## Data Flow
@@ -47,7 +48,15 @@ Enum of I/O operations (16 variants):
 
 **File position:** `Seek { offset: i64, whence: i32 }`, `Tell`
 
-**Network operations:** `Accept`, `Connect { addr }`, `SendTo { addr, port_num, data }`, `RecvFrom { count }`, `Shutdown { how }`
+**Network operations:** `Accept`, `Connect { addr }`, `SendTo { addr, port_num, data }`, `RecvFrom { count, result }`, `Shutdown { how }`
+
+`RecvFrom` pre-allocates its `{:data :addr :port}` result struct on the
+**requesting fiber's heap** (`prim_udp_recv_from`) and the completion fills it
+in place — the iovec receives the payload zero-copy into `:data`, and `:addr`/
+`:port` are stamped into the struct's slots (`set_struct_field_in_place`). This
+mirrors `Read`/`Accept`: nothing is instantiated on the scheduler's heap at
+completion, so the value the fiber resumes with has no cross-heap reference (the
+"datagram arrives zeroed" arena-lifetime bug).
 
 **Timer:** `Sleep { duration }`
 
@@ -90,16 +99,37 @@ Enum tracking in-flight async operations (5 variants):
 - `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing.
 - `Task { buffer_handle }` — background task running on thread pool.
 
-### PoolOp / PoolCompletion
+### PoolOp / PoolCompletion / RawCompletion / CompletionHub
 
 Typed thread-pool submission and completion:
 
-- `PoolOp` — enum with 21 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses, or closures). Replaces the old `(fd, op_kind: u8, data: Vec<u8>, size: usize)` untyped submission.
-- `PoolCompletion { id, result_code, data }` — typed completion struct. Replaces the old `(u64, i32, Vec<u8>)` tuple.
+- `PoolOp` — enum with 11 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses, or closures): a typed submission.
+- `PoolCompletion { id, result_code, data }` — typed completion from a thread-pool worker.
+- `RawCompletion` — `Pool(PoolCompletion)` | `Stdin(StdinCompletion)`. The single
+  shape every background worker ships through the hub. A worker cannot build a
+  cooked `Completion` (the cook fns need main-thread `pending`/`fd_states`/
+  `buffer_pool`/`origin_heap`), so it sends its raw result; the receiver matches
+  once and dispatches to `pool_to_completion` / `stdin_to_completion`.
+- `CompletionHub { sender, receiver, in_flight, eventfd }` — the **one** completion
+  channel all background work feeds: every thread-pool worker and the stdin worker
+  holds a `Sender<RawCompletion>` clone. Collapsing the former platform-pool,
+  network-pool, and stdin channels into one means the scheduler's blocking wait
+  reads exactly one source: a crossbeam `recv()` registers-before-sleeps on the
+  sole channel, so there is nothing to exclude and no wakeup to miss. `in_flight`
+  is the combined count of submitted-but-unreaped worker ops (pool + stdin): +1 per
+  worker submit, −1 once per `RawCompletion` reaped at the single drain site (a
+  cancelled op's reaped completion still decrements; `io/cancel` must not also
+  decrement). `eventfd` is the Linux/uring bridge fd (`None` on the pool-only
+  platforms) a worker writes after `send` so the ring's single wait observes the
+  edge.
 
 ### ConnectAddr
 
-Enum: `Tcp { addr, port }` or `Unix { path }`.
+Enum: `Tcp { addr, port }` or `Unix { path }`. `Tcp.addr` is a **parsed
+`std::net::IpAddr`** — connect is IP-only at the backend. The `tcp/connect-ip`
+primitive parses the IP and builds this; hostname resolution is the stdlib
+`tcp/connect` wrapper's job (`sys/resolve` → `tcp/connect-ip` per address), so
+the backend never runs a blocking getaddrinfo fallback.
 
 ### IoRequest
 
@@ -154,7 +184,7 @@ Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling
 
 Buffered data is never lost on EOF or error. The backend drains buffered data before surfacing EOF or error status.
 
-## Backend Execution (Chunk 2)
+## Backend Execution
 
 ### Subprocess Operations
 
@@ -181,13 +211,21 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 6. Buffer drain invariant: buffered data is never lost on EOF or error.
 7. Buffers passed to io_uring must not move while the kernel holds them.
 8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
-   When stdin reads are pending alongside io_uring ops (e.g. file watchers),
-   the wait path polls io_uring non-blocking and then selects on the stdin
-   receiver channel so neither source starves the other.
+   That worker shares the single `CompletionHub` channel: its completions are
+   `RawCompletion::Stdin` items like any other worker's. On the pool-only
+   platform the scheduler blocks on one `recv()` of the hub (register-before-
+   sleep — no source can be missed). On the io_uring platform the scheduler
+   blocks on one `io_uring_enter`; hub work that posts no ring CQE (stdin /
+   getaddrinfo / `Task`) wakes that single wait through a standing
+   `POLL_ADD(eventfd, POLLIN)` — the eventfd bridge. A worker raises the eventfd
+   (`publish_completion`) *after* publishing to the channel, so the wake can
+   never precede the item; the wait clears the eventfd and re-arms the one-shot
+   poll. One blocking primitive per platform, no wakeup-rescue caps: a genuinely
+   lost wakeup hangs rather than being downgraded to a bounded stall.
 9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
 13. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
-16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). On io_uring platforms, tasks are routed to the network pool to avoid starving fd I/O ops on the main pool. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
+16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). There is no io_uring equivalent for an arbitrary closure, so a `Task` always runs on the thread pool (feeding the `CompletionHub`) on every platform. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.

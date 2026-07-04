@@ -2,19 +2,45 @@
 
 use super::*;
 
+mod intrinsic;
+
+mod loops;
+
 impl<'a> Lowerer<'a> {
     /// Lower a HIR expression to LIR
     pub(super) fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
-        // Set the current span for all instructions emitted while lowering this HIR node
+        let saved_span = self.current_span.clone();
+        let saved_hir_id = self.current_hir_id;
         self.current_span = hir.span.clone();
+        self.current_hir_id = Some(hir.id);
 
-        match &hir.kind {
+        // Per-path branch compensation: if this node is a branch arm body whose
+        // sibling arm holds a live-in region's `decref_point`, free that region at
+        // this arm's head (it would otherwise leak on this path). Emitted into the
+        // arm's basic block, before the arm body — hence before any tail call.
+        self.emit_branch_compensation(hir.id);
+
+        let result = match &hir.kind {
             HirKind::Nil => self.emit_const(LirConst::Nil),
             HirKind::EmptyList => self.emit_const(LirConst::EmptyList),
             HirKind::Bool(b) => self.emit_const(LirConst::Bool(*b)),
             HirKind::Int(n) => self.emit_const(LirConst::Int(*n)),
             HirKind::Float(f) => self.emit_const(LirConst::Float(*f)),
-            HirKind::String(s) => self.emit_const(LirConst::String(s.clone())),
+            HirKind::String(s) => {
+                // A string literal is an ordinary allocation (not a pool load):
+                // materialize it fresh into its OWN solver-assigned region. The
+                // region is resolved from `current_hir_id` (this String node),
+                // which the solver gave a region via `alloc_here`. `emit_alloc`
+                // stamps the region (arming its `DecrefRegion` at `decref_point`).
+                let dst = self.fresh_reg();
+                let template = crate::value::ConstTemplate::String(s.clone());
+                self.emit_alloc(|region| LirInstr::MaterializeConst {
+                    dst,
+                    template,
+                    region,
+                });
+                Ok(dst)
+            }
             HirKind::Keyword(name) => self.emit_const(LirConst::Keyword(name.clone())),
 
             HirKind::Var(binding) => self.lower_var(binding, &hir.span),
@@ -43,7 +69,7 @@ impl<'a> Lowerer<'a> {
                 *num_locals,
                 inferred_signals,
                 param_bounds,
-                *doc,
+                doc.clone(),
                 syntax.clone(),
                 *assert_numeric,
             ),
@@ -81,6 +107,22 @@ impl<'a> Lowerer<'a> {
 
             HirKind::Emit { signal, value } => self.lower_emit(*signal, value),
             HirKind::Quote(value) => self.emit_value_const(*value),
+            HirKind::QuoteConst(template) => {
+                // Quoted compound data is an ordinary allocation: materialize a
+                // FRESH structure from the template into this literal's OWN
+                // solver-assigned region each execution (docs/impl/region-model.md
+                // § "Constants lower as ordinary allocations"). `emit_alloc` stamps the
+                // region (arming its `DecrefRegion` at `decref_point`), exactly
+                // like `HirKind::String`.
+                let dst = self.fresh_reg();
+                let template = template.clone();
+                self.emit_alloc(|region| LirInstr::MaterializeConst {
+                    dst,
+                    template,
+                    region,
+                });
+                Ok(dst)
+            }
             HirKind::Cond {
                 clauses,
                 else_branch,
@@ -96,11 +138,36 @@ impl<'a> Lowerer<'a> {
 
             HirKind::Intrinsic { op, args } => self.lower_intrinsic(*op, args),
 
+            HirKind::Return { value } => self.lower_return(value),
+
             HirKind::Error => Err(format!(
                 "internal: error poison node in lowerer at {}",
                 hir.span
             )),
+        };
+
+        // Emit IncrefRegion for cross-region references at this node,
+        // then DecrefRegion for every region whose `decref_point` HirId is
+        // this node: the lowerer is driven by per-region last-use, not by
+        // scope exits.
+        if let Ok(result_reg) = result {
+            self.emit_increfs_for(hir.id);
+            // A caller may defer this node's decrefs to emit them itself at
+            // a better point (e.g. `lower_let` emits a binding init's decref
+            // only after storing the init value into the slot the decref
+            // reloads — otherwise it decrefs the slot's stamped `nil` and the
+            // value leaks).
+            if !self.deferred_decref_points.contains(&hir.id) {
+                self.emit_decrefs_for(hir.id, Some(result_reg));
+            }
+            // Per-arm sibling-arm releases (used-in-multiple-arms): after the
+            // node's own decrefs, so the release follows the arm's use of the value.
+            self.emit_arm_decrefs(hir.id);
         }
+
+        self.current_span = saved_span;
+        self.current_hir_id = saved_hir_id;
+        result
     }
 
     fn lower_var(&mut self, binding: &Binding, span: &Span) -> Result<Reg, String> {
@@ -109,6 +176,21 @@ impl<'a> Lowerer<'a> {
         // needing a slot allocation.
         if let Some(&literal_value) = self.immutable_values.get(binding) {
             return self.emit_value_const(literal_value);
+        }
+
+        // A reference to the enclosing lambda's own self-recursive binding resolves
+        // to the executing closure (`LoadSelf`), not a load of its forward cell — in
+        // EVERY position. In value position the closure is materialized and used; in
+        // call position the callee IS the executing closure, so the call re-enters the
+        // same code+env with new args (self-call re-dispatch). Both are RC-identical to
+        // the forward-cell load without naming the cell. `current_self_binding` is set
+        // only inside that lambda's body, and only for a same-binding self-edge (a
+        // sibling/foreign capture stays `Local`/`Capture` and keeps its cell for the
+        // closure-cycle merge), so this fires for exactly the self-references.
+        if self.current_self_binding == Some(*binding) {
+            let dst = self.fresh_reg();
+            self.emit(LirInstr::LoadSelf { dst });
+            return Ok(dst);
         }
 
         if let Some(&slot) = self.binding_to_slot.get(binding) {
@@ -127,7 +209,9 @@ impl<'a> Lowerer<'a> {
                 }
                 Ok(dst)
             } else {
-                // Outside lambdas, local variables use LoadLocal
+                // A plain stack slot: every non-upvalue binding — outside
+                // lambdas, and in-lambda for a compiled-cell letrec binding
+                // (letrec_compiled_cell) whose slot holds the MakeCaptureCell.
                 self.emit(LirInstr::LoadLocal { dst, slot });
 
                 if needs_capture {
@@ -279,10 +363,17 @@ impl<'a> Lowerer<'a> {
                 if needs_capture && !self.in_lambda {
                     // Create a cell containing nil
                     // This cell will be captured by nested lambdas
-                    // and updated when the Define is lowered
+                    // and updated when the Define is lowered.
+                    // One region PER cell (`begin_cell_regions`): emitting all
+                    // cells against this Begin's single slot orphans all but
+                    // the last minted physical region — the shared-slot
+                    // capture-cell leak (docs/impl/region-model.md, "one allocation
+                    // execution per slot between drops").
+                    let region = self.cell_region_for(binding);
                     let nil_reg = self.emit_const(LirConst::Nil)?;
                     let cell_reg = self.fresh_reg();
-                    self.emit(LirInstr::MakeCaptureCell {
+                    self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
+                        region,
                         dst: cell_reg,
                         value: nil_reg,
                     });
@@ -317,16 +408,18 @@ impl<'a> Lowerer<'a> {
         let block_result_slot = self.current_func.num_locals;
         self.current_func.num_locals += 1;
         let exit_label = self.fresh_label();
-        let scoped =
-            self.region_scope_check(hir_id) && self.can_scope_allocate_block(block_id, body);
+        let region_id = if self.region_scope_check(hir_id) {
+            self.scope_region_id(hir_id)
+        } else {
+            None
+        };
 
-        // Record region depth BEFORE emitting RegionEnter so that breaks
-        // targeting this block include the block's own region in their
-        // compensating RegionExit count.
-        let depth_before = self.region_depth;
+        // Record active_region_ids depth before the block so breaks
+        // can emit FreeRegion for regions entered since.
+        let region_stack_depth = self.active_region_ids.len();
 
-        if scoped {
-            self.emit_region_enter();
+        if let Some(rid) = region_id {
+            self.active_region_ids.push(rid);
         }
 
         self.block_lower_contexts.push(BlockLowerContext {
@@ -334,11 +427,10 @@ impl<'a> Lowerer<'a> {
             result_reg,
             result_slot: block_result_slot,
             exit_label,
-            region_depth_at_entry: depth_before,
-            flip_depth_at_entry: self.flip_depth,
+            region_depth_at_entry: region_stack_depth as u32,
         });
 
-        // Lower body (same as lower_begin but simpler — body is typically a single Begin node)
+        // Lower body
         if body.is_empty() {
             let nil_reg = self.emit_const(LirConst::Nil)?;
             self.emit(LirInstr::StoreLocal {
@@ -359,8 +451,12 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.pop();
 
-        if scoped {
-            self.emit_region_exit();
+        // Region-demise DecrefRegion is emitted by `lower_expr` at each
+        // region's `decref_point` HirId. This function emits none; it only
+        // keeps the active_region_ids bookkeeping so break compensation (if
+        // any) can still walk it.
+        if region_id.is_some() {
+            self.active_region_ids.pop();
         }
 
         // Normal exit: jump to the exit label
@@ -374,1019 +470,67 @@ impl<'a> Lowerer<'a> {
         Ok(result_reg)
     }
 
-    fn lower_break(&mut self, block_id: &BlockId, value: &Hir) -> Result<Reg, String> {
-        // Find the target block context
-        let target = self
-            .block_lower_contexts
-            .iter()
-            .rev()
-            .find(|ctx| ctx.block_id == *block_id)
-            .ok_or_else(|| format!("Internal error: no block context for {:?}", block_id))?;
-
-        let target_result_slot = target.result_slot;
-        let target_exit_label = target.exit_label;
-        let target_region_depth = target.region_depth_at_entry;
-        let target_flip_depth = target.flip_depth_at_entry;
-
-        // Lower the value expression
-        let value_reg = self.lower_expr(value)?;
-
-        // Store value to the block's result slot
-        self.emit(LirInstr::StoreLocal {
-            slot: target_result_slot,
-            src: value_reg,
-        });
-
-        // Emit compensating FlipExit for each while-loop flip frame
-        // entered since the target block was opened.
-        let compensating_flips = self.flip_depth - target_flip_depth;
-        for _ in 0..compensating_flips {
-            self.emit(LirInstr::FlipExit);
+    /// Lower a `Return` ownership boundary: evaluate the value, then
+    /// incref its result region so the caller receives one owning reference.
+    /// Region-transparent — returns the value's own register. The mint is
+    /// emitted here, before the node's own `emit_decrefs_for` (which the
+    /// regions pass arranges to fire at this Return node, after the retain —
+    /// see the `return_sites` decref_point extension), so a freshly-allocated
+    /// result region survives its callee-side release.
+    ///
+    /// Two encodings, chosen by `coalescible_region` (the staticness predicate,
+    /// docs/impl/region-rules.md § "Compile-time region selection (coalescing)"):
+    ///
+    /// - **slot-resolved** when the returned value is a fresh local allocation
+    ///   whose region is a known static slot — emit the equivalence oracle
+    ///   `AssertRegionMatches { slot }` (debug builds only) then
+    ///   `IncrefRegion { slot }`. The slot resolves, through the activation map,
+    ///   to the same physical region `region_of(value)` would return (the alloc
+    ///   stamped it; a value never moves regions), so the RC trajectory is
+    ///   bit-identical — one fewer runtime deref, stack-neutral.
+    /// - **value-resolved** otherwise (the dynamic boundary — a borrowed
+    ///   captured upvalue, a pass-through arg, a branch-dependent mix, an opaque
+    ///   call result): emit `IncrefValueRegion { src }`, reading the region from
+    ///   the value at runtime.
+    ///
+    /// Either way the caller balances the mint with a `DecrefValueRegion` at the
+    /// result binding's `decref_point` (the caller cannot name the callee's
+    /// region — prediction-free — so the substitution is purely callee-mint-side).
+    fn lower_return(&mut self, value: &Hir) -> Result<Reg, String> {
+        let reg = self.lower_expr(value)?;
+        // Transform 1 (docs/impl/region-rules.md § "Compile-time region selection
+        // (coalescing)"): when the returned value is a fresh local allocation whose
+        // region is a known static slot, the mint is slot-resolved; otherwise the
+        // region is a genuine runtime fact (the dynamic boundary) and the mint stays
+        // value-resolved. `coalescible_region` is the staticness predicate; this
+        // function's doc-comment carries the two encodings and why the caller side
+        // is unaffected (prediction-free).
+        let slot = self.coalescible_region(value);
+        super::rcstats::record_return_mint(slot.is_some());
+        if crate::config::get().has_trace("rc") {
+            eprintln!(
+                "[trace:rc:emit] return_mint hir_id={:?} coalescible={:?} span={}",
+                value.id, slot, self.current_span,
+            );
         }
-
-        // Emit compensating RegionExit for each region entered since the
-        // target block was opened. This ensures scope marks are popped
-        // correctly on early exit. Use the refcounted stack to emit the
-        // correct exit type for each region.
-        let compensating_exits = (self.region_depth - target_region_depth) as usize;
-        let stack_len = self.region_refcounted_stack.len();
-        for i in 0..compensating_exits {
-            // Pop from top of stack (most recently entered region first)
-            let idx = stack_len - 1 - i;
-            if self.region_refcounted_stack[idx] {
-                self.emit(LirInstr::RegionExitRefcounted);
-            } else {
-                self.emit(LirInstr::RegionExit);
+        match slot {
+            Some(slot) => {
+                // The equivalence oracle: assert the slot resolves to the same
+                // physical region the value actually lives in — a mis-coalesce
+                // would let the cascade free a live region (a UAF). Debug-only; it
+                // peeks `reg`, leaving it on top for the following `IncrefRegion`
+                // and the `Return`. Release builds omit it entirely, so the
+                // bytecode never carries it (C0 emit contract).
+                #[cfg(debug_assertions)]
+                self.emit(LirInstr::AssertRegionMatches {
+                    region_id: slot,
+                    src: reg,
+                });
+                self.emit(LirInstr::IncrefRegion { region_id: slot });
             }
+            None => self.emit(LirInstr::IncrefValueRegion { src: reg }),
         }
-        // Note: we emit raw instructions (not emit_region_exit) because we
-        // don't want to decrement region_depth — the break jumps out of
-        // the block entirely, and the dead code after the break is
-        // unreachable. The block's RegionExit at the normal exit path
-        // handles the depth bookkeeping for the normal flow.
-
-        self.terminate(Terminator::Jump(target_exit_label));
-
-        // Start a new (unreachable) block for any dead code after the break
-        let dead_label = self.fresh_label();
-        self.start_new_block(dead_label);
-
-        // Return a dummy register (code after break is dead)
-        Ok(self.fresh_reg())
-    }
-
-    fn lower_while(&mut self, cond: &Hir, body: &Hir, _hir_id: HirId) -> Result<Reg, String> {
-        let result_reg = self.fresh_reg();
-        let flip_eligible = self.can_flip_while_loop(body, &[]);
-        let refcount_eligible = !flip_eligible && self.can_flip_while_loop_refcounted(body, &[]);
-        // All flip-eligible or refcount-eligible loops get double-buffered scope marks.
-        let scope_eligible = flip_eligible || refcount_eligible;
-        let dealloc_eligible =
-            scope_eligible && !refcount_eligible && self.can_dealloc_in_loop(body, &[]);
-
-        let cond_label = self.fresh_label();
-        let body_label = self.fresh_label();
-        let done_label = self.fresh_label();
-
-        // The entry block is the current block before we jump to cond.
-        let entry_label = self.current_block.label;
-
-        // Double-buffered scope marks: push prev (guard) + curr before loop.
-        if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_enter_refcounted(); // prev (guard mark)
-                self.emit_region_enter_refcounted(); // curr (first iteration)
-            } else {
-                self.emit_region_enter(); // prev (guard mark)
-                self.emit_region_enter(); // curr (first iteration)
-            }
-        }
-
-        // Jump to condition check
-        self.terminate(Terminator::Jump(cond_label));
-        self.finish_block();
-
-        // Condition block
-        self.current_block = BasicBlock::new(cond_label);
-        let cond_reg = self.lower_expr(cond)?;
-        self.terminate(Terminator::Branch {
-            cond: cond_reg,
-            then_label: body_label,
-            else_label: done_label,
-        });
-        self.finish_block();
-
-        // Body block — track flip_depth and region_depth so breaks can compensate
-        if flip_eligible {
-            self.flip_depth += 1;
-        }
-        self.current_block = BasicBlock::new(body_label);
-
-        let _body_reg = self.lower_expr(body)?;
-
-        // Back-edge: rotate scope marks (free prev iteration, start new curr)
-        if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_rotate_refcounted();
-            } else if dealloc_eligible {
-                self.emit_region_rotate_dealloc();
-            } else {
-                self.emit_region_rotate();
-            }
-        }
-
-        // The back-edge block is whatever block we're in after lowering
-        // the body (body lowering may have created intermediate blocks).
-        let back_edge_label = self.current_block.label;
-        self.terminate(Terminator::Jump(cond_label));
-        self.finish_block();
-        if flip_eligible {
-            self.flip_depth -= 1;
-        }
-
-        // Record the loop triple for inject_flip to use later.
-        if flip_eligible {
-            self.current_func
-                .while_loops
-                .push((entry_label, back_edge_label, done_label));
-        }
-
-        // Done block — release both scope marks (curr + prev)
-        self.current_block = BasicBlock::new(done_label);
-        if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_exit_refcounted(); // curr
-                self.emit_region_exit_refcounted(); // prev
-            } else {
-                self.emit_region_exit(); // curr
-                self.emit_region_exit(); // prev
-            }
-        }
-        self.emit(LirInstr::Const {
-            dst: result_reg,
-            value: LirConst::Nil,
-        });
-        Ok(result_reg)
-    }
-
-    fn lower_loop(
-        &mut self,
-        bindings: &[(Binding, Hir)],
-        body: &Hir,
-        _hir_id: HirId,
-    ) -> Result<Reg, String> {
-        let result_reg = self.fresh_reg();
-        let loop_scope: Vec<(Binding, &Hir)> = bindings.iter().map(|(b, h)| (*b, h)).collect();
-        let flip_eligible = self.can_flip_while_loop(body, &loop_scope);
-        let refcount_eligible =
-            !flip_eligible && self.can_flip_while_loop_refcounted(body, &loop_scope);
-        // All flip-eligible or refcount-eligible loops get double-buffered scope marks.
-        let scope_eligible = flip_eligible || refcount_eligible;
-        let dealloc_eligible =
-            scope_eligible && !refcount_eligible && self.can_dealloc_in_loop(body, &loop_scope);
-
-        let loop_label = self.fresh_label();
-        let done_label = self.fresh_label();
-
-        let entry_label = self.current_block.label;
-
-        // Initialize loop bindings
-        let mut binding_slots = Vec::new();
-        for (binding, init) in bindings {
-            let init_reg = self.lower_expr(init)?;
-            let slot = self.allocate_slot(*binding);
-            self.emit(LirInstr::StoreLocal {
-                slot,
-                src: init_reg,
-            });
-            binding_slots.push(slot);
-        }
-
-        // Double-buffered scope marks: push prev (guard) + curr before loop.
-        if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_enter_refcounted(); // prev (guard mark)
-                self.emit_region_enter_refcounted(); // curr (first iteration)
-            } else {
-                self.emit_region_enter(); // prev (guard mark)
-                self.emit_region_enter(); // curr (first iteration)
-            }
-        }
-
-        // Jump to loop header
-        self.terminate(Terminator::Jump(loop_label));
-        self.finish_block();
-
-        // Loop body
-        if flip_eligible {
-            self.flip_depth += 1;
-        }
-        self.current_block = BasicBlock::new(loop_label);
-
-        // Save depth counters — Recur emits RegionRotate which doesn't
-        // change region_depth, but the normal exit path needs original depths.
-        let saved_region_depth = self.region_depth;
-        let saved_flip_depth = self.flip_depth;
-
-        // Push loop context so Recur can find us
-        self.loop_lower_contexts.push(LoopLowerContext {
-            loop_label,
-            binding_slots: binding_slots.clone(),
-            scope_eligible,
-            dealloc_eligible,
-            refcount_eligible,
-        });
-
-        let body_reg = self.lower_expr(body)?;
-
-        self.loop_lower_contexts.pop();
-
-        // Restore depth counters for normal exit path
-        self.region_depth = saved_region_depth;
-        self.flip_depth = saved_flip_depth;
-
-        // If we reach here (no Recur), body_reg is the loop result.
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal {
-            slot: result_slot,
-            src: body_reg,
-        });
-
-        // Release both scope marks (curr + prev)
-        if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_exit_refcounted(); // curr
-                self.emit_region_exit_refcounted(); // prev
-            } else {
-                self.emit_region_exit(); // curr
-                self.emit_region_exit(); // prev
-            }
-        }
-
-        let back_edge_label = self.current_block.label;
-        self.terminate(Terminator::Jump(done_label));
-        self.finish_block();
-
-        if flip_eligible {
-            self.flip_depth -= 1;
-            self.current_func
-                .while_loops
-                .push((entry_label, back_edge_label, done_label));
-        }
-
-        // Done block — load result from slot
-        self.current_block = BasicBlock::new(done_label);
-        self.emit(LirInstr::LoadLocal {
-            dst: result_reg,
-            slot: result_slot,
-        });
-        Ok(result_reg)
-    }
-
-    fn lower_recur(&mut self, args: &[Hir]) -> Result<Reg, String> {
-        let ctx = self
-            .loop_lower_contexts
-            .last()
-            .ok_or_else(|| "recur outside of loop".to_string())?;
-
-        let loop_label = ctx.loop_label;
-        let binding_slots = ctx.binding_slots.clone();
-        let scope_eligible = ctx.scope_eligible;
-        let dealloc_eligible = ctx.dealloc_eligible;
-        let refcount_eligible = ctx.refcount_eligible;
-
-        if args.len() != binding_slots.len() {
-            return Err(format!(
-                "recur: expected {} arguments, got {}",
-                binding_slots.len(),
-                args.len()
-            ));
-        }
-
-        // Evaluate all args before storing (avoid order-dependent overwrites)
-        let mut arg_regs = Vec::with_capacity(args.len());
-        for arg in args {
-            arg_regs.push(self.lower_expr(arg)?);
-        }
-
-        // Store new values to loop binding slots BEFORE rotating scope marks.
-        // With double-buffered marks, RegionRotate frees the PREVIOUS
-        // iteration's allocs, not the current one — so recur arg values
-        // survive the rotation even if they reference current-iteration allocs.
-        for (reg, &slot) in arg_regs.iter().zip(&binding_slots) {
-            self.emit(LirInstr::StoreLocal { slot, src: *reg });
-        }
-
-        // Rotate scope marks: free prev iteration, start new curr
-        if scope_eligible {
-            if refcount_eligible {
-                self.emit_region_rotate_refcounted();
-            } else if dealloc_eligible {
-                self.emit_region_rotate_dealloc();
-            } else {
-                self.emit_region_rotate();
-            }
-        }
-
-        // Jump back to loop header
-        self.terminate(Terminator::Jump(loop_label));
-        self.finish_block();
-
-        // Dead block after unconditional jump
-        let dead_label = self.fresh_label();
-        self.current_block = BasicBlock::new(dead_label);
-        let nil_reg = self.emit_const(LirConst::Nil)?;
-        Ok(nil_reg)
-    }
-
-    fn lower_cond(
-        &mut self,
-        clauses: &[(Hir, Hir)],
-        else_branch: &Option<Box<Hir>>,
-    ) -> Result<Reg, String> {
-        if clauses.is_empty() {
-            return if let Some(else_expr) = else_branch {
-                self.lower_expr(else_expr)
-            } else {
-                self.emit_const(LirConst::Nil)
-            };
-        }
-
-        let result_reg = self.fresh_reg();
-        let cond_result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        let done_label = self.fresh_label();
-
-        // Generate labels for each clause's body and the next test
-        let mut clause_labels: Vec<(Label, Label)> = Vec::new();
-        for _ in clauses {
-            let body_label = self.fresh_label();
-            let test_label = self.fresh_label();
-            clause_labels.push((body_label, test_label));
-        }
-        let else_label = self.fresh_label();
-
-        // Process each clause
-        for (i, (test, body)) in clauses.iter().enumerate() {
-            let (body_label, _) = clause_labels[i];
-
-            // Test block (current block for first clause, or test_label for subsequent)
-            let test_reg = self.lower_expr(test)?;
-
-            // Determine where to jump if test fails
-            let fail_label = if i + 1 < clauses.len() {
-                clause_labels[i + 1].1 // Next clause's test label
-            } else {
-                else_label
-            };
-
-            // Branch to body_label if true, fail_label if false
-            self.terminate(Terminator::Branch {
-                cond: test_reg,
-                then_label: body_label,
-                else_label: fail_label,
-            });
-            self.finish_block();
-
-            // Body block
-            self.current_block = BasicBlock::new(body_label);
-            let body_reg = self.lower_expr(body)?;
-            self.emit(LirInstr::StoreLocal {
-                slot: cond_result_slot,
-                src: body_reg,
-            });
-            self.terminate(Terminator::Jump(done_label));
-            self.finish_block();
-
-            // Start next test block (if not last clause)
-            if i + 1 < clauses.len() {
-                self.current_block = BasicBlock::new(clause_labels[i + 1].1);
-            }
-        }
-
-        // Else block
-        self.current_block = BasicBlock::new(else_label);
-        if let Some(else_expr) = else_branch {
-            let else_reg = self.lower_expr(else_expr)?;
-            self.emit(LirInstr::StoreLocal {
-                slot: cond_result_slot,
-                src: else_reg,
-            });
-        } else {
-            let nil_reg = self.emit_const(LirConst::Nil)?;
-            self.emit(LirInstr::StoreLocal {
-                slot: cond_result_slot,
-                src: nil_reg,
-            });
-        }
-        self.terminate(Terminator::Jump(done_label));
-        self.finish_block();
-
-        // Done block (continue here)
-        self.current_block = BasicBlock::new(done_label);
-        self.emit(LirInstr::LoadLocal {
-            dst: result_reg,
-            slot: cond_result_slot,
-        });
-
-        Ok(result_reg)
-    }
-
-    fn lower_intrinsic(
-        &mut self,
-        op: crate::hir::IntrinsicOp,
-        args: &[Hir],
-    ) -> Result<Reg, String> {
-        use crate::hir::IntrinsicOp;
-
-        // Lower all arguments first
-        let mut arg_regs = Vec::with_capacity(args.len());
-        for arg in args {
-            arg_regs.push(self.lower_expr(arg)?);
-        }
-
-        let dst = self.fresh_reg();
-        match op {
-            // Binary arithmetic
-            IntrinsicOp::Add => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Add,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Sub => {
-                if arg_regs.len() == 1 {
-                    self.emit(LirInstr::UnaryOp {
-                        dst,
-                        op: UnaryOp::Neg,
-                        src: arg_regs[0],
-                    });
-                } else {
-                    self.emit(LirInstr::BinOp {
-                        dst,
-                        op: BinOp::Sub,
-                        lhs: arg_regs[0],
-                        rhs: arg_regs[1],
-                    });
-                }
-            }
-            IntrinsicOp::Mul => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Mul,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Div => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Div,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Rem => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Rem,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Mod => {
-                // Floored modulus: ((a % b) + b) % b
-                // The stack-based emitter consumes registers on use, so spill b
-                // to a local slot and reload fresh copies for each operation.
-                let b_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: b_slot,
-                    src: arg_regs[1],
-                });
-                // Step 1: t = a % b (uses original arg_regs, but b was consumed by StoreLocal)
-                let b1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: b1,
-                    slot: b_slot,
-                });
-                let t = self.fresh_reg();
-                self.emit(LirInstr::BinOp {
-                    dst: t,
-                    op: BinOp::Rem,
-                    lhs: arg_regs[0],
-                    rhs: b1,
-                });
-                // Step 2: t2 = t + b
-                let b2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: b2,
-                    slot: b_slot,
-                });
-                let t2 = self.fresh_reg();
-                self.emit(LirInstr::BinOp {
-                    dst: t2,
-                    op: BinOp::Add,
-                    lhs: t,
-                    rhs: b2,
-                });
-                // Step 3: result = t2 % b
-                let b3 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: b3,
-                    slot: b_slot,
-                });
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Rem,
-                    lhs: t2,
-                    rhs: b3,
-                });
-            }
-            // Comparisons
-            IntrinsicOp::Eq => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Eq,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Lt => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Lt,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Gt => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Gt,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Le => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Le,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Ge => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Ge,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            // Logical
-            IntrinsicOp::Not => {
-                self.emit(LirInstr::UnaryOp {
-                    dst,
-                    op: UnaryOp::Not,
-                    src: arg_regs[0],
-                });
-            }
-            // Conversion
-            IntrinsicOp::Int => {
-                self.emit(LirInstr::Convert {
-                    dst,
-                    op: ConvOp::FloatToInt,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::Float => {
-                self.emit(LirInstr::Convert {
-                    dst,
-                    op: ConvOp::IntToFloat,
-                    src: arg_regs[0],
-                });
-            }
-            // List operations
-            IntrinsicOp::Pair => {
-                self.emit(LirInstr::List {
-                    dst,
-                    head: arg_regs[0],
-                    tail: arg_regs[1],
-                });
-            }
-            IntrinsicOp::First => {
-                self.emit(LirInstr::First {
-                    dst,
-                    pair: arg_regs[0],
-                });
-            }
-            IntrinsicOp::Rest => {
-                self.emit(LirInstr::Rest {
-                    dst,
-                    pair: arg_regs[0],
-                });
-            }
-            // Bitwise
-            IntrinsicOp::BitAnd => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::BitAnd,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::BitOr => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::BitOr,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::BitXor => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::BitXor,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Shl => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Shl,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Shr => {
-                self.emit(LirInstr::BinOp {
-                    dst,
-                    op: BinOp::Shr,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            // Bitwise NOT
-            IntrinsicOp::BitNot => {
-                self.emit(LirInstr::UnaryOp {
-                    dst,
-                    op: UnaryOp::BitNot,
-                    src: arg_regs[0],
-                });
-            }
-            // Not-equal comparison
-            IntrinsicOp::Ne => {
-                self.emit(LirInstr::Compare {
-                    dst,
-                    op: CmpOp::Ne,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-            // Type predicates
-            IntrinsicOp::IsNil => {
-                self.emit(LirInstr::IsNil {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsEmpty => {
-                self.emit(LirInstr::IsEmpty {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsBool => {
-                self.emit(LirInstr::IsBool {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsInt => {
-                self.emit(LirInstr::IsInt {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsFloat => {
-                self.emit(LirInstr::IsFloat {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsString => {
-                self.emit(LirInstr::IsString {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsKeyword => {
-                self.emit(LirInstr::IsKeyword {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsSymbol => {
-                self.emit(LirInstr::IsSymbolCheck {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsPair => {
-                self.emit(LirInstr::IsPair {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsArray => {
-                // %array? checks both immutable and mutable arrays.
-                // Spill the source to a local so both checks can read it
-                // (the stack-based emitter consumes the value on first use).
-                let src_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: src_slot,
-                    src: arg_regs[0],
-                });
-                let src1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src1,
-                    slot: src_slot,
-                });
-                let imm = self.fresh_reg();
-                self.emit(LirInstr::IsArray {
-                    dst: imm,
-                    src: src1,
-                });
-                let result_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                let then_label = self.fresh_label();
-                let else_label = self.fresh_label();
-                let merge_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: imm,
-                    then_label,
-                    else_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(then_label);
-                let true_reg = self.emit_const(LirConst::Bool(true))?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: true_reg,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(else_label);
-                let src2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src2,
-                    slot: src_slot,
-                });
-                let mut_r = self.fresh_reg();
-                self.emit(LirInstr::IsArrayMut {
-                    dst: mut_r,
-                    src: src2,
-                });
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: mut_r,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(merge_label);
-                self.emit(LirInstr::LoadLocal {
-                    dst,
-                    slot: result_slot,
-                });
-            }
-            IntrinsicOp::IsStruct => {
-                let src_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: src_slot,
-                    src: arg_regs[0],
-                });
-                let src1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src1,
-                    slot: src_slot,
-                });
-                let imm = self.fresh_reg();
-                self.emit(LirInstr::IsStruct {
-                    dst: imm,
-                    src: src1,
-                });
-                let result_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                let then_label = self.fresh_label();
-                let else_label = self.fresh_label();
-                let merge_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: imm,
-                    then_label,
-                    else_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(then_label);
-                let true_reg = self.emit_const(LirConst::Bool(true))?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: true_reg,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(else_label);
-                let src2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src2,
-                    slot: src_slot,
-                });
-                let mut_r = self.fresh_reg();
-                self.emit(LirInstr::IsStructMut {
-                    dst: mut_r,
-                    src: src2,
-                });
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: mut_r,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(merge_label);
-                self.emit(LirInstr::LoadLocal {
-                    dst,
-                    slot: result_slot,
-                });
-            }
-            IntrinsicOp::IsSet => {
-                let src_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: src_slot,
-                    src: arg_regs[0],
-                });
-                let src1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src1,
-                    slot: src_slot,
-                });
-                let imm = self.fresh_reg();
-                self.emit(LirInstr::IsSet {
-                    dst: imm,
-                    src: src1,
-                });
-                let result_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                let then_label = self.fresh_label();
-                let else_label = self.fresh_label();
-                let merge_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: imm,
-                    then_label,
-                    else_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(then_label);
-                let true_reg = self.emit_const(LirConst::Bool(true))?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: true_reg,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(else_label);
-                let src2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src2,
-                    slot: src_slot,
-                });
-                let mut_r = self.fresh_reg();
-                self.emit(LirInstr::IsSetMut {
-                    dst: mut_r,
-                    src: src2,
-                });
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: mut_r,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(merge_label);
-                self.emit(LirInstr::LoadLocal {
-                    dst,
-                    slot: result_slot,
-                });
-            }
-            IntrinsicOp::IsBytes => {
-                self.emit(LirInstr::IsBytes {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsBox => {
-                self.emit(LirInstr::IsBox {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsClosure => {
-                self.emit(LirInstr::IsClosure {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::IsFiber => {
-                self.emit(LirInstr::IsFiber {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::TypeOf => {
-                self.emit(LirInstr::TypeOf {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            // Data access
-            IntrinsicOp::Length => {
-                self.emit(LirInstr::Length {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::Get => {
-                self.emit(LirInstr::Get {
-                    dst,
-                    obj: arg_regs[0],
-                    key: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Put => {
-                self.emit(LirInstr::Put {
-                    dst,
-                    obj: arg_regs[0],
-                    key: arg_regs[1],
-                    val: arg_regs[2],
-                });
-            }
-            IntrinsicOp::Del => {
-                self.emit(LirInstr::Del {
-                    dst,
-                    obj: arg_regs[0],
-                    key: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Has => {
-                self.emit(LirInstr::Has {
-                    dst,
-                    obj: arg_regs[0],
-                    key: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Push => {
-                // %push mutates @array in place, returns new array for immutable.
-                // Distinct from ArrayMutPush which is splice infrastructure.
-                self.emit(LirInstr::IntrPush {
-                    dst,
-                    array: arg_regs[0],
-                    value: arg_regs[1],
-                });
-            }
-            IntrinsicOp::Pop => {
-                self.emit(LirInstr::Pop {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            // Mutability
-            IntrinsicOp::Freeze => {
-                self.emit(LirInstr::Freeze {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            IntrinsicOp::Thaw => {
-                self.emit(LirInstr::Thaw {
-                    dst,
-                    src: arg_regs[0],
-                });
-            }
-            // Identity
-            IntrinsicOp::Identical => {
-                self.emit(LirInstr::Identical {
-                    dst,
-                    lhs: arg_regs[0],
-                    rhs: arg_regs[1],
-                });
-            }
-        }
-        Ok(dst)
+        Ok(reg)
     }
 
     fn lower_parameterize(&mut self, bindings: &[(Hir, Hir)], body: &Hir) -> Result<Reg, String> {

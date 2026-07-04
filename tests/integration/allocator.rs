@@ -61,10 +61,10 @@ fn make_heap() -> Box<FiberHeap> {
 }
 
 /// Allocate an LString HeapObject whose bytes live inline in `heap`'s arena.
-/// After Phase 2, LString.s is an `InlineSlice<u8>` rather than a `Box<str>`,
-/// so allocating a string is a two-step process: slice first, HeapObject next.
+/// LString.s is an `RegionSlice<u8>` (not a `Box<str>`), so allocating a string
+/// is a two-step process: slice first, HeapObject next.
 fn alloc_str(heap: &mut FiberHeap, text: &str) -> Value {
-    let s = heap.alloc_inline_slice::<u8>(text.as_bytes());
+    let s = heap.alloc_region_slice::<u8>(text.as_bytes());
     heap.alloc(HeapObject::LString {
         s,
         traits: Value::NIL,
@@ -73,7 +73,7 @@ fn alloc_str(heap: &mut FiberHeap, text: &str) -> Value {
 
 /// Allocate an LBytes HeapObject whose bytes live inline in `heap`'s arena.
 fn alloc_bytes(heap: &mut FiberHeap, data: &[u8]) -> Value {
-    let d = heap.alloc_inline_slice::<u8>(data);
+    let d = heap.alloc_region_slice::<u8>(data);
     heap.alloc(HeapObject::LBytes {
         data: d,
         traits: Value::NIL,

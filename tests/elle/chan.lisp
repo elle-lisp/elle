@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Channel Tests
 #
 # Tests for Elle's channel primitives (chan, chan/send, chan/recv, chan/select, etc.)

@@ -235,65 +235,60 @@ impl HirPattern {
             HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
         }
     }
-}
 
-/// Check if a match expression's arms are exhaustive.
-///
-/// A match is considered exhaustive if:
-/// - Any arm's pattern is a wildcard or variable (always matches) without a guard, OR
-/// - The arms cover both `true` and `false` boolean literals (without guards),
-///   including via or-patterns
-pub fn is_exhaustive_match(
-    arms: &[(HirPattern, Option<super::expr::Hir>, super::expr::Hir)],
-) -> bool {
-    // Check if any arm is a catch-all (wildcard or variable without guard)
-    // Typically the last arm, but check all for robustness
-    for (pat, guard, _) in arms {
-        if guard.is_none() && is_catch_all(pat) {
-            return true;
-        }
-    }
-
-    // Check if all boolean values are covered (without guards)
-    let mut has_true = false;
-    let mut has_false = false;
-    for (pat, guard, _) in arms {
-        if guard.is_none() {
-            collect_bool_coverage(pat, &mut has_true, &mut has_false);
-        }
-    }
-    if has_true && has_false {
-        return true;
-    }
-
-    false
-}
-
-/// Check if a pattern is a catch-all (always matches).
-fn is_catch_all(pat: &HirPattern) -> bool {
-    match pat {
-        HirPattern::Wildcard | HirPattern::Var(_) => true,
-        HirPattern::Or(alts) => alts.iter().any(is_catch_all),
-        _ => false,
-    }
-}
-
-/// Collect boolean literal coverage from a pattern, including or-pattern alternatives.
-fn collect_bool_coverage(pat: &HirPattern, has_true: &mut bool, has_false: &mut bool) {
-    match pat {
-        HirPattern::Literal(PatternLiteral::Bool(b)) => {
-            if *b {
-                *has_true = true;
-            } else {
-                *has_false = true;
+    /// Does matching this pattern allocate at the destructure site?
+    ///
+    /// Used by ANF (`Hir::allocates` via `Match`) to decide whether
+    /// a `Match` expression's value position must be named. The
+    /// criterion is operational: which rest-binding lowerings emit
+    /// a fresh heap object?
+    ///
+    /// - `Array { rest: Some(_) }`, `Tuple { rest: Some(_) }`: lower
+    ///   to `ArrayMutSliceFrom`, which allocates a fresh array for
+    ///   the slice.
+    /// - `Struct { rest: Some(_) }`, `Table { rest: Some(_) }`: lower
+    ///   to `StructRest`, which allocates a fresh struct from the
+    ///   non-excluded keys.
+    /// - `List { rest: Some(_) }`: the rest binding is just the
+    ///   remaining cons tail pointer — no allocation.
+    /// - All others recurse into sub-patterns.
+    pub fn allocates(&self) -> bool {
+        match self {
+            HirPattern::Array { rest: Some(_), .. }
+            | HirPattern::Tuple { rest: Some(_), .. }
+            | HirPattern::Struct { rest: Some(_), .. }
+            | HirPattern::Table { rest: Some(_), .. } => true,
+            HirPattern::Pair { head, tail } => head.allocates() || tail.allocates(),
+            HirPattern::List { elements, rest }
+            | HirPattern::Tuple { elements, rest }
+            | HirPattern::Array { elements, rest } => {
+                elements.iter().any(HirPattern::allocates)
+                    || rest.as_deref().is_some_and(HirPattern::allocates)
             }
-        }
-        HirPattern::Or(alts) => {
-            for alt in alts {
-                collect_bool_coverage(alt, has_true, has_false);
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+                entries.iter().any(|(_, p)| p.allocates())
+                    || rest.as_deref().is_some_and(HirPattern::allocates)
             }
+            HirPattern::NamedStruct { entries } => entries.iter().any(|(_, p)| p.allocates()),
+            HirPattern::Set { binding } | HirPattern::SetMut { binding } => binding.allocates(),
+            HirPattern::Or(alts) => alts.iter().any(HirPattern::allocates),
+            HirPattern::Wildcard
+            | HirPattern::Nil
+            | HirPattern::Literal(_)
+            | HirPattern::Var(_) => false,
         }
-        _ => {}
+    }
+
+    /// True when this pattern matches every value: a wildcard, a bare
+    /// variable, or an or-pattern with an irrefutable alternative.
+    /// A match with a guardless irrefutable arm cannot raise
+    /// `:match-error`; signal inference keys on this.
+    pub fn is_irrefutable(&self) -> bool {
+        match self {
+            HirPattern::Wildcard | HirPattern::Var(_) => true,
+            HirPattern::Or(alts) => alts.iter().any(HirPattern::is_irrefutable),
+            _ => false,
+        }
     }
 }
 
@@ -318,4 +313,96 @@ pub(crate) fn validate_or_pattern_bindings(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod allocates_tests {
+    use super::*;
+
+    fn var(b: u32) -> HirPattern {
+        HirPattern::Var(Binding(b))
+    }
+
+    #[test]
+    fn wildcard_does_not_allocate() {
+        assert!(!HirPattern::Wildcard.allocates());
+    }
+
+    #[test]
+    fn var_does_not_allocate() {
+        assert!(!var(0).allocates());
+    }
+
+    #[test]
+    fn list_rest_does_not_allocate() {
+        // (rest list) returns the cdr pointer — no fresh allocation.
+        let p = HirPattern::List {
+            elements: vec![var(0)],
+            rest: Some(Box::new(var(1))),
+        };
+        assert!(!p.allocates());
+    }
+
+    #[test]
+    fn array_rest_allocates() {
+        let p = HirPattern::Array {
+            elements: vec![var(0)],
+            rest: Some(Box::new(var(1))),
+        };
+        assert!(p.allocates());
+    }
+
+    #[test]
+    fn tuple_rest_allocates() {
+        let p = HirPattern::Tuple {
+            elements: vec![var(0)],
+            rest: Some(Box::new(var(1))),
+        };
+        assert!(p.allocates());
+    }
+
+    #[test]
+    fn struct_rest_allocates() {
+        let p = HirPattern::Struct {
+            entries: vec![(PatternKey::Keyword("a".to_string()), var(0))],
+            rest: Some(Box::new(var(1))),
+        };
+        assert!(p.allocates());
+    }
+
+    #[test]
+    fn table_rest_allocates() {
+        let p = HirPattern::Table {
+            entries: vec![(PatternKey::Keyword("a".to_string()), var(0))],
+            rest: Some(Box::new(var(1))),
+        };
+        assert!(p.allocates());
+    }
+
+    #[test]
+    fn nested_allocating_pattern_propagates() {
+        // (match v ((:a (@[x & rest]))) ...) — inner Array.rest allocates,
+        // so the outer Struct's allocates() must propagate the alloc out.
+        let inner = HirPattern::Array {
+            elements: vec![var(0)],
+            rest: Some(Box::new(var(1))),
+        };
+        let outer = HirPattern::Struct {
+            entries: vec![(PatternKey::Keyword("a".to_string()), inner)],
+            rest: None,
+        };
+        assert!(outer.allocates());
+    }
+
+    #[test]
+    fn or_pattern_propagates_alloc() {
+        let alts = vec![
+            var(0),
+            HirPattern::Array {
+                elements: vec![],
+                rest: Some(Box::new(var(1))),
+            },
+        ];
+        assert!(HirPattern::Or(alts).allocates());
+    }
 }

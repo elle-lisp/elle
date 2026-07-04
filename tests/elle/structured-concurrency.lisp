@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Structured concurrency tests
 #
 # User code runs inside the async scheduler (via execute_scheduled),

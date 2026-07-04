@@ -53,6 +53,52 @@ pub use value::JitValue;
 
 use std::fmt;
 
+/// The capability bundle threaded to the JIT intrinsic fast-path helpers
+/// (`elle_jit_put`/`del`/`has`/`push`/`string_push`/`bytes_push`/`freeze`/`thaw`).
+///
+/// Those helpers run the same `PrimFn` bodies as the interpreter, so they need a
+/// VM-bearing `NativeCtx`. A JIT function always runs under one specific VM, and
+/// threading it explicitly through the helper ABI keeps the VM dependency visible
+/// in the signature — which lets two embedded instances coexist in one process,
+/// each helper reaching its own instance's VM. The compiled function's prologue
+/// (`compiler/translate.rs`) builds a `JitCtx` in a stack slot — holding the
+/// driving VM, its 4th entry parameter — and the intrinsic emit sites thread its
+/// address to each helper, which resolves the VM from it (docs/impl/region-ctx.md
+/// "JIT intrinsic helpers reach the VM through a JitCtx").
+///
+/// `#[repr(C)]` with the VM at offset 0 so the prologue's raw `stack_store` of the
+/// `vm` pointer lands on the `vm` field; the heap axis extends this bundle with a
+/// heap capability, threaded the same way, with no further change to the helper ABI.
+#[repr(C)]
+pub(crate) struct JitCtx {
+    vm: *mut crate::vm::VM,
+}
+
+// The prologue stores the VM pointer at offset 0 of the JitCtx stack slot; this
+// pins that the `vm` field lives there (the coupling cranelift cannot type-check).
+const _: () = assert!(
+    std::mem::offset_of!(JitCtx, vm) == 0,
+    "JIT prologue stores the driving VM at offset 0 of the JitCtx slot"
+);
+
+impl JitCtx {
+    /// Build over the driving VM. Non-null by construction — a JIT function
+    /// always runs under a VM. Test-only: in compiled code the prologue
+    /// materializes the equivalent stack slot directly.
+    #[cfg(test)]
+    #[inline]
+    pub(crate) fn new(vm: *mut crate::vm::VM) -> Self {
+        debug_assert!(!vm.is_null(), "JitCtx requires a non-null VM");
+        JitCtx { vm }
+    }
+
+    /// The driving VM pointer (non-null).
+    #[inline]
+    pub(crate) fn vm(&self) -> *mut crate::vm::VM {
+        self.vm
+    }
+}
+
 /// JIT compilation error
 #[derive(Debug, Clone)]
 pub enum JitError {

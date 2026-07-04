@@ -4,7 +4,6 @@
 //! call frames, and signal state. The VM dispatches into the current fiber;
 //! suspended fibers are stored as heap values.
 
-use crate::error::LocationMap;
 use crate::value::closure::Closure;
 use crate::value::Value;
 use smallvec::SmallVec;
@@ -132,18 +131,16 @@ impl std::fmt::Debug for WeakFiberHandle {
 /// The `push_resume_value` field encodes which case applies.
 #[derive(Debug, Clone)]
 pub struct BytecodeFrame {
-    /// Bytecode to resume executing
-    pub bytecode: Rc<Vec<u8>>,
-    /// Constants pool for this frame
-    pub constants: Rc<Vec<Value>>,
-    /// Closure environment
+    /// Code object to resume executing (bytecode + constants + location map +
+    /// child protos). The template-derived half of the execution context; see
+    /// [`crate::value::Code`].
+    pub code: crate::value::Code,
+    /// Closure environment (the per-instance captured half of the context).
     pub env: Rc<Vec<Value>>,
     /// Instruction pointer to resume at
     pub ip: usize,
     /// Operand stack state at suspension
     pub stack: Vec<Value>,
-    /// Location map for mapping bytecode offsets to source locations
-    pub location_map: Rc<LocationMap>,
     /// Whether to push `current_value` onto the stack before resuming.
     ///
     /// `true` for yield frames and caller frames: the resume value is the
@@ -152,6 +149,105 @@ pub struct BytecodeFrame {
     /// signal-pause frames: the instruction at `ip` re-executes from scratch
     /// with the stack exactly as saved — no extra value is injected.
     pub push_resume_value: bool,
+    /// This activation's static→physical region remap at the moment of
+    /// suspension (docs/regions/semantics.md — every value its own region). A yield
+    /// unwinds the Rust call stack and pops each activation's region frame;
+    /// without carrying it here, a region allocated before the yield and
+    /// `DecrefRegion`'d after resume would resolve in the wrong frame (a leak,
+    /// or — on a static-slot collision — a use-after-free). `resume_suspended`
+    /// restores this as the activation's region frame before re-entering.
+    pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+    /// This activation's owner node at the moment of suspension — MOVED (taken,
+    /// never cloned) out of the activation's `Fiber::activation_owner_nodes`
+    /// slot by the suspend site, so the node lives in exactly one place: the
+    /// live slot or one parked frame (docs/impl/region-model.md § "Owner nodes"
+    /// — "A park moves the node into the suspended frame"). Its members are
+    /// `Owned` (RC frozen) with no other release route, so the node must ride
+    /// the park to the resumed body's completion, where the trampoline's
+    /// clean-break release frees node + members. `resume_suspended` restores it
+    /// into the live slot beside `activation_region_map`. `None` for an
+    /// activation that never adopted (the node is minted lazily).
+    pub activation_owner_node: Option<crate::hir::region::RuntimeRegion>,
+    /// The executing-closure register (`Fiber::current_closure`) at the moment this
+    /// activation suspended. A yield unwinds the Rust call stack and restores the
+    /// live register to the caller's value, so without parking it here a self-edge
+    /// resolved after resume would name the wrong closure. `resume_suspended`
+    /// re-installs it before re-entering the body. An uncounted borrow that may be
+    /// DEAD by resume time — the region solver frees a closure value at its last
+    /// use while the activation's `code`/`env` live on as `Rc`s — so it is never
+    /// dereferenced on restore; it is live exactly where it is read (`LoadSelf`,
+    /// whose self-recursive body keeps its closure region alive through the
+    /// recursion). `NIL` for an untracked activation (e.g. a JIT-built frame).
+    pub current_closure: Value,
+    /// Debug-only snapshot of the uncounted region borrows `activation_region_map`
+    /// holds at suspension: `(slot, region, generation)` per mapped region. The
+    /// suspended-frame analogue of the cross-fiber param snapshot's `param_borrows`
+    /// (docs/impl/region-generations.md § "Two borrow shapes"). The mapped regions
+    /// are this activation's own allocations, kept alive by its still-pending
+    /// `DecrefRegion`s while the fiber is parked; `resume_suspended` re-checks each
+    /// recorded generation before `restore_activation_region_map`, so a region freed
+    /// while parked panics at the resume boundary (naming the slot) instead of
+    /// corrupting the resumed activation's allocs/decrefs. Filled by
+    /// [`BytecodeFrame::suspend`] via `record_region_borrows`; empty in release.
+    #[cfg(debug_assertions)]
+    pub region_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
+}
+
+impl BytecodeFrame {
+    /// Build a suspended bytecode frame, snapshotting (debug builds) the uncounted
+    /// region borrows its `activation_region_map` holds — the suspended-frame
+    /// recorded-generation handle (docs/impl/region-generations.md § "Two borrow
+    /// shapes"). Every suspend site goes through this one constructor
+    /// ("constructor, not literal"), so the snapshot is taken once, centrally, at the
+    /// moment the map is captured. `heap` is read only under `debug_assertions`; the
+    /// signature is build-agnostic so suspend sites need no `cfg`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn suspend(
+        code: crate::value::Code,
+        env: Rc<Vec<Value>>,
+        ip: usize,
+        stack: Vec<Value>,
+        push_resume_value: bool,
+        activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+        activation_owner_node: Option<crate::hir::region::RuntimeRegion>,
+        current_closure: Value,
+        heap: &crate::value::fiberheap::FiberHeap,
+    ) -> Self {
+        #[cfg(debug_assertions)]
+        let region_borrows = record_region_borrows(&activation_region_map, heap);
+        #[cfg(not(debug_assertions))]
+        let _ = heap;
+        BytecodeFrame {
+            code,
+            env,
+            ip,
+            stack,
+            push_resume_value,
+            activation_region_map,
+            activation_owner_node,
+            current_closure,
+            #[cfg(debug_assertions)]
+            region_borrows,
+        }
+    }
+}
+
+/// Snapshot the uncounted region borrows a suspended bytecode frame's
+/// `activation_region_map` holds: for each `(slot, region)`, record `(slot, region,
+/// current generation)`. The suspended-frame analogue of `record_param_borrows`
+/// (the cross-fiber param snapshot, `src/vm/fiber.rs`); the recorded generation lets
+/// `resume_suspended`'s `first_stale_borrow` confirm the region has not been freed
+/// since the fiber parked. The region and its generation are read from the SAME
+/// `heap`, so the recorded pair and the later check compare within one store. Debug
+/// builds only (docs/impl/region-generations.md § "Two borrow shapes").
+#[cfg(debug_assertions)]
+pub(crate) fn record_region_borrows(
+    map: &rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
+    heap: &crate::value::fiberheap::FiberHeap,
+) -> Vec<(u32, crate::hir::region::RuntimeRegion, u32)> {
+    map.iter()
+        .map(|(&slot, &r)| (slot, r, heap.generation_raw(r.get())))
+        .collect()
 }
 
 /// A suspended execution step — either a bytecode frame or a sub-fiber resume.
@@ -181,179 +277,8 @@ pub enum SuspendedFrame {
     },
 }
 
-/// Signal type bits. The first 16 are compiler-reserved.
-///
-/// Newtype over `u64` providing named methods and bitwise operator impls.
-///
-/// The inner representation is an implementation detail. All code outside
-/// this impl block should use the provided methods instead of accessing
-/// the raw field.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignalBits(u64);
-
-impl SignalBits {
-    // -- Constructors --------------------------------------------------------
-
-    /// Wrap a raw bitmask.
-    pub const fn new(bits: u64) -> Self {
-        SignalBits(bits)
-    }
-
-    /// The empty set (no signals).
-    pub const EMPTY: SignalBits = SignalBits(0);
-
-    /// The full set (all bits set).
-    pub const ALL: SignalBits = SignalBits(!0);
-
-    /// A single-bit mask for bit position `pos`.
-    pub const fn from_bit(pos: u32) -> Self {
-        SignalBits(1u64 << pos)
-    }
-
-    /// Construct from an i64 (e.g. from an Elle integer value).
-    pub const fn from_i64(v: i64) -> Self {
-        SignalBits(v as u64)
-    }
-
-    // -- Predicates ----------------------------------------------------------
-
-    /// True when no bits are set (normal return / no signals).
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    /// Alias for `is_empty` — reads better in dispatch contexts.
-    pub const fn is_ok(self) -> bool {
-        self.0 == 0
-    }
-
-    /// True when `self` and `other` share at least one bit.
-    pub const fn intersects(self, other: SignalBits) -> bool {
-        self.0 & other.0 != 0
-    }
-
-    /// Alias for `intersects` — existing API, kept for compatibility.
-    pub const fn contains(self, other: SignalBits) -> bool {
-        self.0 & other.0 != 0
-    }
-
-    /// True when `self` has bit at position `pos` set.
-    pub const fn has_bit(self, pos: u32) -> bool {
-        self.0 & (1 << pos) != 0
-    }
-
-    /// True iff this mask handles `other` for signal routing purposes.
-    ///
-    /// Uses overlap (any shared bit) for semantic bits, but requires full
-    /// containment of infrastructure bits (specifically SIG_IO). This
-    /// ensures that a coroutine with mask SIG_YIELD does not accidentally
-    /// swallow SIG_YIELD|SIG_IO signals that must reach the scheduler,
-    /// while still allowing user-defined compound signals (e.g. |:log :audit|)
-    /// to be caught by a partial mask (e.g. |:log|).
-    pub fn covers(self, other: SignalBits) -> bool {
-        use crate::signals::SIG_IO;
-        other.is_ok()
-            || (self.intersects(other) && (!other.contains(SIG_IO) || self.contains(SIG_IO)))
-    }
-
-    // -- Combining -----------------------------------------------------------
-
-    /// Bitwise OR (const-compatible union).
-    pub const fn union(self, other: SignalBits) -> Self {
-        SignalBits(self.0 | other.0)
-    }
-
-    /// Bitwise AND (const-compatible intersection).
-    pub const fn intersection(self, other: SignalBits) -> Self {
-        SignalBits(self.0 & other.0)
-    }
-
-    /// Bits in `self` that are NOT in `other` (const-compatible set difference).
-    pub const fn subtract(self, other: SignalBits) -> Self {
-        SignalBits(self.0 & !other.0)
-    }
-
-    /// Bitwise complement.
-    pub const fn complement(self) -> Self {
-        SignalBits(!self.0)
-    }
-
-    // -- Conversion / inspection ---------------------------------------------
-
-    /// Position of the lowest set bit (for single-bit values).
-    pub const fn trailing_zeros(self) -> u32 {
-        self.0.trailing_zeros()
-    }
-
-    /// Raw bits as `u64`. Prefer named methods; use this only for
-    /// serialization, FFI, or bytecode encoding.
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-impl std::ops::BitOr for SignalBits {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        SignalBits(self.0 | rhs.0)
-    }
-}
-
-impl std::ops::BitAnd for SignalBits {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self {
-        SignalBits(self.0 & rhs.0)
-    }
-}
-
-impl std::ops::BitOrAssign for SignalBits {
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.0 |= rhs.0;
-    }
-}
-
-impl std::ops::BitAndAssign for SignalBits {
-    fn bitand_assign(&mut self, rhs: Self) {
-        self.0 &= rhs.0;
-    }
-}
-
-impl std::ops::Not for SignalBits {
-    type Output = Self;
-    fn not(self) -> Self {
-        SignalBits(!self.0)
-    }
-}
-
-impl std::fmt::Debug for SignalBits {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SignalBits(0x{:x})", self.0)
-    }
-}
-
-impl std::fmt::Display for SignalBits {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0x{:x}", self.0)
-    }
-}
-
-impl From<u64> for SignalBits {
-    fn from(v: u64) -> Self {
-        SignalBits::new(v)
-    }
-}
-
-impl From<u32> for SignalBits {
-    fn from(v: u32) -> Self {
-        SignalBits::new(v as u64)
-    }
-}
-
-impl From<SignalBits> for u64 {
-    fn from(v: SignalBits) -> u64 {
-        v.raw()
-    }
-}
+mod signalbits;
+pub use signalbits::SignalBits;
 
 // Signal constants are canonically defined in `crate::signals` (the semantic
 // owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
@@ -417,46 +342,30 @@ pub struct CallFrame {
 /// Maximum non-tail call depth before emitting a catchable stack-overflow
 /// error.
 ///
-/// Empirically each non-tail closure call costs ~25–30 KB of Rust stack
-/// (dominated by `SmallVec<[Value; 256]>` in `execute_bytecode_saving_stack`).
-/// With the default 8 MB thread stack the hard crash limit is ~280–310
-/// levels.  We set the guard well below that to leave headroom for the call
-/// chain above user code (compilation, dispatch loop, primitives) and for
-/// platforms with smaller default stacks.
+/// Regular Elle→Elle calls push frames onto the Fiber's heap-resident call
+/// stack (`call_closure_inner`) and the dispatch loop continues — the Rust
+/// stack does not recurse.  Only `execute_bytecode_saving_stack` (used for
+/// `run_on` and native re-entry) actually recurses on the Rust stack.
 ///
-/// Tail calls bypass this check entirely — they are trampolined in the
-/// `execute_bytecode_saving_stack` loop and never grow the Rust stack.
+/// Because native re-entry paths share this counter, the limit must stay
+/// below what would overflow the default 8 MB Rust thread stack (~4K–8K
+/// frames of `execute_bytecode_saving_stack`).  10,000 is well above any
+/// legitimate recursion depth while staying safely below the hard crash.
+///
+/// Tail calls bypass this check entirely — they reuse the current frame.
 ///
 /// Shared by the interpreter (`vm::call`) and JIT (`jit::calls`) paths.
-pub const MAX_CALL_DEPTH: usize = 200;
+pub const MAX_CALL_DEPTH: usize = 1_000_000;
 
 /// The fiber: an independent execution context.
 ///
-/// Holds all per-execution state that was previously on the VM struct:
+/// Holds all per-execution state:
 /// operand stack, call frames, exception handlers.
-/// The VM retains only shared state (modules, JIT cache, FFI, docs).
+/// The VM retains only shared state (modules, JIT cache, FFI, docs, heap).
+///
+/// The heap lives on the VM, not on individual fibers. All fibers share
+/// the VM's single heap; isolation is per-region.
 pub struct Fiber {
-    /// Per-fiber heap for arena-style allocation. Boxed for pointer stability:
-    /// the thread-local stores `*mut FiberHeap`, which must survive moves of
-    /// the Fiber struct (e.g., during `std::mem::swap` in fiber transitions).
-    ///
-    /// **Child fibers**: this is the active allocator for the fiber's lifetime.
-    /// Installed as the current thread-local heap on resume, uninstalled on
-    /// suspend/death.
-    ///
-    /// **Root fiber**: this field is structurally present for uniformity but is
-    /// never installed as the active allocator. The root fiber allocates through
-    /// the `ROOT_HEAP` thread-local in `src/value/fiberheap/routing.rs`, which
-    /// is a separately leaked `Box<FiberHeap>` that lives for the thread's
-    /// lifetime. The root `Fiber` struct's `heap` field is constructed in
-    /// `Fiber::new()` but immediately superseded by `install_root_heap()` in
-    /// `VM::new()`.
-    ///
-    /// `Option<Box<FiberHeap>>` was considered and rejected: child fibers access
-    /// `self.heap` on every allocation-related path, and wrapping in `Option`
-    /// would require `.as_ref().unwrap()` or `.as_deref_mut().unwrap()` at every
-    /// such call site with no benefit (child fibers always have a heap).
-    pub heap: Box<crate::value::fiberheap::FiberHeap>,
     /// Operand stack (temporaries). SmallVec avoids heap allocation for
     /// fibers with fewer than 256 stack entries.
     pub stack: SmallVec<[Value; 256]>,
@@ -479,9 +388,32 @@ pub struct Fiber {
     pub child_value: Option<Value>,
     /// The closure this fiber was created from
     pub closure: Rc<Closure>,
+    /// The closure VALUE this fiber was created from — the heap value `closure`
+    /// was cloned out of — so the fiber's first resume can install it as the
+    /// body's executing-closure register (a self-recursive fiber body resolves
+    /// its self-reference to it, via `pending_entry_closure`). Its region is a
+    /// COUNTED cross-region edge of the fiber (`find_object_cross_refs`'s Fiber
+    /// arm): the fiber keeps it alive for its whole life, because a `squelch`/
+    /// `attune` wrapper's value lives in a region distinct from the template/env
+    /// region — reachable only through this field. The runtime `current_closure`
+    /// register that reads it stays an uncounted transient borrow OF this counted
+    /// anchor. `NIL` for a fiber whose closure never executes as a body (the root
+    /// fiber's dummy, the native-iterator no-op).
+    pub closure_value: Value,
     /// Parameter binding frames. Each `parameterize` pushes a frame;
     /// exiting pops it. Lookup walks frames from top to bottom.
     pub param_frames: Vec<Vec<(u32, Value)>>,
+    /// Recorded `(param_id, region, generation)` for the heap values in this
+    /// fiber's *inherited baseline* parameter frame — the uncounted cross-fiber
+    /// borrows a child fiber snapshots from its parent (e.g. the scheduler a
+    /// fiber reaches via a dynamic parameter). Seeding the baseline takes no
+    /// reference count, so the borrow is sound only while the region stays live;
+    /// the recorded generation lets the resume and `resolve_parameter` checks
+    /// confirm that (debug builds), turning a violated invariant into a panic at
+    /// the borrow instead of a stale read. Populated only under
+    /// `debug_assertions`; empty otherwise (docs/impl/region-generations.md
+    /// § "Uncounted-borrow check").
+    pub param_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
     /// Signal value from this fiber. Canonical location for both
     /// signal payloads and normal return values.
     /// - On signal: (bits, payload) before suspending
@@ -492,11 +424,61 @@ pub struct Fiber {
     ///
     /// - Signal suspension (`fiber/signal`): single frame, empty stack
     /// - Yield suspension (`yield`): chain of frames from yielder to
-    ///   coroutine boundary, each with its operand stack captured
+    ///   fiber boundary, each with its operand stack captured
     ///
     /// On resume, frames are replayed from innermost (index 0) to
     /// outermost (last index).
     pub suspended: Option<Vec<SuspendedFrame>>,
+
+    /// Per-activation region-slot remap (docs/impl/region-model.md — every value its
+    /// own region). Each entry maps a static bytecode region id (a per-
+    /// function "slot") to a fresh physical region id minted for *this*
+    /// activation. The stack mirrors the call stack: the top is the current
+    /// activation's frame; a closure call pushes a fresh frame, a normal
+    /// return pops it, a tail call reuses it. Always non-empty (a base frame
+    /// covers the top level). Carried on the fiber so it survives yields.
+    pub activation_region_maps: Vec<rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>>,
+
+    /// The per-activation OWNER-NODE slots, parallel to `activation_region_maps`
+    /// (one entry per activation frame; pushed/popped only through
+    /// `VM::push_activation_region_map` / `restore_activation_region_map` /
+    /// `pop_activation_region_map`, which keep the two stacks in lockstep). An
+    /// entry holds the activation's pages-less owner-node region — the forest
+    /// root `AdoptIntoActivation` adopts members into (docs/impl/region-model.md
+    /// § "Owner nodes — an activation as a forest root") — or `None` until the
+    /// activation's first adopt lazily mints it. Freed at the activation's
+    /// normal completion (`VM::release_activation_owner_node`); a suspend MOVES
+    /// the slot's node into the parked frame
+    /// ([`BytecodeFrame::activation_owner_node`]) and the resume restores it,
+    /// so the node reaches that completion across any number of parks.
+    pub activation_owner_nodes: Vec<Option<crate::hir::region::RuntimeRegion>>,
+
+    /// The FIBER's own owner node — the pages-less forest root for a region whose
+    /// owner is the fiber itself, outliving every single activation
+    /// (docs/impl/region-model.md § "Owner nodes" — "The fiber owner node").
+    /// Fiber state, so it rides parks and fiber swaps structurally — nothing
+    /// moves it, unlike the per-activation slots above. Minted lazily; `None`
+    /// for a fiber that owns nothing. Freed only at the fiber's terminal
+    /// transitions (`take_fiber_owned` / `release_fiber_owned`,
+    /// `src/vm/fiber.rs`) — never while the fiber is resumable.
+    pub fiber_owner_node: Option<crate::hir::region::RuntimeRegion>,
+
+    /// The closure whose body is currently executing in this fiber — an
+    /// **uncounted borrow**, a pure runtime register, not a heap object; it is
+    /// the self-identity a self-reference resolves to. An activation can outlive
+    /// its closure's heap value (the solver frees the value at its last use while
+    /// the body's `code`/`env` live on as `Rc`s), so the register may hold a dead
+    /// value for a body that never reads it; it is live exactly where it is read
+    /// (`LoadSelf` — a self-recursive body's closure region outlives the
+    /// recursion, docs/impl/selfrec.md), and no other site dereferences it.
+    /// Snapshotted/restored like `activation_region_maps`: a nested call saves
+    /// and restores it around the callee (`execute_bytecode_saving_stack`), a
+    /// tail call re-installs it on the frame replacement (`trampoline_loop`), and
+    /// a yield parks it in the `BytecodeFrame` and restores it on resume — so it
+    /// is per-activation and rides fiber swaps with the fiber, never a VM-global
+    /// read across a switch. `NIL` when no closure is executing (the top-level
+    /// body) or when an entrant left it untracked.
+    pub current_closure: Value,
 
     // --- Execution state migrated from VM ---
     /// Call depth counter (for stack overflow detection)
@@ -532,38 +514,20 @@ pub struct NativeIter {
 /// is never actually executed — native iter fibers short-circuit
 /// in the VM's resume path.
 fn noop_closure() -> Rc<Closure> {
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
-    use crate::value::arena::alloc_inline_slice;
     use crate::value::closure::ClosureTemplate;
     use crate::value::types::Arity;
-    use std::collections::HashMap;
 
     Rc::new(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![3, 0, 0, 0]), // Return
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: true,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
-        env: alloc_inline_slice(&[]),
+        template: crate::value::TemplateRef::new(Rc::new(ClosureTemplate {
+            ..ClosureTemplate::new(
+                Rc::new(vec![3, 0, 0, 0]), // Return
+                Arity::Exact(0),
+                Rc::new(vec![]),
+            )
+        })),
+        // The no-op closure captures nothing — an empty env slice needs no
+        // region (no allocation), so build it directly (the empty env needs no allocation).
+        env: crate::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     })
 }
@@ -572,7 +536,6 @@ impl Fiber {
     /// Create a new fiber from a closure with the given signal mask.
     pub fn new(closure: Rc<Closure>, mask: SignalBits) -> Self {
         Fiber {
-            heap: Box::new(crate::value::fiberheap::FiberHeap::new()),
             stack: SmallVec::new(),
             frames: Vec::new(),
             status: FiberStatus::New,
@@ -582,9 +545,15 @@ impl Fiber {
             child: None,
             child_value: None,
             closure,
+            closure_value: Value::NIL,
             param_frames: Vec::new(),
+            param_borrows: Vec::new(),
             signal: None,
             suspended: None,
+            activation_region_maps: vec![rustc_hash::FxHashMap::default()],
+            activation_owner_nodes: vec![None],
+            fiber_owner_node: None,
+            current_closure: Value::NIL,
             call_depth: 0,
             call_stack: Vec::new(),
             fuel: None,
@@ -600,7 +569,6 @@ impl Fiber {
     pub fn native_iter(elements: Vec<Value>, mask: SignalBits) -> Self {
         let closure = noop_closure();
         Fiber {
-            heap: Box::new(crate::value::fiberheap::FiberHeap::new()),
             stack: SmallVec::new(),
             frames: Vec::new(),
             status: FiberStatus::Paused,
@@ -610,9 +578,15 @@ impl Fiber {
             child: None,
             child_value: None,
             closure,
+            closure_value: Value::NIL,
             param_frames: Vec::new(),
+            param_borrows: Vec::new(),
             signal: None,
             suspended: None,
+            activation_region_maps: vec![rustc_hash::FxHashMap::default()],
+            activation_owner_nodes: vec![None],
+            fiber_owner_node: None,
+            current_closure: Value::NIL,
             call_depth: 0,
             call_stack: Vec::new(),
             fuel: None,
@@ -624,10 +598,26 @@ impl Fiber {
         }
     }
 
-    /// Set an error signal on this fiber.
+    /// Set an error signal on this fiber, the error value born in the
+    /// caller-supplied `region` (Rule 3; docs/impl/region-ctx.md).
+    ///
+    /// The `Fiber` owns no heap, so the region is minted by the caller: a VM
+    /// caller via `VM::set_error` (a fresh
+    /// `result_region`); an env-builder caller from its own heap handle. The
+    /// error escapes as the fiber's signal payload and is freed value-based by
+    /// the consumer's `DecrefValueRegion`.
     #[inline]
-    pub fn set_error(&mut self, kind: &str, msg: impl Into<String>) {
-        self.signal = Some((SIG_ERROR, crate::value::error_val(kind, msg)));
+    pub fn set_error_in(
+        &mut self,
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        kind: &str,
+        msg: impl Into<String>,
+        region: crate::hir::region::RuntimeRegion,
+    ) {
+        self.signal = Some((
+            SIG_ERROR,
+            crate::value::error_val_in(heap, kind, msg, region),
+        ));
     }
 }
 
@@ -644,320 +634,4 @@ impl std::fmt::Debug for Fiber {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::LocationMap;
-    use crate::signals::Signal;
-    use crate::value::types::Arity;
-    use std::collections::HashMap;
-
-    fn test_closure() -> Rc<Closure> {
-        use crate::value::ClosureTemplate;
-        Rc::new(Closure {
-            template: Rc::new(ClosureTemplate {
-                bytecode: Rc::new(vec![]),
-                arity: Arity::Exact(0),
-                num_locals: 0,
-                num_captures: 0,
-                num_params: 0,
-                constants: Rc::new(vec![]),
-                signal: Signal::silent(),
-                capture_params_mask: 0,
-                capture_locals_mask: 0,
-
-                symbol_names: Rc::new(HashMap::new()),
-                location_map: Rc::new(LocationMap::new()),
-                rotation_safe: false,
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: None,
-                spirv: std::cell::OnceCell::new(),
-            }),
-            env: crate::value::inline_slice::InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        })
-    }
-
-    #[test]
-    fn test_fiber_new() {
-        let fiber = Fiber::new(test_closure(), SIG_ERROR | SIG_YIELD);
-        assert_eq!(fiber.status, FiberStatus::New);
-        assert_eq!(fiber.mask, SIG_ERROR | SIG_YIELD);
-        assert!(fiber.stack.is_empty());
-        assert!(fiber.frames.is_empty());
-        assert!(fiber.parent.is_none());
-        assert!(fiber.child.is_none());
-        assert!(fiber.param_frames.is_empty());
-        assert!(fiber.signal.is_none());
-    }
-
-    #[test]
-    fn test_fiber_status_transitions() {
-        let mut fiber = Fiber::new(test_closure(), SIG_OK);
-        assert_eq!(fiber.status, FiberStatus::New);
-
-        fiber.status = FiberStatus::Alive;
-        assert_eq!(fiber.status, FiberStatus::Alive);
-
-        fiber.status = FiberStatus::Paused;
-        fiber.signal = Some((SIG_YIELD, Value::int(42)));
-        assert_eq!(fiber.status, FiberStatus::Paused);
-        assert_eq!(fiber.signal, Some((SIG_YIELD, Value::int(42))));
-
-        fiber.status = FiberStatus::Dead;
-        fiber.signal = Some((SIG_OK, Value::int(99)));
-        assert_eq!(fiber.status, FiberStatus::Dead);
-        assert_eq!(fiber.signal, Some((SIG_OK, Value::int(99))));
-
-        // Reset and test error path
-        let mut fiber2 = Fiber::new(test_closure(), SIG_OK);
-        fiber2.status = FiberStatus::Error;
-        fiber2.signal = Some((SIG_ERROR, Value::string("boom")));
-        assert_eq!(fiber2.status, FiberStatus::Error);
-    }
-
-    #[test]
-    fn test_fiber_stack_operations() {
-        let mut fiber = Fiber::new(test_closure(), SIG_OK);
-        fiber.stack.push(Value::int(1));
-        fiber.stack.push(Value::int(2));
-        fiber.stack.push(Value::int(3));
-        assert_eq!(fiber.stack.len(), 3);
-        assert_eq!(fiber.stack.pop(), Some(Value::int(3)));
-        assert_eq!(fiber.stack.len(), 2);
-    }
-
-    #[test]
-    fn test_fiber_frame_operations() {
-        let closure = test_closure();
-        let mut fiber = Fiber::new(closure.clone(), SIG_OK);
-
-        let frame = Frame {
-            closure: closure.clone(),
-            ip: 0,
-            base: 0,
-        };
-        fiber.frames.push(frame);
-        assert_eq!(fiber.frames.len(), 1);
-        assert_eq!(fiber.frames[0].ip, 0);
-        assert_eq!(fiber.frames[0].base, 0);
-
-        let frame2 = Frame {
-            closure,
-            ip: 10,
-            base: 3,
-        };
-        fiber.frames.push(frame2);
-        assert_eq!(fiber.frames.len(), 2);
-        assert_eq!(fiber.frames[1].ip, 10);
-        assert_eq!(fiber.frames[1].base, 3);
-    }
-
-    #[test]
-    fn test_fiber_parent_child() {
-        let parent_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-        let child_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_ERROR));
-
-        // Wire up parent/child
-        child_handle.with_mut(|child| {
-            child.parent = Some(parent_handle.downgrade());
-        });
-        parent_handle.with_mut(|parent| {
-            parent.child = Some(child_handle.clone());
-        });
-
-        // Parent can reach child
-        parent_handle.with(|parent| {
-            assert!(parent.child.is_some());
-        });
-
-        // Child can reach parent (via upgrade)
-        child_handle.with(|child| {
-            let parent_ref = child.parent.as_ref().unwrap().upgrade();
-            assert!(parent_ref.is_some());
-        });
-
-        // Drop parent — child's weak ref becomes invalid
-        drop(parent_handle);
-        child_handle.with(|child| {
-            let parent_ref = child.parent.as_ref().unwrap().upgrade();
-            assert!(parent_ref.is_none());
-        });
-    }
-
-    #[test]
-    fn test_fiber_handle_take_put() {
-        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_ERROR));
-
-        // Can read via with()
-        handle.with(|f| assert_eq!(f.status, FiberStatus::New));
-
-        // Take the fiber out
-        let mut fiber = handle.take();
-        assert_eq!(fiber.status, FiberStatus::New);
-
-        // try_with returns None when taken
-        assert!(handle.try_with(|f| f.status).is_none());
-
-        // Modify and put back
-        fiber.status = FiberStatus::Alive;
-        handle.put(fiber);
-
-        // Can read again
-        handle.with(|f| assert_eq!(f.status, FiberStatus::Alive));
-    }
-
-    #[test]
-    #[should_panic(expected = "fiber already taken")]
-    fn test_fiber_handle_double_take_panics() {
-        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-        let _f1 = handle.take();
-        let _f2 = handle.take(); // should panic
-    }
-
-    #[test]
-    #[should_panic(expected = "slot already occupied")]
-    fn test_fiber_handle_double_put_panics() {
-        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-        let fiber = Fiber::new(test_closure(), SIG_OK);
-        handle.put(fiber); // should panic — slot already occupied
-    }
-
-    #[test]
-    fn test_signal_bits() {
-        assert_eq!(SIG_OK.raw(), 0);
-        assert_eq!(SIG_ERROR.raw(), 1);
-        assert_eq!(SIG_YIELD.raw(), 2);
-        assert_eq!(SIG_DEBUG.raw(), 4);
-        assert_eq!(SIG_RESUME.raw(), 8);
-
-        // Mask catches error and yield but not debug
-        let mask = SIG_ERROR | SIG_YIELD;
-        assert!(mask.contains(SIG_ERROR));
-        assert!(mask.contains(SIG_YIELD));
-        assert!(!mask.contains(SIG_DEBUG));
-        assert!(!mask.contains(SIG_RESUME));
-
-        // User-defined signals in bits 32-63
-        let user_sig = SignalBits::new(1 << 32);
-        assert!(!user_sig.contains(mask));
-    }
-
-    #[test]
-    fn test_signal_bits_covers() {
-        // covers: exact match — mask handles exact signal
-        assert!(SIG_YIELD.covers(SIG_YIELD));
-        // covers: SIG_YIELD mask does NOT handle SIG_YIELD|SIG_IO (missing SIG_IO infrastructure bit)
-        assert!(!SIG_YIELD.covers(SIG_YIELD | SIG_IO));
-        // covers: mask with SIG_IO handles SIG_YIELD|SIG_IO (IO bit present, overlap on YIELD)
-        assert!((SIG_ERROR | SIG_IO).covers(SIG_YIELD | SIG_IO));
-        // covers: all-bits mask handles any compound signal
-        assert!(SignalBits::new(!0).covers(SIG_YIELD | SIG_IO));
-        // covers: SIG_OK (zero) is always handled by any mask
-        assert!(SIG_YIELD.covers(SIG_OK));
-        assert!(SIG_OK.covers(SIG_OK));
-        // covers: user-defined signals use overlap semantics (no SIG_IO involved)
-        // mask |:log| catches |:log :audit| because :log overlaps
-        let log_bit = SignalBits::new(1 << 16);
-        let audit_bit = SignalBits::new(1 << 17);
-        assert!(log_bit.covers(log_bit | audit_bit));
-        assert!(audit_bit.covers(log_bit | audit_bit));
-        // covers: mask does not catch a completely disjoint signal
-        assert!(!SIG_YIELD.covers(SIG_ERROR));
-    }
-
-    #[test]
-    fn test_fiber_status_display() {
-        assert_eq!(FiberStatus::New.as_str(), "new");
-        assert_eq!(FiberStatus::Alive.as_str(), "alive");
-        assert_eq!(FiberStatus::Paused.as_str(), "paused");
-        assert_eq!(FiberStatus::Dead.as_str(), "dead");
-        assert_eq!(FiberStatus::Error.as_str(), "error");
-    }
-
-    #[test]
-    fn test_fiber_debug_format() {
-        let fiber = Fiber::new(test_closure(), SIG_OK);
-        let debug = format!("{:?}", fiber);
-        assert!(debug.contains("fiber:new"));
-        assert!(debug.contains("frames=0"));
-        assert!(debug.contains("stack=0"));
-    }
-
-    #[test]
-    fn test_fiber_zero_mask() {
-        // A fiber with mask=0 propagates all signals
-        let fiber = Fiber::new(test_closure(), SIG_OK);
-        assert!(!fiber.mask.contains(SIG_ERROR));
-        assert!(!fiber.mask.contains(SIG_YIELD));
-    }
-
-    #[test]
-    fn test_fiber_full_mask() {
-        // A fiber with all bits set catches everything
-        let fiber = Fiber::new(test_closure(), SignalBits::new(u64::MAX));
-        assert!(fiber.mask.contains(SIG_ERROR));
-        assert!(fiber.mask.contains(SIG_YIELD));
-        assert!(fiber.mask.contains(SIG_DEBUG));
-        assert!(fiber.mask.contains(SIG_RESUME));
-    }
-
-    /// Regression: two Fiber values that wrap the *same* `FiberHandle` but
-    /// are stored in distinct arena slots must compare equal and hash
-    /// identically.
-    ///
-    /// The motivating scenario is `deep_copy_to_outbox` on fiber yield: a
-    /// signal value containing a fiber gets re-allocated in the outbox,
-    /// producing a new `HeapObject::Fiber` slot whose `handle` is a clone
-    /// of the original. Both values represent the same fiber — the Elle
-    /// scheduler stores fibers as keys in `waiters`/`completed` maps, and
-    /// those lookups must hit regardless of which slot the caller holds.
-    ///
-    /// Historically `Value::eq`/`Value::hash` used the slot pointer, so
-    /// the copied fiber became a *different* map key. That desync caused
-    /// `ev/join` on a recently-spawned fiber to park forever.
-    #[test]
-    fn test_fiber_values_sharing_a_handle_are_identity_equal() {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-
-        // Two independent arena allocations of the *same* handle — this
-        // is exactly what deep_copy_to_outbox produces.
-        let v1 = Value::fiber_from_handle(handle.clone());
-        let v2 = Value::fiber_from_handle(handle.clone());
-
-        // Precondition: the two values really are at distinct slots.
-        // (If they ever coalesce, the test becomes trivially green and
-        // no longer exercises the bug.)
-        assert_ne!(
-            v1.payload, v2.payload,
-            "precondition: two separate allocations should have distinct slot addresses"
-        );
-
-        // Same fiber => equal.
-        assert_eq!(v1, v2, "fibers sharing a handle must compare equal");
-
-        // Same fiber => same hash (Hash/Eq contract).
-        let mut h1 = DefaultHasher::new();
-        let mut h2 = DefaultHasher::new();
-        v1.hash(&mut h1);
-        v2.hash(&mut h2);
-        assert_eq!(
-            h1.finish(),
-            h2.finish(),
-            "fibers sharing a handle must hash identically"
-        );
-
-        // Unrelated fibers still compare not-equal.
-        let other_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
-        let v3 = Value::fiber_from_handle(other_handle);
-        assert_ne!(v1, v3, "distinct fibers must not compare equal");
-    }
-}
+mod tests;

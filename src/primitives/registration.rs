@@ -39,6 +39,8 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     format::PRIMITIVES,
     intrinsics::PRIMITIVES,
     introspection::PRIMITIVES,
+    #[cfg(feature = "mlir")]
+    introspection::MLIR_PRIMITIVES,
     io::PRIMITIVES,
     json::PRIMITIVES,
     list::PRIMITIVES,
@@ -80,6 +82,106 @@ fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
     &[]
 }
 
+/// Name→def index over every primitive table, including aliases.
+///
+/// Compile-time consumers (type inference reading `PrimitiveDef::ret`)
+/// use this to look up primitive metadata by source name without a VM —
+/// the same const tables `register_primitives` feeds, so the data cannot
+/// drift from what runs.
+pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
+    use std::collections::HashMap;
+    use std::sync::LazyLock;
+    static INDEX: LazyLock<HashMap<&'static str, &'static PrimitiveDef>> = LazyLock::new(|| {
+        let mut index = HashMap::new();
+        for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
+            for def in *table {
+                index.insert(def.name, def);
+                for alias in def.aliases {
+                    index.insert(*alias, def);
+                }
+            }
+        }
+        index
+    });
+    INDEX.get(name).copied()
+}
+
+/// The process-global registry owning the `prim_id` ↔ `&'static PrimitiveDef`
+/// correspondence. A native-fn is the IMMEDIATE `Value{TAG_NATIVE_FN, prim_id}`
+/// (no `HeapObject`, no region), so the id is its whole identity: dense (a
+/// switch key for tier-2 MLIR/GPU lowering) and portable across `send`/`spawn`.
+///
+/// Seeded with the canonical `ALL_TABLES`+ffi defs so the common primitives get
+/// small, deterministic ids; any other native-fn def (the trait-method handlers
+/// in `traitregistry`, ffi callbacks) is appended on first `prim_id_of` — in a
+/// deterministic startup order, so the ids are stable across runs of one binary.
+/// Keyed by the def's `&'static` address (every table is a `const PRIMITIVES`
+/// reference into promoted static memory, so addresses are stable).
+struct PrimRegistry {
+    defs: Vec<&'static PrimitiveDef>,
+    by_ptr: std::collections::HashMap<usize, u32>,
+}
+
+static PRIM_REGISTRY: std::sync::LazyLock<std::sync::Mutex<PrimRegistry>> =
+    std::sync::LazyLock::new(|| {
+        let mut reg = PrimRegistry {
+            defs: Vec::new(),
+            by_ptr: std::collections::HashMap::new(),
+        };
+        for t in ALL_TABLES.iter().chain(ffi_tables().iter()) {
+            for def in *t {
+                let key = def as *const PrimitiveDef as usize;
+                if !reg.by_ptr.contains_key(&key) {
+                    let id = reg.defs.len() as u32;
+                    reg.defs.push(def);
+                    reg.by_ptr.insert(key, id);
+                }
+            }
+        }
+        std::sync::Mutex::new(reg)
+    });
+
+/// The `prim_id` of a primitive definition — how `Value::native_fn` finds the id
+/// to store as the immediate payload. Returns the existing id, or appends the def
+/// and assigns the next one (for defs minted outside the canonical tables, e.g.
+/// trait-method handlers).
+pub fn prim_id_of(def: &'static PrimitiveDef) -> u32 {
+    let mut reg = PRIM_REGISTRY.lock().expect("prim registry poisoned");
+    let key = def as *const PrimitiveDef as usize;
+    if let Some(&id) = reg.by_ptr.get(&key) {
+        return id;
+    }
+    let id = reg.defs.len() as u32;
+    reg.defs.push(def);
+    reg.by_ptr.insert(key, id);
+    id
+}
+
+/// The primitive def for a `prim_id` — the inverse of [`prim_id_of`], used by
+/// `Value::as_native_def` to resolve an immediate native-fn back to its def.
+/// `None` for an id never assigned (a corrupt/foreign payload).
+pub fn prim_def(id: u32) -> Option<&'static PrimitiveDef> {
+    PRIM_REGISTRY
+        .lock()
+        .expect("prim registry poisoned")
+        .defs
+        .get(id as usize)
+        .copied()
+}
+
+/// An owned snapshot of the canonical prim table (`prim_id` = index). For a
+/// consumer that needs an indexable table which AGREES with the immediate
+/// native-fn `prim_id` payloads — the WASM host's dispatch table. Take it after
+/// startup registration, when every primitive (core, ffi, trait-method) is
+/// interned.
+pub fn prim_table_snapshot() -> Vec<&'static PrimitiveDef> {
+    PRIM_REGISTRY
+        .lock()
+        .expect("prim registry poisoned")
+        .defs
+        .clone()
+}
+
 /// Register all primitive functions with the VM and build metadata.
 pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveMeta {
     let mut meta = PrimitiveMeta::new();
@@ -91,6 +193,8 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
             meta.functions.insert(sym_id, native_val);
+            meta.effects.insert(sym_id, def.effect);
+            meta.ret_types.insert(sym_id, def.ret);
 
             let doc = Doc {
                 name: def.name,
@@ -110,6 +214,8 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, alias_val);
+                meta.effects.insert(alias_id, def.effect);
+                meta.ret_types.insert(alias_id, def.ret);
                 vm.docs.insert((*alias).to_string(), doc.clone());
             }
         }
@@ -134,12 +240,16 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
             meta.functions.insert(sym_id, Value::native_fn(def));
+            meta.effects.insert(sym_id, def.effect);
+            meta.ret_types.insert(sym_id, def.ret);
 
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, Value::native_fn(def));
+                meta.effects.insert(alias_id, def.effect);
+                meta.ret_types.insert(alias_id, def.ret);
             }
         }
     }
@@ -164,49 +274,5 @@ pub fn intern_primitive_names(symbols: &mut SymbolTable) {
     }
 }
 
-use std::cell::RefCell;
-
-thread_local! {
-    static PRIMITIVE_META_CACHE: RefCell<Option<PrimitiveMeta>> = const { RefCell::new(None) };
-}
-
-/// Return cached primitive metadata, building it on first call.
-///
-/// The cache is never invalidated — primitive metadata is immutable
-/// within a process lifetime. Callers must have already interned
-/// primitives in their SymbolTable (the cache skips the intern
-/// side-effect on hit).
-pub fn cached_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
-    PRIMITIVE_META_CACHE.with(|cache| {
-        let mut cache_ref = cache.borrow_mut();
-        match &*cache_ref {
-            Some(meta) => meta.clone(),
-            None => {
-                let meta = build_primitive_meta(symbols);
-                cache_ref.replace(meta.clone());
-                meta
-            }
-        }
-    })
-}
-
-/// Add stdlib exports to the cached PrimitiveMeta.
-///
-/// Called by `init_stdlib` after stdlib execution. Updates the
-/// PRIMITIVE_META_CACHE so that `cached_primitive_meta` returns
-/// metadata including stdlib exports.
-pub(crate) fn update_primitive_meta_cache(
-    exports: &std::collections::HashMap<
-        crate::value::SymbolId,
-        (crate::value::Value, crate::signals::Signal),
-    >,
-) {
-    PRIMITIVE_META_CACHE.with(|cache| {
-        let mut cache_ref = cache.borrow_mut();
-        let meta = cache_ref.get_or_insert_with(PrimitiveMeta::default);
-        for (sym_id, (value, signal)) in exports {
-            meta.signals.insert(*sym_id, *signal);
-            meta.functions.insert(*sym_id, *value);
-        }
-    });
-}
+#[cfg(test)]
+mod tests;

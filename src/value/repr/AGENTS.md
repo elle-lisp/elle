@@ -36,17 +36,6 @@ Does NOT:
 | TAG_SYMBOL | u32 symbol ID | Symbol |
 | TAG_KEYWORD | FNV-1a hash of name | Keyword |
 | TAG_PTR | heap pointer | Cons, Array, Table, Closure, Fiber, etc. |
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~280 | Tagged-union Value type, tag encoding, constants |
-| `constructors.rs` | ~380 | Value construction methods (int, float, bool, symbol, keyword, cons, array, table, closure, fiber, etc.) |
-| `accessors.rs` | ~670 | Value field access and type checking (is_int, as_int, is_string, as_string, etc.) |
-| `traits.rs` | ~150 | Display, Debug, Clone implementations |
-| `tests.rs` | ~100 | Value encoding roundtrip tests |
-
 ## Constructors
 
 | Constructor | Type | Notes |
@@ -91,7 +80,7 @@ Does NOT:
 | `is_symbol()` | bool | Type check |
 | `as_symbol()` | Option<SymbolId> | Extract symbol ID |
 | `is_keyword()` | bool | Type check |
-| `keyword_hash()` | Option<u64> | Extract 47-bit keyword hash (fast path — no lock) |
+| `keyword_hash()` | Option<u64> | Extract 64-bit keyword hash (fast path — no lock) |
 | `as_keyword_name()` | Option<String> | Extract keyword name (acquires RwLock + allocates) |
 | `is_nil()` | bool | Type check (only matches nil, not empty list) |
 | `is_empty_list()` | bool | Type check (only matches empty list, not nil) |

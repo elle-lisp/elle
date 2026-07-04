@@ -1,11 +1,16 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Compress module tests (FFI to libz + libzstd)
 
-(def [ok1? _] (protect ((fn [] (ffi/native "libz.so")))))
-(def [ok2? _] (protect ((fn [] (ffi/native "libzstd.so")))))
-(unless (and ok1? ok2?)
-  (println "SKIP: libz.so or libzstd.so not available")
-  (exit 0))
+# Gate the whole file on libz + libzstd: if either can't load, re-raise as a loud
+# :gated so `elle test` records a file-level SKIP with a reason (docs § Gating).
+# Eager (def …), so it gates during barrier-module setup, before any test thunk.
+# Never (exit 0): under the runner that would kill the process mid-run.
+(def _compress-libs
+  (let [z (protect (ffi/native "libz.so"))
+        zstd (protect (ffi/native "libzstd.so"))]
+    (if (and (get z 0) (get zstd 0))
+      true
+      (error (struct :error :gated :reason "libz.so or libzstd.so not installed")))))
 
 (def z ((import "std/compress")))
 

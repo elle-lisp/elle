@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Bytes and @bytes Type Tests
 ##
 ## Tests for the immutable bytes and mutable @bytes types.
@@ -132,9 +132,33 @@
 (assert (= (type (string "hello")) :string) "string from string is immutable")
 (assert (= (type (string @"hello")) :string) "string from @string is immutable")
 
-# (bytes x) preserves mutability: string→bytes, @string→@bytes
+# (bytes x)/(@bytes x) are constructors whose mutability is FIXED by the
+# constructor, never inherited from the argument: (bytes …) is always immutable,
+# (@bytes …) always mutable — including the single-argument coercion path.
 (assert (= (type (bytes "hello")) :bytes) "bytes from string is immutable")
-(assert (= (type (bytes @"hello")) :@bytes) "bytes from @string is mutable")
+(assert (= (type (bytes @"hello")) :bytes) "bytes from @string is immutable")
+
+# ============================================================================
+# Constructor mutability is the constructor's contract, not the argument's
+# ============================================================================
+# The single-argument coercion path must OVERRIDE the argument's mutability, not
+# preserve it: a constructor that returned its argument's mutability would make
+# (bytes @x) mutable and (@bytes x) immutable — inverting the contract its own
+# name states. `bytes` ALWAYS yields immutable; `@bytes` ALWAYS yields mutable.
+(assert (= (type (bytes (bytes 1 2))) :bytes) "bytes of bytes is immutable")
+(assert (= (type (bytes (@bytes 1 2))) :bytes) "bytes of @bytes is immutable")
+(assert (= (type (@bytes (bytes 1 2))) :@bytes) "@bytes of bytes is mutable")
+(assert (= (type (@bytes (@bytes 1 2))) :@bytes) "@bytes of @bytes is mutable")
+(assert (not (mutable? (bytes (@bytes 1 2)))) "bytes of @bytes: mutable? false")
+(assert (mutable? (@bytes (bytes 1 2))) "@bytes of bytes: mutable? true")  # Content is preserved across the mutability copy.
+(assert (= (get (bytes (@bytes 72 101 108)) 2) 108)
+        "bytes of @bytes keeps content")
+(assert (= (get (@bytes (bytes 72 101 108)) 2) 108)
+        "@bytes of bytes keeps content")  # The mutable copy is independent of its immutable source.
+(assert (= (let [src (bytes 1 2 3)
+                 dst (@bytes src)]
+             (put dst 0 99)
+             (get src 0)) 1) "@bytes of bytes is an independent copy")
 
 # (bytes->hex x) preserves mutability: bytes→string, @bytes→@string
 (assert (= (type (bytes->hex (bytes 72 101 108))) :string)

@@ -20,7 +20,6 @@
 
 #[cfg(feature = "jit")]
 use crate::jit::JitValue;
-use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
 use crate::value::{
     BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT,
@@ -30,169 +29,427 @@ use std::rc::Rc;
 
 use super::core::VM;
 
-impl VM {
-    // ── Shared swap protocol ────────────────────────────────────────
+/// Incref the region of a fiber `signal`'s value, if it lives in a region
+/// (no-op for `None` and region-0 immediates). The matching decref is the
+/// `signal` scan in `find_object_cross_refs`'s Fiber arm, run when the fiber's
+/// heap object is freed (cascade-decref) — never an explicit release, since
+/// a terminal-result fiber is read (`fiber/value`) but not resumed again.
+fn incref_signal_region(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    signal: &Option<(SignalBits, Value)>,
+) {
+    if let Some((_, v)) = signal {
+        let r = crate::value::arena::region_of(heap, *v);
+        crate::value::arena::incref_for_escape(
+            heap,
+            r,
+            crate::value::arena::EscapeSite::TerminalSignal,
+        );
+    }
+}
 
-    /// Execute a closure with the child fiber swapped in as the active fiber.
-    ///
-    /// Handles the full swap protocol: take child from handle, wire
-    /// parent/child chain, swap fibers, run the closure, update status,
-    /// extract result, swap back, put child back.
-    ///
-    /// `child_value` is the cached Value wrapping the child's FiberHandle,
-    /// cached on the parent so `fiber/child` can return it without re-allocating.
-    ///
-    /// Returns `(signal_bits, signal_value)` from the child's execution.
-    fn with_child_fiber(
-        &mut self,
-        child_handle: &FiberHandle,
-        child_value: Value,
-        execute: impl FnOnce(&mut VM) -> SignalBits,
-    ) -> (SignalBits, Value) {
-        // 1. Take child fiber out of its handle (sets slot to None)
-        let mut child_fiber = child_handle.take();
+/// Release the carrier pass-through retain `dispatch_native_call` applied when a
+/// `fiber/resume` primitive returned `(SIG_RESUME, carrier)`.
+///
+/// `prim_fiber_resume` returns the fiber *argument* (the carrier) as its signal
+/// value, so `dispatch_native_call` — which cannot tell a signal payload from a
+/// real result — increfs `region_of(carrier)` (the fiber's own region) as the
+/// `NativeCallResult` pass-through, expecting the caller's `DecrefValueRegion`
+/// to balance it. But the resume handler REPLACES the carrier with the child's
+/// actual result before pushing it, so the caller's decref targets the result's
+/// region, never the carrier's. The carrier retain is left dangling and the
+/// now-:dead fiber's region (dragging its closure + template) leaks
+/// (`oracle.lisp`'s `fiber-resume` probe pins this reclaimed).
+///
+/// Release it exactly when the resumed fiber ran to completion. The child's
+/// result is balanced on its own: a fresh result by its alloc reference + the
+/// caller's `DecrefValueRegion`; a terminal heap result additionally by the
+/// park-retain (`incref_signal_region`) + the free-time signal scan — so no
+/// re-target incref of the result is needed.
+///
+/// Only the completion path releases. A fiber that SUSPENDED (yield / I/O)
+/// stays alive and resumable; its carrier retain is the liveness hold the
+/// scheduler leans on between pumps, and releasing it would free a live
+/// suspended fiber (the protect/scheduler regression that sank the
+/// suppress-at-dispatch attempts). So this fires solely on :dead.
+fn release_completed_resume_carrier(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    fiber_value: Value,
+) {
+    let r = crate::value::arena::region_of(heap, fiber_value);
+    crate::value::arena::decref_region(heap, r);
+}
 
-        // 2. Wire up parent/child chain (Janet semantics)
-        self.fiber.child = Some(child_handle.clone());
-        self.fiber.child_value = Some(child_value);
-        child_fiber.parent = self.current_fiber_handle.as_ref().map(|h| h.downgrade());
-        child_fiber.parent_value = self.current_fiber_value;
+/// A terminal signal is a fiber's *result*: normal return (SIG_OK), error, or
+/// halt — read later via `fiber/value`, never resumed. Yield and other
+/// suspending signals are transient (the fiber runs again), so their `signal`
+/// value is NOT region-pinned. Must agree with the `find_object_cross_refs` Fiber
+/// arm so the park-retain and the free-time cascade-decref stay balanced.
+pub(crate) fn is_terminal_signal(bits: SignalBits) -> bool {
+    bits.is_ok() || bits.contains(SIG_ERROR) || bits.contains(SIG_HALT)
+}
 
-        // 2a. Propagate withheld capabilities: child inherits parent's withheld.
-        // This is idempotent (OR is monotonic) so safe on repeated resume.
-        child_fiber.withheld |= self.fiber.withheld;
+/// Release the `SuspendEscape` an io op left on its IoRequest's region when a
+/// parked fiber is resumed and that request — held in `fiber.signal` across the
+/// park — is replaced by `resume_value`. This reclaims the IoRequest region of a
+/// yielding io op — the gauge is `oracle.lisp`'s `io-yield ev/sleep` probe, which
+/// dropped 5.5 → 4.5 net objects/op when this landed (the ≈4.5 residual is the
+/// general escape-imprecision gap, not this mechanism).
+///
+/// A yielding io op (`ev/sleep`, `port/read`, …) returns its `IoRequest` with
+/// `SIG_IO`, whereupon the suspend adds a
+/// [`SuspendEscape`](crate::value::arena::EscapeSite::SuspendEscape) retain so the
+/// scheduler can read the request out of `fiber.signal`. The request's own
+/// allocation ref is consumed by the scheduler's `fiber/value` read while it
+/// submits, so at resume the `SuspendEscape` is the request region's *sole*
+/// remaining reference. On resume the io call "returns" `resume_value` (the
+/// completion), so the caller's `DecrefValueRegion` targets THAT region, never
+/// the request's — orphaning the `SuspendEscape` and leaking the request region,
+/// unbounded in a long-running io loop. One decref here, the symmetric
+/// counterpart of the suspend-time incref, frees it: the request is dead (the
+/// scheduler already consumed it), so its region holds nothing live.
+///
+/// **Skip when `resume_value` shares the region** — the `Fresh` io ops
+/// (`port/read`/`accept`) build their completion buffer *in* the IoRequest's
+/// region and hand it back as the resume value, so that region is still live;
+/// there the caller's `DecrefValueRegion` on the buffer balances the
+/// `SuspendEscape`, and a decref here would free the buffer out from under the
+/// caller (a use-after-free).
+///
+/// Gated on `SIG_IO`. A user `(yield v)` / `(emit …)` value is **body-owned** —
+/// its region is released by the fiber body's own `DecrefRegion`, not by a
+/// caller's `DecrefValueRegion` — so releasing it here would double-free; only an
+/// io op's request is the orphaned, transient native-call result this balances.
+/// A no-op for a non-io signal, an immediate / `None` value, or a region-0 value.
+pub(crate) fn release_parked_signal(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    parked: Option<(SignalBits, Value)>,
+    resume_value: Value,
+) {
+    let Some((bits, value)) = parked else {
+        return;
+    };
+    if !bits.contains(crate::value::SIG_IO) {
+        return;
+    }
+    let region = crate::value::arena::region_of(heap, value);
+    if region.is_none() {
+        return;
+    }
+    // The resume value sharing the request's region is the `Fresh`-io-op signature
+    // (the completion buffer is built there): that region is still live, so leave
+    // it to the caller's `DecrefValueRegion`.
+    if crate::value::arena::region_of(heap, resume_value) == region {
+        return;
+    }
+    crate::value::arena::decref_region(heap, region);
+}
 
-        // 3. Swap parent out, child in; track the child's handle and value
-        let parent_handle = self.current_fiber_handle.take();
-        let parent_value = self.current_fiber_value.take();
-        self.current_fiber_handle = Some(child_handle.clone());
-        self.current_fiber_value = Some(child_value);
-        std::mem::swap(&mut self.fiber, &mut child_fiber);
+/// Everything a fiber owns through the ownership forest, TAKEN out of the fiber
+/// (its slots emptied) so the release can run after the fiber borrow is dropped
+/// (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown frees everything
+/// the fiber owns"). Splitting the take from the release keeps heap mutation
+/// disjoint from fiber access: the release's cascades can free the fiber's own
+/// heap value without invalidating a live borrow.
+pub(crate) struct FiberOwned {
+    /// Each still-parked `BytecodeFrame`'s activation owner node, in chain order.
+    parked_nodes: Vec<crate::hir::region::RuntimeRegion>,
+    /// The fiber's own owner node ([`Fiber::fiber_owner_node`]).
+    fiber_node: Option<crate::hir::region::RuntimeRegion>,
+}
 
-        // 3a. Install child's fiber heap as the active allocation target.
-        //     Save whatever was active (parent's heap, always non-null after issue-525).
-        let saved_heap = crate::value::fiberheap::save_current_heap();
-        unsafe {
-            crate::value::fiberheap::install_fiber_heap(
-                &mut *self.fiber.heap as *mut crate::value::FiberHeap,
-            );
+/// The parked activation owner nodes of an abandoned frame chain. The frames'
+/// continuations will never run, so the completion release that would have freed
+/// each node never fires; the release belongs to whoever abandoned the chain —
+/// the discard chokepoint (`VM::discard_suspended_frames`) or the terminal-fiber
+/// teardown ([`take_fiber_owned`]). A `FiberResume` frame owns no node (its
+/// sub-fiber has its own lifecycle).
+pub(crate) fn parked_owner_nodes(
+    frames: Vec<SuspendedFrame>,
+) -> impl Iterator<Item = crate::hir::region::RuntimeRegion> {
+    frames.into_iter().filter_map(|frame| match frame {
+        SuspendedFrame::Bytecode(f) => f.activation_owner_node,
+        SuspendedFrame::FiberResume { .. } => None,
+    })
+}
+
+/// Take everything a TERMINAL fiber owns — the parked chain's activation owner
+/// nodes and the fiber owner node — emptying the fiber's slots so no other
+/// release path can reach them (the move discipline that makes the teardown the
+/// sole demise). Pair with [`release_fiber_owned`] once the fiber borrow is
+/// dropped. Terminal means the fiber can never be resumed: `:dead` (completion,
+/// halt) or a hard kill (cancel; abort of a not-yet-started fiber). An `:error`
+/// fiber is NOT terminal — it is resumable (the restarts system replays its
+/// re-parked frame) — so an error promotion must never take its owned state.
+pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberOwned {
+    let parked_nodes = fiber
+        .suspended
+        .take()
+        .map(|frames| parked_owner_nodes(frames).collect())
+        .unwrap_or_default();
+    FiberOwned {
+        parked_nodes,
+        fiber_node: fiber.fiber_owner_node.take(),
+    }
+}
+
+/// Free everything a terminal fiber owned (the [`take_fiber_owned`] set). When a
+/// fiber node exists, each parked node's members are first gathered under it
+/// (`reparent_owned_children`) and the emptied node freed, so the teardown is ONE
+/// set-drop over the fiber's whole owned set; with no fiber node each parked node
+/// subtree-drops directly. One tolerant decref per node: rc 1→0, subtree drop over
+/// node + adopted members (interior cycles reclaim with the set), the Shared
+/// frontier cascading once from the recorded `outgoing` tables.
+pub(crate) fn release_fiber_owned(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    owned: FiberOwned,
+) {
+    let FiberOwned {
+        parked_nodes,
+        fiber_node,
+    } = owned;
+    for node in parked_nodes {
+        if let Some(fnode) = fiber_node {
+            heap.reparent_owned_children(node, fnode);
         }
-        // 3b. Install outbox for yield-bound allocations. The compiler
-        // emits OutboxEnter/OutboxExit around yield/emit value expressions,
-        // routing those allocations to the outbox. The parent reads
-        // yielded values directly from the outbox (zero-copy).
-        //
-        // Default allocation target is the child's private heap. Only
-        // allocations between OutboxEnter/OutboxExit go to the outbox.
-        // install_outbox tears down the previous outbox (reset-on-resume).
-        let tmpl = &self.fiber.closure.template;
-        if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
-            self.fiber
-                .heap
-                .install_outbox(crate::value::fiberheap::pool::SlabPool::new());
-        }
+        heap.decref_region_if_present(node);
+    }
+    if let Some(fnode) = fiber_node {
+        heap.decref_region_if_present(fnode);
+    }
+}
 
-        // 4. Execute the closure
-        let bits = execute(self);
+/// The hard-kill teardown `fiber/cancel` (of a new/parked fiber) and
+/// `fiber/abort` (of a not-yet-started one) route through: set the terminal
+/// error state, drop the parked chain, and free everything the fiber owned.
+/// The take runs under the fiber borrow; the release after it is dropped
+/// ([`take_fiber_owned`]). Unlike an ordinary `:error` promotion — which keeps
+/// the fiber resumable — a hard kill consumes the chain, so nothing it owned can
+/// ever be replayed.
+pub(crate) fn kill_fiber(
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    handle: &FiberHandle,
+    error_value: Value,
+) {
+    let owned = handle.with_mut(|fiber| {
+        fiber.status = FiberStatus::Error;
+        fiber.signal = Some((SIG_ERROR, error_value));
+        take_fiber_owned(fiber)
+    });
+    release_fiber_owned(heap, owned);
+}
 
-        // 5. Update child status based on result.
-        //    SIG_OK is terminal (Dead). Other signals are Suspended; the
-        //    caller decides whether a caught SIG_ERROR stays Suspended
-        //    (resumable) or gets promoted to Error (terminal) based on
-        //    the parent's mask. SIG_HALT is also provisionally Suspended
-        //    here — the resume handler promotes to Dead if the mask
-        //    doesn't catch it.
-        self.fiber.status = if bits.is_ok() {
-            FiberStatus::Dead
-        } else {
-            FiberStatus::Paused
-        };
+mod abort;
+mod child;
+mod jit;
+mod propagate;
+mod resume;
+mod trampoline;
 
-        // 6. Extract the result before swapping back.
-        //    Safety net: if the value is heap-allocated in the child's
-        //    private pool (not in the outbox), deep-copy to the outbox
-        //    so the parent doesn't read a dangling pointer.
-        let mut result_value = self
-            .fiber
-            .signal
-            .as_ref()
-            .map(|(_, v)| *v)
-            .unwrap_or(Value::NIL);
-        let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
+#[cfg(all(test, debug_assertions))]
+mod borrow_tests;
 
-        if result_value.is_heap()
-            && self.fiber.heap.has_outbox()
-            && self.fiber.heap.value_in_private_pool(result_value)
-        {
-            result_value = self.fiber.heap.deep_copy_to_outbox(result_value);
-            // Update the signal with the new value so the parent reads the copy.
-            if let Some(ref mut sig) = self.fiber.signal {
-                sig.1 = result_value;
+/// Flatten dynamic parameter frames into a single baseline frame, later
+/// frames overriding earlier ones. Used when a child fiber inherits its
+/// parent's dynamic bindings on first resume.
+fn flatten_param_frames(frames: &[Vec<(u32, Value)>]) -> Vec<(u32, Value)> {
+    let mut flat: Vec<(u32, Value)> = Vec::new();
+    for frame in frames {
+        for &(id, val) in frame {
+            if let Some(pos) = flat.iter().position(|&(k, _)| k == id) {
+                flat[pos].1 = val;
+            } else {
+                flat.push((id, val));
             }
         }
-
-        // 7. Swap back: parent in, child out; restore parent's heap and handle
-        unsafe {
-            crate::value::fiberheap::restore_saved_heap(saved_heap);
-        }
-        std::mem::swap(&mut self.fiber, &mut child_fiber);
-        self.current_fiber_handle = parent_handle;
-        self.current_fiber_value = parent_value;
-
-        // 8. Put child fiber back into its handle
-        child_handle.put(child_fiber);
-
-        (result_bits, result_value)
     }
+    flat
+}
+
+/// Snapshot the uncounted cross-fiber borrows in a child's inherited baseline
+/// parameter frame: for each heap-valued binding, record `(param_id, region,
+/// current generation)`. Seeding the baseline takes no reference count, so this
+/// records the generation at which each borrowed region is live; the resume and
+/// `resolve_parameter` checks later confirm the region has not been freed since.
+/// Immediate (non-heap) bindings carry no region and are skipped. Debug-only —
+/// the check it feeds runs only under `debug_assertions`
+/// (docs/impl/region-generations.md § "Uncounted-borrow check").
+///
+/// The region and its generation are read from the SAME `heap`
+/// (`region_of_ptr`/`generation_raw`), so the recorded pair and the later
+/// check compare generations within one store — never across stores, where
+/// generations are unrelated numbers.
+#[cfg(debug_assertions)]
+fn record_param_borrows(
+    flat: &[(u32, Value)],
+    heap: &crate::value::fiberheap::FiberHeap,
+) -> Vec<(u32, crate::hir::region::RuntimeRegion, u32)> {
+    flat.iter()
+        .filter_map(|&(pid, v)| {
+            if !v.is_heap() {
+                return None;
+            }
+            let ptr = v.as_heap_ptr()?;
+            let r = crate::hir::region::RuntimeRegion::new(heap.region_of_ptr(ptr))?;
+            Some((pid, r, heap.generation_raw(r.get())))
+        })
+        .collect()
+}
+
+/// The first recorded borrow whose region's generation has moved since it was
+/// snapshotted — i.e. the region's pages were freed (and possibly recycled)
+/// while a fiber still borrowed a value in it. Reads only the generation
+/// counter, never the borrowed value's page, so it is sound to call after the
+/// region was freed (a re-claimed page would pass `region_of`'s stamp check;
+/// the recorded generation catches it). `None` when every borrow is still live.
+#[cfg(debug_assertions)]
+pub(crate) fn first_stale_borrow(
+    borrows: &[(u32, crate::hir::region::RuntimeRegion, u32)],
+    heap: &crate::value::fiberheap::FiberHeap,
+) -> Option<(u32, crate::hir::region::RuntimeRegion)> {
+    borrows
+        .iter()
+        .find(|&&(_, r, gen)| heap.generation_raw(r.get()) != gen)
+        .map(|&(pid, r, _)| (pid, r))
+}
+
+impl VM {
+    /// Promote a fiber to `:dead` and free everything it owns — the halt-promotion
+    /// twin of `with_child_fiber`'s completion arm (docs/impl/region-model.md
+    /// § "Owner nodes" — "Fiber teardown frees everything the fiber owns"). Dead is
+    /// terminal (`fiber/resume` refuses it), so the parked chain and owner nodes can
+    /// never be replayed. An `:error` promotion must NOT come here — an errored
+    /// fiber is resumable (the restarts system) and keeps its parked state.
+    pub(crate) fn finalize_dead_fiber(&mut self, handle: &FiberHandle) {
+        let owned = handle.with_mut(|fiber| {
+            fiber.status = FiberStatus::Dead;
+            take_fiber_owned(fiber)
+        });
+        release_fiber_owned(unsafe { &mut *self.heap_ptr }, owned);
+    }
+
+    /// Inheritance a trampolined resume must propagate eagerly, while the
+    /// calling fiber is still the active one. `do_fiber_resume_single` will
+    /// run for the child from the ROOT fiber's context (the trampoline in
+    /// `do_fiber_resume`), so anything it derives from `self.fiber` there
+    /// would come from the wrong fiber:
+    /// - a New child's dynamic parameter baseline (mirrors the inheritance
+    ///   in `do_fiber_resume_single`, which skips already-seeded children);
+    /// - withheld capabilities (monotonic OR, so `with_child_fiber`'s later
+    ///   parent→child OR is harmless on top).
+    fn seed_child_inheritance(&mut self, handle: &FiberHandle, fiber_value: Value) {
+        let child_is_new = handle.with(|f| f.status == FiberStatus::New);
+        if child_is_new && !self.fiber.param_frames.is_empty() {
+            let flat = flatten_param_frames(&self.fiber.param_frames);
+            #[cfg(debug_assertions)]
+            let borrows = record_param_borrows(&flat, self.heap());
+            handle.with_mut(|c| {
+                c.param_frames = vec![flat];
+                #[cfg(debug_assertions)]
+                {
+                    c.param_borrows = borrows;
+                }
+            });
+        }
+        let withheld = self.fiber.withheld;
+        handle.with_mut(|f| f.withheld |= withheld);
+        // Child-chain wiring: while we are suspended awaiting this child,
+        // `fiber/child` of this fiber must report it (recursion parity —
+        // with_child_fiber would have set this on us had we recursed).
+        self.fiber.child = Some(handle.clone());
+        self.fiber.child_value = Some(fiber_value);
+    }
+
+    // ── Shared swap protocol ────────────────────────────────────────
 
     // ── SIG_RESUME: fiber execution ───────────────────────────────
 
     /// Handle SIG_RESUME from a fiber primitive (Call position).
-    /// Handle SIG_RESUME from a fiber primitive (Call position).
     ///
-    /// Calls do_fiber_resume directly. The trampoline inside do_fiber_resume
-    /// handles nested fiber/resume iteratively (via the FiberResume frame
-    /// path in resume_suspended returning SIG_SWITCH).
+    /// At the ROOT (no enclosing fiber): calls `do_fiber_resume`, whose
+    /// trampoline drives arbitrarily deep nesting iteratively.
     ///
-    /// TODO(trampoline): This should return SIG_SWITCH instead of calling
-    /// do_fiber_resume, to unwind the Rust call stack. See height.md and
-    /// the plan at .claude/plans/resilient-percolating-bubble.md.
-    /// The blocker: when SIG_SWITCH propagates out of execute_bytecode_from_ip
-    /// (inside resume_suspended) after a TailCall changed the bytecode,
-    /// the frame chain in resume_suspended's Bytecode arm loses the
-    /// continuation context because exec.stack is empty (vec![]).
-    /// Fix: make execute_bytecode_from_ip capture the inner stack on
-    /// non-OK exit (like execute_bytecode_saving_stack does), then use
-    /// that stack in the exec frame that resume_suspended builds.
+    /// INSIDE a fiber (current_fiber_handle is Some): recursing into
+    /// `do_fiber_resume` here would add Rust stack frames per nesting level
+    /// and overflow the host stack at depth. Instead the calling fiber
+    /// suspends with its continuation frame, hands the child to the driving
+    /// trampoline via `pending_fiber_resume`, and returns SIG_SWITCH. The
+    /// trampoline descends iteratively; on the child's completion its unwind
+    /// loop resumes our continuation frame with the result pushed.
     pub(super) fn handle_fiber_resume_signal(
         &mut self,
         fiber_value: Value,
-        bytecode: &Rc<Vec<u8>>,
-        constants: &Rc<Vec<Value>>,
+        code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
-        location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_RESUME with non-fiber value");
+                self.set_error("internal-error", "SIG_RESUME with non-fiber value");
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
         };
 
+        if self.current_fiber_handle.is_some() {
+            self.seed_child_inheritance(&handle, fiber_value);
+            let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+            let activation_region_map = self
+                .fiber
+                .activation_region_maps
+                .last()
+                .cloned()
+                .unwrap_or_default();
+            // MOVE the caller's owner node into its continuation park — this
+            // activation unwinds with the SIG_SWITCH handoff
+            // (docs/impl/region-model.md § "Owner nodes").
+            let activation_owner_node = self.take_activation_owner_node();
+            // The closure that called `fiber/resume` is the one to resume into.
+            let current_closure = self.fiber.current_closure;
+            let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
+                code.clone(),
+                closure_env.clone(),
+                *ip,
+                caller_stack,
+                true,
+                activation_region_map,
+                activation_owner_node,
+                current_closure,
+                self.heap(),
+            ));
+            self.fiber.suspended = Some(vec![caller_frame]);
+            let parent = self
+                .current_fiber_handle
+                .clone()
+                .map(|h| (h, self.current_fiber_value));
+            self.pending_fiber_resume = Some(super::core::PendingFiberResume {
+                handle,
+                fiber_value,
+                parent,
+            });
+            self.fiber.signal = Some((SIG_SWITCH, Value::NIL));
+            return Some(SIG_SWITCH);
+        }
+
         let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
         let mask = handle.with(|fiber| fiber.mask);
 
         if result_bits.contains(SIG_HALT) {
-            handle.with_mut(|f| f.status = FiberStatus::Dead);
+            self.finalize_dead_fiber(&handle);
         }
 
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
+            // Fiber ran to completion (:dead): drop the misdirected carrier
+            // pass-through so the now-dead fiber's region is reclaimed. See
+            // `release_completed_resume_carrier`. Caught-but-suspended results
+            // (a yield the mask covers) leave the fiber resumable, so they keep
+            // the carrier retain.
+            if result_bits.is_ok() {
+                release_completed_resume_carrier(unsafe { &mut *self.heap_ptr }, fiber_value);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
@@ -206,7 +463,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                self.fiber.set_error(
+                self.set_error(
                     "state-error",
                     "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -223,15 +480,30 @@ impl VM {
                         fiber_value,
                     };
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
-                        bytecode: bytecode.clone(),
-                        constants: constants.clone(),
-                        env: closure_env.clone(),
-                        ip: *ip,
-                        stack: caller_stack,
-                        location_map: location_map.clone(),
-                        push_resume_value: true,
-                    });
+                    let activation_region_map = self
+                        .fiber
+                        .activation_region_maps
+                        .last()
+                        .cloned()
+                        .unwrap_or_default();
+                    // MOVE the caller's owner node into its continuation park —
+                    // this activation unwinds with the child's suspending
+                    // signal (docs/impl/region-model.md § "Owner nodes").
+                    let activation_owner_node = self.take_activation_owner_node();
+                    // Caller activation's remap (the resumed sub-fiber runs
+                    // on its own frame stack; this frame continues us).
+                    let current_closure = self.fiber.current_closure;
+                    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
+                        code.clone(),
+                        closure_env.clone(),
+                        *ip,
+                        caller_stack,
+                        true,
+                        activation_region_map,
+                        activation_owner_node,
+                        current_closure,
+                        self.heap(),
+                    ));
                     self.fiber.suspended = Some(vec![fiber_resume_frame, caller_frame]);
                     Some(result_bits)
                 }
@@ -240,26 +512,52 @@ impl VM {
     }
 
     /// Handle SIG_RESUME from a fiber primitive (TailCall position).
+    ///
+    /// Same trampoline split as the Call-position variant. In tail position
+    /// this fiber has NO continuation — its result IS the child's result —
+    /// so it suspends with an empty frame list: when the child completes,
+    /// `resume_suspended([])` immediately completes this fiber with the
+    /// child's value and the unwind continues to our own parent.
     pub(super) fn handle_fiber_resume_signal_tail(&mut self, fiber_value: Value) -> SignalBits {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_RESUME with non-fiber value");
+                self.set_error("internal-error", "SIG_RESUME with non-fiber value");
                 return SIG_ERROR;
             }
         };
+
+        if self.current_fiber_handle.is_some() {
+            self.seed_child_inheritance(&handle, fiber_value);
+            let existing = self.fiber.suspended.take().unwrap_or_default();
+            self.fiber.suspended = Some(existing);
+            let parent = self
+                .current_fiber_handle
+                .clone()
+                .map(|h| (h, self.current_fiber_value));
+            self.pending_fiber_resume = Some(super::core::PendingFiberResume {
+                handle,
+                fiber_value,
+                parent,
+            });
+            self.fiber.signal = Some((SIG_SWITCH, Value::NIL));
+            return SIG_SWITCH;
+        }
 
         let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
         let mask = handle.with(|fiber| fiber.mask);
 
         if result_bits.contains(SIG_HALT) {
-            handle.with_mut(|f| f.status = FiberStatus::Dead);
+            self.finalize_dead_fiber(&handle);
         }
 
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
+            // :dead — release the misdirected carrier retain (see Call variant).
+            if result_bits.is_ok() {
+                release_completed_resume_carrier(unsafe { &mut *self.heap_ptr }, fiber_value);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));
@@ -273,7 +571,7 @@ impl VM {
                 && !result_bits.contains(SIG_ERROR)
                 && !result_bits.contains(SIG_HALT)
             {
-                self.fiber.set_error(
+                self.set_error(
                     "state-error",
                     "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
                 );
@@ -300,521 +598,16 @@ impl VM {
     /// If the child fiber itself calls `fiber/resume` (setting
     /// `pending_fiber_resume` and returning SIG_SWITCH), we iterate
     /// rather than recursing on the Rust call stack.
-    pub(super) fn do_fiber_resume(
+    ///
+    /// `pub(crate)` (not `pub(super)`): the fiber-lifecycle runtime tests drive a
+    /// child fiber through park, resume, and completion with this entry.
+    pub(crate) fn do_fiber_resume(
         &mut self,
         child_handle: &FiberHandle,
         child_value: Value,
     ) -> (SignalBits, Value) {
-        let (mut bits, mut value) = self.do_fiber_resume_single(child_handle, child_value);
-
-        // Fast path: no nested fiber/resume — return directly.
-        if bits != SIG_SWITCH {
-            return (bits, value);
-        }
-
-        // Slow path: trampoline for nested fiber/resume.
-        //
-        // fiber_stack records fibers that suspended because they called
-        // fiber/resume on a deeper fiber. We iterate instead of recursing.
-        let mut fiber_stack: Vec<(FiberHandle, Value)> = vec![];
-        fiber_stack.push((child_handle.clone(), child_value));
-
-        loop {
-            if bits == SIG_SWITCH {
-                // A fiber called fiber/resume on a child: descend.
-                let pending = self
-                    .pending_fiber_resume
-                    .take()
-                    .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
-
-                fiber_stack.push((pending.handle.clone(), pending.fiber_value));
-                let (new_bits, new_value) =
-                    self.do_fiber_resume_single(&pending.handle, pending.fiber_value);
-                bits = new_bits;
-                value = new_value;
-                continue;
-            }
-
-            // Real signal from the current deepest fiber. Unwind the stack.
-            loop {
-                let (current_handle, current_fv) = fiber_stack.pop().unwrap();
-                let mask = current_handle.with(|f| f.mask);
-
-                if bits.contains(SIG_HALT) {
-                    current_handle.with_mut(|f| f.status = FiberStatus::Dead);
-                }
-
-                let caught = bits.is_ok() || (mask.covers(bits) && !bits.contains(SIG_TERMINAL));
-
-                if caught {
-                    self.fiber.child = None;
-                    self.fiber.child_value = None;
-
-                    // Update the fiber's signal so fiber/value returns
-                    // the correct result to Elle code.
-                    current_handle.with_mut(|f| {
-                        f.signal = Some((bits, value));
-                    });
-
-                    if fiber_stack.is_empty() {
-                        // Back to the original caller.
-                        return (bits, value);
-                    }
-
-                    // Resume the parent fiber: it was suspended waiting
-                    // for this child to complete.
-                    let (parent_handle, parent_fv) = fiber_stack.last().unwrap();
-                    parent_handle.with_mut(|f| {
-                        f.signal = Some((SIG_OK, value));
-                    });
-
-                    let (new_bits, new_value) =
-                        self.do_fiber_resume_single(parent_handle, *parent_fv);
-                    bits = new_bits;
-                    value = new_value;
-                    // Break to outer loop to check for SIG_SWITCH.
-                    break;
-                } else {
-                    // Signal NOT caught — propagate through fiber stack.
-                    if bits.contains(SIG_ERROR) {
-                        current_handle.with_mut(|f| f.status = FiberStatus::Error);
-                    }
-
-                    if fiber_stack.is_empty() {
-                        return (bits, value);
-                    }
-
-                    // For uncaught suspending signals (e.g. SIG_IO), build
-                    // FiberResume frame on the parent so the suspension chain
-                    // preserves the fiber nesting for re-entry.
-                    if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
-                        let (parent_handle, _) = fiber_stack.last().unwrap();
-                        let child_resume_frame = SuspendedFrame::FiberResume {
-                            handle: current_handle.clone(),
-                            fiber_value: current_fv,
-                        };
-                        parent_handle.with_mut(|f| {
-                            let mut new_frames = vec![child_resume_frame];
-                            if let Some(mut existing) = f.suspended.take() {
-                                new_frames.append(&mut existing);
-                            }
-                            f.suspended = Some(new_frames);
-                            f.signal = Some((bits, value));
-                        });
-                    }
-                    // Continue unwinding to the next parent.
-                }
-            }
-        }
-    }
-
-    /// Execute a single fiber resume: swap fibers, run, swap back.
-    ///
-    /// This is the non-trampolined core. It performs one level of
-    /// fiber execution. If the child calls `fiber/resume` internally,
-    /// it returns SIG_SWITCH (not recursing).
-    fn do_fiber_resume_single(
-        &mut self,
-        child_handle: &FiberHandle,
-        child_value: Value,
-    ) -> (SignalBits, Value) {
-        // ── Native iterator fast path ────────────────────────────────
-        // Native iter fibers hold a Vec<Value> + cursor. Each resume
-        // yields the next element; exhaustion kills the fiber.
-        let is_native = child_handle.with(|f| f.native_iter.is_some());
-        if is_native {
-            return child_handle.with_mut(|f| {
-                let iter = f.native_iter.as_mut().unwrap();
-                if iter.cursor < iter.elements.len() {
-                    let val = iter.elements[iter.cursor];
-                    iter.cursor += 1;
-                    f.status = FiberStatus::Paused;
-                    f.signal = Some((SIG_YIELD, val));
-                    (SIG_YIELD, val)
-                } else {
-                    f.status = FiberStatus::Dead;
-                    f.signal = Some((SIG_OK, Value::NIL));
-                    (SIG_OK, Value::NIL)
-                }
-            });
-        }
-
-        // Extract resume value and status before taking the fiber
-        let (resume_value, is_first_resume) = child_handle.with_mut(|child| {
-            let rv = child.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
-            let first = child.status == FiberStatus::New;
-            (rv, first)
-        });
-
-        // Parameter inheritance is normally a snapshot taken at fiber/new
-        // time by `VM::snapshot_param_frames_into`.  As a fallback, fibers
-        // that were created outside the user-visible `fiber/new` primitive
-        // (e.g. directly from Rust) inherit from the resumer on first
-        // resume.  Skip when the child already carries its own snapshot.
-        if is_first_resume
-            && child_handle.with(|c| c.param_frames.is_empty())
-            && !self.fiber.param_frames.is_empty()
-        {
-            let mut flat: Vec<(u32, Value)> = Vec::new();
-            for frame in &self.fiber.param_frames {
-                for &(id, val) in frame {
-                    if let Some(pos) = flat.iter().position(|&(k, _)| k == id) {
-                        flat[pos].1 = val;
-                    } else {
-                        flat.push((id, val));
-                    }
-                }
-            }
-            child_handle.with_mut(|c| c.param_frames = vec![flat]);
-        }
-
-        // ── Direct fiber resumption optimization ───────────────────
-        //
-        // For subsequent resumes whose first suspended frame is FiberResume,
-        // the full swap protocol (take/wire/swap/install-heap/outbox/execute/
-        // swap-back/put) is wasted: resume_suspended would immediately set
-        // pending_fiber_resume and return SIG_SWITCH without executing any
-        // bytecode. Short-circuit: consume the FiberResume frame, wire the
-        // inner fiber's signal, set pending_fiber_resume, and return
-        // SIG_SWITCH directly. The trampoline in do_fiber_resume handles
-        // the rest identically. Chains naturally through N levels.
-        if !is_first_resume {
-            let skip = child_handle.with(|c| {
-                c.suspended.as_ref().is_some_and(|frames| {
-                    matches!(frames.first(), Some(SuspendedFrame::FiberResume { .. }))
-                })
-            });
-
-            if skip {
-                let (inner_handle, inner_fv, remaining) = child_handle.with_mut(|c| {
-                    let mut frames = c.suspended.take().unwrap();
-                    let first = frames.remove(0);
-                    match first {
-                        SuspendedFrame::FiberResume {
-                            handle,
-                            fiber_value,
-                        } => {
-                            let rest = if frames.is_empty() {
-                                None
-                            } else {
-                                Some(frames)
-                            };
-                            (handle, fiber_value, rest)
-                        }
-                        _ => unreachable!(),
-                    }
-                });
-
-                // Preserve remaining frames for the unwind-resume path.
-                child_handle.with_mut(|c| c.suspended = remaining);
-
-                // Propagate withheld capabilities: parent → intermediate → inner.
-                let intermediate_withheld = child_handle.with_mut(|c| {
-                    c.withheld |= self.fiber.withheld;
-                    c.withheld
-                });
-                inner_handle.with_mut(|f| f.withheld |= intermediate_withheld);
-
-                // Deliver the resume value to the inner fiber (matches what
-                // resume_suspended does at the FiberResume arm).
-                inner_handle.with_mut(|f| f.signal = Some((SIG_OK, resume_value)));
-
-                // Set up the trampoline to descend into the inner fiber.
-                self.pending_fiber_resume = Some(super::core::PendingFiberResume {
-                    handle: inner_handle,
-                    fiber_value: inner_fv,
-                });
-
-                return (SIG_SWITCH, Value::NIL);
-            }
-        }
-
-        self.with_child_fiber(child_handle, child_value, |vm| {
-            vm.fiber.status = FiberStatus::Alive;
-
-            if is_first_resume {
-                vm.do_fiber_first_resume(resume_value)
-            } else {
-                vm.do_fiber_subsequent_resume(resume_value)
-            }
-        })
-    }
-
-    /// First resume of a New fiber — build env and execute closure bytecode.
-    ///
-    /// The `resume_value` is passed as the closure's argument when the
-    /// closure expects a parameter (e.g., a signal parameter). For
-    /// zero-parameter closures, no arguments are passed.
-    ///
-    /// Uses execute_bytecode_saving_stack (not execute_bytecode_inner) because
-    /// the fiber body may end with a TailCall. execute_bytecode_saving_stack
-    /// handles pending tail calls in a loop, while execute_bytecode_inner does
-    /// not.
-    fn do_fiber_first_resume(&mut self, resume_value: Value) -> SignalBits {
-        let closure = self.fiber.closure.clone();
-
-        // Build args from resume_value based on closure arity.
-        // fiber/resume provides at most one value, so we pass it as a
-        // single argument when the closure expects parameters.
-        let args: &[Value] = match closure.template.arity {
-            crate::value::Arity::Exact(0) => &[],
-            _ => &[resume_value],
-        };
-
-        if !self.check_arity(&closure.template.arity, args.len()) {
-            return SIG_ERROR;
-        }
-
-        let env_rc = match self.build_closure_env(&closure, args) {
-            Some(env) => env,
-            None => {
-                // Error already set on fiber.signal
-                return SIG_ERROR;
-            }
-        };
-
-        let result = self.execute_bytecode_saving_stack(
-            &closure.template.bytecode,
-            &closure.template.constants,
-            &env_rc,
-            &closure.template.location_map,
-        );
-
-        // If the fiber signaled (not normal completion), save context for resumption.
-        // Only save if the yield instruction didn't already set up suspended frames.
-        // SIG_HALT is non-resumable — no suspended frame needed.
-        //
-        // Use the active bytecode/constants/env from ExecResult, not the
-        // original closure fields — a tail call may have switched to a
-        // different function's bytecode before the signal occurred.
-        if !result.bits.is_ok() && !result.bits.contains(SIG_HALT) && self.fiber.suspended.is_none()
-        {
-            self.fiber.suspended = Some(vec![SuspendedFrame::Bytecode(BytecodeFrame {
-                bytecode: result.bytecode,
-                constants: result.constants,
-                env: result.env,
-                ip: result.ip,
-                // Use the captured inner stack so that on resume the instruction
-                // at result.ip sees the same operand stack it had when it paused.
-                // This is essential for SIG_FUEL: check_fuel! fires before any
-                // stack reads, so args are still present and must be restored.
-                stack: result.stack,
-                location_map: result.location_map,
-                // SIG_FUEL: re-execute the paused instruction from scratch —
-                // args are on the stack, nothing extra to push.
-                // All other signals (SIG_ERROR, user-defined, etc.): the
-                // instruction at result.ip expects the signal's "return value"
-                // on the stack (e.g. Return needs a value to pop). Push it.
-                push_resume_value: !result.bits.contains(SIG_FUEL),
-            })]);
-        }
-
-        result.bits
-    }
-
-    /// Resume a Suspended fiber — continue from suspended frames.
-    fn do_fiber_subsequent_resume(&mut self, resume_value: Value) -> SignalBits {
-        let frames = match self.fiber.suspended.take() {
-            Some(frames) => frames,
-            None => {
-                self.fiber.set_error(
-                    "internal-error",
-                    "fiber/resume: suspended fiber has no saved context",
-                );
-                return SIG_ERROR;
-            }
-        };
-
-        self.resume_suspended(frames, resume_value)
-    }
-
-    // ── SIG_PROPAGATE: propagate caught signal ────────────────────
-
-    /// Handle SIG_PROPAGATE from fiber/propagate (Call position).
-    pub(super) fn handle_fiber_propagate_signal(
-        &mut self,
-        fiber_value: Value,
-    ) -> Option<SignalBits> {
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_PROPAGATE with non-fiber value");
-                self.fiber.stack.push(Value::NIL);
-                return None;
-            }
-        };
-
-        let (child_bits, child_value) = handle.with(|fiber| fiber.signal).unwrap_or((
-            SIG_ERROR,
-            error_val("internal-error", "fiber/propagate: no signal"),
-        ));
-
-        self.fiber.child = Some(handle);
-        self.fiber.child_value = Some(fiber_value);
-        self.fiber.signal = Some((child_bits, child_value));
-
-        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
-            self.fiber.stack.push(Value::NIL);
-            None
-        } else if self.current_fiber_handle.is_none() {
-            // At root fiber: no parent to catch the propagated signal
-            self.fiber.set_error(
-                "state-error",
-                "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
-            );
-            self.fiber.stack.push(Value::NIL);
-            None
-        } else {
-            Some(child_bits)
-        }
-    }
-
-    /// Handle SIG_PROPAGATE from fiber/propagate (TailCall position).
-    pub(super) fn handle_fiber_propagate_signal_tail(&mut self, fiber_value: Value) -> SignalBits {
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_PROPAGATE with non-fiber value");
-                return SIG_ERROR;
-            }
-        };
-
-        let (child_bits, child_value) = handle.with(|fiber| fiber.signal).unwrap_or((
-            SIG_ERROR,
-            error_val("internal-error", "fiber/propagate: no signal"),
-        ));
-
-        self.fiber.child = Some(handle);
-        self.fiber.child_value = Some(fiber_value);
-        self.fiber.signal = Some((child_bits, child_value));
-
-        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
-            child_bits
-        } else if self.current_fiber_handle.is_none() {
-            // At root fiber: no parent to catch the propagated signal
-            self.fiber.set_error(
-                "state-error",
-                "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
-            );
-            SIG_ERROR
-        } else {
-            child_bits
-        }
-    }
-
-    // ── SIG_ABORT: inject error into fiber, resume for unwinding ──
-
-    /// Handle SIG_ABORT from fiber/abort (Call position).
-    ///
-    /// Injects an error and resumes the fiber. The result is handled
-    /// identically to fiber/resume — the child's actual outcome (dead,
-    /// error, paused) determines what the parent sees. No status stomp.
-    pub(super) fn handle_fiber_abort_signal(
-        &mut self,
-        fiber_value: Value,
-        _bytecode: &Rc<Vec<u8>>,
-        _constants: &Rc<Vec<Value>>,
-        _closure_env: &Rc<Vec<Value>>,
-        _ip: &mut usize,
-    ) -> Option<SignalBits> {
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_ABORT with non-fiber value");
-                self.fiber.stack.push(Value::NIL);
-                return None;
-            }
-        };
-
-        let (result_bits, result_value) = self.do_fiber_abort(&handle, fiber_value);
-
-        let mask = handle.with(|fiber| fiber.mask);
-
-        if result_bits.is_ok() || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL))
-        {
-            // Abort is terminal — even if the parent catches the signal,
-            // the aborted fiber is finished and must not stay :paused.
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-            self.fiber.child = None;
-            self.fiber.child_value = None;
-            self.fiber.stack.push(result_value);
-            None
-        } else {
-            // Uncaught error → terminal
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.fiber.set_error(
-                    "state-error",
-                    "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
-                );
-                self.fiber.stack.push(Value::NIL);
-                None
-            } else {
-                self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) {
-                    self.fiber.stack.push(Value::NIL);
-                    None
-                } else {
-                    Some(result_bits)
-                }
-            }
-        }
-    }
-
-    /// Handle SIG_ABORT from fiber/abort (TailCall position).
-    pub(super) fn handle_fiber_abort_signal_tail(&mut self, fiber_value: Value) -> SignalBits {
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_ABORT with non-fiber value");
-                return SIG_ERROR;
-            }
-        };
-
-        let (result_bits, result_value) = self.do_fiber_abort(&handle, fiber_value);
-
-        let mask = handle.with(|fiber| fiber.mask);
-
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
-            // Abort is terminal — set child to :error even when caught
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-            self.fiber.child = None;
-            self.fiber.child_value = None;
-            self.fiber.signal = Some((SIG_OK, result_value));
-            SIG_OK
-        } else {
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.fiber.set_error(
-                    "state-error",
-                    "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
-                );
-                SIG_ERROR
-            } else {
-                self.fiber.signal = Some((result_bits, result_value));
-                result_bits
-            }
-        }
+        let (bits, value) = self.do_fiber_resume_single(child_handle, child_value);
+        self.finish_fiber_resume(bits, value, child_handle, child_value)
     }
 
     // ── JIT-context fiber signal handlers ────────────────────────────
@@ -822,241 +615,4 @@ impl VM {
     // These mirror the interpreter-level handlers above but return `JitValue`
     // instead of pushing to fiber.stack. Called from jit/dispatch.rs when a
     // primitive returns SIG_RESUME/SIG_PROPAGATE/SIG_ABORT in JIT context.
-
-    /// Handle SIG_RESUME from a fiber primitive in JIT context.
-    #[cfg(feature = "jit")]
-    ///
-    /// Runs the child fiber synchronously and returns the result as `JitValue`.
-    /// On error: sets fiber.signal, returns `JitValue::nil()`.
-    /// On yield propagation: sets fiber.signal, returns YIELD_SENTINEL.
-    pub(crate) fn handle_fiber_resume_signal_jit(&mut self, fiber_value: Value) -> JitValue {
-        use crate::jit::YIELD_SENTINEL;
-
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_RESUME with non-fiber value");
-                return JitValue::nil();
-            }
-        };
-
-        let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
-
-        let mask = handle.with(|fiber| fiber.mask);
-
-        if result_bits == SIG_HALT {
-            handle.with_mut(|f| f.status = FiberStatus::Dead);
-        }
-
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
-            self.fiber.child = None;
-            self.fiber.child_value = None;
-            JitValue::from_value(result_value)
-        } else {
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.fiber.set_error(
-                    "state-error",
-                    "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
-                );
-                JitValue::nil()
-            } else {
-                self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
-                    JitValue::nil()
-                } else {
-                    // Uncaught non-error signal (yield, I/O, etc.) — side-exit.
-                    // Create a FiberResume frame so that resume_suspended will
-                    // re-resume the child fiber after the signal is resolved.
-                    // Without this, the raw io-request value leaks through as
-                    // the call result instead of the resolved I/O value.
-                    let fiber_resume_frame = SuspendedFrame::FiberResume {
-                        handle: handle.clone(),
-                        fiber_value,
-                    };
-                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
-                    frames.push(fiber_resume_frame);
-                    self.fiber.suspended = Some(frames);
-                    YIELD_SENTINEL
-                }
-            }
-        }
-    }
-
-    /// Handle SIG_PROPAGATE from fiber/propagate in JIT context.
-    #[cfg(feature = "jit")]
-    pub(crate) fn handle_fiber_propagate_signal_jit(&mut self, fiber_value: Value) -> JitValue {
-        use crate::jit::YIELD_SENTINEL;
-
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_PROPAGATE with non-fiber value");
-                return JitValue::nil();
-            }
-        };
-
-        let (child_bits, child_value) = handle.with(|fiber| fiber.signal).unwrap_or((
-            SIG_ERROR,
-            error_val("internal-error", "fiber/propagate: no signal"),
-        ));
-
-        self.fiber.child = Some(handle);
-        self.fiber.child_value = Some(fiber_value);
-        self.fiber.signal = Some((child_bits, child_value));
-
-        if child_bits.contains(SIG_ERROR) || child_bits.contains(SIG_HALT) {
-            JitValue::nil()
-        } else if self.current_fiber_handle.is_none() {
-            self.fiber.set_error(
-                "state-error",
-                "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
-            );
-            JitValue::nil()
-        } else {
-            YIELD_SENTINEL
-        }
-    }
-
-    /// Handle SIG_ABORT from fiber/abort in JIT context.
-    #[cfg(feature = "jit")]
-    pub(crate) fn handle_fiber_abort_signal_jit(&mut self, fiber_value: Value) -> JitValue {
-        use crate::jit::YIELD_SENTINEL;
-
-        let handle = match fiber_value.as_fiber() {
-            Some(h) => h.clone(),
-            None => {
-                self.fiber
-                    .set_error("internal-error", "SIG_ABORT with non-fiber value");
-                return JitValue::nil();
-            }
-        };
-
-        let (result_bits, result_value) = self.do_fiber_abort(&handle, fiber_value);
-
-        let mask = handle.with(|fiber| fiber.mask);
-
-        let caught = result_bits.is_ok()
-            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
-        if caught {
-            // Abort is terminal — set child to :error even when caught
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-            self.fiber.child = None;
-            self.fiber.child_value = None;
-            JitValue::from_value(result_value)
-        } else {
-            if result_bits.contains(SIG_ERROR) {
-                handle.with_mut(|f| f.status = FiberStatus::Error);
-            }
-            if self.current_fiber_handle.is_none()
-                && !result_bits.contains(SIG_ERROR)
-                && !result_bits.contains(SIG_HALT)
-            {
-                self.fiber.set_error(
-                    "state-error",
-                    "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
-                );
-                JitValue::nil()
-            } else {
-                self.fiber.signal = Some((result_bits, result_value));
-                if result_bits.contains(SIG_ERROR) || result_bits.contains(SIG_HALT) {
-                    JitValue::nil()
-                } else {
-                    YIELD_SENTINEL
-                }
-            }
-        }
-    }
-
-    /// Execute a fiber abort: inject error into the fiber's execution context.
-    ///
-    /// For `FiberResume` frames (protect/defer children blocked on I/O),
-    /// the inner fiber is aborted recursively so that protect/defer sees
-    /// the child error and runs cleanup code.
-    ///
-    /// For `Bytecode` frames (direct bytecode suspension), the error is
-    /// set on `fiber.signal` so the dispatch loop returns it immediately.
-    /// The error then propagates through the caller's protect/defer chain.
-    fn do_fiber_abort(
-        &mut self,
-        child_handle: &FiberHandle,
-        child_value: Value,
-    ) -> (SignalBits, Value) {
-        let error_value = child_handle
-            .with(|fiber| fiber.signal.as_ref().map(|(_, v)| *v))
-            .unwrap_or(Value::NIL);
-
-        self.with_child_fiber(child_handle, child_value, |vm| {
-            vm.fiber.status = FiberStatus::Alive;
-            // Clear the signal — prim_fiber_abort pre-set it with the error
-            // value, which we already extracted above. If we leave it set,
-            // the dispatch loop will see SIG_ERROR and bail immediately
-            // when we try to resume remaining bytecode frames.
-            vm.fiber.signal = None;
-
-            let frames = match vm.fiber.suspended.take() {
-                Some(frames) => frames,
-                None => {
-                    // New fiber that was never started — just mark as errored
-                    vm.fiber.signal = Some((SIG_ERROR, error_value));
-                    return SIG_ERROR;
-                }
-            };
-
-            // Check the innermost frame. FiberResume means a protect/defer
-            // child is blocked on I/O — abort it recursively so protect
-            // sees the error. Bytecode means the fiber itself is suspended
-            // — set the error and let the dispatch loop return it.
-            match frames.first() {
-                Some(SuspendedFrame::FiberResume {
-                    handle,
-                    fiber_value,
-                }) => {
-                    let inner_handle = handle.clone();
-                    let inner_value = *fiber_value;
-
-                    // Abort the inner fiber (e.g. protect child blocked on I/O).
-                    // Store the error on the inner fiber so do_fiber_abort picks it up.
-                    inner_handle.with_mut(|f| {
-                        f.signal = Some((SIG_ERROR, error_value));
-                    });
-                    let (inner_bits, inner_result) = vm.do_fiber_abort(&inner_handle, inner_value);
-
-                    // Resume remaining frames so protect/defer cleanup runs.
-                    let remaining: Vec<SuspendedFrame> = frames[1..].to_vec();
-                    if remaining.is_empty() {
-                        vm.fiber.signal = Some((inner_bits, inner_result));
-                        inner_bits
-                    } else {
-                        vm.resume_suspended(remaining, inner_result)
-                    }
-                }
-                Some(SuspendedFrame::Bytecode(_)) => {
-                    // Innermost frame is bytecode — set error and resume
-                    // through the chain. The dispatch loop will see SIG_ERROR
-                    // and return immediately from this frame, then outer
-                    // frames run normally (defer/protect).
-                    vm.fiber.signal = Some((SIG_ERROR, error_value));
-                    vm.resume_suspended(frames, Value::NIL)
-                }
-                None => {
-                    // No frames (shouldn't happen — we checked above)
-                    vm.fiber.signal = Some((SIG_ERROR, error_value));
-                    SIG_ERROR
-                }
-            }
-        })
-    }
 }

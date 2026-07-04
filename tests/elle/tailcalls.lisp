@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Tests for tail call optimization
 #
 # Comprehensive tests for tail call optimization including:
@@ -7,7 +7,7 @@
 # - Break value tail calls (new for #333)
 # - Deep recursion tests (prove TCO works)
 # - Fiber tail position tests
-# - Coroutine tail position tests
+# - Fiber tail position tests
 
 
 # ============================================================================
@@ -161,7 +161,7 @@
 (assert (= (fiber-cancel-tail-test 10) nil) "fiber/cancel in tail position")
 
 # ============================================================================
-# Coroutine tail position tests
+# Fiber tail position tests
 # ============================================================================
 
 # yield in tail position

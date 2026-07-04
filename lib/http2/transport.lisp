@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2/transport.lisp — transport abstraction for HTTP/2
 ##
 ## Loaded via:

@@ -9,11 +9,10 @@ use crate::error::{LError, LResult};
 use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
-use crate::primitives::cached_primitive_meta;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax};
 use crate::value::heap::TableKey;
-use crate::value::{error_val, Value, SIG_ERROR, SIG_OK};
+use crate::value::{Value, SIG_ERROR, SIG_OK};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -21,9 +20,9 @@ use super::core::VM;
 
 /// Handle the Eval instruction from the dispatch loop.
 ///
-/// Accesses the symbol table via the thread-local context (same pattern
-/// as FFI primitives). The symbol table must be set via
-/// `set_symbol_table()` before execution.
+/// Reaches this instance's symbol table through the driving VM (`vm.symbols_ptr`,
+/// set by `RuntimeCore`). A bare VM with no `RuntimeCore` has none, and
+/// `(eval …)` then errors (it needs a `Runtime`).
 pub(crate) fn handle_eval_instruction(vm: &mut VM) {
     let expr_value = vm
         .fiber
@@ -38,19 +37,18 @@ pub(crate) fn handle_eval_instruction(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on eval (env)");
 
-    // Get symbol table from thread-local context
-    let symbols_ptr = unsafe { crate::context::get_symbol_table() };
-    let Some(symbols_ptr) = symbols_ptr else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "eval-error",
-                "eval: symbol table not available (not set in context)",
-            ),
-        ));
+    // This instance's symbol table, reached through the driving VM. Raw deref so
+    // it sits beside the `&mut vm` passed to `eval_inner`.
+    let symbols_ptr = vm.symbols_ptr;
+    if symbols_ptr.is_null() {
+        let err = vm.escaping_error(
+            "eval-error",
+            "eval: symbol table not available (eval requires a Runtime instance)",
+        );
+        vm.fiber.signal = Some((SIG_ERROR, err));
         vm.fiber.stack.push(Value::NIL);
         return;
-    };
+    }
     let symbols = unsafe { &mut *symbols_ptr };
 
     match eval_inner(vm, expr_value, env_value, symbols) {
@@ -58,7 +56,8 @@ pub(crate) fn handle_eval_instruction(vm: &mut VM) {
             vm.fiber.stack.push(result);
         }
         Err(msg) => {
-            vm.fiber.signal = Some((SIG_ERROR, error_val("eval-error", msg)));
+            let err = vm.escaping_error("eval-error", msg);
+            vm.fiber.signal = Some((SIG_ERROR, err));
             vm.fiber.stack.push(Value::NIL);
         }
     }
@@ -74,8 +73,30 @@ fn eval_inner(
     let span = Span::synthetic();
     let syntax = Syntax::from_value(&expr_value, symbols, span)?;
 
-    // Get-or-create Expander (cached on VM)
-    let mut expander = vm.eval_expander.take().unwrap_or_default();
+    // The runtime `eval` instruction compiles against the owning instance's
+    // compile context (core.lisp env + macro-body metadata). Cloned upfront so
+    // the rest of this function can use `vm` freely.
+    let Some((core_env, eval_meta)) = vm
+        .compile_ctx()
+        .map(|c| (c.core_env(), c.primitive_meta().clone()))
+    else {
+        return Err(LError::generic(
+            "eval: no compile context (eval requires a Runtime instance)".to_string(),
+        ));
+    };
+
+    // Get-or-create Expander (cached on VM). A fresh one inherits the
+    // instance's core env and macro-body `eval_meta` so transformer bodies in
+    // the evaluated code compile.
+    let mut expander = match vm.eval_expander.take() {
+        Some(e) => e,
+        None => {
+            let mut e = crate::syntax::Expander::new();
+            e.core_env = core_env;
+            e.set_eval_meta(eval_meta.clone());
+            e
+        }
+    };
 
     // Save the caller's stack before macro expansion. load_prelude and
     // expand both execute VM bytecode (via eval_syntax → vm.execute)
@@ -120,7 +141,7 @@ fn eval_inner(
     };
 
     // Analyze
-    let meta = cached_primitive_meta(symbols);
+    let meta = eval_meta;
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(
         symbols,
@@ -129,6 +150,11 @@ fn eval_inner(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    if let Some(ref exp) = vm.eval_expander {
+        if !exp.core_env.is_empty() {
+            analyzer.bind_compile_time_env(&exp.core_env);
+        }
+    }
     if let Some(ref env_map) = env_map {
         analyzer.bind_compile_time_env(env_map);
     }
@@ -141,15 +167,18 @@ fn eval_inner(
 
     // Mark tail calls
     mark_tail_calls(&mut analysis.hir);
+    crate::hir::functionalize::functionalize(&mut analysis.hir, &mut arena);
+    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
     // Lower
-    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
-    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let region_info =
+        crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
-        .with_intrinsics(intrinsics)
-        .with_immediate_primitives(imm_prims)
+        .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_symbol_names(symbols.all_names());
+        .with_symbol_names(symbols.all_names())
+        .with_region_info(region_info);
     let lir_module = lowerer
         .lower(&analysis.hir)
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
@@ -160,19 +189,20 @@ fn eval_inner(
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     // Execute
-    let bc_rc = Rc::new(bytecode.instructions);
-    let consts_rc = Rc::new(bytecode.constants);
-    let location_map_rc = Rc::new(bytecode.location_map);
+    let mut code = crate::value::Code::new(
+        Rc::new(bytecode.instructions),
+        Rc::new(bytecode.constants),
+        Rc::new(bytecode.location_map),
+        Rc::new(bytecode.child_protos),
+    );
+    // Carry the entry function's builder-idiom merge metadata so the alloc
+    // dispatch mint-or-reuses merged slots (docs/impl/region-model.md § Merging).
+    code.merged_slots = bytecode.merged_slots;
     let empty_env = Rc::new(vec![]);
 
-    let result = vm.execute_bytecode_saving_stack(&bc_rc, &consts_rc, &empty_env, &location_map_rc);
-
-    let mut bits = result.bits;
-
-    // Handle SIG_SWITCH (fiber/resume trampoline) iteratively.
-    while bits == crate::value::SIG_SWITCH {
-        bits = vm.handle_sig_switch();
-    }
+    // Drive the evaluated code, including any nested fiber/resume SIG_SWITCH
+    // trampoline, to completion — see VM::run_thunk_to_completion.
+    let bits = vm.run_thunk_to_completion(&code, &empty_env);
 
     match bits {
         SIG_OK => {

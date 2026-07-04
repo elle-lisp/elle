@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/gtk4/widgets.lisp — Per-widget constructors and signal wiring
 ##
 ## Each make-* function creates a GTK widget, applies props, connects
@@ -340,7 +340,8 @@
 
   (def sig-click-pressed (ffi/signature :void [:ptr :int :double :double :ptr]))
   (def sig-scroll (ffi/signature :int [:ptr :double :double :ptr]))
-  (def sig-key-pressed (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]))  # key-released returns void (unlike key-pressed, which returns int to claim the key)
+  (def sig-key-pressed (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]))
+  # key-released returns void (unlike key-pressed, which returns int to claim the key)
   (def sig-key-released (ffi/signature :void [:ptr :u32 :u32 :u32 :ptr]))
 
   (def SCROLL_VERTICAL 2)

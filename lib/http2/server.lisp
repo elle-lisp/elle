@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2/server.lisp — HTTP/2 server connection handler
 ##
 ## Loaded via:
@@ -250,7 +250,9 @@
                         (assign ended true))}))
 
   (defn handle-streaming-request [sess s sid hdrs end? handler]
-    "Handle one streaming server request."  # If client sent HEADERS+END_STREAM (no body), enqueue a sentinel
+    "Handle one streaming server request."
+
+    # If client sent HEADERS+END_STREAM (no body), enqueue a sentinel
     # so ctrl:recv returns nil immediately instead of blocking
     (when end? (s:data-queue:put {:type :end :end-stream true}))
     (let* [method-pair (first (filter (fn [h] (= (get h 0) ":method")) hdrs))

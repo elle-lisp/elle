@@ -15,7 +15,7 @@
 //! surfaces as a structured `:tier-rejected` error so callers can skip
 //! the tier rather than failing.
 
-use crate::value::{error_val_extra, SignalBits, Value, SIG_ERROR, SIG_OK};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
 #[cfg(feature = "wasm")]
 use std::rc::Rc;
 #[cfg(feature = "jit")]
@@ -23,9 +23,10 @@ use std::sync::Arc;
 
 use super::core::VM;
 
-/// Build a structured `:tier-rejected` error.
-fn rejected(tier: &str, msg: impl Into<String>) -> Value {
-    error_val_extra(
+/// Build a structured `:tier-rejected` error, born in a fresh region of its own
+/// ([`VM::escaping_error_extra`]) — `vm` owns the heap that mints it.
+fn rejected(vm: &mut VM, tier: &str, msg: impl Into<String>) -> Value {
+    vm.error_extra(
         "tier-rejected",
         msg,
         &[
@@ -44,7 +45,7 @@ impl VM {
     /// use leaf functions, so this is a non-issue in practice.
     pub fn invoke_closure_bytecode(
         &mut self,
-        _closure_val: Value,
+        closure_val: Value,
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
@@ -66,12 +67,10 @@ impl VM {
 
         let squelch_mask = closure.squelch_mask;
 
-        let result = self.execute_bytecode_saving_stack(
-            &closure.template.bytecode,
-            &closure.template.constants,
-            &new_env,
-            &closure.template.location_map,
-        );
+        // Hand the target its executing-closure register via the one-shot — a
+        // forced-tier entry runs a closure body like any other entrant.
+        self.pending_entry_closure = closure_val;
+        let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
 
         self.runtime_config.jit = saved_jit;
 
@@ -106,7 +105,7 @@ impl VM {
         }
         (
             SIG_ERROR,
-            crate::value::error_val("runtime-error", "unexpected signal"),
+            self.escaping_error("runtime-error", "unexpected signal"),
         )
     }
 
@@ -122,9 +121,9 @@ impl VM {
         args: &[Value],
     ) -> (SignalBits, Value) {
         // Closure must have LIR — primitives, macros, etc. don't.
-        let lir = match closure.template.lir_function.clone() {
-            Some(l) => l,
-            None => return (SIG_ERROR, rejected("jit", "closure has no LIR")),
+        let lir = match &closure.template.lir_function {
+            Some(l) => (**l).clone(),
+            None => return (SIG_ERROR, rejected(self, "jit", "closure has no LIR")),
         };
 
         // Arity check writes to fiber.signal on mismatch.
@@ -142,7 +141,7 @@ impl VM {
                     Err(e) => {
                         return (
                             SIG_ERROR,
-                            rejected("jit", format!("JIT compiler init failed: {}", e)),
+                            rejected(self, "jit", format!("JIT compiler init failed: {}", e)),
                         )
                     }
                 };
@@ -160,7 +159,7 @@ impl VM {
                     Err(e) => {
                         return (
                             SIG_ERROR,
-                            rejected("jit", format!("JIT rejected closure: {}", e)),
+                            rejected(self, "jit", format!("JIT rejected closure: {}", e)),
                         )
                     }
                 }
@@ -185,12 +184,10 @@ impl VM {
         // target may be a different closure, so we interpret its bytecode.
         if result_jv == crate::jit::TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
-                let exec_result = self.execute_bytecode_saving_stack(
-                    &tail.bytecode,
-                    &tail.constants,
-                    &tail.env,
-                    &tail.location_map,
-                );
+                // The resolved body is the tail callee's — hand it its
+                // executing-closure register (see `run_jit`'s sentinel arm).
+                self.pending_entry_closure = tail.closure;
+                let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
                 let eb = exec_result.bits;
 
                 self.fiber.stack = saved_stack;
@@ -222,13 +219,13 @@ impl VM {
                     }
                     return (
                         SIG_ERROR,
-                        crate::value::error_val("runtime-error", "tail-call error"),
+                        self.escaping_error("runtime-error", "tail-call error"),
                     );
                 } else {
                     // Suspending signal — not supported under compile/run-on.
                     return (
                         SIG_ERROR,
-                        rejected("jit", "tail-call target yielded under compile/run-on"),
+                        rejected(self, "jit", "tail-call target yielded under compile/run-on"),
                     );
                 }
             } else {
@@ -238,7 +235,7 @@ impl VM {
                 }
                 return (
                     SIG_ERROR,
-                    rejected("jit", "tail-call sentinel without pending call (bug)"),
+                    rejected(self, "jit", "tail-call sentinel without pending call (bug)"),
                 );
             }
         }
@@ -265,15 +262,12 @@ impl VM {
                         let registry = crate::signals::registry::global_registry().lock().unwrap();
                         registry.format_signal_bits(squelched)
                     };
-                    self.fiber.suspended = None;
-                    return (
-                        SIG_ERROR,
-                        error_val_extra(
-                            "signal-violation",
-                            format!("squelch: signal {} caught at boundary", squelched_str),
-                            &[],
-                        ),
+                    self.discard_suspended_frames();
+                    let err = self.escaping_error(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
                     );
+                    return (SIG_ERROR, err);
                 }
             }
 
@@ -281,6 +275,7 @@ impl VM {
                 return (
                     SIG_ERROR,
                     rejected(
+                        self,
                         "jit",
                         format!(
                             "closure yielded under compile/run-on (signal {}, value type {})",
@@ -292,7 +287,7 @@ impl VM {
             }
             return (
                 SIG_ERROR,
-                rejected("jit", "closure yielded under compile/run-on"),
+                rejected(self, "jit", "closure yielded under compile/run-on"),
             );
         }
 
@@ -310,15 +305,12 @@ impl VM {
                         let registry = crate::signals::registry::global_registry().lock().unwrap();
                         registry.format_signal_bits(squelched)
                     };
-                    self.fiber.suspended = None;
-                    return (
-                        SIG_ERROR,
-                        error_val_extra(
-                            "signal-violation",
-                            format!("squelch: signal {} caught at boundary", squelched_str),
-                            &[],
-                        ),
+                    self.discard_suspended_frames();
+                    let err = self.escaping_error(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
                     );
+                    return (SIG_ERROR, err);
                 }
             }
             if !bits.is_ok() {
@@ -337,7 +329,10 @@ impl VM {
         _closure: &crate::value::Closure,
         _args: &[Value],
     ) -> (SignalBits, Value) {
-        (SIG_ERROR, rejected("jit", "JIT feature not compiled in"))
+        (
+            SIG_ERROR,
+            rejected(self, "jit", "JIT feature not compiled in"),
+        )
     }
 
     /// Run a closure via the WASM backend (Wasmtime tiered compilation).
@@ -347,13 +342,13 @@ impl VM {
     #[cfg(feature = "wasm")]
     pub fn invoke_closure_wasm(
         &mut self,
-        _closure_val: Value,
+        closure_val: Value,
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
         let lir = match closure.template.lir_function.clone() {
             Some(l) => l,
-            None => return (SIG_ERROR, rejected("wasm", "closure has no LIR")),
+            None => return (SIG_ERROR, rejected(self, "wasm", "closure has no LIR")),
         };
 
         if !self.check_arity(&closure.template.arity, args.len()) {
@@ -377,6 +372,7 @@ impl VM {
             return (
                 SIG_ERROR,
                 rejected(
+                    self,
                     "wasm",
                     "closure uses tail calls (not supported by WASM tiered mode)",
                 ),
@@ -394,22 +390,23 @@ impl VM {
                 Err(e) => {
                     return (
                         SIG_ERROR,
-                        rejected("wasm", format!("WasmTier init failed: {}", e)),
+                        rejected(self, "wasm", format!("WasmTier init failed: {}", e)),
                     )
                 }
             }
         }
 
         // Force-compile if not already cached.
+        let heap_ptr = self.heap_ptr;
         let tier = self.wasm_tier.as_mut().unwrap();
-        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir) {
+        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir, heap_ptr) {
             // Remove the temporary tier before returning.
             if !had_tier {
                 self.wasm_tier = None;
             }
             return (
                 SIG_ERROR,
-                rejected("wasm", "WASM compilation rejected this closure"),
+                rejected(self, "wasm", "WASM compilation rejected this closure"),
             );
         }
 
@@ -418,7 +415,7 @@ impl VM {
         let vm_ptr = self as *mut VM;
         let tier = self.wasm_tier.as_ref().unwrap();
 
-        let result = match tier.call(vm_ptr, bytecode_ptr, &closure_rc, args) {
+        let result = match tier.call(vm_ptr, bytecode_ptr, &closure_rc, args, closure_val) {
             Ok((value, signal)) => {
                 if signal.is_ok() {
                     (SIG_OK, value)
@@ -434,7 +431,7 @@ impl VM {
             }
             Err(e) => (
                 SIG_ERROR,
-                crate::value::error_val("wasm-error", format!("WASM execution failed: {}", e)),
+                self.escaping_error("wasm-error", format!("WASM execution failed: {}", e)),
             ),
         };
 
@@ -461,13 +458,13 @@ impl VM {
     ) -> (SignalBits, Value) {
         let lir = match closure.template.lir_function.as_ref() {
             Some(l) => l.clone(),
-            None => return (SIG_ERROR, rejected("mlir-cpu", "closure has no LIR")),
+            None => return (SIG_ERROR, rejected(self, "mlir-cpu", "closure has no LIR")),
         };
 
         if !lir.is_mlir_cpu_eligible() {
             return (
                 SIG_ERROR,
-                rejected("mlir-cpu", "closure is not MLIR-CPU eligible"),
+                rejected(self, "mlir-cpu", "closure is not MLIR-CPU eligible"),
             );
         }
 
@@ -491,6 +488,7 @@ impl VM {
                 return (
                     SIG_ERROR,
                     rejected(
+                        self,
                         "mlir-cpu",
                         format!(
                             "capture {} is {}, not numeric; MLIR-CPU requires int/float captures",
@@ -514,6 +512,7 @@ impl VM {
                 return (
                     SIG_ERROR,
                     rejected(
+                        self,
                         "mlir-cpu",
                         format!(
                             "arg {} is {}, not numeric; MLIR-CPU requires int/float args",
@@ -537,7 +536,7 @@ impl VM {
             {
                 return (
                     SIG_ERROR,
-                    rejected("mlir-cpu", format!("MLIR compilation failed: {}", e)),
+                    rejected(self, "mlir-cpu", format!("MLIR compilation failed: {}", e)),
                 );
             }
         }
@@ -558,11 +557,11 @@ impl VM {
             }
             Some(Err(e)) => (
                 SIG_ERROR,
-                crate::value::error_val("mlir-error", format!("MLIR execution failed: {}", e)),
+                self.escaping_error("mlir-error", format!("MLIR execution failed: {}", e)),
             ),
             None => (
                 SIG_ERROR,
-                rejected("mlir-cpu", "MLIR cache miss after compile (bug)"),
+                rejected(self, "mlir-cpu", "MLIR cache miss after compile (bug)"),
             ),
         }
     }

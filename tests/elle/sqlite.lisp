@@ -1,10 +1,16 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## SQLite module tests (FFI to libsqlite3)
 
-(def [ok? _] (protect ((fn [] (ffi/native "libsqlite3.so")))))
-(unless ok?
-  (println "SKIP: libsqlite3.so not available")
-  (exit 0))
+# Gate the whole file on libsqlite3: if it can't load, re-raise as a loud :gated
+# so `elle test` records a file-level SKIP with a reason (docs/test-runner.md
+# § Gating). This is an eager (def …), so it runs during the barrier-module
+# setup and gates before any test thunk. Never (exit 0): under the runner that
+# would terminate the process mid-run and silently drop every later form.
+(def _libsqlite3
+  (let [r (protect (ffi/native "libsqlite3.so"))]
+    (if (get r 0)
+      true
+      (error (struct :error :gated :reason "libsqlite3.so not installed")))))
 
 (def db ((import "std/sqlite")))
 
@@ -70,6 +76,26 @@
 (let [[ok? err] (protect ((fn [] (db:exec conn "NOT VALID SQL"))))]
   (assert (not ok?) "bad sql errors")
   (assert (= err:error :sqlite-error) "sqlite error type"))
+
+## Constraint violation raises from exec.  sqlite3_step's return code
+## was once discarded, so PK/UNIQUE/NOT NULL violations silently
+## swallowed the write and returned 0 — callers had no way to tell a
+## dropped row from a no-op.
+(db:exec conn "CREATE TABLE pk (a INTEGER, b INTEGER, PRIMARY KEY (a, b))")
+(db:exec conn "INSERT INTO pk VALUES (1, 2)")
+(let [[ok? err] (protect ((fn [] (db:exec conn "INSERT INTO pk VALUES (1, 2)"))))]
+  (assert (not ok?) "pk violation errors")
+  (assert (= err:error :sqlite-error) "pk violation error type"))
+(let [rows (db:query conn "SELECT COUNT(*) AS n FROM pk")]
+  (assert (= (let [r (first rows)]
+               r:n) 1) "violating insert wrote nothing"))
+(db:exec conn "CREATE TABLE nn (a INTEGER NOT NULL)")
+(let [[ok? _] (protect ((fn [] (db:exec conn "INSERT INTO nn VALUES (NULL)"))))]
+  (assert (not ok?) "not-null violation errors"))  ## The connection stays usable after a constraint error.
+(db:exec conn "INSERT INTO pk VALUES (1, 3)")
+(let [rows (db:query conn "SELECT COUNT(*) AS n FROM pk")]
+  (assert (= (let [r (first rows)]
+               r:n) 2) "connection usable after violation"))
 
 (db:close conn)
 

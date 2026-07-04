@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # --checked-intrinsics tests
 #
 # These tests verify that --checked-intrinsics catches type errors

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Stream combinators — sinks, transforms, port-to-stream converters
 
 

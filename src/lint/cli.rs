@@ -1,10 +1,9 @@
 //! Lint CLI wrapper — configuration, output formatting, and the Linter type.
 
-use crate::context::SymbolTableGuard;
+use crate::analyze_file;
 use crate::hir::HirLinter;
 use crate::lint::diagnostics::{Diagnostic, Severity};
-use crate::symbol::SymbolTable;
-use crate::{analyze_file, init_stdlib, register_primitives, VM};
+use crate::runtime::Runtime;
 
 /// Main linter configuration
 #[derive(Debug, Clone)]
@@ -42,13 +41,17 @@ impl Linter {
         }
     }
 
-    /// Lint Elle code from a string
+    /// Lint Elle code from a string.
+    ///
+    /// Drives a full [`Runtime`] per call — the lint path is an entry path
+    /// like file-run/REPL/embedding, so it uses the same one lifecycle:
+    /// primitives + stdlib on construction, the process-teardown sweep on
+    /// drop (docs/impl/region-rules.md § Teardown — every region frees). Building the VM and stdlib
+    /// by hand here and tearing nothing down left each call's entire stdlib
+    /// live on the thread's root heap (~300 MiB of address space per call).
     pub fn lint_str(&mut self, code: &str, filename: &str) -> Result<(), String> {
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbols);
-        let _sym_guard = SymbolTableGuard::new(&mut symbols);
-        init_stdlib(&mut vm, &mut symbols);
+        let mut rt = Runtime::new();
+        let (vm, symbols, cctx) = rt.parts();
 
         // Use pipeline: parse -> expand -> analyze -> HIR
         let source_name = if filename.is_empty() {
@@ -56,7 +59,7 @@ impl Linter {
         } else {
             filename
         };
-        let analysis = match analyze_file(code, &mut symbols, &mut vm, source_name) {
+        let analysis = match analyze_file(code, symbols, vm, cctx, source_name) {
             Ok(a) => a,
             Err(e) => {
                 // Convert fatal analysis error to a diagnostic instead of propagating
@@ -74,7 +77,7 @@ impl Linter {
 
         // Lint the analyzed file
         let mut hir_linter = HirLinter::new();
-        hir_linter.lint(&analysis.hir, &symbols, &analysis.arena);
+        hir_linter.lint(&analysis.hir, rt.symbols(), &analysis.arena);
         self.diagnostics
             .extend(hir_linter.diagnostics().iter().cloned());
 
@@ -205,25 +208,4 @@ impl Linter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_linter_creation() {
-        let config = LintConfig::default();
-        let linter = Linter::new(config);
-        assert_eq!(linter.exit_code(), 0);
-    }
-
-    #[test]
-    fn test_lint_simple_code() {
-        let config = LintConfig {
-            min_severity: Severity::Warning,
-            ..Default::default()
-        };
-        let mut linter = Linter::new(config);
-
-        let result = linter.lint_str("(+ 1 2)", "test.lisp");
-        assert!(result.is_ok());
-    }
-}
+mod tests;

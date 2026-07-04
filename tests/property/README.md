@@ -48,7 +48,14 @@ cargo test --test property
 
 ## Example Property Test
 
+Property tests use the cached `eval_reuse_bare` (aliased as `eval_source`), which
+returns `Result<Value, String>` directly — unlike the scoped `eval_source` in
+`common/mod.rs`, the cached core is never torn down, so the result stays valid
+and `prop_assert!` (which expands to a `return`) works at the test-fn level:
+
 ```rust
+use crate::common::eval_reuse_bare as eval_source;
+
 proptest! {
     #[test]
     fn test_list_length(items in prop::collection::vec(any::<i64>(), 0..100)) {

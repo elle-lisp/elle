@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 
 ## ZMQ FFI library integration tests
 ## Tests lib/zmq.lisp (FFI bindings to system libzmq)
@@ -6,10 +6,15 @@
 ## Uses inproc:// transport — no network access needed.
 ## Skipped if libzmq.so is not installed.
 
-(let [[ok? _] (protect (ffi/native "libzmq.so"))]
-  (unless ok?
-    (println "zmq tests skipped: libzmq.so not found")
-    (sys/exit 0)))
+# Gate the whole file on libzmq: if it can't load, re-raise as a loud :gated so
+# `elle test` records a file-level SKIP with a reason (docs § Gating). Eager
+# (def …), so it gates during barrier-module setup, before any test thunk.
+# Never (sys/exit 0): under the runner that would kill the process mid-run.
+(def _libzmq
+  (let [r (protect (ffi/native "libzmq.so"))]
+    (if (get r 0)
+      true
+      (error (struct :error :gated :reason "libzmq.so not installed")))))
 
 (def zmq ((import-file "lib/zmq.lisp")))
 

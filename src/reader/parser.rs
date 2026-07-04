@@ -1,4 +1,5 @@
 use super::token::{OwnedToken, SourceLoc};
+use crate::primitives::ctx::Alloc;
 use crate::symbol::SymbolTable;
 use crate::value::repr::Value;
 
@@ -54,27 +55,36 @@ impl Reader {
 
     /// Try to read a single value from the token stream.
     /// Returns None if at EOF (not an error), Some(Err(_)) if there's a parse error.
-    pub fn try_read(&mut self, symbols: &mut SymbolTable) -> Option<Result<Value, String>> {
+    pub fn try_read(
+        &mut self,
+        ctx: &mut Alloc,
+        symbols: &mut SymbolTable,
+    ) -> Option<Result<Value, String>> {
         // Skip comment tokens
         while matches!(self.current(), Some(OwnedToken::Comment(_))) {
             self.advance();
         }
         let token = self.current().cloned()?;
-        Some(self.read_one(symbols, &token))
+        Some(self.read_one(ctx, symbols, &token))
     }
 
     /// Read a single token/form and return result
-    fn read_one(&mut self, symbols: &mut SymbolTable, token: &OwnedToken) -> Result<Value, String> {
+    fn read_one(
+        &mut self,
+        ctx: &mut Alloc,
+        symbols: &mut SymbolTable,
+        token: &OwnedToken,
+    ) -> Result<Value, String> {
         match token {
             // Skip comment tokens — they are handled before reaching here by try_read,
             // but may appear in recursive read() calls inside compound forms.
             OwnedToken::Comment(_) => {
                 self.advance();
-                self.read(symbols)
+                self.read(ctx, symbols)
             }
-            OwnedToken::LeftParen => self.read_list(symbols),
-            OwnedToken::LeftBracket => self.read_array(symbols),
-            OwnedToken::LeftBrace => self.read_struct(symbols),
+            OwnedToken::LeftParen => self.read_list(ctx, symbols),
+            OwnedToken::LeftBracket => self.read_array(ctx, symbols),
+            OwnedToken::LeftBrace => self.read_struct(ctx, symbols),
             OwnedToken::ListSugar => {
                 self.advance();
                 // @[...] is sugar for (list ...)
@@ -99,25 +109,26 @@ impl Reader {
                                 let result = elements
                                     .into_iter()
                                     .rev()
-                                    .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc));
-                                return Ok(Value::pair(list_sym, result));
+                                    .fold(Value::EMPTY_LIST, |acc, v| ctx.pair(v, acc));
+                                return Ok(ctx.pair(list_sym, result));
                             }
                             Some(OwnedToken::Comment(_)) => {
                                 self.advance();
                                 continue;
                             }
-                            _ => elements.push(self.read(symbols)?),
+                            _ => elements.push(self.read(ctx, symbols)?),
                         }
                     }
                 } else if self.current() == Some(&OwnedToken::LeftBrace) {
                     // Handle @{...} for table sugar
-                    self.read_table(symbols)
+                    self.read_table(ctx, symbols)
                 } else if let Some(OwnedToken::String(s)) = self.current().cloned() {
                     // @"..." is sugar for (thaw "...")
                     self.advance();
                     let sb_sym = Value::symbol(symbols.intern("thaw").0);
-                    let str_val = Value::string(s.as_str());
-                    Ok(Value::pair(sb_sym, Value::pair(str_val, Value::EMPTY_LIST)))
+                    let str_val = ctx.string(s.as_str());
+                    let inner = ctx.pair(str_val, Value::EMPTY_LIST);
+                    Ok(ctx.pair(sb_sym, inner))
                 } else {
                     let loc = self.current_location();
                     Err(format!(
@@ -129,33 +140,38 @@ impl Reader {
 
             OwnedToken::Quote => {
                 self.advance();
-                let val = self.read(symbols)?;
+                let val = self.read(ctx, symbols)?;
                 let quote_sym = Value::symbol(symbols.intern("quote").0);
-                Ok(Value::pair(quote_sym, Value::pair(val, Value::EMPTY_LIST)))
+                let inner = ctx.pair(val, Value::EMPTY_LIST);
+                Ok(ctx.pair(quote_sym, inner))
             }
             OwnedToken::Quasiquote => {
                 self.advance();
-                let val = self.read(symbols)?;
+                let val = self.read(ctx, symbols)?;
                 let qq_sym = Value::symbol(symbols.intern("quasiquote").0);
-                Ok(Value::pair(qq_sym, Value::pair(val, Value::EMPTY_LIST)))
+                let inner = ctx.pair(val, Value::EMPTY_LIST);
+                Ok(ctx.pair(qq_sym, inner))
             }
             OwnedToken::Unquote => {
                 self.advance();
-                let val = self.read(symbols)?;
+                let val = self.read(ctx, symbols)?;
                 let uq_sym = Value::symbol(symbols.intern("unquote").0);
-                Ok(Value::pair(uq_sym, Value::pair(val, Value::EMPTY_LIST)))
+                let inner = ctx.pair(val, Value::EMPTY_LIST);
+                Ok(ctx.pair(uq_sym, inner))
             }
             OwnedToken::UnquoteSplicing => {
                 self.advance();
-                let val = self.read(symbols)?;
+                let val = self.read(ctx, symbols)?;
                 let uqs_sym = Value::symbol(symbols.intern("unquote-splicing").0);
-                Ok(Value::pair(uqs_sym, Value::pair(val, Value::EMPTY_LIST)))
+                let inner = ctx.pair(val, Value::EMPTY_LIST);
+                Ok(ctx.pair(uqs_sym, inner))
             }
             OwnedToken::Splice => {
                 self.advance();
-                let val = self.read(symbols)?;
+                let val = self.read(ctx, symbols)?;
                 let splice_sym = Value::symbol(symbols.intern("splice").0);
-                Ok(Value::pair(splice_sym, Value::pair(val, Value::EMPTY_LIST)))
+                let inner = ctx.pair(val, Value::EMPTY_LIST);
+                Ok(ctx.pair(splice_sym, inner))
             }
             OwnedToken::Integer(n) => {
                 let val = Value::int(*n);
@@ -168,7 +184,7 @@ impl Reader {
                 Ok(val)
             }
             OwnedToken::String(s) => {
-                let val = Value::string(s.as_str());
+                let val = ctx.string(s.as_str());
                 self.advance();
                 Ok(val)
             }
@@ -237,8 +253,8 @@ impl Reader {
         }
     }
 
-    pub fn read(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
-        match self.try_read(symbols) {
+    pub fn read(&mut self, ctx: &mut Alloc, symbols: &mut SymbolTable) -> Result<Value, String> {
+        match self.try_read(ctx, symbols) {
             Some(result) => result,
             None => {
                 let loc = self.current_location();
@@ -247,7 +263,7 @@ impl Reader {
         }
     }
 
-    fn read_list(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+    fn read_list(&mut self, ctx: &mut Alloc, symbols: &mut SymbolTable) -> Result<Value, String> {
         self.advance(); // skip (
         let mut elements = Vec::new();
 
@@ -265,18 +281,18 @@ impl Reader {
                     return Ok(elements
                         .into_iter()
                         .rev()
-                        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc)));
+                        .fold(Value::EMPTY_LIST, |acc, v| ctx.pair(v, acc)));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
                     continue;
                 }
-                _ => elements.push(self.read(symbols)?),
+                _ => elements.push(self.read(ctx, symbols)?),
             }
         }
     }
 
-    fn read_array(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+    fn read_array(&mut self, ctx: &mut Alloc, symbols: &mut SymbolTable) -> Result<Value, String> {
         self.advance(); // skip [
         let mut elements = Vec::new();
 
@@ -291,18 +307,18 @@ impl Reader {
                 }
                 Some(OwnedToken::RightBracket) => {
                     self.advance();
-                    return Ok(Value::array_mut(elements));
+                    return Ok(ctx.array_mut(elements));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
                     continue;
                 }
-                _ => elements.push(self.read(symbols)?),
+                _ => elements.push(self.read(ctx, symbols)?),
             }
         }
     }
 
-    fn read_struct(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+    fn read_struct(&mut self, ctx: &mut Alloc, symbols: &mut SymbolTable) -> Result<Value, String> {
         self.advance(); // skip {
         let mut elements = Vec::new();
 
@@ -322,19 +338,19 @@ impl Reader {
                     let result = elements
                         .into_iter()
                         .rev()
-                        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc));
-                    return Ok(Value::pair(struct_sym, result));
+                        .fold(Value::EMPTY_LIST, |acc, v| ctx.pair(v, acc));
+                    return Ok(ctx.pair(struct_sym, result));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
                     continue;
                 }
-                _ => elements.push(self.read(symbols)?),
+                _ => elements.push(self.read(ctx, symbols)?),
             }
         }
     }
 
-    fn read_table(&mut self, symbols: &mut SymbolTable) -> Result<Value, String> {
+    fn read_table(&mut self, ctx: &mut Alloc, symbols: &mut SymbolTable) -> Result<Value, String> {
         self.advance(); // skip {
         let mut elements = Vec::new();
 
@@ -348,14 +364,14 @@ impl Reader {
                     let result = elements
                         .into_iter()
                         .rev()
-                        .fold(Value::EMPTY_LIST, |acc, v| Value::pair(v, acc));
-                    return Ok(Value::pair(table_sym, result));
+                        .fold(Value::EMPTY_LIST, |acc, v| ctx.pair(v, acc));
+                    return Ok(ctx.pair(table_sym, result));
                 }
                 Some(OwnedToken::Comment(_)) => {
                     self.advance();
                     continue;
                 }
-                _ => elements.push(self.read(symbols)?),
+                _ => elements.push(self.read(ctx, symbols)?),
             }
         }
     }

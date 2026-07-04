@@ -105,6 +105,7 @@ impl WasmEmitter {
                             dst: call_dst,
                             func: fn_reg,
                             args,
+                            ..
                         } => {
                             let resume_state = self
                                 .call_state_map
@@ -191,6 +192,7 @@ impl WasmEmitter {
                         dst,
                         func: fn_reg,
                         args,
+                        ..
                     } => {
                         let resume_state = self
                             .call_state_map

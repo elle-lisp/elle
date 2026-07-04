@@ -2,15 +2,8 @@ use crate::error::LocationMap;
 use crate::reader::SourceLoc;
 use crate::value::Value;
 
-/// Per-field escape analysis info for cross-module projection.
-#[derive(Debug, Clone, Copy)]
-pub struct FieldEscapeInfo {
-    /// True when the field's closure is rotation-safe AND param-safe.
-    pub rotation_safe: bool,
-    /// True when the field's closure is outward-safe (no external
-    /// heap stores, even if it returns heap values).
-    pub outward_safe: bool,
-}
+mod disasm;
+pub use disasm::*;
 
 /// Bytecode instruction set
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +138,9 @@ pub enum Instruction {
     /// Empty list constant
     EmptyList,
 
+    /// No match arm covered the scrutinee: signals :match-error carrying it.
+    MatchFail,
+
     /// First for destructuring: signals error if not a cons cell.
     FirstDestructure,
 
@@ -202,35 +198,6 @@ pub enum Instruction {
     /// Pops args array, pops function, tail calls with array elements.
     TailCallArrayMut,
 
-    /// Enter an allocation region (scope boundary for allocator).
-    /// No operands. Pushes a scope mark on the current FiberHeap.
-    /// Effective for all fibers including root (after issue-525).
-    RegionEnter,
-
-    /// Exit an allocation region (scope boundary for allocator).
-    /// No operands. Pops scope mark and releases scoped objects.
-    /// Effective for all fibers including root (after issue-525).
-    RegionExit,
-
-    /// Exit a call-scoped allocation region.
-    /// No operands. Pops two scope marks (barrier + region start),
-    /// frees only the range between them (arg temporaries).
-    RegionExitCall,
-
-    /// Rotate loop scope marks (soft — no slot deallocation).
-    /// Resets alloc_count, runs dtors, truncates tracking vecs.
-    /// Used when loop params may chain across iterations.
-    RegionRotate,
-
-    /// Rotate loop scope marks (hard — with slot deallocation).
-    /// Same as RegionRotate but returns slab slots to the free list.
-    /// Used when no loop param references previous iteration's allocs.
-    RegionRotateDealloc,
-    /// Rotate loop scope marks (refcount-aware — skip pinned values).
-    RegionRotateRefcounted,
-    /// Pop scope mark and release refcount-0 objects only.
-    RegionExitRefcounted,
-
     /// Push a parameter frame onto the fiber's param_frames stack.
     /// Operand: u8 count (number of (param, value) pairs on the stack).
     /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
@@ -257,30 +224,6 @@ pub enum Instruction {
     /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
     /// Source struct is popped from the stack; result pushed.
     StructRest,
-
-    /// Enter outbox routing context. No operands.
-    /// Toggles allocation routing to the outbox (for yield-bound values).
-    OutboxEnter,
-
-    /// Exit outbox routing context. No operands.
-    /// Reverts allocation routing to the private heap.
-    OutboxExit,
-
-    /// Push an explicit rotation frame. No operands.
-    /// Captures the current heap state so `FlipSwap` can rotate relative
-    /// to it and `FlipExit` can tear down this frame's swap pool without
-    /// touching the caller's. Emitted at function entry when the function
-    /// wants explicit rotation (e.g., a self-tail-recursive loop).
-    FlipEnter,
-
-    /// Rotate generations using the top flip frame. No operands.
-    /// Equivalent to the trampoline's implicit `rotate_pools` but keyed
-    /// off the flip stack. Emitted before a self-tail-call.
-    FlipSwap,
-
-    /// Pop the top flip frame and tear down its trailing swap pool. No
-    /// operands. Emitted before every Return in a flip-wrapped function.
-    FlipExit,
 
     /// Convert int → float. Pops value, pushes float. Identity on floats.
     IntToFloat,
@@ -337,6 +280,129 @@ pub enum Instruction {
     CallChecked,
     /// Arity-checked tail call (arg_count). Compiler verified arity.
     TailCallChecked,
+
+    /// Append string to @string (pops value, pops string, pushes string)
+    IntrStringPush,
+    /// Append byte to @bytes (pops value, pops bytes, pushes bytes)
+    IntrBytesPush,
+
+    /// Increment the reference count of a region.
+    /// Operand: u32 region_id.
+    /// Emitted when a value in region A is stored into a structure in
+    /// region B — region A must outlive region B's free point.
+    IncrefRegion,
+
+    /// Decrement the reference count of a region.
+    /// Operand: u32 region_id.
+    /// Decrements RC; when RC hits 0, the region's pages are freed and
+    /// cascade decrefs fire for any cross-region references found in
+    /// the region's contents. The sole region-demise bytecode.
+    DecrefRegion,
+
+    /// Decrement the reference count of the region of the value on
+    /// top of the operand stack. No operand. Pops the value and
+    /// calls `region_of` + `decref_region` at runtime. Used by the
+    /// caller at a Call-result region's decref_point when the compile-time
+    /// region ID doesn't match the runtime region of the actual
+    /// returned value.
+    DecrefValueRegion,
+
+    /// Decrement the reference count of the region of the value on top of
+    /// the operand stack, using `region_of` (NOT `result_region_of`). No
+    /// operand. Pops the value. Unlike `DecrefValueRegion`, this does NOT
+    /// see through a `CaptureCell` wrapper — it frees the CELL's own region.
+    /// Emitted at a captured (env-allocated) binding's `decref_point` to
+    /// release the per-value env cell `populate_env` minted for it (the
+    /// owned-binding release for capture cells; docs/impl/region-rules.md Rule 8).
+    /// `DecrefValueRegion` would unwrap to the inner value's region instead —
+    /// freeing a caller-owned region and leaking the cell.
+    DecrefCellRegion,
+
+    /// Increment the reference count of the region of the value on
+    /// top of the operand stack. No operand. Pops the value and calls
+    /// `region_of` + `incref_region` at runtime (skipping region 0).
+    /// The mirror of `DecrefValueRegion`; emitted at a function's tail
+    /// value so the callee hands the caller one owning reference to the
+    /// result's runtime region.
+    IncrefValueRegion,
+
+    /// Adopt the region of one value into another's Owned subtree (the
+    /// `AdoptRegion` LIR instruction). No operand. Pops two values — `child`
+    /// (top) then `parent` — resolves each to its runtime region via
+    /// `result_region_of`, and calls `RegionStore::adopt_region(parent_region,
+    /// child_region)`, freezing the child's RC so it is reclaimed only by the
+    /// parent's subtree drop (docs/impl/region-model.md § "Adoption and subtree
+    /// drop"). Emitted only under `--region-ownership`; realized on the
+    /// interpreter and the JIT (`elle_jit_adopt_region`).
+    AdoptRegion,
+
+    /// Debug-only region-coalescing oracle (the `AssertRegionMatches` LIR
+    /// instruction). Operand: u32 region slot. Peeks the value on top of the
+    /// operand stack (does NOT pop — it is the return value), resolves the slot
+    /// through the current `activation_region_map`, and under `debug_assertions`
+    /// panics if the slot's physical region differs from `region_of(value)`. In
+    /// release builds it reads the slot operand and does nothing; the lowerer
+    /// emits it only under `debug_assertions`, so release bytecode never carries
+    /// it. See `LirInstr::AssertRegionMatches`.
+    AssertRegionMatches,
+
+    /// Free a co-owned region group as one unit (the `FreeRegionGroup` LIR
+    /// instruction). Operand: u8 member count. Pops that many values off the
+    /// operand stack, resolves each to its runtime region via `result_region_of`,
+    /// and calls `FiberHeap::free_region_group`, which runs the four-phase subtree
+    /// drop over the whole set — interior member↔member references reclaim with the
+    /// group, only genuinely-Shared frontier references cascade. Emitted only under
+    /// `--region-ownership`; realized on the interpreter and the JIT
+    /// (`elle_jit_free_region_group`).
+    FreeRegionGroup,
+
+    /// Push the currently-executing closure onto the operand stack. No operand.
+    /// The value path for a self-reference: the runtime holds the executing
+    /// closure in a per-activation register (`Fiber::current_closure`), and this
+    /// reads it directly — a value-position `loop`/`go` resolves to the closure
+    /// itself with no capture-slot operand. See `LirInstr::LoadSelf`.
+    LoadSelf,
+
+    /// Adopt the region of the value on top of the operand stack into the
+    /// CURRENT ACTIVATION's owner node (the `AdoptIntoActivation` LIR
+    /// instruction). No operand. Pops the child value, resolves its runtime
+    /// region via `result_region_of`, lazily mints the activation's pages-less
+    /// owner node, and calls `RegionStore::adopt_region(node, child_region)` —
+    /// freezing the child's RC so it is reclaimed only by the node's subtree
+    /// drop at the activation's normal completion (docs/impl/region-model.md
+    /// § "Owner nodes — an activation as a forest root"). An immediate child
+    /// (no region) adopts nothing and mints no node. Realized on the
+    /// interpreter and the JIT (`elle_jit_adopt_into_activation`).
+    AdoptIntoActivation,
+
+    /// Materialize a heap literal — a string, or quoted compound data (list /
+    /// array / nested structure) — into a fresh per-activation region. Operands:
+    /// u32 region slot, u32 template byte length, then that many bytes encoding a
+    /// recursive `ConstTemplate` inline in the instruction stream (the immutable
+    /// template — plain data kept in the reclaimable bytecode). Resolves the slot
+    /// to a physical region and materializes a fresh
+    /// structure there, pushing it. Must remain the last variant — the
+    /// `Instruction::from_byte` high-water-mark check keys on it.
+    MaterializeConst,
+}
+
+impl Instruction {
+    /// Decode an opcode byte, rejecting bytes that are not a valid
+    /// `Instruction`. The ONLY sound way to turn a `u8` into an
+    /// `Instruction`: a bare transmute of an out-of-range byte is undefined
+    /// behavior (debug builds abort the process, release builds are UB).
+    ///
+    /// `#[repr(u8)]` with no explicit discriminants assigns variants 0..=N
+    /// sequentially; the last variant in source order is the current
+    /// high-water mark.
+    #[inline]
+    pub fn from_byte(byte: u8) -> Option<Instruction> {
+        if byte <= Instruction::MaterializeConst as u8 {
+            Some(unsafe { std::mem::transmute::<u8, Instruction>(byte) })
+        } else {
+            None
+        }
+    }
 }
 
 /// Compiled bytecode with constants
@@ -361,12 +427,22 @@ pub struct Bytecode {
     /// compilation. When an importing file sees `module:field`, the analyzer
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
-    /// Escape projection: maps keyword field names to escape analysis
-    /// properties. Populated during lowering for module-pattern files
-    /// that return a struct of closures. When an importing file sees
-    /// `module:field` as a callee, the lowerer uses this projection to
-    /// determine safety properties.
-    pub escape_projection: Option<std::collections::HashMap<String, FieldEscapeInfo>>,
+    /// Blueprints for this code object's `MakeClosure` instructions. Each
+    /// `MakeClosure` pushes its nested-lambda template here and emits the index;
+    /// the VM/JIT materialize a fresh region-allocated `HeapObject::ClosureTemplate`
+    /// per execution (a heap literal is an ordinary, reclaimable allocation).
+    /// Threaded into the executing `Code` so each template is reclaimed by region
+    /// RC, never pinned for the process lifetime.
+    pub child_protos: Vec<std::rc::Rc<crate::value::closure::ClosureTemplate>>,
+    /// The static region slots this (top-level / entry) function's allocations
+    /// SHARE after a builder-idiom merge (docs/impl/region-model.md § Merging),
+    /// carried from the entry `LirFunction.merged_slots` so the executing `Code`
+    /// can mint-or-reuse them. The per-lambda equivalent rides
+    /// `ClosureTemplate.merged_slots`; this is the entry-function path
+    /// (`Bytecode → Code`), which would otherwise read empty. Empty unless a merge
+    /// fired (`--checked-intrinsics=off` with a builder idiom), so inert on the
+    /// default path.
+    pub merged_slots: std::rc::Rc<rustc_hash::FxHashSet<u32>>,
 }
 
 impl Bytecode {
@@ -378,7 +454,8 @@ impl Bytecode {
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
-            escape_projection: None,
+            child_protos: Vec::new(),
+            merged_slots: crate::value::code::empty_merged_slots(),
         }
     }
 
@@ -441,6 +518,16 @@ impl Bytecode {
         self.instructions.push((value & 0xff) as u8);
     }
 
+    /// Emit a u32 (big-endian). Used for region-id operands, which are
+    /// minted fresh per allocation-site and thus need the full 32-bit
+    /// space (see docs/regions/semantics.md — every value its own region).
+    pub fn emit_u32(&mut self, value: u32) {
+        self.instructions.push((value >> 24) as u8);
+        self.instructions.push((value >> 16) as u8);
+        self.instructions.push((value >> 8) as u8);
+        self.instructions.push((value & 0xff) as u8);
+    }
+
     /// Emit an i16 (big-endian)
     pub fn emit_i16(&mut self, value: i16) {
         self.emit_u16(value as u16);
@@ -483,146 +570,6 @@ impl Default for Bytecode {
 
 // ── Debug formatting ────────────────────────────────────────────────
 
-/// Disassemble bytecode and return one string per instruction
-pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut i = 0;
-
-    while i < instructions.len() {
-        let byte = instructions[i];
-        let instr: Instruction = unsafe { std::mem::transmute(byte) };
-        let mut line = format!("[{}] {:?}", i, instr);
-        i += 1;
-
-        match instr {
-            Instruction::LoadConst if i + 1 < instructions.len() => {
-                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (const_idx={})", idx));
-                i += 2;
-            }
-            Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue
-                if i + 3 < instructions.len() =>
-            {
-                let offset = i32::from_be_bytes([
-                    instructions[i],
-                    instructions[i + 1],
-                    instructions[i + 2],
-                    instructions[i + 3],
-                ]);
-                let target = (i + 4) as i64 + offset as i64;
-                line.push_str(&format!(" (offset={}, target={})", offset, target));
-                i += 4;
-            }
-            Instruction::LoadLocal | Instruction::StoreLocal if i + 1 < instructions.len() => {
-                let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (index={})", index));
-                i += 2;
-            }
-            Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue
-                if i + 2 < instructions.len() =>
-            {
-                let depth = instructions[i];
-                let index = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
-                line.push_str(&format!(" (depth={}, index={})", depth, index));
-                i += 3;
-            }
-            Instruction::Call
-            | Instruction::TailCall
-            | Instruction::CallChecked
-            | Instruction::TailCallChecked
-                if i + 1 < instructions.len() =>
-            {
-                let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (args={})", arg_count));
-                i += 2;
-            }
-            Instruction::DupN if i < instructions.len() => {
-                let offset = instructions[i];
-                line.push_str(&format!(" (offset={})", offset));
-                i += 1;
-            }
-            Instruction::MakeClosure if i + 3 < instructions.len() => {
-                let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                let num_captures =
-                    ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
-                line.push_str(&format!(
-                    " (const_idx={}, num_captures={})",
-                    const_idx, num_captures
-                ));
-                i += 4;
-            }
-            Instruction::ArrayMutRefDestructure
-            | Instruction::ArrayMutSliceFrom
-            | Instruction::ArrayMutRefOrNil
-                if i + 1 < instructions.len() =>
-            {
-                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (index={})", idx));
-                i += 2;
-            }
-            Instruction::StructGetOrNil | Instruction::StructGetDestructure
-                if i + 1 < instructions.len() =>
-            {
-                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                line.push_str(&format!(" (const_idx={})", idx));
-                i += 2;
-            }
-            Instruction::StructRest if i + 1 < instructions.len() => {
-                let count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                i += 2;
-                let mut keys = Vec::new();
-                for _ in 0..count {
-                    if i + 1 < instructions.len() {
-                        let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                        i += 2;
-                        keys.push(format!("const[{}]", idx));
-                    }
-                }
-                line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
-            }
-            Instruction::Eval => {
-                // No operands — pops 2 from stack, pushes 1
-            }
-            Instruction::ArrayMutExtend | Instruction::ArrayMutPush => {
-                // No operands
-            }
-            Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
-                // No operands (arg count is dynamic, determined by array length)
-            }
-            Instruction::RegionEnter
-            | Instruction::RegionExit
-            | Instruction::RegionExitCall
-            | Instruction::RegionRotate
-            | Instruction::RegionRotateDealloc
-            | Instruction::RegionRotateRefcounted
-            | Instruction::RegionExitRefcounted
-            | Instruction::OutboxEnter
-            | Instruction::OutboxExit
-            | Instruction::FlipEnter
-            | Instruction::FlipSwap
-            | Instruction::FlipExit => {
-                // No operands
-            }
-            Instruction::IntToFloat | Instruction::FloatToInt => {
-                // No operands — pop one, push one
-            }
-            Instruction::PushParamFrame if i < instructions.len() => {
-                let count = instructions[i];
-                line.push_str(&format!(" (count={})", count));
-                i += 1;
-            }
-            Instruction::PopParamFrame => {
-                // No operands
-            }
-            _ => {}
-        }
-
-        lines.push(line);
-    }
-
-    lines
-}
-
 /// Disassemble bytecode with proper instruction names and operands
 pub fn disassemble(instructions: &[u8]) -> String {
     disassemble_lines(instructions)
@@ -646,98 +593,4 @@ pub fn format_bytecode_with_constants(instructions: &[u8], constants: &[crate::V
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bytecode_emission() {
-        let mut bc = Bytecode::new();
-        bc.emit(Instruction::LoadConst);
-        bc.emit_u16(0);
-        bc.emit(Instruction::Return);
-        assert_eq!(bc.instructions.len(), 4);
-    }
-
-    #[test]
-    fn test_constant_deduplication() {
-        let mut bc = Bytecode::new();
-        let idx1 = bc.add_constant(Value::int(42));
-        let idx2 = bc.add_constant(Value::int(42));
-        assert_eq!(idx1, idx2);
-        assert_eq!(bc.constants.len(), 1);
-    }
-
-    #[test]
-    fn test_instruction_roundtrip() {
-        // Test that all arithmetic/bitwise instructions can be emitted and decoded
-        let instructions = [
-            Instruction::Add,
-            Instruction::Sub,
-            Instruction::Mul,
-            Instruction::Div,
-            Instruction::Rem,
-            Instruction::BitAnd,
-            Instruction::BitOr,
-            Instruction::BitXor,
-            Instruction::BitNot,
-            Instruction::Shl,
-            Instruction::Shr,
-        ];
-
-        for instr in instructions {
-            let mut bc = Bytecode::new();
-            bc.emit(instr);
-            let byte = bc.instructions[0];
-            let decoded: Instruction = unsafe { std::mem::transmute(byte) };
-            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
-        }
-    }
-
-    #[test]
-    fn test_region_instruction_roundtrip() {
-        for instr in [Instruction::RegionEnter, Instruction::RegionExit] {
-            let mut bc = Bytecode::new();
-            bc.emit(instr);
-            assert_eq!(
-                bc.instructions.len(),
-                1,
-                "Region instruction should be 1 byte"
-            );
-            let decoded: Instruction = unsafe { std::mem::transmute(bc.instructions[0]) };
-            assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
-        }
-    }
-
-    #[test]
-    fn test_bytecode_variants_distinct() {
-        // Catch accidental duplication of variants (they all get auto-
-        // numbered by the compiler, so any duplicate would be a compile
-        // error anyway — but this test additionally guards against a
-        // refactor that collapses two variants into one). All repr values
-        // must be distinct; pick a few representative ones and spot-check.
-        assert_ne!(
-            Instruction::StructGetDestructure as u8,
-            Instruction::StructGetOrNil as u8,
-            "StructGetDestructure must have a distinct byte value from StructGetOrNil"
-        );
-        assert_ne!(
-            Instruction::FirstDestructure as u8,
-            Instruction::RestDestructure as u8,
-        );
-        assert_ne!(
-            Instruction::OutboxEnter as u8,
-            Instruction::OutboxExit as u8,
-        );
-    }
-
-    #[test]
-    fn test_region_disassembly() {
-        let mut bc = Bytecode::new();
-        bc.emit(Instruction::RegionEnter);
-        bc.emit(Instruction::RegionExit);
-        let lines = disassemble_lines(&bc.instructions);
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("RegionEnter"));
-        assert!(lines[1].contains("RegionExit"));
-    }
-}
+mod tests;

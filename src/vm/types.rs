@@ -1,4 +1,5 @@
 use super::core::VM;
+use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
 
 pub(crate) fn handle_is_nil(vm: &mut VM) {
@@ -278,10 +279,19 @@ pub(crate) fn handle_intr_get(vm: &mut VM) {
     } else if let Some(r) = obj.with_string(|s| {
         use unicode_segmentation::UnicodeSegmentation;
         let i = key.as_int().expect("%get: string index must be int") as usize;
-        s.graphemes(true)
-            .nth(i)
-            .map(Value::string)
-            .unwrap_or(Value::NIL)
+        // The grapheme is born in the SOURCE string's own region (a pass-through
+        // result, like `CollectionCallResult`): `%get` carries no region operand
+        // (it is not modelled as allocating; the JIT path does not allocate at
+        // all), so the result co-locates with the indexed string whose lifetime
+        // covers the result's use. A heap string always has a region.
+        match s.graphemes(true).nth(i) {
+            Some(g) => {
+                let region = crate::value::arena::region_of(unsafe { &mut *vm.heap_ptr }, obj)
+                    .expect("%get: indexed string must have a region");
+                crate::value::build::string(unsafe { &mut *vm.heap_ptr }, g, region)
+            }
+            None => Value::NIL,
+        }
     }) {
         r
     } else {
@@ -290,79 +300,183 @@ pub(crate) fn handle_intr_get(vm: &mut VM) {
     vm.fiber.stack.push(result);
 }
 
+/// Run a conditionally-allocating intrinsic body (`%put`/`%del`/`%string-push`)
+/// with the same per-call result-region discipline as `VM::dispatch_native_call`
+/// — these opcodes are the unchecked fast path for those very primitives. Mint a
+/// fresh region, run the body into it, then pass-through-retain so the caller's
+/// `DecrefValueRegion` (emitted because the region walk now marks these ops as
+/// `call_result_regions`) frees the right *runtime* region: the minted region
+/// for an immutable fresh copy, or arg 0's region for an in-place mutation
+/// (balanced by the retain).
+///
+/// Both the driving `vm` and the `heap` are explicit: the interpreter handlers
+/// pass their own `vm`/`vm.heap_ptr`; the JIT helpers resolve the `vm` from the
+/// threaded `JitCtx` and pass `(*vm).heap_ptr` for the heap. The VM is named at
+/// every call (docs/impl/region-ctx.md "JIT intrinsic helpers reach the VM through
+/// a JitCtx").
+pub(crate) fn run_alloc_intrinsic(
+    vm: *mut crate::vm::VM,
+    heap: *mut crate::value::fiberheap::FiberHeap,
+    body: impl FnOnce(&mut crate::primitives::ctx::NativeCtx) -> (crate::value::SignalBits, Value),
+) -> (crate::value::SignalBits, Value) {
+    let region = unsafe { (*heap).new_runtime_region() };
+    let (bits, value) = {
+        let mut ctx =
+            crate::primitives::ctx::NativeCtx::with_region_vm(region, unsafe { &mut *heap }, vm);
+        body(&mut ctx)
+    };
+    crate::value::arena::pass_through_retain(unsafe { &mut *heap }, value, region);
+    (bits, value)
+}
+
 pub(crate) fn handle_intr_put(vm: &mut VM) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let key = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    // Delegate to prim_put — it handles all the polymorphic cases.
-    // On correct types it never errors; wrong types → panic.
-    let (bits, result) = crate::primitives::access::prim_put(&[obj, key, val]);
-    assert!(
-        !bits.contains(crate::value::SIG_ERROR),
-        "%put: type error (intrinsic contract violated)"
-    );
+    // Delegate to prim_put — it handles all the polymorphic cases. Runtime type
+    // errors (e.g. unhashable key) propagate via fiber.signal so `protect` can
+    // observe them, matching the NativeFn `prim_put` path used under
+    // --checked-intrinsics. The immutable-copy result is born in this call's
+    // own minted region (run_alloc_intrinsic).
+    let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
+        crate::primitives::access::prim_put(ctx, &[obj, key, val])
+    });
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    }
     vm.fiber.stack.push(result);
 }
 
 pub(crate) fn handle_intr_del(vm: &mut VM) {
     let key = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    let (bits, result) = crate::primitives::lstruct::prim_del(&[obj, key]);
-    assert!(
-        !bits.contains(crate::value::SIG_ERROR),
-        "%del: type error (intrinsic contract violated)"
-    );
+    let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
+        crate::primitives::lstruct::prim_del(ctx, &[obj, key])
+    });
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    }
     vm.fiber.stack.push(result);
 }
 
 pub(crate) fn handle_intr_has(vm: &mut VM) {
     let key = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    let (bits, result) = crate::primitives::lstruct::prim_has_key(&[obj, key]);
-    assert!(
-        !bits.contains(crate::value::SIG_ERROR),
-        "%has?: type error (intrinsic contract violated)"
+    // `%has?` is Immediate (returns a bool, allocates nothing), but `prim_has_key`
+    // is a PrimFn requiring a NativeCtx; a `boundary` ctx over the VM mints its
+    // own (unused) region.
+    let (bits, result) = crate::primitives::lstruct::prim_has_key(
+        &mut crate::primitives::ctx::NativeCtx::boundary_vm(vm),
+        &[obj, key],
     );
+    if bits.contains(crate::value::SIG_ERROR) {
+        vm.fiber.signal = Some((bits, result));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    }
     vm.fiber.stack.push(result);
 }
 
 pub(crate) fn handle_intr_push(vm: &mut VM) {
     let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    if let Some(vec_ref) = collection.as_array_mut() {
-        vec_ref.borrow_mut().push(value);
-        vm.fiber.stack.push(collection);
-    } else if let Some(elems) = collection.as_array() {
-        let mut new = elems.to_vec();
-        new.push(value);
-        vm.fiber.stack.push(Value::array(new));
-    } else {
-        panic!("%push: unsupported type {}", collection.type_name())
+    // Delegate to prim_push: @array mutates in place (returns arg 0,
+    // pass-through), immutable array yields a fresh copy. The immutable copy is
+    // born in this call's own minted region (run_alloc_intrinsic) and
+    // pass-through-retained — matching the call-result-region model
+    // (`produces_call_result_region`) the lowerer now uses for %array-push, which
+    // frees the result via a value-based DecrefValueRegion.
+    let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
+        crate::primitives::intrinsics::prim_push(ctx, &[collection, value])
+    });
+    if bits.contains(crate::value::SIG_ERROR) {
+        // A type mismatch reaching this unchecked intrinsic is a compiler bug
+        // (emitted without the proof it requires) — panic like the sibling
+        // intrinsics, not signal. The catchable path is --checked-intrinsics.
+        panic!("%array-push: unsupported type {}", collection.type_name());
     }
+    vm.fiber.stack.push(result);
+}
+
+pub(crate) fn handle_intr_string_push(vm: &mut VM) {
+    let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    // Delegate to prim_string_push for the push itself. A runtime type
+    // mismatch here means the compiler emitted the unchecked intrinsic
+    // without the proof it requires — a compiler bug, so panic loudly like
+    // the sibling intrinsics (%array-push, %bytes-push, %get, %length).
+    // The catchable-error path is the NativeFn used under
+    // --checked-intrinsics; signaling from here instead would let code the
+    // compiler stamped signal-free raise SIG_ERROR at runtime.
+    let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
+        crate::primitives::intrinsics::prim_string_push(ctx, &[collection, value])
+    });
+    if bits.contains(crate::value::SIG_ERROR) {
+        panic!(
+            "%string-push: expected string or @string, got {} (pushed value: {})",
+            collection.type_name(),
+            value.type_name()
+        );
+    }
+    vm.fiber.stack.push(result);
+}
+
+pub(crate) fn handle_intr_bytes_push(vm: &mut VM) {
+    let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    // Delegate to prim_bytes_push: @bytes appends in place (returns arg 0,
+    // pass-through), immutable bytes yields a fresh copy born in this call's own
+    // minted region (run_alloc_intrinsic) and pass-through-retained — matching the
+    // call-result-region model (`produces_call_result_region`) the lowerer now uses
+    // for %bytes-push.
+    let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
+        crate::primitives::intrinsics::prim_bytes_push(ctx, &[collection, value])
+    });
+    if bits.contains(crate::value::SIG_ERROR) {
+        panic!(
+            "%bytes-push: expected bytes or @bytes (value must be integer), got {} (value {})",
+            collection.type_name(),
+            value.type_name()
+        );
+    }
+    vm.fiber.stack.push(result);
 }
 
 pub(crate) fn handle_intr_pop(vm: &mut VM) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
-    let arr = val.as_array_mut().expect("%pop: expected @array");
-    let popped = arr.borrow_mut().pop().expect("%pop: empty @array");
-    vm.fiber.stack.push(popped);
+    let empty = val
+        .array_mut_ref()
+        .expect("intr_pop: expected @array")
+        .is_empty();
+    if empty {
+        vm.set_error("argument-error", "pop: empty @array");
+        vm.fiber.stack.push(Value::NIL);
+    } else {
+        let popped = crate::value::arena::pop_with_decref(unsafe { &mut *vm.heap_ptr }, val);
+        vm.fiber.stack.push(popped);
+    }
 }
 
-pub(crate) fn handle_intr_freeze(vm: &mut VM) {
+pub(crate) fn handle_intr_freeze(vm: &mut VM, region: RuntimeRegion) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let heap = unsafe { &mut *vm.heap_ptr };
     let result = if let Some(a) = val.as_array_mut() {
-        Value::array(a.borrow().clone())
+        crate::value::build::array(heap, a.borrow().clone(), region)
     } else if let Some(t) = val.as_struct_mut() {
         let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect();
-        Value::struct_from_sorted(entries)
+        crate::value::build::struct_from_sorted(heap, entries, region)
     } else if let Some(s) = val.as_set_mut() {
-        Value::set(s.borrow().clone())
+        crate::value::build::set(heap, s.borrow().clone(), region)
     } else if let Some(buf) = val.as_string_mut() {
         let b = buf.borrow();
         let s = std::str::from_utf8(&b).expect("%freeze: @string invalid UTF-8");
-        Value::string(s)
+        crate::value::build::string(heap, s, region)
     } else if let Some(b) = val.as_bytes_mut() {
-        Value::bytes(b.borrow().clone())
+        crate::value::build::bytes(heap, b.borrow().clone(), region)
     } else {
         // Already immutable — pass through
         val
@@ -370,20 +484,23 @@ pub(crate) fn handle_intr_freeze(vm: &mut VM) {
     vm.fiber.stack.push(result);
 }
 
-pub(crate) fn handle_intr_thaw(vm: &mut VM) {
+pub(crate) fn handle_intr_thaw(vm: &mut VM, region: RuntimeRegion) {
     let val = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
+    let heap = unsafe { &mut *vm.heap_ptr };
     let result = if let Some(a) = val.as_array() {
-        Value::array_mut(a.to_vec())
+        crate::value::build::array_mut(heap, a.to_vec(), region)
     } else if let Some(s) = val.as_struct() {
         let entries: std::collections::BTreeMap<_, _> =
             s.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        Value::struct_mut_from(entries)
+        crate::value::build::struct_mut_from(heap, entries, region)
     } else if let Some(s) = val.as_set() {
-        Value::set_mut(s.iter().cloned().collect())
-    } else if let Some(r) = val.with_string(|s| Value::string_mut(s.as_bytes().to_vec())) {
+        crate::value::build::set_mut(heap, s.iter().cloned().collect(), region)
+    } else if let Some(r) =
+        val.with_string(|s| crate::value::build::string_mut(heap, s.as_bytes().to_vec(), region))
+    {
         r
     } else if let Some(b) = val.as_bytes() {
-        Value::bytes_mut(b.to_vec())
+        crate::value::build::bytes_mut(heap, b.to_vec(), region)
     } else {
         // Already mutable — pass through
         val
@@ -439,3 +556,6 @@ pub(crate) fn handle_bit_not_intr(vm: &mut VM) {
     let n = val.as_int().expect("%bit-not: expected integer");
     vm.fiber.stack.push(Value::int(!n));
 }
+
+#[cfg(test)]
+mod tests;

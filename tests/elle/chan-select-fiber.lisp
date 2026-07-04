@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Channel/select × fiber scheduler interaction tests.
 #
 # Regression cover for: chan/select must not park the OS thread, because the
@@ -85,11 +85,11 @@
 # ============================================================================
 
 (let [[tx rx] (chan)
-      _ (sys/spawn (fn []  # Small synchronous sleep so the parent definitely
-                     # parks first.  ev/sleep requires a scheduler — we
-                     # don't have one on the spawned OS thread.
-                     (time/sleep 0.02)
-                     (chan/send tx :hello-from-os-thread)))
+      _ (sys/spawn-vm (fn []  # Small synchronous sleep so the parent definitely
+                        # parks first.  ev/sleep requires a scheduler — we
+                        # don't have one on the spawned OS thread.
+                        (time/sleep 0.02)
+                        (chan/send tx :hello-from-os-thread)))
       t0 (clock/monotonic)
       sel (chan/select @[rx] 1000)
       elapsed (- (clock/monotonic) t0)]
@@ -112,7 +112,7 @@
 (let [iterations 200]
   (each i in (range 0 iterations)
     (let [[tx rx] (chan)
-          producer (sys/spawn (fn [] (chan/send tx i)))
+          producer (sys/spawn-vm (fn [] (chan/send tx i)))
           t0 (clock/monotonic)
           sel (chan/select @[rx] 500)
           elapsed (- (clock/monotonic) t0)]

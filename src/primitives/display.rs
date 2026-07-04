@@ -1,5 +1,4 @@
-use crate::primitives::def::PrimitiveDef;
-use crate::signals::Signal;
+use crate::primitives::def::RegionEffect;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -228,7 +227,10 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
 }
 
 /// (pp value) — Pretty-print a value with indentation, returns the value
-pub(crate) fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_pp(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let val = args[0];
 
     const DEFAULT_WIDTH: usize = 80;
@@ -239,27 +241,30 @@ pub(crate) fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (describe value) — Return a string describing a value's type and content
-pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_describe(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let val = args[0];
 
     if val.is_nil() {
-        return (SIG_OK, Value::string("<nil>"));
+        return (SIG_OK, ctx.string("<nil>"));
     }
 
     if val.is_empty_list() {
-        return (SIG_OK, Value::string("<list (0 elements)>"));
+        return (SIG_OK, ctx.string("<list (0 elements)>"));
     }
 
     if let Some(b) = val.as_bool() {
-        return (SIG_OK, Value::string(format!("<boolean {}>", b)));
+        return (SIG_OK, ctx.string(format!("<boolean {}>", b)));
     }
 
     if let Some(n) = val.as_int() {
-        return (SIG_OK, Value::string(format!("<integer {}>", n)));
+        return (SIG_OK, ctx.string(format!("<integer {}>", n)));
     }
 
     if let Some(n) = val.as_float() {
-        return (SIG_OK, Value::string(format!("<float {}>", n)));
+        return (SIG_OK, ctx.string(format!("<float {}>", n)));
     }
 
     if let Some(r) = val.with_string(|s| {
@@ -268,7 +273,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         } else {
             format!("\"{}\"", s)
         };
-        Value::string(format!("<string {} ({} chars)>", display, s.len()))
+        ctx.string(format!("<string {} ({} chars)>", display, s.len()))
     }) {
         return (SIG_OK, r);
     }
@@ -284,16 +289,16 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         };
         return (
             SIG_OK,
-            Value::string(format!("<@string {} ({} bytes)>", display, buf.len())),
+            ctx.string(format!("<@string {} ({} bytes)>", display, buf.len())),
         );
     }
 
     if let Some(_id) = val.as_symbol() {
-        return (SIG_OK, Value::string(format!("<symbol {}>", val)));
+        return (SIG_OK, ctx.string(format!("<symbol {}>", val)));
     }
 
     if let Some(name) = val.as_keyword_name() {
-        return (SIG_OK, Value::string(format!("<keyword :{}>", name)));
+        return (SIG_OK, ctx.string(format!("<keyword :{}>", name)));
     }
 
     // Count list elements
@@ -304,17 +309,14 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
             count += 1;
             current = pair.rest;
         }
-        return (
-            SIG_OK,
-            Value::string(format!("<list ({} elements)>", count)),
-        );
+        return (SIG_OK, ctx.string(format!("<list ({} elements)>", count)));
     }
 
     // Immutable array
     if let Some(elems) = val.as_array() {
         return (
             SIG_OK,
-            Value::string(format!("<array ({} elements)>", elems.len())),
+            ctx.string(format!("<array ({} elements)>", elems.len())),
         );
     }
 
@@ -323,7 +325,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         let vec = vec_ref.borrow();
         return (
             SIG_OK,
-            Value::string(format!("<@array ({} elements)>", vec.len())),
+            ctx.string(format!("<@array ({} elements)>", vec.len())),
         );
     }
 
@@ -331,7 +333,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     if let Some(struct_map) = val.as_struct() {
         return (
             SIG_OK,
-            Value::string(format!("<struct ({} entries)>", struct_map.len())),
+            ctx.string(format!("<struct ({} entries)>", struct_map.len())),
         );
     }
 
@@ -340,7 +342,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         let table = table_ref.borrow();
         return (
             SIG_OK,
-            Value::string(format!("<@struct ({} entries)>", table.len())),
+            ctx.string(format!("<@struct ({} entries)>", table.len())),
         );
     }
 
@@ -348,7 +350,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     if let Some(set) = val.as_set() {
         return (
             SIG_OK,
-            Value::string(format!("<set ({} elements)>", set.len())),
+            ctx.string(format!("<set ({} elements)>", set.len())),
         );
     }
 
@@ -357,7 +359,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         let set = set_ref.borrow();
         return (
             SIG_OK,
-            Value::string(format!("<@set ({} elements)>", set.len())),
+            ctx.string(format!("<@set ({} elements)>", set.len())),
         );
     }
 
@@ -365,7 +367,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     if let Some(bytes) = val.as_bytes() {
         return (
             SIG_OK,
-            Value::string(format!("<bytes ({} bytes)>", bytes.len())),
+            ctx.string(format!("<bytes ({} bytes)>", bytes.len())),
         );
     }
 
@@ -374,7 +376,7 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         let bytes = bytes_ref.borrow();
         return (
             SIG_OK,
-            Value::string(format!("<@bytes ({} bytes)>", bytes.len())),
+            ctx.string(format!("<@bytes ({} bytes)>", bytes.len())),
         );
     }
 
@@ -387,45 +389,39 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         };
         return (
             SIG_OK,
-            Value::string(format!("<closure (arity {})>", arity_str)),
+            ctx.string(format!("<closure (arity {})>", arity_str)),
         );
     }
 
     // Box
-    if val.as_lbox().is_some() {
-        return (SIG_OK, Value::string("<cell>"));
+    if val.is_lbox() {
+        return (SIG_OK, ctx.string("<cell>"));
     }
 
     // Fiber
     if val.as_fiber().is_some() {
-        return (SIG_OK, Value::string("<fiber>"));
+        return (SIG_OK, ctx.string("<fiber>"));
     }
 
     // Default
-    (SIG_OK, Value::string("<unknown>"))
+    (SIG_OK, ctx.string("<unknown>"))
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "pp",
-        func: prim_pp,
-        signal: Signal::silent(),
+primitive! {
+    "pp" => prim_pp {
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],
         category: "io",
         example: "(pp (list 1 2 (list 3 4)))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "describe",
-        func: prim_describe,
-        signal: Signal::silent(),
+        effect: RegionEffect::PassThrough,
+    }
+    "describe" => prim_describe {
         arity: Arity::Exact(1),
         doc: "Return a string describing a value's type and content.",
         params: &["value"],
         category: "io",
         example: "(describe (list 1 2 3)) #=> \"<list (3 elements)>\"",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Fresh,
+    }
+}

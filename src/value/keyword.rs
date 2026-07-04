@@ -20,13 +20,16 @@
 //! ## Collision handling
 //!
 //! Hash collisions panic immediately — different names that produce the same
-//! 47-bit hash are a fatal, unrecoverable condition. At realistic keyword
-//! set sizes (≤ 10,000), the probability of collision is < 0.00004%.
+//! 64-bit hash are a fatal, unrecoverable condition. The payload is a full
+//! `u64` (the keyword tag occupies the separate tag word of the 16-byte
+//! `Value`), so the hash uses all 64 bits. At realistic keyword set sizes
+//! (≤ 10,000), the birthday-bound collision probability is below
+//! 0.0000000003% (~1 in 3·10^11).
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, RwLock};
 
-/// Global keyword name table. Maps 47-bit FNV-1a hash to keyword name.
+/// Global keyword name table. Maps 64-bit FNV-1a hash to keyword name.
 ///
 /// This is the authoritative table in the host binary. Stable-ABI plugins
 /// never access it directly — they call through the named-function API
@@ -35,7 +38,11 @@ use std::sync::{LazyLock, RwLock};
 static KEYWORD_NAMES: LazyLock<RwLock<HashMap<u64, Box<str>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-/// FNV-1a 64-bit hash of a keyword name, truncated to 47 bits.
+/// Full 64-bit FNV-1a hash of a keyword name.
+///
+/// No truncation: the keyword payload is a full `u64` in the 16-byte
+/// `Value`, so the hash spans the entire 64-bit space for maximum
+/// collision resistance.
 ///
 /// `const fn` to enable precomputed keyword hash constants in the future.
 /// Uses `while` loop (not `for`) because `for` desugars to
@@ -51,10 +58,10 @@ pub const fn keyword_hash(name: &str) -> u64 {
         hash = hash.wrapping_mul(FNV_PRIME);
         i += 1;
     }
-    hash & ((1u64 << 47) - 1)
+    hash
 }
 
-/// Register a keyword name and return its 47-bit hash.
+/// Register a keyword name and return its 64-bit hash.
 ///
 /// Panics on hash collision (different name maps to same hash).
 /// RwLock poisoning on collision panic is intentional — a collision
@@ -94,7 +101,7 @@ pub fn keyword_count() -> usize {
     KEYWORD_NAMES.read().unwrap().len()
 }
 
-/// Look up a keyword name by its 47-bit hash.
+/// Look up a keyword name by its 64-bit hash.
 ///
 /// Returns None only if the hash was never registered — should not happen
 /// for any keyword created through Value::keyword().
@@ -107,84 +114,4 @@ pub fn keyword_name(hash: u64) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hash_is_deterministic() {
-        assert_eq!(keyword_hash("foo"), keyword_hash("foo"));
-        assert_eq!(keyword_hash("error"), keyword_hash("error"));
-    }
-
-    #[test]
-    fn hash_fits_in_47_bits() {
-        let h = keyword_hash("some-long-keyword-name-that-exercises-the-hash");
-        assert_eq!(h & !((1u64 << 47) - 1), 0, "hash must fit in 47 bits");
-    }
-
-    #[test]
-    fn hash_is_const() {
-        const H: u64 = keyword_hash("test");
-        assert_eq!(H & !((1u64 << 47) - 1), 0, "const hash must fit in 47 bits");
-    }
-
-    #[test]
-    fn known_keywords_no_collision() {
-        let keywords = [
-            "error",
-            "yield",
-            "type-error",
-            "arity-error",
-            "exec-error",
-            "encoding-error",
-            "sparql-error",
-            "oxigraph-error",
-            "iri",
-            "bnode",
-            "literal",
-            "lang",
-            "datatype",
-            "turtle",
-            "ntriples",
-            "nquads",
-            "rdfxml",
-            "subject",
-            "predicate",
-            "object",
-            "s",
-            "p",
-            "o",
-            "g",
-            "exit",
-            "stdout",
-            "stderr",
-            "cwd",
-            "env",
-            "stdin",
-            "null",
-            "pipe",
-            "ok",
-            "err",
-        ];
-        let mut seen = std::collections::HashMap::new();
-        for kw in &keywords {
-            let h = keyword_hash(kw);
-            if let Some(prev) = seen.insert(h, kw) {
-                panic!("collision: {:?} and {:?} both hash to {:#x}", prev, kw, h);
-            }
-        }
-    }
-
-    #[test]
-    fn intern_and_lookup() {
-        let h = intern_keyword("test-intern-lookup");
-        assert_eq!(keyword_name(h).as_deref(), Some("test-intern-lookup"));
-    }
-
-    #[test]
-    fn intern_idempotent() {
-        let h1 = intern_keyword("test-idempotent");
-        let h2 = intern_keyword("test-idempotent");
-        assert_eq!(h1, h2);
-    }
-}
+mod tests;

@@ -37,10 +37,18 @@ pub mod resume;
 pub mod store;
 mod suspend;
 
+#[cfg(test)]
+mod tests;
+
 use crate::value::Value;
 
 /// Standard library source, embedded at compile time.
-const STDLIB: &str = include_str!("../../stdlib.lisp");
+const STDLIB: &str = include_str!("../stdlib.lisp");
+
+/// Where `--wasm-dump` writes the emitted module bytes. Lives on the /dev/shm
+/// tmpfs, not /tmp: /tmp is a shared, size-limited filesystem that other
+/// services rely on, so debug artifacts belong on the throwaway tmpfs.
+const WASM_DUMP_PATH: &str = "/dev/shm/elle-wasm-dump.wasm";
 
 /// Maximum number of top-level forms per user-code thunk.
 /// Balances WASM function size (Wasmtime compile time) against
@@ -190,55 +198,79 @@ fn compile_or_cache_module(
     }
 }
 
+/// Build the source the full-module WASM path actually compiles: the stdlib
+/// concatenated with the user code wrapped in `(ev/run (fn [] …))`.
+///
+/// Returns `(full_source, stdlib_form_count)`. `stdlib_form_count` is the number
+/// of leading forms epoch migration must skip (the stdlib forms are already in
+/// the current epoch); `compile_file_to_lir` migrates only the user forms after
+/// them.
+///
+/// Extracted from `eval_wasm_raw` so the exact spliced source is reachable from
+/// tests that need to inspect the compiled LIR (the user literals live inside the
+/// nested `ev/run` thunk, invisible to `--wasm-lir`, which dumps only the entry).
+fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize), String> {
+    // Count stdlib forms so epoch migration skips them.
+    let mut stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
+        .map(|s| s.len())
+        .unwrap_or(0);
+    // Splice include/include-file directives in user source BEFORE
+    // wrapping in ev/run. The directives are top-level in user code
+    // but would become nested (invisible) after the ev/run wrapper.
+    let body_spliced = crate::pipeline::splice_includes(source, source_name)?;
+    // Concatenate stdlib + user source wrapped in ev/run so the async
+    // scheduler is active (needed for ev/spawn, fibers+I/O, TCP, etc.).
+    // I/O inside fibers propagates SIG_IO to the scheduler; top-level
+    // I/O executes inline via maybe_execute_io.
+    // Epoch directives are hoisted before stdlib for extract_epoch.
+    // Strip stdlib's own epoch tag to avoid duplicates.
+    let (epoch_prefix, body) = if body_spliced.starts_with("(elle/epoch") {
+        body_spliced.split_once('\n').unwrap_or((&body_spliced, ""))
+    } else {
+        ("", body_spliced.as_str())
+    };
+    // Strip any (elle/epoch N) from stdlib, not just the current epoch.
+    // Avoids a footgun where bumping CURRENT_EPOCH breaks --wasm=full.
+    let (stdlib_body, stripped_epoch) = if STDLIB.starts_with("(elle/epoch") {
+        let rest = STDLIB.split_once('\n').map(|(_, r)| r).unwrap_or("");
+        (rest, true)
+    } else {
+        (STDLIB, false)
+    };
+    if stripped_epoch {
+        stdlib_form_count = stdlib_form_count.saturating_sub(1);
+    }
+    let wrapped_body = if crate::config::get().wasm_chunk {
+        chunk_user_forms(body, source_name)
+    } else {
+        format!("((fn []\n{}\n))", body)
+    };
+    let full_source = format!(
+        "{}\n{}\n(ev/run (fn []\n{}\n))",
+        epoch_prefix, stdlib_body, wrapped_body
+    );
+    Ok((full_source, stdlib_form_count))
+}
+
 fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<Value, String> {
     let mut vm = crate::vm::VM::new();
     let mut symbols = Box::new(crate::symbol::SymbolTable::new());
     crate::primitives::register_primitives(&mut vm, &mut symbols);
     let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
-    crate::context::set_symbol_table(sym_ptr);
+    // Point the VM at this instance's symbol table (stable boxed address).
+    vm.set_symbols(sym_ptr);
+    // This standalone eval owns its per-instance compile context (the stdlib it
+    // needs is spliced into the source below, so it accumulates during compile);
+    // wire the VM to it so a runtime `(eval …)` in the program resolves here.
+    let mut compile = Box::new(crate::pipeline::CompileCtx::new());
+    vm.set_compile_ctx(&mut *compile as *mut crate::pipeline::CompileCtx);
 
     let full_source;
-    let mut stdlib_form_count;
+    let stdlib_form_count;
     let compile_source = if with_stdlib {
-        // Count stdlib forms so epoch migration skips them.
-        stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
-            .map(|s| s.len())
-            .unwrap_or(0);
-        // Splice include/include-file directives in user source BEFORE
-        // wrapping in ev/run. The directives are top-level in user code
-        // but would become nested (invisible) after the ev/run wrapper.
-        let body_spliced = crate::pipeline::splice_includes(source, source_name)?;
-        // Concatenate stdlib + user source wrapped in ev/run so the async
-        // scheduler is active (needed for ev/spawn, fibers+I/O, TCP, etc.).
-        // I/O inside fibers propagates SIG_IO to the scheduler; top-level
-        // I/O executes inline via maybe_execute_io.
-        // Epoch directives are hoisted before stdlib for extract_epoch.
-        // Strip stdlib's own epoch tag to avoid duplicates.
-        let (epoch_prefix, body) = if body_spliced.starts_with("(elle/epoch") {
-            body_spliced.split_once('\n').unwrap_or((&body_spliced, ""))
-        } else {
-            ("", body_spliced.as_str())
-        };
-        // Strip any (elle/epoch N) from stdlib, not just the current epoch.
-        // Avoids a footgun where bumping CURRENT_EPOCH breaks --wasm=full.
-        let (stdlib_body, stripped_epoch) = if STDLIB.starts_with("(elle/epoch") {
-            let rest = STDLIB.split_once('\n').map(|(_, r)| r).unwrap_or("");
-            (rest, true)
-        } else {
-            (STDLIB, false)
-        };
-        if stripped_epoch {
-            stdlib_form_count = stdlib_form_count.saturating_sub(1);
-        }
-        let wrapped_body = if crate::config::get().wasm_chunk {
-            chunk_user_forms(body, source_name)
-        } else {
-            format!("((fn []\n{}\n))", body)
-        };
-        full_source = format!(
-            "{}\n{}\n(ev/run (fn []\n{}\n))",
-            epoch_prefix, stdlib_body, wrapped_body
-        );
+        let (fs, count) = build_full_source(source, source_name)?;
+        full_source = fs;
+        stdlib_form_count = count;
         full_source.as_str()
     } else {
         stdlib_form_count = 0;
@@ -250,6 +282,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let lir_module = crate::pipeline::compile_file_to_lir(
         compile_source,
         &mut symbols,
+        &mut compile,
         source_name,
         stdlib_form_count,
     )?;
@@ -276,14 +309,29 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     // Module, cached by WASM bytes hash. The full module gets stubs for
     // pre-compiled closures (tiny, compile instantly). At runtime, rt_call
     // dispatches to pre-compiled Modules instead of the full module's table.
+    //
+    // A stubbed closure is served by `call_precached_closure`, which runs it in
+    // a FRESH `Store`. A fresh store cannot participate in a suspend/resume
+    // chain — the `WasmSuspensionFrame` deque and env-stack snapshots live on
+    // the full-module store, and `call_precached_closure` neither saves a frame
+    // on suspend nor drives the resume chain. So a closure that may suspend
+    // (yield, I/O, the async scheduler) loses its fiber state when precached,
+    // corrupting any live state it held across the suspend. Precaching is
+    // all-or-nothing (partial stubbing breaks the funcref table indices a
+    // precached closure would need to call a non-precached sibling), so precache
+    // only when NO closure in the module may suspend. The full stdlib's `ev/run`
+    // scheduler suspends, so full-module programs keep every closure inline.
     let engine = store::create_engine().map_err(|e| e.to_string())?;
     let mut precached: Vec<Option<host::PrecachedClosure>> = vec![None; lir_module.closures.len()];
     let mut stubbed = std::collections::HashSet::new();
 
-    if crate::config::get().cache.is_some() {
+    let any_may_suspend = lir_module.closures.iter().any(|c| c.signal.may_suspend());
+    if crate::config::get().cache.is_some() && !any_may_suspend {
         let mut all_ok = true;
         for (i, closure_func) in lir_module.closures.iter().enumerate() {
-            if let Some(standalone) = emit::emit_single_closure(closure_func, Some(&lir_module)) {
+            if let Some(standalone) =
+                emit::emit_single_closure(closure_func, Some(&lir_module), vm.heap_ptr)
+            {
                 if let Ok(module) = compile_or_cache_module(&engine, &standalone.wasm_bytes) {
                     precached[i] = Some(host::PrecachedClosure {
                         module,
@@ -310,15 +358,19 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     // LIR → WASM bytes + constant pool. Stubbed closures get minimal
     // bodies (unreachable) since they're served by pre-compiled Modules.
-    let result = emit::emit_module(&lir_module, stubbed);
+    let result = emit::emit_module(&lir_module, stubbed, vm.heap_ptr);
     let t2 = std::time::Instant::now();
 
-    // Dump WASM for analysis
+    // Dump WASM for analysis. /dev/shm (a tmpfs) rather than /tmp: the latter
+    // is a shared, size-limited filesystem this process must not scribble into.
     if crate::config::get().wasm_dump {
-        std::fs::write("/tmp/elle-wasm-dump.wasm", &result.wasm_bytes).ok();
+        std::fs::write(WASM_DUMP_PATH, &result.wasm_bytes).ok();
     }
 
     let mut wasm_store = store::create_store(&engine, result.const_pool, result.closure_bytecodes);
+    // This standalone eval owns its driving VM (built above); thread it to the
+    // host so primitive calls build a VM-bearing `NativeCtx`.
+    wasm_store.data_mut().vm = &mut vm as *mut crate::vm::VM;
     wasm_store.data_mut().precached_closures = precached;
     let linker = linker::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Fuel: Preemption via Instruction Budget
 ##
 ## Tests for fiber fuel/preemption (issue #585).

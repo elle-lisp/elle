@@ -6,6 +6,7 @@
 use crate::error::{LError, LResult};
 use crate::ffi::marshal::{read_value_from_buffer, to_libffi_type, AlignedBuffer, MarshalledArg};
 use crate::ffi::types::{Signature, TypeDesc};
+use crate::primitives::ctx::NativeCtx;
 use crate::value::Value;
 use libffi::middle::{Cif, CodePtr, Type};
 use std::ffi::c_void;
@@ -31,6 +32,7 @@ pub unsafe fn ffi_call(
     args: &[Value],
     sig: &Signature,
     cif: &Cif,
+    ctx: &mut NativeCtx,
 ) -> LResult<Value> {
     if args.len() != sig.args.len() {
         return Err(LError::ffi_error(
@@ -115,7 +117,7 @@ pub unsafe fn ffi_call(
                 std::slice::from_raw_parts_mut(buf.as_mut_ptr(), total_size.max(1))
             });
             cif.call_return_into(code_ptr, &ffi_args, ret);
-            read_value_from_buffer(buf.as_mut_ptr(), &sig.ret)
+            read_value_from_buffer(buf.as_mut_ptr(), &sig.ret, ctx)
         }
         TypeDesc::Array(ref elem_desc, count) => {
             let elem_size = elem_desc.size().ok_or_else(|| {
@@ -128,97 +130,10 @@ pub unsafe fn ffi_call(
                 std::slice::from_raw_parts_mut(buf.as_mut_ptr(), total_size.max(1))
             });
             cif.call_return_into(code_ptr, &ffi_args, ret);
-            read_value_from_buffer(buf.as_mut_ptr(), &sig.ret)
+            read_value_from_buffer(buf.as_mut_ptr(), &sig.ret, ctx)
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ffi::types::{CallingConvention, Signature};
-
-    #[test]
-    fn test_prepare_cif() {
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::I32,
-            args: vec![TypeDesc::I32],
-            fixed_args: None,
-        };
-        let _cif = prepare_cif(&sig);
-    }
-
-    #[test]
-    fn test_prepare_cif_no_args() {
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::Void,
-            args: vec![],
-            fixed_args: None,
-        };
-        let _cif = prepare_cif(&sig);
-    }
-
-    #[test]
-    fn test_prepare_variadic_cif() {
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::I32,
-            args: vec![TypeDesc::Ptr, TypeDesc::Size, TypeDesc::Ptr, TypeDesc::I32],
-            fixed_args: Some(3),
-        };
-        let _cif = prepare_cif(&sig);
-    }
-
-    #[test]
-    fn test_arity_check() {
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::I32,
-            args: vec![TypeDesc::I32],
-            fixed_args: None,
-        };
-        let cif = prepare_cif(&sig);
-        // Wrong number of args
-        let result = unsafe { ffi_call(std::ptr::null(), &[], &sig, &cif) };
-        assert!(result.is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_call_abs() {
-        extern "C" {
-            fn abs(n: std::ffi::c_int) -> std::ffi::c_int;
-        }
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::Int,
-            args: vec![TypeDesc::Int],
-            fixed_args: None,
-        };
-        let cif = prepare_cif(&sig);
-        let result = unsafe { ffi_call(abs as *const c_void, &[Value::int(-42)], &sig, &cif) };
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().as_int(), Some(42));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_call_strlen() {
-        extern "C" {
-            fn strlen(s: *const std::ffi::c_char) -> usize;
-        }
-        let sig = Signature {
-            convention: CallingConvention::Default,
-            ret: TypeDesc::Size,
-            args: vec![TypeDesc::Str],
-            fixed_args: None,
-        };
-        let cif = prepare_cif(&sig);
-        let hello = Value::string("hello");
-        let result = unsafe { ffi_call(strlen as *const c_void, &[hello], &sig, &cif) };
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().as_int(), Some(5));
-    }
-}
+mod tests;

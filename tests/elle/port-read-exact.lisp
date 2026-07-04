@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/port-read-exact.lisp — `port/read-exact` semantics.
 #
 # `port/read` follows POSIX "up to N" semantics and never resubmits
@@ -102,14 +102,19 @@
 # port/read call.  port/read-exact must loop to assemble the whole
 # payload, byte-for-byte.
 
-(def value-size 200000)
+(def value-size 100000)
+# Build the payload by doubling a period-10 ASCII pattern (O(log n)
+# concats) rather than a 200 000-iteration per-byte push loop, which
+# dominated the suite runtime.  Sent over a binary port, so the bytes
+# are '0'..'9' = 48..57; built a bit past value-size and the reader
+# takes exactly value-size, leaving the rest unread.
 (def big-bytes
-  (let [@b @""
-        @i 0]
-    (while (< i value-size)
-      (push b (string (mod i 10)))
-      (assign i (+ i 1)))
-    (freeze b)))
+  (let [@s "0123456789"
+        @len 10]
+    (while (< len value-size)
+      (assign s (concat s s))
+      (assign len (* len 2)))
+    s))
 
 (def listener (tcp/listen "127.0.0.1" 0))
 (def server-port
@@ -151,5 +156,55 @@
 
 (protect (port/close listener))
 (protect (ev/join-protected server-fiber))
+
+# ── 5. Large TEXT read-exact canary.  On a text port N counts grapheme
+# clusters, not bytes — with multibyte content the byte count far
+# exceeds N, so the runtime must size its read buffer for bytes
+# (graphemes * worst-case UTF-8 width) and chunk the kernel reads at the
+# page size while still returning exactly N graphemes.  A regression in
+# the buffer sizing or the >64 KiB chunked-resubmit path surfaces here
+# as a short, nil, or garbled string.  Content alternates 'é' (2 bytes)
+# and 'a' (1 byte), so bytes ≈ 1.5 × graphemes.
+# Build "éa…" of exactly n graphemes by doubling (O(log n) concats —
+# a per-grapheme loop at this size would dominate the suite runtime).
+# n must be 2 × a power of two so doubling the 2-grapheme base lands on
+# n exactly, no grapheme-unsafe slice needed.
+(defn make-text [n]
+  (let [@s "éa"
+        @len 2]
+    (while (< len n)
+      (assign s (concat s s))
+      (assign len (* len 2)))
+    s))
+
+(defn text-roundtrip [n label]
+  (let [payload (make-text n)
+        l (tcp/listen "127.0.0.1" 0)
+        lport (let [path (port/path l)]
+                (parse-int (slice path (+ 1 (string/find path ":")))))
+        srv (ev/spawn (fn []
+                        (let [client (tcp/accept l :encoding :text)]
+                          (port/write client payload)
+                          (port/flush client)
+                          (port/close client))))]
+    (let [sock (tcp/connect "127.0.0.1" lport :encoding :text)]
+      (defer
+        (protect (port/close sock))
+        (let [d (port/read-exact sock n)]
+          (assert (string? d) (concat label "a: returns a string"))
+          (assert (= (length d) n)
+                  (concat label "b: got " (string (length d))
+                          " graphemes, want " (string n)))
+          (assert (= d payload)
+                  (concat label "c: content matches byte-for-byte")))))
+    (protect (port/close l))
+    (protect (ev/join-protected srv))))
+
+# Moderate: ~3 KiB of bytes — fits one read, no resubmit.
+(text-roundtrip 2048 "5")
+# Over-large: 65536 graphemes ≈ 98 KiB of bytes — past the 64 KiB
+# loopback recv buffer and the MAX_READ_CHUNK cap, forcing chunked
+# resubmission across the page boundary.
+(text-roundtrip 65536 "6")
 
 (println "port-read-exact: all tests passed")

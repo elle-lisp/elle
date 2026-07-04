@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Macro desugaring tests
 #
 # Migrated from tests/property/macros.rs
@@ -1032,6 +1032,22 @@
   (syntax-case stx ((literal if) :found-if) (_ :other)))
 (assert (= (sc-sym if) :found-if) "syntax-case literal symbol: match")
 (assert (= (sc-sym foo) :other) "syntax-case literal symbol: no match")
+
+# Hygiene is structural, not lexical: a pattern variable that happens to
+# share the internal gensym prefix (__sc...) must bind like any other
+# identifier. Regression: expansion used to classify bindings by
+# starts_with("__sc"), scope-stamping user variables like __scanner so the
+# user's own body reference failed to resolve ("undefined variable").
+(defmacro sc-prefix-var (stx)
+  (syntax-case stx (__scanner (syntax->datum __scanner))))
+(assert (= (sc-prefix-var 99) 99)
+        "syntax-case pattern variable named __scanner binds like any other")
+(defmacro sc-prefix-list (stx)
+  (syntax-case stx
+               ((__sca __scb) (+ (syntax->datum __sca) (syntax->datum __scb)))
+               (_ :not-pair)))
+(assert (= (sc-prefix-list (40 2)) 42)
+        "syntax-case list-pattern variables with __sc prefix bind")
 
 # List pattern: exact length 2
 # Body returns the first element's datum for the 2-element case.

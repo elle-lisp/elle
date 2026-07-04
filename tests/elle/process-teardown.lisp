@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/process-teardown.lisp — process:start orphan sub-fiber teardown
 ##
 ## When a process:start body completes but leaves a fire-and-forget

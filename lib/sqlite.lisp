@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:
@@ -92,6 +92,14 @@
                 (ffi/free ptr))))
         :boolean
           (check db (c-bind-int stmt i (if p 1 0)) "bind")
+
+        ## A keyword binds as its bare name text (`(string :pass)` → "pass"),
+        ## so
+        ## enum-valued columns (result.status, result.tier) can be keyword-typed
+        ## in callers while the column stays plain TEXT and SQL like
+        ## `WHERE status = 'pass'` is unchanged.
+        :keyword
+          (check db (c-bind-text stmt i (string p) -1 SQLITE_TRANSIENT) "bind")
         t
           (error {:error :sqlite-error
                   :message (string "bind: unsupported type " t)}))
@@ -131,18 +139,32 @@
     (c-close db)
     nil)
 
+  (defn step-error [db stmt ctx]
+    "Finalize stmt and raise the current sqlite error."
+    (let [msg (ffi/string (c-errmsg db))]
+      (c-finalize stmt)
+      (error {:error :sqlite-error :message (string ctx ": " msg)})))
+
   (defn exec [db sql & opts]
-    "Execute SQL (no result rows). Optional params array. Returns rows affected."
+    "Execute SQL (no result rows). Optional params array. Returns rows
+   affected.  Raises :sqlite-error when the statement fails — including
+   constraint violations and busy/locked errors.  (sqlite3_step's
+   return code was once discarded here, silently swallowing failed
+   writes.)"
     (let* [params (if (> (length opts) 0) (first opts) [])
            stmt (prepare db sql)]
       (bind-params db stmt params)
-      (c-step stmt)
+      (let [rc (c-step stmt)]
+        (unless (or (= rc SQLITE_DONE) (= rc SQLITE_ROW))
+          (step-error db stmt "step")))
       (let [n (c-changes db)]
         (c-finalize stmt)
         n)))
 
   (defn query [db sql & opts]
-    "Execute a query. Returns list of structs with keyword keys."
+    "Execute a query. Returns list of structs with keyword keys.
+   Raises :sqlite-error when a step fails mid-iteration — a failed
+   step once ended the loop silently, returning truncated results."
     (let* [params (if (> (length opts) 0) (first opts) [])
            stmt (prepare db sql)]
       (bind-params db stmt params)
@@ -150,8 +172,11 @@
              col-names (->array (map (fn [i] (ffi/string (c-col-name stmt i)))
                                      (->list (range ncols))))
              rows @[]]
-        (while (= (c-step stmt) SQLITE_ROW)
-          (push rows (read-row stmt ncols col-names)))
+        (def @rc (c-step stmt))
+        (while (= rc SQLITE_ROW)
+          (push rows (read-row stmt ncols col-names))
+          (assign rc (c-step stmt)))
+        (unless (= rc SQLITE_DONE) (step-error db stmt "step"))
         (c-finalize stmt)
         (->list rows))))
 

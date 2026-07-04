@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Tests for concurrency primitives (spawn, join, current-thread-id)
 
 
@@ -8,64 +8,64 @@
 
 (assert (begin
           (let [x 42]
-            (let [handle (spawn (fn () x))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () x))]
+              (sys/join handle)))
           true) "spawn closure with immutable capture")
 
 (assert (begin
           (let [msg "hello from thread"]
-            (let [handle (spawn (fn () msg))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () msg))]
+              (sys/join handle)))
           true) "spawn closure with string capture")
 
 (assert (begin
           (let [v [1 2 3]]
-            (let [handle (spawn (fn () v))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () v))]
+              (sys/join handle)))
           true) "spawn closure with array capture")
 
 (assert (begin
           (let [x 10
                 y 20]
-            (let [handle (spawn (fn () (+ x y)))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () (+ x y)))]
+              (sys/join handle)))
           true) "spawn closure computation")
 
 (assert (begin
           (let [a 1
                 b 2
                 c 3]
-            (let [handle (spawn (fn () (+ a (+ b c))))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () (+ a (+ b c))))]
+              (sys/join handle)))
           true) "spawn closure with multiple captures")
 
 (assert (begin
           (let [n nil]
-            (let [handle (spawn (fn () n))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () n))]
+              (sys/join handle)))
           true) "spawn closure with nil capture")
 
 (assert (begin
           (let [f 3.14159]
-            (let [handle (spawn (fn () f))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () f))]
+              (sys/join handle)))
           true) "spawn closure with float capture")
 
 (assert (begin
           (let [lst (list 1 2 3)]
-            (let [handle (spawn (fn () lst))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () lst))]
+              (sys/join handle)))
           true) "spawn closure with list capture")
 
 (assert (begin
-          (let [handle (spawn (fn () 42))]
-            (join handle))
+          (let [handle (sys/spawn-vm (fn () 42))]
+            (sys/join handle))
           true) "spawn closure no captures")
 
 (assert (begin
           (let [x 10]
-            (let [handle (spawn (fn () (if (> x 5) "big" "small")))]
-              (join handle)))
+            (let [handle (sys/spawn-vm (fn () (if (> x 5) "big" "small")))]
+              (sys/join handle)))
           true) "spawn closure with conditional")
 
 # ============================================================================
@@ -84,30 +84,30 @@
 (assert (begin
           (let [x 42]
             (let [closure (fn () x)]
-              (let [handle (spawn closure)]
-                (join handle))))
+              (let [handle (sys/spawn-vm closure)]
+                (sys/join handle))))
           true) "spawn jit closure with capture")
 
 (assert (begin
           (let [a 10
                 b 20]
             (let [closure (fn () (+ a b))]
-              (let [handle (spawn closure)]
-                (join handle))))
+              (let [handle (sys/spawn-vm closure)]
+                (sys/join handle))))
           true) "spawn jit closure with computation")
 
 (assert (begin
           (let [msg "hello from jit thread"]
             (let [closure (fn () msg)]
-              (let [handle (spawn closure)]
-                (join handle))))
+              (let [handle (sys/spawn-vm closure)]
+                (sys/join handle))))
           true) "spawn jit closure with string capture")
 
 (assert (begin
           (let [v [10 20 30]]
             (let [closure (fn () v)]
-              (let [handle (spawn closure)]
-                (join handle))))
+              (let [handle (sys/spawn-vm closure)]
+                (sys/join handle))))
           true) "spawn jit closure with array capture")
 
 (assert (begin
@@ -115,15 +115,15 @@
                 b 2
                 c 3]
             (let [closure (fn () (+ a (+ b c)))]
-              (let [handle (spawn closure)]
-                (join handle))))
+              (let [handle (sys/spawn-vm closure)]
+                (sys/join handle))))
           true) "spawn jit closure with multiple captures")
 
 (assert (begin
           (let [x 10]
             (let [closure (fn () (if (> x 5) "big" "small"))]
-              (let [handle (spawn closure)]
-                (join handle))))
+              (let [handle (sys/spawn-vm closure)]
+                (sys/join handle))))
           true) "spawn jit closure with conditional")
 
 # ============================================================================
@@ -133,30 +133,34 @@
 # spawn_sends_mutable_struct_capture
 (let [[ok? result] (protect ((fn ()
                                (let [t (@struct :a 1)]
-                                 (join (spawn (fn () (t :a))))))))]
+                                 (sys/join (sys/spawn-vm (fn () (t :a))))))))]
   (assert ok? "spawn sends mutable @struct capture")
   (assert (= result 1) "spawned @struct preserves data"))
 
 # spawn_rejects_native_function
-(let [[ok? _] (protect ((fn () (spawn abs))))]
+# `parse-int`, not `abs`: abs is stdlib Elle (a closure, legitimately
+# spawnable) — the subject must be a real native fn for the rejection
+# path to be what's tested.
+(assert (native-fn? parse-int) "rejection subject must be a native fn")
+(let [[ok? _] (protect ((fn () (sys/spawn-vm parse-int))))]
   (assert (not ok?) "spawn rejects native function"))
 
 # spawn_wrong_arity
 (let [[ok? _] (protect ((fn () (eval '(spawn)))))]
   (assert (not ok?) "spawn wrong arity: no args"))
 
-(let [[ok? _] (protect ((fn () (eval '(spawn (fn () 1) 2)))))]
+(let [[ok? _] (protect ((fn () (eval '(sys/spawn-vm (fn () 1) 2)))))]
   (assert (not ok?) "spawn wrong arity: two args"))
 
 # join_wrong_arity
-(let [[ok? _] (protect ((fn () (eval '(join)))))]
+(let [[ok? _] (protect ((fn () (eval '(sys/join)))))]
   (assert (not ok?) "join wrong arity: no args"))
 
-(let [[ok? _] (protect ((fn () (eval '(join 1 2)))))]
+(let [[ok? _] (protect ((fn () (eval '(sys/join 1 2)))))]
   (assert (not ok?) "join wrong arity: two args"))
 
 # join_invalid_argument
-(let [[ok? _] (protect ((fn () (join 42))))]
+(let [[ok? _] (protect ((fn () (sys/join 42))))]
   (assert (not ok?) "join rejects non-thread-handle"))
 
 # sleep_negative_duration
@@ -175,26 +179,26 @@
 # ============================================================================
 
 (assert (= (let [add1 (fn (x) (+ x 1))]
-             (join (spawn (fn () (add1 41))))) 42)
+             (sys/join (sys/spawn-vm (fn () (add1 41))))) 42)
         "spawn closure capturing closure")
 
 (assert (= (let [add1 (fn (x) (+ x 1))]
              (let [add2 (fn (x) (add1 (add1 x)))]
-               (join (spawn (fn () (add2 40)))))) 42)
+               (sys/join (sys/spawn-vm (fn () (add2 40)))))) 42)
         "spawn closure capturing nested closures")
 
-(assert (= (let [f (join (spawn (fn () (fn (x) (* x 2)))))]
+(assert (= (let [f (sys/join (sys/spawn-vm (fn () (fn (x) (* x 2)))))]
              (f 21)) 42) "spawn closure returning closure")
 
 (assert (= (let [offset 10]
              (let [add-offset (fn (x) (+ x offset))]
-               (join (spawn (fn () (add-offset 32)))))) 42)
+               (sys/join (sys/spawn-vm (fn () (add-offset 32)))))) 42)
         "spawn closure capturing closure and data")
 
 (let [[ok? result] (protect ((fn ()
                                (let [t (@struct :x 42)]
                                  (let [f (fn () (t :x))]
-                                   (join (spawn (fn () (f)))))))))]
+                                   (sys/join (sys/spawn-vm (fn () (f)))))))))]
   (assert ok? "spawn sends closure capturing closure with @struct")
   (assert (= result 42) "spawned @struct through closure preserves data"))
 
@@ -205,14 +209,14 @@
 # User-attached traits survive cross-thread send
 (begin
   (def v (with-traits [1 2 3] {:tag :my-type}))
-  (def result (join (spawn (fn [] (traits v)))))
+  (def result (sys/join (sys/spawn-vm (fn [] (traits v)))))
   (assert (not (nil? result)) "user traits survive cross-thread send")
   (assert (= (result :tag) :my-type) "user trait data preserved across threads"))
 
 # Default traits are re-stamped on the receiving thread
 (begin
   (def v [10 20 30])
-  (def result (join (spawn (fn [] (first v)))))
+  (def result (sys/join (sys/spawn-vm (fn [] (first v)))))
   (assert (= result 10) "default trait dispatch works across threads"))
 
 # ============================================================================
@@ -223,17 +227,17 @@
                            (if (= n 0)
                              1
                              (* n (fact (- n 1)))))]
-             (join (spawn (fn () (fact 6))))) 720)
+             (sys/join (sys/spawn-vm (fn () (fact 6))))) 720)
         "spawn self-recursive closure")
 
 (assert (= (letrec [even? (fn (n) (if (= n 0) true (odd? (- n 1))))
                     odd? (fn (n) (if (= n 0) false (even? (- n 1))))]
-             (join (spawn (fn () (even? 10))))) true)
+             (sys/join (sys/spawn-vm (fn () (even? 10))))) true)
         "spawn mutually recursive closures")
 
 (assert (= (letrec [even? (fn (n) (if (= n 0) true (odd? (- n 1))))
                     odd? (fn (n) (if (= n 0) false (even? (- n 1))))]
-             (join (spawn (fn () (odd? 99))))) true)
+             (sys/join (sys/spawn-vm (fn () (odd? 99))))) true)
         "spawn mutual recursion deep")
 
 # ============================================================================
@@ -250,7 +254,7 @@
                              (if (= n 0)
                                acc
                                (loop (- n 1) (+ acc (double n)))))]
-               (join (spawn (fn () (loop 100 0)))))) 10100)
+               (sys/join (sys/spawn-vm (fn () (loop 100 0)))))) 10100)
         "spawn hot loop with captured closure (JIT on worker thread)")
 
 (assert (= (let [inc (fn (x) (+ x 1))
@@ -259,7 +263,7 @@
                              (if (= n 0)
                                acc
                                (loop (- n 1) (+ acc (sq (inc n))))))]
-               (join (spawn (fn () (loop 50 0)))))) 45525)
+               (sys/join (sys/spawn-vm (fn () (loop 50 0)))))) 45525)
         "spawn hot loop with two captured closures")
 
 (assert (= (let [compose (fn (f g) (fn (x) (f (g x))))]
@@ -270,7 +274,7 @@
                                  (if (= n 0)
                                    acc
                                    (loop (- n 1) (+ acc (f n)))))]
-                   (join (spawn (fn () (loop 100 0)))))))) 10300)
+                   (sys/join (sys/spawn-vm (fn () (loop 100 0)))))))) 10300)
         "spawn hot loop with composed closures")
 
 # ============================================================================
@@ -299,7 +303,7 @@
 # ============================================================================
 
 (let [before (lir/closure-value-const-count)]
-  (join (sys/spawn (fn [] (inc 41))))
+  (sys/join (sys/spawn-vm (fn [] (inc 41))))
   (let [after (lir/closure-value-const-count)]
     (assert (> after before)
             "ClosureRef LIR-transfer path fires when a spawned closure calls a stdlib function")))

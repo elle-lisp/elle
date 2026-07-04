@@ -157,7 +157,12 @@ impl WasmEmitter {
         }
     }
 
-    /// Spill only live register slots + all stack locals.
+    /// Spill only the slots live at this suspend point. `live_slots` is in the
+    /// combined slot space `compute_spill_liveness` produces: register slots are
+    /// `[0, num_regs)`, stack-local slots are `num_regs + local_slot`. A dead
+    /// register or local is not spilled — the restore side reloads the whole
+    /// saved frame, so any slot omitted here is simply reloaded stale into a
+    /// dead local and never read.
     fn emit_spill_live(&self, f: &mut Function, live_slots: &std::collections::HashSet<u32>) {
         for i in 0..self.num_regs {
             if !live_slots.contains(&i) {
@@ -179,8 +184,10 @@ impl WasmEmitter {
                 memory_index: 0,
             }));
         }
-        // Stack locals are always spilled — they represent mutable bindings.
         for i in 0..self.num_stack_locals {
+            if !live_slots.contains(&(self.num_regs + i)) {
+                continue;
+            }
             let offset = ((self.num_regs + i) * 16) as u64;
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::LocalGet(self.local_slot_tag(i as u16)));
@@ -267,6 +274,18 @@ impl WasmEmitter {
             f.instruction(&Instruction::LocalSet(self.resume_pay_local));
             f.instruction(&Instruction::LocalSet(self.resume_tag_local));
 
+            // Every resume state restores the SAME `total_saved` slots from the
+            // front suspension frame — `num_saved` is uniform across states (see
+            // `pre_scan_resume_states`). So restore once here, before the
+            // dispatch, instead of duplicating an identical restore in every
+            // br_table arm. That duplication was O(states × slots) code and is
+            // what blew large suspending functions past the WASM function-size
+            // limit; hoisting it is behavior-preserving (each arm restored the
+            // exact same slots). The extra slots restored on a resume whose live
+            // set is smaller land in dead locals and are never read.
+            let total_saved = self.num_regs + self.num_stack_locals;
+            self.emit_restore_all(f, total_saved);
+
             let num_states = self.resume_states.len();
             f.instruction(&Instruction::Block(BlockType::Empty));
             for _ in 0..num_states {
@@ -285,7 +304,6 @@ impl WasmEmitter {
             for idx in (0..num_states).rev() {
                 f.instruction(&Instruction::End);
                 let info = &self.resume_states[idx];
-                self.emit_restore_all(f, info.num_saved);
                 f.instruction(&Instruction::I64Const(info.target_block_idx as i64));
                 f.instruction(&Instruction::LocalSet(state_local));
                 f.instruction(&Instruction::Br(idx as u32));
@@ -359,7 +377,6 @@ impl WasmEmitter {
         self.yield_state_map.clear();
         self.call_state_map.clear();
         self.next_resume_state = 1;
-        let total_saved = self.num_regs + self.num_stack_locals;
         let num_real_blocks = func.blocks.len();
 
         for block in &func.blocks {
@@ -372,7 +389,6 @@ impl WasmEmitter {
                 self.resume_states.push(ResumeStateInfo {
                     state_id,
                     target_block_idx,
-                    num_saved: total_saved,
                 });
                 self.yield_state_map.insert(block_idx, state_id);
             }
@@ -390,7 +406,6 @@ impl WasmEmitter {
                     self.resume_states.push(ResumeStateInfo {
                         state_id,
                         target_block_idx: virtual_idx,
-                        num_saved: total_saved,
                     });
                     self.call_state_map.insert((block_idx, instr_idx), state_id);
                     self.call_continuations.push(CallSiteContinuation {

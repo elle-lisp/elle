@@ -87,7 +87,9 @@ pub(super) fn handle_fiber_resume(
     let fiber_handle = match fiber_value.as_fiber() {
         Some(f) => f.clone(),
         None => {
-            let err = crate::value::error_val("type-error", "fiber/resume: not a fiber");
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            let err = ctx.error("type-error", "fiber/resume: not a fiber");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
             return (tag, payload, SIG_ERROR.raw() as i64);
         }
@@ -104,8 +106,9 @@ pub(super) fn handle_fiber_resume(
         Some(idx) => idx,
         None => {
             fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
-            let err =
-                crate::value::error_val("internal-error", "fiber/resume: bytecode closure in WASM");
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            let err = ctx.error("internal-error", "fiber/resume: bytecode closure in WASM");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
             return (tag, payload, SIG_ERROR.raw() as i64);
         }
@@ -124,7 +127,16 @@ pub(super) fn handle_fiber_resume(
                 vec![resume_value]
             };
             caller.data_mut().fiber_id_stack.push(fiber_id);
-            let (tag, payload, signal) = call_wasm_closure(caller, &closure, wasm_idx, &args);
+            // The fiber's root closure is the executing self for its body. A plain
+            // thunk `(fn [] …)` has no self-reference, but a self-recursive fiber root
+            // resolves `LoadSelf` to itself — build its value from the closure.
+            let self_val = {
+                let heap = unsafe { &mut *caller.data().heap_ptr() };
+                crate::primitives::ctx::Alloc::new(heap).closure((*closure).clone())
+            };
+            let (self_tag, self_payload) = caller.data_mut().value_to_wasm(self_val);
+            let (tag, payload, signal) =
+                call_wasm_closure(caller, &closure, wasm_idx, &args, self_tag, self_payload);
 
             if signal == yield_signal {
                 let yielded = caller.data().wasm_to_value(tag, payload);
@@ -196,7 +208,9 @@ pub(super) fn handle_fiber_resume(
             ret
         }
         _ => {
-            let err = crate::value::error_val("fiber-error", "fiber/resume: fiber not resumable");
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+            let err = ctx.error("fiber-error", "fiber/resume: fiber not resumable");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
             (tag, payload, SIG_ERROR.raw() as i64)
         }

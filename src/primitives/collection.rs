@@ -4,15 +4,19 @@
 //! bytes, @bytes, set, @set, struct, @struct) implements these operations.
 //! Each function dispatches once; primitives delegate here instead of
 //! repeating the 12-way type match.
-use crate::value::{error_val, sorted_struct_contains, TableKey, Value};
+use crate::primitives::ctx::NativeCtx;
+use crate::value::{sorted_struct_contains, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::sets::freeze_value;
 
 /// Is the collection empty?
-pub fn coll_empty(val: &Value) -> Result<bool, Value> {
+///
+/// `ctx` is the call's allocation capability: the only allocations here are
+/// error values (Rule 3 — born in the failing native's call region).
+pub fn coll_empty(val: &Value, ctx: &mut NativeCtx) -> Result<bool, Value> {
     if val.is_nil() {
-        return Err(error_val("type-error", "expected collection type, got nil"));
+        return Err(ctx.error("type-error", "expected collection type, got nil"));
     }
     if val.is_empty_list() {
         return Ok(true);
@@ -56,21 +60,21 @@ pub fn coll_empty(val: &Value) -> Result<bool, Value> {
             return Ok(items.is_empty());
         }
     }
-    Err(error_val(
+    Err(ctx.error(
         "type-error",
         format!("expected collection type, got {}", val.type_name()),
     ))
 }
 
 /// Element/key/grapheme/byte count.
-pub fn coll_len(val: &Value) -> Result<usize, Value> {
+pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
     if val.is_nil() || val.is_empty_list() {
         return Ok(0);
     }
     if val.is_pair() {
         let vec = val
             .list_to_vec()
-            .map_err(|e| error_val("type-error", e.to_string()))?;
+            .map_err(|e| ctx.error("type-error", e.to_string()))?;
         return Ok(vec.len());
     }
     if let Some(elems) = val.as_array() {
@@ -87,7 +91,7 @@ pub fn coll_len(val: &Value) -> Result<usize, Value> {
         match std::str::from_utf8(&borrowed) {
             Ok(s) => return Ok(s.graphemes(true).count()),
             Err(e) => {
-                return Err(error_val(
+                return Err(ctx.error(
                     "encoding-error",
                     format!("@string contains invalid UTF-8: {}", e),
                 ))
@@ -113,10 +117,14 @@ pub fn coll_len(val: &Value) -> Result<usize, Value> {
         return Ok(t.borrow().len());
     }
     if let Some(sid) = val.as_symbol() {
-        if let Some(name) = crate::context::resolve_symbol_name(sid) {
+        let name = ctx
+            .vm()
+            .symbols()
+            .and_then(|s| s.name(crate::value::SymbolId(sid)).map(|n| n.to_string()));
+        if let Some(name) = name {
             return Ok(name.graphemes(true).count());
         }
-        return Err(error_val(
+        return Err(ctx.error(
             "internal-error",
             format!("unable to resolve symbol name for id {:?}", sid),
         ));
@@ -130,16 +138,16 @@ pub fn coll_len(val: &Value) -> Result<usize, Value> {
             return Ok(items.len());
         }
     }
-    Err(error_val(
+    Err(ctx.error(
         "type-error",
         format!("expected collection type, got {}", val.type_name()),
     ))
 }
 
 /// Membership test: element in seq/set, key in struct, substring in string.
-pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
+pub fn coll_has(coll: &Value, needle: &Value, ctx: &mut NativeCtx) -> Result<bool, Value> {
     // Sets
-    let frozen = freeze_value(*needle);
+    let frozen = freeze_value(*needle, ctx);
     if let Some(s) = coll.as_set() {
         return Ok(s.binary_search(&frozen).is_ok());
     }
@@ -149,7 +157,7 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
     // Strings — substring check
     if coll.is_string() {
         let needle_str = needle.with_string(|s| s.to_string()).ok_or_else(|| {
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "has?: expected string as substring, got {}",
@@ -159,11 +167,11 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
         })?;
         return coll
             .with_string(|haystack| haystack.contains(&*needle_str))
-            .ok_or_else(|| error_val("internal-error", "has?: unreachable string case"));
+            .ok_or_else(|| ctx.error("internal-error", "has?: unreachable string case"));
     }
     if let Some(buf_ref) = coll.as_string_mut() {
         let needle_str = needle.with_string(|s| s.to_string()).ok_or_else(|| {
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "has?: expected string as substring, got {}",
@@ -173,7 +181,7 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
         })?;
         let borrowed = buf_ref.borrow();
         let haystack = String::from_utf8(borrowed.clone()).map_err(|e| {
-            error_val(
+            ctx.error(
                 "encoding-error",
                 format!("has?: buffer contains invalid UTF-8: {}", e),
             )
@@ -183,7 +191,7 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
     // Structs — key lookup
     if coll.is_struct() || coll.is_struct_mut() {
         let key = TableKey::from_value(needle).ok_or_else(|| {
-            error_val(
+            ctx.error(
                 "type-error",
                 format!("struct keys must be immutable (got {})", needle.type_name()),
             )
@@ -195,7 +203,7 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
             return Ok(t.borrow().contains_key(&key));
         }
     }
-    Err(error_val(
+    Err(ctx.error(
         "type-error",
         format!(
             "has?: expected struct, set, or string, got {}",
@@ -205,7 +213,7 @@ pub fn coll_has(coll: &Value, needle: &Value) -> Result<bool, Value> {
 }
 
 /// Collect all elements as `Vec<Value>`.
-pub fn coll_to_vec(val: &Value) -> Result<Vec<Value>, Value> {
+pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value> {
     // List
     if val.is_pair() || val.is_empty_list() {
         let mut elements = Vec::new();
@@ -233,7 +241,7 @@ pub fn coll_to_vec(val: &Value) -> Result<Vec<Value>, Value> {
     // String — grapheme clusters
     if val.is_string() {
         return val
-            .with_string(|s| Ok(s.graphemes(true).map(Value::string).collect()))
+            .with_string(|s| Ok(s.graphemes(true).map(|g| ctx.string(g)).collect()))
             .unwrap_or_else(|| Ok(vec![]));
     }
     // @string — grapheme clusters
@@ -241,7 +249,7 @@ pub fn coll_to_vec(val: &Value) -> Result<Vec<Value>, Value> {
         if let Some(data) = val.as_string_mut() {
             let bytes = data.borrow();
             if let Ok(s) = std::str::from_utf8(&bytes) {
-                return Ok(s.graphemes(true).map(Value::string).collect());
+                return Ok(s.graphemes(true).map(|g| ctx.string(g)).collect());
             }
         }
         return Ok(vec![]);
@@ -262,105 +270,149 @@ pub fn coll_to_vec(val: &Value) -> Result<Vec<Value>, Value> {
     if let Some(s) = val.as_struct() {
         return Ok(s
             .iter()
-            .map(|(k, v)| Value::array(vec![k.to_value(), *v]))
+            .map(|(k, v)| {
+                let key = k.to_value(ctx);
+                ctx.array(vec![key, *v])
+            })
             .collect());
     }
     if let Some(t) = val.as_struct_mut() {
         return Ok(t
             .borrow()
             .iter()
-            .map(|(k, v)| Value::array(vec![k.to_value(), *v]))
+            .map(|(k, v)| {
+                let key = k.to_value(ctx);
+                ctx.array(vec![key, *v])
+            })
             .collect());
     }
-    Err(error_val(
+    Err(ctx.error(
         "type-error",
         format!("expected collection, got {}", val.type_name()),
     ))
 }
 
 /// Combine two collections (concat for seqs, union for sets, merge for structs).
-pub fn coll_combine(a: &Value, b: &Value) -> Result<Value, Value> {
+/// Collect set elements into a BTreeSet regardless of mutability.
+pub fn set_elements(v: &Value) -> Option<std::collections::BTreeSet<Value>> {
+    v.as_set()
+        .map(|s| s.iter().copied().collect())
+        .or_else(|| v.as_set_mut().map(|s| s.borrow().iter().copied().collect()))
+}
+
+/// Collect struct entries into a BTreeMap regardless of mutability.
+fn struct_entries(
+    v: &Value,
+) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
+    v.as_struct()
+        .map(|s| s.iter().map(|(k, v)| (k.clone(), *v)).collect())
+        .or_else(|| {
+            v.as_struct_mut()
+                .map(|s| s.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect())
+        })
+}
+
+/// Collect array elements into a Vec regardless of mutability.
+fn array_elements(v: &Value) -> Option<Vec<Value>> {
+    v.as_array()
+        .map(|a| a.to_vec())
+        .or_else(|| v.as_array_mut().map(|a| a.borrow().clone()))
+}
+
+/// Collect string content regardless of mutability.
+fn string_content(v: &Value) -> Option<String> {
+    v.with_string(|s| s.to_string()).or_else(|| {
+        v.as_string_mut()
+            .map(|s| String::from_utf8_lossy(&s.borrow()).into_owned())
+    })
+}
+
+/// Collect bytes content regardless of mutability.
+fn bytes_content(v: &Value) -> Option<Vec<u8>> {
+    v.as_bytes()
+        .map(|b| b.to_vec())
+        .or_else(|| v.as_bytes_mut().map(|b| b.borrow().clone()))
+}
+
+/// Is the value a mutable variant of its base type?
+pub fn is_mutable(v: &Value) -> bool {
+    v.is_set_mut()
+        || v.is_struct_mut()
+        || v.is_array_mut()
+        || v.as_string_mut().is_some()
+        || v.as_bytes_mut().is_some()
+}
+
+pub fn coll_combine(a: &Value, b: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
+    let a_mut = is_mutable(a);
+
     // Sets — union
-    if let (Some(sa), Some(sb)) = (a.as_set(), b.as_set()) {
-        let mut result: std::collections::BTreeSet<Value> = sa.iter().copied().collect();
-        result.extend(sb.iter().copied());
-        return Ok(Value::set(result));
-    }
-    if let (Some(sa), Some(sb)) = (a.as_set_mut(), b.as_set_mut()) {
-        let result: std::collections::BTreeSet<Value> =
-            sa.borrow().union(&*sb.borrow()).copied().collect();
-        return Ok(Value::set_mut(result));
+    if let (Some(sa), Some(sb)) = (set_elements(a), set_elements(b)) {
+        let result: std::collections::BTreeSet<Value> = sa.union(&sb).copied().collect();
+        return Ok(if a_mut {
+            ctx.set_mut(result)
+        } else {
+            ctx.set(result)
+        });
     }
 
     // Structs — merge (right wins)
-    if let (Some(sa), Some(sb)) = (a.as_struct(), b.as_struct()) {
-        let mut result = std::collections::BTreeMap::new();
-        result.extend(sa.iter().map(|(k, v)| (k.clone(), *v)));
-        result.extend(sb.iter().map(|(k, v)| (k.clone(), *v)));
-        return Ok(Value::struct_from(result));
-    }
-    if let (Some(ta), Some(tb)) = (a.as_struct_mut(), b.as_struct_mut()) {
-        let mut result = std::collections::BTreeMap::new();
-        result.extend(ta.borrow().iter().map(|(k, v)| (k.clone(), *v)));
-        result.extend(tb.borrow().iter().map(|(k, v)| (k.clone(), *v)));
-        return Ok(Value::struct_mut_from(result));
+    if let (Some(mut ea), Some(eb)) = (struct_entries(a), struct_entries(b)) {
+        ea.extend(eb);
+        return Ok(if a_mut {
+            ctx.struct_mut_from(ea)
+        } else {
+            ctx.struct_from(ea)
+        });
     }
 
     // Lists
     if (a.is_pair() || a.is_empty_list()) && (b.is_pair() || b.is_empty_list()) {
         let mut first = a
             .list_to_vec()
-            .map_err(|e| error_val("type-error", e.to_string()))?;
+            .map_err(|e| ctx.error("type-error", e.to_string()))?;
         let second = b
             .list_to_vec()
-            .map_err(|e| error_val("type-error", e.to_string()))?;
+            .map_err(|e| ctx.error("type-error", e.to_string()))?;
         first.extend(second);
         let mut result = Value::EMPTY_LIST;
         for val in first.into_iter().rev() {
-            result = Value::pair(val, result);
+            result = ctx.pair(val, result);
         }
         return Ok(result);
     }
 
     // Arrays
-    if let (Some(ea), Some(eb)) = (a.as_array(), b.as_array()) {
-        let mut result = ea.to_vec();
-        result.extend(eb.iter().cloned());
-        return Ok(Value::array(result));
-    }
-    if let (Some(ra), Some(rb)) = (a.as_array_mut(), b.as_array_mut()) {
-        let mut result = ra.borrow().clone();
-        result.extend(rb.borrow().iter().cloned());
-        return Ok(Value::array_mut(result));
+    if let (Some(mut ea), Some(eb)) = (array_elements(a), array_elements(b)) {
+        ea.extend(eb);
+        return Ok(if a_mut {
+            ctx.array_mut(ea)
+        } else {
+            ctx.array(ea)
+        });
     }
 
     // Strings
-    if a.is_string() && b.is_string() {
-        let mut sa = a.with_string(|s| s.to_string()).unwrap();
-        b.with_string(|s| sa.push_str(s));
-        return Ok(Value::string(sa.as_str()));
-    }
-    if a.as_string_mut().is_some() && b.as_string_mut().is_some() {
-        let ba = a.as_string_mut().unwrap();
-        let bb = b.as_string_mut().unwrap();
-        let mut result = ba.borrow().clone();
-        result.extend(bb.borrow().iter());
-        return Ok(Value::string_mut(result));
+    if let (Some(mut sa), Some(sb)) = (string_content(a), string_content(b)) {
+        sa.push_str(&sb);
+        return Ok(if a_mut {
+            ctx.string_mut(sa.into_bytes())
+        } else {
+            ctx.string(sa.as_str())
+        });
     }
 
     // Bytes
-    if let (Some(ba), Some(bb)) = (a.as_bytes(), b.as_bytes()) {
-        let mut result = ba.to_vec();
-        result.extend(bb.iter());
-        return Ok(Value::bytes(result));
-    }
-    if let (Some(ra), Some(rb)) = (a.as_bytes_mut(), b.as_bytes_mut()) {
-        let mut result = ra.borrow().clone();
-        result.extend(rb.borrow().iter());
-        return Ok(Value::bytes_mut(result));
+    if let (Some(mut ba), Some(bb)) = (bytes_content(a), bytes_content(b)) {
+        ba.extend(bb);
+        return Ok(if a_mut {
+            ctx.bytes_mut(ba)
+        } else {
+            ctx.bytes(ba)
+        });
     }
 
-    Err(error_val(
+    Err(ctx.error(
         "type-error",
         format!("cannot combine {} and {}", a.type_name(), b.type_name()),
     ))

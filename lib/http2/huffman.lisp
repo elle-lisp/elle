@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2/huffman.lisp — HPACK Huffman codec (RFC 7541 Appendix B)
 ##
 ## Loaded via: (def huffman ((import "std/http2/huffman")))

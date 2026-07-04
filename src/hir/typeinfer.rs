@@ -22,6 +22,11 @@ use crate::symbol::SymbolTable;
 
 use std::collections::HashMap;
 
+mod infer;
+use infer::*;
+mod prune;
+pub(crate) use prune::prune_typeof_match_arms;
+
 /// Result of type inference — currently just tracks whether the pass
 /// found any immediates for region inference.
 pub struct TypeInfo {
@@ -79,13 +84,22 @@ fn build_rewrite_table() -> HashMap<&'static str, RewriteRule> {
 const MAX_ITERS: usize = 10;
 
 /// Run type inference and stdlib-to-intrinsic rewriting on functionalized HIR.
-pub fn infer_and_rewrite(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTable) -> TypeInfo {
+///
+/// `Err` is the monomorphization proof obligation firing (see
+/// `check_monomorphic_proof_obligations`): a silent monomorphic container op
+/// whose container is not statically proven. Only the silent path can raise it —
+/// the checked path early-returns before inference runs.
+pub fn infer_and_rewrite(
+    hir: &mut Hir,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+) -> Result<TypeInfo, String> {
     // When --checked-intrinsics is active, intrinsics route through
     // type-checked NativeFn paths. Don't rewrite to bypass those checks.
     if crate::config::get().checked_intrinsics {
-        return TypeInfo {
+        return Ok(TypeInfo {
             hir_types: HashMap::new(),
-        };
+        });
     }
 
     let interner = TypeInterner::new();
@@ -133,6 +147,10 @@ pub fn infer_and_rewrite(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTa
         }
     }
 
+    // Proof obligation: a silent monomorphic container op must have its container
+    // statically proven (no runtime guard exists on this path to catch a mismatch).
+    check_monomorphic_proof_obligations(hir, &hir_types)?;
+
     // Signal narrowing: strip SIG_ERROR from calls with provably typed args
     super::narrow::narrow_signals(
         hir,
@@ -146,372 +164,7 @@ pub fn infer_and_rewrite(hir: &mut Hir, arena: &BindingArena, symbols: &SymbolTa
     // Signal re-propagation: recompute parent signals bottom-up
     super::narrow::repropagate_signals(hir);
 
-    TypeInfo { hir_types }
-}
-
-/// Collect which bindings are lambda definitions and what their params are.
-fn collect_lambda_info(
-    hir: &Hir,
-    _arena: &BindingArena,
-    lambda_params: &mut HashMap<Binding, Vec<Binding>>,
-) {
-    match &hir.kind {
-        HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
-            for (binding, value) in bindings {
-                if let HirKind::Lambda { params, .. } = &value.kind {
-                    lambda_params.insert(*binding, params.clone());
-                }
-                collect_lambda_info(value, _arena, lambda_params);
-            }
-            collect_lambda_info(body, _arena, lambda_params);
-        }
-        _ => {
-            hir.for_each_child(|child| collect_lambda_info(child, _arena, lambda_params));
-        }
-    }
-}
-
-/// Forward type inference pass. Returns true if any types changed.
-#[allow(clippy::too_many_arguments)]
-fn infer_types(
-    hir: &Hir,
-    interner: &TypeInterner,
-    arena: &BindingArena,
-    binding_types: &mut HashMap<Binding, TyId>,
-    hir_types: &mut HashMap<HirId, TyId>,
-    lambda_params: &HashMap<Binding, Vec<Binding>>,
-    lambda_body_type: &mut HashMap<Binding, TyId>,
-    symbol_names: &HashMap<u32, String>,
-    binding_min_length: &mut HashMap<Binding, usize>,
-) -> bool {
-    let ty = infer_node(
-        hir,
-        interner,
-        arena,
-        binding_types,
-        hir_types,
-        lambda_params,
-        lambda_body_type,
-        symbol_names,
-        binding_min_length,
-    );
-    let old = hir_types.insert(hir.id, ty);
-    old != Some(ty)
-}
-
-/// Infer the type of a single HIR node.
-#[allow(clippy::too_many_arguments)]
-fn infer_node(
-    hir: &Hir,
-    interner: &TypeInterner,
-    arena: &BindingArena,
-    binding_types: &mut HashMap<Binding, TyId>,
-    hir_types: &mut HashMap<HirId, TyId>,
-    lambda_params: &HashMap<Binding, Vec<Binding>>,
-    lambda_body_type: &mut HashMap<Binding, TyId>,
-    symbol_names: &HashMap<u32, String>,
-    binding_min_length: &mut HashMap<Binding, usize>,
-) -> TyId {
-    macro_rules! recurse {
-        ($e:expr) => {
-            infer_node(
-                $e,
-                interner,
-                arena,
-                binding_types,
-                hir_types,
-                lambda_params,
-                lambda_body_type,
-                symbol_names,
-                binding_min_length,
-            )
-        };
-    }
-
-    match &hir.kind {
-        // Literals
-        HirKind::Nil => TypeInterner::NIL,
-        HirKind::Bool(_) => TypeInterner::BOOL,
-        HirKind::Int(_) => TypeInterner::INT,
-        HirKind::Float(_) => TypeInterner::FLOAT,
-        HirKind::String(_) => TypeInterner::STRING,
-        HirKind::Keyword(_) => TypeInterner::KEYWORD,
-        HirKind::EmptyList => TypeInterner::EMPTY_LIST,
-
-        // Variable reference
-        HirKind::Var(binding) => binding_types
-            .get(binding)
-            .copied()
-            .unwrap_or(TypeInterner::TOP),
-
-        // Intrinsic operations — known return types
-        HirKind::Intrinsic { op, args } => {
-            for arg in args {
-                let ty = recurse!(arg);
-                hir_types.insert(arg.id, ty);
-            }
-            intrinsic_return_type(*op, args, interner, hir_types)
-        }
-
-        // Let/Letrec — seed binding types from init values
-        HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-            for (binding, init) in bindings {
-                let ty = recurse!(init);
-                hir_types.insert(init.id, ty);
-                // For lambda bindings, track their body's return type
-                if let HirKind::Lambda { body: lam_body, .. } = &init.kind {
-                    let body_ty = hir_types
-                        .get(&lam_body.id)
-                        .copied()
-                        .unwrap_or(TypeInterner::TOP);
-                    let old = lambda_body_type
-                        .get(binding)
-                        .copied()
-                        .unwrap_or(TypeInterner::BOTTOM);
-                    let joined = interner.join(old, body_ty);
-                    lambda_body_type.insert(*binding, joined);
-                } else {
-                    let old = binding_types
-                        .get(binding)
-                        .copied()
-                        .unwrap_or(TypeInterner::BOTTOM);
-                    let joined = interner.join(old, ty);
-                    binding_types.insert(*binding, joined);
-                    // Track min_length for array constructor bindings
-                    if ty == TypeInterner::MUTABLE_ARRAY || ty == TypeInterner::ARRAY {
-                        if let Some(len) = unwrap_to_call(init) {
-                            binding_min_length.insert(*binding, len);
-                        }
-                    }
-                }
-            }
-            let body_ty = recurse!(body);
-            hir_types.insert(body.id, body_ty);
-            body_ty
-        }
-
-        // Lambda — infer body type and track return type
-        HirKind::Lambda { body, .. } => {
-            let body_ty = recurse!(body);
-            hir_types.insert(body.id, body_ty);
-            // We return Top for the lambda value itself — it's a closure
-            TypeInterner::TOP
-        }
-
-        // If — join branches, with type guard narrowing
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            let _cond_ty = recurse!(cond);
-            hir_types.insert(cond.id, _cond_ty);
-
-            // Type guard narrowing: if cond is a type predicate call,
-            // narrow the binding's type in the true branch
-            let guard = extract_type_guard(cond, arena);
-            let saved_types: Vec<(Binding, Option<TyId>)>;
-            if let Some((binding, narrow_ty)) = guard {
-                saved_types = vec![(binding, binding_types.get(&binding).copied())];
-                let old = binding_types
-                    .get(&binding)
-                    .copied()
-                    .unwrap_or(TypeInterner::TOP);
-                let narrowed = interner.meet(old, narrow_ty);
-                binding_types.insert(binding, narrowed);
-            } else {
-                saved_types = Vec::new();
-            }
-
-            let then_ty = recurse!(then_branch);
-            hir_types.insert(then_branch.id, then_ty);
-
-            // Restore type environment for else branch
-            for (binding, saved) in &saved_types {
-                match saved {
-                    Some(ty) => {
-                        binding_types.insert(*binding, *ty);
-                    }
-                    None => {
-                        binding_types.remove(binding);
-                    }
-                }
-            }
-
-            let else_ty = recurse!(else_branch);
-            hir_types.insert(else_branch.id, else_ty);
-
-            interner.join(then_ty, else_ty)
-        }
-
-        // Call — forward arg types to callee params; result = callee return type
-        HirKind::Call { func, args, .. } => {
-            let _func_ty = recurse!(func);
-            hir_types.insert(func.id, _func_ty);
-
-            let arg_types: Vec<TyId> = args
-                .iter()
-                .map(|a| {
-                    let ty = recurse!(&a.expr);
-                    hir_types.insert(a.expr.id, ty);
-                    ty
-                })
-                .collect();
-
-            // Forward arg types to callee params.
-            // Handle both Var(b) and DerefCell { Var(b) } (letrec recursive calls).
-            let callee_binding = unwrap_callee_binding(func);
-            if let Some(callee_binding) = callee_binding {
-                if let Some(params) = lambda_params.get(&callee_binding) {
-                    for (i, param) in params.iter().enumerate() {
-                        if let Some(&arg_ty) = arg_types.get(i) {
-                            // Don't forward Top — it poisons the parameter type
-                            // and prevents convergence in recursive functions.
-                            if arg_ty != TypeInterner::TOP {
-                                let old = binding_types
-                                    .get(param)
-                                    .copied()
-                                    .unwrap_or(TypeInterner::BOTTOM);
-                                let joined = interner.join(old, arg_ty);
-                                binding_types.insert(*param, joined);
-                            }
-                        }
-                    }
-                }
-                // Return type = whatever the callee's body returns.
-                // Only use BOTTOM for known lambdas (in lambda_params) where the
-                // body type hasn't been computed yet. For unknown callees (primitives,
-                // imports), return TOP to avoid unsound rewrites.
-                if lambda_params.contains_key(&callee_binding) {
-                    let ret_ty = lambda_body_type
-                        .get(&callee_binding)
-                        .copied()
-                        .unwrap_or(TypeInterner::BOTTOM);
-                    return ret_ty;
-                }
-
-                // Primitive return type inference for unresolved callees
-                let callee_sym = arena.get(callee_binding).name;
-                if let Some(name) = symbol_names.get(&callee_sym.0) {
-                    let prim_ty = primitive_return_type(name, &arg_types, interner);
-                    if prim_ty != TypeInterner::TOP {
-                        return prim_ty;
-                    }
-                }
-            }
-
-            TypeInterner::TOP
-        }
-
-        // Begin/Block — type is last expression
-        HirKind::Begin(exprs) => {
-            let mut ty = TypeInterner::NIL;
-            for expr in exprs {
-                ty = recurse!(expr);
-                hir_types.insert(expr.id, ty);
-            }
-            ty
-        }
-        HirKind::Block { body, .. } => {
-            let mut ty = TypeInterner::NIL;
-            for expr in body {
-                ty = recurse!(expr);
-                hir_types.insert(expr.id, ty);
-            }
-            ty
-        }
-
-        // And/Or — conservative: Top
-        HirKind::And(_) | HirKind::Or(_) => {
-            hir.for_each_child(|child| {
-                let ty = recurse!(child);
-                hir_types.insert(child.id, ty);
-            });
-            TypeInterner::TOP
-        }
-
-        // Loop — recurse into body
-        HirKind::Loop { bindings, body } => {
-            for (binding, init) in bindings {
-                let ty = recurse!(init);
-                hir_types.insert(init.id, ty);
-                let old = binding_types
-                    .get(binding)
-                    .copied()
-                    .unwrap_or(TypeInterner::BOTTOM);
-                binding_types.insert(*binding, interner.join(old, ty));
-            }
-            let body_ty = recurse!(body);
-            hir_types.insert(body.id, body_ty);
-            body_ty
-        }
-
-        // Assign/Define — update binding type
-        HirKind::Assign { target, value }
-        | HirKind::Define {
-            binding: target,
-            value,
-        } => {
-            let ty = recurse!(value);
-            hir_types.insert(value.id, ty);
-            let old = binding_types
-                .get(target)
-                .copied()
-                .unwrap_or(TypeInterner::BOTTOM);
-            binding_types.insert(*target, interner.join(old, ty));
-            // Track min_length for array constructor bindings
-            if ty == TypeInterner::MUTABLE_ARRAY || ty == TypeInterner::ARRAY {
-                if let Some(call) = unwrap_to_call(value) {
-                    binding_min_length.insert(*target, call);
-                }
-            }
-            ty
-        }
-
-        // MakeCell — propagate inner value type
-        HirKind::MakeCell { value } => {
-            let ty = recurse!(value);
-            hir_types.insert(value.id, ty);
-            ty
-        }
-
-        // DerefCell — return binding type if cell is Var(b)
-        HirKind::DerefCell { cell } => {
-            let ty = recurse!(cell);
-            hir_types.insert(cell.id, ty);
-            if let HirKind::Var(b) = &cell.kind {
-                binding_types.get(b).copied().unwrap_or(TypeInterner::TOP)
-            } else {
-                TypeInterner::TOP
-            }
-        }
-
-        // SetCell — widen binding type
-        HirKind::SetCell { cell, value } => {
-            let cell_ty = recurse!(cell);
-            hir_types.insert(cell.id, cell_ty);
-            let val_ty = recurse!(value);
-            hir_types.insert(value.id, val_ty);
-            // Widen the binding's type with the new value
-            if let HirKind::Var(b) = &cell.kind {
-                let old = binding_types
-                    .get(b)
-                    .copied()
-                    .unwrap_or(TypeInterner::BOTTOM);
-                binding_types.insert(*b, interner.join(old, val_ty));
-            }
-            val_ty
-        }
-
-        // Everything else — recurse and return Top
-        _ => {
-            hir.for_each_child(|child| {
-                let ty = recurse!(child);
-                hir_types.insert(child.id, ty);
-            });
-            TypeInterner::TOP
-        }
-    }
+    Ok(TypeInfo { hir_types })
 }
 
 /// Extract the binding from a callee expression.
@@ -540,42 +193,43 @@ fn unwrap_to_call(hir: &Hir) -> Option<usize> {
     }
 }
 
-/// Known return types for primitive (stdlib) function calls.
-fn primitive_return_type(name: &str, arg_types: &[TyId], interner: &TypeInterner) -> TyId {
+/// Known return types for callable (stdlib) function calls.
+///
+/// Primitives carry their return type in the registry
+/// (`PrimitiveDef::ret`, looked up through `def_by_name` — name and
+/// alias spellings alike), so inference reads the same const tables
+/// `register_primitives` feeds and cannot drift from them. The only
+/// names matched here are stdlib *closures* (defined in stdlib.lisp,
+/// not in any primitive table) whose pass-through typing inference
+/// still wants.
+fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterner) -> TyId {
+    use crate::primitives::def::RetType;
+
+    if let Some(def) = crate::primitives::registration::def_by_name(name) {
+        return match def.ret {
+            RetType::Unknown => TypeInterner::TOP,
+            RetType::Int => TypeInterner::INT,
+            RetType::Bool => TypeInterner::BOOL,
+            RetType::String => TypeInterner::STRING,
+            RetType::MutableString => TypeInterner::MUTABLE_STRING,
+            RetType::Keyword => TypeInterner::KEYWORD,
+            RetType::Bytes => TypeInterner::BYTES,
+            RetType::MutableBytes => TypeInterner::MUTABLE_BYTES,
+            RetType::Array => TypeInterner::ARRAY,
+            RetType::MutableArray => TypeInterner::MUTABLE_ARRAY,
+            RetType::Struct => TypeInterner::STRUCT,
+            RetType::MutableStruct => TypeInterner::MUTABLE_STRUCT,
+            RetType::Set => TypeInterner::SET,
+            RetType::MutableSet => TypeInterner::MUTABLE_SET,
+            RetType::FirstArg => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
+        };
+    }
+
     match name {
-        "array" => TypeInterner::ARRAY,
-        "@array" => TypeInterner::MUTABLE_ARRAY,
-        "struct" => TypeInterner::STRUCT,
-        "@struct" => TypeInterner::MUTABLE_STRUCT,
-        "string" => TypeInterner::STRING,
-        "push" => {
-            // push returns arg0 type (MutableArray passthrough)
-            arg_types.first().copied().unwrap_or(TypeInterner::TOP)
-        }
-        "put" => {
-            // put returns arg0 type (passthrough)
-            arg_types.first().copied().unwrap_or(TypeInterner::TOP)
-        }
-        "abs" | "floor" | "ceil" | "round" => TypeInterner::NUMBER,
-        "length" => TypeInterner::INT,
-        "type" => TypeInterner::KEYWORD,
-        "has?" | "empty?" | "contains?" => TypeInterner::BOOL,
-        "string?" | "int?" | "integer?" | "float?" | "number?" | "nil?" | "boolean?"
-        | "keyword?" | "symbol?" | "pair?" | "list?" | "array?" | "struct?" | "bytes?"
-        | "even?" | "odd?" | "closure?" | "fiber?" | "box?" | "ptr?" | "pointer?" => {
-            TypeInterner::BOOL
-        }
-        "string/contains?"
-        | "string-contains?"
-        | "string/starts-with?"
-        | "string-starts-with?"
-        | "string/ends-with?"
-        | "string-ends-with?" => TypeInterner::BOOL,
-        "number->string" => TypeInterner::STRING,
-        _ => {
-            let _ = (arg_types, interner);
-            TypeInterner::TOP
-        }
+        // stdlib.lisp closures (not primitives): mutating pass-throughs
+        // that return their first argument.
+        "push" | "put" => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
+        _ => TypeInterner::TOP,
     }
 }
 
@@ -637,6 +291,21 @@ fn intrinsic_return_type(
         // Conversions
         IntrinsicOp::Int => TypeInterner::INT,
         IntrinsicOp::Float => TypeInterner::FLOAT,
+
+        // Monomorphic array push: the variant pins the result type (the whole point
+        // of monomorphization — the polymorphic %array-push stays Top/FirstArg).
+        // %push-array yields a fresh immutable Array twin; %push-array-mut stores in
+        // place and returns its mutable arg0 (MutableArray).
+        IntrinsicOp::PushArray => TypeInterner::ARRAY,
+        IntrinsicOp::PushArrayMut => TypeInterner::MUTABLE_ARRAY,
+
+        // Monomorphic put variants: the variant pins the result type (the polymorphic
+        // %put stays Top). Immutable variants yield a fresh immutable twin; -mut stores
+        // in place and returns its mutable arg0.
+        IntrinsicOp::PutStruct => TypeInterner::STRUCT,
+        IntrinsicOp::PutStructMut => TypeInterner::MUTABLE_STRUCT,
+        IntrinsicOp::PutArray => TypeInterner::ARRAY,
+        IntrinsicOp::PutArrayMut => TypeInterner::MUTABLE_ARRAY,
 
         // Pair
         IntrinsicOp::Pair => TypeInterner::TOP,
@@ -792,3 +461,6 @@ fn rewrite_children(
     });
     changed
 }
+
+#[cfg(test)]
+mod tests;

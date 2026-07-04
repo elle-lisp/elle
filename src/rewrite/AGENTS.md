@@ -42,13 +42,3 @@ For each token, apply rules → collect Vec<Edit>
     ▼
 apply_edits(source, edits) → new source string
 ```
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~10 | Module declarations |
-| `edit.rs` | ~110 | Edit type, apply_edits, overlap detection |
-| `rule.rs` | ~110 | RewriteRule trait, RenameSymbol |
-| `engine.rs` | ~80 | rewrite_source function |
-| `run.rs` | ~120 | CLI entry point |

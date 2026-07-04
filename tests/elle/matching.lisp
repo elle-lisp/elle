@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Match Expression Tests
 ##
 ## Migrated from tests/property/matching.rs (behavioral property tests).

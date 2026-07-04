@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/gtk4/bind.lisp — FFI bindings and low-level helpers for GTK4, GLib, GObject, WebKit
 ##
 ## Raw ffi/defbind declarations plus glib-wait (scheduler integration)

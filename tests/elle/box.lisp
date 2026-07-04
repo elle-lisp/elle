@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # ── box: mutable cell tests ──────────────────────────────────────────
 #
 # Comprehensive tests for box/unbox/rebox/box? primitives.

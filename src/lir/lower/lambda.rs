@@ -18,7 +18,7 @@ impl<'a> Lowerer<'a> {
         num_locals: u16,
         inferred_signal: &crate::signals::Signal,
         param_bounds: &[ParamBound],
-        doc: Option<crate::value::Value>,
+        doc: Option<std::rc::Rc<str>>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
         assert_numeric: bool,
     ) -> Result<Reg, String> {
@@ -34,6 +34,22 @@ impl<'a> Lowerer<'a> {
             let binding_needs_capture = self.arena.get(cap.binding).needs_capture();
 
             match cap.kind {
+                // A self-edge is resolved by `LoadSelf` / a self-call (the executing
+                // closure), never by loading this env slot, so the slot is a dead
+                // placeholder — emit NIL. Keeping the slot (rather than dropping it and
+                // renumbering) leaves every following capture's env index unchanged, so
+                // a transitive `Capture { index }` into this closure's env still
+                // resolves. NIL mints no heap cell: a binding captured only by
+                // self-edges is cell-free. (A binding a *sibling* also captures keeps
+                // its cell for that sibling, reached through the binding's own slot,
+                // not this self-slot.)
+                CaptureKind::Recursive { .. } => {
+                    self.emit(LirInstr::Const {
+                        dst: reg,
+                        value: LirConst::Nil,
+                    });
+                    capture_regs.push(reg);
+                }
                 CaptureKind::Local => {
                     // Load from parent's local/parameter slot
                     // Use binding_to_slot to find where this binding is in the current context
@@ -91,6 +107,19 @@ impl<'a> Lowerer<'a> {
             }
         }
 
+        // Record the self-recursive binding (if any) this closure is the initializer
+        // of: the binding it captures as `CaptureKind::Recursive` (a same-binding
+        // self-edge). Such a closure is cell-free, but its region lives through the
+        // whole recursion (its self-reference borrows the executing closure), so a
+        // recursive tail call strands its scope-end release — `tail_callee_adopts`
+        // reads this set to supply it via the runtime adopt. Recorded BEFORE lowering
+        // the body so a self-tail-call inside the body already sees the fact.
+        for cap in captures {
+            if let crate::hir::CaptureKind::Recursive { binding } = cap.kind {
+                self.self_recursive_bindings.insert(binding);
+            }
+        }
+
         // Reserve a slot in the module's closure list BEFORE lowering
         // the body. This gives pre-order numbering: parent IDs are lower
         // than children's. Matches collect_nested_functions traversal order.
@@ -123,11 +152,191 @@ impl<'a> Lowerer<'a> {
 
         // Create closure referencing it by ID
         let dst = self.fresh_reg();
-        self.emit(LirInstr::MakeClosure {
+        self.emit_alloc(|region| LirInstr::MakeClosure {
+            region,
             dst,
             closure_id,
             captures: capture_regs,
         });
+
+        // Closure-capture region accounting, two modes per capture:
+        //
+        // - **Owned (forest)**: under `--region-ownership`, a capture whose value region is
+        //   an interior member of this closure's Owned subtree (`capture_adopt_edges[lambda]`,
+        //   the capture cut) is ADOPTED — emit a value-resolved
+        //   `AdoptRegion(closure, captured)` linking the captured value's runtime region into
+        //   the closure's subtree, so the closure's free subtree-drops it. The member's own
+        //   compiler decref is suppressed in `analyze_regions_with` (it is freed only by the
+        //   drop, never both). No `IncrefRegion`: the ownership edge is not reference-counted;
+        //   the runtime auto-incref over the `Closure` env (which the cascade would balance) is
+        //   absorbed by the frozen-RC no-op on the dropped member.
+        //
+        // - **Shared (baseline)**: every other cross-region capture keeps the per-region-RC
+        //   baseline incref of the binding's scope region. For a genuinely-Shared member it is
+        //   balanced by the cascade decref when the closure region frees. For a NON-owner
+        //   capture of a member that some OTHER closure adopted (an interior member captured
+        //   by two closures of one Owned subtree — only reachable once a future cut claims
+        //   such webs), the incref is instead inert: the member is RC-frozen, so this
+        //   closure's free-time cascade decref no-ops and the OWNER's subtree drop reclaims
+        //   the member regardless of its RC. `capture_adopt_edges` is empty without the flag,
+        //   so this is the unchanged baseline path.
+        if let Some(hir_id) = self.current_hir_id {
+            if let Some(&closure_region) = self.region_info.alloc_region.get(&hir_id) {
+                let adopt_edges = self
+                    .region_info
+                    .capture_adopt_edges
+                    .get(&hir_id)
+                    .cloned()
+                    .unwrap_or_default();
+                // How to RELOAD each adopted captured value for the value-resolved adopt,
+                // by the capture's access path — the emit covers EVERY capture kind
+                // (region-model.md § "The capture adopt"): a direct local from its binding
+                // slot (`LoadLocal`); an upvalue or transitive capture from the constructing
+                // function's environment (`LoadCapture`, or the raw cell load for a
+                // cell-held binding — `result_region_of` unwraps the cell either way, so
+                // both reloads resolve to the captured VALUE's runtime region, exactly as
+                // the local path's cell-through-slot load does).
+                enum AdoptReload {
+                    Slot(u16),
+                    Env { index: u16, raw: bool },
+                }
+                let mut adopt_loads: Vec<AdoptReload> = Vec::new();
+                // The member regions actually adopted here — checked against `adopt_edges`
+                // below so a suppressed-decref member can never be left un-adopted (a leak).
+                let mut adopted_members = Vec::new();
+                for cap in captures {
+                    // A self-edge is a NIL env placeholder (resolved by the executing
+                    // closure), so it names no captured value region — nothing to adopt
+                    // or incref.
+                    if matches!(cap.kind, crate::hir::CaptureKind::Recursive { .. }) {
+                        continue;
+                    }
+                    // The value regions of this capture that are children of an adopt edge
+                    // into this closure. The edge keys the *static* region; the emit is
+                    // value-resolved off the reload, so the closure adopts the captured
+                    // value's actual runtime region.
+                    let matched = self
+                        .region_info
+                        .binding_source_regions
+                        .get(&cap.binding)
+                        .map(|regs| {
+                            regs.iter()
+                                .copied()
+                                .filter(|r| adopt_edges.contains(&(*r, closure_region)))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    if !matched.is_empty() {
+                        // Mirror the capture-collection loop's access paths exactly.
+                        let needs_cell = self.arena.get(cap.binding).needs_capture();
+                        let reload = match cap.kind {
+                            crate::hir::CaptureKind::Local => {
+                                self.binding_to_slot.get(&cap.binding).copied().map(|slot| {
+                                    if self.in_lambda
+                                        && self.upvalue_bindings.contains(&cap.binding)
+                                    {
+                                        AdoptReload::Env {
+                                            index: slot,
+                                            raw: needs_cell,
+                                        }
+                                    } else {
+                                        AdoptReload::Slot(slot)
+                                    }
+                                })
+                            }
+                            crate::hir::CaptureKind::Capture { index } => Some(if self.in_lambda {
+                                AdoptReload::Env {
+                                    index,
+                                    raw: needs_cell,
+                                }
+                            } else {
+                                AdoptReload::Slot(index)
+                            }),
+                            crate::hir::CaptureKind::Recursive { .. } => None,
+                        };
+                        if let Some(reload) = reload {
+                            adopt_loads.push(reload);
+                            adopted_members.extend(matched);
+                            continue;
+                        }
+                    }
+                    // Baseline incref for every other cross-region capture.
+                    if let Some(&cap_region) = self.region_info.binding_region.get(&cap.binding) {
+                        if cap_region != closure_region {
+                            let region_id = self.static_slot(cap_region);
+                            self.emit(LirInstr::IncrefRegion { region_id });
+                        }
+                    }
+                }
+                // The capture-adopt contract: every `adopt_edges` member had its own decref
+                // suppressed by `analyze_regions_with` (reclaimed solely by this closure's
+                // subtree drop), so each MUST have been adopted above — suppressed yet never
+                // adopted LEAKS. The reloads cover every capture kind, so a miss means the
+                // edge names a region no capture of this closure holds (an inference bug).
+                debug_assert!(
+                    adopt_edges
+                        .iter()
+                        .all(|(member, _)| adopted_members.contains(member)),
+                    "capture-adopt contract violated: closure region {} has adopt edges {:?} \
+                     but only adopted members {:?} — a suppressed-decref member was not \
+                     adopted (a leak). Every adopt edge must name a region held by one of \
+                     this closure's captures.",
+                    closure_region.0,
+                    adopt_edges,
+                    adopted_members,
+                );
+                if !adopt_loads.is_empty() {
+                    // Park the closure in a scratch slot (consuming `dst`), then link each
+                    // captured value's runtime region into the closure's subtree with a
+                    // value-resolved `AdoptRegion` — both operands loaded FRESH so the
+                    // instruction's operand consumption (`ensure_binary_on_top` + two pops)
+                    // is harmless. Finally restore the closure into `dst` for the caller
+                    // (the same store/load roundtrip `emit_decrefs_for` uses for a discarded
+                    // result). `dst` itself cannot be the adopt operand: it is the closure
+                    // the caller binds next, and the capture registers were already consumed
+                    // by `MakeClosure`.
+                    let scratch = self.scratch_slot();
+                    self.emit(LirInstr::StoreLocal {
+                        slot: scratch,
+                        src: dst,
+                    });
+                    for reload in adopt_loads {
+                        let preg = self.fresh_reg();
+                        self.emit(LirInstr::LoadLocal {
+                            dst: preg,
+                            slot: scratch,
+                        });
+                        let creg = self.fresh_reg();
+                        let trace_load = match reload {
+                            AdoptReload::Slot(slot) => {
+                                self.emit(LirInstr::LoadLocal { dst: creg, slot });
+                                ("slot", slot)
+                            }
+                            AdoptReload::Env { index, raw: false } => {
+                                self.emit(LirInstr::LoadCapture { dst: creg, index });
+                                ("env", index)
+                            }
+                            AdoptReload::Env { index, raw: true } => {
+                                self.emit(LirInstr::LoadCaptureRaw { dst: creg, index });
+                                ("env-raw", index)
+                            }
+                        };
+                        self.emit(LirInstr::AdoptRegion {
+                            parent: preg,
+                            child: creg,
+                        });
+                        if crate::config::get().has_trace("rc") {
+                            eprintln!(
+                                "[trace:rc:emit] adopt_region capture closure_region={} {}={}",
+                                closure_region.0, trace_load.0, trace_load.1
+                            );
+                        }
+                    }
+                    self.emit(LirInstr::LoadLocal { dst, slot: scratch });
+                }
+            }
+        }
+
         Ok(dst)
     }
 
@@ -144,7 +353,7 @@ impl<'a> Lowerer<'a> {
         _num_locals: u16,
         inferred_signal: crate::signals::Signal,
         param_bounds: &[ParamBound],
-        doc: Option<crate::value::Value>,
+        doc: Option<std::rc::Rc<str>>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<LirFunction, String> {
         // Compute arity
@@ -161,19 +370,43 @@ impl<'a> Lowerer<'a> {
         let saved_num_local_params = self.num_local_params;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
         let saved_discard_slot = self.discard_slot;
-        let saved_pending_region_exits = self.pending_region_exits;
-        let saved_region_depth = self.region_depth;
-        let saved_region_refcounted_stack = std::mem::take(&mut self.region_refcounted_stack);
-        let saved_flip_depth = self.flip_depth;
+        let saved_region_to_table = std::mem::take(&mut self.region_to_table);
+        // `region_to_slot` is the post-ANF replacement for the
+        // retired `call_region_slot` shadow map: it lets
+        // `emit_decrefs_for` find the slot owning a
+        // call_result_region. Slots are per-function (LIR's local
+        // slot index space is per-function), so the map must be
+        // empty inside the new lambda body and the parent's map
+        // must be restored on exit. Without this, an outer Call's
+        // region could be associated with a stale slot index from
+        // the inner function.
+        let saved_region_to_slot = std::mem::take(&mut self.region_to_slot);
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
         // self-tail-calls. We save it here and restore it for the
         // post-lowering escape analysis.
         let saved_function_binding = self.current_function_binding.take();
         let saved_function_params = self.current_function_params.take();
+        // The self-recursive binding of THIS lambda body: the binding this lambda
+        // captures as `CaptureKind::Recursive` (a same-binding self-edge, classified
+        // in `hir/analyze/scopes.rs`). A reference to it inside the body — in value OR
+        // call position — resolves to the executing closure via `LoadSelf` / a
+        // self-call (`lower_var`), never a cell load. Read directly from the classified
+        // fact, independent of whether the binding also keeps a cell for a sibling
+        // (`needs_capture()`): the self-edge is resolved by the executing closure in
+        // every case. Saved/restored so a nested lambda restores the enclosing value.
+        let saved_self_binding = self.current_self_binding.take();
+        let this_self_binding: Option<Binding> = captures.iter().find_map(|cap| {
+            if let crate::hir::CaptureKind::Recursive { binding } = cap.kind {
+                Some(binding)
+            } else {
+                None
+            }
+        });
 
         self.next_reg = 0;
         self.next_label = 1;
+        self.discard_slot = None;
         // num_locals starts at 0; non-LBox params and let-bound vars
         // will increment it as they're allocated.
         // LBox params go into the env (not counted in num_locals for stack frame).
@@ -183,9 +416,6 @@ impl<'a> Lowerer<'a> {
         self.num_captures = captures.len() as u16;
         self.num_local_params = 0;
         self.discard_slot = None;
-        self.pending_region_exits = 0;
-        self.region_depth = 0;
-        self.flip_depth = 0;
         self.current_func.doc = doc;
         self.current_func.syntax = syntax;
         self.current_func.vararg_kind = vararg_kind.clone();
@@ -249,10 +479,36 @@ impl<'a> Lowerer<'a> {
 
         self.current_func.num_local_params = self.num_local_params as usize;
 
+        // Each param is an OWNED binding: the analysis gave it a placeholder
+        // region in `call_result_regions` (see the Lambda arm of `regions.rs`).
+        // Record `region_to_slot[param_r] = slot` so `emit_decrefs_for` can
+        // release it at the param's true last use. `binding_to_slot` already
+        // holds the right slot for each kind:
+        //   - non-captured param → a LOCAL slot; released `LoadLocal` +
+        //     `DecrefValueRegion` (drops the arg's runtime region).
+        //   - captured (LBox) param → the UPVALUE/env index; its placeholder is
+        //     in `cell_release_regions`, released `LoadCaptureRaw` +
+        //     `DecrefCellRegion` (frees the env cell's own region).
+        for param in params.iter() {
+            let Some(&slot) = self.binding_to_slot.get(param) else {
+                continue;
+            };
+            if let Some(regions) = self.region_info.binding_source_regions.get(param) {
+                for &r in regions.clone().iter() {
+                    if self.region_info.call_result_regions.contains(&r) {
+                        self.region_to_slot.insert(r, slot);
+                    }
+                }
+            }
+        }
+
         // Restore function context for body lowering — needed by
         // emit_drop_dead_params to detect self-tail-calls.
         self.current_function_binding = saved_function_binding;
         self.current_function_params = saved_function_params.clone();
+        // This body's self-reference resolves to the executing closure (value
+        // path). Set before lowering the body; restored below.
+        self.current_self_binding = this_self_binding;
 
         // Emit signal bound checks for each bounded parameter
         for pb in param_bounds {
@@ -274,8 +530,41 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Lower body
+        // Lower body. (No tail-region suppression: ownership transfer
+        // to the caller is carried by `IncrefValueRegion` at each
+        // `Return` — the return-wrapping pass — and the callee's own
+        // `DecrefRegion` fires normally at the `return_sites`-extended
+        // decref_point. See `emit_decrefs_for`.)
         let result_reg = self.lower_expr(body)?;
+
+        // Fallback release for UNUSED non-captured params. A used param's
+        // placeholder region gets a `decref_point` (from its uses) and is
+        // released by `emit_decrefs_for`; an unused param has no `region_data`
+        // entry, so without this its moved-in arg would leak. Release it here,
+        // on the normal-return path (a tail-call exit replaces the frame before
+        // reaching this `Return`, so its params are released by the tail
+        // callee, not here — naturally excluded). The retain ordering note in
+        // `lower_return` does not apply: an unused param is never the return
+        // value, so no `IncrefValueRegion` precedes this.
+        let unused_param_slots: Vec<u16> = params
+            .iter()
+            .filter(|p| !self.arena.get(**p).needs_capture())
+            .filter_map(|p| {
+                let slot = *self.binding_to_slot.get(p)?;
+                let regions = self.region_info.binding_source_regions.get(p)?;
+                let any_unreleased = regions.iter().any(|r| {
+                    self.region_info.call_result_regions.contains(r)
+                        && !self.region_info.region_data.contains_key(r)
+                });
+                any_unreleased.then_some(slot)
+            })
+            .collect();
+        for slot in unused_param_slots {
+            let val_reg = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+            self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+        }
+
         self.terminate(Terminator::Return(result_reg));
         self.finish_block();
 
@@ -284,17 +573,13 @@ impl<'a> Lowerer<'a> {
         // Propagate inferred signal to LIR function
         self.current_func.signal = inferred_signal;
 
-        // Compute escape analysis flags for fiber shared-alloc decisions.
-        // current_function_binding/params are already set (restored before
-        // body lowering above), so body_escapes_heap_values can detect
-        // self-tail-calls with per-parameter analysis.
-        self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
-        self.current_func.has_outward_heap_set =
-            self.body_contains_dangerous_outward_set(body, &[]);
-        self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
-        // Clear function context — will be restored to parent's state below.
         self.current_function_binding = None;
         self.current_function_params = None;
+
+        // Record this lambda's merged slots while `region_to_table` still holds
+        // its slots (restored to the parent's below). Empty unless a builder-idiom
+        // merge fired in this lambda — see `record_merged_slots`.
+        self.record_merged_slots();
 
         let func = std::mem::replace(&mut self.current_func, saved_func);
 
@@ -308,10 +593,9 @@ impl<'a> Lowerer<'a> {
         self.num_local_params = saved_num_local_params;
         self.upvalue_bindings = saved_upvalue_bindings;
         self.discard_slot = saved_discard_slot;
-        self.pending_region_exits = saved_pending_region_exits;
-        self.region_depth = saved_region_depth;
-        self.region_refcounted_stack = saved_region_refcounted_stack;
-        self.flip_depth = saved_flip_depth;
+        self.region_to_table = saved_region_to_table;
+        self.region_to_slot = saved_region_to_slot;
+        self.current_self_binding = saved_self_binding;
 
         Ok(func)
     }

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2/frame.lisp — HTTP/2 frame codec (RFC 9113)
 ##
 ## Loaded via: (def frame ((import "std/http2/frame")))
@@ -108,16 +108,23 @@
 
   (defn read-exact [transport n]
     "Read exactly n bytes from transport. Returns bytes or nil on EOF."
-    (def @buf (bytes))
+
+    # Accumulate into one mutable @bytes (append mutates it in place),
+    # then freeze once. Rebuilding `buf` with (concat buf chunk) per
+    # iteration was O(n²) in copies AND retained every intermediate in a
+    # single never-freed region — a 50 KiB body over short reads ran to
+    # tens of GiB and OOM-killed the process (h2-stress).
+    (def @buf (@bytes))
     (def @remaining n)
+    (def @eof? false)
     (while (> remaining 0)
       (let [chunk (transport:read remaining)]
         (when (nil? chunk)
-          (assign buf nil)
+          (assign eof? true)
           (break nil))
-        (assign buf (concat buf chunk))
+        (append buf chunk)
         (assign remaining (- remaining (length chunk)))))
-    buf)
+    (if eof? nil (freeze buf)))
 
   ## ── Frame reader ──────────────────────────────────────────────────────
 
@@ -393,6 +400,60 @@
       (assert (has-flag? flags FLAG-END-HEADERS)
               "continuation end: end-headers flag")
       (assert (= sid 3) "continuation end: stream-id"))
+
+    # ── read-exact: chunked reassembly + bounded memory ──
+    # A transport that hands back the body in many small chunks stresses
+    # the read loop. Pre-fix read-exact rebuilt `buf` with
+    # (concat buf chunk) every iteration, retaining every growing
+    # intermediate in one never-freed region: O(n²) bytes — OOM on real
+    # 16 KiB frames delivered as short reads. Must be both correct (bytes
+    # reassembled in order) AND bounded (arena grows ~ the result size,
+    # not its square).
+    #
+    # chunk-size 64 over 150 chunks (n=9600): pre-fix the quadratic
+    # accumulation + page over-allocation ran past available memory;
+    # post-fix it is one 9600-byte buffer plus a handful of per-iteration
+    # temporaries. Chunks are built BEFORE the arena snapshot so the delta
+    # reflects read-exact's own allocation.
+    (let* [csize 64
+           cn 150
+           n (* csize cn)
+           src (apply bytes
+                      (let [@l @[]]
+                        (def @bi 0)
+                        (while (< bi n)
+                          (push l (bit/and bi 0xff))
+                          (assign bi (+ bi 1)))
+                        (freeze l)))
+           chunks (let [@cs @[]]
+                    (def @ci 0)
+                    (while (< ci cn)
+                      (push cs (slice src (* ci csize) (* (+ ci 1) csize)))
+                      (assign ci (+ ci 1)))
+                    (freeze cs))
+           transport @{:pos 0}]
+      (put transport
+           :read (fn [_]
+                   (let [p transport:pos]
+                     (if (>= p cn)
+                       nil
+                       (begin
+                         (put transport :pos (+ p 1))
+                         (get chunks p))))))
+      (let* [before (arena/bytes)
+             got (read-exact transport n)
+             delta (- (arena/bytes) before)]
+        (assert (= got src) "read-exact: chunked bytes reassembled in order")
+        (assert (= (length got) n) "read-exact: full length")
+
+        # One n-byte buffer + O(cn) loop temporaries; pre-fix: OOM.
+        (assert (< delta 4000000)
+                (concat "read-exact leaked: arena grew " (string delta)
+                        " bytes for a " (string n) "-byte read"))))
+
+    # read-exact returns nil at clean EOF (transport:read → nil).
+    (let [eof-transport @{:read (fn [_] nil)}]
+      (assert (nil? (read-exact eof-transport 8)) "read-exact: nil on EOF"))
 
     true)
 

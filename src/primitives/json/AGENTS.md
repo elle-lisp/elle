@@ -22,8 +22,8 @@ JSON parsing and serialization primitives.
 | `prim_json_parse(args)` | Parse JSON string → Elle value |
 | `prim_json_serialize(args)` | Serialize Elle value → compact JSON string |
 | `prim_json_serialize_pretty(args)` | Serialize Elle value → pretty-printed JSON string |
-| `JsonParser::new(input)` | Create parser for JSON string (string keys) |
-| `JsonParser::new_with_opts(input, use_keyword_keys)` | Create parser with options |
+| `JsonParser::new(input, ctx)` | Create parser for JSON string (string keys); allocates through `ctx` |
+| `JsonParser::new_with_opts(input, use_keyword_keys, ctx)` | Create parser with options; allocates through `ctx` |
 | `JsonParser::parse()` | Parse JSON → Elle value |
 | `serialize_value(value)` | Serialize value → JSON string |
 | `serialize_value_pretty(value, indent)` | Serialize value → pretty JSON string |
@@ -94,11 +94,3 @@ JSON parsing and serialization primitives.
 - `primitives/registration.rs` — registers JSON primitives
 - `primitives/module_init.rs` — initializes JSON module
 - Elle code — via `json/parse`, `json/serialize`, `json/serialize-pretty`
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | 601 | Primitive definitions and entry points |
-| `parser.rs` | ~400 | Recursive descent JSON parser |
-| `serializer.rs` | ~300 | JSON serialization (compact and pretty) |

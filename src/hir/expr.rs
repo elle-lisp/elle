@@ -8,8 +8,21 @@ use crate::value::Value;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+mod op;
+pub use op::*;
+
+mod traverse;
+
 /// Unique identifier for a HIR node. Used as a key for analysis side
 /// tables (region assignments, type annotations, etc.).
+///
+/// Deliberately NOT `Ord`/`PartialOrd`: a `HirId` is an identity, not a
+/// position. The global counter assigns ids monotonically, but the ANF
+/// lift appends synthetic nodes whose ids do not reflect structural or
+/// execution order, so comparing `HirId` magnitudes is meaningless and
+/// was the source of a phantom-region class. Code that needs program
+/// order must use the explicit index from
+/// `crate::hir::liveness::compute_order` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HirId(pub u32);
 
@@ -147,8 +160,11 @@ pub enum HirKind {
         /// These bounds feed into inferred_signals computation and into runtime checking
         /// (`CheckSignalBound` for silence).
         param_bounds: Vec<ParamBound>,
-        /// Optional docstring extracted from the lambda body
-        doc: Option<Value>,
+        /// Optional docstring extracted from the lambda body. Plain compile-time
+        /// string data (`Rc<str>`), NOT a heap `Value`. It rides the closure
+        /// template (held alive by RC with it) and is materialized as a fresh
+        /// ordinary (reclaimable) allocation when `(doc f)` reads it.
+        doc: Option<std::rc::Rc<str>>,
         /// Original lambda Syntax node for eval environment reconstruction
         syntax: Option<Rc<crate::syntax::Syntax>>,
         /// True if the function body contains `(numeric!)` assertion.
@@ -249,8 +265,16 @@ pub enum HirKind {
     },
 
     // === Quote ===
-    /// Quote stores a pre-computed Value (converted at analysis time)
+    /// Quote of an IMMEDIATE datum (`'5`, `'foo`, `'()`) or a macro-hygiene
+    /// datum carrying a pre-baked `SyntaxLiteral` Value: stores the Value
+    /// directly (an immediate, or — only on the macro path — a syntax object).
     Quote(Value),
+    /// Quote of COMPOUND DATA (`'(a b c)`, `'[1 2]`, nested structures): stores
+    /// the immutable structure as a `ConstTemplate` — plain compile-time data,
+    /// not a pre-baked pinned `Value`. `MaterializeConst` builds a fresh value
+    /// from it into the literal's own region each execution (docs/impl/region-model.md
+    /// § "Constants lower as ordinary allocations").
+    QuoteConst(crate::value::ConstTemplate),
 
     // === Destructuring ===
     /// Unconditional destructuring: extract values from a compound and bind them.
@@ -304,266 +328,30 @@ pub enum HirKind {
         args: Vec<Hir>,
     },
 
+    /// Function-return ownership boundary. Wraps the tail value of a
+    /// function body (one per non-tail-call tail leaf, inserted by
+    /// `wrap_tail_returns` after `mark_tail_calls`). Evaluates `value`
+    /// and hands the caller **one owning reference to the result's
+    /// runtime region** — the callee side of the prediction-free
+    /// calling convention. It is region-transparent: the result is the
+    /// same value, living in the same region as `value`; the only
+    /// effect is an incref of that region (lowered to
+    /// `IncrefValueRegion`), balanced by the caller's release at the
+    /// result binding's `decref_point`.
+    ///
+    /// This is **not** an early/control-flow return — Elle returns are
+    /// implicit via tail position. It is a structural marker of "this
+    /// expression's value escapes to the caller," distinct from a call.
+    /// Tail calls are NOT wrapped: the inner callee already retained
+    /// its result, and wrapping would defeat tail-call optimization.
+    Return {
+        value: Box<Hir>,
+    },
+
     /// Poison node — inserted when a recoverable error is accumulated
     /// during analysis. The lowerer should never see this; the pipeline
     /// checks for accumulated errors before lowering.
     Error,
-}
-
-/// Known %-intrinsic operations with fixed type/alloc/escape behavior.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntrinsicOp {
-    // Arithmetic
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    Mod,
-    // Comparison
-    Eq,
-    Lt,
-    Gt,
-    Le,
-    Ge,
-    // Logical
-    Not,
-    // Conversion
-    Int,
-    Float,
-    // Pair operations
-    Pair, // pair constructor: allocates
-    First,
-    Rest,
-    // Bitwise
-    BitAnd,
-    BitOr,
-    BitXor,
-    BitNot,
-    Shl,
-    Shr,
-    // Comparison (missing)
-    Ne,
-    // Type predicates
-    IsNil,
-    IsEmpty,
-    IsBool,
-    IsInt,
-    IsFloat,
-    IsString,
-    IsKeyword,
-    IsSymbol,
-    IsPair,
-    IsArray,
-    IsStruct,
-    IsSet,
-    IsBytes,
-    IsBox,
-    IsClosure,
-    IsFiber,
-    TypeOf,
-    // Data access
-    Length,
-    Get,
-    Put,
-    Del,
-    Has,
-    Push,
-    Pop,
-    // Mutability
-    Freeze,
-    Thaw,
-    // Identity
-    Identical,
-}
-
-impl IntrinsicOp {
-    /// Name as it appears in source code (with % prefix).
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Add => "%add",
-            Self::Sub => "%sub",
-            Self::Mul => "%mul",
-            Self::Div => "%div",
-            Self::Rem => "%rem",
-            Self::Mod => "%mod",
-            Self::Eq => "%eq",
-            Self::Lt => "%lt",
-            Self::Gt => "%gt",
-            Self::Le => "%le",
-            Self::Ge => "%ge",
-            Self::Not => "%not",
-            Self::Int => "%int",
-            Self::Float => "%float",
-            Self::Pair => "%pair",
-            Self::First => "%first",
-            Self::Rest => "%rest",
-            Self::BitAnd => "%bit-and",
-            Self::BitOr => "%bit-or",
-            Self::BitXor => "%bit-xor",
-            Self::BitNot => "%bit-not",
-            Self::Shl => "%shl",
-            Self::Shr => "%shr",
-            Self::Ne => "%ne",
-            Self::IsNil => "%nil?",
-            Self::IsEmpty => "%empty?",
-            Self::IsBool => "%bool?",
-            Self::IsInt => "%int?",
-            Self::IsFloat => "%float?",
-            Self::IsString => "%string?",
-            Self::IsKeyword => "%keyword?",
-            Self::IsSymbol => "%symbol?",
-            Self::IsPair => "%pair?",
-            Self::IsArray => "%array?",
-            Self::IsStruct => "%struct?",
-            Self::IsSet => "%set?",
-            Self::IsBytes => "%bytes?",
-            Self::IsBox => "%box?",
-            Self::IsClosure => "%closure?",
-            Self::IsFiber => "%fiber?",
-            Self::TypeOf => "%type-of",
-            Self::Length => "%length",
-            Self::Get => "%get",
-            Self::Put => "%put",
-            Self::Del => "%del",
-            Self::Has => "%has?",
-            Self::Push => "%push",
-            Self::Pop => "%pop",
-            Self::Freeze => "%freeze",
-            Self::Thaw => "%thaw",
-            Self::Identical => "%identical?",
-        }
-    }
-
-    /// Look up an intrinsic by its %-prefixed name.
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "%add" => Some(Self::Add),
-            "%sub" => Some(Self::Sub),
-            "%mul" => Some(Self::Mul),
-            "%div" => Some(Self::Div),
-            "%rem" => Some(Self::Rem),
-            "%mod" => Some(Self::Mod),
-            "%eq" => Some(Self::Eq),
-            "%lt" => Some(Self::Lt),
-            "%gt" => Some(Self::Gt),
-            "%le" => Some(Self::Le),
-            "%ge" => Some(Self::Ge),
-            "%not" => Some(Self::Not),
-            "%int" => Some(Self::Int),
-            "%float" => Some(Self::Float),
-            "%pair" => Some(Self::Pair),
-            "%first" => Some(Self::First),
-            "%rest" => Some(Self::Rest),
-            "%bit-and" => Some(Self::BitAnd),
-            "%bit-or" => Some(Self::BitOr),
-            "%bit-xor" => Some(Self::BitXor),
-            "%bit-not" => Some(Self::BitNot),
-            "%shl" => Some(Self::Shl),
-            "%shr" => Some(Self::Shr),
-            "%ne" => Some(Self::Ne),
-            "%nil?" => Some(Self::IsNil),
-            "%empty?" => Some(Self::IsEmpty),
-            "%bool?" => Some(Self::IsBool),
-            "%int?" => Some(Self::IsInt),
-            "%float?" => Some(Self::IsFloat),
-            "%string?" => Some(Self::IsString),
-            "%keyword?" => Some(Self::IsKeyword),
-            "%symbol?" => Some(Self::IsSymbol),
-            "%pair?" => Some(Self::IsPair),
-            "%array?" => Some(Self::IsArray),
-            "%struct?" => Some(Self::IsStruct),
-            "%set?" => Some(Self::IsSet),
-            "%bytes?" => Some(Self::IsBytes),
-            "%box?" => Some(Self::IsBox),
-            "%closure?" => Some(Self::IsClosure),
-            "%fiber?" => Some(Self::IsFiber),
-            "%type-of" => Some(Self::TypeOf),
-            "%length" => Some(Self::Length),
-            "%get" => Some(Self::Get),
-            "%put" => Some(Self::Put),
-            "%del" => Some(Self::Del),
-            "%has?" => Some(Self::Has),
-            "%push" => Some(Self::Push),
-            "%pop" => Some(Self::Pop),
-            "%freeze" => Some(Self::Freeze),
-            "%thaw" => Some(Self::Thaw),
-            "%identical?" => Some(Self::Identical),
-            _ => None,
-        }
-    }
-
-    /// Required arity (min, max). Most are fixed; %sub allows 1 or 2.
-    pub fn arity(self) -> (usize, usize) {
-        match self {
-            Self::Not
-            | Self::Int
-            | Self::Float
-            | Self::First
-            | Self::Rest
-            | Self::BitNot
-            | Self::IsNil
-            | Self::IsEmpty
-            | Self::IsBool
-            | Self::IsInt
-            | Self::IsFloat
-            | Self::IsString
-            | Self::IsKeyword
-            | Self::IsSymbol
-            | Self::IsPair
-            | Self::IsArray
-            | Self::IsStruct
-            | Self::IsSet
-            | Self::IsBytes
-            | Self::IsBox
-            | Self::IsClosure
-            | Self::IsFiber
-            | Self::TypeOf
-            | Self::Length
-            | Self::Pop
-            | Self::Freeze
-            | Self::Thaw => (1, 1),
-            Self::Sub => (1, 2),
-            Self::Add
-            | Self::Mul
-            | Self::Div
-            | Self::Rem
-            | Self::Mod
-            | Self::Eq
-            | Self::Ne
-            | Self::Lt
-            | Self::Gt
-            | Self::Le
-            | Self::Ge
-            | Self::Pair
-            | Self::BitAnd
-            | Self::BitOr
-            | Self::BitXor
-            | Self::Shl
-            | Self::Shr
-            | Self::Get
-            | Self::Del
-            | Self::Has
-            | Self::Push
-            | Self::Identical => (2, 2),
-            Self::Put => (3, 3),
-        }
-    }
-
-    /// Does this intrinsic allocate heap memory?
-    pub fn allocates(self) -> bool {
-        matches!(
-            self,
-            Self::Pair
-                | Self::Freeze
-                | Self::Thaw
-                | Self::Put
-                | Self::Del
-                | Self::TypeOf
-                | Self::Length
-                | Self::Get
-        )
-    }
 }
 
 impl Hir {
@@ -572,235 +360,46 @@ impl Hir {
         Hir::silent(HirKind::Error, span)
     }
 
-    /// Iterate over the immediate child HIR nodes of this node.
-    /// Visit each child mutably, in the same order as `for_each_child`.
-    pub(crate) fn for_each_child_mut(&mut self, mut f: impl FnMut(&mut Hir)) {
-        match &mut self.kind {
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (_, init) in bindings {
-                    f(init);
-                }
-                f(body);
-            }
-            HirKind::Lambda { body, .. } => f(body),
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                f(cond);
-                f(then_branch);
-                f(else_branch);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    f(e);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    f(e);
-                }
-            }
-            HirKind::Break { value, .. } => f(value),
-            HirKind::Call { func, args, .. } => {
-                f(func);
-                for a in args {
-                    f(&mut a.expr);
-                }
-            }
-            HirKind::Assign { value, .. }
-            | HirKind::Define { value, .. }
-            | HirKind::MakeCell { value } => f(value),
-            HirKind::DerefCell { cell } => f(cell),
-            HirKind::SetCell { cell, value } => {
-                f(cell);
-                f(value);
-            }
-            HirKind::While { cond, body } => {
-                f(cond);
-                f(body);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (_, init) in bindings {
-                    f(init);
-                }
-                f(body);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    f(a);
-                }
-            }
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    f(e);
-                }
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    f(c);
-                    f(b);
-                }
-                if let Some(eb) = else_branch {
-                    f(eb);
-                }
-            }
-            HirKind::Emit { value, .. } => f(value),
-            HirKind::Match { value, arms } => {
-                f(value);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        f(g);
-                    }
-                    f(body);
-                }
-            }
-            HirKind::Destructure { value, .. } => f(value),
-            HirKind::Eval { expr, env } => {
-                f(expr);
-                f(env);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (_, v) in bindings {
-                    f(v);
-                }
-                f(body);
-            }
-            HirKind::Intrinsic { args, .. } => {
-                for a in args {
-                    f(a);
-                }
-            }
-        }
-    }
-
-    pub(crate) fn for_each_child(&self, mut f: impl FnMut(&Hir)) {
+    /// Does evaluating this expression produce a freshly-allocated
+    /// heap value owned by *this* HIR node?
+    ///
+    /// "Allocating" is **operational**, not syntactic: the predicate
+    /// must agree with whether the lowerer at this `HirId` emits an
+    /// instruction that increments a region's RC. Used by the ANF
+    /// lift to decide which expressions need to be named.
+    ///
+    /// Notably:
+    ///
+    /// - `MakeCell` / `DerefCell` are **not** allocating. The lowerer
+    ///   is transparent for them (the implicit `MakeCaptureCell` for
+    ///   `needs_capture` bindings happens at the binding site, not
+    ///   the `MakeCell` node). Wrapping their child in a synthetic
+    ///   `Let` would manufacture a region with no matching alloc —
+    ///   exactly the phantom-region class the region-inference audit
+    ///   has been chasing.
+    /// - `Eval` allocates because its runtime region is opaque to
+    ///   the caller (the callee chooses), so the result needs a name
+    ///   so `emit_decrefs_for` can emit `DecrefValueRegion`.
+    /// - `Intrinsic` defers to `IntrinsicOp::allocates` (currently
+    ///   `Pair`, `Freeze`, `Thaw`).
+    /// - `Match` allocates iff any arm's pattern would allocate at
+    ///   the destructure site (see `HirPattern::allocates`).
+    pub fn allocates(&self) -> bool {
         match &self.kind {
-            HirKind::Nil
-            | HirKind::EmptyList
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Var(_)
-            | HirKind::Quote(_)
-            | HirKind::Error => {}
-
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                for (_, init) in bindings {
-                    f(init);
-                }
-                f(body);
-            }
-            HirKind::Lambda { body, .. } => f(body),
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                f(cond);
-                f(then_branch);
-                f(else_branch);
-            }
-            HirKind::Begin(exprs) => {
-                for e in exprs {
-                    f(e);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                for e in body {
-                    f(e);
-                }
-            }
-            HirKind::Break { value, .. } => f(value),
-            HirKind::Call { func, args, .. } => {
-                f(func);
-                for a in args {
-                    f(&a.expr);
-                }
-            }
-            HirKind::Assign { value, .. }
-            | HirKind::Define { value, .. }
-            | HirKind::MakeCell { value } => f(value),
-            HirKind::DerefCell { cell } => f(cell),
-            HirKind::SetCell { cell, value } => {
-                f(cell);
-                f(value);
-            }
-            HirKind::While { cond, body } => {
-                f(cond);
-                f(body);
-            }
-            HirKind::Loop { bindings, body } => {
-                for (_, init) in bindings {
-                    f(init);
-                }
-                f(body);
-            }
-            HirKind::Recur { args } => {
-                for a in args {
-                    f(a);
-                }
-            }
-            HirKind::And(exprs) | HirKind::Or(exprs) => {
-                for e in exprs {
-                    f(e);
-                }
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (c, b) in clauses {
-                    f(c);
-                    f(b);
-                }
-                if let Some(eb) = else_branch {
-                    f(eb);
-                }
-            }
-            HirKind::Emit { value, .. } => f(value),
-            HirKind::Match { value, arms } => {
-                f(value);
-                for (_, guard, body) in arms {
-                    if let Some(g) = guard {
-                        f(g);
-                    }
-                    f(body);
-                }
-            }
-            HirKind::Destructure { value, .. } => f(value),
-            HirKind::Eval { expr, env } => {
-                f(expr);
-                f(env);
-            }
-            HirKind::Parameterize { bindings, body } => {
-                for (_, v) in bindings {
-                    f(v);
-                }
-                f(body);
-            }
-            HirKind::Intrinsic { args, .. } => {
-                for a in args {
-                    f(a);
-                }
-            }
+            HirKind::Lambda { .. } => true,
+            HirKind::Call { .. } => true,
+            HirKind::Eval { .. } => true,
+            // `produces_call_result_region`: %put/%del/%string-push/
+            // %array-push/%bytes-push are call-results (region freed by value),
+            // so ANF must NAME them to give the result a slot — otherwise the
+            // `DecrefValueRegion` is orphaned when the value is consumed as an
+            // operand or discarded.
+            HirKind::Intrinsic { op, .. } => op.allocates() || op.produces_call_result_region(),
+            HirKind::Match { arms, .. } => arms.iter().any(|(p, _, _)| p.allocates()),
+            _ => false,
         }
     }
 }
+
+#[cfg(test)]
+mod allocates_tests;

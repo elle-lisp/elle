@@ -12,7 +12,6 @@
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
-use crate::primitives::registration::ALL_TABLES;
 use crate::signals::SIG_IO;
 use crate::value::fiber::SignalBits;
 use crate::value::repr::TAG_HEAP_START;
@@ -55,6 +54,12 @@ pub struct WasmSuspensionFrame {
     /// Full signal bits at the yield point. Preserves SIG_IO and other
     /// bits so the scheduler can detect I/O requests on the fiber.
     pub signal_bits: u64,
+    /// The executing closure (`SELF_SLOT`) at the yield point — (tag, payload).
+    /// `rt_yield` snapshots it from linear memory; `resume_wasm_closure` writes it
+    /// back before re-invoking, so a `LoadSelf` after resume names the closure that
+    /// suspended (not whichever ran most recently on this store's shared memory).
+    pub self_tag: i64,
+    pub self_payload: i64,
 }
 
 /// Host state stored in the Wasmtime `Store<ElleHost>`.
@@ -77,7 +82,7 @@ pub struct ElleHost {
     /// frame; PopParamFrame pops.
     pub param_frames: Vec<Vec<(u32, Value)>>,
     /// Per-fiber suspension frames. Keyed by fiber ID (FiberHandle pointer
-    /// address). Each fiber's frames are independent — nested coroutine
+    /// address). Each fiber's frames are independent — nested fiber
     /// resumes don't interfere with the parent fiber's frames.
     ///
     /// Frames are pushed to the back (innermost first during yield-through-call)
@@ -108,6 +113,12 @@ pub struct ElleHost {
     /// Indexed by table index (= ClosureId). When set, rt_call dispatches
     /// to the pre-compiled Module instead of call_indirect on the full table.
     pub precached_closures: Vec<Option<PrecachedClosure>>,
+    /// The driving VM, threaded so host primitive calls build a VM-bearing
+    /// `NativeCtx` (docs/impl/region-ctx.md). Set by every Store-creation site
+    /// from the VM in scope (the lazy tier's `run_wasm` pointer, `eval_wasm_raw`'s
+    /// own VM, or an enclosing wasm call's host); null only on a freshly
+    /// constructed host before that install, which never runs a primitive.
+    pub vm: *mut crate::vm::VM,
 }
 
 impl ElleHost {
@@ -127,6 +138,7 @@ impl ElleHost {
             debug: crate::config::get().has_trace("wasm"),
             io_backend: None,
             precached_closures: Vec::new(),
+            vm: std::ptr::null_mut(),
         }
     }
 }
@@ -138,6 +150,14 @@ impl Default for ElleHost {
 }
 
 impl ElleHost {
+    /// Raw pointer to the driving instance's heap (`vm.heap_ptr`). The WASM host
+    /// builds every result / env / error value on the instance's own heap, reached
+    /// through the threaded VM. Non-null whenever wasm executes (the VM is set at
+    /// store creation; a freshly constructed host runs no code before that).
+    pub(crate) fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap {
+        unsafe { (*self.vm).heap_ptr }
+    }
+
     /// Get the current fiber's ID from the stack, or 0 for top-level.
     pub fn current_fiber_id(&self) -> usize {
         self.fiber_id_stack.last().copied().unwrap_or(0)
@@ -235,10 +255,18 @@ impl ElleHost {
     /// Returns (signal_bits, result_value).
     pub fn call_primitive(&mut self, prim_id: u32, args: &[Value]) -> (SignalBits, Value) {
         let def = self.primitives[prim_id as usize];
+        let heap = unsafe { &mut *self.heap_ptr() };
+        // Mint the boundary's fresh result region explicitly so it can be both
+        // threaded to `call_plugin` (the plugin region slot — no `NativeCtx`
+        // region getter survives) and owned by the ctx the native body uses. The
+        // VM comes from the host (`self.vm`), so a re-entrant primitive reaches it
+        // through `ctx.vm()` (docs/impl/region-ctx.md).
+        let region = heap.new_runtime_region();
+        let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, self.vm);
         if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
-            crate::plugin_api::call_plugin(def, args)
+            crate::plugin_api::call_plugin(def, &mut ctx, args, region)
         } else {
-            (def.func)(args)
+            (def.func)(&mut ctx, args)
         }
     }
 
@@ -265,7 +293,7 @@ impl ElleHost {
 
         if let Some(backend_val) = self.find_io_backend() {
             if let Some(async_be) = backend_val.as_external::<AnyBackend>() {
-                if let Ok(_id) = async_be.0.submit(request) {
+                if let Ok(_id) = async_be.0.submit(request, self.heap_ptr()) {
                     if let Ok(completions) = async_be.0.wait(-1) {
                         if let Some(c) = completions.into_iter().next() {
                             return match c.result {
@@ -294,17 +322,16 @@ impl ElleHost {
                     self.io_backend.as_ref().unwrap()
                 }
                 Err(e) => {
+                    let heap = unsafe { &mut *self.heap_ptr() };
+                    let ctx = crate::primitives::ctx::Alloc::new(heap);
                     return (
                         crate::value::fiber::SIG_ERROR,
-                        crate::value::error_val(
-                            "io-error",
-                            format!("failed to create I/O backend: {}", e),
-                        ),
+                        ctx.error("io-error", format!("failed to create I/O backend: {}", e)),
                     );
                 }
             },
         };
-        if let Ok(_id) = backend.0.submit(request) {
+        if let Ok(_id) = backend.0.submit(request, self.heap_ptr()) {
             if let Ok(completions) = backend.0.wait(-1) {
                 if let Some(c) = completions.into_iter().next() {
                     return match c.result {
@@ -314,9 +341,11 @@ impl ElleHost {
                 }
             }
         }
+        let heap = unsafe { &mut *self.heap_ptr() };
+        let ctx = crate::primitives::ctx::Alloc::new(heap);
         (
             crate::value::fiber::SIG_ERROR,
-            crate::value::error_val("io-error", "I/O submission failed"),
+            ctx.error("io-error", "I/O submission failed"),
         )
     }
 
@@ -351,6 +380,9 @@ pub trait WasmEnvHost {
     fn env_stack_ptr(&self) -> usize;
     fn set_env_stack_ptr(&mut self, ptr: usize);
     fn value_to_wasm(&mut self, value: Value) -> (i64, i64);
+    /// Raw pointer to the driving instance's heap, so the generic env builder
+    /// allocates capture cells on the instance's own heap (`vm.heap_ptr`).
+    fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap;
 }
 
 impl WasmEnvHost for ElleHost {
@@ -363,35 +395,29 @@ impl WasmEnvHost for ElleHost {
     fn value_to_wasm(&mut self, value: Value) -> (i64, i64) {
         self.value_to_wasm(value)
     }
-}
-
-/// Build a flattened dispatch table from ALL_TABLES.
-///
-/// Each primitive gets a sequential index. This table is used by the
-/// WASM emitter to assign prim_ids and by the host to dispatch calls.
-fn build_primitive_table() -> Vec<&'static PrimitiveDef> {
-    let mut table = Vec::new();
-    for primitives in ALL_TABLES {
-        for def in *primitives {
-            table.push(def);
-        }
+    fn heap_ptr(&self) -> *mut crate::value::fiberheap::FiberHeap {
+        ElleHost::heap_ptr(self)
     }
-    table
 }
 
-/// Build a name → prim_id lookup for the WASM emitter.
-///
-/// Maps primitive names (and aliases) to their dispatch table index.
+/// The WASM host's dispatch table (index = `prim_id`). This is the canonical
+/// registry snapshot, so the host resolves a `prim_id` to the SAME def an
+/// immediate native-fn `Value{TAG_NATIVE_FN, prim_id}` names — one prim_id space
+/// across the value representation, the WASM emitter, and host dispatch.
+fn build_primitive_table() -> Vec<&'static PrimitiveDef> {
+    crate::primitives::prim_table_snapshot()
+}
+
+/// Build a name → `prim_id` lookup for the WASM emitter, over the canonical
+/// registry table — so the ids the emitter bakes agree with the host's dispatch
+/// table and the immediate native-fn payloads.
 pub fn build_primitive_id_map() -> std::collections::HashMap<String, u32> {
     let mut map = std::collections::HashMap::new();
-    let mut id: u32 = 0;
-    for primitives in ALL_TABLES {
-        for def in *primitives {
-            map.insert(def.name.to_string(), id);
-            for alias in def.aliases {
-                map.insert((*alias).to_string(), id);
-            }
-            id += 1;
+    for (id, def) in crate::primitives::prim_table_snapshot().iter().enumerate() {
+        let id = id as u32;
+        map.insert(def.name.to_string(), id);
+        for alias in def.aliases {
+            map.insert((*alias).to_string(), id);
         }
     }
     map

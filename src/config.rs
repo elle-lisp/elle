@@ -4,23 +4,13 @@
 //! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Separate atomic for runtime-togglable flip; initialized from Config default,
-/// updated by `set_flip`, read by `flip_enabled`.
-static FLIP_OVERRIDE: AtomicBool = AtomicBool::new(true);
-
-/// Check whether flip instructions are enabled (runtime-togglable).
+/// Legacy: flip instructions are always no-ops. Kept for API compat.
 pub fn flip_enabled() -> bool {
-    FLIP_OVERRIDE.load(Ordering::Relaxed)
-}
-
-/// Toggle flip instructions at runtime (from vm/config-set :flip).
-pub fn set_flip(on: bool) {
-    FLIP_OVERRIDE.store(on, Ordering::Relaxed);
+    false
 }
 
 /// Default cache directory.
@@ -48,265 +38,130 @@ pub fn get() -> &'static Config {
 /// Initialize the global config. Must be called before `get` for
 /// CLI-parsed values to take effect. No-op if already initialized.
 pub fn init(config: Config) {
-    FLIP_OVERRIDE.store(config.flip_instructions, Ordering::Relaxed);
     let _ = CONFIG.set(config);
 }
 
-// ── JIT policy ────────────────────────────────────────────────────
-
-/// JIT compilation policy.
-#[derive(Debug, Clone, PartialEq)]
-pub enum JitPolicy {
-    /// JIT disabled.
-    Off,
-    /// Compile on first call.
-    Eager,
-    /// Compile after N calls (default: threshold=10).
-    Adaptive { threshold: usize },
-    /// Defer to an Elle closure stored on the VM (see `vm/config`).
-    Custom,
-}
-
-impl JitPolicy {
-    /// Whether JIT is enabled at all.
-    pub fn enabled(&self) -> bool {
-        !matches!(self, JitPolicy::Off)
-    }
-
-    /// Hotness threshold (calls before compilation).
-    /// Returns 0 for Eager, the threshold for Adaptive, usize::MAX for Off.
-    pub fn threshold(&self) -> usize {
-        match self {
-            JitPolicy::Off => usize::MAX,
-            JitPolicy::Eager => 0,
-            JitPolicy::Adaptive { threshold } => *threshold,
-            JitPolicy::Custom => 0,
-        }
-    }
-
-    /// Keyword representation for Elle.
-    pub fn keyword(&self) -> &'static str {
-        match self {
-            JitPolicy::Off => "off",
-            JitPolicy::Eager => "eager",
-            JitPolicy::Adaptive { .. } => "adaptive",
-            JitPolicy::Custom => "custom",
-        }
-    }
-
-    /// Parse from a keyword string.
-    pub fn from_keyword(s: &str) -> Option<JitPolicy> {
-        match s {
-            "off" => Some(JitPolicy::Off),
-            "eager" => Some(JitPolicy::Eager),
-            "adaptive" => Some(JitPolicy::Adaptive { threshold: 10 }),
-            "custom" => Some(JitPolicy::Custom),
-            _ => None,
-        }
-    }
-}
-
-// ── WASM policy ───────────────────────────────────────────────────
-
-/// WASM compilation policy.
-#[derive(Debug, Clone, PartialEq)]
-pub enum WasmPolicy {
-    /// WASM disabled.
-    Off,
-    /// Compile entire module upfront.
-    Full,
-    /// Per-function lazy compilation after N calls.
-    Lazy { threshold: usize },
-}
-
-impl WasmPolicy {
-    pub fn keyword(&self) -> &'static str {
-        match self {
-            WasmPolicy::Off => "off",
-            WasmPolicy::Full => "full",
-            WasmPolicy::Lazy { .. } => "lazy",
-        }
-    }
-
-    pub fn from_keyword(s: &str) -> Option<WasmPolicy> {
-        match s {
-            "off" => Some(WasmPolicy::Off),
-            "full" => Some(WasmPolicy::Full),
-            "lazy" => Some(WasmPolicy::Lazy { threshold: 10 }),
-            _ => None,
-        }
-    }
-}
-
-// ── MLIR policy ──────────────────────────────────────────────────
-
-/// MLIR compilation policy for GPU-eligible functions.
+/// Whether `%`-intrinsics route through their checked `NativeFn` primitives
+/// (the CLI default, the escape-correct native-Call path) rather than inlining
+/// to unchecked opcodes — read by the analyzer's intrinsic-recognition gate.
 ///
-/// Independent of the JIT policy. When the `mlir` feature is compiled in,
-/// GPU-eligible functions are compiled through MLIR → LLVM. This policy
-/// controls when that compilation happens. Functions not eligible for
-/// MLIR fall through to the Cranelift JIT regardless.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MlirPolicy {
-    /// MLIR disabled — GPU-eligible functions fall through to JIT.
-    Off,
-    /// Compile on first eligible call.
-    Eager,
-    /// Compile after N calls (default: threshold=10).
-    Adaptive { threshold: usize },
+/// This is a function rather than a bare `get().checked_intrinsics` read so a
+/// test can exercise the checked-on path without touching the write-once global
+/// `CONFIG` (which is process-wide and first-write-wins, so unsafe to flip per
+/// test under parallelism). In a non-test build it is exactly the global field.
+pub fn checked_intrinsics() -> bool {
+    #[cfg(test)]
+    {
+        if let Some(v) = test_override::get() {
+            return v;
+        }
+    }
+    get().checked_intrinsics
 }
 
-impl MlirPolicy {
-    /// Whether MLIR compilation is enabled at all.
-    pub fn enabled(&self) -> bool {
-        !matches!(self, MlirPolicy::Off)
+/// Test-only, thread-local override for [`checked_intrinsics`]. A unit test that
+/// must compile on the checked-on (native-Call) path sets it for the duration of
+/// one compile and clears it — scoped to the calling thread, so it cannot leak
+/// across the test runner's parallel threads. Use [`ScopedCheckedIntrinsics`].
+#[cfg(test)]
+pub(crate) mod test_override {
+    use std::cell::Cell;
+    thread_local! {
+        static OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+    pub(crate) fn get() -> Option<bool> {
+        OVERRIDE.with(|c| c.get())
+    }
+    fn set(v: Option<bool>) {
+        OVERRIDE.with(|c| c.set(v));
     }
 
-    /// Hotness threshold (calls before compilation).
-    /// Returns 0 for Eager, the threshold for Adaptive, usize::MAX for Off.
-    pub fn threshold(&self) -> usize {
-        match self {
-            MlirPolicy::Off => usize::MAX,
-            MlirPolicy::Eager => 0,
-            MlirPolicy::Adaptive { threshold } => *threshold,
+    /// RAII guard: forces `checked_intrinsics()` to `value` on this thread until
+    /// dropped, then restores the prior override (clearing on the common path).
+    pub(crate) struct ScopedCheckedIntrinsics(Option<bool>);
+    impl ScopedCheckedIntrinsics {
+        pub(crate) fn new(value: bool) -> Self {
+            let prev = get();
+            set(Some(value));
+            ScopedCheckedIntrinsics(prev)
         }
     }
-
-    /// Keyword representation for Elle.
-    pub fn keyword(&self) -> &'static str {
-        match self {
-            MlirPolicy::Off => "off",
-            MlirPolicy::Eager => "eager",
-            MlirPolicy::Adaptive { .. } => "adaptive",
-        }
-    }
-
-    /// Parse from a keyword string.
-    pub fn from_keyword(s: &str) -> Option<MlirPolicy> {
-        match s {
-            "off" => Some(MlirPolicy::Off),
-            "eager" => Some(MlirPolicy::Eager),
-            "adaptive" => Some(MlirPolicy::Adaptive { threshold: 10 }),
-            _ => None,
-        }
-    }
-}
-
-// ── Trace keywords ────────────────────────────────────────────────
-
-/// All known trace keywords. Unknown keywords in `--trace=` are rejected;
-/// unknown keywords in Elle `(put (vm/config) :trace ...)` are accepted
-/// silently (forward compat for :spirv, :mlir, :gpu).
-pub const TRACE_KEYWORDS: &[&str] = &[
-    "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
-    "macro", "wasm", "capture", "arena", "escape", "bytecode", "posix",
-    // Future: accepted without error
-    "spirv", "mlir", "gpu",
-];
-
-// ── Dump keywords ─────────────────────────────────────────────────
-
-/// Compiler-stage dumps requested from `--dump=<kw>,...`. Unlike `--trace=`
-/// (which enables runtime logging), `--dump=` runs the compiler up to each
-/// requested stage, prints the artifact, and exits without executing.
-pub const DUMP_KEYWORDS: &[&str] = &[
-    "ast", "hir", "fhir", "lir", "jit", "cfg", "dfa", "defuse", "regions", "escape", "git",
-];
-
-pub mod dump_bits {
-    pub const AST: u32 = 1 << 0;
-    pub const HIR: u32 = 1 << 1;
-    pub const LIR: u32 = 1 << 2;
-    pub const JIT: u32 = 1 << 3;
-    pub const CFG: u32 = 1 << 4;
-    pub const DFA: u32 = 1 << 5;
-    pub const GIT: u32 = 1 << 6;
-    pub const FHIR: u32 = 1 << 7;
-    pub const DEFUSE: u32 = 1 << 8;
-    pub const REGIONS: u32 = 1 << 9;
-    pub const ESCAPE: u32 = 1 << 10;
-    pub const ALL: u32 = (1 << 11) - 1;
-
-    /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
-    pub fn from_name(name: &str) -> u32 {
-        match name {
-            "ast" => AST,
-            "hir" => HIR,
-            "fhir" => FHIR,
-            "lir" => LIR,
-            "jit" => JIT,
-            "cfg" => CFG,
-            "dfa" => DFA,
-            "git" => GIT,
-            "defuse" => DEFUSE,
-            "regions" => REGIONS,
-            "escape" => ESCAPE,
-            _ => 0,
+    impl Drop for ScopedCheckedIntrinsics {
+        fn drop(&mut self) {
+            set(self.0);
         }
     }
 }
 
-/// Bit positions for trace keywords — avoids HashSet lookups on hot paths.
-/// Each keyword maps to a bit in a u32.
-pub mod trace_bits {
-    pub const CALL: u32 = 1 << 0;
-    pub const SIGNAL: u32 = 1 << 1;
-    pub const COMPILE: u32 = 1 << 2;
-    pub const FIBER: u32 = 1 << 3;
-    pub const HIR: u32 = 1 << 4;
-    pub const LIR: u32 = 1 << 5;
-    pub const EMIT: u32 = 1 << 6;
-    pub const JIT: u32 = 1 << 7;
-    pub const IO: u32 = 1 << 8;
-    pub const GC: u32 = 1 << 9;
-    pub const IMPORT: u32 = 1 << 10;
-    pub const MACRO: u32 = 1 << 11;
-    pub const WASM: u32 = 1 << 12;
-    pub const CAPTURE: u32 = 1 << 13;
-    pub const ARENA: u32 = 1 << 14;
-    pub const ESCAPE: u32 = 1 << 15;
-    pub const BYTECODE: u32 = 1 << 16;
-    /// POSIX-signal subsystem (os/sig-* primitives, signalfd / kqueue
-    /// EVFILT_SIGNAL plumbing, threadpool blocking sig reads). Read both
-    /// from a per-VM `RuntimeConfig` via `has_trace_bit` and from the
-    /// process-global mirror `GLOBAL_TRACE_BITS` (below) — threadpool
-    /// worker threads and other off-VM call sites have no VM reference.
-    pub const POSIX: u32 = 1 << 17;
-    /// Channel wake protocol (`chan/wait-ready` register/deregister,
-    /// `chan/send` wake_all, wake-fd write/close).  Read both from
-    /// per-VM `RuntimeConfig` and from `GLOBAL_TRACE_BITS` — `chan/send`
-    /// can fire from any thread (including `sys/spawn`'d OS threads)
-    /// which has no `&VM` reference.
-    pub const CHAN: u32 = 1 << 18;
-    pub const ALL: u32 = (1 << 19) - 1;
+/// Whether the ownership forest is enabled (the `--region-ownership` flag).
+/// Like [`checked_intrinsics`], a function rather than a bare field read so a
+/// test can scope it to one compile via the thread-local override without
+/// touching the write-once global `CONFIG`. In a non-test build it is exactly
+/// the global field.
+pub fn region_ownership() -> bool {
+    #[cfg(test)]
+    {
+        if let Some(v) = region_ownership_override::get() {
+            return v;
+        }
+    }
+    get().region_ownership
+}
 
-    /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
-    pub fn from_name(name: &str) -> u32 {
-        match name {
-            "call" => CALL,
-            "signal" => SIGNAL,
-            "compile" => COMPILE,
-            "fiber" => FIBER,
-            "hir" => HIR,
-            "lir" => LIR,
-            "emit" => EMIT,
-            "jit" => JIT,
-            "io" => IO,
-            "gc" => GC,
-            "import" => IMPORT,
-            "macro" => MACRO,
-            "wasm" => WASM,
-            "capture" => CAPTURE,
-            "arena" => ARENA,
-            "escape" => ESCAPE,
-            "bytecode" => BYTECODE,
-            "posix" => POSIX,
-            "chan" => CHAN,
-            // Future keywords — accepted but no bit (traced via HashSet)
-            _ => 0,
+/// Test-only, thread-local override for [`region_ownership`], mirroring
+/// [`test_override`]. A unit/integration test that must compile with the forest
+/// on sets it for one compile and clears it — scoped to the calling thread, so it
+/// cannot leak across the test runner's parallel threads. Use
+/// [`ScopedRegionOwnership`].
+#[cfg(test)]
+pub(crate) mod region_ownership_override {
+    use std::cell::Cell;
+    thread_local! {
+        static OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+    pub(crate) fn get() -> Option<bool> {
+        OVERRIDE.with(|c| c.get())
+    }
+    fn set(v: Option<bool>) {
+        OVERRIDE.with(|c| c.set(v));
+    }
+
+    /// Whether a scoped override forces the ownership forest on or off. A named
+    /// alternative to a bare `bool` at the call site: `ScopedRegionOwnership::new(On)`
+    /// reads as "compile with the forest on", where `new(true)` could mean anything.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub(crate) enum RegionOwnership {
+        On,
+        Off,
+    }
+    impl RegionOwnership {
+        fn enabled(self) -> bool {
+            matches!(self, RegionOwnership::On)
+        }
+    }
+
+    /// RAII guard: forces `region_ownership()` to `ownership` on this thread until
+    /// dropped, then restores the prior override.
+    pub(crate) struct ScopedRegionOwnership(Option<bool>);
+    impl ScopedRegionOwnership {
+        pub(crate) fn new(ownership: RegionOwnership) -> Self {
+            let prev = get();
+            set(Some(ownership.enabled()));
+            ScopedRegionOwnership(prev)
+        }
+    }
+    impl Drop for ScopedRegionOwnership {
+        fn drop(&mut self) {
+            set(self.0);
         }
     }
 }
+
+mod policy;
+pub use policy::{JitPolicy, MlirPolicy, WasmPolicy};
+
+mod keywords;
+pub use keywords::{dump_bits, trace_bits, DUMP_KEYWORDS, TRACE_KEYWORDS};
 
 /// Process-global mirror of the active VM's trace bits, kept in sync by
 /// `RuntimeConfig::set_trace` and `from_static_config`. Threadpool
@@ -440,8 +295,8 @@ pub struct Config {
     /// WASM compilation policy.
     pub wasm: WasmPolicy,
 
-    /// Skip stdlib in full-module WASM mode.
-    pub wasm_no_stdlib: bool,
+    /// Skip stdlib loading entirely (primitives only).
+    pub no_stdlib: bool,
 
     /// Disk cache directory (WASM compilation, future uses).
     /// `None` = caching disabled (explicit `--cache=""`).
@@ -463,7 +318,7 @@ pub struct Config {
     /// JSON output on stderr (errors, stats, timing).
     pub json: bool,
 
-    /// Dump WASM module bytes to /tmp/elle-wasm-dump.wasm.
+    /// Dump WASM module bytes to /dev/shm/elle-wasm-dump.wasm.
     pub wasm_dump: bool,
 
     /// Print LIR before WASM emission.
@@ -480,13 +335,52 @@ pub struct Config {
     /// Route %-intrinsic calls through registered NativeFn primitives
     /// with runtime type validation instead of inlining to unchecked
     /// BinOp/CmpOp/etc. Implies jit=off, mlir=off.
+    ///
+    /// CLI default: **on** (set by `Config::parse`; the struct `Default` is
+    /// off, the library/test baseline). Only the native `Call` path is
+    /// escape-correct — the inlined `%`-intrinsic opcodes (and the JIT's
+    /// inlined accessors) are not. Routing `%`-ops as real native `Call`s is
+    /// therefore the sound default; the opcode fast-path is an optimization to
+    /// be re-enabled later. Override with
+    /// `--checked-intrinsics=off` (restores the optimizing tiers) or by
+    /// explicitly enabling `--jit`/`--mlir`.
     pub checked_intrinsics: bool,
 
-    /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
-    /// lowered functions (Phase 4b). On by default — escape-analysis
-    /// gates injection so only safe loops get flip. Disable via
-    /// `--flip=off` to fall back to trampoline-only rotation.
-    pub flip_instructions: bool,
+    /// Enable the ownership forest: classify regions Owned (adopted, freed by
+    /// subtree drop) vs Shared (the per-region-RC baseline) and emit
+    /// `AdoptRegion` for the interior edges of an externally-unique Owned subtree
+    /// (docs/impl/region-model.md § "Adoption and subtree drop";
+    /// `src/hir/regions/ownership.rs`). Default **off** — with it off no region is
+    /// ever adopted and emission is byte-identical to the per-region-RC baseline.
+    ///
+    /// It runs on BOTH intrinsics settings: the adopt is emitted at the intrinsic
+    /// containment-store site checked-off, and at the funnel call site checked-on
+    /// (the funnel face — docs/impl/region-model.md § "The funnel adopt — the
+    /// checked-on store face"), so `--checked-intrinsics` is left as configured.
+    /// The interpreter and the JIT both carry the `AdoptRegion`/`FreeRegionGroup`
+    /// lowering (`elle_jit_adopt_region`/`elle_jit_free_region_group`), so JIT is
+    /// not forced off either; only MLIR/WASM trail (forced off until their
+    /// structural-arena handling lands). Read through [`region_ownership`] so a
+    /// test can scope it to one compile without touching the write-once global.
+    pub region_ownership: bool,
+
+    /// Enable the A-normal form lift pass (`src/hir/anf.rs`).
+    ///
+    /// Default: on. `--anf=off` short-circuits `anf_lift` to a
+    /// no-op — i.e. the HIR is handed to region inference exactly as
+    /// `functionalize` produced it, with allocating call results
+    /// unnamed and the lowerer falling back on the shadow
+    /// `call_region_slot` mechanism (`src/lir/lower/mod.rs`).
+    ///
+    /// Provided as a counter-factual switch. With `--anf=off` the
+    /// closure-binding-overwrite bug (Family C in
+    /// `tests/integration/anf_counterfactual.rs`) returns; without
+    /// the flag the same scripts pass. This is the canonical proof
+    /// that the ANF transform is what closes the bug class — not some
+    /// other change between the failing and passing trees.
+    ///
+    /// Should be removed in a follow-up once causality is reviewed.
+    pub anf: bool,
 
     /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
     /// are listed in `DUMP_KEYWORDS`. When non-empty, the compiler runs up
@@ -497,16 +391,32 @@ pub struct Config {
     /// Trace keywords from `--trace=kw1,kw2,...`.
     /// Stored here from CLI parsing, then merged into RuntimeConfig on VM init.
     pub trace_keywords: Vec<String>,
+
+    /// Initial page size for region allocation (CLI: --region-page-size).
+    /// Must be a power of two >= 4096. Default: 4096.
+    pub region_page_size: usize,
+
+    /// Maximum bytes to cache in the per-thread page pool
+    /// (CLI: --page-pool-max). Default: 4MB.
+    pub page_pool_max: usize,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
+            // NOTE: the struct `Default` is the *library/test* baseline (the
+            // unoptimized opcode path: checked off, optimizing tiers on). The
+            // **CLI** effective default is different — `Config::parse` turns
+            // checked_intrinsics ON (and the optimizing tiers off) because that
+            // native-Call path is the only escape-correct one. Keeping the
+            // struct default at the old values means the region/anf solver unit
+            // tests (which exercise the intrinsic-opcode path and run off
+            // `Config::default`, never `parse`) stay meaningful. See `Config::parse`.
             jit: JitPolicy::Adaptive { threshold: 10 },
             stats: false,
             mlir: MlirPolicy::Adaptive { threshold: 10 },
             wasm: WasmPolicy::Off,
-            wasm_no_stdlib: false,
+            no_stdlib: false,
             cache: default_cache_dir(),
             no_uring: false,
             home: std::env::var("ELLE_HOME").ok(),
@@ -517,17 +427,31 @@ impl Default for Config {
             wasm_chunk: false,
             wasm_sparse_spill: true,
             checked_intrinsics: false,
-            flip_instructions: true,
+            region_ownership: false,
+            anf: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),
+            region_page_size: 4096,
+            page_pool_max: 4 * 1024 * 1024,
         }
     }
 }
+
+mod parse;
 
 impl Config {
     /// Check if a trace keyword is set.
     pub fn has_trace(&self, keyword: &str) -> bool {
         self.trace_keywords.iter().any(|k| k == keyword)
+    }
+
+    /// Compute trace bits for this config (bitfield of enabled trace keywords).
+    pub fn trace_bits(&self) -> u32 {
+        let mut bits = 0u32;
+        for kw in &self.trace_keywords {
+            bits |= trace_bits::from_name(kw);
+        }
+        bits
     }
 
     /// Whether JIT compilation is enabled.
@@ -544,232 +468,7 @@ impl Config {
     pub fn wasm_full(&self) -> bool {
         matches!(self.wasm, WasmPolicy::Full)
     }
-
-    /// Parse CLI arguments into a Config and remaining positional args.
-    ///
-    /// Returns `(config, subcommand_or_none, remaining_args)`.
-    /// `remaining_args` contains file args and everything after `--`.
-    pub fn parse(args: &[String]) -> Result<(Config, Vec<String>), String> {
-        let mut config = Config::default();
-        let mut remaining = Vec::new();
-        let mut i = 0;
-        let mut eval_exprs: Vec<String> = Vec::new();
-
-        while i < args.len() {
-            let arg = &args[i];
-
-            if arg == "--" {
-                // Everything after -- goes to user args
-                remaining.push("--".to_string());
-                remaining.extend_from_slice(&args[i + 1..]);
-                break;
-            }
-
-            // --key=value style
-            if let Some(rest) = arg.strip_prefix("--jit=") {
-                config.jit = match rest {
-                    "off" => JitPolicy::Off,
-                    "eager" => JitPolicy::Eager,
-                    "adaptive" => JitPolicy::Adaptive { threshold: 10 },
-                    _ => {
-                        let n: u32 = rest.parse().map_err(|_| {
-                            format!(
-                                "--jit: expected integer or policy name (off/eager/adaptive), got '{}'",
-                                rest
-                            )
-                        })?;
-                        if n == 0 {
-                            JitPolicy::Off
-                        } else if n == 1 {
-                            JitPolicy::Eager
-                        } else {
-                            JitPolicy::Adaptive {
-                                threshold: (n - 1) as usize,
-                            }
-                        }
-                    }
-                };
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--mlir=") {
-                config.mlir = match rest {
-                    "off" => MlirPolicy::Off,
-                    "eager" => MlirPolicy::Eager,
-                    "adaptive" => MlirPolicy::Adaptive { threshold: 10 },
-                    _ => {
-                        let n: u32 = rest.parse().map_err(|_| {
-                            format!(
-                                "--mlir: expected integer or policy name (off/eager/adaptive), got '{}'",
-                                rest
-                            )
-                        })?;
-                        if n == 0 {
-                            MlirPolicy::Off
-                        } else if n == 1 {
-                            MlirPolicy::Eager
-                        } else {
-                            MlirPolicy::Adaptive {
-                                threshold: (n - 1) as usize,
-                            }
-                        }
-                    }
-                };
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--wasm=") {
-                config.wasm = match rest {
-                    "off" => WasmPolicy::Off,
-                    "full" => WasmPolicy::Full,
-                    "lazy" => WasmPolicy::Lazy { threshold: 10 },
-                    _ => {
-                        let n: u32 = rest.parse().map_err(|_| {
-                            format!(
-                                "--wasm: expected integer or policy name (off/full/lazy), got '{}'",
-                                rest
-                            )
-                        })?;
-                        if n == 0 {
-                            WasmPolicy::Off
-                        } else {
-                            WasmPolicy::Lazy {
-                                threshold: (n - 1) as usize,
-                            }
-                        }
-                    }
-                };
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--flip=") {
-                config.flip_instructions = match rest {
-                    "on" | "true" | "1" => true,
-                    "off" | "false" | "0" => false,
-                    _ => {
-                        return Err(format!("--flip: expected on/off, got '{}'", rest));
-                    }
-                };
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--trace=") {
-                if rest == "all" {
-                    for kw in TRACE_KEYWORDS {
-                        config.trace_keywords.push(kw.to_string());
-                    }
-                } else {
-                    for kw in rest.split(',') {
-                        let kw = kw.trim();
-                        if !kw.is_empty() {
-                            config.trace_keywords.push(kw.to_string());
-                        }
-                    }
-                }
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--dump=") {
-                if rest == "all" {
-                    for kw in DUMP_KEYWORDS {
-                        config.dump.insert((*kw).to_string());
-                    }
-                } else {
-                    for kw in rest.split(',') {
-                        let kw = kw.trim();
-                        if kw.is_empty() {
-                            continue;
-                        }
-                        if dump_bits::from_name(kw) == 0 {
-                            return Err(format!(
-                                "--dump: unknown stage '{}'. Valid: {}",
-                                kw,
-                                DUMP_KEYWORDS.join(", ")
-                            ));
-                        }
-                        config.dump.insert(kw.to_string());
-                    }
-                }
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--cache=") {
-                config.cache = if rest.is_empty() {
-                    None
-                } else {
-                    Some(rest.to_string())
-                };
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--home=") {
-                config.home = Some(rest.to_string());
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--path=") {
-                config.path = Some(rest.to_string());
-                i += 1;
-                continue;
-            }
-
-            // Boolean flags
-            match arg.as_str() {
-                "--json" => config.json = true,
-                "--stats" => config.stats = true,
-                "--wasm-no-stdlib" => config.wasm_no_stdlib = true,
-                "--no-uring" => config.no_uring = true,
-                // Old debug flags — kept as aliases for --trace=<kw>
-                "--debug" => config.trace_keywords.push("bytecode".into()),
-                "--debug-jit" => config.trace_keywords.push("jit".into()),
-                "--debug-resume" => config.trace_keywords.push("fiber".into()),
-                "--debug-stack" => config.trace_keywords.push("call".into()),
-                "--debug-wasm" => config.trace_keywords.push("wasm".into()),
-                "--wasm-dump" => config.wasm_dump = true,
-                "--wasm-lir" => config.wasm_lir = true,
-                "--wasm-chunk" => config.wasm_chunk = true,
-                "--wasm-no-sparse-spill" => config.wasm_sparse_spill = false,
-                "--checked-intrinsics" => {
-                    config.checked_intrinsics = true;
-                    config.jit = JitPolicy::Off;
-                    config.mlir = MlirPolicy::Off;
-                }
-                "--eval" | "-e" => {
-                    i += 1;
-                    if i >= args.len() {
-                        return Err("--eval requires an argument".to_string());
-                    }
-                    eval_exprs.push(args[i].clone());
-                }
-                _ => {
-                    // Not a recognized flag — pass through as positional
-                    remaining.push(arg.clone());
-                }
-            }
-
-            i += 1;
-        }
-
-        // Prepend eval expressions as synthetic file args
-        // They'll be handled specially in main
-        for expr in eval_exprs.into_iter().rev() {
-            remaining.insert(0, format!("--eval:{}", expr));
-        }
-
-        // --checked-intrinsics requires JIT and MLIR off
-        if config.checked_intrinsics && config.jit.enabled() {
-            return Err(
-                "--checked-intrinsics is incompatible with --jit (JIT would bypass type checks)"
-                    .to_string(),
-            );
-        }
-        if config.checked_intrinsics && config.mlir.enabled() {
-            return Err(
-                "--checked-intrinsics is incompatible with --mlir (MLIR would bypass type checks)"
-                    .to_string(),
-            );
-        }
-
-        Ok((config, remaining))
-    }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/process-io.lisp — Bottom-up tests for I/O inside process:start
 ##
 ## Each test validates one assumption. Tests are cumulative: if test N
@@ -315,9 +315,6 @@
 ## ── 18. h2:close from a different sub-fiber than h2:connect ─────
 ## One sub-fiber opens the session, another closes it. Tests that
 ## the write-queue channel works across sub-fibers inside process.
-## Uses fuel=5000 to avoid fuel-preemption timing race where
-## sub-fibers (h2 reader, h2 server) interleave with the process
-## during handshake, causing EOF on a shared TCP connection.
 
 (process:start (fn []
                  (let* [[listener lport] (listen-ephemeral)
@@ -333,10 +330,8 @@
 (println "  18. h2:close from different sub-fiber: ok")
 
 ## ── 19. ev/timeout around h2:send inside process ────────────────
-## KNOWN ISSUE: ev/timeout inside process:start with h2 sub-fibers
-## has timing issues — the tick counter doesn't advance in sync with
-## I/O-blocked waits, causing premature timeout expiry.
-## Uses h2:send without ev/timeout as a workaround.
+## ev/timeout + process scheduler has been a source of segfaults
+## (aborted timer fibers leaving dangling scheduler state).
 
 (process:start (fn []
                  (let* [[listener lport] (listen-ephemeral)

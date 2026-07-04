@@ -35,19 +35,17 @@ Does NOT:
 | `CallbackStore` | `callback.rs` | Storage for active callbacks, keyed by code pointer |
 | `CallbackData` | `callback.rs` | Closure + signature captured by a trampoline |
 | `ActiveCallback` | `callback.rs` | Keeps a libffi closure alive; holds code pointer |
-| `load_library` | `loader.rs` | Load a shared library, trying host-native names |
-| `load_self` | `loader.rs` | Load the current process (dlopen(NULL)) |
-| `library_candidates` | `loader.rs` | Rewrite a Linux `.so` spec to host-native names |
-| `current_dl_os` | `loader.rs` | Host OS family (`DlOs`) for naming |
-| `LibraryHandle` | `loader.rs` | Handle to a loaded shared library |
+| `load` / `load_self` | `registry.rs` | Load a `.so` (or self) into the process-global registry; never `dlclose`d |
+| `symbol` | `registry.rs` | Resolve a symbol in a registered library |
+| `register_teardown` / `run_teardowns` | `registry.rs` | Attach / run a library's explicit ordered teardown |
 
 ## Data flow
 
 ```
 Elle code
   │
-  ├─ ffi/native "libm.so.6"  →  loader::load_library()  →  library_candidates() (host-native names)  →  LibraryHandle  →  FFISubsystem
-  ├─ ffi/lookup lib "sqrt"    →  LibraryHandle::get_symbol()  →  Value::pointer(addr)
+  ├─ ffi/native "libm.so.6"  →  registry::load()  →  process-global mapping; FFISubsystem maps id→key
+  ├─ ffi/lookup lib "sqrt"    →  FFISubsystem::get_symbol(id,"sqrt")  →  registry::symbol()  →  Value::pointer(addr)
   ├─ ffi/signature :double [:double]  →  Signature  →  Value::ffi_signature()
   │                                                      └─ HeapObject::FFISignature(sig, RefCell<Option<Cif>>)
   └─ ffi/call ptr sig 2.0     →  prim_ffi_call
@@ -75,28 +73,15 @@ Elle code
   │
   └─ C code calls the code_ptr  →  trampoline_callback()
        ├─ read C args via read_value_from_buffer()
-       ├─ get VM from thread-local context
+       ├─ use the VM captured at create_callback (userdata.vm)
        ├─ build closure env, execute bytecode
        ├─ write return value to libffi result buffer
-       └─ on error: zero result + set thread-local error flag
+       └─ on error: zero result + vm.ffi_mut().set_callback_error()
 ```
 
 ## Submodules
 
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | 74 | `FFISubsystem` struct: library map, callback store, load/get methods |
-| `types.rs` | 368 | `TypeDesc` enum, `StructDesc`, `Signature`, `CallingConvention`, keyword parsing, size/align |
-| `marshal.rs` | 460 | Shared types (`to_libffi_type`, `AlignedBuffer`, helpers), re-exports, tests |
-| `to_c.rs` | 511 | `MarshalledArg`, `ArgStorage`, `write_value_to_buffer`, `marshal_struct`, `marshal_array` |
-| `from_c.rs` | 99 | `read_value_from_buffer` — C → Value unmarshalling |
-| `call.rs` | 221 | `prepare_cif`, `ffi_call` — CIF preparation and C function dispatch |
-| `callback.rs` | 556 | `create_callback`, `free_callback`, `CallbackStore`, `ActiveCallback`, `trampoline_callback`, thread-local error flag |
-| `loader.rs` | ~290 | `load_library`, `load_self`, `library_candidates`, `LibraryHandle` — Unix dlopen, Linux→host name rewriting |
-| `primitives/mod.rs` | 7 | Re-exports from `primitives/context.rs` |
-| `primitives/context.rs` | 13 | Re-exports from `crate::context`, `register_ffi_primitives` (no-op) |
-
-The Elle-facing primitives live in `src/primitives/ffi.rs` (1579 lines), not
+The Elle-facing primitives live in `src/primitives/ffi.rs`, not
 in this module. This module provides the Rust implementation that those
 primitives call.
 
@@ -153,9 +138,11 @@ by code pointer, stored in `FFISubsystem`.
 
 ### FFISubsystem
 
-Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
-`callbacks: CallbackStore`. Methods: `load_library`, `load_self`,
-`get_library`, `callbacks_mut`.
+Per-VM FFI state. Holds `libraries: HashMap<u32, PathBuf>` (per-VM id → the
+process-global registry key) and `callbacks: CallbackStore`. Owns **no**
+`libloading::Library` — the mappings live in `registry.rs` for the process lifetime —
+so dropping a worker's `FFISubsystem` `dlclose`s nothing. Methods: `load_library`,
+`load_self`, `get_symbol`, `register_teardown`, `callbacks_mut`.
 
 ## Invariants
 
@@ -169,14 +156,16 @@ Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
    strings, the `CString` is owned by a `MarshalledArg` in the struct's
    `owned` vec. Dropping these before the C call is UB.
 
-3. **Callbacks are single-threaded.** The trampoline accesses the VM via
-   `crate::context::get_vm_context()` (thread-local). Invoking a callback
-   on a different thread will fail (no VM context).
+3. **Callbacks run under the VM that created them.** The trampoline uses the
+   `*mut VM` captured in `CallbackData` at `create_callback`. The callback is
+   owned by that VM's FFI subsystem, so it can only be invoked while that VM is
+   the active driver (the C call that re-enters the trampoline runs under it).
 
-4. **Callback errors use a thread-local flag.** When an Elle closure signals
-   an error during a callback, the trampoline writes zeros to the result
-   buffer and sets `CALLBACK_ERROR`. `prim_ffi_call` checks
-   `take_callback_error()` after the C function returns and propagates it.
+4. **Callback errors stash on the VM's FFI subsystem.** When an Elle closure
+   signals an error during a callback, the trampoline writes zeros to the result
+   buffer and calls `vm.ffi_mut().set_callback_error(err)`. `prim_ffi_call`
+   drains it via `take_callback_error()` after the C function returns and
+   propagates it.
 
 5. **Variadic callbacks are rejected.** `create_callback` returns an error
    if `signature.fixed_args.is_some()`. libffi closures don't support
@@ -195,15 +184,20 @@ Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
    Elle arrays map to C structs (positional fields) and C arrays (uniform
    elements). Field count must match exactly.
 
-9. **Platform-guarded loading.** `loader.rs` uses `#[cfg(unix)]` guards
-   (Linux, macOS, BSD); non-Unix platforms get stub implementations that
-   return errors. Library specs are written Linux-style and rewritten to the
-   host's native form (`.dylib`/`.dll`) by `library_candidates` before the
-   `dlopen`, so a single `(ffi/native "libfoo.so")` call is portable.
+9. **Platform-guarded loading.** `registry.rs` uses `#[cfg(unix)]` guards. Non-unix
+   platforms get stub implementations that return errors.
+
+10. **Library mappings are process-global and never `dlclose`d** (`registry.rs`,
+    matching `plugin.rs`). A worker that loads an FFI library and exits never unmaps
+    it, so a thread-local destructor the library registered (e.g. libgit2 via OpenSSL)
+    always runs against still-mapped code — the worker-teardown SIGSEGV in
+    `__nptl_deallocate_tsd` is impossible by construction. Teardown (`ffi/on-unload` +
+    `ffi/run-teardowns`) is explicit-only, optional graceful cleanup; the runtime
+    never runs it and never unmaps.
 
 ## Dependents
 
-- `primitives/ffi.rs` — all 15 FFI primitives call into this module
+- `primitives/ffi.rs` / `primitives/loading.rs` — the FFI primitives call into this module
 - `value/repr/accessors.rs` — `get_or_prepare_cif()`, `as_ffi_signature()`,
   `as_ffi_type()`, `as_lib_handle()`
 - `value/repr/constructors.rs` — `Value::ffi_signature()`, `Value::ffi_type()`,

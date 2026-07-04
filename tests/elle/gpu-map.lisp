@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # ── gpu/map: compiler-generated GPU compute ───────────────────────────
 #
 # Tests the full pipeline: Elle closure → MLIR → SPIR-V → Vulkan dispatch.
@@ -11,21 +11,21 @@
 (def has-mlir?
   (not (empty? (filter (fn [p] (= (get p :name) "mlir/compile-spirv"))
                        (compile/primitives)))))
-(when (not has-mlir?)
-  (println "SKIP: mlir/compile-spirv not available (build with --features mlir)")
-  (exit 0))
+# Gate (loud :gated skip) rather than (exit 0): under `elle test` a whole-file
+# thunk runs in a worker, so a raw exit there is trapped — but :gated records a
+# reasoned skip on every tier and exits 0 on a direct run too.
+(unless has-mlir?
+  (error (struct :error :gated
+                 :reason "mlir/compile-spirv not available (build with --features mlir)")))
 
 # Vulkan plugin must be loadable
 (def [has-vulkan? plugin] (protect (import "plugin/vulkan")))
-(when (not has-vulkan?)
-  (println "SKIP: vulkan plugin not available")
-  (exit 0))
+(unless has-vulkan?
+  (error (struct :error :gated :reason "vulkan plugin not available")))
 
 # GPU must be initializable
 (def [has-gpu? ctx] (protect (plugin:init)))
-(when (not has-gpu?)
-  (println "SKIP: no GPU available")
-  (exit 0))
+(unless has-gpu? (error (struct :error :gated :reason "no GPU available")))
 
 # ── Load gpu library ─────────────────────────────────────────────────
 

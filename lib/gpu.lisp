@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/gpu.lisp — GPU compute library
 ##
 ## Wraps the vulkan plugin and SPIR-V emitter.

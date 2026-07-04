@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Arithmetic Law Tests
 ##
 ## Migrated from tests/property/arithmetic.rs

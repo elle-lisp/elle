@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # POSIX signal tests
 #
 # Covers sending, watching, capability gating, refcount-driven mask

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # SPIR-V builder tests
 #
 # Tests the lib/spirv.lisp builder, including control flow extensions

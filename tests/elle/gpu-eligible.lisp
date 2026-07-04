@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # GPU eligibility tests
 #
 # Tests the fn/gpu-eligible? predicate which checks signal and structural
@@ -8,7 +8,9 @@
 (assert (fn/gpu-eligible? (fn [a b] (%add a b))) "%add is gpu-eligible")
 (assert (fn/gpu-eligible? (fn [x] (%mul x x))) "%mul is gpu-eligible")
 (assert (fn/gpu-eligible? (fn [x] (%sub 0 x))) "%sub negate is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [a b] (%lt a b))) "%lt is gpu-eligible")  # stdlib arithmetic (+ * - <) goes through Call, not gpu-eligible
+(assert (fn/gpu-eligible? (fn [a b] (%lt a b))) "%lt is gpu-eligible")
+
+# stdlib arithmetic (+ * - <) goes through Call, not gpu-eligible
 (assert (not (fn/gpu-eligible? (fn [a b] (+ a b))))
         "stdlib + is not gpu-eligible")  # bit/and is not an intrinsic (goes through Call), so not gpu-eligible
 (assert (not (fn/gpu-eligible? (fn [x] (bit/and x 0xFF))))

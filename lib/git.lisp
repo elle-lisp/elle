@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/git.lisp — Git repository access via FFI to libgit2
 ##
 ## Usage:
@@ -18,8 +18,12 @@
           s (ffi/signature ret args)]
       (fn [& a] (apply ffi/call p s a))))
 
-  ## Initialize libgit2
+  ## Initialize libgit2, and declare its teardown as this library's unload
+  ## destructor. The mapping is process-global and never unloaded, so this is
+  ## optional graceful cleanup an explicit (ffi/run-teardowns) runs — never an
+  ## obligation to avoid a crash (see `shutdown` below).
   ((cfn "git_libgit2_init" :int @[]))
+  (ffi/on-unload lib "git_libgit2_shutdown")
 
   ## ── C bindings ───────────────────────────────────────────────────
 
@@ -200,6 +204,19 @@
 
   (defn close [repo]
     (c-repo-free repo)
+    nil)
+
+  ## Optional graceful teardown for libgit2. The library mapping is process-global
+  ## and never `dlclose`d (src/ffi/registry.rs), so a worker that uses git and then
+  ## exits is safe regardless: its OpenSSL/libssh2 per-thread state is cleaned up by
+  ## the thread-exit destructor running against still-mapped code. `git:shutdown` is
+  ## therefore NO LONGER REQUIRED to avoid a crash — it is optional cleanup that
+  ## brings libgit2's global refcount to zero (running the unload destructor
+  ## registered at init via `ffi/run-teardowns`). Call it only when the threads that
+  ## used git have quiesced, since `git_libgit2_shutdown` deletes the pthread key it
+  ## created.
+  (defn shutdown []
+    (ffi/run-teardowns)
     nil)
 
   (defn repo-path [repo]
@@ -613,4 +630,5 @@
    :remote-info remote-info
    :fetch fetch
    :config-get config-get
-   :config-set config-set})
+   :config-set config-set
+   :shutdown shutdown})

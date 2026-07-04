@@ -10,18 +10,30 @@ signal profiles.
   location, and inferred `Signal`
 - **`HirKind`** — the node variant: literal, variable reference, call,
   lambda, let, if, begin, etc.
-- **`Binding`** — resolved variable reference (local, capture, primitive,
-  primitive)
-- **`Signal`** — inferred effect profile (Pure, Yields, Polymorphic)
+- **`Binding`** — a resolved variable reference: a `u32` index into a
+  `BindingArena` (in `arena.rs`), which holds the per-binding metadata
+  (`BindingScope` — `Parameter` or `Local` — plus `is_mutated`,
+  `is_captured`, `is_immutable`, `is_primitive`, etc.)
+- **`Signal`** — inferred effect profile: a `SignalBits` set plus a
+  `propagates` parameter mask (silent, yields, polymorphic, …)
 
 ## What analysis does
 
-1. **Binding resolution** — names → `Binding` references with
-   scope depth and index
+1. **Binding resolution** — names → `Binding` arena indices, recording
+   each binding's scope (`Parameter`/`Local`), mutation, and capture
+   status in the `BindingArena`
 2. **Capture analysis** — which free variables a closure captures,
-   whether they are mutable
+   whether they are mutable. Each capture carries a `CaptureKind`: `Local`
+   (from the parent's slot), `Capture` (transitive, from the parent's own
+   captures), or `Recursive` (the closure captures its *own* enclosing
+   `letrec`/`def` binding — a self-reference). A `Recursive` self-edge does
+   **not** mark the binding captured, so a binding captured only by itself is
+   cell-free and its self-reference resolves to the currently-executing closure
+   (`LoadSelf` / a self-call); the lowerer reads this classified fact rather than
+   re-deriving the self-edge. It carries no escape authority (see
+   [impl/escape.md](escape.md))
 3. **Signal inference** — interprocedural: traces call chains to
-   determine whether a function can yield, error, or is pure
+   determine whether a function can yield, error, or is silent
 4. **Tail position marking** — identifies calls in tail position for
    TCO
 5. **Special form analysis** — `if`, `let`, `begin`, `block`,
@@ -30,13 +42,87 @@ signal profiles.
 ## Signal inference
 
 Three signal categories:
-- **Pure** — no signals possible
-- **Yields** — may yield (`:io`, `:yield`, `:fuel`, etc.)
-- **Polymorphic** — signal behavior depends on a parameter
-  (e.g., `(map f xs)` — signals depend on `f`)
+- **Silent** — no signal bits set and no propagation (`Signal::silent()`)
+- **Yields** — has signal bits set (`:io`, `:yield`, `:error`, etc.)
+- **Polymorphic** — signal behavior depends on a parameter, encoded in
+  the `propagates` mask (e.g., `(map f xs)` — signals depend on `f`)
 
-`silence` constrains a parameter to be pure at compile time.
+`silence` constrains a parameter to be silent at compile time.
 The inference propagates through call chains interprocedurally.
+
+## Kernel and sugar (design target)
+
+`HirKind` is currently a **wide** vocabulary: `functionalize` and `anf_lift`
+normalize a few constructs (`while → loop/recur`, `assign → ssa-let/setcell`,
+captured `var → derefcell`) and ANF names allocating subexpressions, but they
+eliminate almost nothing — the lowerer still matches all ~39 variants, so
+`cond`, `match`, `and`/`or`, `begin`, `destructure` reach LIR intact. The design
+direction is a real desugaring boundary so the lowerer consumes only the
+irreducible **kernel**:
+
+- **kernel — spine:** `var`, `let`, `letrec`, `lambda`, `call`, `if`, literals/`quote`
+- **kernel — for the region model, not semantics:** `loop`/`recur`, `return`
+  (semantically reducible to letrec + tail-call, kept primitive because
+  per-iteration region reuse and the ownership boundary need to name them)
+- **kernel — state/effect/FFI:** `makecell`/`derefcell`/`setcell`, `emit`,
+  `intrinsic`, `eval`
+- **kernel — control:** `block`/`break`, `parameterize`
+- **sugar (should desugar into the kernel):** `cond`→`if`, `and`/`or`→`if`+`let`,
+  `match`→`if`+gets, `destructure`→`intrinsic` gets, `begin`→`let`-chain,
+  `while`→`loop`, `assign`→ssa/`setcell`, **`do`/`def`**→`let`/`letrec`
+
+The kernel boundary is set by *what lowering needs to name* (hence `loop`/`return`
+are kernel despite being semantically derivable), not by surface convenience.
+
+## Bodies and `def`
+
+There are exactly two binding kernels: `let` (= `let*`, sequential,
+non-recursive) and `letrec` (= `letrec*`, sequential, recursive). Each surface
+*body* desugars to one of them:
+
+| Context | Body semantics |
+|---|---|
+| `do` / `begin` | `let*` — sequential; no forward refs / no mutual recursion |
+| lambda body | `letrec*` — strict |
+| file / module body | `letrec*` — strict; the body's *value* is the module |
+
+`def` is **polymorphic sugar**: "extend the enclosing body with one binding." In
+a sequential body it desugars to a nested `let` (`(do (def x 4) (def x (+ x 1)))`
+→ `(let [x 4] (let [x (+ x 1)] x))` — shadowing is free); in a recursive body it
+is a `letrec` binding. It is a *body-level*, post-macro-expansion rewrite (a
+`def` may be produced by a macro and must still be collected), not a closed-form
+local macro.
+
+There is **no "module layer."** A module is just the body's return value — per
+[modules.md](../modules.md), a file *"runs as a single letrec, and whatever its
+last expression evaluates to becomes the return value"*, with no export
+declarations and no special syntax; `import-file` is *"essentially
+`(eval (slurp path))`"*. The two things that looked like a layer aren't bound to
+the body at all: the **export projection** (`compute_signal_projection`) is an
+optional compile-time *signal-inference cache* over the returned struct (delete
+it and modules still work, just with conservative cross-file signals), and
+`(signal :kw)` is an orthogonal *declaration form* with a compile-time effect on
+the signal registry, exactly like `defmacro`'s effect on the expander. Strip
+both away and the file body is **strictly `letrec*`** — which is what
+modules.md already says it is.
+
+**So `analyze_file_letrec` is an out-of-band driver to retire, not to rename.**
+It implements `letrec*`-with-redefinition as a bespoke path no `eval`/nested form
+can reach, and its `deferred`-binding machinery exists only to support in-file
+redefinition — which has no coherent meaning (forward references bind the first
+definition, later references the second) and should instead be a
+duplicate-definition error. The target is just the ordinary `letrec*` kernel:
+the loader collects file forms into a `letrec` (via the same `def`-as-body sugar
+and gensym-expr encoding) and runs them through the normal
+expand→analyze→emit→`eval` path — which is what `import-file` already does. If a
+user-replaceable top-level wrapper is wanted (Racket `#%module-begin`-style), it
+is a macro named in valid Elle (e.g. `body*` — **not** `#%body`, since `#` is the
+comment char and `%` the intrinsic prefix) whose default expansion is exactly
+that `letrec`. Two consequences fall out: the file body stops being special, and
+its heap literals are **ordinary allocations** (`MaterializeConst`) into the file
+body's own per-activation regions, freed by the termination sweep (see
+[region-model.md](region-model.md) — *Constants lower as ordinary allocations*),
+closing the per-`eval` leak.
 
 ## Files
 

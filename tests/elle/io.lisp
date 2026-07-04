@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # I/O — stream primitives, ev/spawn, async backend
 
 
@@ -20,11 +20,11 @@
 
 # === ev/spawn with I/O (result collected via mutable) ===
 
-(spit "/tmp/elle-test-ev-spawn-lisp" "spawn content")
+(spit "/dev/shm/elle-test-ev-spawn-lisp" "spawn content")
 (let [result @[]]
   (ev/spawn (fn []
               (push result
-                    (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp"
+                    (port/read-all (port/open "/dev/shm/elle-test-ev-spawn-lisp"
                                    :read)))))  # Pump happens naturally; spawned fiber runs before user code returns.
   )
 
@@ -36,8 +36,8 @@
 
 # === port/read-line ===
 
-(spit "/tmp/elle-test-readline-lisp" "line1\nline2\nline3")
-(let [line (let [p (port/open "/tmp/elle-test-readline-lisp" :read)]
+(spit "/dev/shm/elle-test-readline-lisp" "line1\nline2\nline3")
+(let [line (let [p (port/open "/dev/shm/elle-test-readline-lisp" :read)]
              (port/read-line p))]
   (assert (= line "line1") "port/read-line reads first line"))
 
@@ -48,8 +48,8 @@
 
 # === stream I/O ===
 
-(spit "/tmp/elle-test-toplevel-io-lisp" "top level")
-(assert (= (string (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp"
+(spit "/dev/shm/elle-test-toplevel-io-lisp" "top level")
+(assert (= (string (port/read-all (port/open "/dev/shm/elle-test-toplevel-io-lisp"
                                   :read))) "top level") "stream I/O works")
 
 # === stdlib functions work with scheduler ===
@@ -63,9 +63,9 @@
 
 # === io/submit returns int ===
 
-(spit "/tmp/elle-test-submit-lisp" "test")
+(spit "/dev/shm/elle-test-submit-lisp" "test")
 (let* [backend (io/backend :async)
-       port (port/open "/tmp/elle-test-submit-lisp" :read)
+       port (port/open "/dev/shm/elle-test-submit-lisp" :read)
        f (fiber/new (fn [] (port/read-all port)) 512)]
   (fiber/resume f)
   (assert (int? (io/submit backend (fiber/value f))) "io/submit returns int"))
@@ -82,8 +82,8 @@
 
 # port/open must be opened BEFORE the assert-err lambda so it doesn't yield
 # inside protect's fiber (protect uses mask=1 which doesn't handle SIG_IO).
-(spit "/tmp/elle-test-submit-sync-lisp" "test")
-(let [submit-sync-port (port/open "/tmp/elle-test-submit-sync-lisp" :read)]
+(spit "/dev/shm/elle-test-submit-sync-lisp" "test")
+(let [submit-sync-port (port/open "/dev/shm/elle-test-submit-sync-lisp" :read)]
   (let [[ok? _] (protect ((fn ()
                             (let* [backend (io/backend :sync)
                                    f (fiber/new (fn []
@@ -94,9 +94,9 @@
 
 # === io/submit + io/wait roundtrip ===
 
-(spit "/tmp/elle-test-submit-wait-lisp" "roundtrip")
+(spit "/dev/shm/elle-test-submit-wait-lisp" "roundtrip")
 (let* [backend (io/backend :async)
-       port (port/open "/tmp/elle-test-submit-wait-lisp" :read)
+       port (port/open "/dev/shm/elle-test-submit-wait-lisp" :read)
        f (fiber/new (fn [] (port/read-all port)) 512)]
   (fiber/resume f)
   (let [id (io/submit backend (fiber/value f))]
@@ -105,9 +105,9 @@
 
 # === Completion struct has :id ===
 
-(spit "/tmp/elle-test-comp-id-lisp" "test")
+(spit "/dev/shm/elle-test-comp-id-lisp" "test")
 (let* [backend (io/backend :async)
-       port (port/open "/tmp/elle-test-comp-id-lisp" :read)
+       port (port/open "/dev/shm/elle-test-comp-id-lisp" :read)
        f (fiber/new (fn [] (port/read-all port)) 512)]
   (fiber/resume f)
   (let [id (io/submit backend (fiber/value f))]
@@ -117,9 +117,9 @@
 
 # === Completion struct has :error nil ===
 
-(spit "/tmp/elle-test-comp-val-lisp" "hello async")
+(spit "/dev/shm/elle-test-comp-val-lisp" "hello async")
 (let* [backend (io/backend :async)
-       port (port/open "/tmp/elle-test-comp-val-lisp" :read)
+       port (port/open "/dev/shm/elle-test-comp-val-lisp" :read)
        f (fiber/new (fn [] (port/read-all port)) 512)]
   (fiber/resume f)
   (let [id (io/submit backend (fiber/value f))]
@@ -137,23 +137,23 @@
 
 # === I/O thunk (direct) ===
 
-(spit "/tmp/elle-test-ev-run-io-lisp" "async scheduler")
-(assert (= (string (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp"
+(spit "/dev/shm/elle-test-ev-run-io-lisp" "async scheduler")
+(assert (= (string (port/read-all (port/open "/dev/shm/elle-test-ev-run-io-lisp"
                                   :read))) "async scheduler")
         "I/O thunk reads file")
 
 # === multiple concurrent fibers ===
 
-(spit "/tmp/elle-test-ev-multi-1-lisp" "first")
-(spit "/tmp/elle-test-ev-multi-2-lisp" "second")
+(spit "/dev/shm/elle-test-ev-multi-1-lisp" "first")
+(spit "/dev/shm/elle-test-ev-multi-2-lisp" "second")
 (let [results @[]]
   (let [f1 (ev/spawn (fn []
                        (push results
-                             (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp"
+                             (port/read-all (port/open "/dev/shm/elle-test-ev-multi-1-lisp"
                              :read)))))
         f2 (ev/spawn (fn []
                        (push results
-                             (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp"
+                             (port/read-all (port/open "/dev/shm/elle-test-ev-multi-2-lisp"
                              :read)))))]
     (ev/join f1)
     (ev/join f2))
@@ -166,10 +166,10 @@
 
 # === async write ===
 
-(let [p (port/open "/tmp/elle-test-ev-write-lisp" :write)]
+(let [p (port/open "/dev/shm/elle-test-ev-write-lisp" :write)]
   (port/write p "async write test")
   (port/flush p))
-(assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test")
+(assert (= (slurp "/dev/shm/elle-test-ev-write-lisp") "async write test")
         "async write thunk")
 
 # ============================================================================
@@ -200,14 +200,14 @@
 
 # === ev/sleep interleaved with I/O ===
 
-(spit "/tmp/elle-test-sleep-io-lisp" "sleep-and-io")
+(spit "/dev/shm/elle-test-sleep-io-lisp" "sleep-and-io")
 (let [result @[]]
   (let [f1 (ev/spawn (fn []
                        (ev/sleep 0.01)
                        (push result :slept)))
         f2 (ev/spawn (fn []
                        (push result
-                             (string (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp"
+                             (string (port/read-all (port/open "/dev/shm/elle-test-sleep-io-lisp"
                                      :read))))))]
     (ev/join f1)
     (ev/join f2))

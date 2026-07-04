@@ -1,6 +1,8 @@
 //! LSP server main loop and JSON-RPC dispatch.
 
-use crate::lsp::{completion, definition, formatting, hover, references, rename, CompilerState};
+use crate::lsp::{
+    completion, definition, documentsymbol, formatting, hover, references, rename, CompilerState,
+};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 
@@ -180,14 +182,17 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                 "id": id,
                 "result": {
                     "capabilities": {
-                        "textDocumentSync": 1,
+                        "textDocumentSync": {
+                            "openClose": true,
+                            "change": 1,
+                            "save": { "includeText": true }
+                        },
                         "hoverProvider": true,
                         "definitionProvider": true,
                         "referencesProvider": true,
-                        "renameProvider": {
-                            "prepareProvider": false,
-                            "workspaceEdits": false
-                        },
+                        "renameProvider": { "prepareProvider": false },
+                        "documentSymbolProvider": true,
+                        "workspaceSymbolProvider": true,
                         "documentFormattingProvider": true,
                         "completionProvider": {
                             "resolveProvider": true,
@@ -282,16 +287,49 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                 "result": null
             })
         }
+        "textDocument/didSave" => {
+            // A save can carry the saved text (we request `includeText`). Resync
+            // from it when present, then recompile and republish diagnostics so a
+            // save always reflects on-disk reality.
+            if let Some(uri) = extract_uri(params) {
+                if let Some(text) = params.and_then(|p| p.get("text")).and_then(|t| t.as_str()) {
+                    compiler_state.on_document_change(uri, text.to_string());
+                }
+                compiler_state.compile_document(uri);
+                if let Some(notification) = diagnostics_notification(uri, compiler_state) {
+                    notifications.push(notification);
+                }
+            }
+            json!({ "jsonrpc": "2.0", "id": id, "result": null })
+        }
+        "workspace/didChangeWatchedFiles" => {
+            // Re-analyze any tracked document whose file the client reports as
+            // changed on disk, and republish its diagnostics. Files we do not
+            // have open are ignored: there is no cross-file workspace index to
+            // refresh, so nothing else depends on them.
+            if let Some(changes) = params
+                .and_then(|p| p.get("changes"))
+                .and_then(|c| c.as_array())
+            {
+                for change in changes {
+                    if let Some(uri) = change.get("uri").and_then(|u| u.as_str()) {
+                        if compiler_state.get_document(uri).is_some() {
+                            compiler_state.compile_document(uri);
+                            if let Some(notification) =
+                                diagnostics_notification(uri, compiler_state)
+                            {
+                                notifications.push(notification);
+                            }
+                        }
+                    }
+                }
+            }
+            json!({ "jsonrpc": "2.0", "id": id, "result": null })
+        }
         "textDocument/hover" => {
             let result = extract_position(params).and_then(|(uri, line, character)| {
                 let doc = compiler_state.get_document(uri)?;
-                hover::find_hover_info(
-                    line,
-                    character,
-                    &doc.symbol_index,
-                    compiler_state.symbol_table(),
-                    compiler_state.docs(),
-                )
+                hover::find_hover_info(line, character, &doc.symbol_index, compiler_state.docs())
             });
 
             json!({
@@ -305,12 +343,13 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                 .and_then(|(uri, line, character)| {
                     let doc = compiler_state.get_document(uri)?;
                     let prefix = extract_prefix_at_position(&doc.source_text, line, character);
+                    let builtins = compiler_state.builtin_names();
                     Some(completion::get_completions(
                         line,
                         character,
                         &prefix,
                         &doc.symbol_index,
-                        compiler_state.symbol_table(),
+                        &builtins,
                         compiler_state.docs(),
                     ))
                 })
@@ -328,12 +367,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
         "textDocument/definition" => {
             let result = extract_position(params).and_then(|(uri, line, character)| {
                 let doc = compiler_state.get_document(uri)?;
-                definition::find_definition(
-                    line,
-                    character,
-                    &doc.symbol_index,
-                    compiler_state.symbol_table(),
-                )
+                definition::find_definition(line, character, &doc.symbol_index)
             });
 
             json!({
@@ -356,7 +390,6 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                         character,
                         include_declaration,
                         &doc.symbol_index,
-                        compiler_state.symbol_table(),
                     ))
                 })
                 .unwrap_or_default();
@@ -366,6 +399,22 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                 "id": id,
                 "result": results
             })
+        }
+        "textDocument/documentSymbol" => {
+            let result = extract_uri(params)
+                .and_then(|u| compiler_state.get_document(u))
+                .map(|doc| documentsymbol::document_symbols(&doc.symbol_index))
+                .unwrap_or_default();
+            json!({ "jsonrpc": "2.0", "id": id, "result": result })
+        }
+        "workspace/symbol" => {
+            let query = params
+                .and_then(|p| p.get("query"))
+                .and_then(|q| q.as_str())
+                .unwrap_or("");
+            let result =
+                documentsymbol::workspace_symbols(compiler_state.document_indices(), query);
+            json!({ "jsonrpc": "2.0", "id": id, "result": result })
         }
         "textDocument/formatting" => {
             let uri = extract_uri(params);
@@ -402,7 +451,6 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     new_name,
                     &doc.symbol_index,
                     compiler_state.symbol_table(),
-                    &doc.source_text,
                     uri,
                 ))
             });

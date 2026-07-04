@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 12)
 
 # Logo generator — the elle-lisp glyph rendered as colored fibers
 #

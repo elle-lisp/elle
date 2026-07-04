@@ -6,19 +6,47 @@
 //!
 //! ## Quick Start
 //!
+//! The recommended embedding entry point is [`Runtime`](runtime::Runtime): it
+//! installs the contexts, registers primitives, loads the stdlib, and — on drop
+//! — runs the principled, RC-driven process-teardown sweep (docs/impl/region-rules.md
+//! § "Teardown — every region frees"), the same lifecycle `elle foo.lisp` and the REPL use.
+//!
+//! ```
+//! use elle::pipeline::eval;
+//! use elle::runtime::Runtime;
+//!
+//! let mut rt = Runtime::new();
+//! // The instance's three disjoint capabilities: the VM, the symbol table, and
+//! // its own compile state. Two `Runtime`s on one thread are isolated — each
+//! // names its own here.
+//! let (vm, symbols, cctx) = rt.parts();
+//! let result = eval("(+ 1 2 3)", symbols, vm, cctx, "<example>").unwrap();
+//! // `rt` dropping here tears the runtime down by RC; only the native-fn
+//! // primitives (immediates, no region) persist. `rt.teardown()` runs it
+//! // explicitly and returns the observable region census.
+//! ```
+//!
+//! The lower-level pieces remain available for embedders that manage the VM,
+//! symbol table, and compile context themselves (no automatic teardown):
+//!
 //! ```
 //! use elle::{eval, init_stdlib, register_primitives, SymbolTable, VM};
-//! use elle::context::{set_symbol_table, set_vm_context};
+//! use elle::pipeline::CompileCtx;
 //!
 //! let mut vm = VM::new();
 //! let mut symbols = SymbolTable::new();
 //! register_primitives(&mut vm, &mut symbols);
-//! set_vm_context(&mut vm as *mut VM);
-//! set_symbol_table(&mut symbols as *mut SymbolTable);
-//! init_stdlib(&mut vm, &mut symbols);
+//! // Compile-time state and the symbol table are explicit per-instance
+//! // capabilities. Point the VM at both (so runtime `eval`/`import` and value
+//! // name-resolution resolve against THIS instance) and thread them through
+//! // every pipeline call.
+//! let mut cctx = CompileCtx::new();
+//! vm.set_compile_ctx(&mut cctx as *mut CompileCtx);
+//! vm.set_symbols(&mut symbols as *mut SymbolTable);
+//! init_stdlib(&mut vm, &mut symbols, &mut cctx);
 //!
 //! let code = "(+ 1 2 3)";
-//! let result = eval(code, &mut symbols, &mut vm, "<example>").unwrap();
+//! let result = eval(code, &mut symbols, &mut vm, &mut cctx, "<example>").unwrap();
 //! ```
 //!
 //! ## Architecture
@@ -46,7 +74,7 @@ pub mod trace;
 pub mod arithmetic;
 pub mod compiler;
 pub mod config;
-pub mod context;
+pub mod dump;
 pub mod epoch;
 pub mod error;
 pub mod ffi;
@@ -70,6 +98,7 @@ pub mod primitives;
 pub mod reader;
 pub mod repl;
 pub mod rewrite;
+pub mod runtime;
 pub mod signals;
 pub mod symbol;
 pub mod symbols;
@@ -93,5 +122,5 @@ pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};
 pub use symbol::SymbolTable;
 pub use symbols::{SymbolDef, SymbolIndex, SymbolKind};
-pub use value::{list, Value};
+pub use value::Value;
 pub use vm::VM;

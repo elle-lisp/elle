@@ -1,44 +1,32 @@
 //! Symbol renaming support for LSP
 
 use crate::error::{LError, LResult};
+use crate::lsp::locate;
+use crate::reader::SourceLoc;
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-/// Reserved words that cannot be used as symbol names
-const RESERVED_WORDS: &[&str] = &[
-    "def",
-    "var",
-    "fn",
-    "if",
-    "cond",
-    "quote",
+/// Names reserved in ADDITION to the analyzer's special-form registry
+/// (`hir::analyze::forms::registry`, the single source of truth for special
+/// forms): reader-level quotation forms and prelude macros that shadow poorly.
+const EXTRA_RESERVED: &[&str] = &[
     "quasiquote",
     "unquote",
     "unquote-splicing",
-    "let",
     "let*",
-    "letrec",
-    "begin",
-    "assign",
-    "do",
-    "case",
-    "and",
-    "or",
+    "defn",
+    "defmacro",
     "not",
-    "delay",
-    "force",
-    "call-with-current-continuation",
-    "call/cc",
-    "splice",
-    "eval",
-    "environment",
-    "load",
-    "require",
-    "module",
-    "use-modules",
 ];
+
+/// A name is reserved if it is any registered special-form name or alias,
+/// or one of the reader-level extras above.
+fn is_reserved(name: &str) -> bool {
+    crate::hir::analyze::forms::registry::all_names().any(|n| n == name)
+        || EXTRA_RESERVED.contains(&name)
+}
 
 /// Validate that a new name is acceptable for renaming
 fn validate_new_name(new_name: &str) -> LResult<()> {
@@ -56,7 +44,7 @@ fn validate_new_name(new_name: &str) -> LResult<()> {
         )));
     }
 
-    if RESERVED_WORDS.contains(&new_name) {
+    if is_reserved(new_name) {
         return Err(LError::generic(format!(
             "'{}' is a reserved word and cannot be used as a symbol name",
             new_name
@@ -89,119 +77,62 @@ fn check_rename_conflict(
     Ok(())
 }
 
-/// Rename a symbol at a given position to a new name
+/// Does this location belong to the document the rename was requested in?
+///
+/// The index records real file paths, so the reconstructed URI matches the
+/// request URI directly. The `ends_with` arm tolerates relative-vs-absolute
+/// spelling differences between the two.
+fn same_document(loc: &SourceLoc, uri: &str) -> bool {
+    locate::loc_uri(loc) == uri || (!loc.file.is_empty() && uri.ends_with(&loc.file))
+}
+
+/// Push a `newText` edit for `loc` if it belongs to `uri`.
+fn push_edit(edits: &mut Vec<Value>, loc: &SourceLoc, uri: &str, old_len: usize, new_name: &str) {
+    if same_document(loc, uri) {
+        edits.push(json!({
+            "range": locate::name_range(loc, old_len),
+            "newText": new_name,
+        }));
+    }
+}
+
+/// Rename the symbol at a given position to a new name.
+///
+/// Operates on a single `DefId`, so only the binding actually under the cursor
+/// is renamed — two locals that merely share a name are no longer conflated.
 pub(crate) fn rename_symbol(
     line: u32,
     character: u32,
     new_name: &str,
     symbol_index: &SymbolIndex,
     symbol_table: &SymbolTable,
-    _source_text: &str,
     uri: &str,
 ) -> LResult<Value> {
     validate_new_name(new_name)?;
 
-    let target_line = line as usize + 1;
-    let target_col = character as usize + 1;
-
-    let mut target_symbol = None;
-    let mut closest_distance = usize::MAX;
-    let mut old_name = String::new();
-
-    for (sym_id, usages) in &symbol_index.symbol_usages {
-        for usage_loc in usages {
-            if usage_loc.line == target_line {
-                let distance = (target_col as isize - usage_loc.col as isize).unsigned_abs();
-                if distance < closest_distance && distance <= 10 {
-                    if let Some(def) = symbol_index.definitions.get(sym_id) {
-                        target_symbol = Some(*sym_id);
-                        closest_distance = distance;
-                        old_name = def.name.clone();
-                    }
-                }
-            }
-        }
-    }
-
-    for (sym_id, loc) in &symbol_index.symbol_locations {
-        if loc.line == target_line {
-            let distance = (target_col as isize - loc.col as isize).unsigned_abs();
-            if distance < closest_distance && distance <= 10 {
-                if let Some(def) = symbol_index.definitions.get(sym_id) {
-                    target_symbol = Some(*sym_id);
-                    closest_distance = distance;
-                    old_name = def.name.clone();
-                }
-            }
-        }
-    }
-
-    if target_symbol.is_none() {
-        return Err(LError::generic("No symbol found at the given position"));
-    }
+    let id = locate::symbol_at(symbol_index, line, character)
+        .ok_or_else(|| LError::generic("No symbol found at the given position"))?;
+    let def = symbol_index
+        .definitions
+        .get(&id)
+        .ok_or_else(|| LError::generic("No symbol found at the given position"))?;
+    let old_name = def.name.clone();
+    let old_len = old_name.len();
 
     check_rename_conflict(&old_name, new_name, symbol_index, symbol_table)?;
 
-    let sym_id = target_symbol.unwrap();
     let mut text_edits = Vec::new();
-
-    if let Some(usages) = symbol_index.symbol_usages.get(&sym_id) {
-        for usage_loc in usages {
-            let file_uri = format!("file://{}", usage_loc.file);
-            if file_uri == uri || uri.ends_with(&usage_loc.file) {
-                text_edits.push(json!({
-                    "range": {
-                        "start": {
-                            "line": usage_loc.line.saturating_sub(1),
-                            "character": usage_loc.col.saturating_sub(1)
-                        },
-                        "end": {
-                            "line": usage_loc.line.saturating_sub(1),
-                            "character": usage_loc.col.saturating_sub(1) + old_name.len()
-                        }
-                    },
-                    "newText": new_name
-                }));
-            }
+    if let Some(usages) = symbol_index.symbol_usages.get(&id) {
+        for loc in usages {
+            push_edit(&mut text_edits, loc, uri, old_len, new_name);
         }
     }
-
-    if let Some(def_loc) = symbol_index.symbol_locations.get(&sym_id) {
-        let file_uri = format!("file://{}", def_loc.file);
-        if file_uri == uri || uri.ends_with(&def_loc.file) {
-            text_edits.push(json!({
-                "range": {
-                    "start": {
-                        "line": def_loc.line.saturating_sub(1),
-                        "character": def_loc.col.saturating_sub(1)
-                    },
-                    "end": {
-                        "line": def_loc.line.saturating_sub(1),
-                        "character": def_loc.col.saturating_sub(1) + old_name.len()
-                    }
-                },
-                "newText": new_name
-            }));
-        }
-    } else if let Some(def) = symbol_index.definitions.get(&sym_id) {
-        if let Some(def_loc) = &def.location {
-            let file_uri = format!("file://{}", def_loc.file);
-            if file_uri == uri || uri.ends_with(&def_loc.file) {
-                text_edits.push(json!({
-                    "range": {
-                        "start": {
-                            "line": def_loc.line.saturating_sub(1),
-                            "character": def_loc.col.saturating_sub(1)
-                        },
-                        "end": {
-                            "line": def_loc.line.saturating_sub(1),
-                            "character": def_loc.col.saturating_sub(1) + old_name.len()
-                        }
-                    },
-                    "newText": new_name
-                }));
-            }
-        }
+    let def_loc = symbol_index
+        .symbol_locations
+        .get(&id)
+        .or(def.location.as_ref());
+    if let Some(loc) = def_loc {
+        push_edit(&mut text_edits, loc, uri, old_len, new_name);
     }
 
     let mut changes = HashMap::new();
@@ -209,73 +140,8 @@ pub(crate) fn rename_symbol(
         changes.insert(uri.to_string(), text_edits);
     }
 
-    Ok(json!({
-        "changes": changes
-    }))
+    Ok(json!({ "changes": changes }))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_validate_new_name_empty() {
-        assert!(validate_new_name("").is_err());
-    }
-
-    #[test]
-    fn test_validate_new_name_reserved_word() {
-        assert!(validate_new_name("def").is_err());
-        assert!(validate_new_name("var").is_err());
-        assert!(validate_new_name("if").is_err());
-    }
-
-    #[test]
-    fn test_validate_new_name_invalid_characters() {
-        assert!(validate_new_name("foo@bar").is_err());
-        assert!(validate_new_name("foo bar").is_err());
-    }
-
-    #[test]
-    fn test_validate_new_name_valid() {
-        assert!(validate_new_name("my-function").is_ok());
-        assert!(validate_new_name("my_function").is_ok());
-        assert!(validate_new_name("myFunction").is_ok());
-        assert!(validate_new_name("my123").is_ok());
-    }
-
-    #[test]
-    fn test_rename_symbol_no_symbol_at_position() {
-        let index = SymbolIndex::new();
-        let symbol_table = SymbolTable::new();
-        let source = "(var foo 1)";
-        let uri = "file:///test.elle";
-
-        let result = rename_symbol(0, 0, "bar", &index, &symbol_table, source, uri);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No symbol found at the given position"));
-    }
-
-    #[test]
-    fn test_rename_symbol_returns_workspace_edit() {
-        let index = SymbolIndex::new();
-        let symbol_table = SymbolTable::new();
-        let source = "(var foo 1)";
-        let uri = "file:///test.elle";
-
-        let result = rename_symbol(0, 10, "bar", &index, &symbol_table, source, uri);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_check_rename_conflict_no_conflict() {
-        let index = SymbolIndex::new();
-        let symbol_table = SymbolTable::new();
-
-        let result = check_rename_conflict("foo", "bar", &index, &symbol_table);
-        assert!(result.is_ok());
-    }
-}
+mod tests;

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Tests for eval env argument and (environment) special form
 
 # ──────────────────────────────────────────────────────────
@@ -42,3 +42,22 @@
 
 # eval with nil env works (same as no env)
 (assert (= 42 (eval '42 nil)) "eval with nil env")
+
+# ──────────────────────────────────────────────────────────
+# (environment) visibility is structural, not lexical
+# ──────────────────────────────────────────────────────────
+
+# A user binding whose name shares the compiler's gensym prefix (__...) is
+# an ordinary binding and must be reified. Regression: (environment) used
+# to skip every name starting with "__", hiding user bindings by spelling.
+(def __scanner 7)
+(def env5 (environment))
+(assert (has? env5 '__scanner) "environment includes user __-prefixed binding")
+(assert (= 7 (get env5 '__scanner)) "user __-prefixed binding readable")
+
+# Compiler-internal temporaries (the file-letrec gensyms that wrap
+# top-level expression statements and signal declarations) carry a
+# structural synthetic flag and stay hidden — by flag, not by name.
+(assert (not (has? env5 '__file_expr_0))
+        "environment hides compiler temporaries")
+(assert (not (has? env5 '__signal_0)) "environment hides signal gensyms")

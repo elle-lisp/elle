@@ -11,7 +11,7 @@
 //! Mutually recursive definitions are batch-compiled as a single
 //! letrec unit.
 
-use crate::pipeline::{compile_file_repl, register_repl_binding, register_repl_macros};
+use crate::pipeline::{compile_file_repl, CompileCtx};
 use crate::reader::read_syntax_all;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -46,7 +46,7 @@ impl Repl {
     }
 
     /// Run the interactive REPL loop. Returns true if any errors occurred.
-    pub fn run(&mut self, vm: &mut VM, symbols: &mut SymbolTable) -> bool {
+    pub fn run(&mut self, vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bool {
         println!("Elle v1.0.0 (type (help) for commands)");
         let mut had_errors = false;
 
@@ -79,7 +79,7 @@ impl Repl {
                     self.accumulated.push_str(&line);
                     self.accumulated.push('\n');
 
-                    had_errors |= self.try_eval(vm, symbols);
+                    had_errors |= self.try_eval(vm, symbols, cctx);
                 }
                 Err(ReadlineError::Interrupted) => {
                     println!("^C");
@@ -106,7 +106,7 @@ impl Repl {
     }
 
     /// Run the REPL with basic stdin (no readline).
-    pub fn run_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
+    pub fn run_fallback(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bool {
         use std::io::{self, BufRead, Write};
 
         println!("Elle v1.0.0 (type (help) for commands)");
@@ -144,7 +144,7 @@ impl Repl {
 
             accumulated.push_str(&line);
 
-            had_errors |= try_eval_accumulated(&mut accumulated, vm, symbols, &mut deferred);
+            had_errors |= try_eval_accumulated(&mut accumulated, vm, symbols, cctx, &mut deferred);
         }
 
         if !accumulated.trim().is_empty() {
@@ -168,8 +168,8 @@ impl Repl {
 
     /// Try to parse and evaluate accumulated input.
     /// Returns true if an error occurred.
-    fn try_eval(&mut self, vm: &mut VM, symbols: &mut SymbolTable) -> bool {
-        try_eval_accumulated(&mut self.accumulated, vm, symbols, &mut self.deferred)
+    fn try_eval(&mut self, vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bool {
+        try_eval_accumulated(&mut self.accumulated, vm, symbols, cctx, &mut self.deferred)
     }
 }
 
@@ -182,6 +182,7 @@ fn try_eval_accumulated(
     accumulated: &mut String,
     vm: &mut VM,
     symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
     deferred: &mut Vec<DeferredForm>,
 ) -> bool {
     let mut had_errors = false;
@@ -190,7 +191,7 @@ fn try_eval_accumulated(
         ReadResult::Complete(forms) => {
             accumulated.clear();
             for form in &forms {
-                match eval_form(form, vm, symbols) {
+                match eval_form(form, vm, symbols, cctx) {
                     Ok(value) => {
                         if !value.is_nil() {
                             println!("⟹ {:?}", value);
@@ -206,7 +207,7 @@ fn try_eval_accumulated(
                         }
                     }
                 }
-                try_resolve_deferred(deferred, vm, symbols);
+                try_resolve_deferred(deferred, vm, symbols, cctx);
             }
         }
         ReadResult::Incomplete => {}
@@ -278,7 +279,12 @@ fn extract_undefined_vars(error: &str) -> Vec<String> {
 /// 2. **Batch**: compile all remaining deferred forms together as a
 ///    single letrec. This handles mutual recursion: the letrec
 ///    pre-binds all names, allowing them to reference each other.
-fn try_resolve_deferred(deferred: &mut Vec<DeferredForm>, vm: &mut VM, symbols: &mut SymbolTable) {
+fn try_resolve_deferred(
+    deferred: &mut Vec<DeferredForm>,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+) {
     if deferred.is_empty() {
         return;
     }
@@ -289,7 +295,7 @@ fn try_resolve_deferred(deferred: &mut Vec<DeferredForm>, vm: &mut VM, symbols: 
         changed = false;
         let mut i = 0;
         while i < deferred.len() {
-            if try_resolve_single(&deferred[i], vm, symbols) {
+            if try_resolve_single(&deferred[i], vm, symbols, cctx) {
                 eprintln!("{}: resolved", deferred[i].name);
                 deferred.remove(i);
                 changed = true;
@@ -300,25 +306,30 @@ fn try_resolve_deferred(deferred: &mut Vec<DeferredForm>, vm: &mut VM, symbols: 
     }
 
     // Phase 2: batch resolution for mutual recursion
-    if deferred.len() >= 2 && try_batch_resolve(deferred, vm, symbols) {
+    if deferred.len() >= 2 && try_batch_resolve(deferred, vm, symbols, cctx) {
         // Batch resolved some forms; try individual again
         // (resolving a batch may unblock other deferred forms).
-        try_resolve_deferred(deferred, vm, symbols);
+        try_resolve_deferred(deferred, vm, symbols, cctx);
     }
 }
 
 /// Try to compile and register a single deferred form.
-fn try_resolve_single(form: &DeferredForm, vm: &mut VM, symbols: &mut SymbolTable) -> bool {
-    let Ok((result, expander)) = compile_file_repl(&form.source, symbols, "<repl>") else {
+fn try_resolve_single(
+    form: &DeferredForm,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+) -> bool {
+    let Ok((result, expander)) = compile_file_repl(&form.source, symbols, cctx, "<repl>") else {
         return false;
     };
-    register_repl_macros(expander.macros());
-    let Ok(value) = vm.execute_scheduled(&result.bytecode, symbols) else {
+    cctx.register_repl_macros(expander.macros());
+    let Ok(value) = vm.execute_scheduled(&result.bytecode, symbols, cctx) else {
         return false;
     };
     let sym_id = symbols.intern(&form.name);
     let (signal, arity) = extract_signal_arity(&value);
-    register_repl_binding(sym_id, value, signal, arity);
+    cctx.register_repl_binding(unsafe { &mut *vm.heap_ptr }, sym_id, value, signal, arity);
     true
 }
 
@@ -329,6 +340,7 @@ fn try_batch_resolve(
     deferred: &mut Vec<DeferredForm>,
     vm: &mut VM,
     symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
 ) -> bool {
     let mut combined = String::new();
     let mut all_names: Vec<String> = Vec::new();
@@ -342,11 +354,11 @@ fn try_batch_resolve(
     // Trailing tuple: [name1 name2 ...]
     combined.push_str(&format!("[{}]", all_names.join(" ")));
 
-    let Ok((result, expander)) = compile_file_repl(&combined, symbols, "<repl>") else {
+    let Ok((result, expander)) = compile_file_repl(&combined, symbols, cctx, "<repl>") else {
         return false;
     };
-    register_repl_macros(expander.macros());
-    let Ok(tuple_val) = vm.execute_scheduled(&result.bytecode, symbols) else {
+    cctx.register_repl_macros(expander.macros());
+    let Ok(tuple_val) = vm.execute_scheduled(&result.bytecode, symbols, cctx) else {
         return false;
     };
 
@@ -354,7 +366,7 @@ fn try_batch_resolve(
         for (form, val) in deferred.iter().zip(items.iter()) {
             let sym_id = symbols.intern(&form.name);
             let (signal, arity) = extract_signal_arity(val);
-            register_repl_binding(sym_id, *val, signal, arity);
+            cctx.register_repl_binding(unsafe { &mut *vm.heap_ptr }, sym_id, *val, signal, arity);
         }
         let names: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
         eprintln!("{}: resolved", names.join(", "));
@@ -492,19 +504,24 @@ fn collect_pattern_names(syntax: &Syntax, out: &mut Vec<DefBinding>) {
 /// Compile and execute a single form. If it introduces bindings
 /// (def/var/defn, including destructuring), register each in the
 /// compilation cache so subsequent forms see them.
-fn eval_form(form: &FormInfo, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
+fn eval_form(
+    form: &FormInfo,
+    vm: &mut VM,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+) -> Result<Value, String> {
     if form.bindings.len() <= 1 {
         // No bindings or simple def: compile the form as-is.
         // For simple def, the letrec body is the bound name, so the
         // return value IS the bound value.
-        let (result, expander) = compile_file_repl(&form.source, symbols, "<repl>")?;
-        register_repl_macros(expander.macros());
-        let value = vm.execute_scheduled(&result.bytecode, symbols)?;
+        let (result, expander) = compile_file_repl(&form.source, symbols, cctx, "<repl>")?;
+        cctx.register_repl_macros(expander.macros());
+        let value = vm.execute_scheduled(&result.bytecode, symbols, cctx)?;
 
         if let Some(binding) = form.bindings.first() {
             let sym_id = symbols.intern(&binding.name);
             let (signal, arity) = extract_signal_arity(&value);
-            register_repl_binding(sym_id, value, signal, arity);
+            cctx.register_repl_binding(unsafe { &mut *vm.heap_ptr }, sym_id, value, signal, arity);
         }
 
         Ok(value)
@@ -517,16 +534,22 @@ fn eval_form(form: &FormInfo, vm: &mut VM, symbols: &mut SymbolTable) -> Result<
         let trailer = format!("[{}]", names.join(" "));
         let combined = format!("{} {}", form.source, trailer);
 
-        let (result, expander) = compile_file_repl(&combined, symbols, "<repl>")?;
-        register_repl_macros(expander.macros());
-        let tuple_val = vm.execute_scheduled(&result.bytecode, symbols)?;
+        let (result, expander) = compile_file_repl(&combined, symbols, cctx, "<repl>")?;
+        cctx.register_repl_macros(expander.macros());
+        let tuple_val = vm.execute_scheduled(&result.bytecode, symbols, cctx)?;
 
         // Register each leaf binding from the tuple.
         if let Some(items) = tuple_val.as_array() {
             for (binding, val) in form.bindings.iter().zip(items.iter()) {
                 let sym_id = symbols.intern(&binding.name);
                 let (signal, arity) = extract_signal_arity(val);
-                register_repl_binding(sym_id, *val, signal, arity);
+                cctx.register_repl_binding(
+                    unsafe { &mut *vm.heap_ptr },
+                    sym_id,
+                    *val,
+                    signal,
+                    arity,
+                );
             }
         }
 

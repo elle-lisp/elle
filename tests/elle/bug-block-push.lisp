@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Regression: block + def + push returned broken heap ref
 #
 # The escape analysis in can_scope_allocate_block treated def bindings

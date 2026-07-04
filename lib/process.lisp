@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/process.lisp — Erlang-inspired process module
 ##
 ## Loaded via: (def process ((import "std/process")))
@@ -101,10 +101,7 @@
         join-waiting @{}  # target-fiber → @[pid ...] — who's joining
         select-sets @{}
         futex-parked @{}  # futex-key → @[{:fiber f :pid pid :val cell :expected E} ...]
-        @fuel-preempted @[]]  # PIDs that yielded SIG_FUEL this tick
-    # Shared spawn function: sub-fibers created by ev/spawn inside any
-    # process or sub-fiber register with this scheduler, not the outer one.
-    # The :pid is set to 0 initially; updated per-process when needed.
+        @fuel-preempted @[]]
     (def @current-spawn-pid @[0])
     (def @sched-spawn-fn
       (fn [fiber]
@@ -343,12 +340,10 @@
             (del join-waiting fiber)
             (let [pair [(= status :ok) (fiber/value fiber)]]
               (each w in waiters
-                (if (and (not (integer? w)) (get w :is-sub))
-                  # Sub-fiber waiter: resume the fiber directly
+                (if (and (not (integer? w)) (get w :is-sub))  # Sub-fiber waiter: resume the fiber directly
                   (when (= (fiber/status w:fiber) :paused)
                     (fiber/resume w:fiber pair)
-                    (handle-sub-fiber-after-resume w:fiber w:pid))
-                  # Process waiter: schedule the process
+                    (handle-sub-fiber-after-resume w:fiber w:pid))  # Process waiter: schedule the process
                   (when (alive? w)
                     (put (proc-get w) :resume pair)
                     (push ready w)))))))
@@ -434,6 +429,7 @@
                             (if (> (length keep) 0)
                               (put futex-parked key keep)
                               (del futex-parked key))))
+
                         ## Resume the notifying sub-fiber (if still alive)
                         (when (= (fiber/status fiber) :paused)
                           (fiber/resume fiber woken)
@@ -473,8 +469,7 @@
                             (when (= (fiber/status fiber) :paused)
                               (fiber/resume fiber nil)
                               (handle-sub-fiber-after-resume fiber pid))
-                            (begin
-                              # Cancel any pending I/O for the target sub-fiber
+                            (begin  # Cancel any pending I/O for the target sub-fiber
                               (def @to-cancel @[])
                               (each [id entry] in (pairs io-pending)
                                 (when (and (get entry :fiber)
@@ -487,8 +482,7 @@
                               (handle-sub-fiber-after-resume target pid)
                               (when (= (fiber/status fiber) :paused)
                                 (fiber/resume fiber nil)
-                                (handle-sub-fiber-after-resume fiber pid))))))
-                    ## Unknown wait op — re-queue
+                                (handle-sub-fiber-after-resume fiber pid))))))  ## Unknown wait op — re-queue
                     (push sub-runnable @{:fiber fiber :pid pid})))
                 (push sub-runnable @{:fiber fiber :pid pid}))))))
 
@@ -561,8 +555,7 @@
                   (begin
                     (put (proc-get pid) :resume nil)
                     (push ready pid))
-                  (begin
-                    # Cancel any pending I/O for the target sub-fiber
+                  (begin  # Cancel any pending I/O for the target sub-fiber
                     (def @to-cancel-abort @[])
                     (each [id entry] in (pairs io-pending)
                       (when (and (get entry :fiber)
@@ -1009,9 +1002,8 @@
         (clear-sub-state)))
 
     (def @sched-run
-      (fn [init]
-        # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
-        # registers fibers with THIS scheduler. Spawn the init process inside
+      (fn [init]  # Parameterize *spawn* so that ev/spawn inside any process or sub-fiber
+      # registers fibers with THIS scheduler. Spawn the init process inside
         # the parameterize too — fibers capture their parameter environment at
         # creation time, so sched-spawn (which creates the init fiber) must
         # run with the rebound *spawn*.

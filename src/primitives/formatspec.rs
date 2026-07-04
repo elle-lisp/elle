@@ -2,8 +2,9 @@
 //!
 //! Parses format specification strings like `>10.2f`, `05d`, `*^20`.
 //! Used by `format.rs` to determine alignment, padding, precision, and type.
+use crate::primitives::ctx::NativeCtx;
 use crate::value::fiber::{SignalBits, SIG_ERROR};
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 // ============================================================================
 // Types
@@ -44,7 +45,10 @@ pub(super) enum FormatType {
 // ============================================================================
 
 /// Parse a format spec string like `>10.2f` or `05d` or `*^20`.
-pub(super) fn parse_format_spec(spec: &str) -> Result<FormatSpec, (SignalBits, Value)> {
+pub(super) fn parse_format_spec(
+    spec: &str,
+    ctx: &mut NativeCtx,
+) -> Result<FormatSpec, (SignalBits, Value)> {
     if spec.is_empty() {
         return Ok(FormatSpec {
             fill: ' ',
@@ -90,7 +94,7 @@ pub(super) fn parse_format_spec(spec: &str) -> Result<FormatSpec, (SignalBits, V
         width = Some(width_str.parse::<usize>().map_err(|_| {
             (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "format-error",
                     format!("string/format: invalid format spec '{}'", spec),
                 ),
@@ -111,7 +115,7 @@ pub(super) fn parse_format_spec(spec: &str) -> Result<FormatSpec, (SignalBits, V
             precision = Some(prec_str.parse::<usize>().map_err(|_| {
                 (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "format-error",
                         format!("string/format: invalid format spec '{}'", spec),
                     ),
@@ -120,7 +124,7 @@ pub(super) fn parse_format_spec(spec: &str) -> Result<FormatSpec, (SignalBits, V
         } else {
             return Err((
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "format-error",
                     format!("string/format: invalid format spec '{}'", spec),
                 ),
@@ -143,7 +147,7 @@ pub(super) fn parse_format_spec(spec: &str) -> Result<FormatSpec, (SignalBits, V
             _ => {
                 return Err((
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "format-error",
                         format!("string/format: invalid format spec '{}'", spec),
                     ),
@@ -157,7 +161,7 @@ pub(super) fn parse_format_spec(spec: &str) -> Result<FormatSpec, (SignalBits, V
     if pos < chars.len() {
         return Err((
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "format-error",
                 format!("string/format: invalid format spec '{}'", spec),
             ),

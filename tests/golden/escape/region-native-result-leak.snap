@@ -1,0 +1,56 @@
+[needs_capture]
+  b0(churn) local mutated=false immutable=true needs_capture=false
+  b1(__file_expr_#0) local mutated=false immutable=false needs_capture=false
+  b2(n) param mutated=false immutable=true needs_capture=false
+  b3(before) local mutated=false immutable=true needs_capture=false
+  b4(i) local mutated=true immutable=false needs_capture=false
+  b5(i) local mutated=false immutable=true needs_capture=false
+  b6(~) local mutated=false immutable=true needs_capture=false
+  b7(~) local mutated=false immutable=true needs_capture=false
+  b8(~) local mutated=false immutable=true needs_capture=false
+  b9(~) local mutated=false immutable=true needs_capture=false
+  b10(~) local mutated=false immutable=true needs_capture=false
+  b11(d#0) local mutated=false immutable=true needs_capture=false
+  b12(d#1) local mutated=false immutable=true needs_capture=false
+  b13(G#0) local mutated=false immutable=true needs_capture=false
+  b14(~) local mutated=false immutable=true needs_capture=false
+  b15(~) local mutated=false immutable=true needs_capture=false
+  b16(G#1) local mutated=false immutable=true needs_capture=false
+  b17(~) local mutated=false immutable=true needs_capture=false
+  b18(~) local mutated=false immutable=true needs_capture=false
+[lambda_captures]
+  #1 params=[b2(n)] captures=[]
+[return_frontier]
+  []
+[suppressed_decref_regions]
+  []
+[region_instrs]
+  ; entry <anon>
+    block0: DecrefRegion s0
+    block2: DecrefValueRegion v30
+    block2: DecrefRegion s1
+    block2: DecrefValueRegion v39
+    block2: DecrefRegion s2
+    block4: DecrefValueRegion v43
+    block3: DecrefValueRegion v45
+    block6: DecrefValueRegion v64
+    block6: DecrefRegion s3
+    block6: DecrefValueRegion v73
+    block6: DecrefRegion s4
+    block8: DecrefValueRegion v77
+    block7: IncrefValueRegion v79
+    block7: DecrefValueRegion v80
+  ; closure[0] <anon>
+    block4: DecrefRegion s5
+    block4: DecrefRegion s6
+    block4: DecrefValueRegion v25
+    block4: DecrefValueRegion v33
+    block4: DecrefValueRegion v35
+    block6: DecrefValueRegion v40
+    block3: DecrefValueRegion v42
+    block1: TailCall adopt_callee=false
+    block1: IncrefValueRegion v51
+    block1: DecrefValueRegion v52
+    block1: DecrefValueRegion v54
+    block1: IncrefValueRegion v56
+    block1: DecrefValueRegion v57

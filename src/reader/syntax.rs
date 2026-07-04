@@ -10,24 +10,61 @@
 use super::token::{OwnedToken, SourceLoc};
 use crate::syntax::{Span, Syntax, SyntaxKind};
 
+/// A lexed token together with everything the syntax parser needs in order to
+/// span it: its source location, its source byte length, and its start byte
+/// offset.
+///
+/// This collapses what used to be four parallel `Vec`s — `tokens`, `locations`,
+/// `lengths`, `byte_offsets`, all indexed by a single `pos` with nothing
+/// keeping their lengths in agreement — into one `Vec<LexedToken>`. That makes
+/// the agreement structural: each token carries its own three companions, so
+/// they can no longer fall out of sync, be indexed past one another, or be
+/// supplied in mismatched counts to the reader's internals.
+struct LexedToken {
+    token: OwnedToken,
+    loc: SourceLoc,
+    len: usize,
+    byte_offset: usize,
+}
+
+/// Span width assumed for a token position with no recorded length — only
+/// reachable past the end of the stream. One source character.
+const DEFAULT_TOKEN_LEN: usize = 1;
+
 pub struct SyntaxReader {
-    tokens: Vec<OwnedToken>,
-    locations: Vec<SourceLoc>,
-    lengths: Vec<usize>,
-    byte_offsets: Vec<usize>,
+    tokens: Vec<LexedToken>,
     pos: usize,
 }
 
 impl SyntaxReader {
+    /// Zip the lexer's parallel output columns into one `Vec<LexedToken>`. This
+    /// is the single point where the four columns meet — and the only place a
+    /// length mismatch between them could matter. A position absent from
+    /// `locations`/`lengths`/`byte_offsets` (only possible if a caller passes
+    /// ragged columns) falls back to the same defaults the old per-field
+    /// accessors used.
+    fn from_columns(
+        tokens: Vec<OwnedToken>,
+        locations: Vec<SourceLoc>,
+        lengths: Vec<usize>,
+        byte_offsets: Vec<usize>,
+    ) -> Self {
+        let tokens = tokens
+            .into_iter()
+            .enumerate()
+            .map(|(i, token)| LexedToken {
+                token,
+                loc: locations.get(i).cloned().unwrap_or_else(SourceLoc::start),
+                len: lengths.get(i).copied().unwrap_or(DEFAULT_TOKEN_LEN),
+                byte_offset: byte_offsets.get(i).copied().unwrap_or(0),
+            })
+            .collect();
+        SyntaxReader { tokens, pos: 0 }
+    }
+
     pub fn new(tokens: Vec<OwnedToken>, locations: Vec<SourceLoc>, lengths: Vec<usize>) -> Self {
-        let byte_offsets = vec![0; tokens.len()];
-        SyntaxReader {
-            tokens,
-            locations,
-            lengths,
-            byte_offsets,
-            pos: 0,
-        }
+        // No byte offsets supplied: every token defaults to offset 0, as before.
+        Self::from_columns(tokens, locations, lengths, Vec::new())
     }
 
     pub fn with_byte_offsets(
@@ -36,35 +73,35 @@ impl SyntaxReader {
         lengths: Vec<usize>,
         byte_offsets: Vec<usize>,
     ) -> Self {
-        SyntaxReader {
-            tokens,
-            locations,
-            lengths,
-            byte_offsets,
-            pos: 0,
-        }
+        Self::from_columns(tokens, locations, lengths, byte_offsets)
     }
 
     fn current(&self) -> Option<&OwnedToken> {
-        self.tokens.get(self.pos)
+        self.tokens.get(self.pos).map(|t| &t.token)
     }
 
     fn current_location(&self) -> SourceLoc {
-        self.locations.get(self.pos).cloned().unwrap_or_else(|| {
-            // If we're past the end, use the last location
-            self.locations
-                .last()
-                .cloned()
-                .unwrap_or_else(SourceLoc::start)
-        })
+        // At or past the end, fall back to the last token's location (or the
+        // start sentinel for an empty stream), as before.
+        self.tokens
+            .get(self.pos)
+            .or_else(|| self.tokens.last())
+            .map(|t| t.loc.clone())
+            .unwrap_or_else(SourceLoc::start)
     }
 
     fn current_length(&self) -> usize {
-        self.lengths.get(self.pos).copied().unwrap_or(1)
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.len)
+            .unwrap_or(DEFAULT_TOKEN_LEN)
     }
 
     fn current_byte_offset(&self) -> usize {
-        self.byte_offsets.get(self.pos).copied().unwrap_or(0)
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.byte_offset)
+            .unwrap_or(0)
     }
 
     /// Check if there are remaining tokens. Returns Some with error message if so.
@@ -80,7 +117,7 @@ impl SyntaxReader {
     }
 
     fn advance(&mut self) -> Option<OwnedToken> {
-        let token = self.current().cloned();
+        let token = self.tokens.get(self.pos).map(|t| t.token.clone());
         self.pos += 1;
         token
     }
@@ -532,5 +569,5 @@ impl SyntaxReader {
 }
 
 #[cfg(test)]
-#[path = "syntax_tests.rs"]
+#[path = "syntax_tests/mod.rs"]
 mod tests;

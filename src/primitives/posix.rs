@@ -7,16 +7,21 @@
 use crate::io::request::{IoOp, IoRequest};
 use crate::io::sigfd::SignalReceiver;
 use crate::io::sigmap;
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::ctx::NativeCtx;
+use crate::primitives::def::RegionEffect;
 use crate::signals::{Signal, SIG_OS_SIGNAL};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 use std::collections::BTreeSet;
 
 /// Resolve a Value (single keyword, set/array/list of keywords) to a list
 /// of unique libc signums. Unknown names or non-keywords are an error.
-fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (SignalBits, Value)> {
+fn resolve_signal_set(
+    val: &Value,
+    context: &str,
+    ctx: &mut NativeCtx,
+) -> Result<Vec<libc::c_int>, (SignalBits, Value)> {
     fn push(out: &mut Vec<libc::c_int>, signum: libc::c_int) {
         if !out.contains(&signum) {
             out.push(signum);
@@ -25,6 +30,8 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
 
     let mut out: Vec<libc::c_int> = Vec::new();
 
+    // All `ctx.error` calls below are `&self`, so every closure captures `ctx`
+    // by shared reference — they coexist without aliasing conflicts.
     let process_keyword =
         |name: &str, out: &mut Vec<libc::c_int>| -> Result<(), (SignalBits, Value)> {
             match sigmap::keyword_to_signum(name) {
@@ -34,7 +41,7 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
                 }
                 None => Err((
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "argument-error",
                         format!(
                             "{}: unknown signal keyword :{}; expected one of {}",
@@ -59,7 +66,7 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
             let name = elem.as_keyword_name().ok_or_else(|| {
                 (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "type-error",
                         format!(
                             "{}: set elements must be keywords, got {}",
@@ -80,7 +87,7 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
             let name = elem.as_keyword_name().ok_or_else(|| {
                 (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "type-error",
                         format!(
                             "{}: array elements must be keywords, got {}",
@@ -99,7 +106,7 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
             let name = elem.as_keyword_name().ok_or_else(|| {
                 (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "type-error",
                         format!(
                             "{}: array elements must be keywords, got {}",
@@ -121,7 +128,7 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
             let name = pair.first.as_keyword_name().ok_or_else(|| {
                 (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "type-error",
                         format!(
                             "{}: list elements must be keywords, got {}",
@@ -143,7 +150,7 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
 
     Err((
         SIG_ERROR,
-        error_val(
+        ctx.error(
             "type-error",
             format!(
                 "{}: expected keyword, set, array, or list of keywords, got {}",
@@ -155,25 +162,31 @@ fn resolve_signal_set(val: &Value, context: &str) -> Result<Vec<libc::c_int>, (S
 }
 
 /// Build a Value-set from a slice of libc signums.
-fn signums_to_keyword_set(signums: &[libc::c_int]) -> Value {
+fn signums_to_keyword_set(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    signums: &[libc::c_int],
+) -> Value {
     let mut set: BTreeSet<Value> = BTreeSet::new();
     for &s in signums {
         if let Some(name) = sigmap::signum_to_keyword(s) {
             set.insert(Value::keyword(name));
         }
     }
-    Value::set(set)
+    ctx.set(set)
 }
 
 // ── os/sig-send ────────────────────────────────────────────────────────
 
-fn prim_sig_send(args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_send(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let pid = match args[0].as_int() {
         Some(n) => n as i32,
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!(
                         "os/sig-send: pid must be integer, got {}",
@@ -187,7 +200,7 @@ fn prim_sig_send(args: &[Value]) -> (SignalBits, Value) {
         Ok(s) => s,
         Err(e) => {
             let (kind, msg) = e.parts("os/sig-send");
-            return (SIG_ERROR, error_val(kind, msg));
+            return (SIG_ERROR, ctx.error(kind, msg));
         }
     };
     crate::io::sigfd::posix_trace(format_args!(
@@ -200,7 +213,7 @@ fn prim_sig_send(args: &[Value]) -> (SignalBits, Value) {
         crate::io::sigfd::posix_trace(format_args!("prim_sig_send kill FAILED errno={}", err));
         return (
             SIG_ERROR,
-            error_val("os-signal-error", format!("os/sig-send: {}", err)),
+            ctx.error("os-signal-error", format!("os/sig-send: {}", err)),
         );
     }
     (SIG_OK, Value::NIL)
@@ -208,12 +221,15 @@ fn prim_sig_send(args: &[Value]) -> (SignalBits, Value) {
 
 // ── os/sig-raise ───────────────────────────────────────────────────────
 
-fn prim_sig_raise(args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_raise(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let signum = match sigmap::resolve(&args[0], "os/sig-raise") {
         Ok(s) => s,
         Err(e) => {
             let (kind, msg) = e.parts("os/sig-raise");
-            return (SIG_ERROR, error_val(kind, msg));
+            return (SIG_ERROR, ctx.error(kind, msg));
         }
     };
     // libc::raise sends to the calling thread; for kqueue/signalfd we want
@@ -229,7 +245,7 @@ fn prim_sig_raise(args: &[Value]) -> (SignalBits, Value) {
         crate::io::sigfd::posix_trace(format_args!("prim_sig_raise kill FAILED errno={}", err));
         return (
             SIG_ERROR,
-            error_val("os-signal-error", format!("os/sig-raise: {}", err)),
+            ctx.error("os-signal-error", format!("os/sig-raise: {}", err)),
         );
     }
     (SIG_OK, Value::NIL)
@@ -237,50 +253,62 @@ fn prim_sig_raise(args: &[Value]) -> (SignalBits, Value) {
 
 // ── os/sig-watch ───────────────────────────────────────────────────────
 
-fn prim_sig_watch(args: &[Value]) -> (SignalBits, Value) {
-    let signums = match resolve_signal_set(&args[0], "os/sig-watch") {
+fn prim_sig_watch(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let signums = match resolve_signal_set(&args[0], "os/sig-watch", ctx) {
         Ok(v) => v,
         Err(e) => return e,
     };
     if signums.is_empty() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "argument-error",
                 "os/sig-watch: signal set must be non-empty",
             ),
         );
     }
     match SignalReceiver::new(signums) {
-        Ok(r) => (SIG_OK, Value::external("signal-receiver", r)),
-        Err(msg) => (SIG_ERROR, error_val("os-signal-error", msg)),
+        Ok(r) => (SIG_OK, ctx.external("signal-receiver", r)),
+        Err(msg) => (SIG_ERROR, ctx.error("os-signal-error", msg)),
     }
 }
 
 // ── os/sig-next ────────────────────────────────────────────────────────
 
-fn prim_sig_next(args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_next(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if args[0].as_external::<SignalReceiver>().is_none() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 "os/sig-next: argument must be a signal receiver",
             ),
         );
     }
-    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::SigNext, args[0]))
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::new(ctx, IoOp::SigNext, args[0]),
+    )
 }
 
 // ── os/sig-close ───────────────────────────────────────────────────────
 
-fn prim_sig_close(args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_close(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let receiver = match args[0].as_external::<SignalReceiver>() {
         Some(r) => r,
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     "os/sig-close: argument must be a signal receiver",
                 ),
@@ -293,118 +321,111 @@ fn prim_sig_close(args: &[Value]) -> (SignalBits, Value) {
 
 // ── os/sig-pending ─────────────────────────────────────────────────────
 
-fn prim_sig_pending(_args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_pending(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     let signums = crate::io::sigfd::current_thread_pending();
-    (SIG_OK, signums_to_keyword_set(&signums))
+    (SIG_OK, signums_to_keyword_set(ctx, &signums))
 }
 
 // ── os/sig-mask ────────────────────────────────────────────────────────
 
-fn prim_sig_mask(_args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_mask(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     let signums = crate::io::sigfd::current_thread_blocked();
-    (SIG_OK, signums_to_keyword_set(&signums))
+    (SIG_OK, signums_to_keyword_set(ctx, &signums))
 }
 
 // ── os/sig-watching ────────────────────────────────────────────────────
 
-fn prim_sig_watching(_args: &[Value]) -> (SignalBits, Value) {
+fn prim_sig_watching(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     let signums = crate::io::sigfd::currently_watched();
-    (SIG_OK, signums_to_keyword_set(&signums))
+    (SIG_OK, signums_to_keyword_set(ctx, &signums))
 }
 
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "os/sig-send",
-        func: prim_sig_send,
+primitive! {
+    "os/sig-send" => prim_sig_send {
         signal: Signal::os_signal_errors(),
         arity: Arity::Exact(2),
         doc: "Send a POSIX signal to a pid. signum is a keyword (:sigterm, :sigkill, etc.) or a named integer. Capability: :os-signal.",
         params: &["pid", "signum"],
         category: "posix",
         example: "(os/sig-send 4242 :sigterm)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-raise",
-        func: prim_sig_raise,
+        effect: RegionEffect::Immediate,
+    }
+    "os/sig-raise" => prim_sig_raise {
         signal: Signal::os_signal_errors(),
         arity: Arity::Exact(1),
         doc: "Send a POSIX signal to the current process. Capability: :os-signal.",
         params: &["signum"],
         category: "posix",
         example: "(os/sig-raise :sigusr1)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-watch",
-        func: prim_sig_watch,
+        effect: RegionEffect::Immediate,
+    }
+    "os/sig-watch" => prim_sig_watch {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Open a signal receiver that watches a set of POSIX signals. Blocks the signals on the calling thread and queues deliveries onto a kernel fd. Returns a SignalReceiver. See docs/posix-signals.md for mask policy.",
         params: &["signal-set"],
         category: "posix",
         example: "(os/sig-watch |:sigterm :sigint|)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-next",
-        func: prim_sig_next,
-        signal: Signal {
+        effect: RegionEffect::Fresh,
+    }
+    "os/sig-next" => prim_sig_next {
+        signal: (Signal {
             bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
-        },
+        }),
         arity: Arity::Exact(1),
         doc: "Wait for the next batch of signal deliveries on a receiver. Yields to the scheduler. Resumes with an array of [{:signal :sigterm :sender-pid n :sender-uid n :code n :count n} ...].",
         params: &["receiver"],
         category: "posix",
         example: "(os/sig-next r)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-close",
-        func: prim_sig_close,
+        // Opaque: stores nothing (receiver read, events parsed out), but the
+        // event array is minted at completion on the origin heap (SigNext
+        // completion), neither this call's region nor an arg's. No clique.
+        effect: RegionEffect::Opaque,
+    }
+    "os/sig-close" => prim_sig_close {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close a signal receiver. Decrements the watched-set refcount; the signal is unblocked process-wide when the last watcher releases it. Idempotent.",
         params: &["receiver"],
         category: "posix",
         example: "(os/sig-close r)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-pending",
-        func: prim_sig_pending,
+        effect: RegionEffect::Immediate,
+    }
+    "os/sig-pending" => prim_sig_pending {
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently pending delivery on the calling thread (sigpending(2)).",
-        params: &[],
         category: "posix",
         example: "(os/sig-pending)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-mask",
-        func: prim_sig_mask,
+        effect: RegionEffect::Fresh,
+    }
+    "os/sig-mask" => prim_sig_mask {
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently blocked on the calling thread (pthread_sigmask).",
-        params: &[],
         category: "posix",
         example: "(os/sig-mask)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "os/sig-watching",
-        func: prim_sig_watching,
+        effect: RegionEffect::Fresh,
+    }
+    "os/sig-watching" => prim_sig_watching {
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently being watched by at least one live receiver.",
-        params: &[],
         category: "posix",
         example: "(os/sig-watching)",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Fresh,
+    }
+}
 
 // Suppress dead-code warning for the SIG_OS_SIGNAL re-export now that
 // posix.rs is the only caller. Keep `pub use` so the capability bit is

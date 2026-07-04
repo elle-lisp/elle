@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis
@@ -153,6 +153,15 @@
                    :message (string/format "Captures '{}' by value, but '{}' is mutated elsewhere. This closure sees the value at capture time, not later mutations."
                    (get cap :name) (get cap :name))})))))
 
+    # 6. Mutable binding never reassigned (false-mutable), in THIS function.
+    # Reflects the linter's diagnostics, attributed by the :function the linter
+    # stamped — so a mutable BINDING that never changes is distinguished from a
+    # mutable VALUE held by an immutable binding.
+    (each d in (compile/diagnostics analysis)
+      (when (and (= (get d :rule) "mutable-binding-never-assigned")
+                 (= (get d :function) (string name)))
+        (push obs {:kind :false-mutable :message (get d :message)})))
+
     (freeze obs))
 
   # ── Function portrait ──────────────────────────────────────────────────
@@ -176,6 +185,21 @@
        :observations obs
        :callers callers
        :callees callees}))
+
+  # ── Lint advisories ─────────────────────────────────────────────────────
+
+  (defn false-mutable-advisories [analysis]
+    "Reflect the linter's `mutable-binding-never-assigned` diagnostics — a
+    binding declared mutable (var/@) yet never reassigned via `assign`. Read
+    from compile/diagnostics so portrait and `elle lint` never disagree."
+    (def @out @[])
+    (each d in (compile/diagnostics analysis)
+      (when (= (get d :rule) "mutable-binding-never-assigned")
+        (push out
+              {:kind :false-mutable
+               :line (get d :line)
+               :message (get d :message)})))
+    (freeze out))
 
   # ── Module portrait ─────────────────────────────────────────────────────
 
@@ -228,6 +252,7 @@
        :delegating (freeze delegating)
        :yielding (freeze yielding)
        :boundaries (freeze boundaries)
+       :false-mutable (false-mutable-advisories analysis)
        :graph (compile/call-graph analysis)}))
 
   # ── Text rendering ──────────────────────────────────────────────────────
@@ -323,6 +348,12 @@
               (string/format "    {} → {} ({})\n" (get b :caller)
                              (get b :callee) (get b :transition)))))
 
+    (when (not (empty? (get portrait :false-mutable)))
+      (push out "\n  Mutable bindings never reassigned:\n")
+      (each m in (get portrait :false-mutable)
+        (push out
+              (string/format "    line {}: {}\n" (get m :line) (get m :message)))))
+
     (let [graph (get portrait :graph)]
       (when (not (empty? (get graph :roots)))
         (push out
@@ -344,5 +375,6 @@
    :phases classify-phases
    :failures detect-failure-modes
    :composition assess-composition
-   :observations find-observations})
+   :observations find-observations
+   :false-mutable false-mutable-advisories})
 # end closure

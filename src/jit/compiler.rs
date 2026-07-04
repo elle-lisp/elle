@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{
     AbiParam, BlockArg, Function, InstBuilder, MemFlags, Signature, UserFuncName,
 };
@@ -19,12 +19,19 @@ use cranelift_module::{FuncId, Linkage, Module};
 
 use crate::lir::{Label, LirFunction};
 use crate::value::{Arity, SymbolId};
-use crate::Value;
 
 use super::code::JitCode;
 use super::translate::FunctionTranslator;
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
+
+/// What translating one function yields, kept alive by its `JitCode`:
+/// closure-template `Value`s referenced by `MakeClosure`, and string-literal
+/// template byte buffers the native code's baked pointers point into.
+type TranslatedConsts = (
+    Vec<Box<crate::value::ClosureTemplate>>,
+    Vec<Box<crate::value::ConstTemplate>>,
+);
 
 /// A member of a compilation group (SCC) for batch JIT compilation.
 pub struct BatchMember<'a> {
@@ -40,6 +47,8 @@ pub struct JitCompiler {
     /// Runtime helper function IDs
     helpers: RuntimeHelpers,
 }
+
+mod translate;
 
 impl JitCompiler {
     /// Create a new JIT compiler
@@ -154,7 +163,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let closure_constants = self.translate_function(
+        let (closure_protos, templates) = self.translate_function(
             lir,
             &mut ctx.func,
             scc_peers.as_ref(),
@@ -204,7 +213,8 @@ impl JitCompiler {
             self.module,
             yield_metas,
             call_site_metas,
-            closure_constants,
+            closure_protos,
+            templates,
         ))
     }
 
@@ -301,15 +311,17 @@ impl JitCompiler {
         }
 
         // Define each function with the SCC peer map, collecting closure
-        // constants so they stay alive as long as the JitCode does.
-        let mut all_closure_constants: Vec<(SymbolId, Vec<Value>)> = Vec::new();
+        // template blueprints so they stay alive as long as the JitCode does.
+        let mut all_closure_protos: Vec<(SymbolId, Vec<Box<crate::value::ClosureTemplate>>)> =
+            Vec::new();
+        let mut all_templates: Vec<(SymbolId, Vec<Box<crate::value::ConstTemplate>>)> = Vec::new();
         for (i, member) in members.iter().enumerate() {
             let (_, func_id) = func_ids[i];
             let mut ctx = self.module.make_context();
             ctx.func.signature = sig.clone();
             ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-            let closure_constants = self.translate_function(
+            let (closure_protos, templates) = self.translate_function(
                 member.lir,
                 &mut ctx.func,
                 Some(&scc_peers),
@@ -317,7 +329,8 @@ impl JitCompiler {
                 symbol_names.clone(),
                 Vec::new(),
             )?;
-            all_closure_constants.push((member.sym, closure_constants));
+            all_closure_protos.push((member.sym, closure_protos));
+            all_templates.push((member.sym, templates));
 
             self.module
                 .define_function(func_id, &mut ctx)
@@ -338,457 +351,26 @@ impl JitCompiler {
         // Wrap module in shared Arc so all JitCode entries keep it alive
         let shared_module = Arc::new(super::code::ModuleHolder::new(self.module));
 
-        // Build results — all share the same module, each with its closure constants
-        let mut constants_map: std::collections::HashMap<SymbolId, Vec<Value>> =
-            all_closure_constants.into_iter().collect();
+        // Build results — all share the same module, each with its closure +
+        // string-literal template constants (both kept alive by the JitCode).
+        let mut constants_map: std::collections::HashMap<
+            SymbolId,
+            Vec<Box<crate::value::ClosureTemplate>>,
+        > = all_closure_protos.into_iter().collect();
+        let mut templates_map: std::collections::HashMap<
+            SymbolId,
+            Vec<Box<crate::value::ConstTemplate>>,
+        > = all_templates.into_iter().collect();
         let results = fn_ptrs
             .into_iter()
             .map(|(sym, ptr)| {
                 let cc = constants_map.remove(&sym).unwrap_or_default();
-                (sym, JitCode::new_shared(ptr, shared_module.clone(), cc))
+                let sc = templates_map.remove(&sym).unwrap_or_default();
+                (sym, JitCode::new_shared(ptr, shared_module.clone(), cc, sc))
             })
             .collect();
 
         Ok(results)
-    }
-
-    /// Translate LIR function to Cranelift IR
-    ///
-    /// Each LIR register maps to TWO Cranelift variables: (tag, payload).
-    /// The entry block extracts 6 parameters:
-    ///   env_ptr, args_ptr, nargs, vm_ptr, self_tag, self_payload
-    /// and loads arg Values (16 bytes each) into the doubled arg variables.
-    fn translate_function(
-        &mut self,
-        lir: &LirFunction,
-        func: &mut Function,
-        scc_peers: Option<&HashMap<SymbolId, FuncId>>,
-        self_sym: Option<SymbolId>,
-        symbol_names: HashMap<u32, String>,
-        module_closures: Vec<LirFunction>,
-    ) -> Result<Vec<crate::value::Value>, JitError> {
-        let mut builder_ctx = FunctionBuilderContext::new();
-        let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
-
-        // Create translator context
-        let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
-        translator.symbol_names = symbol_names;
-        translator.module_closures = module_closures;
-
-        translator.self_sym = self_sym;
-
-        if let Some(peers) = scc_peers {
-            translator.scc_peers = peers.clone();
-        }
-
-        // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
-        //   tag     at Cranelift var index 2*r
-        //   payload at Cranelift var index 2*r+1
-        //
-        // The "logical" variable space covers:
-        //   [0,       num_regs)             - LIR work registers
-        //   [num_regs, num_regs+num_locals)  - locals (args + locally-defined)
-        // The max logical index is max(num_regs, local_var_base + num_locally_defined).
-        // Each logical slot needs 2 Cranelift variables.
-        let arg_var_base = lir.num_regs;
-        let is_list_variadic = matches!(lir.arity, Arity::AtLeast(_))
-            && matches!(lir.vararg_kind, crate::hir::VarargKind::List);
-        let is_range_arity = matches!(lir.arity, Arity::Range(_, _));
-        let arity_params = if is_list_variadic || is_range_arity {
-            lir.num_params as u16
-        } else {
-            lir.arity.fixed_params() as u16
-        };
-        // All num_locals are stack-relative in the dual-address-space lowerer.
-        let num_locally_defined = lir.num_locals as u32;
-        let local_var_base = arg_var_base + arity_params as u32;
-        let max_logical = std::cmp::max(
-            std::cmp::max(lir.num_regs + lir.num_locals as u32, lir.num_locals as u32),
-            local_var_base + num_locally_defined,
-        );
-        // Declare 2 * max_logical Cranelift variables (tag + payload per slot).
-        // declare_var allocates sequentially from 0, so the returned Variable
-        // indices match our var(i) scheme.
-        for _ in 0..(2 * max_logical) {
-            builder.declare_var(I64);
-        }
-        translator.arg_var_base = arg_var_base;
-        translator.local_var_base = local_var_base;
-
-        // Create blocks
-        let entry_block = builder.create_block();
-        let loop_header = builder.create_block();
-
-        let mut block_map: HashMap<Label, cranelift_codegen::ir::Block> = HashMap::new();
-        for bb in &lir.blocks {
-            let cl_block = builder.create_block();
-            block_map.insert(bb.label, cl_block);
-        }
-
-        // Entry block: extract 6 function parameters
-        builder.append_block_params_for_function_params(entry_block);
-        builder.switch_to_block(entry_block);
-        builder.seal_block(entry_block);
-
-        let env_ptr = builder.block_params(entry_block)[0];
-        let args_ptr = builder.block_params(entry_block)[1];
-        let nargs = builder.block_params(entry_block)[2];
-        let vm_ptr = builder.block_params(entry_block)[3];
-        let self_tag = builder.block_params(entry_block)[4];
-        let self_payload = builder.block_params(entry_block)[5];
-
-        translator.env_ptr = Some(env_ptr);
-        translator.vm_ptr = Some(vm_ptr);
-        translator.self_tag_payload = Some((self_tag, self_payload));
-
-        if is_list_variadic {
-            // --- Variadic entry: load required+optional params, then cons list for rest ---
-            let required = lir.arity.fixed_params();
-            // num_params includes the rest param slot — subtract 1 for non-rest count
-            let non_rest_params = lir.num_params.saturating_sub(1);
-            let has_opt_params = non_rest_params > required;
-
-            // Load required params unconditionally
-            for i in 0..required as u32 {
-                let tag_offset = (i as i32) * 16;
-                let payload_offset = (i as i32) * 16 + 8;
-                let arg_tag = builder
-                    .ins()
-                    .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                let arg_payload =
-                    builder
-                        .ins()
-                        .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                let base = arg_var_base + i;
-                if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
-                    let (cell_t, cell_p) = translator.call_helper_value_unary(
-                        &mut builder,
-                        translator.helpers.make_capture,
-                        arg_tag,
-                        arg_payload,
-                    )?;
-                    translator.def_var_pair(&mut builder, base, cell_t, cell_p);
-                } else {
-                    translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
-                }
-            }
-
-            // Load optional params conditionally (check nargs for each)
-            if has_opt_params {
-                for i in required as u32..non_rest_params as u32 {
-                    let base = arg_var_base + i;
-                    let threshold = builder.ins().iconst(I64, i as i64 + 1);
-                    let has_arg =
-                        builder
-                            .ins()
-                            .icmp(IntCC::UnsignedGreaterThanOrEqual, nargs, threshold);
-                    let then_block = builder.create_block();
-                    let else_block = builder.create_block();
-                    let merge_block = builder.create_block();
-                    builder.append_block_param(merge_block, I64);
-                    builder.append_block_param(merge_block, I64);
-
-                    builder
-                        .ins()
-                        .brif(has_arg, then_block, &[], else_block, &[]);
-
-                    builder.switch_to_block(then_block);
-                    builder.seal_block(then_block);
-                    let tag_offset = (i as i32) * 16;
-                    let payload_offset = (i as i32) * 16 + 8;
-                    let arg_tag =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                    let arg_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                    builder.ins().jump(
-                        merge_block,
-                        &[BlockArg::Value(arg_tag), BlockArg::Value(arg_payload)],
-                    );
-
-                    builder.switch_to_block(else_block);
-                    builder.seal_block(else_block);
-                    let nil_tag = builder
-                        .ins()
-                        .iconst(I64, crate::value::Value::NIL.tag as i64);
-                    let nil_pay = builder.ins().iconst(I64, 0);
-                    builder.ins().jump(
-                        merge_block,
-                        &[BlockArg::Value(nil_tag), BlockArg::Value(nil_pay)],
-                    );
-
-                    builder.switch_to_block(merge_block);
-                    builder.seal_block(merge_block);
-                    let merged_tag = builder.block_params(merge_block)[0];
-                    let merged_pay = builder.block_params(merge_block)[1];
-
-                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
-                        let (cell_t, cell_p) = translator.call_helper_value_unary(
-                            &mut builder,
-                            translator.helpers.make_capture,
-                            merged_tag,
-                            merged_pay,
-                        )?;
-                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
-                    } else {
-                        translator.def_var_pair(&mut builder, base, merged_tag, merged_pay);
-                    }
-                }
-            }
-
-            // Build cons list from remaining args after non_rest_params (reverse iteration)
-            let rest_var_idx = arg_var_base + non_rest_params as u32;
-
-            let empty_tag = builder
-                .ins()
-                .iconst(I64, crate::value::Value::EMPTY_LIST.tag as i64);
-            let empty_pay = builder.ins().iconst(I64, 0);
-            let one = builder.ins().iconst(I64, 1);
-            let initial_i = builder.ins().isub(nargs, one);
-            let non_rest_val = builder.ins().iconst(I64, non_rest_params as i64);
-
-            let cons_loop_head = builder.create_block();
-            let cons_loop_body = builder.create_block();
-            let cons_loop_exit = builder.create_block();
-
-            builder.ins().jump(
-                cons_loop_head,
-                &[
-                    BlockArg::Value(initial_i),
-                    BlockArg::Value(empty_tag),
-                    BlockArg::Value(empty_pay),
-                ],
-            );
-
-            // loop_head(i, acc_tag, acc_payload)
-            builder.switch_to_block(cons_loop_head);
-            builder.append_block_param(cons_loop_head, I64); // i
-            builder.append_block_param(cons_loop_head, I64); // acc_tag
-            builder.append_block_param(cons_loop_head, I64); // acc_payload
-            let i_param = builder.block_params(cons_loop_head)[0];
-            let acc_tag_param = builder.block_params(cons_loop_head)[1];
-            let acc_pay_param = builder.block_params(cons_loop_head)[2];
-            let cmp = builder
-                .ins()
-                .icmp(IntCC::SignedGreaterThanOrEqual, i_param, non_rest_val);
-            builder.ins().brif(
-                cmp,
-                cons_loop_body,
-                &[
-                    BlockArg::Value(i_param),
-                    BlockArg::Value(acc_tag_param),
-                    BlockArg::Value(acc_pay_param),
-                ],
-                cons_loop_exit,
-                &[
-                    BlockArg::Value(acc_tag_param),
-                    BlockArg::Value(acc_pay_param),
-                ],
-            );
-
-            // loop_body(i, acc_tag, acc_payload)
-            builder.switch_to_block(cons_loop_body);
-            builder.append_block_param(cons_loop_body, I64); // i
-            builder.append_block_param(cons_loop_body, I64); // acc_tag
-            builder.append_block_param(cons_loop_body, I64); // acc_payload
-            builder.seal_block(cons_loop_body);
-            let i_body = builder.block_params(cons_loop_body)[0];
-            let acc_tag_body = builder.block_params(cons_loop_body)[1];
-            let acc_pay_body = builder.block_params(cons_loop_body)[2];
-            let byte_offset = builder.ins().imul_imm(i_body, 16);
-            let tag_addr = builder.ins().iadd(args_ptr, byte_offset);
-            let arg_tag = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 0);
-            let arg_payload = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 8);
-            let cons_ref = translator
-                .module
-                .declare_func_in_func(translator.helpers.pair, builder.func);
-            let call_inst = builder.ins().call(
-                cons_ref,
-                &[arg_tag, arg_payload, acc_tag_body, acc_pay_body],
-            );
-            let new_acc_tag = builder.inst_results(call_inst)[0];
-            let new_acc_pay = builder.inst_results(call_inst)[1];
-            let new_i = builder.ins().isub(i_body, one);
-            builder.ins().jump(
-                cons_loop_head,
-                &[
-                    BlockArg::Value(new_i),
-                    BlockArg::Value(new_acc_tag),
-                    BlockArg::Value(new_acc_pay),
-                ],
-            );
-
-            // loop_exit(acc_tag, acc_payload)
-            builder.switch_to_block(cons_loop_exit);
-            builder.append_block_param(cons_loop_exit, I64); // acc_tag
-            builder.append_block_param(cons_loop_exit, I64); // acc_payload
-            builder.seal_block(cons_loop_exit);
-            let rest_tag = builder.block_params(cons_loop_exit)[0];
-            let rest_payload = builder.block_params(cons_loop_exit)[1];
-
-            // Handle capture_params_mask for the rest param
-            let rest_param_index = non_rest_params;
-            if rest_param_index < 64 && (lir.capture_params_mask & (1 << rest_param_index)) != 0 {
-                let (cell_t, cell_p) = translator.call_helper_value_unary(
-                    &mut builder,
-                    translator.helpers.make_capture,
-                    rest_tag,
-                    rest_payload,
-                )?;
-                translator.def_var_pair(&mut builder, rest_var_idx, cell_t, cell_p);
-            } else {
-                translator.def_var_pair(&mut builder, rest_var_idx, rest_tag, rest_payload);
-            }
-
-            // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
-        } else {
-            // --- Non-variadic entry: load args directly (16 bytes each) ---
-            let required = lir.arity.fixed_params() as u32;
-            for i in 0..arity_params as u32 {
-                let base = arg_var_base + i;
-                let is_optional = is_range_arity && i >= required;
-
-                if is_optional {
-                    // Optional param: check nargs > i, load arg or default to nil
-                    let threshold = builder.ins().iconst(I64, i as i64 + 1);
-                    let has_arg =
-                        builder
-                            .ins()
-                            .icmp(IntCC::UnsignedGreaterThanOrEqual, nargs, threshold);
-                    let then_block = builder.create_block();
-                    let else_block = builder.create_block();
-                    let merge_block = builder.create_block();
-                    builder.append_block_param(merge_block, I64); // tag
-                    builder.append_block_param(merge_block, I64); // payload
-
-                    builder
-                        .ins()
-                        .brif(has_arg, then_block, &[], else_block, &[]);
-
-                    // then: load from args
-                    builder.switch_to_block(then_block);
-                    builder.seal_block(then_block);
-                    let tag_offset = (i as i32) * 16;
-                    let payload_offset = (i as i32) * 16 + 8;
-                    let arg_tag =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                    let arg_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                    builder.ins().jump(
-                        merge_block,
-                        &[BlockArg::Value(arg_tag), BlockArg::Value(arg_payload)],
-                    );
-
-                    // else: nil
-                    builder.switch_to_block(else_block);
-                    builder.seal_block(else_block);
-                    let nil_tag = builder
-                        .ins()
-                        .iconst(I64, crate::value::Value::NIL.tag as i64);
-                    let nil_pay = builder.ins().iconst(I64, 0);
-                    builder.ins().jump(
-                        merge_block,
-                        &[BlockArg::Value(nil_tag), BlockArg::Value(nil_pay)],
-                    );
-
-                    // merge
-                    builder.switch_to_block(merge_block);
-                    builder.seal_block(merge_block);
-                    let merged_tag = builder.block_params(merge_block)[0];
-                    let merged_pay = builder.block_params(merge_block)[1];
-
-                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
-                        let (cell_t, cell_p) = translator.call_helper_value_unary(
-                            &mut builder,
-                            translator.helpers.make_capture,
-                            merged_tag,
-                            merged_pay,
-                        )?;
-                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
-                    } else {
-                        translator.def_var_pair(&mut builder, base, merged_tag, merged_pay);
-                    }
-                } else {
-                    // Required param: load unconditionally
-                    let tag_offset = (i as i32) * 16;
-                    let payload_offset = (i as i32) * 16 + 8;
-                    let arg_tag =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                    let arg_payload =
-                        builder
-                            .ins()
-                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
-                        let (cell_t, cell_p) = translator.call_helper_value_unary(
-                            &mut builder,
-                            translator.helpers.make_capture,
-                            arg_tag,
-                            arg_payload,
-                        )?;
-                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
-                    } else {
-                        translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
-                    }
-                }
-            }
-        }
-
-        // Initialize locally-defined variables
-        if num_locally_defined > 0 {
-            translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
-        }
-
-        // Allocate shared spill slot for emit/call sites (if any).
-        // Check yield_points (emit terminators) and call_sites directly,
-        // not may_suspend() — emit can emit any signal, not just :yield.
-        if !lir.yield_points.is_empty() || !lir.call_sites.is_empty() {
-            translator.allocate_shared_spill_slot(&mut builder);
-        }
-
-        builder.ins().jump(loop_header, &[]);
-
-        // Loop header: merge point for self-tail-calls
-        builder.switch_to_block(loop_header);
-        let first_lir_block = block_map[&lir.entry];
-        builder.ins().jump(first_lir_block, &[]);
-
-        translator.loop_header = Some(loop_header);
-
-        // Translate LIR blocks
-        for bb in &lir.blocks {
-            let cl_block = block_map[&bb.label];
-            builder.switch_to_block(cl_block);
-
-            let mut block_terminated = false;
-            for spanned in &bb.instructions {
-                if translator.translate_instr(&mut builder, &spanned.instr, &block_map)? {
-                    block_terminated = true;
-                    break;
-                }
-            }
-
-            if !block_terminated {
-                translator.translate_terminator(
-                    &mut builder,
-                    &bb.terminator.terminator,
-                    &block_map,
-                )?;
-            }
-        }
-
-        builder.seal_all_blocks();
-        builder.finalize();
-
-        Ok(translator.closure_constants)
     }
 }
 
@@ -799,489 +381,4 @@ impl Default for JitCompiler {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lir::{
-        BasicBlock, BinOp, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
-    };
-    use crate::signals::Signal;
-    use crate::syntax::Span;
-    use crate::value::Arity;
-
-    fn make_simple_lir() -> LirFunction {
-        // Create a simple function that returns its first argument
-        // fn(x) -> x
-        // The LIR uses LoadCapture to access parameters.
-        // With num_captures=0, LoadCapture index 0 loads from args[0].
-        let mut func = LirFunction::new(Arity::Exact(1));
-        func.num_regs = 1;
-        func.num_captures = 0;
-        func.signal = Signal::silent();
-
-        let mut entry = BasicBlock::new(Label(0));
-        // Load argument 0 into register 0
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            },
-            Span::synthetic(),
-        ));
-        entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-
-        func.blocks.push(entry);
-        func.entry = Label(0);
-        func
-    }
-
-    fn make_add_lir() -> LirFunction {
-        // Create a function that adds two arguments
-        // fn(x, y) -> x + y
-        // With num_captures=0, LoadCapture index 0 and 1 load from args[0] and args[1].
-        let mut func = LirFunction::new(Arity::Exact(2));
-        func.num_regs = 3;
-        func.num_captures = 0;
-        func.signal = Signal::silent();
-
-        let mut entry = BasicBlock::new(Label(0));
-        // Load arguments into registers
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            },
-            Span::synthetic(),
-        ));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(1),
-                index: 1,
-            },
-            Span::synthetic(),
-        ));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::BinOp {
-                dst: Reg(2),
-                op: BinOp::Add,
-                lhs: Reg(0),
-                rhs: Reg(1),
-            },
-            Span::synthetic(),
-        ));
-        entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), Span::synthetic());
-
-        func.blocks.push(entry);
-        func.entry = Label(0);
-        func
-    }
-
-    #[test]
-    fn test_compile_identity() {
-        let lir = make_simple_lir();
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let code = compiler
-            .compile(&lir, None, HashMap::new(), Vec::new())
-            .expect("Failed to compile");
-
-        // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call)
-        let args = [crate::value::Value::int(42)];
-        let value = unsafe {
-            code.call(
-                std::ptr::null(),
-                args.as_ptr(),
-                1,
-                std::ptr::null_mut(),
-                0,
-                0,
-            )
-        }
-        .to_value();
-        assert_eq!(value.as_int(), Some(42));
-    }
-
-    #[test]
-    fn test_compile_add() {
-        let lir = make_add_lir();
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let code = compiler
-            .compile(&lir, None, HashMap::new(), Vec::new())
-            .expect("Failed to compile");
-
-        // Call the compiled function with self_tag=0, self_payload=0
-        let args = [crate::value::Value::int(10), crate::value::Value::int(32)];
-        let value = unsafe {
-            code.call(
-                std::ptr::null(),
-                args.as_ptr(),
-                2,
-                std::ptr::null_mut(),
-                0,
-                0,
-            )
-        }
-        .to_value();
-        assert_eq!(value.as_int(), Some(42));
-    }
-
-    #[test]
-    fn test_accept_polymorphic() {
-        let mut lir = make_simple_lir();
-        lir.signal = Signal::polymorphic(0);
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
-        assert!(
-            result.is_ok(),
-            "JIT should accept polymorphic functions (runtime dispatch handles callables): {:?}",
-            result,
-        );
-    }
-
-    #[test]
-    fn test_accept_yielding() {
-        let mut lir = make_simple_lir();
-        lir.signal = Signal::yields();
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        // Should compile (no Yield terminators in this simple LIR)
-        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_compile_batch_single_function() {
-        // A batch with one function should work identically to compile()
-        let lir = make_simple_lir();
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let members = vec![BatchMember {
-            sym: SymbolId(0),
-            lir: &lir,
-        }];
-        let results = compiler
-            .compile_batch(&members, HashMap::new())
-            .expect("Failed to compile batch");
-
-        assert_eq!(results.len(), 1);
-        let (sym, code) = &results[0];
-        assert_eq!(*sym, SymbolId(0));
-
-        let args = [crate::value::Value::int(42)];
-        let value = unsafe {
-            code.call(
-                std::ptr::null(),
-                args.as_ptr(),
-                1,
-                std::ptr::null_mut(),
-                0,
-                0,
-            )
-        }
-        .to_value();
-        assert_eq!(value.as_int(), Some(42));
-    }
-
-    #[test]
-    fn test_compile_batch_mutual_calls() {
-        // Two functions that call each other via ValueConst + Call.
-        // f(x) = if x <= 0 then x else g(x - 1)
-        // g(x) = f(x)  (just forwards to f)
-        //
-        // We can't actually CALL these without a VM (the direct SCC calls
-        // still need a valid vm pointer for exception checks), but this test
-        // verifies that batch compilation with cross-references succeeds.
-        use crate::lir::{CmpOp, LirConst};
-
-        let sym_f = SymbolId(100);
-        let sym_g = SymbolId(101);
-
-        // Build f: if x <= 0 then x else call g(x - 1)
-        let mut f = LirFunction::new(Arity::Exact(1));
-        f.name = Some("f".to_string());
-        f.num_regs = 8;
-        f.num_captures = 0;
-        f.signal = Signal::silent();
-
-        // Block 0 (entry): load arg, check condition
-        let mut b0 = BasicBlock::new(Label(0));
-        b0.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            },
-            Span::synthetic(),
-        ));
-        b0.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(1),
-                value: LirConst::Int(0),
-            },
-            Span::synthetic(),
-        ));
-        b0.instructions.push(SpannedInstr::new(
-            LirInstr::Compare {
-                dst: Reg(2),
-                op: CmpOp::Le,
-                lhs: Reg(0),
-                rhs: Reg(1),
-            },
-            Span::synthetic(),
-        ));
-        b0.terminator = SpannedTerminator::new(
-            Terminator::Branch {
-                cond: Reg(2),
-                then_label: Label(1),
-                else_label: Label(2),
-            },
-            Span::synthetic(),
-        );
-
-        // Block 1 (base case): return x
-        let mut b1 = BasicBlock::new(Label(1));
-        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), Span::synthetic());
-
-        // Block 2 (recursive case): call g(x - 1)
-        let mut b2 = BasicBlock::new(Label(2));
-        b2.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(3),
-                value: LirConst::Int(1),
-            },
-            Span::synthetic(),
-        ));
-        b2.instructions.push(SpannedInstr::new(
-            LirInstr::BinOp {
-                dst: Reg(4),
-                op: BinOp::Sub,
-                lhs: Reg(0),
-                rhs: Reg(3),
-            },
-            Span::synthetic(),
-        ));
-        b2.instructions.push(SpannedInstr::new(
-            LirInstr::ValueConst {
-                dst: Reg(5),
-                value: crate::value::Value::NIL,
-            },
-            Span::synthetic(),
-        ));
-        b2.instructions.push(SpannedInstr::new(
-            LirInstr::Call {
-                dst: Reg(6),
-                func: Reg(5),
-                args: vec![Reg(4)],
-                arity_checked: false,
-            },
-            Span::synthetic(),
-        ));
-        b2.terminator = SpannedTerminator::new(Terminator::Return(Reg(6)), Span::synthetic());
-
-        f.blocks = vec![b0, b1, b2];
-        f.entry = Label(0);
-
-        // Build g: tail-call f(x)
-        let mut g = LirFunction::new(Arity::Exact(1));
-        g.name = Some("g".to_string());
-        g.num_regs = 4;
-        g.num_captures = 0;
-        g.signal = Signal::silent();
-
-        let mut gb0 = BasicBlock::new(Label(0));
-        gb0.instructions.push(SpannedInstr::new(
-            LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            },
-            Span::synthetic(),
-        ));
-        gb0.instructions.push(SpannedInstr::new(
-            LirInstr::ValueConst {
-                dst: Reg(1),
-                value: crate::value::Value::NIL,
-            },
-            Span::synthetic(),
-        ));
-        gb0.instructions.push(SpannedInstr::new(
-            LirInstr::TailCall {
-                func: Reg(1),
-                args: vec![Reg(0)],
-                arity_checked: false,
-            },
-            Span::synthetic(),
-        ));
-        gb0.terminator = SpannedTerminator::new(Terminator::Unreachable, Span::synthetic());
-
-        g.blocks = vec![gb0];
-        g.entry = Label(0);
-
-        // Compile both together
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let members = vec![
-            BatchMember {
-                sym: sym_f,
-                lir: &f,
-            },
-            BatchMember {
-                sym: sym_g,
-                lir: &g,
-            },
-        ];
-        let results = compiler
-            .compile_batch(&members, HashMap::new())
-            .expect("Failed to compile batch");
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].0, sym_f);
-        assert_eq!(results[1].0, sym_g);
-    }
-
-    #[test]
-    fn test_compile_batch_rejects_polymorphic() {
-        let mut lir = make_simple_lir();
-        lir.signal = Signal::polymorphic(0);
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let members = vec![BatchMember {
-            sym: SymbolId(0),
-            lir: &lir,
-        }];
-        let result = compiler.compile_batch(&members, HashMap::new());
-        assert!(matches!(result, Err(JitError::Polymorphic)));
-    }
-
-    #[test]
-    fn test_compile_yielding_function() {
-        use crate::lir::YieldPointInfo;
-
-        let mut func = LirFunction::new(Arity::Exact(0));
-        func.num_regs = 2;
-        func.num_captures = 0;
-        func.signal = Signal::yields();
-
-        let mut b0 = BasicBlock::new(Label(0));
-        b0.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(0),
-                value: crate::lir::LirConst::Int(42),
-            },
-            Span::synthetic(),
-        ));
-        b0.terminator = SpannedTerminator::new(
-            Terminator::Emit {
-                signal: crate::value::fiber::SIG_YIELD,
-                value: Reg(0),
-                resume_label: Label(1),
-            },
-            Span::synthetic(),
-        );
-
-        let mut b1 = BasicBlock::new(Label(1));
-        b1.instructions.push(SpannedInstr::new(
-            LirInstr::LoadResumeValue { dst: Reg(1) },
-            Span::synthetic(),
-        ));
-        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), Span::synthetic());
-
-        func.blocks = vec![b0, b1];
-        func.entry = Label(0);
-        func.yield_points = vec![YieldPointInfo {
-            resume_ip: 5,
-            stack_regs: vec![],
-            num_locals: 0,
-        }];
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&func, None, HashMap::new(), Vec::new());
-        assert!(
-            result.is_ok(),
-            "Yielding function should compile: {:?}",
-            result.err()
-        );
-        assert_eq!(result.unwrap().yield_points.len(), 1);
-    }
-
-    #[test]
-    fn test_reject_struct_variadic() {
-        let mut lir = make_simple_lir();
-        lir.arity = Arity::AtLeast(1);
-        lir.vararg_kind = crate::hir::VarargKind::Struct;
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
-        assert!(
-            matches!(result, Err(JitError::UnsupportedInstruction(_))),
-            "Struct variadic functions should be rejected: {:?}",
-            result,
-        );
-    }
-
-    #[test]
-    fn test_reject_strict_struct_variadic() {
-        let mut lir = make_simple_lir();
-        lir.arity = Arity::AtLeast(1);
-        lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
-        assert!(
-            matches!(result, Err(JitError::UnsupportedInstruction(_))),
-            "StrictStruct variadic functions should be rejected: {:?}",
-            result,
-        );
-    }
-
-    #[test]
-    fn test_compile_list_variadic() {
-        // AtLeast(1) + VarargKind::List should now compile successfully.
-        // fn(x & rest) -> x  (ignores rest, just returns first arg)
-        let mut lir = make_simple_lir();
-        lir.arity = Arity::AtLeast(1);
-        lir.vararg_kind = crate::hir::VarargKind::List;
-        lir.num_params = 2; // x + rest
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
-        assert!(
-            result.is_ok(),
-            "List variadic functions should compile: {:?}",
-            result.err(),
-        );
-    }
-
-    #[test]
-    fn test_compile_batch_rejects_struct_variadic() {
-        let mut lir = make_simple_lir();
-        lir.arity = Arity::AtLeast(1);
-        lir.vararg_kind = crate::hir::VarargKind::Struct;
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let members = vec![BatchMember {
-            sym: SymbolId(0),
-            lir: &lir,
-        }];
-        let result = compiler.compile_batch(&members, HashMap::new());
-        assert!(
-            matches!(result, Err(JitError::UnsupportedInstruction(_))),
-            "Struct variadic functions should be rejected from batch: {:?}",
-            result,
-        );
-    }
-
-    #[test]
-    fn test_compile_batch_accepts_list_variadic() {
-        let mut lir = make_simple_lir();
-        lir.arity = Arity::AtLeast(1);
-        lir.vararg_kind = crate::hir::VarargKind::List;
-        lir.num_params = 2;
-
-        let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let members = vec![BatchMember {
-            sym: SymbolId(0),
-            lir: &lir,
-        }];
-        let result = compiler.compile_batch(&members, HashMap::new());
-        assert!(
-            result.is_ok(),
-            "List variadic functions should compile in batch: {:?}",
-            result.err(),
-        );
-    }
-}
+mod tests;

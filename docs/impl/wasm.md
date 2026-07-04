@@ -22,7 +22,7 @@ elle --wasm=full --debug-wasm script.lisp
 
 # Dump the generated WASM module
 elle --wasm=full --wasm-dump script.lisp
-# => writes /tmp/elle-wasm-dump.wasm (inspect with wasm-tools)
+# => writes /dev/shm/elle-wasm-dump.wasm (inspect with wasm-tools)
 
 # Without stdlib (for testing the emitter in isolation)
 elle --wasm=full --wasm-no-stdlib script.lisp
@@ -214,7 +214,7 @@ cargo test wasm
 | `--wasm=N` | Tiered WASM compilation (threshold N-1) |
 | `--cache=path` | Disk cache for compiled WASM modules |
 | `--debug-wasm` | Print host call traces to stderr |
-| `--wasm-dump` | Write WASM bytes to `/tmp/elle-wasm-dump.wasm` |
+| `--wasm-dump` | Write WASM bytes to `/dev/shm/elle-wasm-dump.wasm` |
 | `--wasm-lir` | Print LIR before WASM emission |
 | `--wasm-no-stdlib` | Skip stdlib (for emitter testing) |
 | `--jit=0` | Disable cranelift optimization in Wasmtime |

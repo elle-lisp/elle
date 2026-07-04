@@ -1,22 +1,25 @@
 //! FFI library loading, symbol lookup, signature creation, call, and callback primitives
 
 use crate::ffi::types::{CallingConvention, Signature};
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 use super::ffi::resolve_type_desc;
 
 // ── FFI call (requires libffi) ───────────────────────────────────────
 
 #[cfg(feature = "ffi")]
-pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_ffi_call(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if args[0].is_nil() {
         return (
             SIG_ERROR,
-            error_val("type-error", "ffi/call: function pointer is nil"),
+            ctx.error("type-error", "ffi/call: function pointer is nil"),
         );
     }
     let fn_addr = match args[0].as_pointer() {
@@ -24,7 +27,7 @@ pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!("ffi/call: expected pointer, got {}", args[0].type_name()),
                 ),
@@ -37,7 +40,7 @@ pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!("ffi/call: expected signature, got {}", args[1].type_name()),
                 ),
@@ -53,7 +56,7 @@ pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("ffi-error", "ffi/call: failed to get CIF from signature"),
+                ctx.error("ffi-error", "ffi/call: failed to get CIF from signature"),
             )
         }
     };
@@ -64,19 +67,20 @@ pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
             call_args,
             &sig,
             &cif_ref,
+            ctx,
         )
     } {
         Ok(val) => (SIG_OK, val),
         Err(e) => (
             SIG_ERROR,
-            error_val("ffi-error", format!("ffi/call: {}", e)),
+            ctx.error("ffi-error", format!("ffi/call: {}", e)),
         ),
     };
 
     // Check for errors from FFI callbacks that ran during this call.
     // If a callback errored, it wrote a zero return value to C and
-    // stored the error here. Propagate it to the Elle caller.
-    if let Some(cb_err) = crate::ffi::callback::take_callback_error() {
+    // stored the error on the VM's FFI subsystem. Propagate it to the Elle caller.
+    if let Some(cb_err) = ctx.vm().ffi_mut().take_callback_error() {
         return (SIG_ERROR, cb_err);
     }
 
@@ -85,25 +89,19 @@ pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
 
 // ── FFI loading ─────────────────────────────────────────────────────
 
-pub(crate) fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
-    let vm_ptr = match crate::context::get_vm_context() {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("ffi-error", "ffi/native: no VM context"),
-            )
-        }
-    };
-    let vm = unsafe { &mut *vm_ptr };
+pub(crate) fn prim_ffi_native(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let vm = ctx.vm();
 
     // nil → load self process (dlopen(NULL))
     if args[0].is_nil() {
         return match vm.ffi_mut().load_self() {
-            Ok(id) => (SIG_OK, Value::lib_handle(id)),
+            Ok(id) => (SIG_OK, ctx.lib_handle(id)),
             Err(e) => (
                 SIG_ERROR,
-                error_val("ffi-error", format!("ffi/native: {}", e)),
+                ctx.error("ffi-error", format!("ffi/native: {}", e)),
             ),
         };
     }
@@ -113,7 +111,7 @@ pub(crate) fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
     } else {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "ffi/native: expected string or nil, got {}",
@@ -123,21 +121,24 @@ pub(crate) fn prim_ffi_native(args: &[Value]) -> (SignalBits, Value) {
         );
     };
     match vm.ffi_mut().load_library(&path) {
-        Ok(id) => (SIG_OK, Value::lib_handle(id)),
+        Ok(id) => (SIG_OK, ctx.lib_handle(id)),
         Err(e) => (
             SIG_ERROR,
-            error_val("ffi-error", format!("ffi/native: {}", e)),
+            ctx.error("ffi-error", format!("ffi/native: {}", e)),
         ),
     }
 }
 
-pub(crate) fn prim_ffi_lookup(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_ffi_lookup(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let lib_id = match args[0].as_lib_handle() {
         Some(id) => id,
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!(
                         "ffi/lookup: expected library handle, got {}",
@@ -152,45 +153,84 @@ pub(crate) fn prim_ffi_lookup(args: &[Value]) -> (SignalBits, Value) {
     } else {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!("ffi/lookup: expected string, got {}", args[1].type_name()),
             ),
         );
     };
-    let vm_ptr = match crate::context::get_vm_context() {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("ffi-error", "ffi/lookup: no VM context"),
-            )
-        }
-    };
-    let vm = unsafe { &*vm_ptr };
-    let lib = match vm.ffi().get_library(lib_id) {
-        Some(lib) => lib,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "ffi-error",
-                    format!("ffi/lookup: library {} not loaded", lib_id),
-                ),
-            )
-        }
-    };
-    match lib.get_symbol(&sym_name) {
+    let vm = ctx.vm();
+    match vm.ffi().get_symbol(lib_id, &sym_name) {
         Ok(ptr) => (SIG_OK, Value::pointer(ptr as usize)),
         Err(e) => (
             SIG_ERROR,
-            error_val("ffi-error", format!("ffi/lookup: {}", e)),
+            ctx.error("ffi-error", format!("ffi/lookup: {}", e)),
         ),
     }
 }
 
-pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
-    let ret = match resolve_type_desc(&args[0], "ffi/signature") {
+/// Register an ordered teardown for a loaded library — a zero-arg C symbol to call
+/// at an explicit `ffi/run-teardowns`. The library mapping is never unloaded (it is
+/// process-global), so this is optional graceful cleanup, never required to avoid a
+/// crash and never run automatically by the runtime.
+pub(crate) fn prim_ffi_on_unload(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let lib_id = match args[0].as_lib_handle() {
+        Some(id) => id,
+        None => {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!(
+                        "ffi/on-unload: expected library handle, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    let sym_name = if let Some(s) = args[1].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!(
+                    "ffi/on-unload: expected string, got {}",
+                    args[1].type_name()
+                ),
+            ),
+        );
+    };
+    match ctx.vm().ffi().register_teardown(lib_id, &sym_name) {
+        Ok(()) => (SIG_OK, Value::NIL),
+        Err(e) => (
+            SIG_ERROR,
+            ctx.error("ffi-error", format!("ffi/on-unload: {}", e)),
+        ),
+    }
+}
+
+/// Run every registered FFI library teardown (`ffi/on-unload`), in reverse load
+/// order. Explicit-only — the program calls this when it knows teardown is safe
+/// (e.g. after `sys/join`ing workers); it never unloads the libraries.
+pub(crate) fn prim_ffi_run_teardowns(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    crate::ffi::registry::run_teardowns();
+    (SIG_OK, Value::NIL)
+}
+
+pub(crate) fn prim_ffi_signature(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let ret = match resolve_type_desc(&args[0], "ffi/signature", ctx) {
         Ok(t) => t,
         Err(e) => return e,
     };
@@ -201,12 +241,12 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
     } else if let Some(arr) = args[1].as_array() {
         arr.to_vec()
     } else {
-        match args[1].list_to_vec() {
+        match args[1].list_to_vec_in(ctx.heap_mut()) {
             Ok(v) => v,
             Err(_) => {
                 return (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "type-error",
                         format!(
                             "ffi/signature: expected array or list for arg types, got {}",
@@ -220,7 +260,7 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
 
     let mut arg_types = Vec::with_capacity(arg_vals.len());
     for val in &arg_vals {
-        match resolve_type_desc(val, "ffi/signature") {
+        match resolve_type_desc(val, "ffi/signature", ctx) {
             Ok(t) => arg_types.push(t),
             Err(e) => return e,
         }
@@ -233,7 +273,7 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
             Some(n) => {
                 return (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "argument-error",
                         format!(
                             "ffi/signature: fixed_args {} out of range [0, {}]",
@@ -246,7 +286,7 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "type-error",
                         format!(
                             "ffi/signature: expected integer for fixed_args, got {}",
@@ -266,17 +306,20 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
         args: arg_types,
         fixed_args,
     };
-    (SIG_OK, Value::ffi_signature(sig))
+    (SIG_OK, ctx.ffi_signature(sig))
 }
 
 #[cfg(feature = "ffi")]
-pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_ffi_callback(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let sig = match args[0].as_ffi_signature() {
         Some(s) => s.clone(),
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!(
                         "ffi/callback: expected signature, got {}",
@@ -291,7 +334,7 @@ pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!(
                         "ffi/callback: expected closure, got {}",
@@ -312,7 +355,7 @@ pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
     if !arity_ok {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "arity-error",
                 format!(
                     "ffi/callback: signature has {} args but closure has arity {}",
@@ -322,34 +365,31 @@ pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let callback = match crate::ffi::callback::create_callback(closure_rc, sig) {
+    // Capture the driving VM in the callback so the C-invoked trampoline reaches
+    // it without a shared context (the callback is single-VM by its limitation).
+    // The closure VALUE rides along so each invocation installs it as the body's
+    // executing-closure register (see `CallbackData::closure_value`).
+    let callback = match crate::ffi::callback::create_callback(closure_rc, args[1], sig, ctx.vm()) {
         Ok(cb) => cb,
         Err(e) => {
             return (
                 SIG_ERROR,
-                error_val("ffi-error", format!("ffi/callback: {}", e)),
+                ctx.error("ffi-error", format!("ffi/callback: {}", e)),
             )
         }
     };
 
-    // Store the callback in the FFI subsystem so it stays alive
-    let vm_ptr = match crate::context::get_vm_context() {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("ffi-error", "ffi/callback: no VM context"),
-            )
-        }
-    };
-    let vm = unsafe { &mut *vm_ptr };
-    let code_ptr = vm.ffi_mut().callbacks_mut().insert(callback);
+    // Store the callback in the driving VM's FFI subsystem so it stays alive.
+    let code_ptr = ctx.vm().ffi_mut().callbacks_mut().insert(callback);
 
     (SIG_OK, Value::pointer(code_ptr))
 }
 
 #[cfg(feature = "ffi")]
-pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_ffi_callback_free(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if args[0].is_nil() {
         return (SIG_OK, Value::NIL); // free(nil) is a no-op
     }
@@ -358,7 +398,7 @@ pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "type-error",
                     format!(
                         "ffi/callback-free: expected pointer, got {}",
@@ -369,22 +409,12 @@ pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let vm_ptr = match crate::context::get_vm_context() {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("ffi-error", "ffi/callback-free: no VM context"),
-            )
-        }
-    };
-    let vm = unsafe { &mut *vm_ptr };
-    if vm.ffi_mut().callbacks_mut().remove(addr) {
+    if ctx.vm().ffi_mut().callbacks_mut().remove(addr) {
         (SIG_OK, Value::NIL)
     } else {
         (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "ffi-error",
                 format!("ffi/callback-free: no callback at address {:#x}", addr),
             ),
@@ -392,77 +422,97 @@ pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Declarative primitive definitions for FFI loading operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "ffi/native",
-        func: prim_ffi_native,
+// Declarative primitive definitions for FFI loading operations.
+primitive! {
+    "ffi/native" => prim_ffi_native {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Load a shared library by Linux-style name (resolved to the host's .dylib/.dll). Pass nil for the current process.",
         params: &["path"],
         category: "ffi",
         example: "(ffi/native \"libm.so.6\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/lookup",
-        func: prim_ffi_lookup,
+        effect: RegionEffect::Fresh,
+    }
+    "ffi/lookup" => prim_ffi_lookup {
         signal: Signal::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Look up a symbol in a loaded library.",
         params: &["lib", "name"],
         category: "ffi",
         example: "(ffi/lookup lib \"strlen\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/signature",
-        func: prim_ffi_signature,
+        effect: RegionEffect::Immediate,
+    }
+    "ffi/on-unload" => prim_ffi_on_unload {
+        signal: Signal::ffi_errors(),
+        arity: Arity::Exact(2),
+        doc: "Register a teardown C symbol (zero-arg) to run for a library at an \
+              explicit (ffi/run-teardowns). The library mapping is never unloaded, \
+              so this is optional graceful cleanup — never required to avoid a crash, \
+              never run automatically.",
+        params: &["lib", "symbol"],
+        category: "ffi",
+        example: "(ffi/on-unload git-lib \"git_libgit2_shutdown\")",
+        effect: RegionEffect::Immediate,
+    }
+    "ffi/run-teardowns" => prim_ffi_run_teardowns {
+        signal: Signal::errors(),
+        arity: Arity::Exact(0),
+        doc: "Run all registered FFI library teardowns (ffi/on-unload), in reverse \
+              load order. Explicit-only; never unloads the libraries. Call only when \
+              workers that used the libraries have quiesced.",
+        params: &[],
+        category: "ffi",
+        example: "(ffi/run-teardowns)",
+        effect: RegionEffect::Immediate,
+    }
+    "ffi/signature" => prim_ffi_signature {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Create a reified function signature. Optional third arg for variadic functions.",
         params: &["return-type", "arg-types", "fixed-args"],
         category: "ffi",
         example: "(ffi/signature :int [:ptr :size :ptr :int] 3)",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Fresh,
+    }
+}
 
-/// FFI call and callback primitives (require libffi).
 #[cfg(feature = "ffi")]
-pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "ffi/call",
-        func: prim_ffi_call,
-        signal: Signal::ffi_errors(),
-        arity: Arity::AtLeast(2),
-        doc: "Call a C function through libffi.",
-        params: &["fn-ptr", "sig"],
-        category: "ffi",
-        example: "(ffi/call sqrt-ptr sig 2.0)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/callback",
-        func: prim_ffi_callback,
-        signal: Signal::ffi_errors(),
-        arity: Arity::Exact(2),
-        doc: "Create a C function pointer from an Elle closure. Returns a pointer.",
-        params: &["sig", "closure"],
-        category: "ffi",
-        example: "(ffi/callback (ffi/signature :int [:ptr :ptr]) (fn (a b) 0))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "ffi/callback-free",
-        func: prim_ffi_callback_free,
-        signal: Signal::ffi_errors(),
-        arity: Arity::Exact(1),
-        doc: "Free a callback created by ffi/callback.",
-        params: &["ptr"],
-        category: "ffi",
-        example: "(ffi/callback-free cb-ptr)",
-        aliases: &[],
-    },
-];
+primitive!(
+    /// FFI call and callback primitives (require libffi).
+    pub(crate) const CALLBACK_PRIMITIVES =
+        "ffi/call" => prim_ffi_call {
+            signal: Signal::ffi_errors(),
+            arity: Arity::AtLeast(2),
+            doc: "Call a C function through libffi.",
+            params: &["fn-ptr", "sig"],
+            category: "ffi",
+            example: "(ffi/call sqrt-ptr sig 2.0)",
+            // Fresh, not Mixed: every arg is marshalled BY COPY (CString,
+            // AlignedBuffer — src/ffi/to_c.rs), `:ptr` accepts only
+            // user-managed pointer values (never an Elle heap payload), and
+            // the result is converted from C memory into the call's own
+            // region. No Elle reference survives the call, so the arg clique
+            // would be pure over-keep — it leaked one region per heap arg per
+            // call once call-result-arg clique increfs became real
+            // (region-ffi-callback-arg-uaf.lisp's bounded assert is the pin).
+            effect: RegionEffect::Fresh,
+        }
+        "ffi/callback" => prim_ffi_callback {
+            signal: Signal::ffi_errors(),
+            arity: Arity::Exact(2),
+            doc: "Create a C function pointer from an Elle closure. Returns a pointer.",
+            params: &["sig", "closure"],
+            category: "ffi",
+            example: "(ffi/callback (ffi/signature :int [:ptr :ptr]) (fn (a b) 0))",
+            effect: RegionEffect::Stores { args: &[1] },
+        }
+        "ffi/callback-free" => prim_ffi_callback_free {
+            signal: Signal::ffi_errors(),
+            arity: Arity::Exact(1),
+            doc: "Free a callback created by ffi/callback.",
+            params: &["ptr"],
+            category: "ffi",
+            example: "(ffi/callback-free cb-ptr)",
+            effect: RegionEffect::Immediate,
+        }
+);

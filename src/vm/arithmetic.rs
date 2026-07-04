@@ -64,9 +64,11 @@ macro_rules! generic_binop {
 // Integer-specialized ops
 // ---------------------------------------------------------------------------
 
-int_binop!(handle_add_int, "AddInt", |a: i64, b: i64| a + b);
-int_binop!(handle_sub_int, "SubInt", |a: i64, b: i64| a - b);
-int_binop!(handle_mul_int, "MulInt", |a: i64, b: i64| a * b);
+// Wrapping, like every other integer path (docs/intrinsics.md § Integer
+// overflow) — bare `+`/`-`/`*` would panic on overflow in debug builds.
+int_binop!(handle_add_int, "AddInt", |a: i64, b: i64| a.wrapping_add(b));
+int_binop!(handle_sub_int, "SubInt", |a: i64, b: i64| a.wrapping_sub(b));
+int_binop!(handle_mul_int, "MulInt", |a: i64, b: i64| a.wrapping_mul(b));
 
 // DivInt needs special div-by-zero handling
 pub(crate) fn handle_div_int(vm: &mut VM) {
@@ -86,7 +88,8 @@ pub(crate) fn handle_div_int(vm: &mut VM) {
     if b == 0 {
         vm.fiber.stack.push(Value::int(0));
     } else {
-        vm.fiber.stack.push(Value::int(a / b));
+        // wrapping_div: i64::MIN / -1 wraps to i64::MIN (bare `/` panics).
+        vm.fiber.stack.push(Value::int(a.wrapping_div(b)));
     }
 }
 
@@ -237,93 +240,4 @@ pub(crate) fn handle_shr(vm: &mut VM) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_vm() -> VM {
-        VM::new()
-    }
-
-    #[test]
-    fn test_handle_rem() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(17));
-        vm.fiber.stack.push(Value::int(5));
-        handle_rem(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(2)));
-    }
-
-    #[test]
-    fn test_handle_rem_negative() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(-17));
-        vm.fiber.stack.push(Value::int(5));
-        handle_rem(&mut vm);
-        // Remainder has same sign as dividend
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(-2)));
-    }
-
-    #[test]
-    fn test_handle_bit_and() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(0b1100)); // 12
-        vm.fiber.stack.push(Value::int(0b1010)); // 10
-        handle_bit_and(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(0b1000))); // 8
-    }
-
-    #[test]
-    fn test_handle_bit_or() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(0b1100)); // 12
-        vm.fiber.stack.push(Value::int(0b1010)); // 10
-        handle_bit_or(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(0b1110))); // 14
-    }
-
-    #[test]
-    fn test_handle_bit_xor() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(0b1100)); // 12
-        vm.fiber.stack.push(Value::int(0b1010)); // 10
-        handle_bit_xor(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(0b0110))); // 6
-    }
-
-    #[test]
-    fn test_handle_bit_not() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(0));
-        handle_bit_not(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(-1))); // !0 = -1 in two's complement
-    }
-
-    #[test]
-    fn test_handle_shl() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(1));
-        vm.fiber.stack.push(Value::int(4));
-        handle_shl(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(16))); // 1 << 4 = 16
-    }
-
-    #[test]
-    fn test_handle_shr() {
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(16));
-        vm.fiber.stack.push(Value::int(2));
-        handle_shr(&mut vm);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(4))); // 16 >> 2 = 4
-    }
-
-    #[test]
-    fn test_handle_bit_and_type_mismatch_produces_garbage() {
-        // With unchecked intrinsics, wrong types produce garbage, not panics
-        let mut vm = make_vm();
-        vm.fiber.stack.push(Value::int(12));
-        vm.fiber.stack.push(Value::float(10.0));
-        handle_bit_and(&mut vm);
-        // Should produce some value (garbage), not panic
-        assert!(vm.fiber.stack.pop().is_some());
-    }
-}
+mod tests;

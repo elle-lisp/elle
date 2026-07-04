@@ -51,7 +51,7 @@ Syntax (expanded)
 Analyzer (&mut BindingArena)
     ├─► resolve variables → Binding (u32 index into BindingArena)
     ├─► track mutations → arena.get_mut(b).is_mutated = true
-    ├─► track captures → arena.get_mut(b).is_captured = true + CaptureInfo
+    ├─► track captures → arena.get_mut(b).mark_captured() + CaptureInfo
     └─► infer signals → Signal
     │
     ▼
@@ -146,8 +146,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the
     analyzer for `(eval expr)` or `(eval expr env)`. The signal is always
     `Yields` (conservative — eval'd code can do anything). Not in tail
-    position. The VM handler accesses the symbol table via thread-local
-    context and caches the Expander on the VM for reuse.
+    position. The VM handler reaches the symbol table per-instance via the
+    driving VM (`vm.symbols()`) and caches the Expander on the VM for reuse.
 
 15. **Docstrings are extracted from leading string literals.**
        `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
@@ -209,23 +209,3 @@ Lowerer (&BindingArena) — read-only access to binding metadata
      set via the arena. File-level `def` bindings shadow primitives. The lowerer
      emits upvalue loads for both — compile-time checks (e.g., `(set + 42)` is
      an error) use the `Binding` identity.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | 25 | Re-exports |
-| `analyze/mod.rs` | ~500 | `Analyzer` struct, `ScopedBinding`, scope-aware resolution, `analyze_file_letrec`, `bind_primitives` |
-| `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
-| `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
-| `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
-| `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, signals |
-| `analyze/special.rs` | ~210 | Special forms: `match`, `emit` |
-| `analyze/call.rs` | ~200 | Call analysis and signal tracking |
-| `expr.rs` | ~180 | `Hir`, `HirKind` |
-| `binding.rs` | ~40 | `Binding(u32)` index type, `CaptureInfo`, `CaptureKind` |
-| `arena.rs` | ~150 | `BindingArena`, `BindingInner`, `BindingScope` |
-| `pattern.rs` | ~100 | Pattern matching types |
-| `tailcall.rs` | ~462 | Post-analysis pass marking tail calls |
-| `lint.rs` | ~150 | HIR-based linter (walks HirKind, produces Diagnostics) |
-| `symbols.rs` | ~200 | HIR-based symbol extraction (builds SymbolIndex) |

@@ -13,14 +13,16 @@ Shared helpers and utilities for all test tiers. These functions provide a consi
 
 ## eval_source
 
-Compiles and executes Elle code in a fresh VM:
+Compiles and executes Elle code in a fresh `Runtime`, handing the result to a
+closure that runs while the heap is still alive (a heap-valued result is a
+pointer into that heap, so it must be inspected before teardown — see the
+module note in `mod.rs`):
 
 ```rust
-let result = eval_source("(+ 1 2)")?;
-assert_eq!(result.as_int(), Some(3));
+eval_source("(+ 1 2)", |r| assert_eq!(r.unwrap().as_int(), Some(3)));
 
 // Errors are returned as Err
-assert!(eval_source("(+ 1 \"string\")").is_err());
+eval_source("(+ 1 \"string\")", |r| assert!(r.is_err()));
 ```
 
 ## Property Test Helpers

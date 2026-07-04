@@ -4,191 +4,53 @@ use super::*;
 use crate::hir::{CallArg, HirPattern};
 use crate::value::fiber::SignalBits;
 
+mod call;
+
 impl<'a> Lowerer<'a> {
-    pub(super) fn lower_call(
-        &mut self,
-        func: &Hir,
-        args: &[CallArg],
-        is_tail: bool,
-        call_signals: SignalBits,
-    ) -> Result<Reg, String> {
-        let has_splice = args.iter().any(|a| a.spliced);
-
-        if !has_splice {
-            // === Common path: no spliced args ===
-            // Check for intrinsic specialization
-            let plain_args: Vec<&Hir> = args.iter().map(|a| &a.expr).collect();
-            if let Some(result) = self.try_lower_intrinsic(func, &plain_args)? {
-                return Ok(result);
-            }
-
-            // Call-scoped reclamation: wrap the call in two RegionEnters
-            // (before args, after args) + RegionExitCall (after Call).
-            // RegionExitCall pops both marks and frees only the arg range
-            // [mark1..mark2), leaving the callee's allocations intact.
-            let call_scoped = !is_tail && self.can_scope_allocate_call(func, args, call_signals);
-            if call_scoped {
-                self.emit_region_enter(); // mark1: before arg evaluation
-            }
-
-            let mut arg_regs = Vec::new();
-            for arg in args {
-                arg_regs.push(self.lower_expr(&arg.expr)?);
-            }
-            let func_reg = self.lower_expr(func)?;
-
-            if call_scoped {
-                self.emit_region_enter(); // mark2: barrier before Call
-            }
-
-            // Determine if the compiler verified arity for this call.
-            // True when the callee is a primitive binding that hasn't been
-            // shadowed or mutated (the analyzer would have errored on arity
-            // mismatch, so if compilation succeeded the arity is correct).
-            let arity_checked = if let HirKind::Var(binding) = &func.kind {
-                let bi = self.arena.get(*binding);
-                bi.is_primitive
-                    && bi.is_immutable
-                    && !bi.is_mutated
-                    && self
-                        .immutable_values
-                        .get(binding)
-                        .is_some_and(|v| v.is_native_fn())
-            } else {
-                false
-            };
-
-            if is_tail {
-                // Emit pending RegionExits before TailCall — the scope's
-                // allocations must be freed before the frame is replaced.
-                // Args are already in registers, so they're not affected.
-                // Emit raw instructions (not emit_region_exit()) — region_depth
-                // must not change because both branches of an `if` emit the
-                // same exits but only one executes at runtime.
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
-
-                self.emit(LirInstr::TailCall {
-                    func: func_reg,
-                    args: arg_regs,
-                    arity_checked,
-                });
-                Ok(self.fresh_reg())
-            } else {
-                let dst = self.fresh_reg();
-                if call_signals
-                    .intersects(crate::signals::SIG_YIELD.union(crate::signals::SIG_DEBUG))
-                {
-                    self.emit(LirInstr::SuspendingCall {
-                        dst,
-                        func: func_reg,
-                        args: arg_regs,
-                        arity_checked,
-                    });
-                } else {
-                    self.emit(LirInstr::Call {
-                        dst,
-                        func: func_reg,
-                        args: arg_regs,
-                        arity_checked,
-                    });
-                }
-                if call_scoped {
-                    self.emit(LirInstr::RegionExitCall);
-                    self.region_depth -= 2; // both marks consumed
-                    self.scope_stats.calls_scoped += 1;
-                }
-                Ok(dst)
-            }
-        } else {
-            // === Splice path: build args array, then CallArrayMut ===
-            // Lower all args first
-            let mut lowered: Vec<(Reg, bool)> = Vec::new();
-            for arg in args {
-                let reg = self.lower_expr(&arg.expr)?;
-                lowered.push((reg, arg.spliced));
-            }
-            let func_reg = self.lower_expr(func)?;
-
-            // Build the args array incrementally
-            // Start with MakeArrayMut of the first run of non-spliced args
-            let mut args_reg: Option<Reg> = None;
-
-            for (reg, spliced) in &lowered {
-                match (args_reg, spliced) {
-                    (None, false) => {
-                        // First arg, not spliced: create array with one element
-                        let dst = self.fresh_reg();
-                        self.emit(LirInstr::MakeArrayMut {
-                            dst,
-                            elements: vec![*reg],
-                        });
-                        args_reg = Some(dst);
-                    }
-                    (None, true) => {
-                        // First arg, spliced: create empty array, then extend
-                        let empty = self.fresh_reg();
-                        self.emit(LirInstr::MakeArrayMut {
-                            dst: empty,
-                            elements: vec![],
-                        });
-                        let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayMutExtend {
-                            dst,
-                            array: empty,
-                            source: *reg,
-                        });
-                        args_reg = Some(dst);
-                    }
-                    (Some(arr), false) => {
-                        let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayMutPush {
-                            dst,
-                            array: arr,
-                            value: *reg,
-                        });
-                        args_reg = Some(dst);
-                    }
-                    (Some(arr), true) => {
-                        let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayMutExtend {
-                            dst,
-                            array: arr,
-                            source: *reg,
-                        });
-                        args_reg = Some(dst);
-                    }
-                }
-            }
-
-            let final_args = args_reg.unwrap_or_else(|| {
-                let dst = self.fresh_reg();
-                self.emit(LirInstr::MakeArrayMut {
-                    dst,
-                    elements: vec![],
-                });
-                dst
-            });
-
-            if is_tail {
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
-                self.emit(LirInstr::TailCallArrayMut {
-                    func: func_reg,
-                    args: final_args,
-                });
-                Ok(self.fresh_reg())
-            } else {
-                let dst = self.fresh_reg();
-                self.emit(LirInstr::CallArrayMut {
-                    dst,
-                    func: func_reg,
-                    args: final_args,
-                });
-                Ok(dst)
-            }
+    /// Whether a tail-call argument is BORROWED — held by a reference this
+    /// activation does not own, so pure-moving it into the callee would
+    /// over-free it (see the move-on-tail-call comment in `lower_call`).
+    ///
+    /// This is a **structural ownership-location** question, NOT true-escape: an
+    /// argument is borrowed iff `b` is a captured upvalue of the current lambda
+    /// (`upvalue_bindings`) — the closure env owns the capture-incref, so this
+    /// frame has no transferable owning reference. The authoritative escape
+    /// analysis (`EscapeInfo`) is deliberately NOT used here: among tail-args its
+    /// escape set is a strict superset of the borrowed set (a born-here value that
+    /// merely flows to a tail *escapes* but is *owned*), and minting for those
+    /// owned-escaping args double-releases across a fiber suspend/resume — a
+    /// phantom `DecrefRegion` / use-after-free witnessed on `contracts.lisp`. The
+    /// env-ownership fact is structural capture, which `is_captured`/`upvalue_bindings`
+    /// answer exactly and escape does not; this is the structural-only role of
+    /// lexical capture (see `hir::escape` and `docs/impl/escape.md`).
+    ///
+    /// This borrowed/mint compensation is **transitional value-RC machinery, not a
+    /// permanent fixture**: it exists only because today's model mints per
+    /// value-escape event. A future ownership-forest model subsumes it — an
+    /// intra-fiber captured upvalue lives in an Owned subtree reclaimed by drop
+    /// (no mint, no over-free), and only genuine cross-fiber Shared regions keep
+    /// edge-RC. The structural capture hint persists (demoted to layout-only);
+    /// this predicate does not.
+    ///
+    /// After ANF a call argument is atomic, and a variable reference takes one of
+    /// two shapes (see `functionalize`): a plain `Var(b)`, or `DerefCell(Var(b))`
+    /// for a binding that `needs_capture()`. BOTH are borrowed when `b` is a
+    /// captured upvalue, so we look THROUGH the `DerefCell` wrapper to the `Var`
+    /// (matching only the bare `Var` let a cell-backed top-level binding tail-pass
+    /// without the fresh incref — region-tail-move-toplevel-uaf.lisp).
+    fn tail_arg_is_borrowed(&self, arg: &Hir) -> bool {
+        if !self.in_lambda {
+            return false;
+        }
+        // Look through the `DerefCell` wrapper `functionalize` adds around a
+        // needs-capture binding read; the borrowed atom underneath is a `Var`.
+        let inner = match &arg.kind {
+            HirKind::DerefCell { cell } => cell,
+            _ => arg,
+        };
+        match &inner.kind {
+            HirKind::Var(binding) => self.upvalue_bindings.contains(binding),
+            _ => false,
         }
     }
 
@@ -353,6 +215,10 @@ impl<'a> Lowerer<'a> {
             expr: expr_reg,
             env: env_reg,
         });
+        // Eval's result lives in a region the outer compilation
+        // didn't allocate; `emit_decrefs_for` uses `region_to_slot`
+        // (recorded by the enclosing binding site after ANF) and
+        // gates the runtime decref on the actual region.
         Ok(dst)
     }
 
@@ -361,12 +227,9 @@ impl<'a> Lowerer<'a> {
         signal: crate::value::fiber::SignalBits,
         value: &Hir,
     ) -> Result<Reg, String> {
-        // Wrap value expression in OutboxEnter/OutboxExit so that
-        // yield-bound allocations route to the outbox (for zero-copy
-        // reading by the parent after yield).
-        self.emit(LirInstr::OutboxEnter);
+        // Region inference stamps yield-bound allocations with the Parent
+        // region via alloc_region. No OutboxEnter/OutboxExit toggle needed.
         let value_reg = self.lower_expr(value)?;
-        self.emit(LirInstr::OutboxExit);
 
         let resume_label = self.fresh_label();
 
@@ -420,7 +283,7 @@ impl<'a> Lowerer<'a> {
         }
 
         // Build decision tree
-        use super::decision::{AccessPath, PatternMatrix};
+        use crate::hir::decision::{AccessPath, PatternMatrix};
         let matrix = PatternMatrix::from_arms(arms);
         let tree = matrix.compile(vec![AccessPath::Root]);
 
@@ -508,15 +371,9 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // No match block: return nil
+        // No match block: raise :match-error carrying the scrutinee
         self.current_block = BasicBlock::new(no_match_label);
-        let nil_reg = self.emit_const(LirConst::Nil)?;
-        self.emit(LirInstr::StoreLocal {
-            slot: result_slot,
-            src: nil_reg,
-        });
-        self.terminate(Terminator::Jump(done_label));
-        self.finish_block();
+        self.emit_no_match(scrutinee_slot, result_slot, done_label)?;
 
         // Done block
         self.current_block = BasicBlock::new(done_label);

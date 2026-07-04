@@ -1,5 +1,5 @@
 // DEFENSE: Value type is the foundation - must be rock solid
-use elle::value::{pair, list, Arity, Value};
+use elle::value::{Arity, Value};
 
 #[test]
 fn test_value_equality() {
@@ -37,12 +37,13 @@ fn test_value_equality() {
 
 #[test]
 fn test_truthiness() {
+    let h = elle::primitives::ctx::TestHeap::new();
     // Truthy values
     assert!(Value::int(0).is_truthy());
     assert!(Value::int(1).is_truthy());
     assert!(Value::float(0.0).is_truthy());
     assert!(Value::bool(true).is_truthy());
-    assert!(pair(Value::int(1), Value::EMPTY_LIST).is_truthy());
+    assert!(h.ctx().pair(Value::int(1), Value::EMPTY_LIST).is_truthy());
     assert!(Value::EMPTY_LIST.is_truthy()); // Empty list is truthy
 
     // Falsy values
@@ -73,7 +74,8 @@ fn test_type_conversions() {
 
 #[test]
 fn test_cons_cell() {
-    let cons_cell = pair(Value::int(1), Value::int(2));
+    let h = elle::primitives::ctx::TestHeap::new();
+    let cons_cell = h.ctx().pair(Value::int(1), Value::int(2));
     let cons_ref = cons_cell.as_pair().unwrap();
 
     assert_eq!(cons_ref.first, Value::int(1));
@@ -82,7 +84,8 @@ fn test_cons_cell() {
 
 #[test]
 fn test_list_construction() {
-    let l = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    let h = elle::primitives::ctx::TestHeap::new();
+    let l = h.ctx().list(vec![Value::int(1), Value::int(2), Value::int(3)]);
 
     assert!(l.is_list());
 
@@ -105,7 +108,8 @@ fn test_empty_list() {
 #[test]
 fn test_improper_list() {
     // (1 . 2) is not a proper list
-    let improper = pair(Value::int(1), Value::int(2));
+    let h = elle::primitives::ctx::TestHeap::new();
+    let improper = h.ctx().pair(Value::int(1), Value::int(2));
     assert!(!improper.is_list());
     assert!(improper.list_to_vec().is_err());
 }
@@ -113,9 +117,10 @@ fn test_improper_list() {
 #[test]
 fn test_nested_lists() {
     // ((1 2) (3 4))
-    let inner1 = list(vec![Value::int(1), Value::int(2)]);
-    let inner2 = list(vec![Value::int(3), Value::int(4)]);
-    let outer = list(vec![inner1, inner2]);
+    let h = elle::primitives::ctx::TestHeap::new();
+    let inner1 = h.ctx().list(vec![Value::int(1), Value::int(2)]);
+    let inner2 = h.ctx().list(vec![Value::int(3), Value::int(4)]);
+    let outer = h.ctx().list(vec![inner1, inner2]);
 
     assert!(outer.is_list());
     let vec = outer.list_to_vec().unwrap();
@@ -126,8 +131,9 @@ fn test_nested_lists() {
 
 #[test]
 fn test_array() {
+    let h = elle::primitives::ctx::TestHeap::new();
     let vec = vec![Value::int(1), Value::int(2), Value::int(3)];
-    let v = Value::array_mut(vec);
+    let v = h.ctx().array_mut(vec);
 
     let vec_ref = v.as_array_mut().unwrap();
     let borrowed = vec_ref.borrow();
@@ -137,7 +143,8 @@ fn test_array() {
 
 #[test]
 fn test_string() {
-    let s = Value::string("hello");
+    let h = elle::primitives::ctx::TestHeap::new();
+    let s = h.ctx().string("hello");
     match s.with_string(|s| s.to_string()) {
         Some(str_val) => assert_eq!(str_val, "hello"),
         None => panic!("Expected string"),
@@ -171,9 +178,10 @@ fn test_arity_matching() {
 #[test]
 fn test_cons_sharing() {
     // Pair cells should allow efficient sharing
-    let tail = pair(Value::int(2), Value::EMPTY_LIST);
-    let list1 = pair(Value::int(1), tail);
-    let list2 = pair(Value::int(0), tail);
+    let h = elle::primitives::ctx::TestHeap::new();
+    let tail = h.ctx().pair(Value::int(2), Value::EMPTY_LIST);
+    let list1 = h.ctx().pair(Value::int(1), tail);
+    let list2 = h.ctx().pair(Value::int(0), tail);
 
     // Both lists share the same tail
     assert!(list1.is_list());
@@ -183,8 +191,9 @@ fn test_cons_sharing() {
 #[test]
 fn test_large_list() {
     // Test with 1000 elements
+    let h = elle::primitives::ctx::TestHeap::new();
     let values: Vec<Value> = (0..1000).map(Value::int).collect();
-    let l = list(values);
+    let l = h.ctx().list(values);
 
     assert!(l.is_list());
     let vec = l.list_to_vec().unwrap();
@@ -217,6 +226,7 @@ fn test_is_empty_list_semantics() {
     assert!(!Value::NIL.is_empty_list());
 
     // Non-empty list should not be empty
-    let non_empty = list(vec![Value::int(1)]);
+    let h = elle::primitives::ctx::TestHeap::new();
+    let non_empty = h.ctx().list(vec![Value::int(1)]);
     assert!(!non_empty.is_empty_list());
 }

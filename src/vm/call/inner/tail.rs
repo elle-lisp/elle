@@ -1,0 +1,214 @@
+//! VM::tail_call_inner — shared TailCall/TailCallArrayMut dispatch.
+
+use super::*;
+
+impl VM {
+    /// Shared TailCall/TailCallArrayMut logic after argument extraction.
+    ///
+    /// Dispatches native functions via tail signal handler, sets up pending
+    /// tail call for closures with environment building.
+    ///
+    /// When `checked` is true, the compiler verified arity at compile time
+    /// and the runtime skips the arity check for primitives and closures.
+    pub(crate) fn tail_call_inner(
+        &mut self,
+        func: Value,
+        args: Vec<Value>,
+        checked: bool,
+        region_id: StaticRegion,
+        adopt_callee: bool,
+    ) -> Option<SignalBits> {
+        if let Some(def) = func.as_native_def() {
+            let blocked = def
+                .signal
+                .bits
+                .intersection(self.fiber.withheld)
+                .intersection(crate::signals::CAP_MASK);
+            if !blocked.is_empty() {
+                return Some(self.handle_capability_denial_tail(def, blocked, &args));
+            }
+            if !checked && !def.arity.matches(args.len()) {
+                self.set_error(
+                    "arity-error",
+                    format!(
+                        "{}: expected {} argument(s), got {}",
+                        def.name,
+                        def.arity,
+                        args.len()
+                    ),
+                );
+                return Some(SIG_ERROR);
+            }
+            // Fresh per-execution result region + pass-through retain, shared
+            // with the Call-position path and the JIT. (A yielding native's
+            // escape retain is handled inside `handle_primitive_signal_tail`'s
+            // Suspend arm; a fresh result lives in this call's `alloc_region` and
+            // is skipped by `dispatch_native_call`, so the two never double-count.)
+            let (bits, value) = self.dispatch_native_call(def, &args, region_id);
+            // Native-tail arg release, done the CORRECT way: by NOT
+            // replacing the frame for a normally-completing native.
+            //
+            // The problem: a value whose last use is a native tail-call argument
+            // has its owning `DecrefValueRegion` emitted by the compiler AFTER the
+            // `TailCall` (the dead post-`TailCall` block: store result, release
+            // each owned arg, retain result, `Return`). A frame-replacing tail
+            // call skips that block, so the arg leaks
+            // (region-native-tail-move.lisp: `(length (%pair 1 nil))`,
+            // `(& xs) (length xs)`).
+            //
+            // A native pushes NO bytecode frame, so a native tail call need not
+            // replace the frame at all. On normal completion, push the result and
+            // return `None` — exactly the non-tail `handle_primitive_signal` `Ok`
+            // path — so the dispatch loop CONTINUES into that post-`TailCall`
+            // block and runs the compiler's own owned-arg `DecrefValueRegion`s.
+            // This releases each arg with the compiler's EXACT per-arg ownership
+            // (a value with a live decref / stored into the result / aliased is
+            // NOT over-freed — region-closure-struct.lisp, box.lisp), which a
+            // runtime "release every arg" heuristic cannot achieve. Result
+            // accounting stays balanced by TWO retains on the result region: the
+            // `dispatch_native_call` pass-through retain, consumed by the caller's
+            // `DecrefValueRegion`, and the post-`TailCall` block's ReturnValue
+            // `IncrefValueRegion` (`lower_call`, the tail mirror of `lower_return`)
+            // that keeps the returned value alive for the caller's binding. The
+            // ReturnValue retain precedes the owned-arg releases, so a result
+            // borrowed from an arg's region survives that arg's cascade-free
+            // (region-native-tail-return-uaf.lisp; omitting it freed the result
+            // under the caller's borrow).
+            //
+            // `bits.is_ok()` is exactly `SignalAction::Ok` (see `classify`). A
+            // non-OK native carries its value as a SIGNAL that may embed an arg
+            // (a yielding `port/write`/`port/flush` hands the scheduler an
+            // `IoRequest` embedding the port — a Rule-5 suspend-escape): keep the
+            // tail suspend/abort/error path, which retains the yielded value and
+            // releases the embedded arg on resume/abort. NOT replacing the
+            // frame here would run the dead arg releases and free a port the
+            // scheduler still reads (the unmasked escape UAF).
+            if bits.is_ok() {
+                self.fiber.stack.push(value);
+                return None;
+            }
+            return Some(self.handle_primitive_signal_tail(bits, value));
+        }
+
+        if let Some((id, default)) = func.as_parameter() {
+            if !args.is_empty() {
+                self.set_error(
+                    "arity-error",
+                    format!("parameter call: expected 0 arguments, got {}", args.len()),
+                );
+                return Some(SIG_ERROR);
+            }
+            let value = self.resolve_parameter(id, default);
+            // Pass-through retain, mirror of the Call-position param branch: a
+            // resolve is never a fresh allocation, so always hand the caller one
+            // owning reference for its `DecrefValueRegion` to consume.
+            // `incref_for_escape(None, …)` no-ops an immediate.
+            let heap = unsafe { &mut *self.heap_ptr };
+            let result_region = crate::value::arena::region_of(heap, value);
+            crate::value::arena::incref_for_escape(
+                heap,
+                result_region,
+                crate::value::arena::EscapeSite::ParameterResolve,
+            );
+            self.fiber.signal = Some((SIG_OK, value));
+            return Some(SIG_OK);
+        }
+
+        if let Some(closure) = func.as_closure() {
+            // Validate argument count (skip if compiler verified)
+            if !checked && !self.check_arity(&closure.template.arity, args.len()) {
+                // check_arity sets fiber.signal to (SIG_ERROR, ...)
+                return Some(SIG_ERROR);
+            }
+
+            // Adopt the callee closure when the compiler flagged it as a per-call
+            // local closure whose release is dead past this `TailCall`
+            // (`lower_call`'s `adopt_callee`). The new activation releases this
+            // region when it completes — the missing decref the frame replacement
+            // skipped. Recorded BEFORE `populate_env` (which copies the closure's
+            // env uncounted): the closure must stay alive through the callee's
+            // run, so the release is deferred to the trampoline-loop break, NOT
+            // done here. A program-root callee is never flagged, so its
+            // program-lifetime region is never released. See `TailCallInfo`.
+            let adopt_region = if adopt_callee {
+                self.tail_callee_adopt_region(func)
+            } else {
+                None
+            };
+
+            // Build proper environment using cached vector. Each env value mints
+            // its own fresh region inside `populate_env` (see `env_value_region`),
+            // so the static slot is no longer used as a physical region — only
+            // its identity as a static slot is consulted. Each tail call through
+            // this site mints its own env-cell regions, so they never commingle
+            // (region-tail-env-commingle.lisp pins this).
+            // A tail call MOVES its args: the caller's reference transfers to
+            // the callee (its dead post-tailcall decref never fires), and the
+            // owned-param callee releases it. So NO caller incref here —
+            // `own_params = false`. (The non-tail path, `build_closure_env`,
+            // passes `true`.)
+            if !Self::populate_env(
+                &mut self.tail_call_env_cache,
+                unsafe { &mut *self.heap_ptr },
+                &mut self.fiber,
+                closure,
+                &args,
+                false,
+            ) {
+                return Some(SIG_ERROR);
+            }
+            let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
+
+            // Store the tail call information (Rc clones, not data copies)
+            self.pending_tail_call = Some(crate::vm::core::TailCallInfo {
+                code: closure.template.code(),
+                env: new_env_rc,
+                closure: func,
+                squelch_mask: closure.squelch_mask,
+                adopt_region,
+            });
+
+            self.fiber.signal = Some((SIG_OK, Value::NIL));
+            return Some(SIG_OK);
+        }
+
+        // Callable collections: struct, array, set — in TAIL position. Routed
+        // through `dispatch_collection_call` for the per-execution region +
+        // Rule-5 pass-through retain, then handled with the native-tail
+        // trick (see the native branch above): a collection-call pushes NO
+        // bytecode frame, so on normal completion we push the result and return
+        // `None` rather than replacing the frame. The dispatch loop then
+        // CONTINUES into the compiler's post-`TailCall` block, which releases
+        // each owned arg with the compiler's exact ownership and retains the
+        // result (ReturnValue) — its retain/decref of the result cancel, leaving
+        // the pass-through retain as the single caller-consumed reference.
+        // Returning `None` here (rather than short-circuiting with
+        // `signal = Some((SIG_OK, value)); return SIG_OK`) is what keeps the
+        // tail-position call-index from leaking the owned args / the let-bound
+        // collection (interpreter) or freeing the returned co-located element
+        // under the caller's borrow (JIT).
+        if let Some(result) = self.dispatch_collection_call(&func, &args, region_id) {
+            match result {
+                Ok(value) => {
+                    self.fiber.stack.push(value);
+                    return None;
+                }
+                Err((kind, msg)) => {
+                    self.set_error(kind, msg);
+                    return Some(SIG_ERROR);
+                }
+            }
+        }
+
+        // Cannot call this value
+        eprintln!(
+            "[DEBUG tailcall] Cannot call: tag={:#x} payload={:#x} type={} on_fiber_heap={}",
+            func.tag,
+            func.payload,
+            func.type_name(),
+            self.heap().value_in_region_store(func)
+        );
+        self.set_error("type-error", format!("Cannot call {:?}", func));
+        Some(SIG_ERROR)
+    }
+}

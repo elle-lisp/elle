@@ -1,6 +1,8 @@
 //! Hygienic macro expansion
 
+mod collections;
 mod compiletime;
+mod define;
 mod introspection;
 mod macro_expand;
 mod quasiquote;
@@ -9,10 +11,12 @@ mod syntaxcase;
 mod tests;
 
 use super::{ScopeId, Span, Syntax, SyntaxKind};
+use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Maximum macro expansion depth before erroring (prevents infinite expansion)
 const MAX_MACRO_EXPANSION_DEPTH: usize = 200;
@@ -28,12 +32,19 @@ pub struct MacroDef {
     pub template: Syntax,
     #[allow(dead_code)] // set during construction; read access planned for hygiene
     pub(crate) definition_scope: ScopeId,
-    /// Cached compiled transformer closure. Populated on first expansion.
-    /// The Value is a closure compiled from `(fn (params...) template)`.
-    /// `RefCell` enables interior mutation while `MacroDef` is held as `&`.
-    /// Cloning copies the inner `Value` (cheap — `Value` is `Copy`, closure
-    /// heap data is `Rc`). Clones get a fresh `RefCell` with the same closure.
-    pub(crate) cached_transformer: RefCell<Option<crate::value::Value>>,
+    /// Cached compiled transformer closure (compiled from `(fn (params...)
+    /// template)`), populated LAZILY on first expansion so its quoted-literal
+    /// hygiene captures the real expansion context (eager compilation at a
+    /// different point mis-scopes template literals — e.g. `each`'s `'in`).
+    ///
+    /// `Rc<RefCell<…>>` so the cell is SHARED across `Expander`/`MacroDef`
+    /// clones: every per-compile clone of the compilation-cache master aliases
+    /// the master's cell, so the first compile that expands the macro fills it
+    /// ONCE and every later compile reuses it. Without the share, each clone
+    /// re-compiled the transformer into a fresh region and orphaned it on clone
+    /// drop (`Value` is `Copy`, no decref) — the corpus-OOM per-compile leak. The
+    /// owning region is released at teardown by `release_cached_transformers`.
+    pub(crate) cached_transformer: std::rc::Rc<RefCell<Option<crate::value::Value>>>,
 }
 
 /// Hygienic macro expander
@@ -43,6 +54,19 @@ pub struct Expander {
     /// Always starts empty — the manual `Clone` impl resets it so that
     /// compile-time defs never leak between pipeline calls via the cache.
     pub(crate) compile_time_env: HashMap<String, crate::value::Value>,
+    /// Pre-prelude exports from core.lisp. Persists across clones so
+    /// that macro bodies compiled via `eval_syntax` can reference
+    /// core functions like `last` and `butlast`.
+    pub(crate) core_env: HashMap<String, crate::value::Value>,
+    /// Primitive (+ stdlib export) metadata used to compile macro-transformer
+    /// bodies via `eval_syntax`. `Rc` so that the per-pipeline-call clone is a
+    /// pointer bump rather than a deep copy of the maps. The owning instance's
+    /// `CompileCtx` sets this to `primitives` at construction and to
+    /// `primitives + stdlib exports` once `init_stdlib` runs; REPL value
+    /// bindings are deliberately NOT included (macro bodies never resolve them).
+    /// Because it rides on the `Expander`, `eval_syntax` reaches it without a
+    /// separate `CompileCtx` borrow — which would alias the macro VM mid-expand.
+    eval_meta: Rc<PrimitiveMeta>,
     next_scope_id: u32,
     expansion_depth: usize,
 }
@@ -52,10 +76,24 @@ impl Clone for Expander {
         Expander {
             macros: self.macros.clone(),
             compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
+            core_env: self.core_env.clone(),  // persists — needed by macro bodies
+            eval_meta: Rc::clone(&self.eval_meta), // shared pointer; immutable after stdlib load
             next_scope_id: self.next_scope_id,
             expansion_depth: self.expansion_depth,
         }
     }
+}
+
+/// Scope operation applied by `map_scope_recursive`. Both operations honor
+/// `scope_exempt`: a datum->syntax node keeps exactly the scopes its context
+/// gave it. The context's scopes at transformer time include the expansion's
+/// pre-stamped intro scope, which datum->syntax itself strips (see
+/// `prim_datum_to_syntax`), so an exempt node already carries its TRUE
+/// use-site scope set and must dodge the flip.
+#[derive(Clone, Copy)]
+enum ScopeOp {
+    Add,
+    Flip,
 }
 
 impl Expander {
@@ -63,9 +101,24 @@ impl Expander {
         Expander {
             macros: HashMap::new(),
             compile_time_env: HashMap::new(),
+            core_env: HashMap::new(),
+            eval_meta: Rc::new(PrimitiveMeta::default()),
             next_scope_id: 1, // 0 is reserved for top-level
             expansion_depth: 0,
         }
+    }
+
+    /// The primitive(+stdlib) metadata for compiling macro-transformer bodies
+    /// (`eval_syntax`). See the `eval_meta` field.
+    pub fn eval_meta(&self) -> &PrimitiveMeta {
+        &self.eval_meta
+    }
+
+    /// Replace the macro-body compile metadata. The owning `CompileCtx` calls
+    /// this with `primitives` at construction and `primitives + stdlib exports`
+    /// after `init_stdlib`.
+    pub fn set_eval_meta(&mut self, meta: PrimitiveMeta) {
+        self.eval_meta = Rc::new(meta);
     }
 
     /// Register a macro definition
@@ -99,7 +152,7 @@ impl Expander {
     /// definitions in this Expander. Must be called after the VM
     /// has primitives registered but before user code expansion.
     pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
-        const PRELUDE: &str = include_str!("../../../prelude.lisp");
+        const PRELUDE: &str = include_str!("../../prelude.lisp");
         let syntaxes = crate::reader::read_syntax_all(PRELUDE, "<internal>")?;
         // Use ScopeId(0) — the reserved primitive scope — so that
         // prelude symbols match primitive bindings (which are also
@@ -113,6 +166,22 @@ impl Expander {
             self.expand(scoped, symbols, vm)?;
         }
         Ok(())
+    }
+
+    /// Release the region reference each cached transformer holds, dropping the
+    /// cache entries to `None`. The transformer closures live in regions that a
+    /// plain `Drop` of the `Value` (it is `Copy`) would never decref, so without
+    /// this they survive teardown as residue. Called from `CompileCtx::release`
+    /// on the instance's master expander at teardown, when it is the last holder
+    /// of these shared transformer cells (per-compile clones, which share the
+    /// SAME `Rc` cell, are long gone).
+    pub fn release_cached_transformers(&mut self, heap: &mut crate::value::fiberheap::FiberHeap) {
+        for def in self.macros.values() {
+            if let Some(v) = def.cached_transformer.borrow_mut().take() {
+                let r = crate::value::arena::region_of(heap, v);
+                crate::value::arena::decref_region(heap, r);
+            }
+        }
     }
 
     /// Generate a fresh scope ID
@@ -154,6 +223,12 @@ impl Expander {
         symbols: &mut SymbolTable,
         vm: &mut VM,
     ) -> Result<Syntax, String> {
+        // Point the transformer-running VM at the table THIS expansion uses, so a
+        // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
+        // interns into the same table the expander threads. Idempotent across
+        // recursion; the table is reborrowed per transformer call, never touched
+        // simultaneously (docs/impl/region-ctx.md § "Symbols").
+        vm.set_symbols(symbols as *mut SymbolTable);
         match &syntax.kind {
             SyntaxKind::Symbol(_) => Ok(syntax),
             SyntaxKind::List(items) if !items.is_empty() => {
@@ -192,26 +267,63 @@ impl Expander {
                     }
                 }
                 // Not a macro call - expand children recursively
-                self.expand_list(items, syntax.span, syntax.scopes, symbols, vm)
+                self.expand_seq(
+                    items,
+                    syntax.span,
+                    syntax.scopes,
+                    symbols,
+                    vm,
+                    SyntaxKind::List,
+                )
             }
-            SyntaxKind::Array(items) => {
-                self.expand_tuple(items, syntax.span, syntax.scopes, symbols, vm)
-            }
-            SyntaxKind::ArrayMut(items) => {
-                self.expand_array_mut(items, syntax.span, syntax.scopes, symbols, vm)
-            }
-            SyntaxKind::Struct(items) => {
-                self.expand_struct(items, syntax.span, syntax.scopes, symbols, vm)
-            }
-            SyntaxKind::StructMut(items) => {
-                self.expand_struct_mut(items, syntax.span, syntax.scopes, symbols, vm)
-            }
-            SyntaxKind::Set(items) => {
-                self.expand_set(items, syntax.span, syntax.scopes, symbols, vm)
-            }
-            SyntaxKind::SetMut(items) => {
-                self.expand_set_mut(items, syntax.span, syntax.scopes, symbols, vm)
-            }
+            SyntaxKind::Array(items) => self.expand_seq(
+                items,
+                syntax.span,
+                syntax.scopes,
+                symbols,
+                vm,
+                SyntaxKind::Array,
+            ),
+            SyntaxKind::ArrayMut(items) => self.expand_seq(
+                items,
+                syntax.span,
+                syntax.scopes,
+                symbols,
+                vm,
+                SyntaxKind::ArrayMut,
+            ),
+            SyntaxKind::Struct(items) => self.expand_seq(
+                items,
+                syntax.span,
+                syntax.scopes,
+                symbols,
+                vm,
+                SyntaxKind::Struct,
+            ),
+            SyntaxKind::StructMut(items) => self.expand_seq(
+                items,
+                syntax.span,
+                syntax.scopes,
+                symbols,
+                vm,
+                SyntaxKind::StructMut,
+            ),
+            SyntaxKind::Set(items) => self.expand_seq(
+                items,
+                syntax.span,
+                syntax.scopes,
+                symbols,
+                vm,
+                SyntaxKind::Set,
+            ),
+            SyntaxKind::SetMut(items) => self.expand_seq(
+                items,
+                syntax.span,
+                syntax.scopes,
+                symbols,
+                vm,
+                SyntaxKind::SetMut,
+            ),
             SyntaxKind::Quote(_) => {
                 // Don't expand inside quote
                 Ok(syntax)
@@ -251,146 +363,74 @@ impl Expander {
         }
     }
 
-    /// Handle (defmacro name (params...) body) or (var-macro name (params...) body)
-    fn handle_defmacro(&mut self, items: &[Syntax], span: &Span) -> Result<Syntax, String> {
-        // Syntax: (defmacro name (params...) body)
-        if items.len() != 4 {
-            return Err(format!(
-                "{}: defmacro requires exactly 3 arguments (name, parameters, body)",
-                span
-            ));
-        }
-
-        // Get macro name
-        let name = items[1]
-            .as_symbol()
-            .ok_or_else(|| format!("{}: macro name must be a symbol", span))?
-            .to_string();
-
-        // Get parameter list
-        let params_syntax = items[2].as_list_or_tuple().ok_or_else(|| {
-            if matches!(items[2].kind, SyntaxKind::ArrayMut(_)) {
-                format!(
-                    "{}: macro parameters must use (...) or [...], not @[...]",
-                    items[2].span
-                )
-            } else {
-                format!(
-                    "{}: macro parameters must be a list (...) or [...], got {}",
-                    items[2].span,
-                    items[2].kind_label()
-                )
-            }
-        })?;
-
-        // Parse params: required* (&opt optional*)? (& rest)?
-        let mut fixed_params = Vec::new();
-        let mut optional_params = Vec::new();
-        let mut rest_param = None;
-        let mut in_optional = false;
-        let mut i = 0;
-        while i < params_syntax.len() {
-            let p = params_syntax[i]
-                .as_symbol()
-                .ok_or_else(|| format!("{}: macro parameter must be a symbol", span))?;
-            if p == "&opt" {
-                in_optional = true;
-                i += 1;
-                continue;
-            }
-            if p == "&" {
-                // Next symbol is the rest param
-                if i + 1 >= params_syntax.len() {
-                    return Err(format!("{}: expected parameter name after &", span));
-                }
-                if i + 2 < params_syntax.len() {
-                    return Err(format!("{}: only one parameter allowed after &", span));
-                }
-                let rest_name = params_syntax[i + 1]
-                    .as_symbol()
-                    .ok_or_else(|| format!("{}: macro parameter must be a symbol", span))?;
-                rest_param = Some(rest_name.to_string());
-                break;
-            }
-            if in_optional {
-                optional_params.push(p.to_string());
-            } else {
-                fixed_params.push(p.to_string());
-            }
-            i += 1;
-        }
-
-        // Get the body template
-        let template = items[3].clone();
-
-        // Create and register the macro
-        let macro_def = MacroDef {
-            name: name.clone(),
-            params: fixed_params,
-            optional_params,
-            rest_param,
-            template,
-            definition_scope: ScopeId(0), // Top-level scope
-            cached_transformer: RefCell::new(None),
-        };
-
-        self.define_macro(macro_def);
-
-        // Return nil - the macro definition itself doesn't produce code
-        Ok(Syntax::new(SyntaxKind::Nil, span.clone()))
+    fn add_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
+        self.map_scope_recursive(syntax, scope, ScopeOp::Add)
     }
 
-    fn add_scope_recursive(&self, mut syntax: Syntax, scope: ScopeId) -> Syntax {
-        // datum->syntax nodes keep their exact scopes — don't add intro scope
+    /// Flip `scope` on every non-exempt node (see `Syntax::flip_scope`):
+    /// the post-expansion hygiene operation. Template-origin identifiers
+    /// gain the intro scope; argument-origin identifiers (pre-stamped at
+    /// wrap time) lose it again. datum->syntax results are exempt — they
+    /// already carry their context's true scopes (the intro scope is
+    /// stripped at copy time by `prim_datum_to_syntax`).
+    pub(super) fn flip_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
+        self.map_scope_recursive(syntax, scope, ScopeOp::Flip)
+    }
+
+    fn map_scope_recursive(&self, mut syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
+        // datum->syntax nodes keep their exact scopes — neither ordinary
+        // stamping nor the hygiene flip touches them.
         if syntax.scope_exempt {
             return syntax;
         }
 
-        // Add scope to this node
-        syntax.add_scope(scope);
+        match op {
+            ScopeOp::Add => syntax.add_scope(scope),
+            ScopeOp::Flip => syntax.flip_scope(scope),
+        }
 
         // Recurse into children
         syntax.kind = match syntax.kind {
             SyntaxKind::List(items) => SyntaxKind::List(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::Array(items) => SyntaxKind::Array(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::ArrayMut(items) => SyntaxKind::ArrayMut(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::Struct(items) => SyntaxKind::Struct(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::StructMut(items) => SyntaxKind::StructMut(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::Set(items) => SyntaxKind::Set(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::SetMut(items) => SyntaxKind::SetMut(
                 items
                     .into_iter()
-                    .map(|item| self.add_scope_recursive(item, scope))
+                    .map(|item| self.map_scope_recursive(item, scope, op))
                     .collect(),
             ),
             SyntaxKind::Quote(inner) => {
@@ -398,16 +438,16 @@ impl Expander {
                 SyntaxKind::Quote(inner)
             }
             SyntaxKind::Quasiquote(inner) => {
-                SyntaxKind::Quasiquote(Box::new(self.add_scope_recursive(*inner, scope)))
+                SyntaxKind::Quasiquote(Box::new(self.map_scope_recursive(*inner, scope, op)))
             }
             SyntaxKind::Unquote(inner) => {
-                SyntaxKind::Unquote(Box::new(self.add_scope_recursive(*inner, scope)))
+                SyntaxKind::Unquote(Box::new(self.map_scope_recursive(*inner, scope, op)))
             }
             SyntaxKind::UnquoteSplicing(inner) => {
-                SyntaxKind::UnquoteSplicing(Box::new(self.add_scope_recursive(*inner, scope)))
+                SyntaxKind::UnquoteSplicing(Box::new(self.map_scope_recursive(*inner, scope, op)))
             }
             SyntaxKind::Splice(inner) => {
-                SyntaxKind::Splice(Box::new(self.add_scope_recursive(*inner, scope)))
+                SyntaxKind::Splice(Box::new(self.map_scope_recursive(*inner, scope, op)))
             }
             // Don't recurse into syntax literals — the inner Value::syntax
             // already carries its correct scopes from the original context.
@@ -416,139 +456,6 @@ impl Expander {
         };
 
         syntax
-    }
-
-    fn expand_list(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::List(expanded?),
-            span,
-            scopes,
-        ))
-    }
-
-    fn expand_tuple(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::Array(expanded?),
-            span,
-            scopes,
-        ))
-    }
-
-    fn expand_array_mut(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::ArrayMut(expanded?),
-            span,
-            scopes,
-        ))
-    }
-
-    fn expand_struct(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::Struct(expanded?),
-            span,
-            scopes,
-        ))
-    }
-
-    fn expand_struct_mut(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::StructMut(expanded?),
-            span,
-            scopes,
-        ))
-    }
-
-    fn expand_set(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::Set(expanded?),
-            span,
-            scopes,
-        ))
-    }
-
-    fn expand_set_mut(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-        scopes: Vec<ScopeId>,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        let expanded: Result<Vec<Syntax>, String> = items
-            .iter()
-            .map(|item| self.expand(item.clone(), symbols, vm))
-            .collect();
-        Ok(Syntax::with_scopes(
-            SyntaxKind::SetMut(expanded?),
-            span,
-            scopes,
-        ))
     }
 }
 

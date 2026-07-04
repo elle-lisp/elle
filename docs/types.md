@@ -126,9 +126,28 @@ including `0`, `""`, `()`, `[]`, and `@[]`.
 (= 1 1.0)                  # => true  — numeric coercion
 ```
 
+`=` is **compositional**: two collections are equal exactly when their
+elements are pairwise equal under `=`. For all `a`, `b`:
+`(= [a] [b])` ⇔ `(= a b)`. Numeric coercion and IEEE 754 float
+semantics therefore apply at every depth, not just at the top level:
+
+```lisp
+(= [1] [1.0])              # => true  — coercion reaches elements
+(= {:a [1]} {:a [1.0]})    # => true
+(def nan (/ 0.0 0.0))
+(= nan nan)                # => false — IEEE 754: NaN ≠ NaN
+(= [nan] [nan])            # => false — NaN poisons any value containing it
+(= -0.0 0.0)               # => true  — IEEE 754: zeros are equal
+```
+
+A consequence of IEEE NaN semantics is that a value containing NaN is
+not `=` to anything — including itself. There is no identity shortcut:
+`(= v v)` is `false` when `v` holds a NaN anywhere inside.
+
 **Precision caveat:** mixed int/float comparisons coerce through f64.
 Integers beyond 2^53 may compare equal when they shouldn't:
-`(= 9007199254740992 9007199254740993)` returns `true`.
+`(= 9007199254740992 9007199254740993.0)` returns `true`. This too
+applies at every depth. Int/int comparison is always exact.
 
 Closures compare by reference:
 
@@ -138,6 +157,33 @@ Closures compare by reference:
 (= f f)                    # => true
 (= f g)                    # => false — different objects
 ```
+
+### identical?
+
+`identical?` is the strict relation: no numeric coercion, and floats
+compare by bit pattern, so it is reflexive even for NaN. Collections
+still compare by contents (under `identical?` recursively); reference
+types (closures, fibers) compare by identity.
+
+```lisp
+(identical? 1 1.0)         # => false — no coercion
+(identical? [nan] [nan])   # => true  — bit-pattern floats
+```
+
+### Keys and membership
+
+Sets, struct keys, `distinct`, and `hash` use a *key equivalence*
+rather than `=`. It agrees with `=` on numbers — `1` and `1.0` are the
+same set element — but is reflexive for NaN (by bit pattern) and
+distinguishes `-0.0` from `0.0`, so that a collection holding a NaN
+remains findable in a set that contains it:
+
+```lisp
+(length (set 1 1.0))       # => 1    — coercion dedups
+(has? (set nan) nan)       # => true — keys are NaN-reflexive
+```
+
+Floats are not permitted as struct keys.
 
 ## Mutability
 

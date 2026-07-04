@@ -40,7 +40,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
 - **Fibers are the concurrency primitive.** ([docs/concurrency.md](docs/concurrency.md)) A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. The parent drives execution by calling `fiber/resume`. When a fiber emits a signal, it suspends and the parent decides what to do next.
 
-  Fibers run as coroutines. A parent spawns a child, drives it step by step, and reads each yielded value:
+  A parent spawns a child fiber, drives it step by step, and reads each yielded value:
 
   ```lisp
   (defn produce []
@@ -147,7 +147,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
 - **Functions are colorless.** Any function can be called from a fiber. There is no `async`/`await` annotation that marks a function as suspending and forces all its callers to be marked too. Whether something runs concurrently is decided at the call site, not baked into the function definition. In Rust/JS/Python, a suspending `fetch` forces every caller to be `async` too; in Elle, the signal is inferred by the compiler and callers are unaffected.
 
-- **Erlang-style processes fall out of the fiber model.** ([docs/processes.md](docs/processes.md)) The same fibers that drive coroutines and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
+- **Erlang-style processes fall out of the fiber model.** ([docs/processes.md](docs/processes.md)) The same fibers that drive generators and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
 
   ```lisp
   (def process ((import "std/process")))
@@ -212,7 +212,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
   (length "👨‍👩‍👧")   # => 1
   ```
 
-- **Destructuring in all binding positions.** ([docs/destructuring.md](docs/destructuring.md)) `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
+- **Destructuring in all binding positions.** ([docs/destructuring.md](docs/destructuring.md)) `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns. In binding forms destructuring is **strict**: a missing element or key, or a type mismatch, signals an error (extra elements are silently ignored). Use `match` when a value may or may not fit a shape — there a non-matching pattern falls through to the next clause instead of erroring.
 
   ```lisp
   (def (head & tail) (list 1 2 3 4))
@@ -596,15 +596,15 @@ concurrency layer.
 
 ## Memory
 
-- **No garbage collector.** ([docs/memory.md](docs/memory.md)) Memory is reclaimed deterministically through three mechanisms, all derived from the same static analysis that drives the signal system:
+- **No garbage collector.** ([docs/regions.md](docs/regions.md)) Memory is reclaimed deterministically through per-region reference counting:
 
-  - **Per-fiber bump arenas:** Each fiber owns a `FiberHeap` backed by a bump arena (sequential 64KB pages). When a fiber finishes, its entire arena is freed — no traversal, no mark phase, no sweep. Bump allocation is O(1) with strong cache locality and zero fragmentation.
+  - **Every value is born in a region.** A region owns physical pages and a reference count. The compiler assigns each allocation to a region whose lifetime matches the value's actual point of demise — not its syntactic scope.
 
-  - **Zero-copy inter-fiber sharing:** The compiler knows at fiber-creation time whether a fiber can yield (signal inference). Yielding fibers route all allocations to a `SharedAllocator` owned by the parent — the parent reads yielded values directly from shared memory. Silent fibers skip this entirely and allocate into their own arena with no indirection. No deep copy, no serialization, no runtime decision.
+  - **`DecrefRegion` at the point of demise.** The compiler emits one `DecrefRegion` per region at the HirId where the value's last use ends (`free_at`). When the region's RC hits 0, its pages are freed and cascade decrefs fire for any cross-region references found in the region's contents. `IncrefRegion` increments RC at cross-region edges; the runtime also auto-increfs at allocation and at mutable-collection push/put.
 
-  - **Escape-analysis-driven scope reclamation:** The compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it emits `RegionEnter`/`RegionExit` bytecodes that rewind the arena to a mark at scope exit, recycling memory without waiting for fiber death.
+  - **Merging is the optimization.** Regions with identical `free_at` and identical incref topology may be merged so that one `DecrefRegion` covers multiple allocations. Merging is monotonic and iterative; failure to merge is a performance concern, never a correctness one.
 
-- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Scope reclamation recycles memory within a fiber's lifetime. The ownership topology — private arena per fiber, shared arena per yield boundary — is the minimal structure that gives per-fiber lifecycle management and zero-copy yield simultaneously. See [`docs/memory.md`](docs/memory.md) for the full model.
+- **Long-running fiber schedulers don't accumulate garbage.** Each region is freed independently when its RC hits 0 — fibers do not "own" regions, and a value yielded to a parent stays alive as long as the parent references it. See [`docs/regions.md`](docs/regions.md) for the full model.
 
 ## Execution Backends
 
@@ -778,11 +778,11 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `git` | Git repository operations (FFI to libgit2) |
   | `glob` | Filesystem glob pattern matching |
   | `gtk4` | GTK4 bindings via FFI (pure Elle, no plugin) |
-  | `hash` | Streaming hash helpers (ports, coroutines) |
+  | `hash` | Streaming hash helpers (ports, fibers) |
   | `grpc` | gRPC client over HTTP/2 with length-prefixed framing |
   | `http` | Pure Elle HTTP/1.1 client and server |
   | `http2` | HTTP/2 client and server (h2 over TLS + h2c cleartext) |
-  | `irc` | Coroutine-based IRCv3 client with SASL |
+  | `irc` | Fiber-based IRCv3 client with SASL |
   | `lua` | Lua compatibility prelude |
   | `mqtt` | MQTT client (uses the `mqtt` plugin for packet codec) |
   | `portrait` | Semantic portraits from `compile/analyze` |
@@ -870,7 +870,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   (f 1 2)                     # Error: f expects 1 argument, got 2
   ```
 
-- **Match exhaustiveness is checked at compile time.** The compiler warns when a match expression has patterns that can never be reached, and when the match may not cover all cases for a known type.
+- **Unreachable match arms are compile-time errors.** The compiler builds the decision tree for every `match` and rejects arms no value can reach — a duplicated literal, or anything after a guardless catch-all. The same analysis runs inside or-patterns at any depth: an alternative that earlier arms and alternatives already cover is rejected. A `match` that no arm covers raises a structured `:match-error` at runtime carrying the unmatched value; no mandatory wildcard arm.
 
 - **Opinionated code formatter.** `elle fmt` formats Elle source to a single canonical style with zero configuration. Wadler-style pretty printing with column-aware alignment. Idempotent — formatting already-formatted code produces identical output. See [`docs/fmt.md`](docs/fmt.md) for the rule set and examples.
 
@@ -921,7 +921,7 @@ Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
 The compiler computes signal inference, capture analysis, and call graphs for every file. The MCP server makes all of this queryable.
 
 - **[Agent Reasoning Guide](docs/analysis/agent-reasoning.md)** — Workflow: understand locally via `portrait`, reason globally via SPARQL, refactor via compile-aware tools
-- **[MCP Server](docs/mcp.md)** — 15 tools: `portrait`, `signal_query`, `impact`, `trace`, `compile_rename`, `compile_extract`, `compile_parallelize`, `verify_invariants`, and SPARQL
+- **[MCP Server](docs/mcp.md)** — 21 tools, including `portrait`, `signal_query`, `impact`, `trace`, `compile_rename`, `compile_extract`, `compile_parallelize`, `verify_invariants`, and SPARQL query/update
 - **[Analysis overview](docs/analysis/README.md)** — How portrait, MCP, and agent reasoning fit together
 
 ## Alternative Surface Syntaxes
@@ -992,7 +992,12 @@ make smoke                                # run all tests (~30s)
 Plugins live in a [separate repository](https://github.com/elle-lisp/plugins)
 and use a stable ABI — they can be built independently from elle. The
 [MCP server](https://github.com/elle-lisp/mcp) is also maintained
-separately. Both are included as git submodules.
+separately. Both are included as git submodules — a fresh clone needs them
+checked out before the plugin/MCP examples will run:
+
+```bash
+git submodule update --init plugins mcp    # populate plugins/ and mcp/
+```
 
 ### Subcommands
 

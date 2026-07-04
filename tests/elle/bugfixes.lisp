@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Bug Regression Tests
 ##
 ## Migrated from tests/property/bugfixes.rs

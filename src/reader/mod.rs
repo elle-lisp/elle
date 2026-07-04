@@ -1,12 +1,16 @@
+pub mod cursor;
 mod js_lexer;
 mod js_parser;
 mod lexer;
 mod lua_lexer;
 mod lua_parser;
+mod nav;
 mod numeric;
 mod parser;
 mod py_lexer;
 mod py_parser;
+pub mod scan;
+mod synbuild;
 mod syntax;
 mod token;
 
@@ -14,14 +18,20 @@ mod token;
 pub use lexer::Lexer;
 pub use parser::Reader;
 pub use syntax::SyntaxReader;
-pub use token::{OwnedToken, SourceLoc, Token, TokenWithLoc};
+pub use token::{OwnedToken, SourceLoc, Token, TokenWithLoc, UNKNOWN_FILE};
 
 use crate::symbol::SymbolTable;
 use crate::syntax::Syntax;
 use crate::value::Value;
 
-/// Main public entry point for reading Lisp code from a string
-pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String> {
+/// Main public entry point for reading Lisp code from a string. The result is
+/// born in a fresh region on `heap` (the caller's instance heap — an embedder
+/// passes `runtime.heap()`), escaping value-based to the caller.
+pub fn read_str(
+    input: &str,
+    heap: &mut crate::value::fiberheap::FiberHeap,
+    symbols: &mut SymbolTable,
+) -> Result<Value, String> {
     // Strip shebang if present (e.g., #!/usr/bin/env elle)
     let input_owned = if input.starts_with("#!") {
         // Find the end of the first line and skip it
@@ -44,7 +54,13 @@ pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String>
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    reader.read(symbols)
+    // The read's allocation capability over a fresh region on the caller's heap
+    // (docs/impl/region-ctx.md — explicit region). The returned Value lives in
+    // this region and escapes to the caller value-based; the caller owns its
+    // lifetime (this entry point runs no per-read teardown).
+    let region = heap.new_runtime_region();
+    let mut ctx = crate::primitives::ctx::Alloc::with_region(region, heap);
+    reader.read(&mut ctx, symbols)
 }
 
 /// Tokenized source ready for the syntax parser.
@@ -158,32 +174,4 @@ pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[allow(clippy::approx_constant)]
-    fn test_read_number() {
-        let mut symbols = SymbolTable::new();
-        assert_eq!(read_str("42", &mut symbols).unwrap(), Value::int(42));
-        assert_eq!(read_str("3.14", &mut symbols).unwrap(), Value::float(3.14));
-    }
-
-    #[test]
-    fn test_read_list() {
-        let mut symbols = SymbolTable::new();
-        let result = read_str("(1 2 3)", &mut symbols).unwrap();
-        assert!(result.is_list());
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 3);
-    }
-
-    #[test]
-    fn test_read_quote() {
-        let mut symbols = SymbolTable::new();
-        let result = read_str("'foo", &mut symbols).unwrap();
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 2);
-    }
-}
+// Tests migrated to tests/elle/reader.lisp

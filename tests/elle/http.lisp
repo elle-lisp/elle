@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # HTTP module tests
 #
 # Tests the public API of lib/http.lisp. Internal wire-format helpers
@@ -446,7 +446,7 @@
 (port/close redir-listener)
 
 # ============================================================================
-# Server-Sent Events: server emits, client coroutine consumes
+# Server-Sent Events: server emits, client fiber consumes
 # ============================================================================
 
 (def sse-listener (tcp/listen "127.0.0.1" 0))
@@ -542,7 +542,7 @@
     (assert (string/contains? meta:data "text/plain")
             "sse-post: :headers override the default Content-Type")))
 
-# Error path: non-2xx response signals :sse-bad-status (coroutine body
+# Error path: non-2xx response signals :sse-bad-status (fiber body
 # errors during draining; the error surfaces to the each-loop driver).
 (let [[ok? err] (protect (let [source (http:sse-post (string "http://127.0.0.1:"
                                sse-server-port "/bad-post") "ignored")]

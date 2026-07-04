@@ -392,7 +392,7 @@ reasoning patterns.
 | `src/hir/analyze/forms.rs` | Qualified symbol desugaring (`a:b` → `(get a :b)`), projection lookup for cross-file signal inference |
 | `src/hir/analyze/call.rs` | Import pattern detection, compile-time squelch inference |
 | `src/hir/analyze/fileletrec.rs` | `compute_signal_projection`: extracts keyword→signal mapping from struct-returning files |
-| `src/pipeline/cache.rs` | Signal projection cache (`PROJECTION_CACHE`), `get_or_compile_projection` |
+| `src/pipeline/cache.rs` | Per-instance signal projection cache (`CompileCtx.projections`), `get_or_compile_projection` |
 | `src/reader/lexer.rs` | Qualified symbol lexing (`a:b` as single token) |
 | `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
 | `tests/integration/projection.rs` | Signal projection and compile-time squelch tests |

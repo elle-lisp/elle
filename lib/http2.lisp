@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2.lisp — HTTP/2 client and server for Elle
 ##
 ## Plain h2c (cleartext):
@@ -67,26 +67,20 @@
              query (if (nil? q-pos) nil (slice path+query (inc q-pos)))]
         {:scheme scheme :host host :port port :path path :query query})))
 
-  ## ── Hostname resolution ────────────────────────────────────────────────
-
-  (defn resolve-host [host]
-    (first (sys/resolve host)))
-
   ## ── Connection open ────────────────────────────────────────────────────
 
   (defn open-transport [url-parsed]
-    (let [ip (resolve-host url-parsed:host)]
-      (if (= url-parsed:scheme "https")
-        (begin
-          (when (nil? tls)
-            (error {:error :h2-error
-                    :reason :tls-not-configured
-                    :message "https requires :tls plugin passed to (import \"std/http2\")"}))
-          (let [conn (tls:connect url-parsed:host url-parsed:port
-                                  {:alpn ["h2" "http/1.1"]})]
-            {:transport (transport:tls conn) :tls-conn conn}))
-        {:transport (transport:tcp (tcp/connect ip url-parsed:port))
-         :tls-conn nil})))
+    (if (= url-parsed:scheme "https")
+      (begin
+        (when (nil? tls)
+          (error {:error :h2-error
+                  :reason :tls-not-configured
+                  :message "https requires :tls plugin passed to (import \"std/http2\")"}))
+        (let [conn (tls:connect url-parsed:host url-parsed:port
+                                {:alpn ["h2" "http/1.1"]})]
+          {:transport (transport:tls conn) :tls-conn conn}))
+      {:transport (transport:tcp (tcp/connect url-parsed:host url-parsed:port))
+       :tls-conn nil}))
 
   ## ── Client: handshake ──────────────────────────────────────────────────
 
@@ -309,8 +303,7 @@
         (when-let [s (get sess:streams sid)] (protect (s:data-queue:close))))
       (session:send-goaway sess sess:last-stream-id C:err-no-error)
       (sess:write-queue:put :shutdown)
-      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))
-      # Abort reader before closing transport — the reader may have a pending
+      (when sess:writer-fiber (ev/join-protected sess:writer-fiber))  # Abort reader before closing transport — the reader may have a pending
       # read on the socket (started by fuel preemption or concurrent sub-fiber).
       # Closing the fd while a read is in-flight causes partial-read errors.
       (when sess:reader-fiber

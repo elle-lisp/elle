@@ -1,3 +1,4 @@
+use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
 use crate::vm::core::VM;
 
@@ -8,7 +9,10 @@ use crate::vm::core::VM;
 /// Creates a CaptureCell (not LBox) because MakeCapture is emitted by the compiler for
 /// mutable captured variables, which should auto-unwrap on LoadUpvalue.
 /// User-created boxes via `box` use a different code path.
-pub(crate) fn handle_make_capture(vm: &mut VM) {
+pub(crate) fn handle_make_capture(vm: &mut VM, region_id: RuntimeRegion) {
+    use crate::value::heap::HeapObject;
+    use std::cell::RefCell;
+    use std::rc::Rc;
     let value = vm
         .fiber
         .stack
@@ -18,10 +22,14 @@ pub(crate) fn handle_make_capture(vm: &mut VM) {
         // Already a capture cell (e.g., locally-defined variable from outer lambda) — don't double-wrap
         vm.fiber.stack.push(value);
     } else {
-        // Create a capture cell for compiler-generated captures
-        // CaptureCell is auto-unwrapped by LoadUpvalue
-        let cell = Value::capture_cell(value);
-        vm.fiber.stack.push(cell);
+        // alloc_in_region → alloc_obj → incref_cross_region_refs handles
+        // the cross-region incref for the initial value automatically.
+        let obj = HeapObject::CaptureCell {
+            cell: Rc::new(RefCell::new(value)),
+            traits: Value::NIL,
+        };
+        let val = vm.heap().alloc_in_region(obj, region_id);
+        vm.fiber.stack.push(val);
     }
 }
 
@@ -33,8 +41,7 @@ pub(crate) fn handle_unwrap_capture(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on UnwrapCapture");
-    if let Some(cell_ref) = cell_val.as_capture_cell() {
-        let value = *cell_ref.borrow();
+    if let Some(value) = cell_val.capture_cell_get() {
         vm.fiber.stack.push(value);
     } else {
         panic!(
@@ -57,9 +64,13 @@ pub(crate) fn handle_update_capture(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on UpdateCapture");
-    if let Some(cell_ref) = cell_val.as_capture_cell() {
-        let mut cell_mut = cell_ref.borrow_mut();
-        *cell_mut = new_value;
+    if cell_val.is_capture_cell() {
+        // The funnel tracks cross-region refs relative to the cell's region.
+        crate::value::arena::capture_store_with_rebind(
+            unsafe { &mut *vm.heap_ptr },
+            cell_val,
+            new_value,
+        );
         vm.fiber.stack.push(new_value);
     } else {
         panic!(

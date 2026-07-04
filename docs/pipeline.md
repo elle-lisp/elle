@@ -12,13 +12,13 @@ Module: `src/pipeline/` (7 files, ~540 lines of implementation).
 - [The fixpoint loop](#the-fixpoint-loop)
 - [Pre-scanning functions](#pre-scanning-functions-in-srcpipelinescanrs)
 - [Compilation phases (single-form)](#compilation-phases-single-form)
-- [Compilation cache](#compilation-cache-in-srcpipelinecachersrs)
+- [Compile context](#compile-context-in-srcpipelinecachersrs)
 - [Known issues](#known-issues)
 
 | File | Lines | Purpose |
 |------|-------|---------|
 | `mod.rs` | 28 | Module declarations, re-exports, type definitions |
-| `cache.rs` | 92 | Thread-local compilation cache (VM, Expander, PrimitiveMeta) |
+| `cache.rs` | 395 | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
 | `scan.rs` | 97 | Pre-scanning for forward declarations (`prescan_forms`, `scan_define_lambda`, `scan_const_binding`) |
 | `fixpoint.rs` | 81 | Shared fixpoint loop (`run_fixpoint`) parameterized by post-analyze closure |
 | `compile.rs` | 115 | `compile()`, `compile_file()` |
@@ -54,49 +54,52 @@ pub struct AnalyzeResult {
 
 ### Signatures
 
+The compile context (`cctx`) is the per-instance `CompileCtx` threaded
+explicitly as a parameter through every entry point. `compile`/`compile_file`
+expand macros on the context's own macro VM, so they need no caller VM; the
+`eval`/`analyze` family run expansion on the caller's borrowed VM.
+
 ```rust
-pub fn compile(source: &str, symbols: &mut SymbolTable, source_name: &str) -> Result<CompileResult, String>
-pub fn compile_file(source: &str, symbols: &mut SymbolTable, source_name: &str) -> Result<CompileResult, String>
-pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<Value, String>
-pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<Value, String>
-pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<Value, String>
+pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
+pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
+pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
+pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
+pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>
-pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<AnalyzeResult, String>
-pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, source_name: &str) -> Result<AnalyzeResult, String>
+pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
+pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
 ```
 
 ## VM ownership patterns
 
-Two distinct patterns exist, and confusing them causes bugs:
+The macro-expansion VM is owned by the per-instance `CompileCtx` (built once
+with primitives registered, core.lisp, and the prelude). Two distinct patterns
+use it, and confusing them causes bugs:
 
-**Internal VM** (`compile`, `compile_file`): These functions create a fresh
-`VM::new()` and a fresh `Expander::new()`. The internal VM is used only for
-macro expansion during compilation. Macro side effects don't persist. Primitives
-are registered into this VM via `register_primitives`. This is the correct
-pattern for batch compilation where the caller doesn't need a running VM.
+**Context's macro VM** (`compile`, `compile_file`): These expand macros on the
+`CompileCtx`'s own macro VM (`with_macro_expansion`, fiber reset between uses)
+with a cloned `Expander`. They need no caller VM, so they take only
+`symbols` + `cctx`. This is the correct pattern for batch compilation where
+the caller doesn't need a running VM.
 
 **Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`):
 These borrow the caller's `&mut VM`. The same VM is used for both macro
-expansion and (for `eval`) execution. This means macro side effects persist
-in the caller's VM. This is the correct pattern for stdlib initialization
-and macro body evaluation where state must accumulate.
+expansion and (for `eval`) execution, so macro side effects persist in the
+caller's VM. This is the correct pattern for stdlib initialization and macro
+body evaluation where state must accumulate. They obtain a cloned `Expander`
+and `PrimitiveMeta` from the context via `cctx.expander_and_meta()`.
 
-**Hybrid** (`eval_all`): Delegates compilation to `compile_file` (which creates
-an internal VM for macro expansion), then executes each compiled form on the
-caller's borrowed VM. Macro side effects do NOT persist in the caller's VM.
+**Hybrid** (`eval_all`): Delegates compilation to `compile_file` (which expands
+on the context's macro VM), then executes each compiled form on the caller's
+borrowed VM. Macro side effects do NOT persist in the caller's VM.
 
 **`eval_syntax` is special**: It also borrows the caller's `Expander`, not just
 the VM. This is because it's called from inside `Expander::expand_macro_call_inner`
 — the macro expansion engine needs to compile and run a macro body while
 preserving the current expansion context (macro registry, scope state). Nested
-macro calls work because the same Expander is threaded through.
-
-**Primitive metadata divergence**: `compile`/`compile_file` call
-`register_primitives()` which returns signal and arity metadata as a side
-effect of registration. `eval`/`analyze` and friends call `build_primitive_meta()`
-instead, which builds the same metadata without registering anything (the
-caller's VM already has primitives registered). This is why `compile` can work
-with just `&mut SymbolTable` while `eval` needs `&mut VM`.
+macro calls work because the same Expander is threaded through. Its macro-body
+metadata rides on the expander (`eval_meta`), so no separate `CompileCtx`
+borrow is needed mid-expansion.
 
 ## Expander lifecycle
 
@@ -240,30 +243,35 @@ Every compilation path follows the same five phases:
 
 `analyze` and `analyze_file` stop after phase 3 (no lowering or emission).
 
-## Compilation cache (in `src/pipeline/cache.rs`)
+## Compile context (in `src/pipeline/cache.rs`)
 
-The module uses a thread-local `CompilationCache` to avoid per-call costs of
-VM creation, primitive registration, and prelude loading.
+`CompileCtx` is the per-instance compile-time state: a macro-expansion VM
+(primitives registered), the core.lisp/prelude `Expander`, the
+`PrimitiveMeta`, and the file→signal projection cache. It is built once when
+the instance's `RuntimeCore` is constructed and threaded explicitly through
+every pipeline call — two embedded Elle instances on one thread each own their
+own, so neither sees the other's exports or REPL definitions.
 
-### `get_compilation_cache()`
+### `with_macro_expansion()`
 
-Returns `(*mut VM, Expander, PrimitiveMeta)` from the thread-local cache.
-The VM's fiber is always reset before use. The Expander is cloned so each
-pipeline call gets independent expansion state. Used by `compile` and
-`compile_file`.
+Runs a closure with the macro-expansion VM (fiber reset), a clone of the
+`Expander` (independent expansion state), and a clone of the compile `meta`.
+The clones decouple it from `self`'s borrow so a nested compile does not alias.
+Used by `compile` and `compile_file`.
 
-### `get_cached_expander_and_meta()`
+### `expander_and_meta()`
 
-Returns `(Expander, PrimitiveMeta)` from the thread-local cache without
-borrowing the cached VM. Used by `eval`, `analyze`, and `analyze_file` which
-have their own VM.
+Returns a cloned `(Expander, PrimitiveMeta)` without borrowing the macro VM.
+Used by `eval`, `analyze`, and `analyze_file`, which run expansion on their
+own VM.
 
 ### Invariants
 
 - Prelude must be 100% defmacro (no runtime definitions)
-- Primitives must be registered before any pipeline function call
+- Primitives must be registered in the context's macro VM at construction
 - Pipeline functions are not re-entrant (no nested compile/compile_file)
-- Primitive registration order is deterministic (ALL_TABLES)
+- Primitive registration order is deterministic (ALL_TABLES), so the baked
+  `SymbolId`s match any table that interned the primitives in the same order
 
 ## Known issues
 

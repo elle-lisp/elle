@@ -4,7 +4,6 @@ use super::*;
 use crate::hir::expr::ParamBound;
 use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
-use crate::value::Value;
 use std::rc::Rc;
 
 impl<'a> Analyzer<'a> {
@@ -216,7 +215,10 @@ impl<'a> Analyzer<'a> {
         let body_items = &items[2..];
         let (doc, body_start) = if body_items.len() > 1 {
             if let SyntaxKind::String(s) = &body_items[0].kind {
-                (Some(Value::string(s.clone())), &body_items[1..])
+                // A docstring is compile-time string DATA, not a heap value:
+                // carry it as `Rc<str>` on the template. `(doc f)` materializes
+                // a fresh ordinary (reclaimable) string from it on demand.
+                (Some(std::rc::Rc::from(s.as_str())), &body_items[1..])
             } else {
                 (None, body_items)
             }

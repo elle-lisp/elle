@@ -1,3 +1,6 @@
+#[macro_use]
+pub mod def;
+
 pub mod access;
 pub mod allocator;
 pub mod arena;
@@ -14,8 +17,8 @@ pub mod compile;
 pub mod concurrency;
 pub mod config;
 pub mod convert;
+pub mod ctx;
 pub mod debug;
-pub mod def;
 pub mod disassembly;
 pub mod display;
 pub mod docs;
@@ -64,5 +67,6 @@ pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use docs::help_text;
 pub use module_init::init_stdlib;
 pub use registration::{
-    build_primitive_meta, cached_primitive_meta, intern_primitive_names, register_primitives,
+    build_primitive_meta, intern_primitive_names, prim_def, prim_id_of, prim_table_snapshot,
+    register_primitives,
 };

@@ -26,7 +26,7 @@ Does NOT:
 | `CaptureInfo` | What a closure captures and how (`Local`, `Capture`, or `Global`) |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
 | `SignalSources` | Tracks Yields sources within a lambda body for polymorphic inference |
-| `ParamBound` | Struct: `{ binding, signal }` — a parameter bound (after Chunk 4b, `kind` field removed) |
+| `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters with declared bounds (during lambda analysis) |
 | `current_declared_ceiling` | Maps `Binding` → `Signal` for function-level bounds (during lambda analysis) |
 | `param_bounds_env` | Maps `Binding` → `Vec<(usize, Signal)>` for call-site checking of bounded parameters |
@@ -42,7 +42,7 @@ Syntax (expanded, with scope sets)
 Analyzer (&mut BindingArena)
     ├─► resolve variables → Binding (u32 index into BindingArena)
     ├─► track mutations → arena.get_mut(b).is_mutated = true
-    ├─► track captures → arena.get_mut(b).is_captured = true + CaptureInfo
+    ├─► track captures → arena.get_mut(b).mark_captured() + CaptureInfo
     ├─► infer signals → Signal (Silent, Yields, Polymorphic)
     ├─► validate scope rules (hygienic resolution)
     ├─► validate control flow (break targeting)
@@ -74,20 +74,6 @@ Bindings are resolved using **hygienic scope sets**:
 - Empty scopes `[]` is a subset of everything, so pre-expansion code works identically
 
 This prevents accidental capture in macros while allowing intentional capture via `datum->syntax`.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~620 | `Analyzer` struct, scope management, entry point, binding resolution |
-| `forms.rs` | ~725 | Core form analysis: `analyze_expr`, literals, operators, collections |
-| `binding.rs` | ~530 | Binding forms: `let`, `letrec`, `def`/`var`, `set!` |
-| `fileletrec.rs` | ~360 | File-scope letrec compilation for top-level forms |
-| `destructure.rs` | ~415 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
-| `lambda.rs` | ~160 | Lambda/fn analysis with captures, params, signals, docstrings |
-| `special.rs` | ~345 | Special forms: `match`, `yield`, `silence`, `squelch`, pattern matching |
-| `call.rs` | ~200 | Call analysis and signal tracking |
-
 ## Invariants
 
 1. **Every variable reference is a `Binding`.** No symbols in HIR. If you see a symbol at this stage, analysis failed.
@@ -104,6 +90,10 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 7. **Binding resolution is scope-aware (hygienic).** `bind()` stores a `Vec<ScopeId>` alongside each binding. `lookup()` uses subset matching: a binding is visible to a reference if the binding's scope set is a subset of the reference's scope set. When multiple bindings match, the one with the largest scope set wins (most specific). Empty scopes `[]` is a subset of everything, so pre-expansion code works identically.
 
+7b. **`letrec*` contexts reject use-before-init.** Prebound bindings carry `init_pending`/`prebind_fn_depth` (`BindingInner`), set in letrec/begin Pass 1 and cleared after each initializer is analyzed. The Symbol arm of `analyze_expr` errors (`'{name}' referenced before its initialization`, `Err(String)`) on a value read of a pending binding at the SAME `fn_depth`; a read inside a lambda (deeper depth) is the legal deferred forward reference. File top-level (`fileletrec`) is deliberately not covered yet — enumerated debt. docs/bindings.md "Use before initialization is an error".
+
+7a. **`letrec*` contexts reject duplicate definitions by binding identity.** Explicit `letrec` and fn-body `begin` (the two-pass `in_function` branch) check each definition through `DuplicateGuard` (`analyze/scopes.rs`), keyed `(SymbolId, sorted scope set)` — the same identity `bind()` records — so a macro-template binder and a user binder of one spelling coexist while a true re-definition is a compile error (`Err(String)`). `letrec` binders are bound with their name syntax's scopes (hygienic, like `fileletrec` and `analyze_begin`). docs/bindings.md "Duplicates are judged by binding identity" / "Function bodies are an implicit letrec".
+
 8. **`Define` and `LocalDefine` are unified.** There is a single `HirKind::Define { binding, value }`. The lowerer checks `binding.is_global()` to decide between global and local define semantics.
 
 9. **Binding metadata is mutable during analysis, read-only after.** The analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc. The lowerer only reads via `arena.get(b).needs_capture()`, `arena.get(b).name`, etc. The type system enforces this: the analyzer holds `&mut BindingArena`, the lowerer holds `&BindingArena`.
@@ -116,7 +106,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 13. **`Block` and `Break` are compile-time control flow.** `HirKind::Block` has a `BlockId` and optional name. `HirKind::Break` targets a `BlockId`. The analyzer validates: break outside block → error, unknown block name → error, break across function boundary → error. The lowerer compiles break to `Move` + `Jump` — no new bytecode instructions needed. `while` wraps its `While` node in an implicit `Block` named `"while"`, so `(break :while val)` or unnamed `(break)` can exit a while loop.
 
-14. **`Eval` compiles and executes a datum at runtime.** `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the     analyzer for `(eval expr)` or `(eval expr env)`. The signal is always `Yields` (conservative — eval'd code can do anything). Not in tail position. The VM handler accesses the symbol table via thread-local context and caches the Expander on the VM for reuse.
+14. **`Eval` compiles and executes a datum at runtime.** `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the     analyzer for `(eval expr)` or `(eval expr env)`. The signal is always `Yields` (conservative — eval'd code can do anything). Not in tail position. The VM handler reaches the symbol table per-instance via the driving VM (`vm.symbols()`) and caches the Expander on the VM for reuse.
 
 15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda`
     has a `doc: Option<Value>` field. The analyzer extracts the first string literal
@@ -150,7 +140,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 ## Common pitfalls
 
-- **Forgetting to mark captures**: If a binding is referenced in a nested lambda, set `arena.get_mut(b).is_captured = true` during analysis
+- **Forgetting to mark captures**: If a binding is referenced in a nested lambda, call `arena.get_mut(b).mark_captured()` during analysis (the field is module-private — the lexical-capture proxy has no escape authority, so the solver cannot name it)
 - **Forgetting to mark mutations**: If a binding is assigned via `set!`, set `arena.get_mut(b).is_mutated = true`
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating signals**: When combining sub-expressions, use `signal.combine()` to merge signals upward

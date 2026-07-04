@@ -122,8 +122,6 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())
             }
-            HeapTag::NativeFn => Err("Cannot serialize native functions to JSON".to_string()),
-
             HeapTag::LibHandle => Err("Cannot serialize library handles to JSON".to_string()),
 
             HeapTag::ThreadHandle => Err("Cannot serialize thread handles to JSON".to_string()),
@@ -155,6 +153,9 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                 } else {
                     Err("Mutable set should have been accessible".to_string())
                 }
+            }
+            HeapTag::ClosureTemplate => {
+                Err("Cannot serialize closure templates to JSON".to_string())
             }
         }
     } else {
@@ -308,8 +309,6 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())
             }
-            HeapTag::NativeFn => Err("Cannot serialize native functions to JSON".to_string()),
-
             HeapTag::LibHandle => Err("Cannot serialize library handles to JSON".to_string()),
 
             HeapTag::ThreadHandle => Err("Cannot serialize thread handles to JSON".to_string()),
@@ -355,6 +354,9 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                 } else {
                     Err("Mutable set should have been accessible".to_string())
                 }
+            }
+            HeapTag::ClosureTemplate => {
+                Err("Cannot serialize closure templates to JSON".to_string())
             }
         }
     } else {

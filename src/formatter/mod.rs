@@ -33,6 +33,8 @@ pub mod core;
 pub mod doc;
 pub mod format;
 pub mod forms;
+pub mod metrics;
+pub mod pos;
 pub mod render;
 pub mod run;
 pub mod trivia;

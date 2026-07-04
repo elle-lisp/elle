@@ -1,9 +1,16 @@
 # Pattern Matching
 
-`match` dispatches on the structure and value of data. The compiler
-**errors** on non-exhaustive patterns — every `match` must end with a
-wildcard (`_`) or a variable pattern to cover all cases. Any unbound
-symbol works as a wildcard.
+`match` dispatches on the structure and value of data. Arms are tried
+top to bottom; the first pattern that matches (and whose guard, if any,
+passes) selects the body. If no arm matches, a runtime `:match-error`
+is raised carrying the unmatched value. A catch-all final arm — a
+wildcard (`_`) or a variable pattern — is idiomatic when a fallback
+makes sense, but it is not required: omitting it means "no other value
+can reach this match", and the runtime error enforces that claim.
+
+The compiler **errors** on unreachable arms — an arm that earlier arms
+already cover (a duplicated literal, or anything after a guardless
+catch-all) is rejected at compile time.
 
 ## Basic patterns
 
@@ -43,9 +50,11 @@ expressions.
 ```lisp
 (def x 42)
 (match 99
-  x x       # x binds to 99, body returns 99
-  _ :no)    # => 99, NOT :no
+  x x)      # x binds to 99, body returns 99 — NOT a comparison with 42
 ```
+
+A bare symbol is a catch-all, so no arm may follow it — the compiler
+rejects unreachable arms.
 
 To dispatch against a variable's value, use `case` or a guard:
 
@@ -180,13 +189,100 @@ Guards can reference bindings from the pattern:
     _                  "not a pair"))
 ```
 
+When a guarded arm's pattern is an or-pattern, a failed guard retries
+the remaining alternatives — each alternative re-binds and re-tests the
+guard before the match moves on to the next arm:
+
+```lisp
+# alternative 1 binds x to the head (:a), the guard fails;
+# alternative 2 retries with x bound to the tail (5) and passes
+(assert (= (match (pair :a 5)
+             (or (x . _) (_ . x)) when (= x 5) x
+             _ :none) 5))
+```
+
+## No matching arm
+
+When no arm matches, `match` raises a `:match-error` carrying the
+unmatched value. Catch it with `protect` (or a `try` handler) like any
+other error:
+
+```lisp
+(def [ok? err] (protect (match 5
+                          1 :one
+                          2 :two)))
+
+(assert (not ok?))
+(assert (= (get err :error) :match-error))
+(assert (= (get err :value) 5))
+```
+
+A guard that fails on the final arm falls through the same way:
+
+```
+(match -1
+  x when (> x 0) :positive)   # raises :match-error — guard rejected -1
+```
+
+A match that can fail this way is typed as possibly erroring: signal
+inference marks it with `:error` unless some guardless arm is
+irrefutable (a wildcard or variable). Inside a `(silent!)` function,
+use a catch-all arm — a match without one is a compile-time signal
+violation.
+
+## Unreachable arms
+
+An arm that earlier arms already cover can never match — the compiler
+rejects it:
+
+```
+(match n
+  _ :anything
+  1 :one)        # compile error: unreachable match arm 2
+
+(match n
+  1 :one
+  1 :uno         # compile error: unreachable match arm 2
+  _ :other)
+```
+
+Guarded arms never make later arms unreachable — the guard may fail at
+runtime, so the compiler assumes both outcomes are possible:
+
+```lisp
+(assert (= (match 1
+             x when false :never
+             1            :one) :one))
+```
+
+The same analysis applies *inside* or-patterns, at any nesting depth:
+each alternative must match something that earlier arms and earlier
+alternatives do not. A dead alternative is a compile error:
+
+```
+(match n
+  1        :one
+  (or 1 2) :other)   # compile error: alternative 1 of the or-pattern
+                     # is unreachable — arm 1 already matches 1
+
+(match p
+  (or (x . _) (_ . x)) x)   # compile error: every pair matches the
+                            # first alternative, so the second is dead
+```
+
+On a **guarded** arm, earlier alternatives of the same or-pattern never
+make later ones dead: a failed guard retries the remaining alternatives
+(see Guards above), so `(or (x . _) (_ . x)) when (= x 5)` is legal —
+the second alternative is reachable through guard fallthrough. Coverage
+by earlier *arms* still applies to guarded arms as usual.
+
 ## match vs case vs cond
 
 | | `match` | `case` | `cond` |
 |---|---------|--------|--------|
 | **Dispatch** | structural patterns | equality (`=`) against evaluated expressions | arbitrary test expressions |
 | **Variables** | bare symbols **bind** | keys are **evaluated** and compared | full expressions |
-| **Exhaustiveness** | compiler-enforced | no | no |
+| **No match** | runtime `:match-error`; unreachable arms are compile errors | falls through to default | falls through |
 | **Use when** | dispatching on shape, type, or literal values | dispatching against runtime values | multi-branch boolean logic |
 
 ```
@@ -211,8 +307,10 @@ Guards can reference bindings from the pattern:
 ```
 
 When `cond` branches are all testing the same expression against literal
-values, `match` is more concise and catches incomplete coverage at compile
-time. See [control.md](control.md) for `cond` and `case`.
+values, `match` is more concise: it rejects unreachable arms at compile
+time and raises a `:match-error` at runtime when no arm covers the value,
+instead of silently falling through. See [control.md](control.md) for
+`cond` and `case`.
 
 ---
 

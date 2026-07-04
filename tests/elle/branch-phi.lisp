@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Tests: phi-insertion for cond/match branch assigns
 ## Verifies that assigns inside branch bodies correctly propagate
 ## through SSA phi-insertion (not just runtime slot mutation).
@@ -128,6 +128,30 @@
     2 (assign x 2)
     _ nil)
   (assert (= x 0) "match phi: default no assign"))
+
+(let [@x 0]
+  (match 5
+    n when
+    (= n 5) (assign x n)
+    _ nil)
+  (assert (= x 5) "match phi: guarded arm assigns"))
+
+## The phi-select match re-evaluates guards. An impure guard that
+## answers differently the second time must not raise a spurious
+## :match-error; the phi falls back to the pre-match value (known
+## limitation: the stale pre-value is selected on divergence, the
+## same behavior a user catch-all arm produced before).
+
+(def phi-box @[true])
+(defn phi-pred ()
+  (get phi-box 0))
+(let [@a 0]
+  (match 5
+    x when
+    (phi-pred) (do
+                 (put phi-box 0 false)
+                 (assign a 1)))
+  (assert (= a 0) "match phi: divergent impure guard falls back to pre-value"))
 
 ## ── cond phi: use after multiple conds ───────────────────────
 

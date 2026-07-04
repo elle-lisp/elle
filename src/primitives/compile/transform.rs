@@ -1,14 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::context;
 use crate::hir::{Binding, HirKind};
 use crate::rewrite::edit::{apply_edits, Edit};
 use crate::signals::registry::with_registry;
 use crate::signals::Signal;
-use crate::value::error_val;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::sorted_struct_get;
 use crate::value::Value;
+
+mod rewrite;
+pub(crate) use rewrite::*;
 
 use super::{
     collect_vars_in_range, compute_line_offsets, find_matching_paren, find_named_lambda,
@@ -16,49 +17,42 @@ use super::{
 };
 
 /// (compile/rename analysis :old-name :new-name) → {:source "..." :edits N}
-pub(super) fn prim_compile_rename(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/rename") {
+pub(super) fn prim_compile_rename(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/rename", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let old_name = match resolve_name(args, 1, "compile/rename") {
+    let old_name = match resolve_name(args, 1, "compile/rename", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let new_name = match resolve_name(args, 2, "compile/rename") {
+    let new_name = match resolve_name(args, 2, "compile/rename", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
 
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/rename: no symbol table"),
-            )
-        }
-    };
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("runtime-error", "compile/rename: no symbol table"),
+        );
+    }
     let symbols = unsafe { &*symbols_ptr };
 
-    // Find the first non-primitive binding matching old_name (file-scope first).
-    let mut target_binding = None;
-    for i in 0..handle.arena.len() {
-        let binding = Binding(i as u32);
-        let inner = handle.arena.get(binding);
-        if let Some(name) = symbols.name(inner.name) {
-            if name == old_name {
-                target_binding = Some(binding);
-                break;
-            }
-        }
-    }
+    // Pick the binding named old_name that carries source spans, skipping any
+    // phantom file-scope prebind that shares the name but holds no spans.
+    let target_binding =
+        super::binding_for_name(&handle.arena, symbols, &handle.symbol_index, &old_name);
     let binding = match target_binding {
         Some(b) => b,
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "lookup-error",
                     format!("compile/rename: no binding '{}' in analysis", old_name),
                 ),
@@ -71,7 +65,7 @@ pub(super) fn prim_compile_rename(args: &[Value]) -> (SignalBits, Value) {
         _ => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "lookup-error",
                     format!("compile/rename: no source spans for '{}'", old_name),
                 ),
@@ -92,321 +86,31 @@ pub(super) fn prim_compile_rename(args: &[Value]) -> (SignalBits, Value) {
     match apply_edits(&handle.source, &mut edits) {
         Ok(new_source) => {
             let mut fields = BTreeMap::new();
-            fields.insert(kw("source"), Value::string(&*new_source));
+            fields.insert(kw("source"), ctx.string(&*new_source));
             fields.insert(kw("edits"), Value::int(count as i64));
-            (SIG_OK, Value::struct_from(fields))
+            (SIG_OK, ctx.struct_from(fields))
         }
         Err(e) => (
             SIG_ERROR,
-            error_val("rewrite-error", format!("compile/rename: {}", e)),
+            ctx.error("rewrite-error", format!("compile/rename: {}", e)),
         ),
     }
 }
 
-/// (compile/extract analysis {:from :fn :lines [s e] :name :new}) → {:source :new-function :captures :signal}
-pub(super) fn prim_compile_extract(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/extract") {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
-    let opts = match args[1].as_struct() {
-        Some(f) => f,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    "compile/extract: second argument must be a struct",
-                ),
-            )
-        }
-    };
-
-    let from_name = match sorted_struct_get(opts, &kw("from")).and_then(|v| {
-        v.as_keyword_name()
-            .map(|s| s.to_string())
-            .or_else(|| v.with_string(|s| s.to_string()))
-    }) {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("type-error", "compile/extract: :from is required"),
-            )
-        }
-    };
-
-    let (start_line, end_line) =
-        match sorted_struct_get(opts, &kw("lines")).and_then(|v| v.as_array()) {
-            Some(arr) if arr.len() == 2 => {
-                let s = arr[0].as_int().unwrap_or(0) as u32;
-                let e = arr[1].as_int().unwrap_or(0) as u32;
-                (s, e)
-            }
-            _ => {
-                return (
-                    SIG_ERROR,
-                    error_val("type-error", "compile/extract: :lines must be [start end]"),
-                )
-            }
-        };
-
-    let new_fn_name = match sorted_struct_get(opts, &kw("name")).and_then(|v| {
-        v.as_keyword_name()
-            .map(|s| s.to_string())
-            .or_else(|| v.with_string(|s| s.to_string()))
-    }) {
-        Some(n) => n,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("type-error", "compile/extract: :name is required"),
-            )
-        }
-    };
-
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/extract: no symbol table"),
-            )
-        }
-    };
-    let symbols = unsafe { &*symbols_ptr };
-
-    if start_line == 0 || end_line == 0 || start_line > end_line {
-        return (
-            SIG_ERROR,
-            error_val("range-error", "compile/extract: invalid line range"),
-        );
-    }
-
-    let line_offsets = compute_line_offsets(&handle.source);
-    let start_byte = line_offsets
-        .get((start_line - 1) as usize)
-        .copied()
-        .unwrap_or(0);
-    let end_byte = line_offsets
-        .get(end_line as usize)
-        .copied()
-        .unwrap_or(handle.source.len());
-
-    // Find the lambda and collect free vars in range.
-    let lambda = match find_named_lambda(&handle.hir, &handle.arena, symbols, &from_name) {
-        Some(l) => l,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "lookup-error",
-                    format!("compile/extract: no function '{}'", from_name),
-                ),
-            )
-        }
-    };
-
-    let mut referenced = BTreeSet::new();
-    let mut defined = BTreeSet::new();
-    let mut signal = Signal::silent();
-
-    if let HirKind::Lambda { body, .. } = &lambda.kind {
-        collect_vars_in_range(
-            body,
-            start_byte,
-            end_byte,
-            &mut referenced,
-            &mut defined,
-            &mut signal,
-        );
-    }
-
-    let free_vars: Vec<String> = referenced
-        .difference(&defined)
-        .filter(|b| !handle.arena.get(**b).is_primitive)
-        .filter_map(|b| {
-            symbols
-                .name(handle.arena.get(*b).name)
-                .map(|s| s.to_string())
-        })
-        .collect();
-
-    let extracted_body = handle.source[start_byte..end_byte].trim();
-
-    let params_str = if free_vars.is_empty() {
-        "[]".to_string()
-    } else {
-        format!("[{}]", free_vars.join(" "))
-    };
-    let new_function = format!(
-        "(defn {} {}\n  {})",
-        new_fn_name, params_str, extracted_body
-    );
-
-    let replacement = if free_vars.is_empty() {
-        format!("({})", new_fn_name)
-    } else {
-        format!("({} {})", new_fn_name, free_vars.join(" "))
-    };
-
-    // Replace extracted range with the call.
-    let mut edits = vec![Edit {
-        byte_offset: start_byte,
-        byte_len: end_byte - start_byte,
-        replacement: format!("{}\n", replacement),
-    }];
-
-    let new_source = match apply_edits(&handle.source, &mut edits) {
-        Ok(s) => s,
-        Err(e) => {
-            return (
-                SIG_ERROR,
-                error_val("rewrite-error", format!("compile/extract: {}", e)),
-            )
-        }
-    };
-
-    let captures_val = Value::array(free_vars.iter().map(|v| Value::string(&**v)).collect());
-
-    let mut fields = BTreeMap::new();
-    fields.insert(kw("source"), Value::string(&*new_source));
-    fields.insert(kw("new-function"), Value::string(&*new_function));
-    fields.insert(kw("captures"), captures_val);
-    fields.insert(kw("signal"), signal_to_value(&signal));
-    (SIG_OK, Value::struct_from(fields))
-}
-
-/// (compile/parallelize analysis [:fn-a :fn-b]) → {:safe bool :reason "..." :code "..." :signal {...}}
-pub(super) fn prim_compile_parallelize(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/parallelize") {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
-    let fn_names: Vec<String> = match args[1].as_array() {
-        Some(arr) => {
-            let mut names = Vec::new();
-            for v in arr {
-                match v
-                    .as_keyword_name()
-                    .map(|s| s.to_string())
-                    .or_else(|| v.with_string(|s| s.to_string()))
-                {
-                    Some(n) => names.push(n),
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            error_val(
-                                "type-error",
-                                "compile/parallelize: names must be keywords or strings",
-                            ),
-                        )
-                    }
-                }
-            }
-            names
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    "compile/parallelize: second argument must be an array",
-                ),
-            )
-        }
-    };
-
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/parallelize: no symbol table"),
-            )
-        }
-    };
-    let symbols = unsafe { &*symbols_ptr };
-
-    // Collect captures for each function.
-    let mut all_captures: Vec<(String, Vec<(Binding, bool)>)> = Vec::new();
-    let mut combined_signal = Signal::silent();
-
-    for name in &fn_names {
-        if let Some(sig) = handle.signal_map.get(name) {
-            combined_signal = combined_signal.combine(*sig);
-        }
-        let mut caps = Vec::new();
-        if let Some(lambda) = find_named_lambda(&handle.hir, &handle.arena, symbols, name) {
-            if let HirKind::Lambda { captures, .. } = &lambda.kind {
-                for cap in captures {
-                    let inner = handle.arena.get(cap.binding);
-                    caps.push((cap.binding, inner.is_mutated));
-                }
-            }
-        }
-        all_captures.push((name.clone(), caps));
-    }
-
-    // Check pairwise for shared mutable captures.
-    let mut shared = Vec::new();
-    for i in 0..all_captures.len() {
-        for j in (i + 1)..all_captures.len() {
-            for (b1, m1) in &all_captures[i].1 {
-                for (b2, m2) in &all_captures[j].1 {
-                    if b1 == b2 && (*m1 || *m2) {
-                        if let Some(cap_name) = symbols.name(handle.arena.get(*b1).name) {
-                            let mut f = BTreeMap::new();
-                            f.insert(kw("name"), Value::string(cap_name));
-                            let kind = if handle.arena.get(*b1).needs_capture() {
-                                "lbox"
-                            } else {
-                                "value"
-                            };
-                            f.insert(kw("kind"), Value::keyword(kind));
-                            shared.push(Value::struct_from(f));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let safe = shared.is_empty();
-    let mut fields = BTreeMap::new();
-    fields.insert(kw("safe"), Value::bool(safe));
-
-    if safe {
-        let fn_list = fn_names.join(" ");
-        let code = format!("(ev/map (fn [f] (f)) [{}])", fn_list);
-        fields.insert(
-            kw("reason"),
-            Value::string("No shared mutable captures between any pair."),
-        );
-        fields.insert(kw("code"), Value::string(&*code));
-    } else {
-        fields.insert(
-            kw("reason"),
-            Value::string("Shared mutable captures detected."),
-        );
-        fields.insert(kw("shared-captures"), Value::array(shared));
-    }
-
-    fields.insert(kw("signal"), signal_to_value(&combined_signal));
-    (SIG_OK, Value::struct_from(fields))
-}
-
 /// (compile/add-handler analysis :fn-name :signal-kind) → {:source "..." :wraps N}
-pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/add-handler") {
+pub(super) fn prim_compile_add_handler(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/add-handler", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let fn_name = match resolve_name(args, 1, "compile/add-handler") {
+    let fn_name = match resolve_name(args, 1, "compile/add-handler", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let signal_kind = match resolve_name(args, 2, "compile/add-handler") {
+    let signal_kind = match resolve_name(args, 2, "compile/add-handler", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -417,7 +121,7 @@ pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "lookup-error",
                     format!("compile/add-handler: no function '{}'", fn_name),
                 ),
@@ -432,7 +136,7 @@ pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
             _ => {
                 return (
                     SIG_ERROR,
-                    error_val(
+                    ctx.error(
                         "lookup-error",
                         format!("compile/add-handler: unknown signal '{}'", signal_kind),
                     ),
@@ -444,7 +148,7 @@ pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
     if !sig.bits.has_bit(bit) && sig.propagates & (1 << bit) == 0 {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "signal-error",
                 format!(
                     "compile/add-handler: '{}' does not emit :{}",
@@ -500,13 +204,13 @@ pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
     match apply_edits(&handle.source, &mut edits) {
         Ok(new_source) => {
             let mut fields = BTreeMap::new();
-            fields.insert(kw("source"), Value::string(&*new_source));
+            fields.insert(kw("source"), ctx.string(&*new_source));
             fields.insert(kw("wraps"), Value::int(wrap_count));
-            (SIG_OK, Value::struct_from(fields))
+            (SIG_OK, ctx.struct_from(fields))
         }
         Err(e) => (
             SIG_ERROR,
-            error_val("rewrite-error", format!("compile/add-handler: {}", e)),
+            ctx.error("rewrite-error", format!("compile/add-handler: {}", e)),
         ),
     }
 }
@@ -523,12 +227,15 @@ pub(super) fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
 /// Implementation: returns `SIG_QUERY` with payload `(tier closure arg1 arg2 ...)`;
 /// the VM's `dispatch_compile_run_on` handler does the actual work because it
 /// needs `&mut VM` access for the JIT cache, MLIR cache, and call machinery.
-pub(super) fn prim_compile_run_on(args: &[Value]) -> (SignalBits, Value) {
+pub(super) fn prim_compile_run_on(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     // Cheap front-end validation — full type checks happen in the dispatch handler.
     if args[0].as_keyword_name().is_none() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "compile/run-on: tier must be a keyword, got {}",
@@ -540,7 +247,7 @@ pub(super) fn prim_compile_run_on(args: &[Value]) -> (SignalBits, Value) {
     if args[1].as_closure().is_none() {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 format!(
                     "compile/run-on: target must be a closure, got {}",
@@ -553,9 +260,202 @@ pub(super) fn prim_compile_run_on(args: &[Value]) -> (SignalBits, Value) {
     // Forward the entire arg list to the VM dispatcher.
     (
         SIG_QUERY,
-        Value::pair(
-            Value::keyword("compile/run-on"),
-            crate::value::list(args.to_vec()),
+        ctx.pair(Value::keyword("compile/run-on"), ctx.list(args.to_vec())),
+    )
+}
+
+// ── compile/barrier-module ──────────────────────────────────────────────
+
+/// `(compile/barrier-module source name)` — compile a file in the per-form
+/// fault-barrier test mode (docs/test-runner.md § Mechanism). Returns a mutable
+/// array of `[index thunk]` pairs (one 0-arg thunk per test/expression form,
+/// each capturing the file's shared bindings), or signals an error on a
+/// compile failure / def-initializer fault (a file-level failure for the runner).
+///
+/// Implementation: returns `SIG_QUERY` with payload `(source name)`; the VM's
+/// `dispatch_barrier_module` handler does the work because it needs `&mut VM`
+/// (symbol table from context, plus re-entrant module execution).
+pub(super) fn prim_compile_barrier_module(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    for (i, label) in ["source", "name"].iter().enumerate() {
+        if args[i].with_string(|_| ()).is_none() {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!(
+                        "compile/barrier-module: {} must be a string, got {}",
+                        label,
+                        args[i].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+    (
+        SIG_QUERY,
+        ctx.pair(
+            Value::keyword("compile/barrier-module"),
+            ctx.list(args.to_vec()),
         ),
+    )
+}
+
+/// `(compile/whole-module source name)` — compile a file as ONE whole-file thunk
+/// (multi-form path): all top-level forms become the body of a single
+/// 0-arg thunk, returned as one `[0 thunk]` entry. Unlike `compile/barrier-module`
+/// (which hoists `def`/`var` eagerly and slices each expression into its own
+/// thunk), this runs every form in source order, once per tier, in isolation —
+/// matching a direct file run. See docs/test-runner.md § Multi-form files.
+///
+/// Like `compile/barrier-module`, returns `SIG_QUERY` (the VM handler does the
+/// work — it needs the driving VM's own symbol table).
+pub(super) fn prim_compile_whole_module(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    for (i, label) in ["source", "name"].iter().enumerate() {
+        if args[i].with_string(|_| ()).is_none() {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!(
+                        "compile/whole-module: {} must be a string, got {}",
+                        label,
+                        args[i].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+    (
+        SIG_QUERY,
+        ctx.pair(
+            Value::keyword("compile/whole-module"),
+            ctx.list(args.to_vec()),
+        ),
+    )
+}
+
+/// `(compile/read-forms source name)` — parse SOURCE into a list of syntax
+/// values (spans preserved), without expanding or compiling. The companion to
+/// `compile/whole-module-syntax`: the test runner reads a multi-form file
+/// ONCE in the main VM with this, then ships the resulting syntax to a worker
+/// (syntax is sendable across `os/spawn`) that compiles + runs it with its own
+/// stdlib — so the file's runtime `import`s and the worker's `ev/run` scheduler
+/// share one set of dynamic parameters. Reading needs no symbol table, so this
+/// answers directly (no VM dispatch).
+pub(super) fn prim_compile_read_forms(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let source = match args[0].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!(
+                        "compile/read-forms: source must be a string, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    let name = match args[1].with_string(|s| s.to_string()) {
+        Some(s) => s,
+        None => {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!(
+                        "compile/read-forms: name must be a string, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    match crate::reader::read_syntax_all_for(&source, &name) {
+        Ok(forms) => {
+            let vals: Vec<Value> = forms.into_iter().map(|s| ctx.syntax(s)).collect();
+            (SIG_OK, ctx.list(vals))
+        }
+        Err(e) => (SIG_ERROR, ctx.error("compile-error", e)),
+    }
+}
+
+/// `(compile/whole-module-syntax forms name)` — like `compile/whole-module`, but
+/// from a list of already-parsed syntax values (from `compile/read-forms`)
+/// instead of a source string. Returns one `[0 thunk]` entry. Returns
+/// `SIG_QUERY` (the VM handler needs the driving VM's own symbol table) so the
+/// WORKER that receives the shipped syntax compiles it against ITS OWN stdlib.
+pub(super) fn prim_compile_whole_module_syntax(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if args[1].with_string(|_| ()).is_none() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!(
+                    "compile/whole-module-syntax: name must be a string, got {}",
+                    args[1].type_name()
+                ),
+            ),
+        );
+    }
+    (
+        SIG_QUERY,
+        ctx.pair(
+            Value::keyword("compile/whole-module-syntax"),
+            ctx.list(args.to_vec()),
+        ),
+    )
+}
+
+// ── compile/dumps ────────────────────────────────────────────────────────
+
+/// `(compile/dumps source name)` — compile a module once through the real file
+/// front-end and return a struct mapping each available dump kind to its
+/// rendered text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg …
+/// :dfa … :jit … :escape …}`. These are the same artifacts `elle --dump=KIND`
+/// prints, returned in-process instead of printed-and-exit, so the test runner
+/// (`src/test.lisp`) can capture them per form into the CAS (docs/test-runner.md
+/// § CAS asset capture). A stage that fails to compile or yields nothing is
+/// omitted from the struct.
+///
+/// Implementation: returns `SIG_QUERY` with payload `(source name)`; the VM's
+/// `dispatch_compile_dumps` handler does the work because it needs the driving
+/// VM's own symbol table (same pattern as `compile/barrier-module`).
+pub(super) fn prim_compile_dumps(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    for (i, label) in ["source", "name"].iter().enumerate() {
+        if args[i].with_string(|_| ()).is_none() {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!(
+                        "compile/dumps: {} must be a string, got {}",
+                        label,
+                        args[i].type_name()
+                    ),
+                ),
+            );
+        }
+    }
+    (
+        SIG_QUERY,
+        ctx.pair(Value::keyword("compile/dumps"), ctx.list(args.to_vec())),
     )
 }

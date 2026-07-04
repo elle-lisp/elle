@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/stdin-close.lisp — verify (port/close *stdin*) cancels
 ## an in-flight read and the child program exits cleanly.
 ##

@@ -1,14 +1,17 @@
 //! Debug print, trace, and memory usage primitives
 
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, list, Value};
+use crate::value::Value;
 
 /// Prints a value with debug information
 /// (debug-print value)
-pub(crate) fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_debug_print(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     eprintln!("[DEBUG] {:?}", args[0]);
     (SIG_OK, args[0])
 }
@@ -17,9 +20,12 @@ pub(crate) fn prim_debug_print(args: &[Value]) -> (SignalBits, Value) {
 /// `(trace label value)` — prints `[TRACE] label: value` to stderr, returns value
 ///
 /// Label can be a string or symbol. Symbols are resolved to their
-/// name via the thread-local symbol table (same access pattern as
-/// string).
-pub(crate) fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
+/// name via the VM's symbol table (via `ctx.vm().symbols()`, same access
+/// pattern as string).
+pub(crate) fn prim_trace(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     if args[0]
         .with_string(|s| {
             eprintln!("[TRACE] {}: {:?}", s, args[1]);
@@ -28,14 +34,20 @@ pub(crate) fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
     {
         (SIG_OK, args[1])
     } else if let Some(sym_id) = args[0].as_symbol() {
-        let name = crate::context::resolve_symbol_name(sym_id)
+        let name = ctx
+            .vm()
+            .symbols()
+            .and_then(|s| {
+                s.name(crate::value::SymbolId(sym_id))
+                    .map(|n| n.to_string())
+            })
             .unwrap_or_else(|| format!("#<sym:{}>", sym_id));
         eprintln!("[TRACE] {}: {:?}", name, args[1]);
         (SIG_OK, args[1])
     } else {
         (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 "trace: first argument must be a string or symbol".to_string(),
             ),
@@ -46,11 +58,14 @@ pub(crate) fn prim_trace(args: &[Value]) -> (SignalBits, Value) {
 /// Returns memory usage statistics
 /// (memory-usage)
 /// Returns a list: (rss-bytes virtual-bytes)
-pub(crate) fn prim_memory_usage(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_memory_usage(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     let (rss_bytes, virtual_bytes) = get_memory_usage();
     (
         SIG_OK,
-        list(vec![
+        ctx.list(vec![
             Value::int(rss_bytes as i64),
             Value::int(virtual_bytes as i64),
         ]),
@@ -163,30 +178,30 @@ fn get_memory_usage() -> (u64, u64) {
     (0, 0)
 }
 
-/// Returns the number of interned symbols in the thread-local symbol table.
+/// Returns the number of interned symbols in the VM's symbol table
+/// (via `ctx.vm().symbols()`).
 /// (debug/symbol-count)
-pub(crate) fn prim_symbol_count(_args: &[Value]) -> (SignalBits, Value) {
-    let count = unsafe {
-        match crate::context::get_symbol_table() {
-            Some(ptr) => (*ptr).len(),
-            None => 0,
-        }
-    };
+pub(crate) fn prim_symbol_count(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    let count = ctx.vm().symbols().map_or(0, |s| s.len());
     (SIG_OK, Value::int(count as i64))
 }
 
 /// Returns the number of registered keywords in the global name table.
 /// (debug/keyword-count)
-pub(crate) fn prim_keyword_count(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_keyword_count(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
     let count = crate::value::keyword::keyword_count();
     (SIG_OK, Value::int(count as i64))
 }
 
-/// Declarative primitive definitions for debug operations.
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "debug/print",
-        func: prim_debug_print,
+// Declarative primitive definitions for debug operations.
+primitive! {
+    "debug/print" => prim_debug_print {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Prints a value with debug information to stderr",
@@ -194,10 +209,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(debug/print 42)",
         aliases: &["debug-print"],
-    },
-    PrimitiveDef {
-        name: "debug/trace",
-        func: prim_trace,
+        effect: RegionEffect::PassThrough,
+    }
+    "debug/trace" => prim_trace {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Traces execution with a label, prints to stderr, returns value",
@@ -205,38 +219,25 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "debug",
         example: "(debug/trace \"x\" 42)",
         aliases: &["trace"],
-    },
-    PrimitiveDef {
-        name: "debug/memory",
-        func: prim_memory_usage,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+        effect: RegionEffect::PassThrough,
+    }
+    "debug/memory" => prim_memory_usage {
         doc: "Returns memory usage statistics as (rss-bytes virtual-bytes)",
-        params: &[],
         category: "debug",
         example: "(debug/memory)",
         aliases: &["memory-usage"],
-    },
-    PrimitiveDef {
-        name: "debug/symbol-count",
-        func: prim_symbol_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+        effect: RegionEffect::Fresh,
+    }
+    "debug/symbol-count" => prim_symbol_count {
         doc: "Returns the number of interned symbols in the symbol table",
-        params: &[],
         category: "debug",
         example: "(debug/symbol-count)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "debug/keyword-count",
-        func: prim_keyword_count,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
+        effect: RegionEffect::Immediate,
+    }
+    "debug/keyword-count" => prim_keyword_count {
         doc: "Returns the number of registered keywords in the global name table",
-        params: &[],
         category: "debug",
         example: "(debug/keyword-count)",
-        aliases: &[],
-    },
-];
+        effect: RegionEffect::Immediate,
+    }
+}

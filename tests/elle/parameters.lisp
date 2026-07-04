@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Parameters — Racket-style dynamic bindings
 #
 # Tests for parameter, parameter?, parameterize, and fiber inheritance.
@@ -87,7 +87,6 @@
 (def p7 (parameter :default))
 (let [f (parameterize ((p7 :inside))
           (fiber/new (fn () (p7)) 1))]
-  # parameterize has unwound — p7 is back to :default here
   (assert (= (p7) :default) "p7 is :default outside parameterize")
   (fiber/resume f nil)
   (assert (= (fiber/value f) :inside)

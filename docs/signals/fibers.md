@@ -141,7 +141,7 @@ controls whether the resume value is pushed onto the stack before continuing.
 stack. The fiber's own operand stack is preserved in place.
 
 **Yield suspension** (`yield` instruction): chain of `SuspendedFrame`s from
-the yielder to the coroutine boundary. Each frame captures its operand stack.
+the yielder to the fiber boundary. Each frame captures its operand stack.
 When yield propagates through Call instructions, each caller's frame is
 appended to the chain.
 

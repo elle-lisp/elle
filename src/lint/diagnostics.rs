@@ -30,6 +30,11 @@ pub struct Diagnostic {
     pub message: String,
     pub location: Option<SourceLoc>,
     pub suggestions: Vec<String>,
+    /// The nearest enclosing named function this diagnostic occurs in, if any.
+    /// Stamped by the HIR linter so per-function consumers (e.g. the portrait
+    /// system) can attribute a finding to a function exactly, rather than by a
+    /// fragile line-range heuristic. `None` for module/top-level findings.
+    pub function: Option<String>,
 }
 
 impl Diagnostic {
@@ -47,6 +52,7 @@ impl Diagnostic {
             message: message.into(),
             location,
             suggestions: Vec::new(),
+            function: None,
         }
     }
 
@@ -137,35 +143,4 @@ impl fmt::Display for Diagnostic {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_severity_ordering() {
-        assert!(Severity::Info < Severity::Warning);
-        assert!(Severity::Warning < Severity::Error);
-    }
-
-    #[test]
-    fn test_diagnostic_creation() {
-        let loc = SourceLoc::from_line_col(5, 2);
-        let diag = Diagnostic::new(
-            Severity::Warning,
-            "W002",
-            "arity-mismatch",
-            "function expects 1 argument but got 2",
-            Some(loc),
-        );
-
-        assert_eq!(diag.severity, Severity::Warning);
-        assert_eq!(diag.rule, "arity-mismatch");
-    }
-
-    #[test]
-    fn test_diagnostic_without_location() {
-        let diag = Diagnostic::new(Severity::Info, "I001", "test-rule", "test message", None);
-
-        assert_eq!(diag.severity, Severity::Info);
-        assert!(diag.location.is_none());
-    }
-}
+mod tests;

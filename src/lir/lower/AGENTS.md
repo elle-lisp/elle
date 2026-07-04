@@ -1,17 +1,20 @@
 # lir/lower
 
-HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operations, and escape analysis.
+HIR to LIR lowering: explicit control flow, binding slot allocation, lbox operations, and region RC instruction emission.
 
 ## Responsibility
 
 - Lower HIR to explicit control flow (basic blocks, jumps)
 - Translate `Binding` references to concrete slot indices
 - Emit lbox operations for mutable captures
-- Perform escape analysis for scope allocation
-- Compute compile-time scope allocation statistics
+- Emit region RC instructions (`IncrefRegion`/`DecrefRegion` and the
+  value/cell-targeted variants) from the region solver's `RegionInfo`
 
 Does NOT:
 - Resolve bindings (that's HIR)
+- Decide escape or region assignment (that's the region solver,
+  `src/hir/regions.rs`) — the lowerer has no escape-analysis pass; it only
+  *emits* from `RegionInfo`
 - Execute code (that's VM)
 - Perform optimization (future work)
 
@@ -28,7 +31,6 @@ Does NOT:
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
 | `BlockLowerContext` | Active block for `break` lowering (block_id, result_reg, exit_label, region_depth_at_entry) |
-| `ScopeStats` | Compile-time scope allocation statistics |
 
 ## Data flow
 
@@ -42,7 +44,7 @@ Lowerer (&BindingArena)
     ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture())
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
-    ├─► perform escape analysis for scope allocation
+    ├─► emit region RC instructions from RegionInfo (regionemit.rs)
     └─► propagate HIR spans to SpannedInstr
     │
     ▼
@@ -88,67 +90,57 @@ pub struct SpannedInstr {
 
 The lowerer propagates HIR spans to LIR instructions. The emitter builds a `LocationMap` that maps bytecode offsets to source locations. This map is stored in `Closure.location_map` and used by the VM for error reporting.
 
-## Escape analysis for scope allocation
+## Region instructions
 
-Scope allocation uses `RegionEnter` and `RegionExit` instructions to mark allocation regions. The lowerer performs escape analysis to determine when a scope's allocations are safe to release at scope exit.
+Region allocation uses `IncrefRegion` and `DecrefRegion` instructions
+to manage per-region reference counts. The lowerer emits these based
+on output from the region solver (`src/hir/regions.rs`); there is no
+local escape-analysis pass that gates region instructions. See
+`docs/regions.md` for the full memory model.
 
-**Escape analysis conditions (all must hold for `let`/`letrec`):**
-1. No binding is captured by a nested lambda
-2. Body cannot suspend (`may_suspend()`)
-3. Body result is provably a immediate (`result_is_safe`)
-4. Body contains no dangerous `set` to bindings outside the scope (`body_contains_dangerous_outward_set`) — an outward set is dangerous only if the assigned value is not provably immediate
-5. Body contains no escaping `break` (`body_contains_escaping_break`) — breaks targeting blocks inside the scope are safe; only breaks targeting outer blocks are dangerous
+**Lowerer outputs from `RegionInfo`:**
+- `alloc_region[hir_id]` — the region each allocation site is born
+  into.
+- `region_data[rid].free_at` — the HirId at which the lowerer emits
+  the region's compiler-owned `DecrefRegion`.
+- `cross_region_refs` — cross-region edges that drive `IncrefRegion`
+  emission at the storage site.
 
-For `block`: conditions 1-4 plus all break values targeting this block are safe immediates and no escaping breaks.
+**`regions_demising_at(hir_id)`** is the reverse index over
+`region_data.free_at`. After lowering each HIR node, the lowerer
+iterates `regions_demising_at(hir_id)` and emits one
+`DecrefRegion(rid)` per region in that iterator.
 
-**`result_is_safe` tiers:**
-- **Tier 1**: Whitelisted immediate-returning primitives (`length`, `empty?`, `abs`, `floor`, `ceil`, `round`, `type`, `type-of`, type predicates)
-- **Tier 2**: Intrinsic operations (`BinOp`, `CmpOp`, `UnaryOp`) with correct arity
-- **Tier 3**: `Var` referencing an outer binding or a scope binding whose init is provably immediate
-- **Tier 4**: Nested `Let`/`Letrec`/`Block` where the inner result is recursively safe
-- **Tier 5**: `Match` where all arm bodies are recursively safe
-- **Tier 6**: `While` (always returns nil)
-- **Tier 7**: Breaks targeting blocks inside the scope (safe — don't exit the region)
-- **Tier 8**: Outward sets with provably immediate values (safe — don't escape heap pointers)
+There is no escape-vs-local classification. Every allocation gets its
+own region; the runtime tracks references via RC. The compiler's only
+decision is *where* in the HIR to drop the initial reference, which
+is governed by last-use liveness, not by escape analysis. The lowerer
+has **no local escape pass** — there is no `escape.rs` and no
+`ScopeStats`/`can_scope_allocate_*`; all of `regionemit.rs`'s emission
+reads the solver's `RegionInfo` directly.
 
-**Compile-time scope stats** (`ScopeStats`): The lowerer counts how many scopes were analyzed, how many qualified for scope allocation, and the first-failing condition for each rejected scope (captured, suspends, unsafe-result, outward-set, break). Access via `lowerer.scope_stats()` after `lower()` completes. Pass `--stats` to the elle CLI to print the aggregated stats to stderr on program exit (alongside JIT stats).
+There are two surviving tail-call ownership predicates. One reads the
+authoritative escape analysis (`EscapeInfo`, `src/hir/escape.rs`); the
+other is structural ownership-location, NOT escape:
 
-**`callee_return_safe` fixpoint analysis:**
-
-`precompute_return_safe()` determines whether each function's return value is
-provably non-heap-allocated (returns immediates, Vars, or results of other
-return-safe calls). Uses `result_is_safe_extended()` — identical to
-`result_is_safe()` but additionally trusts calls to functions already proven
-return-safe. This enables `tail_arg_is_safe_extended()` to see through call
-boundaries that `call_result_is_safe()` conservatively rejects (e.g.
-letrec-bound functions). Critical for backtracking patterns like nqueens where
-a non-tail call to a return-safe function appears inside an `if` in a
-tail-call argument.
-
-**`tail_arg_is_safe_extended`:**
-
-Extended version of `tail_arg_is_safe` that recurses into control flow (If,
-Cond, Begin, And, Or, Let, Letrec, Block, Match, While, Parameterize) and
-checks `callee_result_immediate` or `callee_return_safe` for Call expressions
-at any depth. Used by `body_escapes_heap_values` (rotation safety) when the
-standard flat check fails.
-
-**Known limitations and why they exist:**
-
-- **`suspends` (condition 2)**: Any let body that calls a polymorphic-signal
-  function (e.g., `map`, `filter`, `fold` with a callback) fails this
-  condition. Fixing this requires knowing the concrete signal of the callback
-  at the call site. See `signals/AGENTS.md` for signal definitions.
-
-- **`unsafe-result` (condition 3)**: Calls to user-defined functions fail
-  `result_is_safe` because we don't know their return type at the call site.
-  `callee_return_safe` partially mitigates this for rotation-safety analysis
-  and call-scoped reclamation, but `result_is_safe` remains conservative for
-  let-scope allocation decisions.
-
-These are accepted limitations. The analysis is maximally conservative to
-avoid use-after-free. False negatives (missed optimizations) are preferable
-to false positives (use-after-free bugs).
+- `control.rs::tail_arg_is_borrowed` — a tail-call argument is borrowed
+  (the env owns the capture-incref, so the frame has no transferable
+  owning reference) iff its binding is a captured upvalue
+  (`upvalue_bindings`, through `functionalize`'s `DerefCell`). This is
+  **structural** and does NOT read `EscapeInfo`: escape over-approximates
+  "the env owns it" (a born-here value that flows to a tail escapes but is
+  owned), and minting for those owned-escaping args double-releases across
+  a fiber suspend/resume — a phantom `DecrefRegion`/UAF (witnessed on
+  `contracts.lisp`). The env-ownership fact is structural lexical capture.
+- `control/call.rs::tail_callee_adopts` — the per-call callee closure
+  whose `DecrefRegion` the solver placed at this node is stranded as
+  dead code by the `TailCall`; setting `adopt_callee` makes the runtime
+  supply that decref. Two facts: region-locality (the callee has an owned
+  per-call region demising here — `decrefs_by_decref_point` minus
+  `suppressed_decref_regions`, which `EscapeInfo` cannot express) AND
+  non-escape (`EscapeInfo::lambda_escapes_definition`/
+  `binding_escapes_activation` — the escape half, replacing the old
+  region-level proxy).
 
 ## Yield as terminator
 
@@ -164,32 +156,18 @@ The emitter preserves stack state across the yield boundary via `yield_stack_sta
 
 `HirKind::Block` lowers to a result register + exit label pattern:
 1. Allocate `result_reg` and `exit_label`
-2. Push `BlockLowerContext { block_id, result_reg, exit_label, region_depth_at_entry }`
+2. Push `BlockLowerContext { block_id, result_reg, exit_label, ... }` recording the active region-demise set at entry
 3. Lower body, move result to `result_reg`
 4. Pop context, jump to `exit_label`, start new block at `exit_label`
 
 `HirKind::Break` lowers to Move + Jump:
 1. Find target block's `result_reg` and `exit_label` via `block_lower_contexts`
-2. Lower value, move to `result_reg`, jump to `exit_label`
-3. Emit compensating `RegionExit` instructions for each region entered between break site and target block
-4. Start unreachable dead-code block
+2. Lower value, move to `result_reg`
+3. Emit compensating `DecrefRegion` instructions for each region whose `free_at` lies between the break site and the target block (so the break path fires the same decrefs a fall-through exit would have)
+4. Jump to `exit_label`
+5. Start unreachable dead-code block
 
-No new bytecode instructions — break compiles to existing Move + Jump + RegionExit.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~280 | `Lowerer` struct, context, entry point, `can_scope_allocate_*` analysis |
-| `expr.rs` | ~457 | Expression lowering: literals, operators, calls |
-| `binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
-| `lambda.rs` | ~250 | fn lowering, closure capture, lbox wrapping |
-| `control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
-| `pattern.rs` | ~1135 | Pattern matching lowering: decision tree walking, constructor tests |
-| `access.rs` | ~85 | Access path loading: navigate cons/array/struct to extract values at a path |
-| `escape.rs` | ~693 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break`, `all_break_values_safe` |
-| `decision.rs` | ~100 | Decision tree compilation for pattern matching |
-
+No new bytecode instructions — break compiles to existing Move + Jump + DecrefRegion.
 ## Key instructions
 
 | Instruction | Stack effect | Notes |
@@ -215,8 +193,8 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 | `StructRest` | struct → struct | Collect all keys not in exclude set into a new immutable struct; variable-length operands: u16 count + count x u16 const_idx |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
-| `RegionEnter` | (none) | Push scope mark on FiberHeap (effective for all fibers including root) |
-| `RegionExit` | (none) | Pop scope mark and release scoped objects (effective for all fibers including root) |
+| `IncrefRegion` | (none) | Increment a region's reference count (cross-region reference taken) |
+| `DecrefRegion` | (none) | Decrement a region's reference count; free pages when RC hits 0 (sole region-demise opcode) |
 
 ## Invariants
 
@@ -232,7 +210,7 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 
 6. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
-7. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `assign`. With immutable-by-default let bindings, only `@`-prefixed bindings can be mutated, so this mask is typically sparser than before. The JIT uses this to skip `CaptureCell` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
+7. **`capture_locals_mask` is set for locals that need lboxes.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `assign`. With immutable-by-default let bindings, only `@`-prefixed bindings can be mutated, so this mask is typically sparse. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` (`src/value/capturemask.rs`), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell. (`capture_params_mask` is still a `u64` — functions don't approach 64 parameters, and the params path has no `>=64` fallback to leak through.)
 
 8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering. The emitter preserves it into `Closure.doc` without encoding it in bytecode.
 
@@ -241,8 +219,9 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 - **Adding a new special form**: Add a case in `expr.rs::lower_expr`, implement `lower_your_form` method
 - **Changing binding lowering**: Update `binding.rs`
 - **Changing control flow**: Update `control.rs`
-- **Changing pattern matching**: Update `pattern.rs` and `decision.rs`
-- **Changing escape analysis**: Update `escape.rs` and `mod.rs::can_scope_allocate_*`
+- **Changing pattern matching**: Update `pattern.rs` and `pattern/{keyed,matching,seq}.rs`
+- **Changing region RC emission**: Update `regionemit.rs` (it reads the solver's `RegionInfo`); to change *what* is escaping or *where* a region is dropped, edit the region solver in `src/hir/regions.rs`, not the lowerer
+- **Changing tail-call ownership**: Update `control.rs::tail_arg_is_borrowed` and `control/call.rs::tail_callee_adopts`
 - **Adding new bytecode instructions**: Update `expr.rs`, `control.rs`, `binding.rs`, or `lambda.rs` to emit them
 
 ## Common pitfalls
@@ -251,5 +230,5 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 - **Mixing LoadLocal and LoadCapture**: Inside lambdas, upvalues use LoadCapture; locals use LoadLocal
 - **Not emitting lbox operations**: If a binding needs an lbox, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
-- **Forgetting region cleanup**: If `RegionEnter` is emitted, ensure `RegionExit` is emitted at scope exit
-- **Not handling break compensation**: When emitting `break`, emit compensating `RegionExit` instructions for each region entered between break site and target
+- **Missing a region demise**: After lowering each HIR node, iterate `regions_demising_at(hir_id)` and emit one `DecrefRegion(rid)` per region. Forgetting to do so leaks regions.
+- **Not handling break compensation**: When emitting `break`, emit compensating `DecrefRegion` instructions for each region whose `free_at` lies between the break site and the target block

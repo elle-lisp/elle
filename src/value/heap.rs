@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::syntax::Syntax;
 use crate::value::fiber::FiberHandle;
-use crate::value::inline_slice::InlineSlice;
+use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
 // Re-export types for convenience
@@ -108,7 +108,6 @@ pub enum HeapTag {
     LArray = 7,
     LBox = 8,
     Float = 9, // For NaN values that can't be inline
-    NativeFn = 10,
     LibHandle = 12,
     ThreadHandle = 14,
     Fiber = 16,
@@ -123,6 +122,7 @@ pub enum HeapTag {
     LSet = 26,
     LSetMut = 27,
     CaptureCell = 28,
+    ClosureTemplate = 29,
 }
 
 /// All heap-allocated value types.
@@ -132,11 +132,12 @@ pub enum HeapTag {
 /// via pointer.
 ///
 /// 19 user-facing variants carry a `traits: Value` field (initialized to
-/// `Value::NIL`). The 5 infrastructure variants (Float, NativeFn, LibHandle,
-/// FFISignature, FFIType) do not carry traits.
+/// `Value::NIL`). The infrastructure variants (Float, LibHandle, FFISignature,
+/// FFIType, ClosureTemplate) do not carry traits. Native-fns are NOT here — they
+/// are immediates (`Value{TAG_NATIVE_FN, prim_id}`), no heap cell.
 pub enum HeapObject {
     /// Immutable string. Bytes stored inline in the arena.
-    LString { s: InlineSlice<u8>, traits: Value },
+    LString { s: RegionSlice<u8>, traits: Value },
 
     /// Pair cell (list pair)
     Pair(Pair),
@@ -178,7 +179,7 @@ pub enum HeapObject {
 
     /// Immutable array (fixed-length sequence, inline in arena)
     LArray {
-        elements: InlineSlice<Value>,
+        elements: RegionSlice<Value>,
         traits: Value,
     },
 
@@ -191,7 +192,7 @@ pub enum HeapObject {
 
     /// Immutable byte sequence (binary data, inline in arena)
     LBytes {
-        data: InlineSlice<u8>,
+        data: RegionSlice<u8>,
         traits: Value,
     },
 
@@ -221,9 +222,6 @@ pub enum HeapObject {
 
     /// Float value that couldn't be stored inline (NaN payload)
     Float(f64),
-
-    /// Native function (Rust function)
-    NativeFn(NativeFn),
 
     /// FFI library handle
     LibHandle(u32),
@@ -278,7 +276,7 @@ pub enum HeapObject {
 
     /// Immutable set (sorted array of values, inline in arena)
     LSet {
-        data: InlineSlice<Value>,
+        data: RegionSlice<Value>,
         traits: Value,
     },
 
@@ -288,22 +286,59 @@ pub enum HeapObject {
         data: std::rc::Rc<RefCell<BTreeSet<Value>>>,
         traits: Value,
     },
+
+    /// A region-allocated closure **template** (code object). Materialized per
+    /// execution by `MakeClosure` from a compile-time blueprint, into the same
+    /// region as the closure instance that references it (docs/impl/region-model.md
+    /// § "Constants lower as ordinary allocations" — closure templates are no
+    /// exception). Reclaimed by region RC.
+    /// Never user-visible: it carries no `traits` and is never compared,
+    /// hashed, or serialized as a user value.
+    ClosureTemplate(crate::value::closure::ClosureTemplate),
 }
 
 /// Thread handle for concurrent execution.
 ///
-/// Holds the result of a spawned thread's execution.
-/// Uses `Arc<Mutex<>>` to safely share the result across threads.
+/// Holds the result of a spawned thread's execution plus a completion
+/// channel the joiner waits on. `Arc<Mutex<>>` shares the result across
+/// threads; the worker fills it before signalling completion.
+///
+/// Completion is delivered via the channel wake protocol (`done_rx` /
+/// `done_wake`) rather than polling: after storing its result the worker
+/// sends a sentinel on `done_rx`'s channel and signals `done_wake`, so a
+/// joiner parked in `chan/select` wakes exactly once and yields to the
+/// scheduler in the meantime. `sys/thread-state` peeks `result` first (a
+/// finished thread needs no wait) and otherwise hands back a fresh
+/// `chan/receiver` over `done_rx` for the caller to select on. These are
+/// plain `Send` fields (like `result`) — not heap `Value`s — so they need
+/// no GC tracing.
 #[derive(Clone)]
 pub struct ThreadHandle {
     /// The result of the spawned thread execution, wrapped in `SendBundle` for Send.
     pub result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>,
+    /// Receiver half of the worker's completion channel. Cloned into a
+    /// fresh `chan/receiver` Value on demand (`sys/thread-state`).
+    /// `pub(crate)`: `SendableValue` is a crate-private type.
+    pub(crate) done_rx: crossbeam_channel::Receiver<crate::primitives::chan::SendableValue>,
+    /// Shared wake list for the completion channel — the worker signals
+    /// it so a parked `chan/select` over `done_rx` wakes.
+    pub(crate) done_wake: Arc<crate::primitives::chan::WakeList>,
 }
 
 impl ThreadHandle {
-    /// Create a new thread handle with a shared result slot.
-    pub fn new(result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>) -> Self {
-        ThreadHandle { result }
+    /// Create a new thread handle with a shared result slot and the
+    /// receiver/wake-list halves of its completion channel.
+    /// `pub(crate)`: takes the crate-private `SendableValue` channel type.
+    pub(crate) fn new(
+        result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>,
+        done_rx: crossbeam_channel::Receiver<crate::primitives::chan::SendableValue>,
+        done_wake: Arc<crate::primitives::chan::WakeList>,
+    ) -> Self {
+        ThreadHandle {
+            result,
+            done_rx,
+            done_wake,
+        }
     }
 }
 
@@ -335,291 +370,11 @@ impl Clone for ExternalObject {
     }
 }
 
-impl HeapObject {
-    /// Get the type tag for this heap object.
-    #[inline]
-    pub fn tag(&self) -> HeapTag {
-        match self {
-            HeapObject::LString { .. } => HeapTag::LString,
-            HeapObject::Pair(_) => HeapTag::Pair,
-            HeapObject::LArrayMut { .. } => HeapTag::LArrayMut,
-            HeapObject::LStructMut { .. } => HeapTag::LStructMut,
-            HeapObject::LStruct { .. } => HeapTag::LStruct,
-            HeapObject::Closure { .. } => HeapTag::Closure,
-            HeapObject::LArray { .. } => HeapTag::LArray,
-            HeapObject::LStringMut { .. } => HeapTag::LStringMut,
-            HeapObject::LBytes { .. } => HeapTag::LBytes,
-            HeapObject::LBytesMut { .. } => HeapTag::LBytesMut,
-            HeapObject::LBox { .. } => HeapTag::LBox,
-            HeapObject::CaptureCell { .. } => HeapTag::CaptureCell,
-            HeapObject::Float(_) => HeapTag::Float,
-            HeapObject::NativeFn(_) => HeapTag::NativeFn,
-            HeapObject::LibHandle(_) => HeapTag::LibHandle,
-            HeapObject::ThreadHandle { .. } => HeapTag::ThreadHandle,
-            HeapObject::Fiber { .. } => HeapTag::Fiber,
-            HeapObject::Syntax { .. } => HeapTag::Syntax,
-            HeapObject::FFISignature(_, _) => HeapTag::FFISignature,
-            HeapObject::FFIType(_) => HeapTag::FFIType,
-            HeapObject::ManagedPointer { .. } => HeapTag::ManagedPointer,
-            HeapObject::External { .. } => HeapTag::External,
-            HeapObject::Parameter { .. } => HeapTag::Parameter,
-            HeapObject::LSet { .. } => HeapTag::LSet,
-            HeapObject::LSetMut { .. } => HeapTag::LSetMut,
-        }
-    }
-
-    /// Get the Value-level TAG_* constant for this heap object.
-    /// Used by the allocator to stamp the tag into the returned Value.
-    #[inline]
-    pub fn value_tag(&self) -> u64 {
-        use crate::value::repr::{
-            TAG_ARRAY, TAG_ARRAY_MUT, TAG_BYTES, TAG_BYTES_MUT, TAG_CAPTURE_CELL, TAG_CLOSURE,
-            TAG_CONS, TAG_EXTERNAL, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE,
-            TAG_MANAGED_PTR, TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT, TAG_STRING,
-            TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD,
-        };
-        match self {
-            HeapObject::LString { .. } => TAG_STRING,
-            HeapObject::LStringMut { .. } => TAG_STRING_MUT,
-            HeapObject::LArray { .. } => TAG_ARRAY,
-            HeapObject::LArrayMut { .. } => TAG_ARRAY_MUT,
-            HeapObject::LStruct { .. } => TAG_STRUCT,
-            HeapObject::LStructMut { .. } => TAG_STRUCT_MUT,
-            HeapObject::Pair(_) => TAG_CONS,
-            HeapObject::Closure { .. } => TAG_CLOSURE,
-            HeapObject::LBytes { .. } => TAG_BYTES,
-            HeapObject::LBytesMut { .. } => TAG_BYTES_MUT,
-            HeapObject::LSet { .. } => TAG_SET,
-            HeapObject::LSetMut { .. } => TAG_SET_MUT,
-            HeapObject::LBox { .. } => TAG_LBOX,
-            HeapObject::CaptureCell { .. } => TAG_CAPTURE_CELL,
-            HeapObject::Fiber { .. } => TAG_FIBER,
-            HeapObject::Syntax { .. } => TAG_SYNTAX,
-            HeapObject::NativeFn(_) => TAG_NATIVE_FN,
-            HeapObject::FFISignature(_, _) => TAG_FFI_SIG,
-            HeapObject::FFIType(_) => TAG_FFI_TYPE,
-            HeapObject::LibHandle(_) => TAG_LIB_HANDLE,
-            HeapObject::ManagedPointer { .. } => TAG_MANAGED_PTR,
-            HeapObject::External { .. } => TAG_EXTERNAL,
-            HeapObject::Parameter { .. } => TAG_PARAMETER,
-            HeapObject::ThreadHandle { .. } => TAG_THREAD,
-            // Float: in the new representation ALL floats are immediate (TAG_FLOAT,
-            // payload = f64::to_bits()). HeapObject::Float must never be allocated.
-            HeapObject::Float(_) => {
-                panic!("HeapObject::Float must not be allocated — floats are now immediate")
-            }
-        }
-    }
-
-    /// Get a human-readable type name.
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            HeapObject::LString { .. } => "string",
-            HeapObject::Pair(_) => "list",
-            HeapObject::LArrayMut { .. } => "@array",
-            HeapObject::LStructMut { .. } => "@struct",
-            HeapObject::LStruct { .. } => "struct",
-            HeapObject::Closure { .. } => "closure",
-            HeapObject::LArray { .. } => "array",
-            HeapObject::LStringMut { .. } => "@string",
-            HeapObject::LBytes { .. } => "bytes",
-            HeapObject::LBytesMut { .. } => "@bytes",
-            HeapObject::LBox { .. } => "box",
-            HeapObject::CaptureCell { .. } => "capture-cell",
-            HeapObject::Float(_) => "float",
-            HeapObject::NativeFn(_) => "native-fn",
-            HeapObject::LibHandle(_) => "library-handle",
-            HeapObject::ThreadHandle { .. } => "thread-handle",
-            HeapObject::Fiber { .. } => "fiber",
-            HeapObject::Syntax { .. } => "syntax",
-            HeapObject::FFISignature(_, _) => "ffi-signature",
-            HeapObject::FFIType(_) => "ffi-type",
-            HeapObject::ManagedPointer { .. } => "ptr",
-            HeapObject::External { obj, .. } => obj.type_name,
-            HeapObject::Parameter { .. } => "parameter",
-            HeapObject::LSet { .. } => "set",
-            HeapObject::LSetMut { .. } => "@set",
-        }
-    }
-}
-
-impl std::fmt::Debug for HeapObject {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HeapObject::LString { s, .. } => {
-                write!(f, "\"{}\"", String::from_utf8_lossy(s.as_slice()))
-            }
-            HeapObject::Pair(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
-            HeapObject::LArrayMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    write!(f, "{:?}", &*borrowed)
-                } else {
-                    write!(f, "[<borrowed>]")
-                }
-            }
-            HeapObject::LStructMut { .. } => write!(f, "<@struct>"),
-            HeapObject::LStruct { .. } => write!(f, "<struct>"),
-            HeapObject::Closure { .. } => write!(f, "<closure>"),
-            HeapObject::LArray { elements, .. } => {
-                write!(f, "[")?;
-                for (i, v) in elements.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{:?}", v)?;
-                }
-                write!(f, "]")
-            }
-            HeapObject::LStringMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    write!(f, "@\"{}\"", String::from_utf8_lossy(&borrowed))
-                } else {
-                    write!(f, "@\"<borrowed>\"")
-                }
-            }
-            HeapObject::LBytes { data, .. } => {
-                write!(f, "#bytes[")?;
-                for (i, byte) in data.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{:02x}", byte)?;
-                }
-                write!(f, "]")
-            }
-            HeapObject::LBytesMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    write!(f, "#@bytes[")?;
-                    for (i, byte) in borrowed.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, " ")?;
-                        }
-                        write!(f, "{:02x}", byte)?;
-                    }
-                    write!(f, "]")
-                } else {
-                    write!(f, "#@bytes[<borrowed>]")
-                }
-            }
-            HeapObject::LBox { .. } => write!(f, "<box>"),
-            HeapObject::CaptureCell { .. } => write!(f, "<capture-cell>"),
-            HeapObject::Float(n) => write!(f, "{}", n),
-            HeapObject::NativeFn(_) => write!(f, "<native-fn>"),
-            HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),
-            HeapObject::ThreadHandle { .. } => write!(f, "<thread-handle>"),
-            HeapObject::Fiber { handle, .. } => match handle.try_with(|fib| fib.status.as_str()) {
-                Some(status) => write!(f, "<fiber:{}>", status),
-                None => write!(f, "<fiber:taken>"),
-            },
-            HeapObject::Syntax { syntax, .. } => write!(f, "#<syntax:{}>", syntax),
-            HeapObject::FFISignature(_, _) => write!(f, "<ffi-signature>"),
-            HeapObject::FFIType(desc) => write!(f, "<ffi-type:{:?}>", desc),
-            HeapObject::ManagedPointer { addr, .. } => match addr.get() {
-                Some(a) => write!(f, "<managed-pointer 0x{:x}>", a),
-                None => write!(f, "<freed-pointer>"),
-            },
-            HeapObject::External { obj, .. } => write!(f, "#<{}>", obj.type_name),
-            HeapObject::Parameter { id, .. } => write!(f, "<parameter:{}>", id),
-            HeapObject::LSet { data, .. } => write!(f, "LSet({:?})", data),
-            HeapObject::LSetMut { data, .. } => write!(f, "LSetMut({:?})", data.borrow()),
-        }
-    }
-}
+mod objimpl;
 
 // Re-export arena types and functions so existing `use crate::value::heap::{...}`
 // import sites continue working after the arena code moved to `arena.rs`.
-pub use super::arena::{
-    alloc, alloc_permanent, deref, drop_heap, heap_arena_len, heap_arena_mark, heap_arena_release,
-    ArenaGuard, ArenaMark,
-};
+pub use super::arena::{alloc, alloc_root, deref, drop_heap};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_alloc_string() {
-        let v = Value::string("hello");
-        assert!(v.is_heap());
-        assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "hello");
-    }
-
-    #[test]
-    fn test_alloc_permanent_cons() {
-        // Pair has no inner arena allocation, safe for alloc_permanent.
-        let v = alloc_permanent(HeapObject::Pair(Pair::new(Value::NIL, Value::int(1))));
-        assert!(v.is_heap());
-        unsafe {
-            let obj = deref(v);
-            match obj {
-                HeapObject::Pair(c) => assert_eq!(c.rest.as_int(), Some(1)),
-                _ => panic!("Expected Pair"),
-            }
-            drop_heap(v);
-        }
-    }
-
-    #[test]
-    fn test_arena_mark_release() {
-        let mark = heap_arena_mark();
-        let v = Value::string("temporary");
-        assert!(v.is_heap());
-        assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "temporary");
-        heap_arena_release(mark);
-    }
-
-    #[test]
-    fn test_arena_guard_raii() {
-        let before = heap_arena_len();
-        {
-            let _guard = ArenaGuard::new();
-            Value::string("guarded");
-            alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-            let during = heap_arena_len();
-            assert_eq!(during, before + 2);
-        }
-        let after = heap_arena_len();
-        assert_eq!(after, before);
-    }
-
-    #[test]
-    fn test_arena_nested_guards() {
-        let before = heap_arena_len();
-        {
-            let _outer = ArenaGuard::new();
-            Value::string("outer alloc");
-            {
-                let _inner = ArenaGuard::new();
-                Value::string("inner alloc");
-                let during_inner = heap_arena_len();
-                assert_eq!(during_inner, before + 2);
-            }
-            let after_inner = heap_arena_len();
-            assert_eq!(after_inner, before + 1);
-        }
-        let after_outer = heap_arena_len();
-        assert_eq!(after_outer, before);
-    }
-
-    #[test]
-    fn test_arena_guard_fires_on_error_path() {
-        let before = heap_arena_len();
-        let result: Result<(), String> = {
-            let _guard = ArenaGuard::new();
-            Value::string("will be freed");
-            alloc(HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
-            Err("simulated error".to_string())
-        };
-        assert!(result.is_err());
-        let after = heap_arena_len();
-        assert_eq!(after, before);
-    }
-
-    #[test]
-    fn test_heap_tag() {
-        let v = Value::string("test");
-        let s = unsafe { deref(v) };
-        assert_eq!(s.tag(), HeapTag::LString);
-        assert_eq!(s.type_name(), "string");
-    }
-}
+mod tests;

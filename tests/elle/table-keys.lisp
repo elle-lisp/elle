@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # Tests for using fibers and closures as @struct keys
 
 

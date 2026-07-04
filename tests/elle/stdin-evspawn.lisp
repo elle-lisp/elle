@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## stdin + ev/spawn interaction
 ##
 ## Regression test: port/read-line on stdin must work when a long-lived

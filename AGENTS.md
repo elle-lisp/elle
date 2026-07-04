@@ -77,7 +77,8 @@ bytecode. Error messages include file:line:col information.
   for subprocess lifecycle
 - **`port`** — Port type (file descriptor wrapper with direction, encoding, kind)
 - **`error`** — `LocationMap` for bytecode offset → source location mapping
-- **`context`** — Thread-local VM and symbol table context management
+- **`runtime`** — Per-instance `Runtime`/`RuntimeCore` owning the VM, symbol
+  table, compile context, and heap; handed out via `rt.parts()`
 - **`symbol`** — Symbol interning table
 - **`config`** — Global CLI configuration (parsed once at startup)
 

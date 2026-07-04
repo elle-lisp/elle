@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/aws.lisp — Elle-native AWS client
 ##
 ## Usage:

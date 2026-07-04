@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.
@@ -25,273 +25,346 @@
 (redis:test)
 (println "RESP self-tests passed.")
 
-# Skip if Redis is not reachable
-(let [[ok? _] (protect (tcp/connect "127.0.0.1" 6379))]
-  (when (not ok?)
-    (println "SKIP: Redis not available at 127.0.0.1:6379")
-    (exit 0)))
+# Gate the connection block on a live Redis: if it isn't reachable, the
+# (redis:with …) form below emits a loud :gated (skip with a reason) instead of
+# connecting and failing. Never (exit 0) — under the runner that would terminate
+# the whole process mid-run and silently drop every later form.
+(gate! (service-up? "127.0.0.1" 6379) "redis not running on 127.0.0.1:6379"
+       (redis:with "127.0.0.1" 6379
+                   (fn []
 
-(println "Connecting to Redis at 127.0.0.1:6379...")
+                     # ================================================================
+                     # 1. Integration tests
+                     # ================================================================
 
-(redis:with "127.0.0.1" 6379
-            (fn []
+                     (assert (= (redis:ping) "PONG") "ping")
+                     (println "  ping: ok")
 
-              # ================================================================
-              # 1. Integration tests
-              # ================================================================
+                     (assert (= (redis:echo "hello") "hello") "echo")
+                     (println "  echo: ok")
 
-              (assert (= (redis:ping) "PONG") "ping")
-              (println "  ping: ok")
+                     (clear-test-keys)
 
-              (assert (= (redis:echo "hello") "hello") "echo")
-              (println "  echo: ok")
+                     # ── String commands ─────────────────────────────────────────────
 
-              (clear-test-keys)
+                     (assert (= (redis:set "test:redis:k1" "v1") true) "set")
+                     (assert (= (redis:get "test:redis:k1") "v1") "get")
+                     (assert (nil? (redis:get "test:redis:nonexistent"))
+                             "get nil")
 
-              # ── String commands ─────────────────────────────────────────────
+                     (assert (= (redis:set "test:redis:nx" "first" :nx true)
+                                true) "set nx first")
+                     (assert (= (redis:get "test:redis:nx") "first")
+                             "get nx first")
 
-              (assert (= (redis:set "test:redis:k1" "v1") true) "set")
-              (assert (= (redis:get "test:redis:k1") "v1") "get")
-              (assert (nil? (redis:get "test:redis:nonexistent")) "get nil")
+                     (redis:set "test:redis:counter" "10")
+                     (assert (= (redis:incr "test:redis:counter") 11) "incr")
+                     (assert (= (redis:decr "test:redis:counter") 10) "decr")
+                     (assert (= (redis:incrby "test:redis:counter" 5) 15)
+                             "incrby")
+                     (assert (= (redis:decrby "test:redis:counter" 3) 12)
+                             "decrby")
 
-              (assert (= (redis:set "test:redis:nx" "first" :nx true) true)
-                      "set nx first")
-              (assert (= (redis:get "test:redis:nx") "first") "get nx first")
+                     (redis:set "test:redis:str" "hello")
+                     (redis:append "test:redis:str" " world")
+                     (assert (= (redis:get "test:redis:str") "hello world")
+                             "append")
+                     (assert (= (redis:strlen "test:redis:str") 11) "strlen")
 
-              (redis:set "test:redis:counter" "10")
-              (assert (= (redis:incr "test:redis:counter") 11) "incr")
-              (assert (= (redis:decr "test:redis:counter") 10) "decr")
-              (assert (= (redis:incrby "test:redis:counter" 5) 15) "incrby")
-              (assert (= (redis:decrby "test:redis:counter" 3) 12) "decrby")
+                     (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
+                     (let [vals (redis:mget "test:redis:m1" "test:redis:m2"
+                           "test:redis:nonexistent")]
+                       (assert (= (get vals 0) "a") "mget 0")
+                       (assert (= (get vals 1) "b") "mget 1")
+                       (assert (nil? (get vals 2)) "mget nil"))
 
-              (redis:set "test:redis:str" "hello")
-              (redis:append "test:redis:str" " world")
-              (assert (= (redis:get "test:redis:str") "hello world") "append")
-              (assert (= (redis:strlen "test:redis:str") 11) "strlen")
+                     (assert (= (redis:setnx "test:redis:setnx" "val") true)
+                             "setnx new")
+                     (assert (= (redis:setnx "test:redis:setnx" "val2") false)
+                             "setnx exists")
 
-              (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
-              (let [vals (redis:mget "test:redis:m1" "test:redis:m2"
-                                     "test:redis:nonexistent")]
-                (assert (= (get vals 0) "a") "mget 0")
-                (assert (= (get vals 1) "b") "mget 1")
-                (assert (nil? (get vals 2)) "mget nil"))
+                     (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
+                     (let [vals (redis:mget "test:redis:m1" "test:redis:m2"
+                           "test:redis:nonexistent")]
+                       (assert (= (get vals 0) "a") "mget 0")
+                       (assert (= (get vals 1) "b") "mget 1")
+                       (assert (nil? (get vals 2)) "mget nil"))
 
-              (assert (= (redis:setnx "test:redis:setnx" "val") true)
-                      "setnx new")
-              (assert (= (redis:setnx "test:redis:setnx" "val2") false)
-                      "setnx exists")
+                     (assert (= (redis:setnx "test:redis:setnx" "val") true)
+                             "setnx new")
+                     (assert (= (redis:setnx "test:redis:setnx" "val2") false)
+                             "setnx exists")
 
-              (println "  string commands: ok")
+                     (assert (= (redis:exists "test:redis:k1") true)
+                             "exists true")
+                     (assert (= (redis:exists "test:redis:nonexistent") false)
+                             "exists false")
 
-              # ── Key commands ────────────────────────────────────────────────
+                     (redis:set "test:redis:exp" "val")
+                     (assert (= (redis:expire "test:redis:exp" 100) true)
+                             "expire")
+                     (let [ttl (redis:ttl "test:redis:exp")]
+                       (assert (> ttl 0) "ttl positive"))
+                     (assert (= (redis:persist "test:redis:exp") true) "persist")
+                     (assert (= (redis:ttl "test:redis:exp") -1)
+                             "ttl after persist")
 
-              (assert (= (redis:exists "test:redis:k1") true) "exists true")
-              (assert (= (redis:exists "test:redis:nonexistent") false)
-                      "exists false")
+                     (assert (= (redis:exists "test:redis:k1") true)
+                             "exists true")
+                     (assert (= (redis:exists "test:redis:nonexistent") false)
+                             "exists false")
 
-              (redis:set "test:redis:exp" "val")
-              (assert (= (redis:expire "test:redis:exp" 100) true) "expire")
-              (let [ttl (redis:ttl "test:redis:exp")]
-                (assert (> ttl 0) "ttl positive"))
-              (assert (= (redis:persist "test:redis:exp") true) "persist")
-              (assert (= (redis:ttl "test:redis:exp") -1) "ttl after persist")
+                     (redis:set "test:redis:rename" "val")
+                     (assert (= (redis:rename "test:redis:rename"
+                                "test:redis:renamed") true) "rename")
+                     (assert (= (redis:get "test:redis:renamed") "val")
+                             "get renamed")
 
-              (assert (= (redis:type "test:redis:k1") "string") "type")
+                     (assert (>= (redis:del "test:redis:k1" "test:redis:renamed")
+                                 1) "del")
+                     (assert (= (redis:exists "test:redis:k1") false)
+                             "exists after del")
 
-              (redis:set "test:redis:rename" "val")
-              (assert (= (redis:rename "test:redis:rename" "test:redis:renamed")
-                         true) "rename")
-              (assert (= (redis:get "test:redis:renamed") "val") "get renamed")
+                     (redis:set "test:redis:rename" "val")
+                     (assert (= (redis:rename "test:redis:rename"
+                                "test:redis:renamed") true) "rename")
+                     (assert (= (redis:get "test:redis:renamed") "val")
+                             "get renamed")
 
-              (assert (>= (redis:del "test:redis:k1" "test:redis:renamed") 1)
-                      "del")
-              (assert (= (redis:exists "test:redis:k1") false)
-                      "exists after del")
+                     (assert (>= (redis:del "test:redis:k1" "test:redis:renamed")
+                                 1) "del")
+                     (assert (= (redis:exists "test:redis:k1") false)
+                             "exists after del")
 
-              (println "  key commands: ok")
+                     (redis:hset "test:redis:hash" "name" "Alice")
+                     (redis:hset "test:redis:hash" "age" "30")
 
-              # ── Hash commands ───────────────────────────────────────────────
+                     (assert (= (redis:hget "test:redis:hash" "name") "Alice")
+                             "hget")
+                     (assert (nil? (redis:hget "test:redis:hash" "missing"))
+                             "hget nil")
+                     (assert (= (redis:hexists "test:redis:hash" "name") true)
+                             "hexists true")
+                     (assert (= (redis:hexists "test:redis:hash" "missing")
+                                false) "hexists false")
 
-              (redis:hset "test:redis:hash" "name" "Alice")
-              (redis:hset "test:redis:hash" "age" "30")
+                     (let [h (redis:hgetall "test:redis:hash")]
+                       (assert (= (get h "name") "Alice") "hgetall name")
+                       (assert (= (get h "age") "30") "hgetall age"))
 
-              (assert (= (redis:hget "test:redis:hash" "name") "Alice") "hget")
-              (assert (nil? (redis:hget "test:redis:hash" "missing")) "hget nil")
-              (assert (= (redis:hexists "test:redis:hash" "name") true)
-                      "hexists true")
-              (assert (= (redis:hexists "test:redis:hash" "missing") false)
-                      "hexists false")
+                     (assert (= (redis:hget "test:redis:hash" "name") "Alice")
+                             "hget")
+                     (assert (nil? (redis:hget "test:redis:hash" "missing"))
+                             "hget nil")
+                     (assert (= (redis:hexists "test:redis:hash" "name") true)
+                             "hexists true")
+                     (assert (= (redis:hexists "test:redis:hash" "missing")
+                                false) "hexists false")
 
-              (let [h (redis:hgetall "test:redis:hash")]
-                (assert (= (get h "name") "Alice") "hgetall name")
-                (assert (= (get h "age") "30") "hgetall age"))
+                     (redis:hmset "test:redis:hm" "a" "1" "b" "2" "c" "3")
+                     (let [vals (redis:hmget "test:redis:hm" "a" "c" "missing")]
+                       (assert (= (get vals 0) "1") "hmget 0")
+                       (assert (= (get vals 1) "3") "hmget 1")
+                       (assert (nil? (get vals 2)) "hmget nil"))
 
-              (assert (= (redis:hlen "test:redis:hash") 2) "hlen")
-              (redis:hdel "test:redis:hash" "age")
-              (assert (= (redis:hlen "test:redis:hash") 1) "hlen after hdel")
+                     (redis:hset "test:redis:hinc" "n" "10")
+                     (assert (= (redis:hincrby "test:redis:hinc" "n" 5) 15)
+                             "hincrby")
 
-              (redis:hmset "test:redis:hm" "a" "1" "b" "2" "c" "3")
-              (let [vals (redis:hmget "test:redis:hm" "a" "c" "missing")]
-                (assert (= (get vals 0) "1") "hmget 0")
-                (assert (= (get vals 1) "3") "hmget 1")
-                (assert (nil? (get vals 2)) "hmget nil"))
+                     (println "  hash commands: ok")
 
-              (redis:hset "test:redis:hinc" "n" "10")
-              (assert (= (redis:hincrby "test:redis:hinc" "n" 5) 15) "hincrby")
+                     # ── List commands ───────────────────────────────────────────────
 
-              (println "  hash commands: ok")
+                     (redis:rpush "test:redis:list" "a" "b" "c")
+                     (assert (= (redis:llen "test:redis:list") 3) "llen")
+                     (assert (= (redis:lindex "test:redis:list" 0) "a")
+                             "lindex 0")
+                     (assert (= (redis:lindex "test:redis:list" 2) "c")
+                             "lindex 2")
 
-              # ── List commands ───────────────────────────────────────────────
+                     (let [range (redis:lrange "test:redis:list" 0 -1)]
+                       (assert (= (length range) 3) "lrange length")
+                       (assert (= (get range 0) "a") "lrange 0")
+                       (assert (= (get range 2) "c") "lrange 2"))
 
-              (redis:rpush "test:redis:list" "a" "b" "c")
-              (assert (= (redis:llen "test:redis:list") 3) "llen")
-              (assert (= (redis:lindex "test:redis:list" 0) "a") "lindex 0")
-              (assert (= (redis:lindex "test:redis:list" 2) "c") "lindex 2")
+                     (redis:lpush "test:redis:list" "z")
+                     (assert (= (redis:lpop "test:redis:list") "z") "lpop")
+                     (assert (= (redis:rpop "test:redis:list") "c") "rpop")
 
-              (let [range (redis:lrange "test:redis:list" 0 -1)]
-                (assert (= (length range) 3) "lrange length")
-                (assert (= (get range 0) "a") "lrange 0")
-                (assert (= (get range 2) "c") "lrange 2"))
+                     (redis:lset "test:redis:list" 0 "A")
+                     (assert (= (redis:lindex "test:redis:list" 0) "A") "lset")
 
-              (redis:lpush "test:redis:list" "z")
-              (assert (= (redis:lpop "test:redis:list") "z") "lpop")
-              (assert (= (redis:rpop "test:redis:list") "c") "rpop")
+                     (println "  list commands: ok")
 
-              (redis:lset "test:redis:list" 0 "A")
-              (assert (= (redis:lindex "test:redis:list" 0) "A") "lset")
+                     # ── Set commands ────────────────────────────────────────────────
 
-              (println "  list commands: ok")
+                     (redis:sadd "test:redis:set1" "a" "b" "c")
+                     (assert (= (redis:scard "test:redis:set1") 3) "scard")
+                     (assert (= (redis:sismember "test:redis:set1" "a") true)
+                             "sismember true")
+                     (assert (= (redis:sismember "test:redis:set1" "z") false)
+                             "sismember false")
 
-              # ── Set commands ────────────────────────────────────────────────
+                     (redis:srem "test:redis:set1" "c")
+                     (assert (= (redis:scard "test:redis:set1") 2)
+                             "scard after srem")
 
-              (redis:sadd "test:redis:set1" "a" "b" "c")
-              (assert (= (redis:scard "test:redis:set1") 3) "scard")
-              (assert (= (redis:sismember "test:redis:set1" "a") true)
-                      "sismember true")
-              (assert (= (redis:sismember "test:redis:set1" "z") false)
-                      "sismember false")
+                     (redis:sadd "test:redis:set2" "b" "c" "d")
+                     (let [u (redis:sunion "test:redis:set1" "test:redis:set2")]
+                       (assert (>= (length u) 3) "sunion"))
+                     (let [i (redis:sinter "test:redis:set1" "test:redis:set2")]
+                       (assert (>= (length i) 1) "sinter"))
 
-              (redis:srem "test:redis:set1" "c")
-              (assert (= (redis:scard "test:redis:set1") 2) "scard after srem")
+                     (println "  set commands: ok")
 
-              (redis:sadd "test:redis:set2" "b" "c" "d")
-              (let [u (redis:sunion "test:redis:set1" "test:redis:set2")]
-                (assert (>= (length u) 3) "sunion"))
-              (let [i (redis:sinter "test:redis:set1" "test:redis:set2")]
-                (assert (>= (length i) 1) "sinter"))
+                     # ── Sorted set commands ─────────────────────────────────────────
 
-              (println "  set commands: ok")
+                     (redis:zadd "test:redis:zset" 1 "a")
+                     (redis:zadd "test:redis:zset" 2 "b")
+                     (redis:zadd "test:redis:zset" 3 "c")
 
-              # ── Sorted set commands ─────────────────────────────────────────
+                     (assert (= (redis:zcard "test:redis:zset") 3) "zcard")
+                     (assert (= (redis:zscore "test:redis:zset" "b") "2")
+                             "zscore")
+                     (assert (= (redis:zrank "test:redis:zset" "a") 0) "zrank")
 
-              (redis:zadd "test:redis:zset" 1 "a")
-              (redis:zadd "test:redis:zset" 2 "b")
-              (redis:zadd "test:redis:zset" 3 "c")
+                     (let [range (redis:zrange "test:redis:zset" 0 -1)]
+                       (assert (= (length range) 3) "zrange length")
+                       (assert (= (get range 0) "a") "zrange 0"))
 
-              (assert (= (redis:zcard "test:redis:zset") 3) "zcard")
-              (assert (= (redis:zscore "test:redis:zset" "b") "2") "zscore")
-              (assert (= (redis:zrank "test:redis:zset" "a") 0) "zrank")
+                     (redis:zrem "test:redis:zset" "c")
+                     (assert (= (redis:zcard "test:redis:zset") 2)
+                             "zcard after zrem")
 
-              (let [range (redis:zrange "test:redis:zset" 0 -1)]
-                (assert (= (length range) 3) "zrange length")
-                (assert (= (get range 0) "a") "zrange 0"))
+                     (println "  sorted set commands: ok")
 
-              (redis:zrem "test:redis:zset" "c")
-              (assert (= (redis:zcard "test:redis:zset") 2) "zcard after zrem")
+                     # ── Pipeline ────────────────────────────────────────────────────
 
-              (println "  sorted set commands: ok")
+                     (redis:set "test:redis:p1" "x")
+                     (redis:set "test:redis:p2" "y")
+                     (let [results (redis:pipeline (list "GET" "test:redis:p1")
+                           (list "GET" "test:redis:p2") (list "PING"))]
+                       (assert (= (get results 0) "x") "pipeline get 0")
+                       (assert (= (get results 1) "y") "pipeline get 1")
+                       (assert (= (get results 2) "PONG") "pipeline ping"))
 
-              # ── Pipeline ────────────────────────────────────────────────────
+                     (println "  pipeline: ok")
 
-              (redis:set "test:redis:p1" "x")
-              (redis:set "test:redis:p2" "y")
-              (let [results (redis:pipeline (list "GET" "test:redis:p1")
-                    (list "GET" "test:redis:p2") (list "PING"))]
-                (assert (= (get results 0) "x") "pipeline get 0")
-                (assert (= (get results 1) "y") "pipeline get 1")
-                (assert (= (get results 2) "PONG") "pipeline ping"))
+                     # ── DBSIZE ──────────────────────────────────────────────────────
 
-              (println "  pipeline: ok")
+                     (let [sz (redis:dbsize)]
+                       (assert (> sz 0) "dbsize"))
+                     (println "  dbsize: ok")
 
-              # ── DBSIZE ──────────────────────────────────────────────────────
+                     # ================================================================
+                     # 2. Stress tests
+                     # ================================================================
 
-              (let [sz (redis:dbsize)]
-                (assert (> sz 0) "dbsize"))
-              (println "  dbsize: ok")
+                     (clear-test-keys)
 
-              # ================================================================
-              # 2. Stress tests
-              # ================================================================
+                     # 100 PINGs
+                     (def @i 0)
+                     (while (< i 100)
+                       (assert (= (redis:ping) "PONG")
+                               (concat "ping failed at " (string i)))
+                       (assign i (+ i 1)))
+                     (println "  100 pings: ok")
 
-              (clear-test-keys)
+                     # 50 SET/GET pairs
+                     (assign i 0)
+                     (while (< i 50)
+                       (let [key (concat "test:redis:sg:" (string i))
+                             val (concat "value-" (string i))]
+                         (assert (= (redis:set key val) true)
+                                 (concat "set failed at " (string i)))
+                         (assert (= (redis:get key) val)
+                                 (concat "get failed at " (string i))))
+                       (assign i (+ i 1)))
+                     (println "  50 set/get pairs: ok")
 
-              # 100 PINGs
-              (def @i 0)
-              (while (< i 100)
-                (assert (= (redis:ping) "PONG")
-                        (concat "ping failed at " (string i)))
-                (assign i (+ i 1)))
-              (println "  100 pings: ok")
+                     # Mixed response types
+                     (clear-test-keys)
+                     (redis:set "test:redis:k1" "v1")
+                     (redis:get "test:redis:k1")
+                     (redis:get "test:redis:nonexistent")
+                     (redis:set "test:redis:nx" "first" :nx true)
+                     (redis:get "test:redis:nx")
+                     (redis:set "test:redis:counter" "10")
+                     (redis:incr "test:redis:counter")
+                     (redis:decr "test:redis:counter")
+                     (redis:incrby "test:redis:counter" 5)
+                     (redis:decrby "test:redis:counter" 3)
+                     (redis:set "test:redis:str" "hello")
+                     (redis:append "test:redis:str" " world")
+                     (redis:get "test:redis:str")
+                     (redis:strlen "test:redis:str")
+                     (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
+                     (redis:mget "test:redis:m1" "test:redis:m2"
+                                 "test:redis:nonexistent")
+                     (redis:setnx "test:redis:setnx" "val")
+                     (redis:setnx "test:redis:setnx" "val2")
+                     (assert (= (redis:exists "test:redis:k1") true)
+                             "stress exists true")
+                     (assert (= (redis:exists "test:redis:nonexistent") false)
+                             "stress exists false")
+                     (println "  mixed commands: ok")
 
-              # 50 SET/GET pairs
-              (assign i 0)
-              (while (< i 50)
-                (let [key (concat "test:redis:sg:" (string i))
-                      val (concat "value-" (string i))]
-                  (assert (= (redis:set key val) true)
-                          (concat "set failed at " (string i)))
-                  (assert (= (redis:get key) val)
-                          (concat "get failed at " (string i))))
-                (assign i (+ i 1)))
-              (println "  50 set/get pairs: ok")
+                     # ── ev/spawn inside redis-with ─────────────────────────────────
+                     #
+                     # Regression: redis:with binds *redis-port* via parameterize.
+                     # A fiber spawned with ev/spawn inside the body is resumed
+                     # later by the scheduler, whose own param_frames do not
+                     # contain *redis-port*.  Only creation-time inheritance in
+                     # fiber/new makes the child see the connection.  Without it
+                     # the redis:get call fails with :no-connection.
 
-              # Mixed response types
-              (clear-test-keys)
-              (redis:set "test:redis:k1" "v1")
-              (redis:get "test:redis:k1")
-              (redis:get "test:redis:nonexistent")
-              (redis:set "test:redis:nx" "first" :nx true)
-              (redis:get "test:redis:nx")
-              (redis:set "test:redis:counter" "10")
-              (redis:incr "test:redis:counter")
-              (redis:decr "test:redis:counter")
-              (redis:incrby "test:redis:counter" 5)
-              (redis:decrby "test:redis:counter" 3)
-              (redis:set "test:redis:str" "hello")
-              (redis:append "test:redis:str" " world")
-              (redis:get "test:redis:str")
-              (redis:strlen "test:redis:str")
-              (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
-              (redis:mget "test:redis:m1" "test:redis:m2"
-                          "test:redis:nonexistent")
-              (redis:setnx "test:redis:setnx" "val")
-              (redis:setnx "test:redis:setnx" "val2")
-              (assert (= (redis:exists "test:redis:k1") true)
-                      "stress exists true")
-              (assert (= (redis:exists "test:redis:nonexistent") false)
-                      "stress exists false")
-              (println "  mixed commands: ok")
+                     # Mixed response types
+                     (clear-test-keys)
+                     (redis:set "test:redis:k1" "v1")
+                     (redis:get "test:redis:k1")
+                     (redis:get "test:redis:nonexistent")
+                     (redis:set "test:redis:nx" "first" :nx true)
+                     (redis:get "test:redis:nx")
+                     (redis:set "test:redis:counter" "10")
+                     (redis:incr "test:redis:counter")
+                     (redis:decr "test:redis:counter")
+                     (redis:incrby "test:redis:counter" 5)
+                     (redis:decrby "test:redis:counter" 3)
+                     (redis:set "test:redis:str" "hello")
+                     (redis:append "test:redis:str" " world")
+                     (redis:get "test:redis:str")
+                     (redis:strlen "test:redis:str")
+                     (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
+                     (redis:mget "test:redis:m1" "test:redis:m2"
+                                 "test:redis:nonexistent")
+                     (redis:setnx "test:redis:setnx" "val")
+                     (redis:setnx "test:redis:setnx" "val2")
+                     (assert (= (redis:exists "test:redis:k1") true)
+                             "stress exists true")
+                     (assert (= (redis:exists "test:redis:nonexistent") false)
+                             "stress exists false")
+                     (println "  mixed commands: ok")
 
-              # ── ev/spawn inside redis-with ─────────────────────────────────
-              #
-              # Regression: redis:with binds *redis-port* via parameterize.
-              # A fiber spawned with ev/spawn inside the body is resumed
-              # later by the scheduler, whose own param_frames do not
-              # contain *redis-port*.  Only creation-time inheritance in
-              # fiber/new makes the child see the connection.  Without it
-              # the redis:get call fails with :no-connection.
+                     # ── ev/spawn inside redis-with ─────────────────────────────────
+                     #
+                     # Regression: redis:with binds *redis-port* via parameterize.
+                     # A fiber spawned with ev/spawn inside the body is resumed
+                     # later by the scheduler, whose own param_frames do not
+                     # contain *redis-port*.  Only creation-time inheritance in
+                     # fiber/new makes the child see the connection.  Without it
+                     # the redis:get call fails with :no-connection.
 
-              (redis:set "test:redis:spawn-canary" "preset")
-              (let [result-box (box nil)
-                    f (ev/spawn (fn []
-                                  (rebox result-box
-                                  (redis:get "test:redis:spawn-canary"))))]
-                (ev/join f)
-                (assert (= (unbox result-box) "preset")
-                        "spawned fiber sees *redis-port* inherited from spawner"))
-              (println "  ev/spawn inside redis-with: ok")
+                     (redis:set "test:redis:spawn-canary" "preset")
+                     (let [result-box (box nil)
+                           f (ev/spawn (fn []
+                                         (rebox result-box
+                                         (redis:get "test:redis:spawn-canary"))))]
+                       (ev/join f)
+                       (assert (= (unbox result-box) "preset")
+                               "spawned fiber sees *redis-port* inherited from spawner"))
+                     (println "  ev/spawn inside redis-with: ok")
 
-              # ── Cleanup ─────────────────────────────────────────────────────
+                     # ── Cleanup ─────────────────────────────────────────────────────
 
-              (clear-test-keys)
-              (println "redis: all tests passed")))
+                     (clear-test-keys)
+                     (println "redis: all tests passed"))))

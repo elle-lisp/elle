@@ -1,6 +1,22 @@
 // Debug test for printing raw bytecode
-use elle::pipeline::compile;
 use elle::symbol::SymbolTable;
+
+// Local `compile` shim preserving the pre-CompileCtx arity. The test source
+// uses stdlib (`nil?`), so load the stdlib: it must be in `cctx.meta` for name
+// resolution, while its export closures live on a throwaway VM (this test only
+// inspects the compiled bytecode, it never executes).
+fn compile(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<elle::CompileResult, String> {
+    let mut vm = elle::vm::VM::new();
+    let _ = elle::register_primitives(&mut vm, symbols);
+    let mut cctx = elle::pipeline::CompileCtx::new();
+    vm.set_symbols(symbols as *mut SymbolTable);
+    elle::init_stdlib(&mut vm, symbols, &mut cctx);
+    elle::pipeline::compile(source, symbols, &mut cctx, source_name)
+}
 
 fn setup() -> (SymbolTable, elle::vm::VM) {
     let mut vm = elle::vm::VM::new();

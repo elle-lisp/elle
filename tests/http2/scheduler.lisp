@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/http2/scheduler.lisp — h2 client+server in the same scheduler
 ## See tests/http2/server.lisp for comprehensive server coverage.
 

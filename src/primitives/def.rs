@@ -9,6 +9,129 @@ use crate::value::types::{Arity, PrimFn};
 use crate::value::{SymbolId, Value};
 use std::collections::HashMap;
 
+/// Statically known return type of a primitive, consumed by type
+/// inference (`hir::typeinfer`).
+///
+/// This is the single source of truth: inference reads it through
+/// `registration::def_by_name` instead of keeping a parallel
+/// name→type string table that silently drifts when primitives are
+/// renamed, aliased, or added. `Unknown` (the default) means "no
+/// static claim" — inference falls back to Top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetType {
+    /// Not statically known (the default).
+    Unknown,
+    Int,
+    Bool,
+    String,
+    /// Mutable string (`@string`). Sound only for a primitive that *always*
+    /// yields a mutable string (the `@string` constructor builds fresh; the
+    /// `bytes`/`@bytes` lesson: a coercion that inherits the argument's
+    /// mutability is NOT a clean `Mutable*`/immutable return type).
+    MutableString,
+    Keyword,
+    Bytes,
+    MutableBytes,
+    Array,
+    MutableArray,
+    Struct,
+    MutableStruct,
+    Set,
+    MutableSet,
+    /// Returns its first argument (mutating pass-throughs).
+    FirstArg,
+}
+
+/// Declared region behavior of a primitive — the native-call analogue of
+/// Rule 2's opaque-call exception and Rule 5's escape list
+/// (docs/impl/region-effects.md "Native region effects: declared, not guessed").
+///
+/// The region solver keys the opaque-call arg clique on this:
+/// `Immediate`/`Fresh`/`PassThrough` calls record no may-store edges
+/// between their heap arguments; `Stores` (and `Sends`, identically) record
+/// directed edges from the listed arguments only; `Mixed` and `Unknown`
+/// (the default) keep the full mutual clique — the conservative worst case
+/// (over-keep, never mis-free). `Sends` additionally marks the listed args
+/// as fiber-frontier crossings for the ownership forest (the **send** Shared
+/// seed) — see the variant doc.
+///
+/// A declaration is a soundness claim, so it is checked forever: in debug
+/// builds `dispatch_native_call` compares the declared effect against
+/// `region_of(result)` after every normally-completing native call (the
+/// declaration oracle) and panics on a lie, naming the primitive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionEffect {
+    /// The result is always an immediate (int, float, bool, nil,
+    /// keyword); no argument is stored anywhere that outlives the call.
+    Immediate,
+    /// A heap result is freshly allocated in the call's own result
+    /// region; no argument is stored anywhere *outside* the result. The
+    /// result MAY embed references to the arguments (`pair`, `list`,
+    /// struct constructors) — those are alloc-scan counted (Rule 5), so
+    /// an embedding constructor is `Fresh`, not `Stores`. (An immediate
+    /// result — e.g. a nil error-path return — is always permitted; the
+    /// claim constrains the heap case. Same for the variants below.)
+    Fresh,
+    /// A heap result is one of the arguments or a value living in an
+    /// argument's region (or an immediate); no argument is stored.
+    /// The dispatch pass-through retain hands the caller its counted
+    /// reference.
+    PassThrough,
+    /// The listed (0-based) arguments may be stored into another
+    /// argument or an external structure without a runtime count the
+    /// solver can rely on. A heap result is fresh. Stores into the
+    /// result are `Fresh` (alloc-scan counted); a funnel-storing native
+    /// declares `Funnel`.
+    Stores { args: &'static [usize] },
+    /// Like `Stores`, but the listed arguments cross a **fiber boundary**:
+    /// they are handed to another fiber (`chan/send`'s message rides the
+    /// channel to the receiving fiber, by pointer under the single-threaded
+    /// scheduler). The solver treats the edge/lifetime accounting exactly as
+    /// `Stores` — the stored arg is increfed and kept alive in the channel
+    /// buffer. The *escape* of the message is the escape analysis's fiber/send
+    /// facet (`hir::escape`), the **send** half of the ownership forest's
+    /// fiber-facet Shared seed. The
+    /// distinction from `Stores` is the *frontier*: a `Stores` into a local
+    /// aggregate or a callback (`ffi/callback`) is containment and stays an
+    /// Owned-candidate; a `Sends` leaves the fiber and cannot be Owned. A heap
+    /// result is fresh (`chan/send` returns a fresh `[:ok]`), so the
+    /// declaration oracle's result-side check is identical to `Stores`.
+    Sends { args: &'static [usize] },
+    /// Every argument store goes through the mutable-store funnel
+    /// (arena.rs `push_with_incref`-style, runtime-counted), and the
+    /// result may be fresh OR pass-through (`put` copies an immutable
+    /// struct, returns a mutable one). No solver edges — a compile-time
+    /// clique incref would double-count the funnel's runtime incref
+    /// against the container's single free-time cascade decref (the
+    /// leakcollect.lisp t11 / leakfiber.lisp t14 `put`/`push` tiers
+    /// pin this). No result-side
+    /// oracle constraint, exactly as `Mixed`.
+    Funnel,
+    /// Examined, and confirmed to store NO argument (every argument is read
+    /// or copied out — into a Rust `String`/`Vec`, the kernel, a fresh
+    /// structure — never retained uncounted), but the result is non-fresh and
+    /// non-pass-through: it lives in neither the call's own region nor an
+    /// argument's (e.g. a value minted on the scheduler heap and delivered by
+    /// a fiber resume — `subprocess/exec`'s process struct). `Mixed` minus the
+    /// store: NO arg clique (nothing is stored, so the clique would only leak)
+    /// and no result-side oracle constraint (the result may live anywhere).
+    /// The clique is keyed on the *store*, not the result shape, so a no-store
+    /// opaque-result native is `Opaque`, never `Mixed`
+    /// (docs/impl/region-effects.md § Opaque).
+    Opaque,
+    /// Examined, and the native stores arguments *uncounted* (the property
+    /// the arg clique exists to cover) — and/or returns a result that is
+    /// neither always-fresh nor always-pass-through. A positive declaration —
+    /// "we read it; this is the honest worst case." A native that stores
+    /// nothing but merely returns a non-fresh result is `Opaque`, not `Mixed`.
+    Mixed,
+    /// Nobody has looked (the default). Unexamined primitives, every
+    /// plugin-supplied definition, and user-supplied functions.
+    /// Operationally identical to `Mixed` (full arg clique, no oracle
+    /// check); epistemically the declaration work queue.
+    Unknown,
+}
+
 /// Declarative definition of a primitive function.
 ///
 /// All metadata for a primitive lives here. Each primitive module
@@ -38,6 +161,13 @@ pub struct PrimitiveDef {
     /// Aliases — additional names that resolve to the same function.
     /// Registered with identical metadata.
     pub aliases: &'static [&'static str],
+    /// Declared region behavior. See [`RegionEffect`]. The region solver
+    /// keys the opaque-call arg clique on this, and the declaration
+    /// oracle (debug builds) checks the result side after every native
+    /// call.
+    pub effect: RegionEffect,
+    /// Statically known return type, for type inference. See [`RetType`].
+    pub ret: RetType,
 }
 
 impl PrimitiveDef {
@@ -53,19 +183,106 @@ impl PrimitiveDef {
         category: "",
         example: "",
         aliases: &[],
+        effect: RegionEffect::Unknown,
+        ret: RetType::Unknown,
     };
 }
 
 /// Placeholder function for DEFAULT — should never be called.
 const fn _default_prim(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[crate::value::Value],
 ) -> (crate::value::fiber::SignalBits, crate::value::Value) {
     panic!("PrimitiveDef::DEFAULT func called — this is a bug")
 }
 
+/// Declare primitive `PrimitiveDef`s. One entry is
+/// `"elle-name" => rust_func { key: value, ... }`; only `name` and `func`
+/// are required, every other field defaults to `PrimitiveDef::DEFAULT`.
+///
+/// Three forms:
+///
+/// - **Anonymous table** — emits `pub(crate) const PRIMITIVES: &[PrimitiveDef]`,
+///   the per-module registration table:
+///
+///   ```ignore
+///   primitive! {
+///       "math/sqrt" => prim_sqrt {
+///           signal: Signal::errors(), arity: Arity::Exact(1),
+///           doc: "Square root.", params: &["x"],
+///           category: "math", example: "(math/sqrt 16)",
+///           aliases: &["sqrt"],
+///       }
+///       "and" => prim_and { arity: Arity::AtLeast(0), category: "logic" }
+///   }
+///   ```
+///
+/// - **Named table** — same, but a caller-chosen const name and visibility,
+///   for the feature-gated side tables:
+///
+///   ```ignore
+///   primitive!(pub(crate) const CALLBACK_PRIMITIVES =
+///       "ffi/call" => prim_ffi_call { arity: Arity::AtLeast(2) }
+///   );
+///   ```
+///
+/// - **Single static** — one `static`, for the trait-method handles and the
+///   ad-hoc no-op def:
+///
+///   ```ignore
+///   primitive!(static SEQ_FIRST = "trait:Sequence:first" => trait_seq_first {
+///       signal: Signal::errors(), arity: Arity::Exact(1), effect: RegionEffect::Mixed
+///   });
+///   ```
+macro_rules! primitive {
+    // Single static def. Forwards outer attributes (doc comments, `#[cfg]`).
+    ( $(#[$meta:meta])* $vis:vis static $id:ident = $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } ) => {
+        $(#[$meta])*
+        #[allow(clippy::needless_update)]
+        $vis static $id: crate::primitives::def::PrimitiveDef = crate::primitives::def::PrimitiveDef {
+            name: $name,
+            func: $func,
+            $( $key : $val, )*
+            ..crate::primitives::def::PrimitiveDef::DEFAULT
+        };
+    };
+
+    // Named const table. Forwards outer attributes (doc comments, `#[cfg]`).
+    ( $(#[$meta:meta])* $vis:vis const $tbl:ident = $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
+        $(#[$meta])*
+        $vis const $tbl: &[crate::primitives::def::PrimitiveDef] = &[
+            $(
+                #[allow(clippy::needless_update)]
+                crate::primitives::def::PrimitiveDef {
+                    name: $name,
+                    func: $func,
+                    $( $key : $val, )*
+                    ..crate::primitives::def::PrimitiveDef::DEFAULT
+                }
+            ),*
+        ];
+    };
+
+    // Anonymous `pub(crate) const PRIMITIVES` table.
+    ( $( $name:literal => $func:ident { $( $key:ident : $val:expr ),* $(,)? } )* ) => {
+        pub(crate) const PRIMITIVES: &[crate::primitives::def::PrimitiveDef] = &[
+            $(
+                #[allow(clippy::needless_update)]
+                crate::primitives::def::PrimitiveDef {
+                    name: $name,
+                    func: $func,
+                    $( $key : $val, )*
+                    ..crate::primitives::def::PrimitiveDef::DEFAULT
+                }
+            ),*
+        ];
+    };
+}
+
 /// No-op primitive: returns (SIG_OK, nil). Used by ad-hoc Value::native_fn
 /// creation in tests and FFI wrappers.
 fn _noop_prim(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[crate::value::Value],
 ) -> (crate::value::fiber::SignalBits, crate::value::Value) {
     (
@@ -74,19 +291,14 @@ fn _noop_prim(
     )
 }
 
-/// A silent, no-op PrimitiveDef for ad-hoc `Value::native_fn` creation.
-/// Used by tests and FFI wrappers that need a `&'static PrimitiveDef`.
-pub static NOOP_PRIM: PrimitiveDef = PrimitiveDef {
-    name: "<noop>",
-    func: _noop_prim,
-    signal: Signal::silent(),
-    arity: Arity::AtLeast(0),
-    doc: "",
-    params: &[],
-    category: "",
-    example: "",
-    aliases: &[],
-};
+primitive!(
+    /// A silent, no-op PrimitiveDef for ad-hoc `Value::native_fn` creation.
+    /// Used by tests and FFI wrappers that need a `&'static PrimitiveDef`.
+    pub static NOOP_PRIM = "<noop>" => _noop_prim {
+        signal: Signal::silent(),
+        arity: Arity::AtLeast(0),
+    }
+);
 
 /// Documentation info for a named form (primitive, special form, or macro).
 /// Stored at runtime for `doc` lookup.
@@ -159,6 +371,18 @@ pub struct PrimitiveMeta {
     /// values so the lowerer can emit `LoadConst` instead of
     /// `LoadGlobal`.
     pub functions: HashMap<SymbolId, Value>,
+    /// Primitive SymbolId → declared [`RegionEffect`]. Aliases get the
+    /// same entry as their primary name (a single map, so the alias
+    /// metadata cannot drift). The region solver's call classification
+    /// reads this.
+    pub effects: HashMap<SymbolId, RegionEffect>,
+    /// Primitive SymbolId → declared [`RetType`]. Aliases get the same entry.
+    /// The ownership inference reads this to classify a `Funnel` store's
+    /// container argument: a `MutableArray`/`MutableStruct` container *retains*
+    /// the stored value's region (so the forest recovers a containment edge),
+    /// where a `String`/`Unknown` (e.g. `@string`/`@bytes`) container copies
+    /// bytes and retains nothing.
+    pub ret_types: HashMap<SymbolId, RetType>,
 }
 
 impl PrimitiveMeta {
@@ -168,6 +392,8 @@ impl PrimitiveMeta {
             arities: HashMap::new(),
             docs: HashMap::new(),
             functions: HashMap::new(),
+            effects: HashMap::new(),
+            ret_types: HashMap::new(),
         }
     }
 }

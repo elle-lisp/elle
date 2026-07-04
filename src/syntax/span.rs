@@ -61,7 +61,9 @@ impl Span {
     /// Convert to a SourceLoc for error reporting
     pub fn to_source_loc(&self) -> crate::reader::SourceLoc {
         crate::reader::SourceLoc::new(
-            self.file.clone().unwrap_or_else(|| "<unknown>".to_string()),
+            self.file
+                .clone()
+                .unwrap_or_else(|| crate::reader::UNKNOWN_FILE.to_string()),
             self.line as usize,
             self.col as usize,
         )
@@ -107,3 +109,6 @@ impl fmt::Display for Span {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

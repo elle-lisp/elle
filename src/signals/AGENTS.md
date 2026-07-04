@@ -5,9 +5,8 @@ Signal system for tracking which signals a function may emit. Includes the globa
 ## Responsibility
 
 1. Define the `Signal` type and provide signal inference for the emit/fiber system.
-   `emit` is a special form when the first argument is a literal keyword or keyword set;
-   it replaces the old `yield` special form. `yield` is now a macro (defined in prelude.lisp)
-   that expands to `(emit :yield val)`.
+   `emit` is a special form when the first argument is a literal keyword or keyword set.
+   `yield` is a prelude macro (prelude.lisp) that expands to `(emit :yield val)`.
 2. Maintain the global signal registry mapping signal keywords to bit positions
 3. Track which signals a function might emit (error, yield, debug, ffi, io, halt, user-defined)
 4. Track which parameter indices propagate their callee's signals
@@ -97,7 +96,7 @@ The programmer-supplied ceiling constraint from `(silence)` is a separate concep
 
 ### Parameter Bounds
 
-Parameter bounds are stored as `param_bounds: Vec<ParamBound>` on the Lambda node, where `ParamBound = { binding, signal }` (after Chunk 4b, `kind` field is removed).
+Parameter bounds are stored as `param_bounds: Vec<ParamBound>` on the Lambda node, where `ParamBound = { binding, signal }`.
 
 - **Silence bounds:** When a parameter has a `silence` bound, it is no longer polymorphic — its signal contribution to the lambda is the bound's bits, not a polymorphic reference.
 
@@ -133,7 +132,7 @@ return `(SIG_YIELD | SIG_IO, IoRequest)` must declare both bits.
 
 Stream primitives (`port/read-line`, `port/read`, `port/read-all`,
 `port/write`, `port/flush`) have signal `SIG_ERROR | SIG_YIELD | SIG_IO`.
-Network primitives (`tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/send-to`,
+Network primitives (`tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/send-to`,
 `udp/recv-from`, `unix/accept`, `unix/connect`, `unix/shutdown`) also include
 `SIG_YIELD | SIG_IO`. The async sleep primitive `ev/sleep` has signal
 `SIG_ERROR | SIG_YIELD | SIG_IO`.
@@ -148,17 +147,9 @@ Used across the pipeline and the runtime:
 - `pipeline.rs` — builds primitive signals map, passes to Analyzer
 - `jit/compiler.rs` — JIT gate rejects polymorphic (`signal.propagates != 0`)
 - `vm/call.rs` — call dispatch checks `!signal.may_suspend()`
-- `primitives/coroutines.rs` — coroutine warnings check `!signal.may_yield()`
+- `primitives/fibers.rs` — fiber warnings check `!signal.may_yield()`
 - `primitives/stream.rs` — stream primitives use `SIG_ERROR | SIG_YIELD | SIG_IO`
 - `io/backend.rs` — backend execution returns `(SIG_OK, result)` or `(SIG_ERROR, error)`
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~350 | `Signal` struct, constructors, predicates, Display, combine, tests |
-| `registry.rs` | ~200 | `SignalRegistry` struct, global singleton, built-in registration, user signal allocation |
-
 ## Invariants
 
 1. **Signal::silent() is the default.** Unknown signals start as silent. This is

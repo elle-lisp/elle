@@ -155,19 +155,6 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 ```
 
 `(syntax->datum stx)` strips scope information, returning the plain value.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~400 | `Expander` struct, macro registry, entry point, desugaring |
-| `macro_expand.rs` | ~170 | VM-based macro expansion via `eval_syntax` |
-| `quasiquote.rs` | ~160 | Quasiquote-to-code conversion |
-| `introspection.rs` | ~100 | `macro?` and `expand-macro` |
-| `compiletime.rs` | ~80 | `begin-for-syntax` handler |
-| `syntaxcase.rs` | ~350 | `syntax-case` code-generating transformation |
-| `tests.rs` | ~540 | Expansion tests |
-
 ## Invariants
 
 1. **Scopes are additive, with one exception.** `add_scope()` never removes. `add_scope_recursive()` skips nodes with `scope_exempt: true` (set by `datum->syntax` to prevent intro scope stamping on nodes that should resolve at the call site). `scope_exempt` only affects `add_scope_recursive`, not `add_scope`. Two identifiers match only if their scope sets are compatible.
@@ -186,7 +173,7 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
     `MacroDef.cached_transformer` holds the compiled `(fn (params...) template)`
     closure after first expansion. Cloning `MacroDef` copies the `Value` (cheap;
     it's `Copy` and the closure's heap data is `Rc`). The original in the
-    `CompilationCache` does NOT see the update (different `RefCell`) — the
+    instance's `CompileCtx` does NOT see the update (different `RefCell`) — the
     cache warms per pipeline call, not globally. This is by design.
 
 8. **Qualified symbols pass through expansion unchanged.** `module:name` is recognized by the lexer as a single token. The Expander does not transform it. The Analyzer desugars it to nested `get` calls.

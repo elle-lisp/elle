@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Tests for (parse-int str radix) — radix-aware string-to-integer conversion
 
 # ── Basic radix parsing ──────────────────────────────────────────────

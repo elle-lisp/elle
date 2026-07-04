@@ -34,15 +34,6 @@ Bytecode instruction definitions and debug formatting.
 |------|----------|---------|
 | `Instruction` | `bytecode.rs` | Bytecode opcodes |
 | `Bytecode` | `bytecode.rs` | Instructions + constants |
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~10 | Re-exports |
-| `bytecode.rs` | ~200 | Instruction enum, Bytecode struct |
-| `bytecode_debug.rs` | ~150 | Debug formatting |
-
 ## Type guard instructions
 
 Type guard instructions are used in pattern matching to check value types:

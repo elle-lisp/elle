@@ -5,12 +5,15 @@
 //! - Macro results that return runtime Values (Value → Syntax)
 
 use super::{Span, Syntax, SyntaxKind};
+use crate::primitives::ctx::NativeCtx;
 use crate::symbol::SymbolTable;
 use crate::value::{TableKey, Value};
 
-/// Check if a Syntax tree contains any SyntaxLiteral nodes.
-/// Used as a debug assertion in `from_value` to catch arena pointer escapes.
-fn contains_syntax_literal(s: &Syntax) -> bool {
+/// Check if a Syntax tree contains any SyntaxLiteral nodes. Used as a debug
+/// assertion in `from_value` to catch arena pointer escapes — a cloned Syntax
+/// must not carry a heap-pointer `SyntaxLiteral` Value that would dangle once its
+/// arena region frees.
+pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
     match &s.kind {
         SyntaxKind::SyntaxLiteral(_) => true,
         SyntaxKind::List(items)
@@ -61,9 +64,24 @@ fn table_key_to_syntax(
 }
 
 impl Syntax {
-    /// Convert Syntax to runtime Value
-    /// Used for quote expressions at runtime
-    pub fn to_value(&self, symbols: &mut SymbolTable) -> Value {
+    /// Convert Syntax to a runtime Value as an **ordinary allocation** into the
+    /// ctx's own region (reclaimed by RC). Used by the read-time primitives `read`
+    /// / `read-all` / `syntax->datum`, whose native call mints a fresh region for
+    /// the result (region-model.md, "Constants lower as ordinary allocations").
+    ///
+    /// `ctx` is the allocation capability — the read-time primitives pass their
+    /// call's ctx (docs/impl/region-ctx.md). The whole tree lands in the ctx's
+    /// region, reclaimed at the caller's `decref_point`.
+    pub fn to_value(&self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
+        self.to_value_in(symbols, ctx)
+    }
+
+    /// Shared recursive materializer threading the `ctx` capability through every
+    /// heap leaf. Immediates (nil/bool/int/float/symbol/keyword) need no region;
+    /// every heap leaf (`String`, the list spine, `Array`, the `Rc`-backed mutable
+    /// aggregates, syntax) is born in the ctx's region via the `ctx.*`
+    /// constructors.
+    fn to_value_in(&self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
         match &self.kind {
             SyntaxKind::Nil => Value::NIL,
             SyntaxKind::Bool(b) => Value::bool(*b),
@@ -74,85 +92,196 @@ impl Syntax {
                 Value::symbol(id.0)
             }
             SyntaxKind::Keyword(s) => Value::keyword(s),
-            SyntaxKind::String(s) => Value::string(s.clone()),
-            SyntaxKind::StringMut(s) => Value::string_mut(s.as_bytes().to_vec()),
+            SyntaxKind::String(s) => ctx.string(s),
+            SyntaxKind::StringMut(s) => ctx.string_mut(s.as_bytes().to_vec()),
             SyntaxKind::List(items) => {
-                let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                crate::value::list(values)
+                let values: Vec<Value> = items
+                    .iter()
+                    .map(|item| item.to_value_in(symbols, ctx))
+                    .collect();
+                ctx.list(values)
             }
             SyntaxKind::Array(items) => {
-                let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::array(values)
+                let values = items
+                    .iter()
+                    .map(|item| item.to_value_in(symbols, ctx))
+                    .collect();
+                ctx.array(values)
             }
             SyntaxKind::ArrayMut(items) => {
-                let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::array_mut(values)
+                let values = items
+                    .iter()
+                    .map(|item| item.to_value_in(symbols, ctx))
+                    .collect();
+                ctx.array_mut(values)
             }
             SyntaxKind::Bytes(items) => {
                 // Convert to (bytes e1 e2 ...) list
                 let bytes_sym = symbols.intern("bytes");
                 let mut values = vec![Value::symbol(bytes_sym.0)];
-                values.extend(items.iter().map(|item| item.to_value(symbols)));
-                crate::value::list(values)
+                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
+                ctx.list(values)
             }
             SyntaxKind::BytesMut(items) => {
                 // Convert to (@bytes e1 e2 ...) list
                 let bytes_mut_sym = symbols.intern("@bytes");
                 let mut values = vec![Value::symbol(bytes_mut_sym.0)];
-                values.extend(items.iter().map(|item| item.to_value(symbols)));
-                crate::value::list(values)
+                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
+                ctx.list(values)
             }
             SyntaxKind::Struct(items) => {
                 // Convert to (struct k1 v1 k2 v2 ...) list
                 let struct_sym = symbols.intern("struct");
                 let mut values = vec![Value::symbol(struct_sym.0)];
-                values.extend(items.iter().map(|item| item.to_value(symbols)));
-                crate::value::list(values)
+                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
+                ctx.list(values)
             }
             SyntaxKind::StructMut(items) => {
                 // Convert to (@struct k1 v1 k2 v2 ...) list
                 let struct_mut_sym = symbols.intern("@struct");
                 let mut values = vec![Value::symbol(struct_mut_sym.0)];
-                values.extend(items.iter().map(|item| item.to_value(symbols)));
-                crate::value::list(values)
+                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
+                ctx.list(values)
             }
             SyntaxKind::Set(items) => {
                 // Convert to (set e1 e2 ...) list
                 let set_sym = symbols.intern("set");
                 let mut values = vec![Value::symbol(set_sym.0)];
-                values.extend(items.iter().map(|item| item.to_value(symbols)));
-                crate::value::list(values)
+                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
+                ctx.list(values)
             }
             SyntaxKind::SetMut(items) => {
                 // Convert to (@set e1 e2 ...) list
                 let set_mut_sym = symbols.intern("@set");
                 let mut values = vec![Value::symbol(set_mut_sym.0)];
-                values.extend(items.iter().map(|item| item.to_value(symbols)));
-                crate::value::list(values)
+                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
+                ctx.list(values)
             }
             SyntaxKind::Quote(inner) => {
                 let quote_sym = symbols.intern("quote");
-                crate::value::list(vec![Value::symbol(quote_sym.0), inner.to_value(symbols)])
+                let inner_val = inner.to_value_in(symbols, ctx);
+                ctx.list(vec![Value::symbol(quote_sym.0), inner_val])
             }
             SyntaxKind::Quasiquote(inner) => {
                 let sym = symbols.intern("quasiquote");
-                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
+                let inner_val = inner.to_value_in(symbols, ctx);
+                ctx.list(vec![Value::symbol(sym.0), inner_val])
             }
             SyntaxKind::Unquote(inner) => {
                 let sym = symbols.intern("unquote");
-                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
+                let inner_val = inner.to_value_in(symbols, ctx);
+                ctx.list(vec![Value::symbol(sym.0), inner_val])
             }
             SyntaxKind::UnquoteSplicing(inner) => {
                 let sym = symbols.intern("unquote-splicing");
-                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
+                let inner_val = inner.to_value_in(symbols, ctx);
+                ctx.list(vec![Value::symbol(sym.0), inner_val])
             }
             SyntaxKind::Splice(inner) => {
                 let sym = symbols.intern("splice");
-                crate::value::list(vec![Value::symbol(sym.0), inner.to_value(symbols)])
+                let inner_val = inner.to_value_in(symbols, ctx);
+                ctx.list(vec![Value::symbol(sym.0), inner_val])
             }
-            // Only reached during macro expansion. The value is a syntax object
-            // that will be processed by from_value() after VM evaluation.
-            SyntaxKind::SyntaxLiteral(v) => *v,
+            // A hygiene-bearing template symbol. Materialize a fresh syntax object
+            // (ordinary allocation into the ctx's region) wrapping the carried
+            // `Syntax` — processed by from_value() after VM evaluation.
+            SyntaxKind::SyntaxLiteral(s) => ctx.syntax((**s).clone()),
+        }
+    }
+
+    /// Convert Syntax to a `ConstTemplate` — the allocation-free compile-time
+    /// form of [`to_value`](Self::to_value): plain recursive data that
+    /// `MaterializeConst` materializes fresh into a reclaimable region each
+    /// execution (region-model.md, "Constants lower as ordinary allocations").
+    /// The desugaring matches `to_value` — a quoted `{:a 1}` becomes the list
+    /// template `(struct :a 1)`, etc. — so the quoted datum's value is unchanged.
+    ///
+    /// A hygiene-bearing `SyntaxLiteral` (always a symbol) becomes a
+    /// `ConstTemplate::SyntaxSymbol` carrying its scope set verbatim, so it too
+    /// materializes ordinarily with hygiene intact.
+    ///
+    /// Symbols are carried BY NAME (not interned to a per-table id) so the
+    /// template is portable across a `sys/spawn` boundary; they re-intern into
+    /// the executing table at materialize time. So this needs no `SymbolTable`.
+    pub fn to_const_template(&self) -> crate::value::ConstTemplate {
+        use crate::value::ConstTemplate as T;
+        // Build a cons-list template `(e1 e2 … en)` ending in the empty list —
+        // the desugaring `to_value` performs via `list_in`.
+        fn list_template(items: Vec<T>) -> T {
+            items.into_iter().rev().fold(T::EmptyList, |acc, item| {
+                T::Pair(Box::new(item), Box::new(acc))
+            })
+        }
+        // A desugared `(head e1 e2 …)` list template, head being a leading
+        // constructor symbol (`struct`/`set`/`bytes`/`@…`).
+        let tagged_list = |head: &str, items: &[Syntax]| -> T {
+            let mut vals = vec![T::Symbol(head.to_string())];
+            vals.extend(items.iter().map(|item| item.to_const_template()));
+            list_template(vals)
+        };
+        match &self.kind {
+            SyntaxKind::Nil => T::Nil,
+            SyntaxKind::Bool(b) => T::Bool(*b),
+            SyntaxKind::Int(n) => T::Int(*n),
+            SyntaxKind::Float(n) => T::Float(*n),
+            SyntaxKind::Symbol(s) => T::Symbol(s.clone()),
+            SyntaxKind::Keyword(s) => T::Keyword(s.clone()),
+            SyntaxKind::String(s) => T::String(s.clone()),
+            SyntaxKind::StringMut(s) => T::StringMut(s.clone()),
+            SyntaxKind::List(items) => {
+                list_template(items.iter().map(|i| i.to_const_template()).collect())
+            }
+            SyntaxKind::Array(items) => {
+                T::Array(items.iter().map(|i| i.to_const_template()).collect())
+            }
+            SyntaxKind::ArrayMut(items) => {
+                T::ArrayMut(items.iter().map(|i| i.to_const_template()).collect())
+            }
+            SyntaxKind::Bytes(items) => tagged_list("bytes", items),
+            SyntaxKind::BytesMut(items) => tagged_list("@bytes", items),
+            SyntaxKind::Struct(items) => tagged_list("struct", items),
+            SyntaxKind::StructMut(items) => tagged_list("@struct", items),
+            SyntaxKind::Set(items) => tagged_list("set", items),
+            SyntaxKind::SetMut(items) => tagged_list("@set", items),
+            SyntaxKind::Quote(inner) => list_template(vec![
+                T::Symbol("quote".to_string()),
+                inner.to_const_template(),
+            ]),
+            SyntaxKind::Quasiquote(inner) => list_template(vec![
+                T::Symbol("quasiquote".to_string()),
+                inner.to_const_template(),
+            ]),
+            SyntaxKind::Unquote(inner) => list_template(vec![
+                T::Symbol("unquote".to_string()),
+                inner.to_const_template(),
+            ]),
+            SyntaxKind::UnquoteSplicing(inner) => list_template(vec![
+                T::Symbol("unquote-splicing".to_string()),
+                inner.to_const_template(),
+            ]),
+            SyntaxKind::Splice(inner) => list_template(vec![
+                T::Symbol("splice".to_string()),
+                inner.to_const_template(),
+            ]),
+            // A hygiene-bearing macro-template symbol (always a `Symbol`,
+            // produced by quasiquote): carry its scope set verbatim into a
+            // `SyntaxSymbol` template so it materializes as an ordinary
+            // allocation with hygiene intact (region-model.md, "Constants lower
+            // as ordinary allocations").
+            SyntaxKind::SyntaxLiteral(s) => {
+                if let SyntaxKind::Symbol(name) = &s.kind {
+                    T::SyntaxSymbol {
+                        name: name.clone(),
+                        scopes: s.scopes.iter().map(|sc| sc.0).collect(),
+                        span: s.span.clone(),
+                        scope_exempt: s.scope_exempt,
+                    }
+                } else {
+                    unreachable!(
+                        "to_const_template: non-symbol SyntaxLiteral cannot arise (quasiquote only wraps symbols)"
+                    )
+                }
+            }
         }
     }
 
@@ -162,20 +291,17 @@ impl Syntax {
     /// scopes from the original Syntax. The passed `span` is ignored in
     /// this case; the syntax object carries its own (more accurate) span.
     pub fn from_value(value: &Value, symbols: &SymbolTable, span: Span) -> Result<Syntax, String> {
-        // Syntax objects pass through directly, preserving scopes.
-        // The intro scope WILL be added by add_scope_recursive, which
-        // is correct: it distinguishes this expansion's symbols from
-        // other scopes. Both template symbols (from quasiquote) and
-        // argument symbols (from unquote) get the intro scope on top
-        // of their existing scopes, enabling proper hygiene resolution.
+        // Syntax objects pass through directly, preserving scopes — the
+        // post-expansion hygiene FLIP (flip_scope_recursive) relies on
+        // them arriving intact: argument-origin nodes carry their use-site
+        // scopes plus the pre-stamped intro scope (which the flip removes),
+        // template-origin nodes carry definition-site scopes only (the flip
+        // adds the intro scope). Nodes from `datum->syntax` carry their own
+        // scope_exempt flag and dodge the flip — do NOT blanket-exempt here:
+        // blanket-exempting disables hygiene entirely by shielding every
+        // identifier from the intro scope.
         if let Some(syntax_rc) = value.as_syntax() {
-            let mut s = syntax_rc.clone();
-            // Mark scope_exempt so the intro scope isn't added to
-            // call-site identifiers that survived the Value round-trip.
-            // Template symbols from quasiquote also come through here
-            // (via SyntaxLiteral) and are exempt — their definition-site
-            // scopes are sufficient for correct resolution.
-            s.scope_exempt = true;
+            let s = syntax_rc.clone();
             // Safety check: the cloned Syntax must not contain SyntaxLiteral
             // children. SyntaxLiteral holds a heap-pointer Value that may be
             // arena-allocated; if it survives into the result Syntax, it will
@@ -279,351 +405,4 @@ impl Syntax {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::symbol::SymbolTable;
-    use crate::value::SymbolId;
-
-    fn test_span() -> Span {
-        Span::synthetic()
-    }
-
-    #[test]
-    fn test_roundtrip_nil() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::Nil, test_span());
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Nil));
-    }
-
-    #[test]
-    fn test_roundtrip_int() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::Int(42), test_span());
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Int(42)));
-    }
-
-    #[test]
-    fn test_roundtrip_float() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::Float(1.5), test_span());
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::Float(f) => assert!((f - 1.5).abs() < f64::EPSILON),
-            other => panic!("expected Float, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_bool() {
-        let mut symbols = SymbolTable::new();
-        for b in [true, false] {
-            let syntax = Syntax::new(SyntaxKind::Bool(b), test_span());
-            let value = syntax.to_value(&mut symbols);
-            let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-            assert!(matches!(result.kind, SyntaxKind::Bool(v) if v == b));
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_string() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::String("hello".to_string()), test_span());
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        assert!(matches!(result.kind, SyntaxKind::String(ref s) if s == "hello"));
-    }
-
-    #[test]
-    fn test_roundtrip_symbol() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::Symbol("foo".to_string()), test_span());
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "foo"));
-    }
-
-    #[test]
-    fn test_roundtrip_keyword() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::Keyword("bar".to_string()), test_span());
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Keyword(ref s) if s == "bar"));
-    }
-
-    #[test]
-    fn test_roundtrip_empty_list() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(SyntaxKind::List(vec![]), test_span());
-        let value = syntax.to_value(&mut symbols);
-        assert!(value.is_empty_list());
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::List(items) => assert!(items.is_empty()),
-            other => panic!("expected empty List, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_list() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Int(1), test_span()),
-                Syntax::new(SyntaxKind::Int(2), test_span()),
-            ]),
-            test_span(),
-        );
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::List(items) => {
-                assert_eq!(items.len(), 2);
-                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
-                assert!(matches!(items[1].kind, SyntaxKind::Int(2)));
-            }
-            other => panic!("expected List, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_tuple() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(
-            SyntaxKind::Array(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
-            test_span(),
-        );
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::Array(items) => {
-                assert_eq!(items.len(), 1);
-                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
-            }
-            other => panic!("expected Array, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_array() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(
-            SyntaxKind::ArrayMut(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
-            test_span(),
-        );
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::ArrayMut(items) => {
-                assert_eq!(items.len(), 1);
-                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
-            }
-            other => panic!("expected ArrayMut, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_from_value_rejects_closure() {
-        let result = Syntax::from_value(
-            &Value::native_fn(&crate::primitives::def::NOOP_PRIM),
-            &SymbolTable::new(),
-            test_span(),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_roundtrip_syntax_with_scopes() {
-        use crate::syntax::ScopeId;
-        // A Syntax node with scopes, wrapped as Value::syntax, should
-        // survive from_value and preserve its scopes.
-        let scoped = Syntax::with_scopes(
-            SyntaxKind::Symbol("x".to_string()),
-            test_span(),
-            vec![ScopeId(1), ScopeId(2)],
-        );
-        let value = Value::syntax(scoped.clone());
-        let result = Syntax::from_value(&value, &SymbolTable::new(), test_span()).unwrap();
-        assert!(matches!(result.kind, SyntaxKind::Symbol(ref s) if s == "x"));
-        assert_eq!(result.scopes.len(), 2);
-        assert_eq!(result.scopes[0], ScopeId(1));
-        assert_eq!(result.scopes[1], ScopeId(2));
-    }
-
-    #[test]
-    fn test_roundtrip_list_with_scoped_children() {
-        use crate::syntax::ScopeId;
-        let symbols = SymbolTable::new();
-        // A list containing a syntax-object element should preserve
-        // the element's scopes through from_value.
-        let scoped_child = Syntax::with_scopes(
-            SyntaxKind::Symbol("y".to_string()),
-            test_span(),
-            vec![ScopeId(3)],
-        );
-        let child_value = Value::syntax(scoped_child);
-        let plain_child = Value::int(42);
-        let list_value = crate::value::list(vec![child_value, plain_child]);
-        let result = Syntax::from_value(&list_value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::List(items) => {
-                assert_eq!(items.len(), 2);
-                // First element: syntax object with scopes preserved
-                assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "y"));
-                assert_eq!(items[0].scopes, vec![ScopeId(3)]);
-                // Second element: plain int, no scopes
-                assert!(matches!(items[1].kind, SyntaxKind::Int(42)));
-                assert!(items[1].scopes.is_empty());
-            }
-            other => panic!("expected List, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_no_scopes_produces_plain_value() {
-        let mut symbols = SymbolTable::new();
-        // Syntax with empty scopes through to_value produces a plain value,
-        // not a syntax object.
-        let syntax = Syntax::new(SyntaxKind::Symbol("z".to_string()), test_span());
-        let value = syntax.to_value(&mut symbols);
-        // Should be a plain symbol, not a syntax object
-        assert!(value.as_symbol().is_some());
-        assert!(!value.is_syntax());
-    }
-
-    #[test]
-    fn test_to_value_struct_mut_desugars_to_at_struct() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(
-            SyntaxKind::StructMut(vec![
-                Syntax::new(SyntaxKind::Keyword("k".to_string()), test_span()),
-                Syntax::new(SyntaxKind::Int(1), test_span()),
-            ]),
-            test_span(),
-        );
-        let value = syntax.to_value(&mut symbols);
-
-        let items = value
-            .list_to_vec()
-            .expect("to_value StructMut should produce a list");
-        assert_eq!(
-            items.len(),
-            3,
-            "expected (@struct :k 1), got {} elements",
-            items.len()
-        );
-
-        let sym_raw = items[0]
-            .as_symbol()
-            .expect("first element should be a symbol");
-        let name = symbols
-            .name(SymbolId(sym_raw))
-            .expect("symbol should be interned");
-        assert_eq!(
-            name, "@struct",
-            "StructMut must desugar to @struct, not table"
-        );
-    }
-
-    #[test]
-    fn test_to_value_struct_desugars_to_struct() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(
-            SyntaxKind::Struct(vec![
-                Syntax::new(SyntaxKind::Keyword("k".to_string()), test_span()),
-                Syntax::new(SyntaxKind::Int(1), test_span()),
-            ]),
-            test_span(),
-        );
-        let value = syntax.to_value(&mut symbols);
-
-        let items = value
-            .list_to_vec()
-            .expect("to_value Struct should produce a list");
-        assert_eq!(
-            items.len(),
-            3,
-            "expected (struct :k 1), got {} elements",
-            items.len()
-        );
-
-        let sym_raw = items[0]
-            .as_symbol()
-            .expect("first element should be a symbol");
-        let name = symbols
-            .name(SymbolId(sym_raw))
-            .expect("symbol should be interned");
-        assert_eq!(name, "struct", "Struct must desugar to struct");
-    }
-
-    #[test]
-    fn test_roundtrip_struct() {
-        use crate::value::TableKey;
-        use std::collections::BTreeMap;
-
-        let symbols = SymbolTable::new();
-        // Build a struct Value directly (to_value produces a list, not a struct)
-        let mut fields = BTreeMap::new();
-        fields.insert(TableKey::Keyword("alpha".to_string()), Value::int(1));
-        fields.insert(TableKey::Keyword("bravo".to_string()), Value::int(2));
-        let value = Value::struct_from(fields);
-
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::Struct(items) => {
-                assert_eq!(
-                    items.len(),
-                    4,
-                    "expected 4 items (2 key-value pairs), got {}",
-                    items.len()
-                );
-                // BTreeMap sorts by key, so order may differ from insertion.
-                // Just verify all keys and values are present.
-                let keys: Vec<_> = items.iter().step_by(2).collect();
-                let vals: Vec<_> = items.iter().skip(1).step_by(2).collect();
-                assert!(keys
-                    .iter()
-                    .any(|k| matches!(&k.kind, SyntaxKind::Keyword(s) if s == "alpha")));
-                assert!(keys
-                    .iter()
-                    .any(|k| matches!(&k.kind, SyntaxKind::Keyword(s) if s == "bravo")));
-                assert!(vals.iter().any(|v| matches!(&v.kind, SyntaxKind::Int(1))));
-                assert!(vals.iter().any(|v| matches!(&v.kind, SyntaxKind::Int(2))));
-            }
-            other => panic!("expected Struct, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_table() {
-        use crate::value::TableKey;
-        use std::collections::BTreeMap;
-
-        let symbols = SymbolTable::new();
-        // Build a table Value directly (to_value produces a list, not a table)
-        let mut entries = BTreeMap::new();
-        entries.insert(TableKey::Keyword("charlie".to_string()), Value::int(3));
-        let value = Value::struct_mut_from(entries);
-
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::StructMut(items) => {
-                assert_eq!(
-                    items.len(),
-                    2,
-                    "expected 2 items (1 key-value pair), got {}",
-                    items.len()
-                );
-                assert!(matches!(&items[0].kind, SyntaxKind::Keyword(s) if s == "charlie"));
-                assert!(matches!(&items[1].kind, SyntaxKind::Int(3)));
-            }
-            other => panic!("expected StructMut, got {:?}", other),
-        }
-    }
-}
+// Tests migrated to tests/elle/syntax-roundtrip.lisp

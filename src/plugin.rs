@@ -137,5 +137,8 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
     // Leak the library handle — never unload plugins
     std::mem::forget(lib);
 
-    Ok(Value::struct_from(fields))
+    // The plugin module-export struct is born in a fresh region on the VM's
+    // heap; it survives as the loaded module's value.
+    let ctx = crate::primitives::ctx::Alloc::new(vm.heap());
+    Ok(ctx.struct_from(fields))
 }

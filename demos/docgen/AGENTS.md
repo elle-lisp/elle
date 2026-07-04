@@ -19,7 +19,7 @@ Does NOT:
 
 | File | Purpose |
 |------|---------|
-| `generate.lisp` | Main generator script (741 lines) |
+| `generate.lisp` | Main generator script |
 | `lib/` | Library modules for generation |
 | `docs/` | Generated documentation output |
 
@@ -116,15 +116,6 @@ If the generated HTML is malformed, check for:
 - HTML escaping issues (use `html-escape`)
 - Unclosed tags
 - Incorrect string concatenation
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `generate.lisp` | ~740 | Main generator script |
-| `lib/` | — | Library modules (if any) |
-| `docs/` | — | Generated documentation output |
-
 ## Invariants
 
 1. **Lists terminate with `EMPTY_LIST`.** Use `empty?` to check for end-of-list, not `nil?`.

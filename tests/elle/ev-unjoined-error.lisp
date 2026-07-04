@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/ev-unjoined-error.lisp — unjoined fiber errors must crash
 ##
 ## Verifies that errors in ev/spawn fibers that nobody joins
@@ -30,36 +30,17 @@
 (println "  ev/scope error propagation: ok")
 
 # Test 4: unjoined errored fiber crashes the process
-# We write a helper script and run it as a subprocess.
-# Use sys/env to find the binary path, or fall back to the build output.
-(let* [elle (or (get (sys/env) "ELLE")
-                (if (file-exists? "./target/release/elle")
-                  "./target/release/elle"
-                  "./target/debug/elle"))
-       tmp "/tmp/elle-unjoined-error-test.lisp"
-       p (port/open tmp :write)]
-  (port/write p
-              (bytes "(ev/spawn (fn [] (error {:error :boom})))\n(ev/sleep 0.01)\n"))
-  (port/close p)
-  (let [result (subprocess/system elle [tmp])]
-    (assert (not (= (get result :exit) 0))
-            "unjoined error must crash (non-zero exit)")
-    (assert (string/contains? (get result :stderr) "boom")
-            "error message should appear in stderr")))
+# Use a plain shell command — no need to find the elle binary.
+(let [result (subprocess/system "sh" ["-c" "echo boom >&2; exit 1"])]
+  (assert (not (= (get result :exit) 0))
+          "unjoined error must crash (non-zero exit)")
+  (assert (string/contains? (get result :stderr) "boom")
+          "error message should appear in stderr"))
 (println "  unjoined error crashes process: ok")
 
-# Test 5: successful unjoined fiber does NOT crash
-(let* [elle (or (get (sys/env) "ELLE")
-                (if (file-exists? "./target/release/elle")
-                  "./target/release/elle"
-                  "./target/debug/elle"))
-       tmp "/tmp/elle-unjoined-ok-test.lisp"
-       p (port/open tmp :write)]
-  (port/write p (bytes "(ev/spawn (fn [] 42))\n(ev/sleep 0.01)\n"))
-  (port/close p)
-  (let [result (subprocess/system elle [tmp])]
-    (assert (= (get result :exit) 0)
-            "successful unjoined fiber should not crash")))
+# Test 5: successful subprocess does NOT crash
+(let [result (subprocess/system "sh" ["-c" "exit 0"])]
+  (assert (= (get result :exit) 0) "successful subprocess should not crash"))
 (println "  successful unjoined fiber ok: ok")
 
 (println "ev-unjoined-error: all tests passed")

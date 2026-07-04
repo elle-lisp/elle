@@ -9,19 +9,22 @@ mod serializer;
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 
-use crate::primitives::def::PrimitiveDef;
+use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::Value;
 
 /// Parse a JSON string into Elle values
-pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_json_parse(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     // 2 args is never valid (option key without value, or value without key)
     if args.len() == 2 {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "arity-error",
                 "json/parse: expected 1 or 3 arguments".to_string(),
             ),
@@ -33,7 +36,7 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
     } else {
         return (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "type-error",
                 "json/parse: expected string argument".to_string(),
             ),
@@ -48,7 +51,7 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
         } else {
             return (
                 SIG_ERROR,
-                error_val(
+                ctx.error(
                     "argument-error",
                     "json/parse: expected :keys :keyword".to_string(),
                 ),
@@ -58,36 +61,42 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
         false
     };
 
-    let mut parser = JsonParser::new_with_opts(&json_str, use_keyword_keys);
-    match parser.parse() {
+    let result = {
+        let mut parser = JsonParser::new_with_opts(&json_str, use_keyword_keys, ctx);
+        parser.parse()
+    };
+    match result {
         Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, error_val("parse-error", e)),
+        Err(e) => (SIG_ERROR, ctx.error("parse-error", e)),
     }
 }
 
 /// Serialize an Elle value to compact JSON
-pub(crate) fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_json_serialize(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let json_str = match serialize_value(&args[0]) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, error_val("parse-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("parse-error", e)),
     };
-    (SIG_OK, Value::string(json_str))
+    (SIG_OK, ctx.string(json_str))
 }
 
 /// Serialize an Elle value to pretty-printed JSON with 2-space indentation
-pub(crate) fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_json_serialize_pretty(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let json_str = match serialize_value_pretty(&args[0], 0) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, error_val("parse-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("parse-error", e)),
     };
-    (SIG_OK, Value::string(json_str))
+    (SIG_OK, ctx.string(json_str))
 }
 
-/// Declarative primitive definitions for JSON operations
-pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "json/parse",
-        func: prim_json_parse,
+primitive! {
+    "json/parse" => prim_json_parse {
         signal: Signal::silent(),
         arity: Arity::Range(1, 3),
         doc: "Parse a JSON string into Elle values. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
@@ -95,10 +104,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "json",
         example: r#"(json/parse "{\"name\": \"Alice\", \"age\": 30}" :keys :keyword)"#,
         aliases: &["json-parse"],
-    },
-    PrimitiveDef {
-        name: "json/serialize",
-        func: prim_json_serialize,
+        effect: RegionEffect::Fresh,
+    }
+    "json/serialize" => prim_json_serialize {
         signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to compact JSON",
@@ -106,10 +114,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "json",
         example: "(json/serialize (@struct :name \"Bob\" :age 25))",
         aliases: &["json-serialize"],
-    },
-    PrimitiveDef {
-        name: "json/pretty",
-        func: prim_json_serialize_pretty,
+        effect: RegionEffect::Fresh,
+    }
+    "json/pretty" => prim_json_serialize_pretty {
         signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
@@ -117,593 +124,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "json",
         example: "(json/pretty (list 1 2 3))",
         aliases: &["json-serialize-pretty"],
-    },
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::value::list;
-    use std::collections::BTreeMap;
-    use std::rc::Rc;
-
-    #[test]
-    fn test_parse_null() {
-        let mut parser = JsonParser::new("null");
-        assert_eq!(parser.parse().unwrap(), Value::NIL);
-    }
-
-    #[test]
-    fn test_parse_booleans() {
-        let mut parser = JsonParser::new("true");
-        assert_eq!(parser.parse().unwrap(), Value::bool(true));
-
-        let mut parser = JsonParser::new("false");
-        assert_eq!(parser.parse().unwrap(), Value::bool(false));
-    }
-
-    #[test]
-    fn test_parse_integers() {
-        let mut parser = JsonParser::new("0");
-        assert_eq!(parser.parse().unwrap(), Value::int(0));
-
-        let mut parser = JsonParser::new("42");
-        assert_eq!(parser.parse().unwrap(), Value::int(42));
-
-        let mut parser = JsonParser::new("-17");
-        assert_eq!(parser.parse().unwrap(), Value::int(-17));
-
-        let mut parser = JsonParser::new("140737488355327");
-        assert_eq!(parser.parse().unwrap(), Value::int(140737488355327));
-    }
-
-    #[test]
-    #[allow(clippy::approx_constant)]
-    fn test_parse_floats() {
-        let mut parser = JsonParser::new("3.14");
-        if let Some(f) = parser.parse().unwrap().as_float() {
-            assert!((f - 3.14).abs() < 1e-10);
-        } else {
-            panic!("Expected float");
-        }
-
-        let mut parser = JsonParser::new("-0.5");
-        if let Some(f) = parser.parse().unwrap().as_float() {
-            assert!((f - (-0.5)).abs() < 1e-10);
-        } else {
-            panic!("Expected float");
-        }
-
-        let mut parser = JsonParser::new("1e10");
-        if let Some(f) = parser.parse().unwrap().as_float() {
-            assert!((f - 1e10).abs() < 1e5);
-        } else {
-            panic!("Expected float");
-        }
-
-        let mut parser = JsonParser::new("2.5e-3");
-        if let Some(f) = parser.parse().unwrap().as_float() {
-            assert!((f - 0.0025).abs() < 1e-10);
-        } else {
-            panic!("Expected float");
-        }
-
-        let mut parser = JsonParser::new("1.0");
-        if let Some(f) = parser.parse().unwrap().as_float() {
-            assert!((f - 1.0).abs() < 1e-10);
-        } else {
-            panic!("Expected float");
-        }
-    }
-
-    #[test]
-    fn test_parse_strings() {
-        let mut parser = JsonParser::new("\"hello\"");
-        assert_eq!(parser.parse().unwrap(), Value::string("hello"));
-
-        let mut parser = JsonParser::new("\"\"");
-        assert_eq!(parser.parse().unwrap(), Value::string(""));
-
-        let mut parser = JsonParser::new("\"hello\\nworld\"");
-        assert_eq!(parser.parse().unwrap(), Value::string("hello\nworld"));
-
-        let mut parser = JsonParser::new("\"quote\\\"test\"");
-        assert_eq!(parser.parse().unwrap(), Value::string("quote\"test"));
-
-        let mut parser = JsonParser::new("\"backslash\\\\test\"");
-        assert_eq!(parser.parse().unwrap(), Value::string("backslash\\test"));
-
-        let mut parser = JsonParser::new("\"tab\\there\"");
-        assert_eq!(parser.parse().unwrap(), Value::string("tab\there"));
-
-        let mut parser = JsonParser::new("\"\\u0041\"");
-        assert_eq!(parser.parse().unwrap(), Value::string("A"));
-    }
-
-    #[test]
-    fn test_parse_arrays() {
-        let mut parser = JsonParser::new("[]");
-        assert_eq!(parser.parse().unwrap(), Value::EMPTY_LIST);
-
-        let mut parser = JsonParser::new("[1,2,3]");
-        let result = parser.parse().unwrap();
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 3);
-        assert_eq!(vec[0], Value::int(1));
-        assert_eq!(vec[1], Value::int(2));
-        assert_eq!(vec[2], Value::int(3));
-
-        let mut parser = JsonParser::new("[1,\"two\",true,null]");
-        let result = parser.parse().unwrap();
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 4);
-        assert_eq!(vec[0], Value::int(1));
-        assert_eq!(vec[1], Value::string("two"));
-        assert_eq!(vec[2], Value::bool(true));
-        assert_eq!(vec[3], Value::NIL);
-    }
-
-    #[test]
-    fn test_parse_objects() {
-        let mut parser = JsonParser::new("{}");
-        if let Some(t) = parser.parse().unwrap().as_struct_mut() {
-            assert_eq!(t.borrow().len(), 0);
-        } else {
-            panic!("Expected @struct");
-        }
-
-        let mut parser = JsonParser::new("{\"name\":\"Alice\",\"age\":30}");
-        if let Some(t) = parser.parse().unwrap().as_struct_mut() {
-            let mstruct = t.borrow();
-            assert_eq!(mstruct.len(), 2);
-            assert_eq!(
-                mstruct.get(&crate::value::TableKey::String("name".to_string())),
-                Some(&Value::string("Alice"))
-            );
-            assert_eq!(
-                mstruct.get(&crate::value::TableKey::String("age".to_string())),
-                Some(&Value::int(30))
-            );
-        } else {
-            panic!("Expected @struct");
-        }
-    }
-    #[test]
-    fn test_parse_whitespace() {
-        let mut parser = JsonParser::new("  \n\t  42  \n\t  ");
-        assert_eq!(parser.parse().unwrap(), Value::int(42));
-
-        let mut parser = JsonParser::new("[ 1 , 2 , 3 ]");
-        let result = parser.parse().unwrap();
-        let vec = result.list_to_vec().unwrap();
-        assert_eq!(vec.len(), 3);
-    }
-
-    #[test]
-    fn test_parse_errors() {
-        let mut parser = JsonParser::new("");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("42 extra");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("\"unterminated");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("[1,2");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("{\"key\":42");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("invalid");
-        assert!(parser.parse().is_err());
-    }
-
-    #[test]
-    fn test_serialize_compact() {
-        assert_eq!(serialize_value(&Value::NIL).unwrap(), "null");
-        assert_eq!(serialize_value(&Value::bool(true)).unwrap(), "true");
-        assert_eq!(serialize_value(&Value::bool(false)).unwrap(), "false");
-        assert_eq!(serialize_value(&Value::int(42)).unwrap(), "42");
-        assert_eq!(serialize_value(&Value::int(-17)).unwrap(), "-17");
-
-        #[allow(clippy::approx_constant)]
-        {
-            match serialize_value(&Value::float(3.14)) {
-                Ok(s) => assert!(s.contains("3.14")),
-                Err(e) => panic!("Error: {}", e),
-            }
-        }
-
-        assert_eq!(
-            serialize_value(&Value::string("hello")).unwrap(),
-            "\"hello\""
-        );
-
-        let list = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
-        assert_eq!(serialize_value(&list).unwrap(), "[1,2,3]");
-
-        let mut map = BTreeMap::new();
-        map.insert(
-            crate::value::TableKey::String("name".to_string()),
-            Value::string("Alice"),
-        );
-        map.insert(
-            crate::value::TableKey::String("age".to_string()),
-            Value::int(30),
-        );
-        let mstruct = Value::struct_mut_from(map);
-        let serialized = serialize_value(&mstruct).unwrap();
-        assert!(serialized.contains("\"name\":\"Alice\""));
-        assert!(serialized.contains("\"age\":30"));
-    }
-
-    #[test]
-    fn test_serialize_string_escaping() {
-        assert_eq!(
-            serialize_value(&Value::string("hello\"world")).unwrap(),
-            "\"hello\\\"world\""
-        );
-
-        assert_eq!(
-            serialize_value(&Value::string("hello\\world")).unwrap(),
-            "\"hello\\\\world\""
-        );
-
-        assert_eq!(
-            serialize_value(&Value::string("hello\nworld")).unwrap(),
-            "\"hello\\nworld\""
-        );
-
-        assert_eq!(
-            serialize_value(&Value::string("hello\tworld")).unwrap(),
-            "\"hello\\tworld\""
-        );
-    }
-
-    #[test]
-    fn test_serialize_roundtrip() {
-        let original = list(vec![
-            Value::int(1),
-            Value::string("test"),
-            Value::bool(true),
-            Value::NIL,
-        ]);
-
-        let serialized = serialize_value(&original).unwrap();
-        let mut parser = JsonParser::new(&serialized);
-        let deserialized = parser.parse().unwrap();
-
-        assert_eq!(original, deserialized);
-    }
-
-    #[test]
-    fn test_serialize_pretty() {
-        let list = list(vec![Value::int(1), Value::int(2), Value::int(3)]);
-        let pretty = serialize_value_pretty(&list, 0).unwrap();
-        assert!(pretty.contains('\n'));
-        assert!(pretty.contains("  "));
-
-        let mut map = BTreeMap::new();
-        map.insert(
-            crate::value::TableKey::String("key".to_string()),
-            Value::int(42),
-        );
-        let mstruct = Value::struct_mut_from(map);
-        let pretty = serialize_value_pretty(&mstruct, 0).unwrap();
-        assert!(pretty.contains('\n'));
-        assert!(pretty.contains("  "));
-    }
-
-    #[test]
-    fn test_serialize_errors() {
-        let template = Rc::new(crate::value::ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: crate::value::Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: crate::signals::Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(std::collections::HashMap::new()),
-            location_map: Rc::new(crate::error::LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            syntax: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        });
-        let closure = Value::closure(crate::value::Closure {
-            template,
-            env: crate::value::inline_slice::InlineSlice::empty(),
-            squelch_mask: SignalBits::EMPTY,
-        });
-        assert!(serialize_value(&closure).is_err());
-
-        let fn_val = Value::native_fn(&crate::primitives::def::NOOP_PRIM);
-        assert!(serialize_value(&fn_val).is_err());
-    }
-
-    #[test]
-    fn test_float_formatting() {
-        match serialize_value(&Value::float(1.0)) {
-            Ok(s) => assert!(
-                s.contains("."),
-                "Float 1.0 should contain decimal point, got: {}",
-                s
-            ),
-            Err(e) => panic!("Error: {}", e),
-        }
-
-        match serialize_value(&Value::float(42.0)) {
-            Ok(s) => assert!(
-                s.contains("."),
-                "Float 42.0 should contain decimal point, got: {}",
-                s
-            ),
-            Err(e) => panic!("Error: {}", e),
-        }
-    }
-
-    #[test]
-    fn test_parse_leading_zeros() {
-        // Leading zeros are not allowed in JSON
-        let mut parser = JsonParser::new("01");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("00");
-        assert!(parser.parse().is_err());
-
-        // But "0" alone is valid
-        let mut parser = JsonParser::new("0");
-        assert_eq!(parser.parse().unwrap(), Value::int(0));
-
-        // And "0.1" is valid
-        let mut parser = JsonParser::new("0.1");
-        if let Some(f) = parser.parse().unwrap().as_float() {
-            assert!((f - 0.1).abs() < 1e-10);
-        } else {
-            panic!("Expected float");
-        }
-    }
-
-    #[test]
-    fn test_parse_trailing_comma() {
-        // Trailing commas are not allowed in JSON
-        let mut parser = JsonParser::new("[1,2,]");
-        assert!(parser.parse().is_err());
-
-        let mut parser = JsonParser::new("{\"a\":1,}");
-        assert!(parser.parse().is_err());
-    }
-
-    #[test]
-    fn test_serialize_nan_infinity() {
-        // NaN should error
-        assert!(serialize_value(&Value::float(f64::NAN)).is_err());
-
-        // Positive infinity should error
-        assert!(serialize_value(&Value::float(f64::INFINITY)).is_err());
-
-        // Negative infinity should error
-        assert!(serialize_value(&Value::float(f64::NEG_INFINITY)).is_err());
-    }
-
-    #[test]
-    fn test_serialize_non_string_table_key() {
-        let mut map = BTreeMap::new();
-        map.insert(crate::value::TableKey::Int(42), Value::string("value"));
-        let mstruct = Value::struct_mut_from(map);
-
-        // Should error because key is not a string
-        assert!(serialize_value(&mstruct).is_err());
-    }
-
-    #[test]
-    fn test_json_parse_wrong_type() {
-        // json-parse requires a string argument
-        let (bits, _) = prim_json_parse(&[Value::int(42)]);
-        assert_eq!(bits, crate::value::fiber::SIG_ERROR);
-    }
-
-    #[test]
-    fn test_parse_surrogate_pair() {
-        // Emoji 😀 is U+1F600, encoded as surrogate pair \uD83D\uDE00
-        let mut parser = JsonParser::new("\"\\uD83D\\uDE00\"");
-        if let Some(s) = parser.parse().unwrap().with_string(|s| s.to_string()) {
-            assert_eq!(s, "😀");
-        } else {
-            panic!("Expected string");
-        }
-    }
-
-    #[test]
-    fn test_parse_lone_surrogate() {
-        // High surrogate without low surrogate should error
-        let mut parser = JsonParser::new("\"\\uD800\"");
-        assert!(parser.parse().is_err());
-
-        // Low surrogate without high surrogate should error
-        let mut parser = JsonParser::new("\"\\uDC00\"");
-        assert!(parser.parse().is_err());
-    }
-
-    #[test]
-    fn test_serialize_keyword_table_keys() {
-        let mut map = BTreeMap::new();
-        map.insert(
-            crate::value::TableKey::Keyword("x".to_string()),
-            Value::int(1),
-        );
-        map.insert(
-            crate::value::TableKey::Keyword("y".to_string()),
-            Value::int(2),
-        );
-        let mstruct = Value::struct_mut_from(map);
-
-        let result = serialize_value(&mstruct).unwrap();
-        assert!(result.contains("\"x\""));
-        assert!(result.contains("\"y\""));
-    }
-
-    #[test]
-    fn test_serialize_keyword_table_keys_pretty() {
-        let mut map = BTreeMap::new();
-        map.insert(
-            crate::value::TableKey::Keyword("name".to_string()),
-            Value::string("Alice"),
-        );
-        let mstruct = Value::struct_mut_from(map);
-
-        let result = serialize_value_pretty(&mstruct, 0).unwrap();
-        assert!(result.contains("\"name\": \"Alice\""));
-    }
-
-    #[test]
-    fn test_serialize_keyword_value() {
-        let kw = Value::keyword("hello");
-        let result = serialize_value(&kw).unwrap();
-        assert_eq!(result, "\"hello\"");
-    }
-
-    #[test]
-    fn test_serialize_keyword_value_pretty() {
-        let kw = Value::keyword("hello");
-        let result = serialize_value_pretty(&kw, 0).unwrap();
-        assert_eq!(result, "\"hello\"");
-    }
-
-    #[test]
-    fn test_serialize_mixed_string_keyword_keys() {
-        let mut map = BTreeMap::new();
-        map.insert(
-            crate::value::TableKey::String("a".to_string()),
-            Value::int(1),
-        );
-        map.insert(
-            crate::value::TableKey::Keyword("b".to_string()),
-            Value::int(2),
-        );
-        let mstruct = Value::struct_mut_from(map);
-
-        let result = serialize_value(&mstruct).unwrap();
-        assert!(result.contains("\"a\""));
-        assert!(result.contains("\"b\""));
-    }
-
-    // ── json/parse :keys :keyword ─────────────────────────────────────────────
-
-    #[test]
-    fn test_parse_keyword_keys_simple() {
-        // (json/parse "{\"a\": 1}" :keys :keyword) → struct with :a keyword key = 1
-        let (bits, val) = prim_json_parse(&[
-            Value::string("{\"a\": 1}"),
-            Value::keyword("keys"),
-            Value::keyword("keyword"),
-        ]);
-        assert_eq!(bits, SIG_OK);
-        if let Some(t) = val.as_struct_mut() {
-            let s = t.borrow();
-            assert_eq!(
-                s.get(&crate::value::TableKey::Keyword("a".to_string())),
-                Some(&Value::int(1))
-            );
-        } else {
-            panic!("Expected @struct");
-        }
-    }
-
-    #[test]
-    fn test_parse_keyword_keys_nested() {
-        // (json/parse "{\"a\": {\"b\": 2}}" :keys :keyword) → nested keyword keys
-        let (bits, val) = prim_json_parse(&[
-            Value::string("{\"a\": {\"b\": 2}}"),
-            Value::keyword("keys"),
-            Value::keyword("keyword"),
-        ]);
-        assert_eq!(bits, SIG_OK);
-        if let Some(t) = val.as_struct_mut() {
-            let s = t.borrow();
-            let inner = s
-                .get(&crate::value::TableKey::Keyword("a".to_string()))
-                .expect("expected :a key");
-            if let Some(inner_t) = inner.as_struct_mut() {
-                let inner_s = inner_t.borrow();
-                assert_eq!(
-                    inner_s.get(&crate::value::TableKey::Keyword("b".to_string())),
-                    Some(&Value::int(2))
-                );
-            } else {
-                panic!("Expected nested @struct");
-            }
-        } else {
-            panic!("Expected @struct");
-        }
-    }
-
-    #[test]
-    fn test_parse_default_string_keys() {
-        // (json/parse "{\"a\": 1}") → struct with "a" string key = 1 (default, unchanged)
-        let (bits, val) = prim_json_parse(&[Value::string("{\"a\": 1}")]);
-        assert_eq!(bits, SIG_OK);
-        if let Some(t) = val.as_struct_mut() {
-            let s = t.borrow();
-            assert_eq!(
-                s.get(&crate::value::TableKey::String("a".to_string())),
-                Some(&Value::int(1))
-            );
-        } else {
-            panic!("Expected @struct");
-        }
-    }
-
-    #[test]
-    fn test_parse_wrong_keys_option_value() {
-        // (json/parse "{}" :keys :wrong) → argument-error
-        let (bits, _) = prim_json_parse(&[
-            Value::string("{}"),
-            Value::keyword("keys"),
-            Value::keyword("wrong"),
-        ]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_parse_wrong_option_key() {
-        // (json/parse "{}" :wrong :keyword) → argument-error
-        let (bits, _) = prim_json_parse(&[
-            Value::string("{}"),
-            Value::keyword("wrong"),
-            Value::keyword("keyword"),
-        ]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_parse_two_args_arity_error() {
-        // 2 args is never valid
-        let (bits, _) = prim_json_parse(&[Value::string("{}"), Value::keyword("keys")]);
-        assert_eq!(bits, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_parse_array_keyword_keys_unaffected() {
-        // (json/parse "[]" :keys :keyword) → empty list (arrays unaffected)
-        let (bits, val) = prim_json_parse(&[
-            Value::string("[]"),
-            Value::keyword("keys"),
-            Value::keyword("keyword"),
-        ]);
-        assert_eq!(bits, SIG_OK);
-        assert_eq!(val, Value::EMPTY_LIST);
+        effect: RegionEffect::Fresh,
     }
 }
+
+// Tests migrated to tests/elle/prim-json.lisp

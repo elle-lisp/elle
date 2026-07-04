@@ -17,8 +17,30 @@ pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
         }
     }
     vm.fiber.stack[abs_idx] = value;
-    // Push the value back so it can be used as the result of set!
     vm.fiber.stack.push(value);
+}
+
+/// Push the currently-executing closure — the value path for a self-reference.
+/// `current_closure` is a per-activation register naming the closure whose body
+/// is running (restored across every call/tail-call/suspend boundary), so a
+/// value-position `loop`/`go` resolves to the closure itself with no capture
+/// slot. It is a borrow (no incref): the executing closure is kept alive by the
+/// activation running it, and any escape of the pushed value is counted by the
+/// ordinary return/store RC path — RC-identical to naming the closure through a
+/// binding slot, without any per-call cell.
+pub(crate) fn handle_load_self(vm: &mut VM) {
+    // LoadSelf is emitted only inside a closure body, and every entrant that
+    // runs a closure body hands the callee through the one-shot entry register
+    // (docs/impl/vm.md § The executing-closure register) — so an untracked
+    // (NIL) register here means an entry path dropped the handoff, and the
+    // self-reference would silently resolve to nil. Fail loudly at the read.
+    debug_assert!(
+        !vm.fiber.current_closure.is_nil(),
+        "LoadSelf on an untracked activation: an entry path ran a closure body \
+         without handing the callee through `pending_entry_closure` \
+         (docs/impl/vm.md § The executing-closure register)"
+    );
+    vm.fiber.stack.push(vm.fiber.current_closure);
 }
 
 pub(crate) fn handle_load_upvalue(
@@ -107,17 +129,9 @@ pub(crate) fn handle_store_upvalue(
     // Handle cell-based storage for shared mutable captures.
     // Upvalues are always cells (LocalCell for mutable captures).
     let env_val = env[idx];
-    if let Some(cell_ref) = env_val.as_capture_cell() {
-        let old_val = {
-            let mut cell_mut = cell_ref.borrow_mut();
-            let old = *cell_mut;
-            *cell_mut = val;
-            old
-        };
-        // Decref/incref after releasing the borrow_mut — transitive
-        // incref may walk into closures capturing this same cell.
-        crate::value::fiberheap::decref_and_free(old_val);
-        crate::value::fiberheap::incref(val);
+    if env_val.is_capture_cell() {
+        // The funnel tracks cross-region refs relative to the cell's region.
+        crate::value::arena::capture_store_with_rebind(unsafe { &mut *vm.heap_ptr }, env_val, val);
         vm.fiber.stack.push(val);
     } else {
         panic!(

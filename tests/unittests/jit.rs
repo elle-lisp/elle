@@ -15,8 +15,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add1 acc))))
             (loop 20 0))"#;
-        let result = eval_source(code).unwrap();
-        assert_eq!(result, Value::int(20));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(20)));
     }
 
     #[test]
@@ -27,9 +26,8 @@ mod jit_tests {
             (defn sum-squares (n acc)
               (if (= n 0) acc (sum-squares (- n 1) (+ acc (square n)))))
             (sum-squares 15 0))"#;
-        let result = eval_source(code).unwrap();
         // Sum of squares from 1 to 15 = 1240
-        assert_eq!(result, Value::int(1240));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(1240)));
     }
 
     #[test]
@@ -42,9 +40,8 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add5 acc))))
             (loop 15 0))"#;
-        let result = eval_source(code).unwrap();
         // 15 * 5 = 75
-        assert_eq!(result, Value::int(75));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(75)));
     }
 
     #[test]
@@ -58,9 +55,8 @@ mod jit_tests {
                   (test-comparisons 5 10)
                   (begin (test-comparisons n (+ n 1)) (loop (- n 1)))))
             (loop 15))"#;
-        let result = eval_source(code).unwrap();
         // Should return (false true false true false) for (= 5 10), (< 5 10), etc.
-        assert!(result.is_pair());
+        eval_source(code, |r| assert!(r.unwrap().is_pair()));
     }
 
     #[test]
@@ -72,13 +68,12 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 1) acc (loop (- n 1) (+ acc (mod-div-test n 2)))))
             (loop 15 0))"#;
-        let result = eval_source(code).unwrap();
         // For n from 15 down to 2: (n/2) + (n%2)
         // 15: 7+1=8, 14: 7+0=7, 13: 6+1=7, 12: 6+0=6, 11: 5+1=6, 10: 5+0=5
         // 9: 4+1=5, 8: 4+0=4, 7: 3+1=4, 6: 3+0=3, 5: 2+1=3, 4: 2+0=2
         // 3: 1+1=2, 2: 1+0=1
         // Sum = 8+7+7+6+6+5+5+4+4+3+3+2+2+1 = 63
-        assert_eq!(result, Value::int(63));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(63)));
     }
 
     #[test]
@@ -90,11 +85,10 @@ mod jit_tests {
             (defn sum-abs (n acc)
               (if (= n 0) acc (sum-abs (- n 1) (+ acc (abs (- n 8))))))
             (sum-abs 15 0))"#;
-        let result = eval_source(code).unwrap();
         // Sum of |n - 8| for n from 1 to 15
         // = |1-8| + |2-8| + ... + |15-8|
         // = 7 + 6 + 5 + 4 + 3 + 2 + 1 + 0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 = 56
-        assert_eq!(result, Value::int(56));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(56)));
     }
 
     #[test]
@@ -107,9 +101,8 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (h acc))))
             (loop 12 0))"#;
-        let result = eval_source(code).unwrap();
         // Each call to h adds 4, so 12 * 4 = 48
-        assert_eq!(result, Value::int(48));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(48)));
     }
 
     #[test]
@@ -121,8 +114,7 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (float-op acc 1.5))))
             (loop 12 1.0))"#;
-        let result = eval_source(code).unwrap();
-        assert!(result.is_float());
+        eval_source(code, |r| assert!(r.unwrap().is_float()));
     }
 
     #[test]
@@ -133,8 +125,7 @@ mod jit_tests {
             (defn loop (n)
               (if (= n 0) (id 42) (begin (id n) (loop (- n 1)))))
             (loop 15))"#;
-        let result = eval_source(code).unwrap();
-        assert_eq!(result, Value::int(42));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(42)));
     }
 
     #[test]
@@ -145,11 +136,10 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add3 acc n 1))))
             (loop 12 0))"#;
-        let result = eval_source(code).unwrap();
         // Sum of (n + 1) for n from 1 to 12 = 12 + 11 + ... + 1 + 12 = 78 + 12 = 90
         // Actually: acc starts at 0, each iteration adds (acc + n + 1)
         // This is more complex, let's just verify it runs
-        assert!(result.is_int());
+        eval_source(code, |r| assert!(r.unwrap().is_int()));
     }
 
     #[test]
@@ -163,8 +153,7 @@ mod jit_tests {
             (defn loop (n)
               (if (= n 0) counter (begin (inc!) (loop (- n 1)))))
             (loop 15))"#;
-        let result = eval_source(code).unwrap();
-        assert_eq!(result, Value::int(15));
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(15)));
     }
 
     #[test]
@@ -181,15 +170,17 @@ mod jit_tests {
                      (assign results (pair (fib 10) results))
                     (collect (- n 1)))))
             (collect 15))"#;
-        let result = eval_source(code).unwrap();
-        // All results should be fib(10) = 55
-        // Verify the list is non-empty and all elements are 55
-        assert!(result.is_pair());
-        let mut current = result;
-        while let Some(pair) = current.as_pair() {
-            assert_eq!(pair.first, Value::int(55));
-            current = pair.rest;
-        }
+        eval_source(code, |r| {
+            let result = r.unwrap();
+            // All results should be fib(10) = 55
+            // Verify the list is non-empty and all elements are 55
+            assert!(result.is_pair());
+            let mut current = result;
+            while let Some(pair) = current.as_pair() {
+                assert_eq!(pair.first, Value::int(55));
+                current = pair.rest;
+            }
+        });
     }
 
     #[test]
@@ -200,9 +191,10 @@ mod jit_tests {
             (defn sum-to (n acc)
                 (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
             (sum-to 100 0))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-        assert_eq!(result.unwrap().as_int(), Some(5050));
+        assert_eq!(result.unwrap(), Some(5050));
     }
 
     #[test]
@@ -213,9 +205,10 @@ mod jit_tests {
             (defn count-down (n)
                 (if (= n 0) 0 (count-down (- n 1))))
             (count-down 50000))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-        assert_eq!(result.unwrap().as_int(), Some(0));
+        assert_eq!(result.unwrap(), Some(0));
     }
 
     #[test]
@@ -227,9 +220,10 @@ mod jit_tests {
             (defn is-odd (n)
                 (if (= n 0) false (is-even (- n 1))))
             (is-even 100)"#,
+            |r| r.map(|v| v.as_bool()),
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-        assert_eq!(result.unwrap().as_bool(), Some(true));
+        assert_eq!(result.unwrap(), Some(true));
     }
 
     #[test]
@@ -243,10 +237,11 @@ mod jit_tests {
                     (if (= n 1) b
                         (fib-tail (- n 1) b (+ a b)))))
             (fib-tail 30 0 1))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
         let val = result.unwrap();
-        assert_eq!(val.as_int(), Some(832040));
+        assert_eq!(val, Some(832040));
     }
 
     #[test]
@@ -268,11 +263,12 @@ mod jit_tests {
                 (let [fib (fiber/new (fn () (f 0)) 1)]
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -1 0)))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok());
         let val = result.unwrap();
         // Should get -1 from the error handler, not garbage from continuing after exception
-        assert_eq!(val.as_int(), Some(-1));
+        assert_eq!(val, Some(-1));
     }
 
     #[test]
@@ -295,11 +291,12 @@ mod jit_tests {
                 (let [fib (fiber/new (fn () (f 0)) 1)]
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -42 0)))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok());
         let val = result.unwrap();
         // Should be -42 from the error handler, not 1001 (which would happen if NIL + 1000 worked)
-        assert_eq!(val.as_int(), Some(-42));
+        assert_eq!(val, Some(-42));
     }
 
     #[test]
@@ -317,10 +314,11 @@ mod jit_tests {
                 (let [fib (fiber/new (fn () (outer 0)) 1)]
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -999 0)))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok());
         let val = result.unwrap();
-        assert_eq!(val.as_int(), Some(-999));
+        assert_eq!(val, Some(-999));
     }
 
     // =========================================================================
@@ -344,9 +342,10 @@ mod jit_tests {
                     (+ (if (fiber? lst) 1 0)
                        (count-fibers lst (- n 1)))))
                 (count-fibers 42 20))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok(), "fiber? in hot loop failed: {:?}", result);
-        assert_eq!(result.unwrap().as_int(), Some(0));
+        assert_eq!(result.unwrap(), Some(0));
     }
 
     #[test]
@@ -361,9 +360,10 @@ mod jit_tests {
                       (fiber/new (fn () n) 1)
                       (make-fibers (- n 1)))))
                 (make-fibers 20))"#,
+            |r| r.map(|v| v.as_bool()),
         );
         assert!(result.is_ok(), "fiber/new in hot loop failed: {:?}", result);
-        assert_eq!(result.unwrap().as_bool(), Some(true));
+        assert_eq!(result.unwrap(), Some(true));
     }
 
     #[test]
@@ -377,6 +377,7 @@ mod jit_tests {
                   (if (= n 0) (= (fiber/status f) :new)
                     (begin (fiber/status f) (check-status (- n 1)))))
                 (check-status 20))"#,
+            |r| r.map(|v| v.as_bool()),
         );
         assert!(
             result.is_ok(),
@@ -384,7 +385,7 @@ mod jit_tests {
             result
         );
         let val = result.unwrap();
-        assert_eq!(val.as_bool(), Some(true));
+        assert_eq!(val, Some(true));
     }
 
     #[test]
@@ -398,13 +399,14 @@ mod jit_tests {
                   (fiber/resume f))
                 (var f (fiber/new (fn () 42) 0))
                 (resume-fiber f))"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(
             result.is_ok(),
             "fiber/resume via interpreter failed: {:?}",
             result
         );
-        assert_eq!(result.unwrap().as_int(), Some(42));
+        assert_eq!(result.unwrap(), Some(42));
     }
 
     #[test]
@@ -426,8 +428,9 @@ mod jit_tests {
                 # Now use fibers (interpreter path)
                 (var fval (use-fiber sum))
                 fval)"#,
+            |r| r.map(|v| v.as_int()),
         );
         assert!(result.is_ok(), "mixed pure/fiber failed: {:?}", result);
-        assert_eq!(result.unwrap().as_int(), Some(20));
+        assert_eq!(result.unwrap(), Some(20));
     }
 }

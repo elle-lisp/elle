@@ -1,9 +1,8 @@
 //! Register allocation for the WASM emitter.
 //!
 //! LIR uses SSA-style virtual registers (one def per register, unlimited count).
-//! The WASM emitter previously mapped each virtual register to a dedicated pair
-//! of WASM locals (tag + payload), causing massive local counts (~1744 for hello
-//! world + stdlib).
+//! Each virtual register needs a pair of WASM locals (tag + payload), so a naive
+//! one-pair-per-register mapping would explode the local count.
 //!
 //! This module computes a mapping from virtual registers to a smaller set of
 //! reusable WASM local pairs. Registers whose entire lifetime is within a single
@@ -211,9 +210,11 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
     match instr {
         LirInstr::Const { dst, .. }
         | LirInstr::ValueConst { dst, .. }
+        | LirInstr::MaterializeConst { dst, .. }
         | LirInstr::LoadLocal { dst, .. }
         | LirInstr::LoadCapture { dst, .. }
         | LirInstr::LoadCaptureRaw { dst, .. }
+        | LirInstr::LoadSelf { dst, .. }
         | LirInstr::MakeClosure { dst, .. }
         | LirInstr::Call { dst, .. }
         | LirInstr::SuspendingCall { dst, .. }
@@ -236,6 +237,7 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::ArrayMutLen { dst, .. }
         | LirInstr::MakeCaptureCell { dst, .. }
         | LirInstr::LoadCaptureCell { dst, .. }
+        | LirInstr::MatchFail { dst, .. }
         | LirInstr::FirstDestructure { dst, .. }
         | LirInstr::RestDestructure { dst, .. }
         | LirInstr::ArrayMutRefDestructure { dst, .. }
@@ -272,36 +274,39 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::Freeze { dst, .. }
         | LirInstr::Thaw { dst, .. }
         | LirInstr::IntrPush { dst, .. }
+        | LirInstr::IntrStringPush { dst, .. }
+        | LirInstr::IntrBytesPush { dst, .. }
         | LirInstr::Identical { dst, .. } => f(*dst),
 
         LirInstr::StoreLocal { .. }
+        | LirInstr::StoreLocalRefcounted { .. }
         | LirInstr::StoreCapture { .. }
         | LirInstr::StoreCaptureCell { .. }
         | LirInstr::TailCall { .. }
         | LirInstr::TailCallArrayMut { .. }
-        | LirInstr::RegionEnter
-        | LirInstr::RegionExit
-        | LirInstr::RegionExitCall
-        | LirInstr::RegionRotate
-        | LirInstr::RegionRotateDealloc
-        | LirInstr::RegionRotateRefcounted
-        | LirInstr::RegionExitRefcounted
+        | LirInstr::IncrefRegion { .. }
+        | LirInstr::DecrefRegion { .. }
+        | LirInstr::DecrefValueRegion { .. }
+        | LirInstr::DecrefCellRegion { .. }
+        | LirInstr::IncrefValueRegion { .. }
+        | LirInstr::AssertRegionMatches { .. }
+        | LirInstr::AdoptRegion { .. }
+        | LirInstr::AdoptIntoActivation { .. }
+        | LirInstr::FreeRegionGroup { .. }
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
-        | LirInstr::CheckSignalBound { .. }
-        | LirInstr::OutboxEnter
-        | LirInstr::OutboxExit
-        | LirInstr::FlipEnter
-        | LirInstr::FlipSwap
-        | LirInstr::FlipExit => {}
+        | LirInstr::CheckSignalBound { .. } => {}
     }
 }
 
 pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
     match instr {
-        LirInstr::Const { .. } | LirInstr::ValueConst { .. } => {}
+        LirInstr::Const { .. }
+        | LirInstr::ValueConst { .. }
+        | LirInstr::MaterializeConst { .. } => {}
         LirInstr::LoadCapture { .. }
         | LirInstr::LoadCaptureRaw { .. }
+        | LirInstr::LoadSelf { .. }
         | LirInstr::LoadResumeValue { .. } => {}
 
         LirInstr::LoadLocal { .. } => {}
@@ -335,7 +340,7 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             f(*func);
             f(*args);
         }
-        LirInstr::TailCallArrayMut { func, args } => {
+        LirInstr::TailCallArrayMut { func, args, .. } => {
             f(*func);
             f(*args);
         }
@@ -365,6 +370,7 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::IsSet { src, .. }
         | LirInstr::IsSetMut { src, .. }
         | LirInstr::ArrayMutLen { src, .. }
+        | LirInstr::MatchFail { src, .. }
         | LirInstr::FirstDestructure { src, .. }
         | LirInstr::RestDestructure { src, .. }
         | LirInstr::ArrayMutRefDestructure { src, .. }
@@ -395,6 +401,14 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
 
         LirInstr::IntrPush { array, value, .. } => {
             f(*array);
+            f(*value);
+        }
+        LirInstr::IntrStringPush { string, value, .. } => {
+            f(*string);
+            f(*value);
+        }
+        LirInstr::IntrBytesPush { bytes, value, .. } => {
+            f(*bytes);
             f(*value);
         }
         LirInstr::Get { obj, key, .. }
@@ -436,19 +450,29 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::RegionEnter
-        | LirInstr::RegionExit
-        | LirInstr::RegionExitCall
-        | LirInstr::RegionExitRefcounted
-        | LirInstr::RegionRotate
-        | LirInstr::RegionRotateDealloc
-        | LirInstr::RegionRotateRefcounted
-        | LirInstr::PopParamFrame
-        | LirInstr::OutboxEnter
-        | LirInstr::OutboxExit
-        | LirInstr::FlipEnter
-        | LirInstr::FlipSwap
-        | LirInstr::FlipExit => {}
+        LirInstr::IncrefRegion { .. } | LirInstr::DecrefRegion { .. } | LirInstr::PopParamFrame => {
+        }
+
+        LirInstr::StoreLocalRefcounted { src, .. } => f(*src),
+        LirInstr::DecrefValueRegion { src, .. } => f(*src),
+        LirInstr::DecrefCellRegion { src } => f(*src),
+        LirInstr::IncrefValueRegion { src } => f(*src),
+        // The oracle peeks `src` (the return value the slot is claimed to
+        // name); record the use so liveness keeps it alive across the check.
+        LirInstr::AssertRegionMatches { src, .. } => f(*src),
+        // The ownership-forest ops load their operand values (the handler pops
+        // them to drive the adopt / group free); record those uses so liveness
+        // keeps them alive even though this backend never executes the op.
+        LirInstr::AdoptRegion { parent, child } => {
+            f(*parent);
+            f(*child);
+        }
+        LirInstr::AdoptIntoActivation { child } => f(*child),
+        LirInstr::FreeRegionGroup { members } => {
+            for m in members {
+                f(*m);
+            }
+        }
     }
 }
 
@@ -462,80 +486,4 @@ pub fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lir::{BasicBlock, Label, LirFunction, SpannedInstr, SpannedTerminator};
-    use crate::syntax::Span;
-    use crate::value::Arity;
-
-    fn mk_func(blocks: Vec<BasicBlock>, num_regs: u32) -> LirFunction {
-        let mut f = LirFunction::new(Arity::Exact(0));
-        f.blocks = blocks;
-        f.num_regs = num_regs;
-        f
-    }
-
-    fn mk_block(label: u32, instrs: Vec<LirInstr>, term: Terminator) -> BasicBlock {
-        let mut b = BasicBlock::new(Label(label));
-        b.instructions = instrs
-            .into_iter()
-            .map(|i| SpannedInstr::new(i, Span::synthetic()))
-            .collect();
-        b.terminator = SpannedTerminator::new(term, Span::synthetic());
-        b
-    }
-
-    #[test]
-    fn within_block_reuse() {
-        // Two registers used only within the same block should share a slot.
-        // r0 = const 1; r1 = const 2; r2 = add r0 r1; return r2
-        use crate::lir::{BinOp as LirBinOp, LirConst};
-        let block = mk_block(
-            0,
-            vec![
-                LirInstr::Const {
-                    dst: Reg(0),
-                    value: LirConst::Int(1),
-                },
-                LirInstr::Const {
-                    dst: Reg(1),
-                    value: LirConst::Int(2),
-                },
-                LirInstr::BinOp {
-                    dst: Reg(2),
-                    op: LirBinOp::Add,
-                    lhs: Reg(0),
-                    rhs: Reg(1),
-                },
-            ],
-            Terminator::Return(Reg(2)),
-        );
-        let func = mk_func(vec![block], 3);
-        let alloc = allocate(&func, 0);
-
-        // r0 and r1 are last used at idx 2 (BinOp), r2 is defined at idx 2.
-        // Defs are allocated before frees at the same instruction, so r2
-        // gets its own slot before r0/r1 are freed. Total: 3 slots.
-        assert_eq!(alloc.max_slots, 3);
-    }
-
-    #[test]
-    fn cross_block_dedicated() {
-        // r0 defined in block 0, used in block 1 → cross-block, gets dedicated slot.
-        use crate::lir::LirConst;
-        let b0 = mk_block(
-            0,
-            vec![LirInstr::Const {
-                dst: Reg(0),
-                value: LirConst::Int(42),
-            }],
-            Terminator::Jump(Label(1)),
-        );
-        let b1 = mk_block(1, vec![], Terminator::Return(Reg(0)));
-        let func = mk_func(vec![b0, b1], 1);
-        let alloc = allocate(&func, 0);
-
-        assert_eq!(alloc.max_slots, 1);
-        assert!(alloc.reg_to_slot.contains_key(&Reg(0)));
-    }
-}
+mod tests;

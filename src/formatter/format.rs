@@ -35,8 +35,8 @@ pub fn format_forms(
     let mut all_docs: Vec<Doc> = Vec::new();
 
     // Format all forms, separated by a HardBreak. Leading trivia no longer
-    // supplies its own preceding break (see format_annotated), so the
-    // separator is emitted unconditionally between siblings.
+    // supplies its own preceding break (see `emit_leading`), so the separator
+    // is emitted unconditionally between siblings.
     for (i, form) in forms.iter().enumerate() {
         if i > 0 {
             all_docs.push(Doc::hardbreak());
@@ -82,7 +82,11 @@ pub fn format_forms(
 ///
 /// Each comment becomes `text + HardBreak`; blank lines become HardBreaks.
 /// The break that puts the first comment on its own line is the caller's
-/// inter-sibling separator, not emitted here — see `format_annotated`.
+/// inter-sibling separator (the HardBreak in `format_forms`/`format_body`, a
+/// form's header→body break, or a collection's element separator), NOT emitted
+/// here — emitting a leading HardBreak too would double the newline (a spurious
+/// blank line) after that separator. Keeping own-line comments as leading is
+/// what stops the formatter deleting/relocating standalone comments.
 fn emit_leading(leading: &[Trivia], parts: &mut Vec<Doc>) {
     for t in leading {
         match t {
@@ -91,7 +95,7 @@ fn emit_leading(leading: &[Trivia], parts: &mut Vec<Doc>) {
                 parts.push(Doc::hardbreak());
             }
             Trivia::BlankLines { count, .. } => {
-                for _ in 0..(*count).min(2) {
+                for _ in 0..count.capped_at(2) {
                     parts.push(Doc::hardbreak());
                 }
             }
@@ -110,14 +114,9 @@ pub(super) fn format_annotated(
 ) -> Doc {
     let mut parts = Vec::new();
 
-    // Leading trivia: comments and blank lines before this node.
-    //
-    // The break BEFORE this trivia is supplied by the caller — the
-    // inter-sibling separator in format_forms/format_body, a form's
-    // header→body break, or a collection's element separator. So each
-    // comment emits `text + HardBreak` (ending its own line) and blank
-    // lines emit their own HardBreaks. Emitting a leading HardBreak here
-    // too would double the newline (a blank line) after that separator.
+    // Leading trivia: comments and blank lines before this node. The break
+    // BEFORE the trivia is the caller's inter-sibling separator, so each comment
+    // emits `text + HardBreak` (ending its own line) — see `emit_leading`.
     emit_leading(&node.leading, &mut parts);
 
     // The node itself
@@ -149,7 +148,7 @@ pub(super) fn format_annotated(
             }
             Trivia::BlankLines { count, .. } => {
                 seen_break = true;
-                for _ in 0..(*count).min(2) {
+                for _ in 0..count.capped_at(2) {
                     parts.push(Doc::hardbreak());
                 }
             }
@@ -222,7 +221,7 @@ pub(super) fn format_trailing_trivia(node: &AnnotatedSyntax) -> Doc {
             Trivia::BlankLines { count, .. } => {
                 seen_break = true;
                 if has_trailing_comments {
-                    for _ in 0..(*count).min(2) {
+                    for _ in 0..count.capped_at(2) {
                         parts.push(Doc::hardbreak());
                     }
                 }

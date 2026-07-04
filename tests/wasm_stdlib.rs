@@ -1,22 +1,22 @@
 //! Test: can we compile and run stdlib.lisp through WASM?
 #![cfg(feature = "wasm")]
 
-const STDLIB: &str = include_str!("../stdlib.lisp");
+const STDLIB: &str = include_str!("../src/stdlib.lisp");
 
-/// Set up a VM + symbols like the real elle binary does.
-fn setup() -> (elle::VM, Box<elle::SymbolTable>) {
-    let mut vm = elle::VM::new();
-    let mut symbols = Box::new(elle::SymbolTable::new());
-    elle::register_primitives(&mut vm, &mut symbols);
-    let sym_ptr: *mut elle::SymbolTable = &mut *symbols;
-    elle::context::set_symbol_table(sym_ptr);
-    (vm, symbols)
+/// Set up an instance like the real elle binary does: primitives registered, a
+/// fresh `CompileCtx`, and the VM pointed at this instance's own symbol table
+/// (stdlib macros gensym, resolving through it). `RuntimeCore::bare` does all of
+/// this; the compile context is threaded explicitly into the pipeline via
+/// `core.parts()`.
+fn setup() -> elle::runtime::RuntimeCore {
+    elle::runtime::RuntimeCore::bare()
 }
 
 #[test]
 fn compile_stdlib_to_bytecode() {
-    let (_vm, mut symbols) = setup();
-    match elle::pipeline::compile_file(STDLIB, &mut symbols, "<stdlib>") {
+    let mut core = setup();
+    let (_vm, symbols, cctx) = core.parts();
+    match elle::pipeline::compile_file(STDLIB, symbols, cctx, "<stdlib>") {
         Ok(r) => eprintln!("stdlib bytecode: {} bytes", r.bytecode.instructions.len()),
         Err(e) => panic!("stdlib bytecode compilation failed: {}", e),
     }
@@ -24,8 +24,9 @@ fn compile_stdlib_to_bytecode() {
 
 #[test]
 fn compile_stdlib_to_lir() {
-    let (_vm, mut symbols) = setup();
-    match elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0) {
+    let mut core = setup();
+    let (_vm, symbols, cctx) = core.parts();
+    match elle::pipeline::compile_file_to_lir(STDLIB, symbols, cctx, "<stdlib>", 0) {
         Ok(lir) => {
             eprintln!(
                 "stdlib LIR: {} blocks, {} regs, {} locals",
@@ -40,9 +41,14 @@ fn compile_stdlib_to_lir() {
 
 #[test]
 fn compile_stdlib_to_wasm() {
-    let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0).unwrap();
-    let result = elle::wasm::emit::emit_module(&lir, std::collections::HashSet::new());
+    let mut core = setup();
+    let (_vm, symbols, cctx) = core.parts();
+    let lir = elle::pipeline::compile_file_to_lir(STDLIB, symbols, cctx, "<stdlib>", 0).unwrap();
+    let result = elle::wasm::emit::emit_module(
+        &lir,
+        std::collections::HashSet::new(),
+        core.heap() as *mut elle::value::fiberheap::FiberHeap,
+    );
     eprintln!(
         "stdlib WASM: {} bytes, {} constants",
         result.wasm_bytes.len(),
@@ -61,9 +67,14 @@ fn run_stdlib_first_100_lines() {
     (true :positive)))
 (classify 5)
 "#;
-    let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(source, &mut symbols, "<stdlib>", 0).unwrap();
-    let result = elle::wasm::emit::emit_module(&lir, std::collections::HashSet::new());
+    let mut core = setup();
+    let (_vm, symbols, cctx) = core.parts();
+    let lir = elle::pipeline::compile_file_to_lir(source, symbols, cctx, "<stdlib>", 0).unwrap();
+    let result = elle::wasm::emit::emit_module(
+        &lir,
+        std::collections::HashSet::new(),
+        core.heap() as *mut elle::value::fiberheap::FiberHeap,
+    );
     let engine = elle::wasm::store::create_engine().unwrap();
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
         Ok(_) => eprintln!("first 100 lines: WASM valid"),
@@ -84,9 +95,14 @@ fn stdlib_with_map() {
 
 #[test]
 fn run_stdlib_on_wasm() {
-    let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0).unwrap();
-    let result = elle::wasm::emit::emit_module(&lir, std::collections::HashSet::new());
+    let mut core = setup();
+    let (_vm, symbols, cctx) = core.parts();
+    let lir = elle::pipeline::compile_file_to_lir(STDLIB, symbols, cctx, "<stdlib>", 0).unwrap();
+    let result = elle::wasm::emit::emit_module(
+        &lir,
+        std::collections::HashSet::new(),
+        core.heap() as *mut elle::value::fiberheap::FiberHeap,
+    );
     eprintln!(
         "WASM: {} bytes, {} consts, {} closures",
         result.wasm_bytes.len(),
@@ -104,10 +120,10 @@ fn run_stdlib_on_wasm() {
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
         Ok(_) => eprintln!("WASM module compiled successfully"),
         Err(e) => {
-            // Dump WASM for inspection
-            let mut f = std::fs::File::create("/tmp/stdlib_test.wasm").unwrap();
+            // Dump WASM for inspection (/dev/shm — /tmp is off-limits here)
+            let mut f = std::fs::File::create("/dev/shm/stdlib_test.wasm").unwrap();
             std::io::Write::write_all(&mut f, &result.wasm_bytes).unwrap();
-            eprintln!("Wrote WASM to /tmp/stdlib_test.wasm");
+            eprintln!("Wrote WASM to /dev/shm/stdlib_test.wasm");
             panic!("WASM compilation failed:\n{:#}", e);
         }
     }

@@ -28,7 +28,7 @@ Does NOT:
 
 ```rust
 // Parse to Value (legacy)
-let value = read_str(source, &mut symbols)?;
+let value = read_str(source, runtime.heap(), &mut symbols)?;
 
 // Parse to Syntax (preferred)
 let syntax = read_syntax(source)?;
@@ -130,15 +130,3 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
    by the lexer. Both `SyntaxReader` and `Reader` skip comment tokens during
    parsing — they do not appear in the output tree. The formatter collects
    them separately via `lex_with_comments()` for comment preservation.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | 130 | Entry points: `read_str`, `read_syntax`, `read_syntax_all` |
-| `lexer.rs` | ~490 | Tokenization: character dispatch, string/symbol/keyword/delimiter reading |
-| `numeric.rs` | ~300 | Numeric literal parsing: integer, float, radix (hex/octal/binary), underscore separators, scientific notation |
-| `token.rs` | ~100 | Token types, SourceLoc |
-| `parser.rs` | ~200 | Token → Value parsing |
-| `syntax.rs` | ~425 | Token → Syntax parsing |
-| `syntax_tests.rs` | ~484 | Tests for SyntaxReader |

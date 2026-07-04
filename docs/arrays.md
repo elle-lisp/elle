@@ -38,6 +38,12 @@ arr                        # => [10 20 30] (unchanged)
 (concat [1 2] [3 4])       # => [1 2 3 4]
 ```
 
+`concat` accepts any number of sequences and joins them in a single
+linear pass into one accumulator. It does **not** fold pairwise (which
+would allocate — and leak — one growing intermediate per argument, i.e.
+O(n²) total). Concatenating N arrays, strings, or byte vectors costs
+O(total length) time and one result allocation.
+
 ## Mutable @array operations
 
 `put`, `push`, and `pop` mutate in place. `put` and `push` return the

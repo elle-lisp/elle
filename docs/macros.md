@@ -101,9 +101,11 @@ scope ID. No pattern matching, no ellipsis, no multiple clauses.
    pipeline (expand → analyze → lower → emit → execute) runs on the
    let-expression, using the same Expander (so nested macros work)
 5. Convert the result `Value` back to `Syntax` via `from_value()`
-6. Stamp a fresh `ScopeId` onto every node in the result via
-   `add_scope_recursive()`. **Note:** this stamps ALL nodes, including
-   argument-derived nodes. See hygiene plan for the fix.
+6. Mint a fresh intro `ScopeId`, pre-stamp it on the arguments, and
+   **flip** it on the transformer's result via `flip_scope_recursive()`:
+   template-origin nodes gain the scope, argument-origin nodes lose it
+   (recovering their use-site scope sets). See "Sets-of-Scopes Hygiene"
+   below.
 7. Recursively expand the result (handles macro-generated macro calls)
 
 ### Expander precedence
@@ -158,6 +160,11 @@ Macro hygiene means two things:
 
 2. **Referential transparency.** Free variables in a macro template
    resolve in the macro's definition environment, not the call site.
+   (Elle does not yet deliver this half: every top-level form carries the
+   same prelude scope, so a call-site shadow can still capture a
+   template's reference — pinned RED in
+   tests/elle/hygiene-definition-scope.lisp. The fix is a per-defmacro
+   definition scope, compatible with the intro-scope flip.)
 
 Without hygiene, macro authors must manually avoid name collisions. The
 standard workaround is `gensym` — generating unique names that can't
@@ -203,6 +210,15 @@ for the common case.
 - `Value::syntax(Syntax)` preserves scope sets through the Value round-trip
 - `SyntaxKind::SyntaxLiteral(Value)` injects syntax objects into the pipeline
 - `from_value()` unwraps syntax objects, preserving scopes
+- each expansion mints a fresh **intro scope**, pre-stamps it on the macro
+  arguments, and **flips** it on the transformer's result
+  (`flip_scope_recursive`): template-origin identifiers — which never saw
+  the scope — gain it, argument-origin identifiers lose it, recovering
+  their use-site scope sets exactly. A template binder therefore carries
+  the intro scope and cannot capture inbound identifiers.
+- `datum->syntax` results are exempt from the flip; they copy their
+  context's scopes with the intro scope stripped, which is what makes
+  deliberate capture (anaphoric macros) work.
 
 **How it works:**
 
@@ -313,8 +329,9 @@ is returned unchanged.
 
 ### Implementation
 
-Both are runtime primitives in `src/primitives/meta.rs`. They access
-the symbol table via the thread-local `get_symbol_table()` pattern.
+Both are runtime primitives in `src/primitives/meta.rs`. They reach the
+symbol table through their `NativeCtx` — `ctx.vm().symbols()` — which
+resolves in the running instance's own table.
 
 The `scope_exempt: bool` field on `Syntax` is the mechanism that
 prevents intro scope stamping. `add_scope_recursive` checks this flag

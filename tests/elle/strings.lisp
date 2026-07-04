@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## String Operation Law Tests
 ##
 ## Migrated from tests/property/strings.rs (input-invariant laws only).

@@ -57,11 +57,23 @@ Yield              yield current fiber
 Emit signal val    emit a signal
 ```
 
+### Self-reference
+```text
+LoadSelf           push the currently-executing closure (no operand)
+```
+`LoadSelf` is the value path for a closure that references itself — passed to a
+higher-order call, returned, or stored, then invoked. It reads the runtime's
+per-activation executing-closure register, so a value-position self-reference
+resolves to the closure itself with no capture-slot operand. See
+[impl/lir.md](lir.md) — *Self-reference: `LoadSelf`*.
+
 ### Regions
 ```text
-RegionEnter        begin scope allocation region
-RegionExit         end scope allocation, free region objects
+IncrefRegion rid   increment region rid's reference count
+DecrefRegion rid   decrement region rid; free pages when RC hits 0
 ```
+`DecrefRegion` is the only region-demise bytecode; there is no
+separate `FreeRegion`. See `docs/regions.md` for the full model.
 
 ## Encoding
 

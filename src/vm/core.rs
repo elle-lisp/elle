@@ -1,5 +1,6 @@
-use crate::error::{LocationMap, StackFrame};
+use crate::error::StackFrame;
 use crate::ffi::FFISubsystem;
+use crate::hir::region::{RuntimeRegion, StaticRegion};
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::{
@@ -15,12 +16,37 @@ use std::sync::Arc;
 use crate::jit::{JitCode, JitRejectionInfo};
 
 pub(crate) struct TailCallInfo {
-    pub bytecode: Rc<Vec<u8>>,
-    pub constants: Rc<Vec<Value>>,
+    pub code: crate::value::Code,
     pub env: Rc<Vec<Value>>,
-    pub location_map: Rc<LocationMap>,
-    pub rotation_safe: bool,
+    /// The callee CLOSURE this tail call re-enters the activation as. A
+    /// frame-replacing tail call keeps the same Rust/activation frame but swaps
+    /// which closure is executing (a self-recursive `loop` re-enters as itself; a
+    /// tail call to a sibling re-enters as the sibling). `trampoline_loop` installs
+    /// it as `fiber.current_closure` on the replacement so the executing-closure
+    /// register tracks the frame across TCO. `NIL` for a callee with no closure
+    /// value (a native/parameter tail target sets no pending tail call, so this is
+    /// always a real closure in practice).
+    pub closure: Value,
     pub squelch_mask: SignalBits,
+    /// The callee CLOSURE's region, when it is a per-call *local* closure whose
+    /// compiler-emitted `DecrefValueRegion` is dead (emitted past the `TailCall`
+    /// — see `lower_call`'s `is_tail` arm). A tail call replaces the frame, so
+    /// that trailing release never runs and the closure's region leaks (one per
+    /// call through every higher-order stdlib fn: `fold`/`map`/`filter`/…, whose
+    /// recursion tail-calls a `letrec`-bound `go`). The new activation ADOPTS the
+    /// closure here and releases its region when the activation completes (the
+    /// trampoline-loop break) — the missing decref, deferred to where the
+    /// frame-replacing tail call moved the closure's lifetime.
+    ///
+    /// `None` for a callee that is NOT a per-call local closure — a top-level
+    /// `defn` (a program-root closure, region held for the program's life: it has
+    /// no per-call decref and tail-calling it never leaked) or a native/parameter
+    /// callee (no frame replacement). The discriminator is
+    /// `VM::tail_callee_adopt_region`: a local closure's region is recorded in the
+    /// CURRENT activation's region map (and, with its decref dead, never cleared);
+    /// a program-root closure's region was minted in a different, popped
+    /// activation. Releasing a program-root region would be a use-after-free.
+    pub adopt_region: Option<RuntimeRegion>,
 }
 
 /// Pending fiber resume for the trampoline.
@@ -30,14 +56,45 @@ pub(crate) struct TailCallInfo {
 pub(crate) struct PendingFiberResume {
     pub handle: FiberHandle,
     pub fiber_value: Value,
+    /// The TRUE parent of the pending child — the fiber whose code called
+    /// `fiber/resume`. The trampoline descends from the ROOT context (the
+    /// requesting fiber is swapped out by then), so `with_child_fiber`'s
+    /// default parent wiring (the currently active fiber) would record the
+    /// wrong parent. Carried here and installed via the VM's
+    /// `trampoline_parent_override` for the descent.
+    pub parent: Option<(FiberHandle, Option<Value>)>,
 }
 
 pub struct VM {
     /// Mutable runtime configuration: trace flags, JIT/WASM policy.
     /// Accessible from Elle via `(vm/config)`.
     pub runtime_config: crate::config::RuntimeConfig,
+    /// Pointer to this instance's heap. The VM does not own it: a `RuntimeCore`
+    /// owns it as a sibling `Box<FiberHeap>` (`VM::new_with_heap`), or — for a bare
+    /// VM with no `RuntimeCore` — it is a privately leaked heap (`VM::new`). Either
+    /// way it outlives the VM, and is private to this instance: two coexisting
+    /// instances on one thread never share it. Access via `self.heap()` or directly
+    /// for split borrows.
+    pub(crate) heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    /// Pointer to the owning instance's compile context, set by `RuntimeCore`.
+    /// The VM does not own it — its `RuntimeCore` does, as a sibling. The
+    /// runtime `eval` instruction reaches the instance's macro expander, core
+    /// env, and stdlib metadata through it. Null for a bare VM with no
+    /// `RuntimeCore` (a macro-expansion VM, or a test VM that never runs
+    /// `(eval …)`).
+    pub(crate) compile_ctx_ptr: *mut crate::pipeline::CompileCtx,
+    /// Pointer to the owning instance's symbol table, set by `RuntimeCore`.
+    /// The VM does not own it — its `RuntimeCore` does, as a sibling whose boxed
+    /// `SymbolTable` has a stable address. The runtime `eval` instruction, the
+    /// `meta`/`read`/`debug` primitives, and value name-resolution reach the
+    /// instance's table through `vm.symbols()` / `ctx.vm().symbols()`, so two
+    /// embedded instances on one thread each resolve names in their OWN table.
+    /// Null for a bare VM with no `RuntimeCore` (a macro-expansion VM, or a test
+    /// VM that never resolves a symbol name); the readers treat null as "table
+    /// unavailable" and error or skip name resolution.
+    pub(crate) symbols_ptr: *mut crate::symbol::SymbolTable,
     /// The current fiber holding all per-execution state:
-    /// operand stack, call frames, exception handlers, coroutine state.
+    /// operand stack, call frames, exception handlers, fiber state.
     pub fiber: Fiber,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
@@ -61,6 +118,26 @@ pub struct VM {
     pub env_cache: Vec<Value>,
     pub(crate) pending_tail_call: Option<TailCallInfo>,
     pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
+    /// One-shot "the closure whose body is about to run", set immediately before
+    /// entering a body via `execute_bytecode_saving_stack` or the raw
+    /// `execute_bytecode`, which take it (resetting to `NIL`) and install it as
+    /// `fiber.current_closure` for that activation. **Every entrant that runs a
+    /// closure body must set it** — the interpreter call path, the JIT helpers'
+    /// interpreter fallback and tail-call resolution, the forced-tier entries,
+    /// the fiber's first resume, the measured-thunk entry, the macro-transformer
+    /// call, the FFI callback trampoline, the WASM host's bytecode fallback, and
+    /// the spawned-worker body — or the body's `LoadSelf` resolves a
+    /// self-reference to `NIL` (docs/impl/vm.md § The executing-closure
+    /// register; `handle_load_self` debug-asserts the register is populated). A
+    /// `NIL` (untracked) entry is legal only for a body that is not a closure
+    /// instance — a top-level program, module body, or eval'd form. `NIL`
+    /// between calls; never read except by the immediately following entry.
+    pub(crate) pending_entry_closure: Value,
+    /// One-shot parent-wiring override for the next `with_child_fiber`.
+    /// Set by the trampoline descent in `do_fiber_resume` from
+    /// `PendingFiberResume::parent`; consumed (taken) by `with_child_fiber`
+    /// in place of its default "currently active fiber" parent wiring.
+    pub(crate) trampoline_parent_override: Option<(FiberHandle, Option<Value>)>,
     /// Source location of the instruction that produced the current error.
     /// Resolved by the dispatch loop using the current closure's LocationMap.
     /// Reset to None at each translation boundary entry.
@@ -68,6 +145,28 @@ pub struct VM {
     /// call sites. This also protects against fiber error propagation
     /// overwriting the child fiber's error origin.
     pub(crate) error_loc: Option<SourceLoc>,
+    /// Reason carried by the most recent uncaught `:gated` error to propagate
+    /// out of `execute_bytecode`. A loud `(gate! …)` whose condition is unmet
+    /// raises `{:error :gated :reason …}`; when that escapes to the top level
+    /// uncaught, it is an intentional SKIP, not a failure. The top-level driver
+    /// (`run_source`) reads this to exit 0 with a notice instead of erroring.
+    /// Set to `Some`/`None` on every uncaught error (so a stale reason from a
+    /// caught gate never lingers); only meaningful when execution returned Err.
+    pub(crate) gated_exit_reason: Option<String>,
+    /// The backend tier currently executing under `compile/run-on`
+    /// (`"bytecode"`, `"jit"`, `"wasm"`, `"mlir-cpu"`), read by `(vm/tier)` /
+    /// `(backend? :tier)` so a closure compiled once and dispatched to several
+    /// tiers learns which one it is running on at runtime. `dispatch_compile_run_on`
+    /// saves, sets, and restores it around the forced-tier call; `"bytecode"`
+    /// otherwise. A `VM` field (not shared state) so two instances never collide.
+    pub(crate) active_tier: &'static str,
+    /// When set, `(exit)` emits a catchable `{:error :exited :code N}` instead of
+    /// terminating the process. Toggled by `(sys/trap-exit! on)`. The test runner
+    /// brackets each test with it so a test's `(exit)` records a result and the run
+    /// continues. A `VM` field: one VM per worker thread, so per-VM equals
+    /// per-thread, keeping the trap scoped to the calling OS thread (the runner's
+    /// own `exit`, on a VM with the trap unset, still terminates the process).
+    pub(crate) exit_trapped: bool,
     /// JIT code cache: bytecode pointer → compiled native code.
     #[cfg(feature = "jit")]
     pub jit_cache: FxHashMap<*const u8, Arc<JitCode>>,
@@ -85,6 +184,13 @@ pub struct VM {
     /// `(jit/rejections)` primitive and `--stats` CLI flag.
     #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
+    /// Per-template count of background JIT compilations submitted.
+    /// Incremented on every `submit_jit_task`. The negative-cache
+    /// invariant (see docs/impl/jit.md) holds this at 1 for a rejected
+    /// function regardless of call count; a regression shows up here as
+    /// an unbounded `:attempts` in `(jit/rejections)`.
+    #[cfg(feature = "jit")]
+    pub jit_compile_attempts: FxHashMap<*const u8, usize>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
@@ -113,187 +219,67 @@ pub struct VM {
     pub(crate) mlir_cache: Option<crate::mlir::MlirCache>,
 }
 
-/// Create a dummy root closure for the root fiber.
-/// The root fiber doesn't execute a closure directly — it's the
-/// execution context for top-level bytecode. This closure is never
-/// called; it exists only to satisfy Fiber's constructor.
-fn root_closure() -> Rc<Closure> {
-    use crate::signals::Signal;
-    use crate::value::types::Arity;
-    use crate::value::ClosureTemplate;
-    Rc::new(Closure {
-        template: Rc::new(ClosureTemplate {
-            bytecode: Rc::new(vec![]),
-            arity: Arity::Exact(0),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 0,
-            constants: Rc::new(vec![]),
-            signal: Signal::silent(),
-            capture_params_mask: 0,
-            capture_locals_mask: 0,
-
-            symbol_names: Rc::new(HashMap::new()),
-            location_map: Rc::new(LocationMap::new()),
-            rotation_safe: false,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: crate::hir::VarargKind::List,
-            name: None,
-            result_is_immediate: false,
-            has_outward_heap_set: false,
-            wasm_func_idx: None,
-            spirv: std::cell::OnceCell::new(),
-        }),
-        env: crate::value::inline_slice::InlineSlice::empty(),
-        squelch_mask: SignalBits::EMPTY,
-    })
-}
+mod decode;
+mod format;
+mod lifecycle;
+mod region;
+mod resume;
 
 impl VM {
-    pub fn new() -> Self {
-        // Install the root fiber heap before any allocation can happen.
-        crate::value::fiberheap::install_root_heap();
+    /// Access the root heap.
+    #[inline]
+    pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
+        unsafe { &mut *self.heap_ptr }
+    }
 
-        // Initialize default trait tables for collection/sequence types.
-        crate::primitives::traitregistry::init_default_traits();
+    /// Point this VM at its owning instance's compile context. Set by
+    /// `RuntimeCore` (the boxed `CompileCtx` has a stable address). See
+    /// `compile_ctx_ptr`.
+    pub fn set_compile_ctx(&mut self, ctx: *mut crate::pipeline::CompileCtx) {
+        self.compile_ctx_ptr = ctx;
+    }
 
-        let mut fiber = Fiber::new(root_closure(), SIG_OK);
-        // Root fiber starts alive (it's the currently executing context)
-        fiber.status = crate::value::FiberStatus::Alive;
+    /// Point this VM at its owning instance's symbol table. Set by `RuntimeCore`
+    /// (the boxed `SymbolTable` has a stable address). See `symbols_ptr`.
+    pub fn set_symbols(&mut self, symbols: *mut crate::symbol::SymbolTable) {
+        self.symbols_ptr = symbols;
+    }
 
-        let rc = crate::config::RuntimeConfig::from_static_config(crate::config::get());
-        // Merge --trace= keywords from CLI into the RuntimeConfig
-        let mut rc = rc;
-        if !crate::config::get().trace_keywords.is_empty() {
-            let mut kws = rc.trace.clone();
-            for kw in &crate::config::get().trace_keywords {
-                kws.insert(kw.clone());
-            }
-            rc.set_trace(kws);
-        }
-
-        #[cfg(feature = "mlir")]
-        let mlir_enabled = rc.mlir.enabled();
-
-        VM {
-            runtime_config: rc,
-            fiber,
-            current_fiber_handle: None, // root fiber has no handle
-            current_fiber_value: None,  // root fiber has no Value
-            ffi: FFISubsystem::new(),
-            loading_modules: std::collections::HashSet::new(),
-            loaded_plugins: HashMap::new(),
-            closure_call_counts: FxHashMap::default(),
-            tail_call_env_cache: Vec::with_capacity(256),
-            env_cache: Vec::with_capacity(256),
-            pending_tail_call: None,
-            pending_fiber_resume: None,
-            error_loc: None,
-            #[cfg(feature = "jit")]
-            jit_cache: FxHashMap::default(),
-            #[cfg(feature = "jit")]
-            jit_worker: None,
-            #[cfg(feature = "jit")]
-            jit_pending: rustc_hash::FxHashSet::default(),
-            #[cfg(feature = "jit")]
-            jit_rejections: FxHashMap::default(),
-            docs: HashMap::new(),
-            eval_expander: None,
-            user_args: Vec::new(),
-            source_arg: String::new(),
-            #[cfg(feature = "wasm")]
-            wasm_tier: if crate::config::get().wasm_tier_enabled() {
-                crate::wasm::lazy::WasmTier::new().ok()
-            } else {
-                None
-            },
-            #[cfg(feature = "wasm")]
-            wasm_rejections: FxHashMap::default(),
-            #[cfg(feature = "mlir")]
-            mlir_enabled,
-            #[cfg(feature = "mlir")]
-            mlir_cache: None,
+    /// The owning instance's symbol table, for runtime name interning/resolution.
+    /// Returns `None` for a bare VM (no `RuntimeCore`); the readers treat that as
+    /// "symbol table unavailable". The borrow is sound by the same contract as
+    /// `heap()`/`compile_ctx()`: the `SymbolTable` is a disjoint allocation owned
+    /// by the `RuntimeCore` that outlives the VM, reborrowed per call (the VM does
+    /// not touch it during the synchronous read).
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) fn symbols(&self) -> Option<&mut crate::symbol::SymbolTable> {
+        if self.symbols_ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { &mut *self.symbols_ptr })
         }
     }
 
-    /// Reset the VM's fiber and transient state for reuse.
-    ///
-    /// Preserves: docs, ffi, jit_cache, eval_expander, env_cache,
-    /// tail_call_env_cache, fiber heap Box (reused for pointer stability).
-    /// Resets: fiber, call state, location map,
-    /// loaded modules, closure call counts.
-    pub fn reset_fiber(&mut self) {
-        // The root heap is persistent (lives in ROOT_HEAP thread-local).
-        // Do not clear it — root fiber objects accumulate across resets,
-        // so Values returned by execute_bytecode remain valid.
-        // self.fiber.heap is an unused Box<FiberHeap>; it is dropped and
-        // recreated with the new Fiber, costing one allocation. This is
-        // acceptable; making fiber.heap Option<> would add branches everywhere.
-        self.fiber = Fiber::new(root_closure(), SIG_OK);
-        self.fiber.status = crate::value::FiberStatus::Alive;
-        self.current_fiber_handle = None;
-        self.current_fiber_value = None;
-        self.pending_tail_call = None;
-        self.pending_fiber_resume = None;
-        self.error_loc = None;
-        self.closure_call_counts.clear();
-        #[cfg(feature = "jit")]
-        self.jit_rejections.clear();
-        self.loading_modules.clear();
+    /// The owning instance's compile context, for the runtime `eval`
+    /// instruction. Returns `None` for a bare VM (no `RuntimeCore`), in which
+    /// case `(eval …)` of macro-using code is unsupported. The borrow is sound
+    /// by the same contract as `heap()`: the `CompileCtx` is a disjoint
+    /// allocation owned by the `RuntimeCore` that outlives the VM.
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) fn compile_ctx(&self) -> Option<&mut crate::pipeline::CompileCtx> {
+        if self.compile_ctx_ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { &mut *self.compile_ctx_ptr })
+        }
     }
 
-    /// Format a runtime error value with source location.
-    pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
-        let mut result = String::new();
-
-        // Stack trace first (shallowest frame first, drilling down to error origin)
-        let trace = self.capture_stack_trace();
-        if !trace.is_empty() {
-            const MAX_TRACE_DEPTH: usize = 20;
-            for frame in trace.iter().rev().take(MAX_TRACE_DEPTH) {
-                if let Some(name) = &frame.function_name {
-                    result.push_str(&format!("  in {}", name));
-                    if let Some(loc) = &frame.location {
-                        result.push_str(&format!(" at {}", loc));
-                    }
-                    result.push('\n');
-                }
-            }
-            if trace.len() > MAX_TRACE_DEPTH {
-                result.push_str(&format!(
-                    "  ... {} more frames\n",
-                    trace.len() - MAX_TRACE_DEPTH
-                ));
-            }
-        }
-
-        // Error location and source context
-        if let Some(loc) = &self.error_loc {
-            result.push_str(&format!("  at {}\n", loc));
-
-            // Add source context if available
-            if let Some(source) = crate::error::formatting::load_source_for_loc(loc) {
-                if let Some(line) = crate::error::formatting::extract_source_line(&source, loc.line)
-                {
-                    let truncated = if line.len() > 120 {
-                        format!("{}...", &line[..117])
-                    } else {
-                        line.to_string()
-                    };
-                    result.push_str(&format!("   {}\n", truncated));
-
-                    let caret = crate::error::formatting::highlight_column(&line, loc.col);
-                    result.push_str(&format!("   {}\n", caret));
-                }
-            }
-        }
-
-        // Error value last
-        result.push_str(&format!("✗ Runtime error: {:?}", err_value));
-
-        result
+    /// Take the reason of the most recent uncaught `:gated` error, if the last
+    /// failed execution terminated via a loud gate. Consumes it (returns None on
+    /// a second call). The top-level driver uses this to exit 0 with a skip
+    /// notice instead of reporting a failure. See `gated_exit_reason`.
+    pub fn take_gated_exit_reason(&mut self) -> Option<String> {
+        self.gated_exit_reason.take()
     }
 
     /// Check a signal against a squelch mask. If the signal is squelched,
@@ -315,13 +301,49 @@ impl VM {
             let registry = crate::signals::registry::global_registry().lock().unwrap();
             registry.format_signal_bits(squelched)
         };
-        let err = crate::value::error_val(
+        let err = self.escaping_error(
             "signal-violation",
             format!("squelch: signal {} caught at boundary", squelched_str),
         );
-        self.fiber.suspended = None;
+        self.discard_suspended_frames();
         self.fiber.signal = Some((crate::value::SIG_ERROR, err));
         true
+    }
+
+    /// Discard the LIVE fiber's suspended frames (squelch / abort) — the
+    /// chokepoint for abandoning suspended work while the fiber runs on, the
+    /// discard counterpart of `resume_suspended` (docs/impl/region-diagnostics.md
+    /// § "The squelch/abort discard"; a fiber reaching a TERMINAL state instead
+    /// releases through `vm::fiber::take_fiber_owned`/`release_fiber_owned`,
+    /// which also frees the fiber owner node this discard leaves alone — the
+    /// fiber survives a squelch and may still own it).
+    ///
+    /// Each discarded `BytecodeFrame` may carry its activation's parked owner
+    /// node ([`crate::value::BytecodeFrame::activation_owner_node`], MOVED in at
+    /// the suspend — the node's only home). Its members are `Owned` (count
+    /// consumed by the adopt) with no other release route, and the continuation
+    /// whose normal completion would have freed the node will never run — so the
+    /// discard runs that release here: one tolerant decref takes the node's rc
+    /// 1→0 and subtree-drops node + members (interior cycles reclaim with the
+    /// set; the Shared frontier cascades once). The move discipline makes this
+    /// the sole release path — the slot was emptied at the park, so no
+    /// completion or resume can free the node a second time.
+    ///
+    /// The node is the ONLY thing released. The frame's `activation_region_map`
+    /// is a borrowed view: a region it names can still be live in an outer,
+    /// non-discarded frame or in the activation that catches the squelch, so a
+    /// per-slot release here over-frees live state. A node's members, by
+    /// contrast, are exactly the regions the inference proved externally unique
+    /// and moved in through `AdoptIntoActivation`, so freeing them cannot touch
+    /// a region any live frame still counts on. The map's regions stay leaked
+    /// on this path until an ownership cut adopts them (UAF-safe, bounded per
+    /// discard; docs/impl/region-model.md § "Owner nodes").
+    pub(crate) fn discard_suspended_frames(&mut self) {
+        if let Some(frames) = self.fiber.suspended.take() {
+            for node in crate::vm::fiber::parked_owner_nodes(frames) {
+                self.heap().decref_region_if_present(node);
+            }
+        }
     }
 
     /// Record a closure call and return whether it's "hot" (called N+ times,
@@ -381,343 +403,7 @@ impl VM {
             location_map,
         });
     }
-
-    /// Capture current call stack as trace frames
-    pub fn capture_stack_trace(&self) -> Vec<StackFrame> {
-        self.fiber
-            .call_stack
-            .iter()
-            .rev()
-            .map(|frame| {
-                let location = frame.location_map.get(&frame.ip).cloned();
-                StackFrame {
-                    function_name: Some(frame.name.to_string()),
-                    location,
-                }
-            })
-            .collect()
-    }
-
-    /// Wrap a string error with stack trace information
-    pub fn wrap_error(&self, error: String) -> String {
-        let trace = self.capture_stack_trace();
-        if trace.is_empty() {
-            return error;
-        }
-
-        let mut result = error;
-        for frame in &trace {
-            result.push_str("\n    in ");
-            if let Some(ref name) = frame.function_name {
-                result.push_str(name);
-            } else {
-                result.push_str("<anonymous>");
-            }
-            if let Some(ref loc) = frame.location {
-                result.push_str(&format!(" at {}", loc));
-            }
-        }
-        result
-    }
-
-    #[inline(always)]
-    pub fn read_u8(&self, bytecode: &[u8], ip: &mut usize) -> u8 {
-        let val = bytecode[*ip];
-        *ip += 1;
-        val
-    }
-
-    #[inline(always)]
-    pub fn read_u16(&self, bytecode: &[u8], ip: &mut usize) -> u16 {
-        let high = bytecode[*ip] as u16;
-        let low = bytecode[*ip + 1] as u16;
-        *ip += 2;
-        (high << 8) | low
-    }
-
-    #[inline(always)]
-    pub fn read_i16(&self, bytecode: &[u8], ip: &mut usize) -> i16 {
-        self.read_u16(bytecode, ip) as i16
-    }
-
-    #[inline(always)]
-    pub fn read_i32(&self, bytecode: &[u8], ip: &mut usize) -> i32 {
-        let b0 = bytecode[*ip] as u32;
-        let b1 = bytecode[*ip + 1] as u32;
-        let b2 = bytecode[*ip + 2] as u32;
-        let b3 = bytecode[*ip + 3] as u32;
-        *ip += 4;
-        ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) as i32
-    }
-
-    pub(crate) fn ffi(&self) -> &FFISubsystem {
-        &self.ffi
-    }
-
-    pub(crate) fn ffi_mut(&mut self) -> &mut FFISubsystem {
-        &mut self.ffi
-    }
-
-    /// Resume execution from suspended frames.
-    ///
-    /// Replays the frame chain from innermost (index 0) to outermost
-    /// (last index), threading the resume value through. For single-frame
-    /// suspension (signal-based), this is equivalent to a simple resume.
-    /// For multi-frame suspension (yield-through-calls), this replays the
-    /// full call chain.
-    ///
-    /// Handles two frame types:
-    /// - `Bytecode`: restores the saved operand stack and continues bytecode
-    ///   execution from the saved instruction pointer.
-    /// - `FiberResume`: resumes a suspended sub-fiber (from `defer`/`protect`)
-    ///   with the current value via `do_fiber_resume`, using the proper
-    ///   fiber-swap machinery so heap context and parent/child chain are correct.
-    ///
-    /// Returns SignalBits. The result value is stored in `self.fiber.signal`.
-    pub fn resume_suspended(
-        &mut self,
-        frames: Vec<SuspendedFrame>,
-        resume_value: Value,
-    ) -> SignalBits {
-        if frames.is_empty() {
-            self.fiber.signal = Some((SIG_OK, resume_value));
-            return SIG_OK;
-        }
-
-        // Save current stack state
-        let saved_stack = std::mem::take(&mut self.fiber.stack);
-
-        let mut current_value = resume_value;
-
-        for i in 0..frames.len() {
-            let frame = &frames[i];
-
-            match frame {
-                SuspendedFrame::FiberResume {
-                    handle,
-                    fiber_value,
-                } => {
-                    // Trampoline: instead of calling do_fiber_resume (which
-                    // would recurse on the Rust stack), set pending_fiber_resume
-                    // and return SIG_SWITCH. The trampoline in do_fiber_resume
-                    // will handle the fiber transition iteratively.
-                    handle.with_mut(|f| {
-                        f.signal = Some((SIG_OK, current_value));
-                    });
-
-                    self.pending_fiber_resume = Some(PendingFiberResume {
-                        handle: handle.clone(),
-                        fiber_value: *fiber_value,
-                    });
-
-                    // Save remaining outer frames for later resumption.
-                    if i + 1 < frames.len() {
-                        self.fiber.suspended = Some(frames[i + 1..].to_vec());
-                    }
-
-                    self.fiber.signal = Some((SIG_SWITCH, Value::NIL));
-                    self.fiber.stack = saved_stack;
-                    return SIG_SWITCH;
-                }
-
-                SuspendedFrame::Bytecode(frame) => {
-                    // Restore this frame's stack
-                    self.fiber.stack.clear();
-                    self.fiber.stack.extend(frame.stack.iter().copied());
-
-                    // For yield frames and caller frames: the resume value is the
-                    // "return value" of the suspended operation (yield result, or
-                    // call return). Push it so the next instruction sees it.
-                    // For fuel/signal-pause frames: the instruction at frame.ip
-                    // re-executes from scratch — no extra value is injected.
-                    if frame.push_resume_value {
-                        self.fiber.stack.push(current_value);
-                    }
-
-                    if self
-                        .runtime_config
-                        .has_trace_bit(crate::config::trace_bits::CALL)
-                    {
-                        let opcode = if frame.ip < frame.bytecode.len() {
-                            frame.bytecode[frame.ip]
-                        } else {
-                            255
-                        };
-                        let env_ptr = std::rc::Rc::as_ptr(&frame.env) as usize;
-                        eprintln!(
-                            "[resume] frame={} ip={} bc_len={} opcode={} saved_stack={} push_rv={} final_stack={} env_len={} env_ptr={:#x} rv_type={}",
-                            i, frame.ip, frame.bytecode.len(), opcode,
-                            frame.stack.len(), frame.push_resume_value,
-                            self.fiber.stack.len(), frame.env.len(),
-                            env_ptr, current_value.type_name(),
-                        );
-                        for (si, sv) in self.fiber.stack.iter().enumerate() {
-                            eprintln!("  stack[{}] = {} {:?}", si, sv.type_name(), sv);
-                        }
-                        // Only dump env for small envs (inner closures, not stdlib)
-                        if frame.env.len() <= 5 {
-                            for (ei, ev) in frame.env.iter().enumerate() {
-                                let detail = if ev.is_capture_cell() {
-                                    if let Some(cell_ref) = ev.as_capture_cell() {
-                                        let inner = *cell_ref.borrow();
-                                        let lbox_ptr = cell_ref as *const _ as usize;
-                                        format!(
-                                            "box(ptr={:#x}) -> {} {:?}",
-                                            lbox_ptr,
-                                            inner.type_name(),
-                                            inner
-                                        )
-                                    } else {
-                                        format!("{} {:?}", ev.type_name(), ev)
-                                    }
-                                } else {
-                                    format!("{} {:?}", ev.type_name(), ev)
-                                };
-                                eprintln!("  env[{}] = {}", ei, detail);
-                            }
-                        }
-                    }
-
-                    let exec = self.execute_bytecode_from_ip(
-                        &frame.bytecode,
-                        &frame.constants,
-                        &frame.env,
-                        frame.ip,
-                        &frame.location_map,
-                    );
-
-                    if exec.bits.is_ok() {
-                        let (_, v) = self.fiber.signal.take().unwrap();
-                        if self
-                            .runtime_config
-                            .has_trace_bit(crate::config::trace_bits::FIBER)
-                        {
-                            eprintln!(
-                                "[resume_suspended] frame {} OK: val_type={} total_frames={}",
-                                i,
-                                v.type_name(),
-                                frames.len(),
-                            );
-                        }
-                        current_value = v;
-                    } else {
-                        if self
-                            .runtime_config
-                            .has_trace_bit(crate::config::trace_bits::FIBER)
-                        {
-                            let susp_len =
-                                self.fiber.suspended.as_ref().map(|v| v.len()).unwrap_or(0);
-                            let remaining = frames.len() - i - 1;
-                            eprintln!(
-                                "[resume_suspended] frame {} non-OK: bits={} susp_frames={} remaining={}",
-                                i, exec.bits, susp_len, remaining,
-                            );
-                        }
-                        if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
-                            self.fiber.suspended =
-                                Some(vec![SuspendedFrame::Bytecode(BytecodeFrame {
-                                    bytecode: exec.bytecode,
-                                    constants: exec.constants,
-                                    env: exec.env,
-                                    ip: exec.ip,
-                                    stack: exec.stack,
-                                    location_map: exec.location_map,
-                                    push_resume_value: !exec.bits.contains(SIG_FUEL),
-                                })]);
-                        }
-
-                        // For suspending signals (any bits except error/halt),
-                        // merge remaining outer frames
-                        if !exec.bits.contains(SIG_ERROR)
-                            && !exec.bits.contains(SIG_HALT)
-                            && i + 1 < frames.len()
-                        {
-                            if let Some(ref mut new_frames) = self.fiber.suspended {
-                                for f in frames[i + 1..].iter() {
-                                    new_frames.push(f.clone());
-                                }
-                            }
-                        }
-
-                        self.fiber.stack = saved_stack;
-                        return exec.bits;
-                    }
-                }
-            }
-        }
-
-        self.fiber.stack = saved_stack;
-        self.fiber.signal = Some((SIG_OK, current_value));
-        SIG_OK
-    }
-}
-
-impl Default for VM {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_signal_bits() {
-        use crate::value::{SIG_ERROR, SIG_OK, SIG_YIELD};
-
-        assert_eq!(SIG_OK.raw(), 0);
-        assert_eq!(SIG_ERROR.raw(), 1);
-        assert_eq!(SIG_YIELD.raw(), 2);
-
-        let mask = SIG_ERROR | SIG_YIELD;
-        assert!(mask.contains(SIG_ERROR));
-        assert!(mask.contains(SIG_YIELD));
-        assert!(!mask.contains(SIG_OK)); // SIG_OK has no bits, contains() returns false
-    }
-
-    #[test]
-    fn test_capture_stack_trace() {
-        use std::collections::HashMap;
-        let mut vm = VM::new();
-        let empty_map = Rc::new(HashMap::new());
-
-        vm.push_call_frame("function_a".to_string(), 10, empty_map.clone());
-        vm.push_call_frame("function_b".to_string(), 20, empty_map.clone());
-        vm.push_call_frame("function_c".to_string(), 30, empty_map.clone());
-
-        let trace = vm.capture_stack_trace();
-
-        assert_eq!(trace.len(), 3);
-        assert_eq!(trace[0].function_name, Some("function_c".to_string()));
-        assert_eq!(trace[1].function_name, Some("function_b".to_string()));
-        assert_eq!(trace[2].function_name, Some("function_a".to_string()));
-    }
-
-    #[test]
-    fn test_wrap_error_with_trace() {
-        use std::collections::HashMap;
-        let mut vm = VM::new();
-        let empty_map = Rc::new(HashMap::new());
-
-        vm.push_call_frame("outer".to_string(), 5, empty_map.clone());
-        vm.push_call_frame("inner".to_string(), 15, empty_map.clone());
-
-        let error_msg = "Something went wrong".to_string();
-        let wrapped = vm.wrap_error(error_msg);
-
-        assert!(wrapped.contains("Something went wrong"));
-        assert!(wrapped.contains("inner"));
-        assert!(wrapped.contains("outer"));
-    }
-
-    #[test]
-    fn test_wrap_error_empty_stack() {
-        let vm = VM::new();
-
-        let error_msg = "Error with no context".to_string();
-        let wrapped = vm.wrap_error(error_msg.clone());
-
-        assert_eq!(wrapped, error_msg);
-    }
-}
+mod tests;

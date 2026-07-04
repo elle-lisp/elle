@@ -40,7 +40,9 @@ runs exactly as if it had been written using current-epoch syntax.
 
 ## Migration rule types
 
-Each epoch bump defines a set of migration rules. There are three types:
+Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
+`src/epoch/rules.rs` has six variants: `Rename`, `Remove`, `Unwrap`, `Replace`,
+`FlattenBindings`, and `FlattenClauses`.
 
 ### Rename
 
@@ -221,9 +223,9 @@ is unwrapped to just `body...`. Non-lambda forms produce a compile error.
 
 ### Epoch 7 — flat let bindings
 
-`let`, `let*`, `letrec`, `if-let`, and `when-let` switch from nested-pair
-bindings to flat (Clojure-style) bindings. Each binding is a pattern/value
-pair laid out flat inside a single bracket form.
+`let`, `let*`, `letrec`, `if-let`, `when-let`, and `when-ok` switch from
+nested-pair bindings to flat (Clojure-style) bindings. Each binding is a
+pattern/value pair laid out flat inside a single bracket form.
 
 | Old (epoch ≤ 6) | New (epoch 7) |
 |-----------------|---------------|
@@ -282,3 +284,49 @@ Classic Lisp pair操作 names are replaced with descriptive alternatives:
 | `cons` | `pair` |
 | `car` | `first` |
 | `cdr` | `rest` |
+
+### Epoch 11 — sys/spawn→sys/spawn-vm, os/spawn→os/spawn-vm
+
+`sys/spawn`/`os/spawn` now load the standard library in the spawned worker
+(so `eval`/`read` resolve stdlib names there) and are correspondingly
+heavier. The original light, primitives-only worker is now `sys/spawn-vm` /
+`os/spawn-vm`. Renaming the old qualified names to their `-vm` form
+preserves the original (light) behavior of pre-epoch code; new code gets the
+heavy, stdlib-backed default via `sys/spawn`.
+
+| Old (epoch ≤ 10) | New (epoch 11) |
+|------------------|----------------|
+| `sys/spawn` | `sys/spawn-vm` |
+| `os/spawn` | `os/spawn-vm` |
+
+Only the qualified `sys/spawn`/`os/spawn` are renamed. The bare `spawn`
+symbol is deliberately left alone: `Rename` is not binding-aware, and
+`spawn` is also the `(ev/scope (fn [spawn] …))` nursery parameter — a global
+rename would clobber that local. Bare `spawn` is no longer registered as a
+primitive alias at all, so top-level code must use `sys/spawn` /
+`sys/spawn-vm`.
+
+### Epoch 12 — remove coroutine API, use fibers directly
+
+Coroutines were always trivial wrappers over yield-masking fibers and have
+been removed. All `coro/*` and legacy `coroutine-*` / `make-coroutine`
+forms are rewritten to their `fiber/*` equivalents.
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `coro/new fn` | `(fiber/new fn \|:yield\|)` | Adds yield capability |
+| `make-coroutine fn` | `(fiber/new fn \|:yield\|)` | Gen-1 alias |
+| `coro/resume` | `fiber/resume` | Rename |
+| `coro/status` | `fiber/status` | Rename |
+| `coro/done?` | `fiber/done?` | Rename |
+| `coro/value` | `fiber/value` | Rename |
+| `coroutine-resume` | `fiber/resume` | Gen-1 rename |
+| `coroutine-status` | `fiber/status` | Gen-1 rename |
+| `coroutine-done?` | `fiber/done?` | Gen-1 rename |
+| `coroutine-value` | `fiber/value` | Gen-1 rename |
+| `coroutine?` | `fiber?` | Rename |
+| `coro?` | `fiber?` | Rename |
+| `yield-from` | `yield*` | Rename |
+| `coro/>iterator` | — | Removed (fibers are natively iterable) |
+| `coroutine->iterator` | — | Removed |
+| `coroutine-next` | — | Removed (use `fiber/resume`) |

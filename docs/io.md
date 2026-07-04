@@ -8,8 +8,9 @@ code runs inside the async scheduler automatically.
 On Linux, Elle uses `io_uring` for all I/O: file reads, writes, TCP,
 timers, subprocess pipes. Operations are submitted to the kernel's
 submission queue and completed without syscalls or threads — the kernel
-handles multiplexing directly. A single-threaded event loop polls the
-completion queue and resumes the waiting fiber.
+handles multiplexing directly. A single-threaded event loop drains any
+ready completions, then blocks on the completion queue (waiting for at
+least one completion) and resumes the waiting fiber.
 
 On macOS, Elle uses a thread-pool backend that provides the same
 abstraction. Blocking I/O operations run on background threads; the
@@ -21,6 +22,37 @@ Both backends are syscall-free from the fiber's perspective: the fiber
 yields `:io`, the scheduler submits the operation, and the fiber resumes
 with the result. No threads are created per-operation on Linux; on macOS,
 the thread pool is shared across all fibers.
+
+Whatever cannot lift to io_uring — `getaddrinfo`, an arbitrary `Task`
+closure, blocking stdin reads, and everything on the thread-pool platform —
+runs on a single shared thread pool whose every worker reports through one
+completion channel. On the thread-pool platform the scheduler's blocking wait
+*is* a `recv()` on that channel. On Linux it blocks on one `io_uring_enter`
+instead, and a bridge eventfd carries the channel's completions into it: a
+worker raises the eventfd after publishing, and a standing poll on the ring
+turns that edge into a completion. Either way the scheduler has exactly one
+blocking primitive, so a completion published by a worker can never be missed
+while the scheduler is asleep.
+
+### Backend teardown
+
+An io_uring submission queue entry references a buffer the kernel writes
+into asynchronously — a `BufferPool` slot for `read-all`/`open`, or the
+fiber's own arena buffer for `read`/`read-line`. The kernel may complete
+the operation (and write that buffer) at any point up until its completion
+is reaped. So a backend must never be torn down while an operation is still
+in flight: freeing the buffer pool and the ring with the kernel still
+holding a write pointer lands the eventual write in freed heap (manifesting
+as a `malloc(): unsorted double linked list corrupted` abort).
+
+Dropping an async backend therefore first brings the ring to a quiescent
+state — it cancels every pending io_uring operation and drains the
+resulting completions, so no kernel-owned buffer outlives the backend. This
+matters when user code submits work it never waits for, e.g. `(io/submit
+backend req)` with no following `(io/wait backend …)`: the operation is
+in flight when the backend value goes out of scope. Thread-pool and stdin
+operations need no such handling — their workers copy results through
+channels and never write into a freed pooled buffer.
 
 ## Ports
 

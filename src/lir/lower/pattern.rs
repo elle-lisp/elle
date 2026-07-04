@@ -1,11 +1,43 @@
 //! Pattern matching lowering
 
-use super::decision::{Constructor, DecisionTree};
 use super::*;
+use crate::hir::decision::{Constructor, DecisionTree};
 use crate::hir::{HirPattern, PatternKey, PatternLiteral};
+
+mod keyed;
+mod matching;
+mod seq;
 
 impl<'a> Lowerer<'a> {
     // ── Decision tree lowering ─────────────────────────────────────
+
+    /// Emit the no-match path: raise :match-error carrying the scrutinee.
+    /// The store and jump after MatchFail are NOT dead: errors are
+    /// resumable, and a fiber that catches SIG_ERROR resumes here with
+    /// the handler's value pushed — the store makes that value the
+    /// match expression's result (same convention as the destructure
+    /// instructions).
+    pub(super) fn emit_no_match(
+        &mut self,
+        scrutinee_slot: u16,
+        result_slot: u16,
+        done_label: Label,
+    ) -> Result<(), String> {
+        let scrut = self.fresh_reg();
+        self.emit(LirInstr::LoadLocal {
+            dst: scrut,
+            slot: scrutinee_slot,
+        });
+        let dst = self.fresh_reg();
+        self.emit(LirInstr::MatchFail { dst, src: scrut });
+        self.emit(LirInstr::StoreLocal {
+            slot: result_slot,
+            src: dst,
+        });
+        self.terminate(Terminator::Jump(done_label));
+        self.finish_block();
+        Ok(())
+    }
 
     /// Lower a compiled decision tree to LIR instructions.
     ///
@@ -27,18 +59,7 @@ impl<'a> Lowerer<'a> {
         lowered_arms: &mut std::collections::HashMap<usize, Label>,
     ) -> Result<(), String> {
         match tree {
-            DecisionTree::Fail => {
-                // Defensive: should not happen with exhaustiveness checking.
-                // Emit nil as the result.
-                let nil_reg = self.emit_const(LirConst::Nil)?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: nil_reg,
-                });
-                self.terminate(Terminator::Jump(done_label));
-                self.finish_block();
-                Ok(())
-            }
+            DecisionTree::Fail => self.emit_no_match(scrutinee_slot, result_slot, done_label),
             DecisionTree::Leaf {
                 arm_index,
                 bindings,
@@ -230,14 +251,8 @@ impl<'a> Lowerer<'a> {
                         lowered_arms,
                     )?;
                 } else {
-                    // No default → fail (non-exhaustive)
-                    let nil_reg = self.emit_const(LirConst::Nil)?;
-                    self.emit(LirInstr::StoreLocal {
-                        slot: result_slot,
-                        src: nil_reg,
-                    });
-                    self.terminate(Terminator::Jump(done_label));
-                    self.finish_block();
+                    // No default → no constructor matched the scrutinee
+                    self.emit_no_match(scrutinee_slot, result_slot, done_label)?;
                 }
 
                 Ok(())
@@ -253,12 +268,38 @@ impl<'a> Lowerer<'a> {
     fn emit_constructor_test(&mut self, value_reg: Reg, ctor: &Constructor) -> Result<Reg, String> {
         match ctor {
             Constructor::Literal(lit) => {
+                // A STRING literal compares by content but is a HEAP value, so —
+                // unlike the immediate literals below — it cannot be a pooled
+                // constant. Materialize it FRESH into a transient per-activation
+                // region, compare, then free that region immediately: a heap
+                // literal is an ordinary, reclaimable allocation (region-model.md,
+                // "Constants lower as ordinary allocations"), never a process-
+                // pinned constant. The string is dead the instant the comparison
+                // reads it, so the region's whole life is these three instructions.
+                if let PatternLiteral::String(s) = lit {
+                    let str_reg = self.fresh_reg();
+                    let region = self.fresh_managed_region();
+                    self.emit(LirInstr::MaterializeConst {
+                        dst: str_reg,
+                        template: crate::value::ConstTemplate::String(s.clone()),
+                        region,
+                    });
+                    let dst = self.fresh_reg();
+                    self.emit(LirInstr::Compare {
+                        dst,
+                        op: CmpOp::Eq,
+                        lhs: value_reg,
+                        rhs: str_reg,
+                    });
+                    self.emit(LirInstr::DecrefRegion { region_id: region });
+                    return Ok(dst);
+                }
                 let lit_reg = match lit {
                     PatternLiteral::Bool(b) => self.emit_const(LirConst::Bool(*b))?,
                     PatternLiteral::Int(n) => self.emit_const(LirConst::Int(*n))?,
                     PatternLiteral::Float(f) => self.emit_const(LirConst::Float(*f))?,
-                    PatternLiteral::String(s) => self.emit_const(LirConst::String(s.clone()))?,
                     PatternLiteral::Keyword(k) => self.emit_const(LirConst::Keyword(k.clone()))?,
+                    PatternLiteral::String(_) => unreachable!("string handled above"),
                 };
                 let dst = self.fresh_reg();
                 self.emit(LirInstr::Compare {
@@ -454,758 +495,5 @@ impl<'a> Lowerer<'a> {
             slot: merge_slot,
         });
         Ok(dst)
-    }
-
-    /// Lower pattern matching code
-    /// Emits code that checks if value_reg matches the pattern
-    /// If it doesn't match, branches to fail_label
-    /// If it matches, binds any variables and continues in the current block
-    pub(super) fn lower_pattern_match(
-        &mut self,
-        pattern: &HirPattern,
-        value_reg: Reg,
-        fail_label: Label,
-    ) -> Result<(), String> {
-        match pattern {
-            HirPattern::Wildcard => {
-                // Wildcard always matches, do nothing
-                Ok(())
-            }
-            HirPattern::Nil => {
-                // Check if value is nil (NOT empty_list)
-                // nil and '() are distinct values with distinct semantics
-                let is_nil_reg = self.fresh_reg();
-                self.emit(LirInstr::IsNil {
-                    dst: is_nil_reg,
-                    src: value_reg,
-                });
-
-                // If NOT nil, fail; otherwise continue
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_nil_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
-
-                Ok(())
-            }
-            HirPattern::Literal(lit) => {
-                // Check if value equals literal
-                let lit_reg = match lit {
-                    PatternLiteral::Bool(b) => self.emit_const(LirConst::Bool(*b))?,
-                    PatternLiteral::Int(n) => self.emit_const(LirConst::Int(*n))?,
-                    PatternLiteral::Float(f) => self.emit_const(LirConst::Float(*f))?,
-                    PatternLiteral::String(s) => self.emit_const(LirConst::String(s.clone()))?,
-                    PatternLiteral::Keyword(name) => {
-                        self.emit_const(LirConst::Keyword(name.clone()))?
-                    }
-                };
-
-                let eq_reg = self.fresh_reg();
-                self.emit(LirInstr::Compare {
-                    dst: eq_reg,
-                    op: CmpOp::Eq,
-                    lhs: value_reg,
-                    rhs: lit_reg,
-                });
-
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: eq_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
-
-                Ok(())
-            }
-            HirPattern::Var(binding) => {
-                // Bind the value to the variable.
-                // If the binding already has a slot (e.g., from a previous
-                // or-pattern alternative), reuse it instead of allocating a new one.
-                let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
-                    existing
-                } else {
-                    self.allocate_slot(*binding)
-                };
-                let needs_capture = self.arena.get(*binding).needs_capture();
-                if self.in_lambda && needs_capture {
-                    self.upvalue_bindings.insert(*binding);
-                    self.emit(LirInstr::StoreCapture {
-                        index: slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot,
-                        src: value_reg,
-                    });
-                }
-                Ok(())
-            }
-            HirPattern::Pair { head, tail } => {
-                // Store value to temp slot before any operations, so we can
-                // reload it after the block boundary.
-                // Inside a lambda, slots need to account for the captures offset.
-                // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                // Reload for type check (auto-pop consumed value_reg)
-                let reloaded_for_check = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_check,
-                    slot: temp_slot,
-                });
-
-                // Check if value is a pair
-                let is_pair_reg = self.fresh_reg();
-                self.emit(LirInstr::IsPair {
-                    dst: is_pair_reg,
-                    src: reloaded_for_check,
-                });
-
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_pair_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
-
-                // Extract car, match head pattern, THEN extract cdr and match tail.
-                // This ordering is critical: the head pattern match may create
-                // block boundaries (e.g., nested cons, or-patterns), which
-                // invalidate registers from the current block. By extracting
-                // cdr AFTER the head match, we reload from the temp slot in
-                // whatever block the head match left us in.
-
-                // Reload for car
-                let reloaded_for_car = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_car,
-                    slot: temp_slot,
-                });
-
-                let head_reg = self.fresh_reg();
-                self.emit(LirInstr::First {
-                    dst: head_reg,
-                    pair: reloaded_for_car,
-                });
-
-                // Match head pattern first (may create block boundaries)
-                self.lower_pattern_match(head, head_reg, fail_label)?;
-
-                // Now reload for cdr — in whatever block the head match left us in
-                let reloaded_for_cdr = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_cdr,
-                    slot: temp_slot,
-                });
-
-                let tail_reg = self.fresh_reg();
-                self.emit(LirInstr::Rest {
-                    dst: tail_reg,
-                    pair: reloaded_for_cdr,
-                });
-
-                // Match tail pattern
-                self.lower_pattern_match(tail, tail_reg, fail_label)?;
-
-                Ok(())
-            }
-            HirPattern::List { elements, rest } => {
-                // Check if value is a list of the right length
-                // Iterate through patterns and match each element
-
-                let mut current_reg = value_reg;
-
-                for pat in elements.iter() {
-                    // Store current to a temporary slot BEFORE IsPair, so we can
-                    // reload it after the block boundary.
-                    // Inside a lambda, slots need to account for the captures offset.
-                    let temp_slot = self.current_func.num_locals;
-                    self.current_func.num_locals += 1;
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: current_reg,
-                    });
-
-                    // Reload for type check (auto-pop consumed current_reg)
-                    let reloaded_for_check = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded_for_check,
-                        slot: temp_slot,
-                    });
-
-                    // Check if current is a pair
-                    let is_pair_reg = self.fresh_reg();
-                    self.emit(LirInstr::IsPair {
-                        dst: is_pair_reg,
-                        src: reloaded_for_check,
-                    });
-
-                    let continue_label = self.fresh_label();
-                    self.terminate(Terminator::Branch {
-                        cond: is_pair_reg,
-                        then_label: continue_label,
-                        else_label: fail_label,
-                    });
-                    self.finish_block();
-                    self.current_block = BasicBlock::new(continue_label);
-
-                    // Load for car extraction
-                    let current_for_car = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: current_for_car,
-                        slot: temp_slot,
-                    });
-
-                    // Extract head
-                    let head_reg = self.fresh_reg();
-                    self.emit(LirInstr::First {
-                        dst: head_reg,
-                        pair: current_for_car,
-                    });
-
-                    // Match head against pattern
-                    self.lower_pattern_match(pat, head_reg, fail_label)?;
-
-                    // Load for cdr extraction — always needed for next
-                    // element, rest binding, or EMPTY_LIST check at end
-                    let current_for_cdr = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: current_for_cdr,
-                        slot: temp_slot,
-                    });
-
-                    // Extract tail for next iteration
-                    let tail_reg = self.fresh_reg();
-                    self.emit(LirInstr::Rest {
-                        dst: tail_reg,
-                        pair: current_for_cdr,
-                    });
-
-                    current_reg = tail_reg;
-                }
-
-                if let Some(rest_pat) = rest {
-                    // With & rest: bind remaining tail to rest pattern
-                    self.lower_pattern_match(rest_pat, current_reg, fail_label)?;
-                } else {
-                    // Without rest: check that tail is empty_list (exact length)
-                    let empty_list_reg = self.fresh_reg();
-                    self.emit(LirInstr::ValueConst {
-                        dst: empty_list_reg,
-                        value: Value::EMPTY_LIST,
-                    });
-                    let is_empty_reg = self.fresh_reg();
-                    self.emit(LirInstr::Compare {
-                        dst: is_empty_reg,
-                        op: CmpOp::Eq,
-                        lhs: current_reg,
-                        rhs: empty_list_reg,
-                    });
-
-                    let continue_label = self.fresh_label();
-                    self.terminate(Terminator::Branch {
-                        cond: is_empty_reg,
-                        then_label: continue_label,
-                        else_label: fail_label,
-                    });
-                    self.finish_block();
-                    self.current_block = BasicBlock::new(continue_label);
-                }
-
-                Ok(())
-            }
-            HirPattern::Tuple { elements, rest } => {
-                // Array [...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                // Step 2: Check if value is an array.
-                // Reload from temp slot — value_reg was consumed by StoreLocal
-                // and cannot be reused in stack-based bytecode emission.
-                let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_type,
-                    slot: temp_slot,
-                });
-                let is_tuple_reg = self.fresh_reg();
-                self.emit(LirInstr::IsArray {
-                    dst: is_tuple_reg,
-                    src: reloaded_for_type,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_tuple_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(type_ok_label);
-
-                // Step 3: Check array length
-                // Reload from temp slot
-                let reloaded_for_len = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_len,
-                    slot: temp_slot,
-                });
-
-                let len_reg = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutLen {
-                    dst: len_reg,
-                    src: reloaded_for_len,
-                });
-
-                let expected_len = self.emit_const(LirConst::Int(elements.len() as i64))?;
-                let len_ok_reg = self.fresh_reg();
-
-                if rest.is_some() {
-                    // With & rest: length must be >= number of fixed elements
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Ge,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
-                } else {
-                    // Without rest: length must be exactly equal
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Eq,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
-                }
-
-                let len_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: len_ok_reg,
-                    then_label: len_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(len_ok_label);
-
-                // Step 4: Match each element using ArrayMutRefDestructure
-                for (i, element_pat) in elements.iter().enumerate() {
-                    // Reload the array from temp slot for each element
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefDestructure {
-                        dst: elem_reg,
-                        src: reloaded,
-                        index: i as u16,
-                    });
-
-                    // Recursively match the element
-                    self.lower_pattern_match(element_pat, elem_reg, fail_label)?;
-                }
-
-                // Step 5: Handle & rest
-                if let Some(rest_pat) = rest {
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
-                        dst: slice_reg,
-                        src: reloaded,
-                        index: elements.len() as u16,
-                    });
-
-                    self.lower_pattern_match(rest_pat, slice_reg, fail_label)?;
-                }
-
-                Ok(())
-            }
-            HirPattern::Array { elements, rest } => {
-                // Array @[...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                // Step 2: Check if value is a mutable array.
-                // Reload from temp slot — value_reg was consumed by StoreLocal.
-                let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_type,
-                    slot: temp_slot,
-                });
-                let is_array_reg = self.fresh_reg();
-                self.emit(LirInstr::IsArrayMut {
-                    dst: is_array_reg,
-                    src: reloaded_for_type,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_array_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(type_ok_label);
-
-                // Step 3: Check array length
-                // Reload from temp slot
-                let reloaded_for_len = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_len,
-                    slot: temp_slot,
-                });
-
-                let len_reg = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutLen {
-                    dst: len_reg,
-                    src: reloaded_for_len,
-                });
-
-                let expected_len = self.emit_const(LirConst::Int(elements.len() as i64))?;
-                let len_ok_reg = self.fresh_reg();
-
-                if rest.is_some() {
-                    // With & rest: length must be >= number of fixed elements
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Ge,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
-                } else {
-                    // Without rest: length must be exactly equal
-                    self.emit(LirInstr::Compare {
-                        dst: len_ok_reg,
-                        op: CmpOp::Eq,
-                        lhs: len_reg,
-                        rhs: expected_len,
-                    });
-                }
-
-                let len_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: len_ok_reg,
-                    then_label: len_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(len_ok_label);
-
-                // Step 4: Match each element using ArrayMutRefOrNil
-                for (i, element_pat) in elements.iter().enumerate() {
-                    // Reload the array from temp slot for each element
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefDestructure {
-                        dst: elem_reg,
-                        src: reloaded,
-                        index: i as u16,
-                    });
-
-                    // Recursively match the element
-                    self.lower_pattern_match(element_pat, elem_reg, fail_label)?;
-                }
-
-                // Step 5: Handle & rest
-                if let Some(rest_pat) = rest {
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
-                        dst: slice_reg,
-                        src: reloaded,
-                        index: elements.len() as u16,
-                    });
-
-                    self.lower_pattern_match(rest_pat, slice_reg, fail_label)?;
-                }
-
-                Ok(())
-            }
-            HirPattern::Struct { entries, rest } => {
-                // Struct {...} pattern matching for `match`.
-                // Check if value is a struct, then use StructGetOrNil for each key.
-                // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                // Type guard: reject non-struct values.
-                // Reload from temp slot — value_reg was consumed by StoreLocal.
-                let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_type,
-                    slot: temp_slot,
-                });
-                let is_struct_reg = self.fresh_reg();
-                self.emit(LirInstr::IsStruct {
-                    dst: is_struct_reg,
-                    src: reloaded_for_type,
-                });
-
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_struct_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
-
-                for (key, sub_pattern) in entries.iter() {
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let elem_reg = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
-                    self.emit(LirInstr::StructGetOrNil {
-                        dst: elem_reg,
-                        src: reloaded,
-                        key: lir_key,
-                    });
-
-                    self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
-                }
-
-                if let Some(rest_pat) = rest {
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-                    let rest_reg = self.fresh_reg();
-                    let exclude: Vec<LirConst> = entries
-                        .iter()
-                        .map(|(key, _)| match key {
-                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
-                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                        })
-                        .collect();
-                    self.emit(LirInstr::StructRest {
-                        dst: rest_reg,
-                        src: reloaded,
-                        exclude_keys: exclude,
-                    });
-                    self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
-                }
-
-                Ok(())
-            }
-            HirPattern::Table { entries, rest } => {
-                // @struct @{...} pattern matching for `match`.
-                // Check if value is a @struct, then use StructGetOrNil for each key.
-                // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                // Type guard: reject non-@struct values.
-                // Reload from temp slot — value_reg was consumed by StoreLocal.
-                let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: reloaded_for_type,
-                    slot: temp_slot,
-                });
-                let is_table_reg = self.fresh_reg();
-                self.emit(LirInstr::IsStructMut {
-                    dst: is_table_reg,
-                    src: reloaded_for_type,
-                });
-
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_table_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
-
-                for (key, sub_pattern) in entries.iter() {
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let elem_reg = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
-                    self.emit(LirInstr::StructGetOrNil {
-                        dst: elem_reg,
-                        src: reloaded,
-                        key: lir_key,
-                    });
-
-                    self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
-                }
-
-                if let Some(rest_pat) = rest {
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-                    let rest_reg = self.fresh_reg();
-                    let exclude: Vec<LirConst> = entries
-                        .iter()
-                        .map(|(key, _)| match key {
-                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
-                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                        })
-                        .collect();
-                    self.emit(LirInstr::StructRest {
-                        dst: rest_reg,
-                        src: reloaded,
-                        exclude_keys: exclude,
-                    });
-                    self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
-                }
-
-                Ok(())
-            }
-            HirPattern::Or(alternatives) => {
-                // Or-pattern: try each alternative sequentially.
-                // Store value to temp slot so we can reload for each alternative.
-                // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                let success_label = self.fresh_label();
-
-                for (i, alt) in alternatives.iter().enumerate() {
-                    let next_alt_label = if i + 1 < alternatives.len() {
-                        self.fresh_label()
-                    } else {
-                        fail_label
-                    };
-
-                    // Reload value for this alternative
-                    let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    self.lower_pattern_match(alt, reloaded, next_alt_label)?;
-
-                    // This alternative matched — jump to success
-                    self.terminate(Terminator::Jump(success_label));
-                    self.finish_block();
-
-                    if i + 1 < alternatives.len() {
-                        self.current_block = BasicBlock::new(next_alt_label);
-                    }
-                }
-
-                self.current_block = BasicBlock::new(success_label);
-                Ok(())
-            }
-            HirPattern::Set { binding } => {
-                // Type guard: check if value is a set
-                let is_set_reg = self.fresh_reg();
-                self.emit(LirInstr::IsSet {
-                    dst: is_set_reg,
-                    src: value_reg,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_set_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(type_ok_label);
-
-                // Recursively match the binding (if any)
-                self.lower_pattern_match(binding, value_reg, fail_label)?;
-                Ok(())
-            }
-            HirPattern::SetMut { binding } => {
-                // Type guard: check if value is a mutable set
-                let is_set_mut_reg = self.fresh_reg();
-                self.emit(LirInstr::IsSetMut {
-                    dst: is_set_mut_reg,
-                    src: value_reg,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_set_mut_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(type_ok_label);
-
-                // Recursively match the binding (if any)
-                self.lower_pattern_match(binding, value_reg, fail_label)?;
-                Ok(())
-            }
-            HirPattern::NamedStruct { .. } => {
-                // NamedStruct only appears in &named parameter destructuring, never in match.
-                unreachable!("NamedStruct in lower_pattern_match")
-            }
-        }
     }
 }

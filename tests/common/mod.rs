@@ -2,63 +2,86 @@
 //!
 //! Provides canonical eval and setup functions so test files don't need
 //! to copy-paste their own variants.
+//!
+//! Every helper drives a [`Runtime`] (`elle::runtime`), the one per-instance
+//! owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. There
+//! is no shared compile cache: the compile state each eval names explicitly is
+//! the instance's own (`rt.parts()`), so two test instances never share stdlib
+//! exports or REPL definitions. `Runtime` also points the VM at its own symbol
+//! table and `CompileCtx`, so executed code that resolves through the VM sees
+//! this instance's state.
 
-use elle::context::{set_symbol_table, set_vm_context};
-use elle::{eval_all, init_stdlib, register_primitives, SymbolTable, Value, VM};
+use elle::runtime::{Runtime, RuntimeCore};
+use elle::{compile_file, eval_all, Value};
 
-/// Evaluate Elle source code through the pipeline WITHOUT stdlib.
-///
-/// Identical to `eval_source` except it skips `init_stdlib`. Use this
-/// for tests that never call stdlib functions (map, filter, fold, etc.).
-/// Prelude macros (defn, let*, ->, ->>, when, unless, try/catch, etc.)
-/// are still available — they're loaded by `compile_file`'s internal
-/// `Expander::load_prelude`, not by `init_stdlib`.
+// ── Result inspection must outlive nothing ───────────────────────────────────
+//
+// A result `Value` is a tagged pointer straight into its `Runtime`'s region
+// heap; `Display`, `with_string`, `as_pair`, … deref that pointer directly (no
+// ambient heap, no handle). The `Runtime` is torn down — and its `Box<FiberHeap>`
+// freed — the instant it drops, so a heap-valued result handed *out* of the eval
+// dangles (a use-after-free the plain VM reads as stale-but-intact, only
+// guardfree reddens). Immediates carry no pointer and were always safe, which is
+// why this stayed latent.
+//
+// So these helpers are **scoped**: they hand the `Result<Value, String>` to a
+// closure that runs while the `Runtime` is still alive, then tear down after.
+// Inspect inside `f` and return only OWNED data (scalars, `String`, booleans,
+// counts) — never the result `Value` itself, which would re-dangle.
+//
+// (The cached `eval_reuse*` helpers below do NOT need this: their `RuntimeCore`
+// is never torn down, so the heap outlives the returned `Value` for the thread's
+// life.)
+
+/// Evaluate Elle source WITHOUT stdlib and inspect the result while its heap is
+/// alive (see the module note above). Skips stdlib loading; prelude macros
+/// (`defn`, `let*`, `->`, `when`, `try`/`catch`, …) are still available — they
+/// live in the `CompileCtx`'s expander, not in the stdlib.
 #[allow(dead_code)]
-pub fn eval_source_bare(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    set_vm_context(&mut vm as *mut VM);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    // No init_stdlib — tests using this must not depend on stdlib functions
-    let result = eval_all(input, &mut symbols, &mut vm, "<test>");
-    set_vm_context(std::ptr::null_mut());
-    result
+pub fn eval_source_bare<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
+    let mut rt = Runtime::without_stdlib();
+    let result = {
+        let (vm, symbols, cctx) = rt.parts();
+        eval_all(input, symbols, vm, cctx, "<test>")
+    };
+    f(result)
 }
 
-/// Evaluate Elle source code through the full pipeline.
-///
-/// Handles both single-form and multi-form input via `eval_all`.
-/// Initializes primitives, stdlib, and symbol table context.
-///
-/// This is the canonical test eval. Use this unless you have a specific
-/// reason not to (e.g., testing without stdlib).
-pub fn eval_source(input: &str) -> Result<Value, String> {
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    // Set symbol table context before stdlib init so that macros using
-    // gensym (each, ffi/defbind) work during init_stdlib's eval() calls.
-    set_vm_context(&mut vm as *mut VM);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols);
-    let result = eval_all(input, &mut symbols, &mut vm, "<test>");
-    // Clear context to avoid affecting other tests
-    set_vm_context(std::ptr::null_mut());
-    result
+/// Evaluate Elle source through the full pipeline and inspect the result while
+/// its heap is alive (see the module note above). The canonical test eval — use
+/// it unless you have a specific reason not to (e.g. testing without stdlib).
+/// Handles single- and multi-form input via `eval_all`.
+pub fn eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
+    let mut rt = Runtime::new();
+    let result = {
+        let (vm, symbols, cctx) = rt.parts();
+        eval_all(input, symbols, vm, cctx, "<test>")
+    };
+    f(result)
+}
+
+/// Like `eval_source` (stdlib loaded) but runs WITHOUT the async scheduler —
+/// a plain `vm.execute`, no `ev/run` wrapping. Real top-level Elle always runs
+/// scheduled (so `eval_source` does too); use this only for the rare test that
+/// asserts behavior *outside* a scheduler — e.g. that an I/O primitive's
+/// SIG_IO yield errors at top level when nothing is there to service it.
+#[allow(dead_code)]
+pub fn eval_source_unscheduled<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
+    let mut rt = Runtime::new();
+    let result = {
+        let (vm, symbols, cctx) = rt.parts();
+        compile_file(input, symbols, cctx, "<test>")
+            .map_err(|e| e.to_string())
+            .and_then(|r| vm.execute(&r.bytecode).map_err(|e| e.to_string()))
+    };
+    f(result)
 }
 
 #[allow(dead_code)]
-/// Set up a VM and SymbolTable with primitives and stdlib.
-///
-/// Returns (symbols, vm). Symbol table context is set.
-pub fn setup() -> (SymbolTable, VM) {
-    let mut symbols = SymbolTable::new();
-    let mut vm = VM::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols);
-    (symbols, vm)
+/// Set up a `Runtime` (primitives + stdlib, contexts installed). Hand out the
+/// disjoint `(vm, symbols, cctx)` borrows via `rt.parts()`.
+pub fn setup() -> Runtime {
+    Runtime::new()
 }
 
 /// Create a proptest config that respects the PROPTEST_CASES env var.
@@ -93,82 +116,75 @@ pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
 // Cached eval helpers for property tests
 // ---------------------------------------------------------------------------
 //
-// These reuse a thread-local (VM, SymbolTable) pair across proptest cases,
-// eliminating per-case bootstrap cost (VM creation, primitive registration,
-// stdlib loading). Between cases the fiber is reset.
+// These reuse a thread-local `RuntimeCore` across proptest cases, eliminating
+// per-case bootstrap cost (VM creation, primitive registration, stdlib
+// loading, CompileCtx construction). Between cases the fiber is reset.
+//
+// `RuntimeCore` (not `Runtime`) is cached deliberately: a `Runtime` runs a
+// teardown sweep on `Drop`, and a thread-local that drops at thread exit would
+// run that sweep at an unpredictable point, against an instance other cases may
+// still be using. `RuntimeCore` has no such `Drop`, so caching it is safe.
 //
 // Use `eval_reuse_bare` for tests that don't need stdlib (the common case).
 // Use `eval_reuse` for tests that need stdlib functions (map, filter, etc.).
 //
-// The old `eval_source` / `eval_source_bare` remain available for tests that
-// need a guaranteed-fresh VM (none currently do, but the option exists).
+// The one-shot `eval_source` / `eval_source_bare` remain available for tests
+// that need a guaranteed-fresh Runtime (none currently do, but the option
+// exists).
 
 use std::cell::RefCell;
 use std::thread::LocalKey;
 
-struct TestCache {
-    vm: VM,
-    symbols: SymbolTable,
-}
-
 thread_local! {
-    static BARE_CACHE: RefCell<Option<TestCache>> = const { RefCell::new(None) };
-    static FULL_CACHE: RefCell<Option<TestCache>> = const { RefCell::new(None) };
+    static BARE_CACHE: RefCell<Option<RuntimeCore>> = const { RefCell::new(None) };
+    static FULL_CACHE: RefCell<Option<RuntimeCore>> = const { RefCell::new(None) };
 }
 
 fn eval_with_cache(
     input: &str,
-    cache: &'static LocalKey<RefCell<Option<TestCache>>>,
-    init: fn(&mut VM, &mut SymbolTable),
+    cache: &'static LocalKey<RefCell<Option<RuntimeCore>>>,
+    with_stdlib: bool,
 ) -> Result<Value, String> {
     cache.with(|cell| {
         let mut borrow = cell.borrow_mut();
-        let c = borrow.get_or_insert_with(|| {
-            let mut vm = VM::new();
-            let mut symbols = SymbolTable::new();
-            let _signals = register_primitives(&mut vm, &mut symbols);
-            // Context pointers needed during init (stdlib loading uses gensym).
-            set_vm_context(&mut vm as *mut VM);
-            set_symbol_table(&mut symbols as *mut SymbolTable);
-            init(&mut vm, &mut symbols);
-            TestCache { vm, symbols }
+        let core = borrow.get_or_insert_with(|| {
+            let mut core = RuntimeCore::bare();
+            if with_stdlib {
+                // `RuntimeCore::bare` already points the VM at this instance's own
+                // symbol table, so stdlib-load gensym (and all name resolution)
+                // resolves through it.
+                core.load_stdlib();
+            }
+            core
         });
 
-        // Reset per-case state
-        c.vm.reset_fiber();
+        let (vm, symbols, cctx) = core.parts();
+
+        // Reset per-case state.
+        vm.reset_fiber();
         #[cfg(feature = "jit")]
-        c.vm.jit_cache.clear();
+        vm.jit_cache.clear();
 
-        // Set context pointers (may have been cleared after previous eval)
-        set_vm_context(&mut c.vm as *mut VM);
-        set_symbol_table(&mut c.symbols as *mut SymbolTable);
-
-        let result = eval_all(input, &mut c.symbols, &mut c.vm, "<test>");
-
-        set_vm_context(std::ptr::null_mut());
-
-        result
+        eval_all(input, symbols, vm, cctx, "<test>")
     })
 }
 
-/// Evaluate Elle source with a cached VM (primitives only, no stdlib).
+/// Evaluate Elle source with a cached Runtime (primitives only, no stdlib).
 ///
-/// Drop-in replacement for `eval_source_bare` in property tests. The VM
+/// Drop-in replacement for `eval_source_bare` in property tests. The Runtime
 /// is created once per thread and reused across proptest cases. Between
 /// cases, the fiber is reset.
 #[allow(dead_code)]
 pub fn eval_reuse_bare(input: &str) -> Result<Value, String> {
-    eval_with_cache(input, &BARE_CACHE, |_, _| {})
+    eval_with_cache(input, &BARE_CACHE, false)
 }
 
-/// Evaluate Elle source with a cached VM (primitives + stdlib).
+/// Evaluate Elle source with a cached Runtime (primitives + stdlib).
 ///
-/// Drop-in replacement for `eval_source` in property tests. The VM
+/// Drop-in replacement for `eval_source` in property tests. The Runtime
 /// is created once per thread and reused across proptest cases. Between
 /// cases, the fiber is reset.
 #[allow(dead_code)]
 pub fn eval_reuse(input: &str) -> Result<Value, String> {
-    eval_with_cache(input, &FULL_CACHE, |vm, symbols| {
-        init_stdlib(vm, symbols);
-    })
+    eval_with_cache(input, &FULL_CACHE, true)
 }

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/ev-run-error.lisp — error propagation through fibers
 ##
 ## Tests that errors from spawned fibers propagate correctly

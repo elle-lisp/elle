@@ -63,9 +63,9 @@ The public `execute_bytecode` method is the translation boundary — it converts
 `SignalBits` to `Result<Value, String>` for external callers. On `SIG_ERROR`,
 it extracts the error struct from `fiber.signal` and formats the error message.
 
-Instruction handlers no longer return `Result<(), String>`. VM bugs panic
-immediately. User errors set `fiber.signal` to `(SIG_ERROR, error_val(kind, msg))`
-and push `Value::NIL` to keep the stack consistent.
+Instruction handlers return `()`. VM bugs panic immediately. User errors set
+`fiber.signal` to `(SIG_ERROR, error_val(kind, msg))` and push `Value::NIL` to
+keep the stack consistent.
 
 ## Rc threading
 
@@ -77,8 +77,10 @@ creating `SuspendedFrame`s or `TailCallInfo`.
 
 - `execute_bytecode` wraps raw slices in `Rc` once at the public boundary
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take `&Rc`
-- `TailCallInfo` is `(Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>)` — tail
-  calls clone the Rc (cheap), not the Vec (expensive)
+- `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
+  value (installed as `fiber.current_closure` on the frame replacement), its
+  squelch mask, and an optional adopt region — tail calls clone the `Rc`s (cheap),
+  not the `Vec`s (expensive)
 - `closure_env` parameter is `&Rc<Vec<Value>>` (non-optional; empty Rc for no env)
 - `execute_closure_bytecode` takes `&Rc` params directly (no `.to_vec()` copy);
   used by JIT trampolines where the closure already owns Rc'd data
@@ -95,7 +97,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_CANCEL` → inject error into target fiber
 - `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats` (0-arg: current fiber; 1-arg: suspended fiber; includes scope-enter/dtor counts), `call-count`, `doc`, `global?`, `fiber/self`, `jit/rejections`, `list-primitives`, `primitive-meta`
 
-All SIG_RESUME primitives (including coroutine wrappers) return
+All SIG_RESUME primitives (including fiber wrappers) return
 `(SIG_RESUME, fiber_value)`. The VM uses `FiberHandle::take()`/`put()` to swap
 the child fiber into `vm.fiber`, executes the child, then swaps back.
 
@@ -146,7 +148,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 
 | Field | Type | Purpose |
 |-------|-------|---------|
-| `fiber` | `Fiber` | Root fiber: stack, call frames, signal state |
+| `fiber` | `Fiber` | Current fiber: stack, call frames, signal state |
+| `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
 | `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
@@ -167,7 +170,6 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `call_depth` | `usize` | Stack overflow detection |
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
-| `heap` | `Box<FiberHeap>` | Per-fiber arena for heap allocation (installed as thread-local during child execution) |
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
@@ -178,9 +180,9 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Re-entrancy
 
 `execute_bytecode_saving_stack` makes the VM re-entrant. It saves the caller's
-operand stack and active allocator state (`ActiveAlloc`), runs inner bytecode
-from IP 0, then restores both on return. The inner execution sees an empty stack
-and runs on the same fiber (same heap, parameter frames).
+operand stack, runs inner bytecode from IP 0, then restores it on return. The
+inner execution sees an empty stack and runs on the same fiber (same heap,
+parameter frames).
 
 ### Callers
 
@@ -190,7 +192,7 @@ and runs on the same fiber (same heap, parameter frames).
 | Non-yielding `fiber/resume` | `call.rs` | Runs a child fiber inline on the current thread |
 | `arena/allocs` SIG_QUERY handler | `signal.rs` | Runs a thunk to measure its allocations |
 | JIT trampolines | `call.rs` | Re-enters interpreter for uncompiled hot paths |
-| Coroutine resume | `call.rs` | Resumes a suspended coroutine |
+| Fiber resume | `call.rs` | Resumes a suspended fiber |
 
 ### Yield hazard
 
@@ -221,104 +223,31 @@ When a fiber suspends (via yield instruction or `emit`):
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
-- `execute_bytecode_saving_stack`: Saves/restores caller's stack and `ActiveAlloc` state, handles tail calls
+- `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
+- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `arena/allocs`, test-setup module loader)
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
-- `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
-  manages per-fiber heap routing: saves the current thread-local heap pointer,
-  installs the child fiber's `FiberHeap`, executes, then restores the saved
-  pointer on swap-back. All fibers (including root) have a FiberHeap installed
-  after issue-525.
-  For yielding fibers (signal includes `SIG_YIELD`), also provisions a shared allocator
-  via a two-way branch (step 3b): (a) parent has shared_alloc → propagate
-  down, (c) parent has no shared_alloc → create on parent's heap (handles
-  root→child too). Cleared on swap-back (step 7a).
+- `with_child_fiber` (`fiber/child.rs`): Shared swap protocol for fiber
+  resume/cancel. Swaps the child fiber into `vm.fiber`, wires the parent/child
+  chain, runs the body, then swaps back. No heap swap is involved: all fibers
+  (including root) share the VM's single heap, reached via `vm.heap_ptr`.
 
-## Allocation region instructions
+## The heap
 
-`RegionEnter` and `RegionExit` push/pop scope marks on the current FiberHeap
-via `region_enter()`/`region_exit()`. Effective for all fibers including root
-(after issue-525, the root fiber always has a FiberHeap installed). The lowerer
-gates emission on escape analysis — currently maximally conservative, so no
-region instructions are emitted in normal code.
-
-## Active allocator state
-
-`FiberHeap` has an `active_allocator: ActiveAlloc` enum field (defined in
-`value/fiberheap/mod.rs`) that tracks which allocator is currently active:
-- `ActiveAlloc::Slab` — allocate from the fiber's root slab (the default)
-- `ActiveAlloc::Bump(ptr)` — allocate from a scope bump (inside a `RegionEnter`)
-
-**Initialization:** `init_active_allocator()` is a no-op — `active_allocator` starts
-as `ActiveAlloc::Slab` at `FiberHeap::new()`. It is still called in `with_child_fiber`
-after the child's heap is installed as thread-local for forward compatibility.
-
-**Save/restore on Call/Return:** `execute_bytecode_saving_stack` saves the active
-allocator state via `save_active_allocator()` before execution and restores it via
-`restore_active_allocator()` after, so callee scope changes don't leak into the
-caller's context. `BytecodeFrame`/`SuspendedFrame` do NOT carry this state.
-
-**Fiber swap:** `with_child_fiber` swaps the thread-local `FiberHeap` pointer via
-`restore_saved_heap()`. Each fiber's `active_allocator` lives on its own `FiberHeap`,
-so the swap naturally switches allocator context. The child's allocator is
-recomputed from `scope_bumps` by `init_active_allocator()` (currently a no-op
-because scope bumps are only active inside `RegionEnter`/`RegionExit` pairs).
-
-**Root fiber:** Has a FiberHeap installed (the persistent `ROOT_HEAP` thread-local,
-set up by `VM::new()`). `save_active_allocator()` reads from the installed heap.
-
-## Fiber heap routing
-
-Child fibers each own a `Box<FiberHeap>` (on the `Fiber` struct). When the
-VM swaps to a child fiber via `with_child_fiber`, it installs the child's
-heap as the thread-local allocation target. All `Value::cons()`, `Value::closure()`,
-etc. calls during child execution route to the child's `FiberHeap`. On swap-back,
-the parent's heap (always non-null after issue-525) is restored.
+The VM owns exactly one `FiberHeap`, reached via `vm.heap_ptr` / `vm.heap()`. It
+is owned by the instance's `RuntimeCore` (or privately leaked for a bare VM) and
+outlives the VM, so Values returned by `execute_bytecode` remain valid after the
+VM drops. ALL fibers — including the root — share this one heap, reached the
+same way (`vm.heap_ptr`) on every fiber; isolation is per-region, not per-fiber.
 
 `FiberHeap` uses a bump arena (`BumpArena`) wrapped in `SlabPool` for all
 allocations. Destructor tracking ensures `HeapObject` variants with inner heap
 allocations (`Vec`, `Rc`, `BTreeMap`) have their `Drop` impls called on
-`release()` and `clear()`. `release()` runs destructors and rewinds the arena
-to the scope-entry position. Individual slot deallocation is a no-op; memory
-is reclaimed only by scope release or fiber death.
+`release()` and `clear()`. `release()` runs destructors, returns slab slots to
+the free list, and rewinds the arena to the region-entry position. Memory is
+reclaimed by region release (`DecrefRegion`), tail-call rotation, or fiber death.
 
-The root fiber uses the persistent `ROOT_HEAP` thread-local (a leaked `Box<FiberHeap>`
-created by `ensure_root_heap()`). The heap outlives any individual VM, so Values
-returned by `execute_bytecode` remain valid after VM drop.
-
-`reset_fiber()` in `core.rs` does not clear the root heap — root fiber objects
-accumulate across resets, so Values returned across multiple invocations remain valid.
-
-## Shared allocator provisioning
-
-When `with_child_fiber` swaps in a yielding child fiber, step 3b provisions
-a `SharedAllocator` for zero-copy value exchange. The child's `FiberHeap`
-receives a raw `*mut SharedAllocator` pointer — all allocations during child
-execution route to this shared allocator instead of the child's private bump.
-
-**Two-way branch** (after swap, `self.fiber` = child, `child_fiber` = parent):
-
-1. **Parent has shared_alloc** (case a): Parent already received a shared_alloc
-   from its own parent (A→B→C chain). Propagate the same pointer down.
-2. **Parent has no shared_alloc** (case c): Create a new shared allocator on the
-   parent's FiberHeap's `owned_shared`. After issue-525, this handles root→child
-   too — root always has a FiberHeap installed.
-
-Note: case (b) `saved_heap.is_null()` no longer exists after issue-525. The root
-fiber always has a FiberHeap installed. Root→child transitions use case (c).
-
-**Signal gate (M1)**: All child fibers get shared allocators so that heap
-objects allocated during child execution live on the parent's heap. Without
-this, Values that escape the child (e.g., closures sharing a ClosureTemplate
-with the parent) would be freed when the child's FiberHeap is torn down.
-
-**Shared allocator reuse**: Case (c) uses `get_or_create_shared_allocator()`,
-which reuses the last entry in `owned_shared` if one exists. This keeps
-`owned_shared` at most length 1 for non-propagation cases, preventing the
-per-resume leak where each resume would push a new `Box<SharedAllocator>`.
-
-**Cleanup (step 7a)**: Before swap-back, `self.fiber.heap.clear_shared_alloc()`
-nulls the child's `shared_alloc` pointer. The shared allocator data remains
-alive in the owner's `owned_shared` Vec.
+`reset_fiber()` in `core.rs` does not clear the heap — objects accumulate across
+resets, so Values returned across multiple invocations remain valid.
 
 ## Parameter resolution
 
@@ -335,33 +264,6 @@ iterates from the top frame downward, searching for a matching parameter.
 **Inheritance**: Child fibers inherit parent parameter frames. When a child fiber
 is created, it copies the parent's `param_frames` stack. This allows child code
 to see parent-established parameter bindings.
-
-## Files
-
-| File | Lines | Content |
-|------|-------|---------|
-| `mod.rs` | ~100 | VM struct, VmResult, public interface |
-| `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, allocation error check, returns `(SignalBits, usize)` |
-| `call.rs` | ~636 | Call, TailCall, call dispatch, `call_closure` macro helper |
-| `env.rs` | ~254 | Closure environment building: `build_closure_env`, `populate_env`, parameter lbox wrapping, rest-arg collection (list/struct/strict-struct) |
-| `jit_entry.rs` | ~282 | JIT compilation profiling, dispatch, batch compilation |
-| `signal.rs` | ~530 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/stats, arena/allocs), re-entrant thunk execution |
-| `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |
-| `execute.rs` | ~250 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack`, re-entrancy documentation |
-| `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |
-| `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
-| `variables.rs` | ~150 | LoadUpvalue, StoreUpvalue, LoadLocal, StoreLocal, LoadCapture, etc. (`LoadGlobal`/`StoreGlobal` are dead instructions — unreachable in dispatch) |
-| `parameters.rs` | ~50 | Parameter resolution: `resolve_parameter` helper |
-| `control.rs` | ~100 | Jump, JumpIfFalse, Return |
-| `closure.rs` | ~100 | MakeClosure |
-| `arithmetic.rs` | ~150 | Add, Sub, Mul, Div, Rem, BitAnd/Or/Xor/Not, Shl, Shr, IntToFloat, FloatToInt. **Unchecked** — wrong types produce garbage (not crashes). Matches WASM/SPIR-V semantics. |
-| `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge. Eq/Ne return false for incomparable types. Lt/Gt/Le/Ge return false for incomparable types (unchecked). |
-| `types.rs` | ~50 | IsNil, IsEmptyList, IsPair, Not |
-| `data.rs` | ~100 | Cons, Car, Cdr, MakeVector, `handle_struct_rest` |
-| `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
-| `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
-| `capture.rs` | Capture cell operations: MakeCapture, UnwrapCapture, UpdateCapture |
-
 ## Truthiness
 
 The VM evaluates truthiness via `Value::is_truthy()`:

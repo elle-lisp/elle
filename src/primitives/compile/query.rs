@@ -1,15 +1,16 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::context;
 use crate::hir::symbols::extract_symbols_from_hir;
 use crate::hir::{BindingArena, HirLinter};
 use crate::hir::{Hir, HirKind};
 use crate::pipeline::analyze_file;
 use crate::signals::registry::with_registry;
-use crate::value::error_val;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::sorted_struct_get;
 use crate::value::Value;
+
+mod captures;
+pub(crate) use captures::*;
 
 use super::{
     build_binding_spans, build_call_graph, build_signal_map, call_edge_to_value,
@@ -18,13 +19,16 @@ use super::{
 };
 
 /// `(compile/analyze source [opts])` → analysis handle
-pub(super) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
+pub(super) fn prim_compile_analyze(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let source = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
         None => {
             return (
                 SIG_ERROR,
-                error_val("type-error", "compile/analyze: expected string source"),
+                ctx.error("type-error", "compile/analyze: expected string source"),
             )
         }
     };
@@ -42,36 +46,37 @@ pub(super) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
         "<analyze>".to_string()
     };
 
-    // We need mutable access to the symbol table and a VM for macro
-    // expansion.  Use the thread-local context.
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "runtime-error",
-                    "compile/analyze: no symbol table in context",
-                ),
-            )
-        }
-    };
-    let vm_ptr = match context::get_vm_context() {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/analyze: no VM in context"),
-            )
-        }
-    };
+    // The driving VM hosts macro expansion during analysis. `ctx.vm()` is total
+    // (a native always runs under a VM); read it as a raw pointer so it sits beside
+    // the disjoint symbol-table and compile-context borrows below.
+    let vm_ptr: *mut crate::vm::VM = ctx.vm();
 
-    let (symbols, vm) = unsafe { (&mut *symbols_ptr, &mut *vm_ptr) };
+    // The symbol table and compile context are disjoint siblings of the VM in the
+    // owning `RuntimeCore`; read their pointers through the VM (this instance's
+    // own) so all three become separate `&mut`.
+    let symbols_ptr = unsafe { (*vm_ptr).symbols_ptr };
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "runtime-error",
+                "compile/analyze: no symbol table in context",
+            ),
+        );
+    }
+    let cctx_ptr = unsafe { (*vm_ptr).compile_ctx_ptr };
+    if cctx_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("runtime-error", "compile/analyze: no compile context"),
+        );
+    }
+    let (symbols, vm, cctx) = unsafe { (&mut *symbols_ptr, &mut *vm_ptr, &mut *cctx_ptr) };
 
     // Run analysis.
-    let result = match analyze_file(&source, symbols, vm, &file_name) {
+    let result = match analyze_file(&source, symbols, vm, cctx, &file_name) {
         Ok(r) => r,
-        Err(e) => return (SIG_ERROR, error_val("compile-error", e)),
+        Err(e) => return (SIG_ERROR, ctx.error("compile-error", e)),
     };
 
     // Extract symbols and diagnostics.
@@ -128,49 +133,66 @@ pub(super) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
         binding_spans,
     };
 
-    (SIG_OK, Value::external("analysis", handle))
+    (SIG_OK, ctx.external("analysis", handle))
 }
 
 /// (compile/diagnostics analysis) → [{:severity :warning :code "..." ...}]
-pub(super) fn prim_compile_diagnostics(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/diagnostics") {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
-    let values: Vec<Value> = handle.diagnostics.iter().map(diagnostic_to_value).collect();
-    (SIG_OK, Value::array(values))
-}
-
-/// (compile/symbols analysis) → [{:name "f" :kind :function ...}]
-pub(super) fn prim_compile_symbols(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/symbols") {
+pub(super) fn prim_compile_diagnostics(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/diagnostics", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
     let values: Vec<Value> = handle
-        .symbol_index
-        .definitions
-        .values()
-        .map(symbol_def_to_value)
+        .diagnostics
+        .iter()
+        .map(|x| diagnostic_to_value(x, ctx))
         .collect();
-    (SIG_OK, Value::array(values))
+    (SIG_OK, ctx.array(values))
 }
 
-/// (compile/signal analysis :name) → {:bits |:io| :propagates || ...}
-pub(super) fn prim_compile_signal(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/signal") {
+/// (compile/symbols analysis) → [{:name "f" :kind :function ...}]
+pub(super) fn prim_compile_symbols(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/symbols", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let name = match resolve_name(args, 1, "compile/signal") {
+    // Only real in-file definitions (those with a source location). Usage-only
+    // placeholder entries for primitives carry no location and are not symbols
+    // the user defined here.
+    let values: Vec<Value> = handle
+        .symbol_index
+        .definitions
+        .values()
+        .filter(|d| d.location.is_some())
+        .map(|x| symbol_def_to_value(x, ctx))
+        .collect();
+    (SIG_OK, ctx.array(values))
+}
+
+/// (compile/signal analysis :name) → {:bits |:io| :propagates || ...}
+pub(super) fn prim_compile_signal(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/signal", ctx) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
+    let name = match resolve_name(args, 1, "compile/signal", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
     match handle.signal_map.get(&name) {
-        Some(sig) => (SIG_OK, signal_to_value(sig)),
+        Some(sig) => (SIG_OK, signal_to_value(sig, ctx)),
         None => (
             SIG_ERROR,
-            error_val(
+            ctx.error(
                 "lookup-error",
                 format!("compile/signal: no function '{}' in analysis", name),
             ),
@@ -181,12 +203,15 @@ pub(super) fn prim_compile_signal(args: &[Value]) -> (SignalBits, Value) {
 /// (compile/query-signal analysis :io) → [{:name "f" :line 42}]
 /// (compile/query-signal analysis :silent) → [{:name "g" :line 10}]
 /// (compile/query-signal analysis :jit-eligible) → [...]
-pub(super) fn prim_compile_query_signal(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/query-signal") {
+pub(super) fn prim_compile_query_signal(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/query-signal", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let query = match resolve_name(args, 1, "compile/query-signal") {
+    let query = match resolve_name(args, 1, "compile/query-signal", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -210,40 +235,42 @@ pub(super) fn prim_compile_query_signal(args: &[Value]) -> (SignalBits, Value) {
             })
             .map(|(name, _)| {
                 let mut fields = BTreeMap::new();
-                fields.insert(kw("name"), Value::string(&**name));
-                // Find line from symbol index.
+                fields.insert(kw("name"), ctx.string(&**name));
+                // Find line from symbol index. Match only located definitions
+                // so usage-only primitive placeholders (no location) never win.
                 for def in handle.symbol_index.definitions.values() {
                     if def.name == *name {
                         if let Some(loc) = &def.location {
                             fields.insert(kw("line"), Value::int(loc.line as i64));
+                            break;
                         }
-                        break;
                     }
                 }
-                Value::struct_from(fields)
+                ctx.struct_from(fields)
             })
             .collect()
     });
 
-    (SIG_OK, Value::array(matches))
+    (SIG_OK, ctx.array(matches))
 }
 
 /// (compile/bindings analysis) → [{:name "x" :scope :parameter ...}]
-pub(super) fn prim_compile_bindings(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/bindings") {
+pub(super) fn prim_compile_bindings(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/bindings", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
 
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/bindings: no symbol table"),
-            )
-        }
-    };
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("runtime-error", "compile/bindings: no symbol table"),
+        );
+    }
     let symbols = unsafe { &*symbols_ptr };
 
     let mut values = Vec::new();
@@ -252,7 +279,7 @@ pub(super) fn prim_compile_bindings(args: &[Value]) -> (SignalBits, Value) {
         let inner = handle.arena.get(binding);
         let mut fields = BTreeMap::new();
         if let Some(name) = symbols.name(inner.name) {
-            fields.insert(kw("name"), Value::string(name));
+            fields.insert(kw("name"), ctx.string(name));
         } else {
             continue; // Skip gensym bindings.
         }
@@ -264,363 +291,30 @@ pub(super) fn prim_compile_bindings(args: &[Value]) -> (SignalBits, Value) {
             }),
         );
         fields.insert(kw("mutated"), Value::bool(inner.is_mutated));
-        fields.insert(kw("captured"), Value::bool(inner.is_captured));
         fields.insert(kw("immutable"), Value::bool(inner.is_immutable));
         fields.insert(kw("needs-lbox"), Value::bool(inner.needs_capture()));
 
-        // Add location from symbol index if available.
-        if let Some(loc) = handle.symbol_index.symbol_locations.get(&inner.name) {
+        // Add location from symbol index if available (keyed per-binding).
+        if let Some(loc) = handle.symbol_index.symbol_locations.get(&binding.def_id()) {
             fields.insert(kw("line"), Value::int(loc.line as i64));
             fields.insert(kw("col"), Value::int(loc.col as i64));
         }
 
-        values.push(Value::struct_from(fields));
+        values.push(ctx.struct_from(fields));
     }
-    (SIG_OK, Value::array(values))
-}
-
-/// (compile/captures analysis :fn-name) → [{:name "x" :kind :value :mutated false}]
-pub(super) fn prim_compile_captures(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/captures") {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
-    let name = match resolve_name(args, 1, "compile/captures") {
-        Ok(n) => n,
-        Err(e) => return e,
-    };
-
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/captures: no symbol table"),
-            )
-        }
-    };
-    let symbols = unsafe { &*symbols_ptr };
-
-    // Find the Lambda for this function name.
-    match find_lambda_captures(&handle.hir, &handle.arena, symbols, &name) {
-        Some(captures) => (SIG_OK, Value::array(captures)),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "lookup-error",
-                format!("compile/captures: no function '{}' in analysis", name),
-            ),
-        ),
-    }
-}
-
-pub(super) fn find_lambda_captures(
-    hir: &Hir,
-    arena: &BindingArena,
-    symbols: &crate::symbol::SymbolTable,
-    target: &str,
-) -> Option<Vec<Value>> {
-    match &hir.kind {
-        HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
-            for (binding, value) in bindings {
-                if let Some(name) = symbols.name(arena.get(*binding).name) {
-                    if name == target {
-                        if let HirKind::Lambda { captures, .. } = &value.kind {
-                            return Some(captures_to_values(captures, arena, symbols));
-                        }
-                    }
-                }
-                if let Some(result) = find_lambda_captures(value, arena, symbols, target) {
-                    return Some(result);
-                }
-            }
-            find_lambda_captures(body, arena, symbols, target)
-        }
-        HirKind::Define { binding, value } => {
-            if let Some(name) = symbols.name(arena.get(*binding).name) {
-                if name == target {
-                    if let HirKind::Lambda { captures, .. } = &value.kind {
-                        return Some(captures_to_values(captures, arena, symbols));
-                    }
-                }
-            }
-            find_lambda_captures(value, arena, symbols, target)
-        }
-        HirKind::Lambda { body, .. } => find_lambda_captures(body, arena, symbols, target),
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => find_lambda_captures(cond, arena, symbols, target)
-            .or_else(|| find_lambda_captures(then_branch, arena, symbols, target))
-            .or_else(|| find_lambda_captures(else_branch, arena, symbols, target)),
-        HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
-            for e in exprs {
-                if let Some(r) = find_lambda_captures(e, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Block { body, .. } => {
-            for e in body {
-                if let Some(r) = find_lambda_captures(e, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Call { func, args, .. } => find_lambda_captures(func, arena, symbols, target)
-            .or_else(|| {
-                for arg in args {
-                    if let Some(r) = find_lambda_captures(&arg.expr, arena, symbols, target) {
-                        return Some(r);
-                    }
-                }
-                None
-            }),
-        HirKind::Assign { value, .. } => find_lambda_captures(value, arena, symbols, target),
-        HirKind::While { cond, body } => find_lambda_captures(cond, arena, symbols, target)
-            .or_else(|| find_lambda_captures(body, arena, symbols, target)),
-        HirKind::Match { value, arms } => {
-            if let Some(r) = find_lambda_captures(value, arena, symbols, target) {
-                return Some(r);
-            }
-            for (_, guard, body) in arms {
-                if let Some(g) = guard {
-                    if let Some(r) = find_lambda_captures(g, arena, symbols, target) {
-                        return Some(r);
-                    }
-                }
-                if let Some(r) = find_lambda_captures(body, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
-            find_lambda_captures(e, arena, symbols, target)
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses {
-                if let Some(r) = find_lambda_captures(c, arena, symbols, target) {
-                    return Some(r);
-                }
-                if let Some(r) = find_lambda_captures(b, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            else_branch
-                .as_ref()
-                .and_then(|e| find_lambda_captures(e, arena, symbols, target))
-        }
-        HirKind::Destructure { value, .. } => find_lambda_captures(value, arena, symbols, target),
-        HirKind::Eval { expr, env } => find_lambda_captures(expr, arena, symbols, target)
-            .or_else(|| find_lambda_captures(env, arena, symbols, target)),
-        HirKind::Parameterize { bindings, body } => {
-            for (p, v) in bindings {
-                if let Some(r) = find_lambda_captures(p, arena, symbols, target) {
-                    return Some(r);
-                }
-                if let Some(r) = find_lambda_captures(v, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            find_lambda_captures(body, arena, symbols, target)
-        }
-        _ => None,
-    }
-}
-
-pub(super) fn captures_to_values(
-    captures: &[crate::hir::CaptureInfo],
-    arena: &BindingArena,
-    symbols: &crate::symbol::SymbolTable,
-) -> Vec<Value> {
-    captures
-        .iter()
-        .map(|cap| {
-            let inner = arena.get(cap.binding);
-            let mut fields = BTreeMap::new();
-            if let Some(name) = symbols.name(inner.name) {
-                fields.insert(kw("name"), Value::string(name));
-            }
-            let kind = match cap.kind {
-                crate::hir::CaptureKind::Local => {
-                    if inner.needs_capture() {
-                        "lbox"
-                    } else {
-                        "value"
-                    }
-                }
-                crate::hir::CaptureKind::Capture { .. } => "transitive",
-            };
-            fields.insert(kw("kind"), Value::keyword(kind));
-            fields.insert(kw("mutated"), Value::bool(inner.is_mutated));
-            Value::struct_from(fields)
-        })
-        .collect()
-}
-
-/// (compile/captured-by analysis :name) → [{:name "make-handler" :line 20}]
-/// Reverse lookup: which functions capture the named binding?
-pub(super) fn prim_compile_captured_by(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/captured-by") {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
-    let name = match resolve_name(args, 1, "compile/captured-by") {
-        Ok(n) => n,
-        Err(e) => return e,
-    };
-
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val("runtime-error", "compile/captured-by: no symbol table"),
-            )
-        }
-    };
-    let symbols = unsafe { &*symbols_ptr };
-
-    // Find all lambdas whose captures include a binding named `name`.
-    let mut results = Vec::new();
-    find_capturers(&handle.hir, &handle.arena, symbols, &name, &mut results);
-    (SIG_OK, Value::array(results))
-}
-
-pub(super) fn find_capturers(
-    hir: &Hir,
-    arena: &BindingArena,
-    symbols: &crate::symbol::SymbolTable,
-    target: &str,
-    results: &mut Vec<Value>,
-) {
-    match &hir.kind {
-        HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
-            for (binding, value) in bindings {
-                if let HirKind::Lambda { captures, .. } = &value.kind {
-                    for cap in captures {
-                        if let Some(cap_name) = symbols.name(arena.get(cap.binding).name) {
-                            if cap_name == target {
-                                let mut fields = BTreeMap::new();
-                                if let Some(fn_name) = symbols.name(arena.get(*binding).name) {
-                                    fields.insert(kw("name"), Value::string(fn_name));
-                                }
-                                fields.insert(kw("line"), Value::int(value.span.line as i64));
-                                results.push(Value::struct_from(fields));
-                                break;
-                            }
-                        }
-                    }
-                }
-                find_capturers(value, arena, symbols, target, results);
-            }
-            find_capturers(body, arena, symbols, target, results);
-        }
-        HirKind::Define { binding, value } => {
-            if let HirKind::Lambda { captures, .. } = &value.kind {
-                for cap in captures {
-                    if let Some(cap_name) = symbols.name(arena.get(cap.binding).name) {
-                        if cap_name == target {
-                            let mut fields = BTreeMap::new();
-                            if let Some(fn_name) = symbols.name(arena.get(*binding).name) {
-                                fields.insert(kw("name"), Value::string(fn_name));
-                            }
-                            fields.insert(kw("line"), Value::int(value.span.line as i64));
-                            results.push(Value::struct_from(fields));
-                            break;
-                        }
-                    }
-                }
-            }
-            find_capturers(value, arena, symbols, target, results);
-        }
-        HirKind::Lambda { body, .. } => find_capturers(body, arena, symbols, target, results),
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            find_capturers(cond, arena, symbols, target, results);
-            find_capturers(then_branch, arena, symbols, target, results);
-            find_capturers(else_branch, arena, symbols, target, results);
-        }
-        HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
-            for e in exprs {
-                find_capturers(e, arena, symbols, target, results);
-            }
-        }
-        HirKind::Block { body, .. } => {
-            for e in body {
-                find_capturers(e, arena, symbols, target, results);
-            }
-        }
-        HirKind::Call { func, args, .. } => {
-            find_capturers(func, arena, symbols, target, results);
-            for arg in args {
-                find_capturers(&arg.expr, arena, symbols, target, results);
-            }
-        }
-        HirKind::Assign { value, .. } => find_capturers(value, arena, symbols, target, results),
-        HirKind::While { cond, body } => {
-            find_capturers(cond, arena, symbols, target, results);
-            find_capturers(body, arena, symbols, target, results);
-        }
-        HirKind::Match { value, arms } => {
-            find_capturers(value, arena, symbols, target, results);
-            for (_, guard, body) in arms {
-                if let Some(g) = guard {
-                    find_capturers(g, arena, symbols, target, results);
-                }
-                find_capturers(body, arena, symbols, target, results);
-            }
-        }
-        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
-            find_capturers(e, arena, symbols, target, results);
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses {
-                find_capturers(c, arena, symbols, target, results);
-                find_capturers(b, arena, symbols, target, results);
-            }
-            if let Some(e) = else_branch {
-                find_capturers(e, arena, symbols, target, results);
-            }
-        }
-        HirKind::Destructure { value, .. } => {
-            find_capturers(value, arena, symbols, target, results)
-        }
-        HirKind::Eval { expr, env } => {
-            find_capturers(expr, arena, symbols, target, results);
-            find_capturers(env, arena, symbols, target, results);
-        }
-        HirKind::Parameterize { bindings, body } => {
-            for (p, v) in bindings {
-                find_capturers(p, arena, symbols, target, results);
-                find_capturers(v, arena, symbols, target, results);
-            }
-            find_capturers(body, arena, symbols, target, results);
-        }
-        _ => {}
-    }
+    (SIG_OK, ctx.array(values))
 }
 
 /// (compile/callers analysis :name) → [{:name "main" :line 50 :tail false}]
-pub(super) fn prim_compile_callers(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/callers") {
+pub(super) fn prim_compile_callers(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/callers", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let name = match resolve_name(args, 1, "compile/callers") {
+    let name = match resolve_name(args, 1, "compile/callers", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -636,7 +330,7 @@ pub(super) fn prim_compile_callers(args: &[Value]) -> (SignalBits, Value) {
         .iter()
         .map(|caller_name| {
             let mut fields = BTreeMap::new();
-            fields.insert(kw("name"), Value::string(&**caller_name));
+            fields.insert(kw("name"), ctx.string(&**caller_name));
             // Find the specific edge for line info.
             if let Some(edges) = handle.call_graph.edges.get(caller_name) {
                 for edge in edges {
@@ -647,20 +341,23 @@ pub(super) fn prim_compile_callers(args: &[Value]) -> (SignalBits, Value) {
                     }
                 }
             }
-            Value::struct_from(fields)
+            ctx.struct_from(fields)
         })
         .collect();
 
-    (SIG_OK, Value::array(values))
+    (SIG_OK, ctx.array(values))
 }
 
 /// (compile/callees analysis :name) → [{:name "http/get" :line 3 :tail false}]
-pub(super) fn prim_compile_callees(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/callees") {
+pub(super) fn prim_compile_callees(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/callees", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let name = match resolve_name(args, 1, "compile/callees") {
+    let name = match resolve_name(args, 1, "compile/callees", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -672,13 +369,16 @@ pub(super) fn prim_compile_callees(args: &[Value]) -> (SignalBits, Value) {
         .cloned()
         .unwrap_or_default();
 
-    let values: Vec<Value> = edges.iter().map(call_edge_to_value).collect();
-    (SIG_OK, Value::array(values))
+    let values: Vec<Value> = edges.iter().map(|x| call_edge_to_value(x, ctx)).collect();
+    (SIG_OK, ctx.array(values))
 }
 
 /// (compile/call-graph analysis) → {:nodes [...] :roots [...] :leaves [...]}
-pub(super) fn prim_compile_call_graph(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/call-graph") {
+pub(super) fn prim_compile_call_graph(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/call-graph", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
@@ -689,126 +389,122 @@ pub(super) fn prim_compile_call_graph(args: &[Value]) -> (SignalBits, Value) {
         .iter()
         .map(|(name, edges)| {
             let mut fields = BTreeMap::new();
-            fields.insert(kw("name"), Value::string(&**name));
-            fields.insert(
-                kw("callees"),
-                Value::array(edges.iter().map(|e| Value::string(&*e.callee)).collect()),
-            );
+            let name_val = ctx.string(&**name);
+            fields.insert(kw("name"), name_val);
+            let callees: Vec<Value> = edges.iter().map(|e| ctx.string(&*e.callee)).collect();
+            let callees_val = ctx.array(callees);
+            fields.insert(kw("callees"), callees_val);
             let callers = handle
                 .call_graph
                 .reverse
                 .get(name)
                 .cloned()
                 .unwrap_or_default();
-            fields.insert(
-                kw("callers"),
-                Value::array(callers.iter().map(|c| Value::string(&**c)).collect()),
-            );
-            Value::struct_from(fields)
+            let caller_vals: Vec<Value> = callers.iter().map(|c| ctx.string(&**c)).collect();
+            let callers_val = ctx.array(caller_vals);
+            fields.insert(kw("callers"), callers_val);
+            ctx.struct_from(fields)
         })
         .collect();
 
     let mut fields = BTreeMap::new();
-    fields.insert(kw("nodes"), Value::array(nodes));
-    fields.insert(
-        kw("roots"),
-        Value::array(
-            handle
-                .call_graph
-                .roots
-                .iter()
-                .map(|s| Value::string(&**s))
-                .collect(),
-        ),
-    );
-    fields.insert(
-        kw("leaves"),
-        Value::array(
-            handle
-                .call_graph
-                .leaves
-                .iter()
-                .map(|s| Value::string(&**s))
-                .collect(),
-        ),
-    );
+    let nodes_val = ctx.array(nodes);
+    fields.insert(kw("nodes"), nodes_val);
+    let roots: Vec<Value> = handle
+        .call_graph
+        .roots
+        .iter()
+        .map(|s| ctx.string(&**s))
+        .collect();
+    let roots_val = ctx.array(roots);
+    fields.insert(kw("roots"), roots_val);
+    let leaves: Vec<Value> = handle
+        .call_graph
+        .leaves
+        .iter()
+        .map(|s| ctx.string(&**s))
+        .collect();
+    let leaves_val = ctx.array(leaves);
+    fields.insert(kw("leaves"), leaves_val);
 
-    (SIG_OK, Value::struct_from(fields))
+    (SIG_OK, ctx.struct_from(fields))
 }
 
 /// (compile/binding analysis :name) → {:scope :local :mutated true ...}
-pub(super) fn prim_compile_binding(args: &[Value]) -> (SignalBits, Value) {
-    let handle = match get_handle(args, "compile/binding") {
+pub(super) fn prim_compile_binding(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let handle = match get_handle(args, "compile/binding", ctx) {
         Ok(h) => h,
         Err(e) => return e,
     };
-    let name = match resolve_name(args, 1, "compile/binding") {
+    let name = match resolve_name(args, 1, "compile/binding", ctx) {
         Ok(n) => n,
         Err(e) => return e,
     };
 
-    let symbols_ptr = match unsafe { context::get_symbol_table() } {
-        Some(ptr) => ptr,
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("runtime-error", "compile/binding: no symbol table"),
+        );
+    }
+    let symbols = unsafe { &*symbols_ptr };
+
+    // Find the binding by name, preferring the one that carries source spans
+    // (skips any phantom file-scope prebind sharing the name).
+    let binding = match super::binding_for_name(&handle.arena, symbols, &handle.symbol_index, &name)
+    {
+        Some(b) => b,
         None => {
             return (
                 SIG_ERROR,
-                error_val("runtime-error", "compile/binding: no symbol table"),
+                ctx.error(
+                    "lookup-error",
+                    format!("compile/binding: no binding '{}' in analysis", name),
+                ),
             )
         }
     };
-    let symbols = unsafe { &*symbols_ptr };
+    let inner = handle.arena.get(binding);
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        kw("name"),
+        ctx.string(symbols.name(inner.name).unwrap_or("")),
+    );
+    fields.insert(
+        kw("scope"),
+        Value::keyword(match inner.scope {
+            crate::hir::arena::BindingScope::Parameter => "parameter",
+            crate::hir::arena::BindingScope::Local => "local",
+        }),
+    );
+    fields.insert(kw("mutated"), Value::bool(inner.is_mutated));
+    fields.insert(kw("immutable"), Value::bool(inner.is_immutable));
+    fields.insert(kw("needs-lbox"), Value::bool(inner.needs_capture()));
 
-    // Find the binding by name.
-    for i in 0..handle.arena.len() {
-        let binding = crate::hir::Binding(i as u32);
-        let inner = handle.arena.get(binding);
-        if let Some(bname) = symbols.name(inner.name) {
-            if bname == name {
-                let mut fields = BTreeMap::new();
-                fields.insert(kw("name"), Value::string(bname));
-                fields.insert(
-                    kw("scope"),
-                    Value::keyword(match inner.scope {
-                        crate::hir::arena::BindingScope::Parameter => "parameter",
-                        crate::hir::arena::BindingScope::Local => "local",
-                    }),
-                );
-                fields.insert(kw("mutated"), Value::bool(inner.is_mutated));
-                fields.insert(kw("captured"), Value::bool(inner.is_captured));
-                fields.insert(kw("immutable"), Value::bool(inner.is_immutable));
-                fields.insert(kw("needs-lbox"), Value::bool(inner.needs_capture()));
-
-                if let Some(loc) = handle.symbol_index.symbol_locations.get(&inner.name) {
-                    fields.insert(kw("line"), Value::int(loc.line as i64));
-                    fields.insert(kw("col"), Value::int(loc.col as i64));
-                }
-
-                // Usages.
-                if let Some(usages) = handle.symbol_index.symbol_usages.get(&inner.name) {
-                    let usage_vals: Vec<Value> = usages
-                        .iter()
-                        .map(|loc| {
-                            let mut f = BTreeMap::new();
-                            f.insert(kw("line"), Value::int(loc.line as i64));
-                            f.insert(kw("col"), Value::int(loc.col as i64));
-                            Value::struct_from(f)
-                        })
-                        .collect();
-                    fields.insert(kw("usages"), Value::array(usage_vals));
-                }
-
-                return (SIG_OK, Value::struct_from(fields));
-            }
-        }
+    if let Some(loc) = handle.symbol_index.symbol_locations.get(&binding.def_id()) {
+        fields.insert(kw("line"), Value::int(loc.line as i64));
+        fields.insert(kw("col"), Value::int(loc.col as i64));
     }
 
-    (
-        SIG_ERROR,
-        error_val(
-            "lookup-error",
-            format!("compile/binding: no binding '{}' in analysis", name),
-        ),
-    )
+    // Usages (keyed per-binding).
+    if let Some(usages) = handle.symbol_index.symbol_usages.get(&binding.def_id()) {
+        let usage_vals: Vec<Value> = usages
+            .iter()
+            .map(|loc| {
+                let mut f = BTreeMap::new();
+                f.insert(kw("line"), Value::int(loc.line as i64));
+                f.insert(kw("col"), Value::int(loc.col as i64));
+                ctx.struct_from(f)
+            })
+            .collect();
+        fields.insert(kw("usages"), ctx.array(usage_vals));
+    }
+
+    (SIG_OK, ctx.struct_from(fields))
 }
 
 // ── Primitive metadata ─────────────────────────────────────────────────
@@ -816,7 +512,10 @@ pub(super) fn prim_compile_binding(args: &[Value]) -> (SignalBits, Value) {
 /// Return metadata for all Rust-defined primitives as an array of structs.
 ///
 /// Each struct: {:name :category :arity :signal :doc :params :aliases}
-pub(super) fn prim_compile_primitives(args: &[Value]) -> (SignalBits, Value) {
+pub(super) fn prim_compile_primitives(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
     let _ = args;
     use crate::primitives::registration::ALL_TABLES;
 
@@ -825,28 +524,28 @@ pub(super) fn prim_compile_primitives(args: &[Value]) -> (SignalBits, Value) {
     for table in ALL_TABLES {
         for def in *table {
             let mut fields = BTreeMap::new();
-            fields.insert(kw("name"), Value::string(def.name));
+            fields.insert(kw("name"), ctx.string(def.name));
             fields.insert(
                 kw("category"),
                 if def.category.is_empty() {
-                    Value::string("core")
+                    ctx.string("core")
                 } else {
-                    Value::string(def.category)
+                    ctx.string(def.category)
                 },
             );
-            fields.insert(kw("arity"), Value::string(format!("{}", def.arity)));
-            fields.insert(kw("signal"), signal_to_value(&def.signal));
-            fields.insert(kw("doc"), Value::string(def.doc));
+            fields.insert(kw("arity"), ctx.string(format!("{}", def.arity)));
+            fields.insert(kw("signal"), signal_to_value(&def.signal, ctx));
+            fields.insert(kw("doc"), ctx.string(def.doc));
 
-            let params: Vec<Value> = def.params.iter().map(|p| Value::string(*p)).collect();
-            fields.insert(kw("params"), Value::array(params));
+            let params: Vec<Value> = def.params.iter().map(|p| ctx.string(*p)).collect();
+            fields.insert(kw("params"), ctx.array(params));
 
-            let aliases: Vec<Value> = def.aliases.iter().map(|a| Value::string(*a)).collect();
-            fields.insert(kw("aliases"), Value::array(aliases));
+            let aliases: Vec<Value> = def.aliases.iter().map(|a| ctx.string(*a)).collect();
+            fields.insert(kw("aliases"), ctx.array(aliases));
 
-            results.push(Value::struct_from(fields));
+            results.push(ctx.struct_from(fields));
         }
     }
 
-    (SIG_OK, Value::array(results))
+    (SIG_OK, ctx.array(results))
 }

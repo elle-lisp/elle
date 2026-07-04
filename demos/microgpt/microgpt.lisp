@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 10)
+(elle/epoch 12)
 # ── microgpt: minimal GPT in Elle ───────────────────────────────
 #
 # Port of https://github.com/karpathy/microgpt

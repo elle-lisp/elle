@@ -39,7 +39,7 @@ pub struct JitCode {
     /// Yield point metadata for side-exit support.
     /// Indexed by yield point index (u32 immediate in JIT code).
     /// Empty for non-yielding functions.
-    /// Read by `elle_jit_yield` runtime helper (Chunk 2).
+    /// Read by `elle_jit_yield` runtime helper.
     #[allow(dead_code)]
     pub(crate) yield_points: Vec<super::dispatch::YieldPointMeta>,
     /// Call site metadata for yield-through-call support.
@@ -48,10 +48,26 @@ pub struct JitCode {
     /// Read by `elle_jit_yield_through_call` runtime helper.
     #[allow(dead_code)]
     pub(crate) call_sites: Vec<super::dispatch::CallSiteMeta>,
-    /// Closure template Values referenced by MakeClosure instructions.
-    /// Kept alive to prevent `Rc<ClosureTemplate>` from being freed.
-    #[allow(dead_code)]
-    pub(crate) closure_constants: Vec<Value>,
+    /// Nested-lambda template **blueprints** referenced by MakeClosure
+    /// instructions. The native code bakes a raw pointer to each, so each must
+    /// outlive the JIT code and keep a stable address (hence `Box`). This is
+    /// template *data* (the code object's blueprints), not a region value —
+    /// `elle_jit_make_closure` re-materializes a fresh region-allocated template
+    /// per execution.
+    #[allow(dead_code, clippy::vec_box)]
+    pub(crate) closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+    /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
+    /// a quoted compound structure). The native code holds a raw pointer to each
+    /// `ConstTemplate`, so they must live as long as the JIT code itself (this
+    /// code object owns them). Each `Box` has a stable heap address. This is
+    /// template *data* (the code object's constant pool), not a region value —
+    /// re-materialized per execution.
+    //
+    // clippy::vec_box: the `Box` is load-bearing, not redundant indirection —
+    // native code bakes a raw pointer to each `ConstTemplate`, so an element must
+    // not move when the Vec grows; `Box` gives each a stable address.
+    #[allow(dead_code, clippy::vec_box)]
+    pub(crate) templates: Vec<Box<crate::value::ConstTemplate>>,
 }
 
 // Safety: The function pointer points to immutable code that doesn't
@@ -68,43 +84,52 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
-            closure_constants: Vec::new(),
+            closure_protos: Vec::new(),
+            templates: Vec::new(),
         }
     }
 
     /// Create a new JitCode from a function pointer and a shared module
     ///
     /// This constructor is used for batch compilation where multiple JitCode
-    /// instances share one module. Closure constants must be passed in to
-    /// keep `Rc<ClosureTemplate>` alive for the lifetime of the JitCode.
+    /// instances share one module. Closure template blueprints and
+    /// string-literal templates must be passed in to keep them alive for the
+    /// JitCode's lifetime.
+    #[allow(clippy::vec_box)] // stable per-element address for baked JIT pointers
     pub(crate) fn new_shared(
         fn_ptr: *const u8,
         module: Arc<ModuleHolder>,
-        closure_constants: Vec<Value>,
+        closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+        templates: Vec<Box<crate::value::ConstTemplate>>,
     ) -> Self {
         JitCode {
             fn_ptr,
             _module: module,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
-            closure_constants,
+            closure_protos,
+            templates,
         }
     }
 
-    /// Create a new JitCode with yield point, call site metadata, and closure constants
+    /// Create a new JitCode with yield point, call site metadata, closure
+    /// template blueprints, and string-literal templates.
+    #[allow(clippy::vec_box)] // stable per-element address for baked JIT pointers
     pub(crate) fn new_with_metadata(
         fn_ptr: *const u8,
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
         call_sites: Vec<super::dispatch::CallSiteMeta>,
-        closure_constants: Vec<Value>,
+        closure_protos: Vec<Box<crate::value::ClosureTemplate>>,
+        templates: Vec<Box<crate::value::ConstTemplate>>,
     ) -> Self {
         JitCode {
             fn_ptr,
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites,
-            closure_constants,
+            closure_protos,
+            templates,
         }
     }
 
@@ -165,8 +190,18 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites: Vec::new(),
-            closure_constants: Vec::new(),
+            closure_protos: Vec::new(),
+            templates: Vec::new(),
         }
+    }
+
+    /// Create a JitCode with call sites but no real compiled code.
+    /// For testing `elle_jit_yield_through_call` without Cranelift compilation.
+    #[allow(dead_code)]
+    pub(crate) fn test_with_call_sites(call_sites: Vec<super::dispatch::CallSiteMeta>) -> Self {
+        let mut code = Self::test_with_yield_points(Vec::new());
+        code.call_sites = call_sites;
+        code
     }
 }
 

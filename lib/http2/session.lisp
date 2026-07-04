@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## lib/http2/session.lisp — shared HTTP/2 session management
 ##
 ## Loaded via:
@@ -447,7 +447,10 @@
                     (let [len (length payload)]
                       (when (> len 0)
                         (put sess :pending-conn-wu (+ sess:pending-conn-wu len))))
-                    (when-let [s (get sess:streams sid)]  # §5.1: DATA on half-closed(remote) or closed → stream error
+
+                    # §5.1: DATA on half-closed(remote) or closed → stream
+                    # error
+                    (when-let [s (get sess:streams sid)]
                               (when (or (= s:state :half-closed-remote)
                                         (= s:state :closed))
                                 (send-rst-stream sess sid C:err-stream-closed))
@@ -474,7 +477,9 @@
                                   (when (> (or s:pending-stream-wu 0) 0)
                                     (send-window-update sess sid
                                     s:pending-stream-wu)
-                                    (put s :pending-stream-wu 0)))  # Deliver data (may block on full queue —
+                                    (put s :pending-stream-wu 0)))
+
+                                # Deliver data (may block on full queue —
                                 # but WU is already enqueued above)
                                 (s:data-queue:put {:type :data
                                 :data payload

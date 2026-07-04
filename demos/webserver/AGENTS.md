@@ -31,8 +31,7 @@ Does NOT:
 
 Keep-alive connections via `connection-loop` have a 150x latency
 regression vs equivalent raw TCP ops (40ms vs 0.26ms). See README.md
-for measurements and `.claude/plans/keepalive-regression.md` for the
-investigation plan.
+for measurements.
 
 ## Running
 

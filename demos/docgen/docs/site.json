@@ -10,13 +10,18 @@
         "functions", "named-args", "parameters",
         "arrays", "structs", "sets", "strings", "bytes",
         "control", "loops", "match", "errors",
-        "concurrency", "threads", "coroutines",
+        "concurrency", "threads",
         "modules", "macros", "traits", "io", "ffi", "lua", "epochs"
       ]
     },
     {
       "name": "Runtime",
-      "pages": ["runtime", "scheduler", "memory", "processes", "pipeline"]
+      "pages": ["runtime", "scheduler", "regions", "processes", "pipeline"]
+    },
+    {
+      "name": "Memory",
+      "dir": "regions",
+      "pages": ["semantics", "lifetime", "performance"]
     },
     {
       "name": "Signals",
@@ -36,7 +41,9 @@
     {
       "name": "Implementation",
       "dir": "impl",
-      "pages": ["reader", "hir", "lir", "bytecode", "vm", "jit", "values"]
+      "pages": ["reader", "hir", "lir", "bytecode", "vm", "jit", "values",
+                "region-rules", "region-model", "region-effects", "region-bindings",
+                "region-generations", "region-diagnostics"]
     },
     {
       "name": "Reference",
