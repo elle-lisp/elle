@@ -263,6 +263,22 @@ pub struct RegionInfo {
     /// at these regions' `decref_point` instead of `DecrefRegion(rid)`,
     /// reading the runtime region from the value at last use.
     pub call_result_regions: FxHashSet<Region>,
+    /// HirIds of a binding init that is a WHOLE-VALUE read of a reassigned
+    /// captured cell (`is_restorable_capture_cell`) — the reader of the 1-slot
+    /// container. The cell's overwrite (`capture_store_with_rebind`) decrefs the
+    /// displaced prior unconditionally, so a reader that merely aliases the
+    /// cell's value is freed under it by the next overwrite (the captured-alias
+    /// use-after-free; docs/impl/region-bindings.md § "Captured reassigned
+    /// cells"). The read is treated as Rule 5's "new reference" pass-through: the
+    /// lowerer emits an `IncrefValueRegion` here so the reader holds a counted
+    /// reference of its own, and the read's placeholder region (minted at this
+    /// HirId, so it lands in `call_result_regions`) carries the balancing
+    /// `DecrefValueRegion` at the reader's last use. Element reads
+    /// (`first`/`get`/destructuring) are excluded — an element is independently
+    /// counted by its parent's alloc-scan, so it cascades rather than freeing
+    /// under the reader. Pinned by
+    /// tests/elle/region-reassign-captured-cell-reader.lisp.
+    pub counted_cell_read_sites: FxHashSet<HirId>,
     /// The subset of `call_result_regions` whose callee declares
     /// [`RegionEffect::Fresh`](crate::primitives::def::RegionEffect::Fresh): the
     /// result is freshly allocated in the call's own region, so it is genuinely
@@ -519,6 +535,7 @@ impl RegionInfo {
             region_data: HashMap::new(),
             binding_last_use: HashMap::new(),
             call_result_regions: FxHashSet::default(),
+            counted_cell_read_sites: FxHashSet::default(),
             fresh_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),

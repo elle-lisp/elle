@@ -135,6 +135,42 @@ fn region_native_tail_return_uaf() {
     );
 }
 
+// Guard — a whole-value read of a REASSIGNED CAPTURED CELL (fn-local upvalue
+// read AND module-scope `def @cell`) must take a counted reference, or the
+// cell's next overwrite (`capture_store_with_rebind` decrefs the displaced prior
+// unconditionally) frees the value under the reader — the captured-alias UAF
+// (SIGSEGV under guardfree). The reader takes Rule 5's "new reference"
+// pass-through (an `IncrefValueRegion` at the read, balanced by the
+// `DecrefValueRegion` at its last use). This is the std/process scheduler's
+// `ready` double-buffer (`sched-run`'s `(let [batch ready] (assign ready @[])
+// (each pid in batch (run-one pid)))`), whose regression SIGSEGVs
+// tests/elle/process-io.lisp. docs/impl/region-bindings.md § "Captured
+// reassigned cells".
+#[test]
+fn region_reassign_captured_cell_reader() {
+    run_elle_script_with_args(
+        "region-reassign-captured-cell-reader",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — a self-recursive closure that is ALSO captured by a sibling (so it is
+// cell-held) must NOT have its region released by a tail-call adopt: the
+// capturing cell owns that release, and its lifetime outlives the tail-call
+// activation. Marking such a binding `stranded_self` frees its region under the
+// live cell (a generation panic / SIGSEGV under guardfree at the next
+// `tail_callee_adopt_region` deref). This is the scheduler's mutually recursive
+// `handle-fiber-after-resume` group, whose regression SIGSEGVs
+// tests/elle/process-io.lisp. Only CELL-FREE self-recursion is stranded
+// (docs/impl/selfrec.md).
+#[test]
+fn region_selfrec_captured_tail_adopt() {
+    run_elle_script_with_args(
+        "region-selfrec-captured-tail-adopt",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Correctness guard — the splice/`apply` manifestation of the native-tail-return
 // retain. `(first ;argv)` lowers to `TailCallArrayMut`, whose post-block emits
 // the ReturnValue retain (lower_call splice arm). Known limitation: the splice

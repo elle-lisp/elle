@@ -104,6 +104,17 @@ use-after-free of the closure's own env — the self-call re-dispatch reads a re
   (`suppressed_self_regions`, checked in `emit_decrefs_for`) and marks the binding
   `stranded_self_bindings`, reproducing the `letrec` path's runtime accounting exactly.
 
+Both markings are gated on **cell-freedom** (`!needs_capture()`): the strand+adopt is the
+release route *only* for a self-recursive binding with no forward cell. A member that is
+**also sibling-captured** has a cell that holds a counted reference to the closure region
+and releases it by the cell's cascade — a lifetime that outlives any single tail-call
+activation. Stranding such a binding would make the adopt decref its region a SECOND
+time, freeing it under the still-live cell (the scheduler's mutually recursive
+`handle-fiber-after-resume` group — each member self-recursive AND sibling-captured;
+`region-selfrec-captured-tail-adopt.lisp`, whose regression SIGSEGVs `process-io.lisp`).
+So the cell owns the release for a captured member; the adopt owns it only for the
+cell-free case.
+
 In both stranded cases the runtime **adopt** supplies the release.
 `tail_callee_adopts` (`lir/lower/control/call.rs`) returns true for a tail call to a
 `stranded_self_bindings` callee that does not cross a frontier; the `TailCall` then carries

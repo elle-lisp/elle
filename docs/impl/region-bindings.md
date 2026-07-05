@@ -167,17 +167,26 @@ cell's update increfs the new content and decrefs the displaced prior
 unconditionally; there is no fallback to suppress, because the cell's RC
 semantics live in the update opcode itself. The soundness obligation
 therefore falls on readers: **a direct whole-value binding read out of a
-module-scope reassigned captured cell takes a counted reference** — incref
-at the bind, value-based release at the reader's last use, exactly Rule 5's
-"new reference" pass-through discipline. An uncounted alias would be freed
-under the reader by the next reassignment's overwrite-release (the
-captured-alias double-free). Element reads (`first`/`get`/destructuring)
-need no counting: an element's region is independently counted by its
-parent's alloc-time scan, so the parent's demise cascades rather than
-freeing the element under the reader. A reader that is itself reassigned is
-not counted (its own cell machinery owns its references); the
-alias-of-a-mutable-by-a-mutable pairing stays within the cells' own
-store/overwrite accounting.
+reassigned captured cell takes a counted reference** — incref at the bind,
+value-based release at the reader's last use, exactly Rule 5's "new
+reference" pass-through discipline. An uncounted alias would be freed under
+the reader by the next reassignment's overwrite-release (the captured-alias
+double-free). The obligation is scope-independent — a fn-local
+`is_restorable_capture_cell` read through an upvalue by a nested closure
+(the std/process scheduler's `sched-run` `(let [batch ready] (assign ready
+@[]) (each pid in batch …))`, where `ready` is a `make-scheduler` local) is
+exactly as exposed as a top-level `def @cell` read, and both are pinned by
+`region-reassign-captured-cell-reader.lisp`. The read is recognised at the
+binding init (`RegionInfo::counted_cell_read_sites`: a bare `Var`/`DerefCell`
+of an `is_restorable_capture_cell` source), minted a placeholder region so it
+rides `call_result_regions` for the value-based release, and retained by an
+`IncrefValueRegion` at the read (`emit_counted_cell_read_retain`). Element
+reads (`first`/`get`/destructuring) need no counting: an element's region is
+independently counted by its parent's alloc-time scan, so the parent's demise
+cascades rather than freeing the element under the reader. A reader that is
+itself a capture cell is not counted (its own cell machinery owns its
+references); the alias-of-a-mutable-by-a-mutable pairing stays within the
+cells' own store/overwrite accounting.
 
 **Env cells in loops: release once per activation, not per iteration.** A
 captured local (`needs_capture` binding defined inside a lambda) and a captured

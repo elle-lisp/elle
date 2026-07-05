@@ -13,6 +13,29 @@ impl<'a> Lowerer<'a> {
             self.region_to_slot.insert(r, slot);
         }
     }
+
+    /// The reader half of a reassigned-captured-cell 1-slot container: when a
+    /// binding init at `hir_id` is a whole-value read of an
+    /// `is_restorable_capture_cell` binding (`RegionInfo::counted_cell_read_sites`),
+    /// the reader takes its OWN counted reference — Rule 5's "new reference"
+    /// pass-through — so the cell's next overwrite
+    /// (`capture_store_with_rebind`, which decrefs the displaced prior
+    /// unconditionally) cannot free the value under the reader
+    /// (docs/impl/region-bindings.md § "Captured reassigned cells"). The
+    /// balancing `DecrefValueRegion` fires at the reader's last use: the walk
+    /// minted the read's placeholder region at `hir_id`, so it lands in
+    /// `call_result_regions` and its `decref_point` is the reader's last use.
+    ///
+    /// Emitted while the read value is on the operand-stack top (right after
+    /// `lower_expr(init)`, before the slot store) — `IncrefValueRegion` peeks the
+    /// top and does not pop, so the value stays in place for the store.
+    /// No-op unless `hir_id` is a counted read site. Pinned by
+    /// tests/elle/region-reassign-captured-cell-reader.lisp.
+    pub(super) fn emit_counted_cell_read_retain(&mut self, hir_id: HirId, src: Reg) {
+        if self.region_info.counted_cell_read_sites.contains(&hir_id) {
+            self.emit(LirInstr::IncrefValueRegion { src });
+        }
+    }
     /// Store a top-level captured binding's init value into its pre-allocated
     /// `MakeCaptureCell` (the binding `slot` holds the CELL, created nil by the
     /// `lower_begin`/`lower_letrec` pre-pass).

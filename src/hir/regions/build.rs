@@ -95,6 +95,7 @@ impl RegionInference {
             // (the tight, binding-resolved last-use per region). Empty here.
             binding_last_use: HashMap::new(),
             call_result_regions: self.call_result_regions,
+            counted_cell_read_sites: self.counted_cell_read_sites,
             fresh_result_regions: self.fresh_result_regions,
             containment_edges,
             funnel_store_sites: self.funnel_store_sites,

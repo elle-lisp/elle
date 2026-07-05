@@ -215,6 +215,7 @@ impl RegionInference {
                     }
                     let init_regions = self.walk(init);
                     self.binding_region.insert(*b, scope_region);
+                    let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
                     self.binding_regions.insert(*b, init_regions);
                 }
 

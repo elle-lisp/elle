@@ -47,6 +47,7 @@ impl<'a> Lowerer<'a> {
             self.record_region_slot(init.id, slot);
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
+            self.emit_counted_cell_read_retain(init.id, init_reg);
             let needs_capture = self.arena.get(*binding).needs_capture();
 
             if self.in_lambda && needs_capture {
@@ -258,7 +259,18 @@ impl<'a> Lowerer<'a> {
         // double-free.
         if Self::body_is_tail_call(body) {
             for (b, _) in bindings.iter() {
-                if self.self_recursive_bindings.contains(b) {
+                // Cell-free self-recursion only. A self-recursive binding that is
+                // ALSO captured by a sibling (`needs_capture`) is held by a letrec
+                // cell whose lifetime outlives this tail-call activation; its
+                // closure region is released by the cell's cascade, so a tail-call
+                // adopt would decref it a SECOND time and free it under the still-live
+                // cell (the scheduler's `handle-fiber-after-resume` — self-recursive
+                // AND sibling-captured — freed under its forward cell; a stale
+                // `tail_callee_adopt_region` deref of the next self-call).
+                // docs/impl/selfrec.md: the cell-free case is exactly the one the
+                // self-edge leaves uncaptured. Pinned by
+                // tests/elle/region-selfrec-captured-tail-adopt.lisp.
+                if self.self_recursive_bindings.contains(b) && !self.arena.get(*b).needs_capture() {
                     self.stranded_self_bindings.insert(*b);
                 }
             }
@@ -399,7 +411,13 @@ impl<'a> Lowerer<'a> {
         // adopt. Mirror it for `def`: SUPPRESS the closure region's `DecrefRegion`
         // (`suppressed_self_regions`) and STRAND the binding (`stranded_self_bindings`)
         // so a tail call to it adopts the region — the sole, once-only release.
-        if self.self_recursive_bindings.contains(&binding) {
+        // Cell-free self-recursion only (see the `lower_letrec` twin): a
+        // sibling-captured (`needs_capture`) self-recursive binding is held by a
+        // cell, so its region is released by the cell's cascade, not this
+        // suppress-and-strand adopt — stranding it double-frees under the live cell.
+        if self.self_recursive_bindings.contains(&binding)
+            && !self.arena.get(binding).needs_capture()
+        {
             if let Some(&closure_region) = self.region_info.alloc_region.get(&value.id) {
                 self.suppressed_self_regions.insert(closure_region);
             }

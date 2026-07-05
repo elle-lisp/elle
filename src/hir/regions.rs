@@ -72,6 +72,10 @@ struct RegionInference {
     /// uses these to choose `DecrefValueRegion(reg)` over
     /// `DecrefRegion(rid)` at `decref_point`.
     call_result_regions: rustc_hash::FxHashSet<Region>,
+    /// Binding-init HirIds that are a whole-value read of a reassigned captured
+    /// cell — the reader half of the 1-slot container. See
+    /// `RegionInfo::counted_cell_read_sites`.
+    counted_cell_read_sites: rustc_hash::FxHashSet<HirId>,
     /// The subset of `call_result_regions` whose callee declares
     /// `RegionEffect::Fresh` — a result freshly allocated in the call's own
     /// region, genuinely caller-owned. See `RegionInfo::fresh_result_regions`.
@@ -165,6 +169,7 @@ impl RegionInference {
             cross_region_refs: Vec::new(),
             hard_edge_sites: rustc_hash::FxHashSet::default(),
             call_result_regions: rustc_hash::FxHashSet::default(),
+            counted_cell_read_sites: rustc_hash::FxHashSet::default(),
             fresh_result_regions: rustc_hash::FxHashSet::default(),
             mutable_container_regions: rustc_hash::FxHashSet::default(),
             containment_edges: Vec::new(),
@@ -370,6 +375,58 @@ impl RegionInference {
         let r = self.fresh_region(self.current_region);
         self.alloc_region.insert(hir_id, r);
         r
+    }
+
+    /// The reader half of a reassigned-captured-cell 1-slot container: when a
+    /// binding `reader` is initialised from a WHOLE-VALUE read of an
+    /// `is_restorable_capture_cell` binding, give the reader a COUNTED reference
+    /// of its own instead of aliasing the cell's value uncounted. The cell's
+    /// overwrite (`capture_store_with_rebind`) decrefs the displaced prior
+    /// unconditionally, so an uncounted alias is freed under the reader by the
+    /// next overwrite — the captured-alias use-after-free
+    /// (docs/impl/region-bindings.md § "Captured reassigned cells").
+    ///
+    /// Realised as Rule 5's "new reference" pass-through: mint a placeholder
+    /// region at the read node (it lands in `call_result_regions`, so the reader
+    /// carries a value-based `DecrefValueRegion` at its last use) and record the
+    /// read site so the lowerer emits the balancing `IncrefValueRegion`. Returns
+    /// `[read_r]` for the reader's `binding_regions`, or the unmodified
+    /// `init_regions` when the treatment does not apply.
+    ///
+    /// Applies to BOTH scopes (fn-local upvalue read and module-scope cell read),
+    /// which the `is_restorable_capture_cell` predicate covers uniformly. Skipped
+    /// when the reader is itself a capture cell — its own store/overwrite
+    /// accounting owns its references (the alias-of-a-mutable-by-a-mutable
+    /// pairing) — and for an immediate-valued read (no heap reference to count).
+    /// Element reads (`first`/`get`/destructure) never reach here: they are not a
+    /// bare `Var`/`DerefCell` of the cell, and an element is independently counted
+    /// by its parent's alloc-scan (it cascades, never frees under the reader).
+    fn counted_cell_read_regions(
+        &mut self,
+        reader: Binding,
+        init: &Hir,
+        init_regions: Vec<Region>,
+    ) -> Vec<Region> {
+        // A whole-value read is a bare `Var(b)`, or the `DerefCell`-wrapped form
+        // `functionalize` puts around a needs-capture read (the fn-local upvalue).
+        let source = match &init.kind {
+            HirKind::Var(b) => *b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => *b,
+                _ => return init_regions,
+            },
+            _ => return init_regions,
+        };
+        if init_regions.is_empty()
+            || !self.arena().get(source).is_restorable_capture_cell()
+            || self.arena().get(reader).needs_capture()
+        {
+            return init_regions;
+        }
+        let read_r = self.alloc_here(init.id);
+        self.call_result_regions.insert(read_r);
+        self.counted_cell_read_sites.insert(init.id);
+        vec![read_r]
     }
 
     /// A captured (`needs_capture`) binding introduced INSIDE a lambda body is
