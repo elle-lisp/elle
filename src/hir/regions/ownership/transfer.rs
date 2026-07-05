@@ -22,7 +22,7 @@ use super::inputs::ownership_inputs;
 use super::seeds::compute_shared_seeds;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// The transfer cut's output, computed only under `--region-ownership`.
+/// The transfer cut's output, computed by the ownership pass in `analyze_regions_with`.
 /// The interior owner edges are merged into the ordinary adopt maps
 /// (`RegionInfo::owned_adopt_edges` / `capture_adopt_edges` — same emission,
 /// same suppress ⊆ adopt contract for capture members); `result_regions` are

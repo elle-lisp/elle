@@ -276,16 +276,6 @@ impl Config {
                     checked_explicit_on = true;
                     // jit/mlir forced off in the post-loop normalization.
                 }
-                "--region-ownership" => {
-                    // The ownership forest (docs/impl/region-model.md § "Adoption
-                    // and subtree drop"). Runs on BOTH intrinsics settings: the
-                    // adopt is emitted at the intrinsic containment store
-                    // checked-off, and at the funnel call site checked-on (the
-                    // funnel face — region-model.md § "The funnel adopt"). The
-                    // adopt/group ops are lowered on VM and JIT, so only MLIR/WASM
-                    // are forced off, in the post-loop normalization.
-                    config.region_ownership = true;
-                }
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {
@@ -338,20 +328,6 @@ impl Config {
         if config.checked_intrinsics {
             config.jit = JitPolicy::Off;
             config.mlir = MlirPolicy::Off;
-        }
-        // The ownership forest runs on BOTH intrinsics settings — the adopt is
-        // emitted at the intrinsic containment store checked-off, and at the
-        // funnel call site checked-on (the funnel face; region-model.md § "The
-        // funnel adopt — the checked-on store face") — so `--region-ownership`
-        // leaves `--checked-intrinsics` as configured (the production default,
-        // on). The `AdoptRegion`/`FreeRegionGroup` ops are lowered on the JIT
-        // (`elle_jit_adopt_region`/`elle_jit_free_region_group`) as well as the
-        // interpreter, so JIT is left as configured too — VM≡JIT parity, the
-        // precondition for the flag ever defaulting on. Only MLIR/WASM still trail
-        // their structural-arena handling (step 5) and are forced off.
-        if config.region_ownership {
-            config.mlir = MlirPolicy::Off;
-            config.wasm = WasmPolicy::Off;
         }
 
         Ok((config, remaining))

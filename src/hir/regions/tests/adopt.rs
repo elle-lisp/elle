@@ -443,6 +443,127 @@ fn adopt_edges_refuses_captured_value_used_after_closure() {
     );
 }
 
+// ── ownership inference: a `Fresh` native's embed declaration ────────────────────
+//
+// A `Fresh` native whose result EMBEDS an argument declares which args it embeds
+// (`PrimitiveDef::embeds`, region-effects.md § "Native region effects"). The walk's
+// `Fresh` arm then records `result ⊇ arg` in `containment_edges` — the compile-time
+// analog of the runtime alloc-scan (`find_object_cross_refs`) that counts the same
+// embedding. Without it the forest cannot see a captured value flow OUT through an
+// escaping result, so it wrongly folds the value into the capturing closure's Owned
+// subtree. `with-traits` is the canonical embedder: it clones its arg-0 value with the
+// arg-1 struct attached as the `traits` side-field, so it embeds arg 1 (`embeds: &[1]`).
+
+/// The single region captured by the lambda whose `alloc_region` is `closure` — its
+/// sole capture's binding's sole source region. The embed-declaration probe's shape
+/// has exactly one capture (the trait table); panics otherwise.
+fn sole_captured_region(hir: &Hir, info: &RegionInfo, closure: Region) -> Region {
+    fn walk(h: &Hir, info: &RegionInfo, closure: Region, out: &mut Vec<Region>) {
+        if let HirKind::Lambda { captures, .. } = &h.kind {
+            if info.alloc_region.get(&h.id) == Some(&closure) {
+                for c in captures {
+                    if let Some(rs) = info.binding_source_regions.get(&c.binding) {
+                        out.extend(rs.iter().copied().filter(|&r| r != closure));
+                    }
+                }
+            }
+        }
+        h.for_each_child(|c| walk(c, info, closure, out));
+    }
+    let mut out = Vec::new();
+    walk(hir, info, closure, &mut out);
+    out.sort_by_key(|r| r.0);
+    out.dedup();
+    assert_eq!(
+        out.len(),
+        1,
+        "shape must have exactly one captured region; got {out:?}",
+    );
+    out[0]
+}
+
+#[test]
+fn with_traits_embed_refuses_adopt_of_captured_escaping_table() {
+    // Fixture shape (tests/integration/fixtures/region-traits-capture-adopt-uaf.lisp):
+    // a closure `make` CAPTURES a struct `shared-tbl` and, in its body, attaches it as a
+    // trait table with `with-traits`. The traited RESULT escapes `make` (returned from
+    // its body) with its `traits` side-field still referencing the captured table.
+    //
+    // `with-traits` is a `Fresh` NATIVE that embeds arg 1 (the table) into the fresh
+    // result's `traits` side-field — declared by `PrimitiveDef::embeds = &[1]`. The walk
+    // records the containment edge `result ⊇ table`, so external uniqueness sees the
+    // table referenced from OUTSIDE make's subtree (by the escaping result region) and
+    // REFUSES to fold it in: the table stays Shared (per-region RC), reclaimed under the
+    // live result's reference.
+    //
+    // Counterfactual (RED before the embed declaration): with no `result ⊇ table` edge
+    // the forest judged the captured table externally unique to `make`, capture-adopted
+    // it, and make's subtree drop freed it under the escaped result's `traits` field — a
+    // use-after-free (`UpdateCapture` under `--trace=guardfree`; the fixture's SIGSEGV).
+    let src = "(begin (let [shared-tbl {:type :my-type}] \
+                        (let [make (fn (data) (with-traits [data] shared-tbl))] \
+                          (make 1))) \
+                      nil)";
+    let (hir, info, edges) = adopt_edges(src);
+    let make_r = sole_closure_region(&hir, &info);
+    let tbl = sole_captured_region(&hir, &info, make_r);
+    // Precondition: `make` genuinely captures the table (so absent the embed edge the
+    // forest would fold it into make's Owned subtree — the counterfactual's premise).
+    assert!(
+        closure_captures_region(&hir, &info, tbl, make_r),
+        "precondition: the closure r{} must capture the table r{}",
+        make_r.0,
+        tbl.0,
+    );
+    // The invariant: the captured table, embedded into an escaping result, is adopted by
+    // NOBODY — it stays Shared (per-region RC). Asserted FIRST so the counterfactual
+    // fails here (the table IS capture-adopted before the fix), on the real defect.
+    let adopts: Vec<(Region, Region)> = edges
+        .store
+        .values()
+        .chain(edges.capture.values())
+        .flatten()
+        .copied()
+        .collect();
+    assert!(
+        !adopts.iter().any(|&(m, _)| m == tbl),
+        "the captured table r{} embedded into an escaping result must NOT be adopted \
+         (it stays Shared) — got adopts {:?}",
+        tbl.0,
+        adopts,
+    );
+    let (_, _, owned) = owned_subtrees_with_effects(src);
+    assert!(
+        !in_some_owned_subtree(&owned, tbl),
+        "the captured-and-embedded table r{} must be in no Owned subtree; owned={:?}",
+        tbl.0,
+        owned,
+    );
+    // The mechanism: the fix records the with-traits FRESH result ⊇ the table region.
+    let (_, embed_src, result) = info
+        .containment_edges
+        .iter()
+        .copied()
+        .find(|&(_, src, _)| src == tbl)
+        .unwrap_or_else(|| {
+            panic!(
+                "with-traits (Fresh, embeds arg 1) must record `result ⊇ table` for the \
+                 captured table r{}; containment={:?}",
+                tbl.0, info.containment_edges,
+            )
+        });
+    assert_eq!(embed_src, tbl, "the embed's contained member is the table");
+    assert_ne!(
+        result, tbl,
+        "the embed's container is the with-traits result"
+    );
+    assert!(
+        info.fresh_result_regions.contains(&result),
+        "the embed container r{} is the with-traits FRESH result",
+        result.0,
+    );
+}
+
 // ── ownership inference: combined store + capture + deep-nesting subtrees ───────
 //
 // The pins above exercise each emit mode in isolation (a flat/deep store star, a lone
@@ -1061,7 +1182,7 @@ fn activation_adopts_capture_back_edge_scc() {
     // `c ⊇ m` (capture). The m↔c SCC is admitted to the activation node — root is the
     // hull (it dies in-activation, keeping its own baseline release) and is NOT a
     // member. Both members' own decrefs are suppressed.
-    let (hir, info) = analyze_flag_on(
+    let (hir, info) = analyze_full(
         "(begin (let [root (@array) m (@array)] \
                   (let [c (fn [] (length m))] \
                     (begin (%array-push m c) (c) (%array-push root m) nil))) \
@@ -1109,7 +1230,7 @@ fn activation_adopts_capture_back_edge_scc() {
     );
 
     // The BARE shape (no root): the SCC alone is externally unique — same admission.
-    let (hir, info) = analyze_flag_on(
+    let (hir, info) = analyze_full(
         "(begin (let [m (@array)] \
                   (let [c (fn [] (length m))] \
                     (begin (%array-push m c) (c) nil))) \
@@ -1131,7 +1252,7 @@ fn activation_adopts_funnel_recovered_scc_checked_on() {
     // `containment_edges` entry. The signature's store half must count it, and
     // the emit needs no store site (the adopt is value-resolved), so the SCC is
     // admitted exactly as on the intrinsic path.
-    let (hir, info) = analyze_flag_on_checked_on(
+    let (hir, info) = analyze_full_checked_on(
         "(begin (let [m (@array)] \
                   (let [c (fn [] (length m))] \
                     (begin (%array-push m c) (c) nil))) \
@@ -1159,7 +1280,7 @@ fn activation_adopt_excludes_other_mechanisms() {
     //
     // (a) The letrec closure-cycle MERGE's shape (a capture-only SCC — no interior
     // store edge): the signature refuses, the merge keeps sole ownership.
-    let (_, info) = analyze_flag_on(
+    let (_, info) = analyze_full(
         "(begin (letrec [ping (fn [n] (if (%lt n 1) :done (pong (%sub n 1)))) \
                          pong (fn [n] (ping n))] \
                   (ping 3)) \
@@ -1173,7 +1294,7 @@ fn activation_adopt_excludes_other_mechanisms() {
     );
     // (b) The co-owned group's shape (a store-only bare @array cycle — no capture
     // edge): the signature refuses, the group free keeps sole ownership.
-    let (_, info) = analyze_flag_on(
+    let (_, info) = analyze_full(
         "(begin (let [a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) nil)) \
                 nil)",
@@ -1191,7 +1312,7 @@ fn activation_adopt_excludes_other_mechanisms() {
     // (c) The upvalue closure-web family (capture-only edges through nested
     // closures): the signature refuses — the family stays on the baseline until
     // its own cut (class 4 admission / class 6).
-    let (_, info) = analyze_flag_on(
+    let (_, info) = analyze_full(
         "(begin (let [m (%pair 1 2)] \
                   (letrec [e (fn [] (let [o (fn [] (begin (e) (%first m)))] (o)))] (e))) \
                 nil)",
@@ -1212,7 +1333,7 @@ fn activation_adopt_refuses_escaping_hull() {
     // (the return frontier), so it outlives the activation and freeing m at the
     // activation's completion would leave root's contents dangling for the
     // caller. The SCC must refuse to Shared.
-    let (_, info) = analyze_flag_on(
+    let (_, info) = analyze_full(
         "(let [root (@array) m (@array)] \
            (let [c (fn [] (length m))] \
              (begin (%array-push m c) (c) (%array-push root m) root)))",
@@ -1235,7 +1356,7 @@ fn activation_adopt_refuses_escaping_hull() {
 // and each consumer site's call-result region lands in
 // `RegionInfo::transfer_adopt_regions`, whose release the lowerer replaces
 // with `AdoptIntoActivation` (docs/impl/region-model.md § "Owner nodes" — "The
-// transferred returned subtree"). These pins read the flag-on `RegionInfo`
+// transferred returned subtree"). These pins read the fully-analyzed `RegionInfo`
 // (the lowerer's view), so they pin the wiring — not just the walk.
 
 /// The two mutually-referencing cycle regions of a compiled shape — the
@@ -1260,7 +1381,7 @@ fn cycle_pair(info: &RegionInfo) -> rustc_hash::FxHashSet<Region> {
 fn transfer_adopts_returned_cycle_to_consumer() {
     // The call face, intrinsic (`--checked-intrinsics=off` test default) path:
     // a let-bound producer returning an a↔b cycle, one discarded consumer site.
-    let (_, info) = analyze_flag_on(
+    let (_, info) = analyze_full(
         "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) a)))] \
                   (begin (mk) nil)) \
@@ -1312,7 +1433,7 @@ fn transfer_adopts_returned_cycle_checked_on() {
     // the containment is funnel-recovered and the interior adopt is keyed at
     // the funnel CALL site (the value-resolved adopt needs no store opcode), so
     // the cut admits the production path exactly as the intrinsic path.
-    let (_, info) = analyze_flag_on_checked_on(
+    let (_, info) = analyze_full_checked_on(
         "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) a)))] \
                   (begin (mk) nil)) \
@@ -1345,7 +1466,7 @@ fn transfer_adopts_fiber_terminal_cycle() {
     // The fiber face: a silent body's terminal value is the returned cycle; the
     // completing resume hands it to the consumer, whose site is gated exactly
     // like a call-face site.
-    let (_, info) = analyze_flag_on(
+    let (_, info) = analyze_full(
         "(begin (let [f (fiber/new (fn [] (let [a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) a))) 1)] \
                   (begin (fiber/resume f) nil)) \
@@ -1412,7 +1533,7 @@ fn transfer_adopt_refuses_unsafe_shapes() {
          nil)",
     ];
     for src in shapes {
-        let (_, info) = analyze_flag_on(src);
+        let (_, info) = analyze_full(src);
         assert!(
             info.transfer_adopt_regions.is_empty(),
             "an unsafe transfer shape must refuse (no consumer adopt); got {:?} \

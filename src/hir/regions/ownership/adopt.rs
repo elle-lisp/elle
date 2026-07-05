@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The two adopt-edge maps the ownership forest's emit consumes, by emit site — the
 /// output of `compute_adopt_edges` (docs/impl/region-model.md § "Adoption and subtree
-/// drop"). Computed only under `--region-ownership`.
+/// drop"). Computed by the ownership pass in `analyze_regions_with`.
 pub(in crate::hir::regions) struct AdoptEdges {
     /// `cross_region_refs` **store-site** HirId → `(member, owner)` adopts the lowerer
     /// emits in `emit_increfs_for` in place of the interior `IncrefRegion`

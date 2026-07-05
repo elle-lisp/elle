@@ -95,13 +95,19 @@
 //!    `cross_region_refs` edge (the funnel counts the store at runtime; a compile-time
 //!    edge would double-count — region-effects.md § `Funnel`). The walk recovers it
 //!    from the container argument's `RetType` (`MutableArray`/`MutableStruct`), so the
-//!    forest sees the same containment checked-on as checked-off, with no incref.
+//!    forest sees the same containment checked-on as checked-off, with no incref. The
+//!    same `containment_edges` vector ALSO carries a `Fresh` native's **embed**
+//!    containment `result ⊇ arg` (`PrimitiveDef::embeds`, recorded by the walk's `Fresh`
+//!    arm — `with-traits`'s `traits` side-field), the compile-time analog of the runtime
+//!    alloc-scan; consumed here identically to the funnel-recovered edges
+//!    (region-effects.md § `Fresh`).
 //!
-//! [`compute_owned_subtrees`] is **live** under `--region-ownership`: it is wrapped
-//! by [`compute_adopt_edges`], which `analyze_regions_with` calls when the flag is on
-//! to populate `RegionInfo::owned_adopt_edges`, and the lowerer emits an `AdoptRegion`
-//! per edge (`regionemit.rs::emit_increfs_for`). With the flag off the whole chain is skipped and emission is the unchanged
-//! per-region-RC baseline. The cuts consumed today are the **shared/deep-container**
+//! [`compute_owned_subtrees`] is wrapped by [`compute_adopt_edges`], which
+//! `analyze_regions_with` calls unconditionally to populate
+//! `RegionInfo::owned_adopt_edges`, and the lowerer emits an `AdoptRegion` per edge
+//! (`regionemit.rs::emit_increfs_for`). A shape the walk cannot prove externally unique
+//! stays Shared, so no adopt edge is emitted for it and its emission is the per-region-RC
+//! baseline by construction. The cuts consumed today are the **shared/deep-container**
 //! subtree (a Fresh container owning its members, members adopted by their actual
 //! parent — flat star or multi-level nesting) and the **capture** subtree
 //! (a value captured by a local closure: the member's tight last-use admits it, the
@@ -117,8 +123,8 @@
 //! (site-keyed at its funnel call) is an emittable interior owner-edge wherever the
 //! site is a retaining store recording the member, so a funnel-built subtree adopts
 //! identically on the production path (region-model.md § "The funnel adopt — the
-//! checked-on store face"), which is what let the `--region-ownership` →
-//! `--checked-intrinsics=off` CLI forcing be deleted. The owner-node cuts sit beside
+//! checked-on store face"), so the forest reclaims on the checked-on (native-Call)
+//! default as well as the intrinsic path. The owner-node cuts sit beside
 //! these region-rooted modes: the capture-back-edge SCC (`compute_activation_adopts`)
 //! and the transferred returned subtree (`compute_transfer_adopts` — a
 //! callee/fiber-body-built cyclic subtree handed across the return frontier, owned by

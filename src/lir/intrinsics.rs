@@ -66,6 +66,7 @@ impl PrimitiveClassification {
             intrinsic_ops: intrinsics.keys().copied().collect(),
             effects: meta.effects.iter().map(|(k, v)| (*k, *v)).collect(),
             ret_types: meta.ret_types.iter().map(|(k, v)| (*k, *v)).collect(),
+            embeds: meta.embeds.iter().map(|(k, v)| (*k, *v)).collect(),
             retaining_store_funnels,
             // The two natives the transferred-returned-subtree cut recognizes
             // structurally: a fiber-body producer and its resume consumer.

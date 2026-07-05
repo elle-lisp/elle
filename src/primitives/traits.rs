@@ -216,6 +216,15 @@ primitive! {
         category: "traits",
         example: "(with-traits [1 2 3] {:Seq {:first (fn (v) (get v 0))}})",
         effect: RegionEffect::Fresh,
+        // Among the arguments, only the arg-1 table is a cross-region reference the
+        // result's OWN region holds — in its `traits` side-field. Arg 0 is cloned into an
+        // independent result whose payload lives in the clone's own region (copied for a
+        // slice-backed immutable, deep-cloned for a mutable — see `clone_with_traits`), so
+        // the result never references arg 0's region. Declaring `&[1]` makes the region
+        // walk record `result ⊇ table`, so the ownership forest sees a captured table flow
+        // out through an escaping traited value and keeps it Shared instead of adopting it
+        // (region-effects.md § "Native region effects").
+        embeds: &[1],
     }
     "traits" => prim_traits {
         signal: Signal::errors(),

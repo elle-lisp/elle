@@ -3,6 +3,30 @@
 //! lines. `super::ownership` resolves via the re-export in `mod.rs`.
 use super::*;
 
+/// The ownership forest is unconditional, so `analyze_regions`/`analyze_regions_with`
+/// run the ownership pass and, AFTER computing the adopt/group maps, suppress each
+/// capture-adopted and activation-adopted member's own decref (adding them to
+/// `suppressed_decref_regions`). A test helper that re-runs a `compute_*` ownership walk
+/// directly on the returned `RegionInfo` would then see those members as `not_ownable`
+/// (`ownership::inputs::not_ownable` reads `suppressed_decref_regions`) — a self-poisoning
+/// the production single pass never hits, because suppression is applied only AFTER the
+/// walks run internally. Undo exactly the ownership-added suppressions so a direct re-run
+/// reproduces the pre-suppression view the internal pass computed against. The
+/// reassign-gate suppressions (the other contributor to `suppressed_decref_regions`) are
+/// left intact — `not_ownable` must still see them.
+fn restore_pre_ownership_view(info: &mut RegionInfo) {
+    let ownership_suppressed: Vec<Region> = info
+        .capture_adopt_edges
+        .values()
+        .flatten()
+        .map(|&(member, _closure)| member)
+        .chain(info.activation_adopt_sites.values().flatten().copied())
+        .collect();
+    for r in ownership_suppressed {
+        info.suppressed_decref_regions.remove(&r);
+    }
+}
+
 /// Every `%pair` car/cdr store edge `(child, parent)` in the program — the
 /// immutable-aggregate-store edges the merge seed considers. An edge is one such
 /// store iff its site is a `Pair` intrinsic AND the edge target is the region
@@ -78,7 +102,8 @@ pub(super) fn owned_subtrees(
 ) {
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(source, &mut symbols);
-    let info = analyze_regions(&hir, &arena);
+    let mut info = analyze_regions(&hir, &arena);
+    restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &CallClassification::default());
     let owned = super::ownership::compute_owned_subtrees(&hir, &info, &escape, &arena);
     (hir, info, owned)
@@ -103,7 +128,8 @@ pub(super) fn owned_subtrees_with_effects(
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
     let cc = pc.call_classification;
-    let info = analyze_regions_with(&hir, &arena, cc.clone());
+    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
+    restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let owned = super::ownership::compute_owned_subtrees(&hir, &info, &escape, &arena);
     (hir, info, owned)
@@ -139,7 +165,8 @@ pub(super) fn owned_subtrees_checked_on(
         let (hir, arena, _) = compile_fhir(source, &mut symbols);
         (hir, arena)
     };
-    let info = analyze_regions_with(&hir, &arena, cc.clone());
+    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
+    restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let owned = super::ownership::compute_owned_subtrees(&hir, &info, &escape, &arena);
     (hir, info, owned)
@@ -157,7 +184,8 @@ pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::A
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
     let cc = pc.call_classification;
-    let info = analyze_regions_with(&hir, &arena, cc.clone());
+    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
+    restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let order = compute_order(&hir);
     let edges = super::ownership::compute_adopt_edges(&hir, &info, &escape, &arena, &order);
@@ -182,7 +210,8 @@ pub(super) fn adopt_edges_checked_on(
         let (hir, arena, _) = compile_fhir(source, &mut symbols);
         (hir, arena)
     };
-    let info = analyze_regions_with(&hir, &arena, cc.clone());
+    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
+    restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let order = compute_order(&hir);
     let edges = super::ownership::compute_adopt_edges(&hir, &info, &escape, &arena, &order);
@@ -199,7 +228,8 @@ pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<Hir
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
     let cc = pc.call_classification;
-    let info = analyze_regions_with(&hir, &arena, cc.clone());
+    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
+    restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let order = compute_order(&hir);
     let groups =
@@ -207,15 +237,12 @@ pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<Hir
     (hir, info, groups)
 }
 
-/// Compile under the REAL primitive classification and run the whole inference
-/// with `--region-ownership` scoped ON, returning the populated `RegionInfo` —
-/// the view the lowerer consumes (`activation_adopt_sites`,
-/// `suppressed_decref_regions`, the adopt/group maps together). The
-/// activation-adopt pins read THIS (not a direct `compute_*` call) so they are
-/// red until `analyze_regions_with` actually wires the cut.
-pub(super) fn analyze_flag_on(source: &str) -> (Hir, RegionInfo) {
-    use crate::config::region_ownership_override::{RegionOwnership, ScopedRegionOwnership};
-    let _g = ScopedRegionOwnership::new(RegionOwnership::On);
+/// Compile under the REAL primitive classification and run the whole (ownership)
+/// inference, returning the populated `RegionInfo` — the view the lowerer consumes
+/// (`activation_adopt_sites`, `suppressed_decref_regions`, the adopt/group maps
+/// together). The activation-adopt pins read THIS (not a direct `compute_*` call)
+/// so they exercise the same wiring `analyze_regions_with` hands the lowerer.
+pub(super) fn analyze_full(source: &str) -> (Hir, RegionInfo) {
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
@@ -224,15 +251,13 @@ pub(super) fn analyze_flag_on(source: &str) -> (Hir, RegionInfo) {
     (hir, info)
 }
 
-/// Like [`analyze_flag_on`] but compiled on the **checked-on** (native-Call)
+/// Like [`analyze_full`] but compiled on the **checked-on** (native-Call)
 /// production path, where a store is an opaque `Funnel` call recording NO
 /// `cross_region_refs` edge — the containment reaches the inference only through
 /// the funnel-recovered `RegionInfo::containment_edges`. The activation-adopt
 /// cut must admit through that face too (its emit is value-resolved, needing no
 /// store site).
-pub(super) fn analyze_flag_on_checked_on(source: &str) -> (Hir, RegionInfo) {
-    use crate::config::region_ownership_override::{RegionOwnership, ScopedRegionOwnership};
-    let _g = ScopedRegionOwnership::new(RegionOwnership::On);
+pub(super) fn analyze_full_checked_on(source: &str) -> (Hir, RegionInfo) {
     let mut symbols = SymbolTable::new();
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);

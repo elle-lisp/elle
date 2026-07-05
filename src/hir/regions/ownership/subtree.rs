@@ -126,7 +126,7 @@ pub(in crate::hir::regions) fn compute_owned_subtrees(
 /// Disjoint from [`compute_owned_subtrees`] by construction: a source SCC is reached by
 /// no top container (being reached would mean an external container holds a member, i.e.
 /// not a source), so the container-rooted subtrees and the co-owned groups never overlap.
-/// Computed only under `--region-ownership`.
+/// Run by the ownership pass in `analyze_regions_with`.
 pub(in crate::hir::regions) fn compute_owned_region_groups(
     hir: &Hir,
     info: &RegionInfo,

@@ -53,42 +53,29 @@ fn test_lower_begin() {
 //
 // The never-mergeable shape: a Fresh mutable container (`@array`) and the value
 // pushed into it (`array`) are both call-result regions — no static slot, so
-// MERGE cannot collapse them. Under `--region-ownership` the lowerer classifies
-// `{container, value}` as an externally-unique Owned subtree and emits
-// `AdoptRegion(container, value)` at the push site (instead of the interior edge's
-// inert IncrefRegion), so the container's free subtree-drops the value. The pair of
-// tests is the counterfactual: the flag turns the emission on, and with it off the
-// stream is the unchanged per-region-RC baseline.
+// MERGE cannot collapse them. The lowerer classifies `{container, value}` as an
+// externally-unique Owned subtree and emits `AdoptRegion(container, value)` at the
+// push site (instead of the interior edge's inert IncrefRegion), so the
+// container's free subtree-drops the value. This is unconditional — the ownership
+// forest is how the language runs (§ "One semantics, every backend"); a shape the
+// inference cannot prove externally unique stays Shared and emits the per-region-RC
+// baseline instead, so no `AdoptRegion` appears for it.
 
 #[test]
-fn adopt_region_emitted_for_owned_container_under_flag() {
-    let _g = ScopedRegionOwnership::new(RegionOwnership::On);
+fn adopt_region_emitted_for_owned_container() {
     // The push records a containment edge (value -> container); both are Fresh
     // call-results, so the subtree is Owned and the interior edge becomes an adopt.
     let module = compile_to_lir("(begin (%array-push (@array) (array 1 2)) nil)");
     assert!(
         count_adopt_regions(&module) >= 1,
-        "under --region-ownership the Owned container/value subtree must emit an \
-         AdoptRegion at the push site; got {}",
+        "the Owned container/value subtree must emit an AdoptRegion at the push \
+         site; got {}",
         count_adopt_regions(&module),
-    );
-}
-
-#[test]
-fn no_adopt_region_without_flag() {
-    // Counterfactual / baseline guard: with the flag off, the SAME shape emits no
-    // AdoptRegion — the lowered stream is the unchanged per-region-RC baseline.
-    let module = compile_to_lir("(begin (%array-push (@array) (array 1 2)) nil)");
-    assert_eq!(
-        count_adopt_regions(&module),
-        0,
-        "with --region-ownership off, no AdoptRegion may be emitted (baseline)",
     );
 }
 
 #[test]
 fn adopt_region_emitted_per_member_for_interior_cycle() {
-    let _g = ScopedRegionOwnership::new(RegionOwnership::On);
     // The shared-container cut: a Fresh container `root` directly holds two members
     // `a` and `b`, which reference each other (`a ⊇ b`, `b ⊇ a` — the interior cycle).
     // Each member is adopted DIRECTLY by the root, so TWO AdoptRegions are emitted (one
@@ -112,7 +99,6 @@ fn adopt_region_emitted_per_member_for_interior_cycle() {
 
 #[test]
 fn adopt_region_emitted_for_deep_nesting_chain() {
-    let _g = ScopedRegionOwnership::new(RegionOwnership::On);
     // Deep nesting: `root` holds `a` and `a` holds `b`, but `root` does NOT hold `b`
     // directly (`root ⊇ a ⊇ b`). `b` is adopted by its ACTUAL parent `a`, and `a` by the
     // root — TWO AdoptRegions forming a multi-level owner chain the root's recursive
@@ -133,35 +119,20 @@ fn adopt_region_emitted_for_deep_nesting_chain() {
 }
 
 #[test]
-fn adopt_region_emitted_for_captured_value_under_flag() {
-    let _g = ScopedRegionOwnership::new(RegionOwnership::On);
+fn adopt_region_emitted_for_captured_value() {
     // The capture cut: a pair `p` captured by a LOCAL
     // closure `c` (called in place, discarded). Tight last-use for a captured-and-owned
     // value admits the Owned subtree {closure, p}, so the lowerer emits a value-resolved
     // `AdoptRegion(closure, p)` at the closure-construction site (MakeClosure) — capture
     // records no `cross_region_refs` store site, so the adopt rides the closure rather than
-    // a store node — and the closure's subtree drop then frees `p`. Counterfactual: before
-    // the capture emit the closure built `p` RC'd, with zero AdoptRegions — RED.
+    // a store node — and the closure's subtree drop then frees `p`.
     let module =
         compile_to_lir("(begin (let [p (%pair 1 2)] (let [c (fn [] (length p))] (c))) nil)");
     assert!(
         count_adopt_regions(&module) >= 1,
-        "under --region-ownership the captured-value Owned subtree must emit an AdoptRegion \
-         at the closure construction; got {}",
+        "the captured-value Owned subtree must emit an AdoptRegion at the closure \
+         construction; got {}",
         count_adopt_regions(&module),
-    );
-}
-
-#[test]
-fn no_capture_adopt_region_without_flag() {
-    // Counterfactual / baseline guard: with the flag off the SAME capture shape emits no
-    // AdoptRegion — the lowered stream is the unchanged per-region-RC baseline.
-    let module =
-        compile_to_lir("(begin (let [p (%pair 1 2)] (let [c (fn [] (length p))] (c))) nil)");
-    assert_eq!(
-        count_adopt_regions(&module),
-        0,
-        "with --region-ownership off, the captured-value shape emits no AdoptRegion (baseline)",
     );
 }
 

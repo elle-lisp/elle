@@ -112,14 +112,14 @@ impl RegionInference {
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),
             // Populated by the `regions::ownership` post-pass in
-            // `analyze_regions_with` only under `--region-ownership` (it reads the
-            // final `region_data` and `merged_parent`). Empty here, and on the
-            // baseline path.
+            // `analyze_regions_with` (it reads the final `region_data` and
+            // `merged_parent`). Empty here; empty after the pass too for a shape that
+            // stays Shared (the RC baseline).
             owned_adopt_edges: HashMap::new(),
             capture_adopt_edges: HashMap::new(),
             // Populated by the `regions::ownership` post-pass in `analyze_regions_with`
-            // only under `--region-ownership` (the co-owned-cycle and activation-owner
-            // cuts). Empty here, and on the baseline path.
+            // (the co-owned-cycle and activation-owner cuts). Empty here; empty after
+            // the pass too for a shape that stays Shared.
             owned_region_groups: HashMap::new(),
             owned_group_members: rustc_hash::FxHashSet::default(),
             transfer_adopt_regions: rustc_hash::FxHashSet::default(),

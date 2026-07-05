@@ -332,7 +332,7 @@ pub enum Instruction {
     /// `result_region_of`, and calls `RegionStore::adopt_region(parent_region,
     /// child_region)`, freezing the child's RC so it is reclaimed only by the
     /// parent's subtree drop (docs/impl/region-model.md § "Adoption and subtree
-    /// drop"). Emitted only under `--region-ownership`; realized on the
+    /// drop"). Emitted by the ownership forest; realized on the
     /// interpreter and the JIT (`elle_jit_adopt_region`).
     AdoptRegion,
 
@@ -351,8 +351,8 @@ pub enum Instruction {
     /// operand stack, resolves each to its runtime region via `result_region_of`,
     /// and calls `FiberHeap::free_region_group`, which runs the four-phase subtree
     /// drop over the whole set — interior member↔member references reclaim with the
-    /// group, only genuinely-Shared frontier references cascade. Emitted only under
-    /// `--region-ownership`; realized on the interpreter and the JIT
+    /// group, only genuinely-Shared frontier references cascade. Emitted by the
+    /// ownership forest; realized on the interpreter and the JIT
     /// (`elle_jit_free_region_group`).
     FreeRegionGroup,
 

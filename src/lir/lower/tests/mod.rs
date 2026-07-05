@@ -1,5 +1,4 @@
 use super::*;
-use crate::config::region_ownership_override::{RegionOwnership, ScopedRegionOwnership};
 use crate::syntax::Span;
 
 fn make_span() -> Span {

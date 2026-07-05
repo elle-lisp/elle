@@ -25,7 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// (`RegionInfo::activation_adopt_sites`): adopt-site HirId — the innermost
 /// structural scope enclosing every member's allocation — → the capture-back-edge
 /// SCC members to `AdoptIntoActivation` there, in allocation program order.
-/// Computed only under `--region-ownership`.
+/// Run by the ownership pass in `analyze_regions_with`.
 ///
 /// Admission (each gate refusing to Shared, the always-legal baseline):
 ///

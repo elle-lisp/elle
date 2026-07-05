@@ -17,13 +17,21 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   MAY embed references to the arguments (`pair`, `list`, struct
   constructors): those are counted by the result object's alloc-time scan
   and released by its free-time cascade (Rule 5, immutable contents) — no
-  compile-time edge needed, which is exactly why an embedding constructor
-  is `Fresh` and not `Stores`. (An immediate result — e.g. a nil
+  compile-time **RC** edge needed, which is exactly why an embedding constructor
+  is `Fresh` and not `Stores`. The **ownership forest**, however, must know
+  *which* arguments the result embeds, so it does not judge an embedded value
+  externally unique and adopt it while the escaping result still references it
+  (the captured-trait-table-into-an-escaping-value shape). `Fresh` alone is too
+  vague — `popn` is `Fresh` yet embeds none of its args — so a `Fresh` native
+  that embeds an argument names it in `PrimitiveDef::embeds`, and the region walk
+  records a `result ⊇ arg` containment edge (no `IncrefRegion`; the alloc-scan
+  already counts the RC) for the forest to read (`with-traits`'s `&[1]` — its
+  `traits` side-field embed). (An immediate result — e.g. a nil
   error-path return — is always permitted; the claim constrains the heap
   case. Same for the variants below. Note:
   `Fresh` therefore does NOT mean "no new holder of the argument's
-  region" — uniqueness inference must consult the call-result flow, not
-  this declaration alone.)
+  region" — uniqueness inference consults the call-result flow AND the `embeds`
+  containment, not this declaration alone.)
 - **`PassThrough`** — a heap result is one of the arguments or a value
   living in an argument's region (or a value with no region, e.g. an
   immediate); no argument is stored. The dispatch pass-through retain

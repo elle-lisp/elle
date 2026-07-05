@@ -161,7 +161,7 @@ impl<'a> Lowerer<'a> {
 
         // Closure-capture region accounting, two modes per capture:
         //
-        // - **Owned (forest)**: under `--region-ownership`, a capture whose value region is
+        // - **Owned (forest)**: a capture whose value region is
         //   an interior member of this closure's Owned subtree (`capture_adopt_edges[lambda]`,
         //   the capture cut) is ADOPTED — emit a value-resolved
         //   `AdoptRegion(closure, captured)` linking the captured value's runtime region into

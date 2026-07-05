@@ -93,70 +93,6 @@ pub(crate) mod test_override {
     }
 }
 
-/// Whether the ownership forest is enabled (the `--region-ownership` flag).
-/// Like [`checked_intrinsics`], a function rather than a bare field read so a
-/// test can scope it to one compile via the thread-local override without
-/// touching the write-once global `CONFIG`. In a non-test build it is exactly
-/// the global field.
-pub fn region_ownership() -> bool {
-    #[cfg(test)]
-    {
-        if let Some(v) = region_ownership_override::get() {
-            return v;
-        }
-    }
-    get().region_ownership
-}
-
-/// Test-only, thread-local override for [`region_ownership`], mirroring
-/// [`test_override`]. A unit/integration test that must compile with the forest
-/// on sets it for one compile and clears it — scoped to the calling thread, so it
-/// cannot leak across the test runner's parallel threads. Use
-/// [`ScopedRegionOwnership`].
-#[cfg(test)]
-pub(crate) mod region_ownership_override {
-    use std::cell::Cell;
-    thread_local! {
-        static OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
-    }
-    pub(crate) fn get() -> Option<bool> {
-        OVERRIDE.with(|c| c.get())
-    }
-    fn set(v: Option<bool>) {
-        OVERRIDE.with(|c| c.set(v));
-    }
-
-    /// Whether a scoped override forces the ownership forest on or off. A named
-    /// alternative to a bare `bool` at the call site: `ScopedRegionOwnership::new(On)`
-    /// reads as "compile with the forest on", where `new(true)` could mean anything.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub(crate) enum RegionOwnership {
-        On,
-        Off,
-    }
-    impl RegionOwnership {
-        fn enabled(self) -> bool {
-            matches!(self, RegionOwnership::On)
-        }
-    }
-
-    /// RAII guard: forces `region_ownership()` to `ownership` on this thread until
-    /// dropped, then restores the prior override.
-    pub(crate) struct ScopedRegionOwnership(Option<bool>);
-    impl ScopedRegionOwnership {
-        pub(crate) fn new(ownership: RegionOwnership) -> Self {
-            let prev = get();
-            set(Some(ownership.enabled()));
-            ScopedRegionOwnership(prev)
-        }
-    }
-    impl Drop for ScopedRegionOwnership {
-        fn drop(&mut self) {
-            set(self.0);
-        }
-    }
-}
-
 mod policy;
 pub use policy::{JitPolicy, MlirPolicy, WasmPolicy};
 
@@ -346,24 +282,6 @@ pub struct Config {
     /// explicitly enabling `--jit`/`--mlir`.
     pub checked_intrinsics: bool,
 
-    /// Enable the ownership forest: classify regions Owned (adopted, freed by
-    /// subtree drop) vs Shared (the per-region-RC baseline) and emit
-    /// `AdoptRegion` for the interior edges of an externally-unique Owned subtree
-    /// (docs/impl/region-model.md § "Adoption and subtree drop";
-    /// `src/hir/regions/ownership.rs`). Default **off** — with it off no region is
-    /// ever adopted and emission is byte-identical to the per-region-RC baseline.
-    ///
-    /// It runs on BOTH intrinsics settings: the adopt is emitted at the intrinsic
-    /// containment-store site checked-off, and at the funnel call site checked-on
-    /// (the funnel face — docs/impl/region-model.md § "The funnel adopt — the
-    /// checked-on store face"), so `--checked-intrinsics` is left as configured.
-    /// The interpreter and the JIT both carry the `AdoptRegion`/`FreeRegionGroup`
-    /// lowering (`elle_jit_adopt_region`/`elle_jit_free_region_group`), so JIT is
-    /// not forced off either; only MLIR/WASM trail (forced off until their
-    /// structural-arena handling lands). Read through [`region_ownership`] so a
-    /// test can scope it to one compile without touching the write-once global.
-    pub region_ownership: bool,
-
     /// Enable the A-normal form lift pass (`src/hir/anf.rs`).
     ///
     /// Default: on. `--anf=off` short-circuits `anf_lift` to a
@@ -427,7 +345,6 @@ impl Default for Config {
             wasm_chunk: false,
             wasm_sparse_spill: true,
             checked_intrinsics: false,
-            region_ownership: false,
             anf: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),

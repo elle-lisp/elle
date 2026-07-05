@@ -274,8 +274,8 @@ impl<'a> Lowerer<'a> {
         // Ownership forest: an interior edge of an externally-unique Owned subtree
         // becomes an `AdoptRegion` (parent adopts the child's region; no RC),
         // emitted here in place of the edge's `IncrefRegion`. `owned_adopt_edges`
-        // is empty unless `--region-ownership`, so this is inert on the baseline
-        // path (docs/impl/region-model.md § "Adoption and subtree drop").
+        // is empty for a shape that stays Shared, so this is then inert
+        // (docs/impl/region-model.md § "Adoption and subtree drop").
         let adopt_edges = self
             .region_info
             .owned_adopt_edges

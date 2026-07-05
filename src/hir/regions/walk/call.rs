@@ -81,6 +81,31 @@ impl RegionInference {
                 // and no may-store edge is added (a Fresh native stores no
                 // argument outside the result).
                 self.fresh_result_regions.insert(call_r);
+
+                // Record `result ⊇ arg` containment for each argument the native
+                // EMBEDS into its fresh result (`call_embeds` — the per-primitive
+                // embed declaration; `with-traits` embeds arg 1, the trait table,
+                // into the cloned result's `traits` side-field). This is the
+                // compile-time analog of the runtime alloc-scan
+                // (`find_object_cross_refs`, which enumerates the `traits`
+                // side-field) that counts the same embedding at allocation:
+                // without it the ownership forest cannot see a captured value flow
+                // OUT through an escaping result and would fold it into the
+                // capturing closure's Owned subtree, freeing it under the escaped
+                // result's still-live reference. The edge feeds only
+                // `regions::ownership` (`containment_edges`), never an
+                // `IncrefRegion` (the alloc-scan counts the embedding at runtime)
+                // — behavior-preserving, exactly like the funnel-recovered
+                // containment below.
+                for &i in self.call_embeds(func) {
+                    if let Some(embedded_regions) = arg_regions.get(i) {
+                        for &v in embedded_regions {
+                            if v != call_r {
+                                self.containment_edges.push((hir.id, v, call_r));
+                            }
+                        }
+                    }
+                }
             }
             Some(RegionEffect::Funnel) => {
                 // The store is runtime-counted, so NO may-store edge — a

@@ -281,29 +281,24 @@ fn region_capture_cell_noreassign_uaf() {
     }
 }
 
-// Guard — under `--region-ownership`, a `@`-mutable captured local materialized as
-// a `populate_env` env cell (minted once per activation) and captured by a closure
-// built in a loop must survive every iteration. The closure captures the CELL by
-// indirection — a BORROW through a separately-owned env cell whose release is
-// hoisted to once-per-activation — so the ownership forest must NOT fold the cell's
-// contents into the closure's per-iteration Owned subtree. If it did, the closure's
-// subtree drop would free the cell (and its still-referenced contents) at the end of
-// iteration 1, and the next iteration's re-store of the cell derefs the freed page
-// (`capture_store_with_rebind` reads the stale prior content). `capture_containment_edges`
-// excludes cell-indirected captures for exactly this reason (the cell owns its
-// contents, the closure only reads through it). Runs under `--region-ownership`
-// (the ownership adopt is empty flag-off) + the guardfree oracle so a regression
-// SIGSEGVs deterministically at the stale deref rather than reading a recycled page.
-// The corpus runner never sets `--region-ownership`, so this is the sole guard for
+// Guard — a `@`-mutable captured local materialized as a `populate_env` env cell
+// (minted once per activation) and captured by a closure built in a loop must
+// survive every iteration. The closure captures the CELL by indirection — a BORROW
+// through a separately-owned env cell whose release is hoisted to once-per-activation
+// — so the ownership forest must NOT fold the cell's contents into the closure's
+// per-iteration Owned subtree. If it did, the closure's subtree drop would free the
+// cell (and its still-referenced contents) at the end of iteration 1, and the next
+// iteration's re-store of the cell derefs the freed page (`capture_store_with_rebind`
+// reads the stale prior content). `capture_containment_edges` excludes cell-indirected
+// captures for exactly this reason (the cell owns its contents, the closure only reads
+// through it). The corpus runner exercises the (now unconditional) forest but never
+// under `--trace=guardfree`, so this subprocess is the deterministic-fault guard for
 // the env-cell-vs-capture-adopt interaction. Canonical shape:
 // tests/elle/region-capture-cell-loop-uaf.lisp (single loop, nested loops, and
 // per-iteration content variance).
 #[test]
 fn region_capture_cell_loop_uaf_ownership() {
-    run_elle_script_with_args(
-        "region-capture-cell-loop-uaf",
-        &["--region-ownership", "--trace=guardfree"],
-    );
+    run_elle_script_with_args("region-capture-cell-loop-uaf", &["--trace=guardfree"]);
 }
 
 // GREEN (live guard) — `with-traits` attaches a trait-table struct to a value;
@@ -322,6 +317,27 @@ fn region_capture_cell_loop_uaf_ownership() {
 fn region_traits_table_uaf() {
     run_elle_file_with_args(
         "tests/integration/fixtures/region-traits-table-uaf.lisp",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
+// GREEN (live guard) — distinct from `region_traits_table_uaf` above, which was a
+// RUNTIME RC gap (fixed). This is the COMPILE-TIME OWNERSHIP invariant the unconditional
+// forest upholds: a closure captures a top-level struct and attaches it as a trait table
+// with `with-traits`. `with-traits` declares `RegionEffect::Fresh` AND `embeds: &[1]`, so
+// the walk records the `result ⊇ table` embed containment (`call_embeds` →
+// `containment_edges`) — the compile-time analog of the runtime alloc-scan that counts the
+// same embedding. With it the forest sees the captured table flow OUT through the escaping
+// traited value and keeps it Shared instead of capture-adopting it. Without it the closure's
+// subtree drop frees the table while the escaped value's `traits` field still references it
+// — a wrong answer (`nil`) on plain runs and a SIGSEGV (context `UpdateCapture`) under
+// guardfree. Quarantined as a subprocess because a regression is an uncatchable SIGSEGV that
+// would crash the shared smoke harness; armed under guardfree so the fault is deterministic
+// if it returns. Full repro + invariant in the fixture.
+#[test]
+fn region_traits_capture_adopt_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-traits-capture-adopt-uaf.lisp",
         &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
     );
 }

@@ -86,14 +86,15 @@ struct RegionInference {
     /// containment the funnel records only at runtime. See `RegionInfo::
     /// containment_edges` and the `Funnel` arm in `regions::walk`.
     mutable_container_regions: rustc_hash::FxHashSet<Region>,
-    /// Structural containment edges `(funnel_call_site, contained, container)`
-    /// recovered from a `Funnel` store into a mutable retaining container — the
-    /// value's region is retained by the container's. Site-keyed exactly like
-    /// `cross_region_refs`, so the ownership forest can hang a value-resolved
-    /// `AdoptRegion` on the funnel call (the checked-on store face). Unlike
-    /// `cross_region_refs` these drive NO `IncrefRegion` (the funnel counts the
-    /// store at runtime); they feed only the ownership inference. See
-    /// `RegionInfo::containment_edges`.
+    /// Structural containment edges `(site, contained, container)` for the ownership
+    /// inference, from two sources: a `Funnel` store into a mutable retaining container
+    /// (`container ⊇ value`, recovered from the container's `RetType`), and a `Fresh`
+    /// native's declared **embed** (`result ⊇ embedded_arg`, from `call_embeds` — e.g.
+    /// `with-traits`'s trait side-field). Both are site-keyed exactly like
+    /// `cross_region_refs`, so the forest can hang a value-resolved `AdoptRegion` on the
+    /// call (the checked-on store face), and both drive NO `IncrefRegion` (the funnel
+    /// counts the store at runtime; the alloc-scan counts the embedding), feeding only
+    /// the ownership inference. See `RegionInfo::containment_edges`.
     containment_edges: Vec<(HirId, Region, Region)>,
     /// Funnel-store call site → the regions of the heap values stored there (the
     /// non-container args of a `Funnel` intrinsic — `%put`/`%array-push`/…). The

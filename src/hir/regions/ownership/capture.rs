@@ -31,8 +31,8 @@ use rustc_hash::FxHashSet;
 /// loops, so it (and its contents, held by an uncounted cell store the ownership scan
 /// cannot see) outlives any per-iteration closure — the closure's subtree drop would free
 /// the cell's contents while the persistent cell still references them, and the next
-/// iteration's re-store derefs the freed page (`region-capture-cell-loop-uaf.lisp` under
-/// `--region-ownership`). The cell owns its contents and releases them; the closure only
+/// iteration's re-store derefs the freed page (`region-capture-cell-loop-uaf.lisp`).
+/// The cell owns its contents and releases them; the closure only
 /// reads through it. A prebound *immutable* letrec cell is excluded (its content is set
 /// once, not re-stored): that closure-cycle structure is governed by the closure-cycle
 /// merge and the lifetime obligation instead.

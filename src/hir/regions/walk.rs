@@ -501,6 +501,26 @@ impl RegionInference {
         }
     }
 
+    /// The 0-based argument indices the callee EMBEDS into its fresh result
+    /// ([`crate::primitives::def::PrimitiveDef::embeds`]), under the same
+    /// unshadowed-immutable-primitive condition as [`call_effect`]. Empty for an
+    /// unknown/shadowed callee or an empty classification. The walk's `Fresh` arm
+    /// records a `result ⊇ arg` containment edge for each, so the ownership forest
+    /// tracks an argument the fresh result keeps a reference to (`with-traits`'s trait
+    /// table into its cloned result). The returned slice is `'static` (the primitive
+    /// table's own data), so it borrows nothing from `self`.
+    pub(super) fn call_embeds(&self, func: &Hir) -> &'static [usize] {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return &[];
+            }
+            self.call_class.embeds.get(&bi.name).copied().unwrap_or(&[])
+        } else {
+            &[]
+        }
+    }
+
     /// Check if a HIR body is a tail call (or control flow where all result
     /// positions are tail calls). When the body is a tail call, RegionExit
     /// fires BEFORE the tail call executes, so the tail call's result does

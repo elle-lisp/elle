@@ -94,6 +94,21 @@ impl<'a> Lowerer<'a> {
         // actually returned or sent to a fiber outlives the activation.
         if let HirKind::Var(b) = &func.kind {
             if self.stranded_self_bindings.contains(b) {
+                // Invariant: a stranded self-recursive binding is CELL-FREE
+                // (`!needs_capture()`; the strand sites in `binding.rs` both gate on
+                // it, docs/impl/selfrec.md § the cell-free gate). A sibling-captured
+                // (`needs_capture`) member's closure region is released by its forward
+                // cell's cascade; adopting it here decrefs that region a SECOND time,
+                // under the still-live cell — the captured-self-tail double-free
+                // (tests/elle/region-selfrec-captured-tail-adopt.lisp). Asserting at
+                // the CONSUMER catches any future strand path that skips the gate,
+                // turning that UAF into a loud panic at the seam.
+                debug_assert!(
+                    !self.arena.get(*b).needs_capture(),
+                    "stranded self-recursive binding {b:?} is needs_capture: its forward \
+                     cell already releases the closure region, so a tail-call adopt would \
+                     double-free it (see docs/impl/selfrec.md § the cell-free gate)"
+                );
                 let frontier_escapes = self.escape_info.binding_escapes_via_return(*b)
                     || self.escape_info.escapes_fiber(*b);
                 return !frontier_escapes;

@@ -14,7 +14,7 @@ use rustc_hash::FxHashSet;
 /// Consumed by [`compute_owned_subtrees`] (the external-uniqueness walk) and pinned
 /// directly by the `shared_seed_*` pins (`regions::tests`). The chain is reached in a
 /// shipping build through [`compute_adopt_edges`], which `analyze_regions_with` calls
-/// under `--region-ownership`.
+/// by the ownership pass.
 pub(in crate::hir::regions) fn compute_shared_seeds(
     info: &RegionInfo,
     escape: &crate::hir::EscapeInfo,

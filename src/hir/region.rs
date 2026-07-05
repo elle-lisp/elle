@@ -128,6 +128,15 @@ pub struct CallClassification {
     /// `Funnel` arm in `regions::walk`). Empty by default — only the real
     /// primitive classification (`PrimitiveClassification::new`) fills it.
     pub ret_types: rustc_hash::FxHashMap<SymbolId, crate::primitives::def::RetType>,
+    /// Primitive SymbolId → the 0-based argument indices the callee EMBEDS into its
+    /// fresh result ([`crate::primitives::def::PrimitiveDef::embeds`]). The region
+    /// walk's `Fresh` arm records a `result ⊇ arg` containment edge
+    /// (`RegionInfo::containment_edges`) for each, so the ownership forest sees a value
+    /// the fresh result keeps a reference to — a captured trait table `with-traits`
+    /// embeds into an escaping value — and refuses to adopt it. Empty by default (the
+    /// walk records no embed edges); only the real primitive classification
+    /// (`PrimitiveClassification::new`) fills it.
+    pub embeds: rustc_hash::FxHashMap<SymbolId, &'static [usize]>,
     /// Letrec-bound Bindings whose lambda bodies return immediates.
     /// Populated by the callee fixpoint pre-pass.
     pub user_immediates: FxHashSet<Binding>,
@@ -247,14 +256,12 @@ pub struct RegionInfo {
     /// closure (the lambda-as-`let`-init position, ordered after the closure's
     /// last call).
     ///
-    /// Read **only** under `--region-ownership`, by the ownership lifetime
-    /// obligation (`regions::ownership::compute_adopt_edges`) for a **captured**
-    /// member: a value reachable only through a local closure is then admitted as
-    /// Owned (freed at the closure's true death by subtree drop) rather than
-    /// refused for a phantom over-extension. A value also used *after* its closure
-    /// keeps a later direct use here, so the obligation still correctly refuses
-    /// it. Populated unconditionally but unused on the baseline path, so flag-off
-    /// emission is unchanged.
+    /// Read by the ownership lifetime obligation
+    /// (`regions::ownership::compute_adopt_edges`) for a **captured** member: a value
+    /// reachable only through a local closure is then admitted as Owned (freed at the
+    /// closure's true death by subtree drop) rather than refused for a phantom
+    /// over-extension. A value also used *after* its closure keeps a later direct use
+    /// here, so the obligation still correctly refuses it.
     pub binding_last_use: HashMap<Region, HirId>,
     /// Set of regions created by `alloc_here` at a Call HirId. Their
     /// compile-time region ID is just a placeholder for the runtime
@@ -308,10 +315,18 @@ pub struct RegionInfo {
     /// funnel call (the checked-on store face — region-model.md § "The funnel
     /// adopt"; the emit is value-resolved, needing no store opcode).
     /// `@string`/`@bytes` containers (which copy bytes, retaining no region) are
-    /// excluded by their non-container `RetType`. The dual recovery for `Fresh`
-    /// *constructor* embedding (`pair`/`array` result ⊇ args) is NOT here —
-    /// `Fresh` alone is too vague (`popn` is `Fresh` yet embeds none of its
-    /// args), so it awaits a per-primitive embed declaration.
+    /// excluded by their non-container `RetType`. This vector ALSO carries a `Fresh`
+    /// native's **embed** edges `(embed_call_site, embedded_arg, result)`: a native
+    /// whose fresh result references an argument declares which via
+    /// [`PrimitiveDef::embeds`](crate::primitives::def::PrimitiveDef::embeds), and the
+    /// walk's `Fresh` arm (`call_embeds`) records the same `result ⊇ arg` containment
+    /// — the compile-time analog of the runtime alloc-scan (`find_object_cross_refs`)
+    /// that counts the embedding. `Fresh` alone is too vague to carry it (`popn` is
+    /// `Fresh` yet embeds none of its args). `with-traits` declares its `traits`
+    /// side-field embed (`&[1]`), so a value it embeds into an escaping result is seen
+    /// referenced from outside the capturing closure's subtree and stays Shared. The
+    /// `pair`/`array` CONSTRUCTORS do not declare it: checked-off their embedding is
+    /// the intrinsic `cross_region_refs` edge recorded by the intrinsic walk arm.
     pub containment_edges: Vec<(HirId, Region, Region)>,
     /// Funnel-store call site HirId → the regions of the heap values stored there
     /// (the non-container args of a `Funnel` intrinsic). The runtime mutable-store
@@ -421,9 +436,8 @@ pub struct RegionInfo {
     /// forest's keys/roots; empty when no cycle merged.
     pub closure_cycle_members: FxHashSet<Region>,
     /// Ownership forest (docs/impl/region-model.md § "Adoption and subtree
-    /// drop"), populated **only** under `--region-ownership`
-    /// (`config::region_ownership`); empty otherwise, so the lowerer's emission is
-    /// the unchanged per-region-RC baseline. Store-site HirId → the interior
+    /// drop"), populated by the ownership pass; empty when the shape stays Shared,
+    /// so the lowerer's emission is then the per-region-RC baseline. Store-site HirId → the interior
     /// containment edges `(child_region, parent_region)` of an externally-unique
     /// Owned subtree (`regions::ownership::compute_owned_subtrees`). At each such
     /// site the lowerer emits `AdoptRegion(parent, child)` — linking the child's
@@ -442,13 +456,13 @@ pub struct RegionInfo {
     /// a static `IncrefRegion`), so its adopt cannot ride the `owned_adopt_edges`
     /// store-site path. Instead the lowerer, at `MakeClosure`, emits a value-resolved
     /// `AdoptRegion(closure, captured)` in place of the capture `IncrefRegion` for each
-    /// edge here (`lower_lambda_expr`). Populated **only** under `--region-ownership`;
-    /// empty otherwise. Disjoint from `owned_adopt_edges`: a member is adopted by its
+    /// edge here (`lower_lambda_expr`). Populated by the ownership pass; empty when the
+    /// shape stays Shared. Disjoint from `owned_adopt_edges`: a member is adopted by its
     /// single owner through exactly one of the two maps (the store site or the capture
     /// site), never both.
     pub capture_adopt_edges: HashMap<HirId, Vec<(Region, Region)>>,
-    /// Ownership forest, **co-owned-cycle** cut, populated **only** under
-    /// `--region-ownership`; empty otherwise. A
+    /// Ownership forest, **co-owned-cycle** cut, populated by the ownership pass;
+    /// empty when no such cycle is present. A
     /// mutual reference cycle with no container parent (an externally-unique source
     /// strongly-connected component of the containment graph) has no owner among its
     /// members — each owns and is owned by the others — so it is reclaimed
@@ -466,10 +480,10 @@ pub struct RegionInfo {
     /// region — the O(1) set the lowerer's `emit_decrefs_for` consults to SKIP a
     /// co-owned member's individual decref (the `FreeRegionGroup` at the group's drop
     /// site is its sole release). Kept beside the keyed map purely to avoid scanning
-    /// every group per region at emit; populated together, empty without the flag.
+    /// every group per region at emit; populated together, empty when no group is present.
     pub owned_group_members: FxHashSet<Region>,
-    /// Ownership forest, **transferred-returned-subtree** cut, populated
-    /// **only** under `--region-ownership`; empty otherwise. The consumer-site
+    /// Ownership forest, **transferred-returned-subtree** cut, populated by the
+    /// ownership pass; empty when no such transfer is present. The consumer-site
     /// call-result regions of a summarized producer (a callee/fiber body whose
     /// returned subtree is externally unique and cyclic — docs/impl/
     /// region-model.md § "Owner nodes" — "The transferred returned subtree").
@@ -482,8 +496,8 @@ pub struct RegionInfo {
     /// adopt maps above). Computed by
     /// `regions::ownership::compute_transfer_adopts`.
     pub transfer_adopt_regions: FxHashSet<Region>,
-    /// Ownership forest, **activation-owner** cut, populated **only** under
-    /// `--region-ownership`; empty otherwise. Adopt-site HirId — the innermost
+    /// Ownership forest, **activation-owner** cut, populated by the ownership pass;
+    /// empty when no capture-back-edge SCC is present. Adopt-site HirId — the innermost
     /// structural scope enclosing every member's allocation — → the member regions of
     /// a capture-back-edge SCC (a container captured by a closure it holds:
     /// `m ⊇ c` by store, `c ⊇ m` by capture — the cycle no region root can own;

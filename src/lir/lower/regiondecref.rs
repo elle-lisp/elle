@@ -141,7 +141,7 @@ impl<'a> Lowerer<'a> {
                     // (docs/impl/region-model.md § "Owner nodes" — "The
                     // transferred returned subtree"). Same operand shape as the
                     // decref it replaces (one value consumed); the nil-stamp
-                    // below still applies. Empty without `--region-ownership`.
+                    // below still applies. Empty when no transfer subtree is present.
                     if self.region_info.transfer_adopt_regions.contains(&r) {
                         self.emit(LirInstr::AdoptIntoActivation { child: val_reg });
                         if crate::config::get().has_trace("rc") {
@@ -239,8 +239,8 @@ impl<'a> Lowerer<'a> {
         // The ownership forest's co-owned-cycle cut: at the group's drop
         // site — the latest member `decref_point`, i.e. this node — free the whole member
         // set as one unit, replacing the members' individual decrefs (skipped above).
-        // `owned_region_groups` is empty without `--region-ownership`, so this is inert on
-        // the baseline path.
+        // `owned_region_groups` is empty when no co-owned cycle is present, so this is
+        // then inert.
         if let Some(members) = self.region_info.owned_region_groups.get(&hir_id).cloned() {
             self.emit_free_region_group(&members);
         }
@@ -249,7 +249,7 @@ impl<'a> Lowerer<'a> {
         // (this node). The adopt transfers ownership only — the free is the
         // node's release at the activation's completion
         // (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge
-        // SCC"). Empty without `--region-ownership`, so inert on the baseline path.
+        // SCC"). Empty when no such SCC is present, so then inert.
         if let Some(members) = self
             .region_info
             .activation_adopt_sites

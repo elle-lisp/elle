@@ -195,6 +195,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
             meta.functions.insert(sym_id, native_val);
             meta.effects.insert(sym_id, def.effect);
             meta.ret_types.insert(sym_id, def.ret);
+            meta.embeds.insert(sym_id, def.embeds);
 
             let doc = Doc {
                 name: def.name,
@@ -216,6 +217,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
                 meta.functions.insert(alias_id, alias_val);
                 meta.effects.insert(alias_id, def.effect);
                 meta.ret_types.insert(alias_id, def.ret);
+                meta.embeds.insert(alias_id, def.embeds);
                 vm.docs.insert((*alias).to_string(), doc.clone());
             }
         }
@@ -242,6 +244,7 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
             meta.functions.insert(sym_id, Value::native_fn(def));
             meta.effects.insert(sym_id, def.effect);
             meta.ret_types.insert(sym_id, def.ret);
+            meta.embeds.insert(sym_id, def.embeds);
 
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
@@ -250,6 +253,7 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
                 meta.functions.insert(alias_id, Value::native_fn(def));
                 meta.effects.insert(alias_id, def.effect);
                 meta.ret_types.insert(alias_id, def.ret);
+                meta.embeds.insert(alias_id, def.embeds);
             }
         }
     }

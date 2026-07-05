@@ -166,6 +166,20 @@ pub struct PrimitiveDef {
     /// oracle (debug builds) checks the result side after every native
     /// call.
     pub effect: RegionEffect,
+    /// The 0-based argument indices this primitive EMBEDS into its fresh result —
+    /// meaningful only with [`RegionEffect::Fresh`]. The result's region holds a
+    /// reference to each listed argument's region (as `%pair` embeds its car/cdr), so
+    /// the region walk records `result ⊇ arg` in `RegionInfo::containment_edges` for
+    /// each: the compile-time analog of the runtime alloc-scan
+    /// (`find_object_cross_refs`) that counts the same embedding at allocation. Without
+    /// it the ownership forest cannot see a captured value flow OUT through an escaping
+    /// result and would fold it into the capturing closure's Owned subtree
+    /// (docs/impl/region-effects.md § "Native region effects"; region-model.md § "The
+    /// funnel adopt" — the side-field embed analog). Empty (the default) for a `Fresh`
+    /// native that embeds none of its arguments (`popn`), which is exactly why `Fresh`
+    /// alone cannot carry the fact. `with-traits` is the canonical declarant (`&[1]` —
+    /// its `traits` side-field embeds the arg-1 table into the cloned result).
+    pub embeds: &'static [usize],
     /// Statically known return type, for type inference. See [`RetType`].
     pub ret: RetType,
 }
@@ -184,6 +198,7 @@ impl PrimitiveDef {
         example: "",
         aliases: &[],
         effect: RegionEffect::Unknown,
+        embeds: &[],
         ret: RetType::Unknown,
     };
 }
@@ -383,6 +398,11 @@ pub struct PrimitiveMeta {
     /// where a `String`/`Unknown` (e.g. `@string`/`@bytes`) container copies
     /// bytes and retains nothing.
     pub ret_types: HashMap<SymbolId, RetType>,
+    /// Primitive SymbolId → the argument indices it EMBEDS into its fresh result
+    /// ([`PrimitiveDef::embeds`]). Aliases get the same entry. The region walk's
+    /// `Fresh` arm reads this (through `CallClassification::embeds`) to record a
+    /// `result ⊇ arg` containment edge for each embedded argument.
+    pub embeds: HashMap<SymbolId, &'static [usize]>,
 }
 
 impl PrimitiveMeta {
@@ -394,6 +414,7 @@ impl PrimitiveMeta {
             functions: HashMap::new(),
             effects: HashMap::new(),
             ret_types: HashMap::new(),
+            embeds: HashMap::new(),
         }
     }
 }

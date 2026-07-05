@@ -351,11 +351,12 @@ pub enum LirInstr {
     /// both values (loaded from their binding slots by the lowerer purely to
     /// drive the adopt).
     ///
-    /// Emitted under `--region-ownership`. Realized on the interpreter
+    /// Emitted by the ownership forest. Realized on the interpreter
     /// (`handle_adopt_region`) and the JIT (`elle_jit_adopt_region`, a
     /// line-for-line mirror), so the same program adopts identically on either
-    /// tier; MLIR/WASM realization still trails (the flag forces those tiers off
-    /// until their structural-arena handling lands, step 5).
+    /// tier; on WASM the op is a structural no-op and on MLIR a region-op-carrying
+    /// function is GPU-ineligible, so prompt reclamation on those tiers awaits their
+    /// structural-arena handling (step 5).
     AdoptRegion { parent: Reg, child: Reg },
 
     /// Free a **co-owned region group** as one unit — the runtime `FreeRegionGroup`
@@ -372,9 +373,10 @@ pub enum LirInstr {
     /// genuinely-Shared frontier references cascade. The drop is wholesale, independent
     /// of the members' reference counts.
     ///
-    /// Emitted under `--region-ownership`. Realized on the interpreter
+    /// Emitted by the ownership forest. Realized on the interpreter
     /// (`handle_free_region_group`) and the JIT (`elle_jit_free_region_group`),
-    /// like `AdoptRegion`; MLIR/WASM still trail (forced off under the flag).
+    /// like `AdoptRegion`; a structural no-op on WASM and GPU-ineligible on MLIR
+    /// (step 5).
     FreeRegionGroup { members: Vec<Reg> },
 
     /// Adopt the region of `child` as an **Owned** member of the CURRENT
@@ -391,7 +393,7 @@ pub enum LirInstr {
     ///
     /// Realized on the interpreter (`handle_adopt_into_activation`) and the
     /// JIT (`elle_jit_adopt_into_activation`); handled structurally (no-op)
-    /// on WASM; GPU-ineligible. Emitted under `--region-ownership` for the
+    /// on WASM; GPU-ineligible. Emitted by the ownership forest for the
     /// capture-back-edge SCC (a container captured by a closure it holds —
     /// `RegionInfo::activation_adopt_sites`, one adopt per member at the SCC's
     /// enclosing-scope site) and for the transferred returned subtree (a

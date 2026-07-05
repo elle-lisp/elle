@@ -129,21 +129,30 @@ The adopt for a stranded self-recursive binding is gated on the **frontier** esc
 `binding_escapes_via_return ∪ escapes_fiber` (return ∪ fiber) — not
 `binding_escapes_activation`. The full activation escape additionally folds in the store
 and capture facets — **containment** relations that keep a closure inside the activation's
-owned subtree (it dies WITH the activation), not frontier crossings. A self-recursive
-closure held by a local container, or captured by a non-escaping sibling, would then read
-as escaping and falsely block the adopt, re-stranding the decref into a leak. Only a
-closure actually returned or sent to a fiber outlives the activation and must not be freed
-by the new activation, so those two facets — and only those — block the adopt.
+owned subtree (it dies WITH the activation), not frontier crossings. A cell-free
+self-recursive closure held by a local container would then read as escaping (the store
+facet is a containment relation, not a frontier crossing) and falsely block the adopt,
+re-stranding the decref into a leak. Only a closure actually returned or sent to a fiber
+outlives the activation and must not be freed by the new activation, so those two facets —
+and only those — block the adopt. (The *capture* facet never applies to a binding that
+reaches this gate: a sibling capture would make the binding `needs_capture`, so it is not
+cell-free, so the § cell-free gate never strands it — its forward cell's cascade owns the
+release instead of the adopt.)
 
 ## Per-call cost, and the irreducible adopt
 
 A retained self-recursive closure mints exactly **2 objects/call** — the closure and its env
 — with no per-call cell, the same cost as a foreign-capturing closure of equal capture arity
-(`self_recursive_loop_is_cell_free`). The tail-call **adopt** is **irreducible**: the closure
-region is a per-call allocation whose scope-end release is stranded past the recursive tail
-call whether or not a cell exists, so a self-tail-loop always needs the adopt to supply that
-once-only release (§ above). Cell-freedom buys the per-call object and better locality; it
-does not remove the adopt.
+(`self_recursive_loop_is_cell_free`). The tail-call **adopt** is **irreducible for the
+cell-free case**: a cell-free self-recursive closure's region is a per-call allocation whose
+scope-end release is stranded past the recursive tail call — removing the *self*-cell removed
+the cell, not the stranding — so a cell-free self-tail-loop always needs the adopt to supply
+that once-only release (§ above). Cell-freedom buys the per-call object and better locality;
+it does not remove the adopt. The one exception is a **sibling-captured** self-recursive
+member: it is not cell-free, and its *sibling forward* cell's cascade — not the adopt — owns
+the once-only release (§ the cell-free gate), which is why marking it stranded would
+double-free (once by the cascade, once by the adopt). So the adopt is irreducible precisely
+where no external owner (a forward cell) exists, and forbidden where one does.
 
 ## Relationship to the closure-cycle merge (mutual recursion)
 

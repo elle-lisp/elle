@@ -413,7 +413,13 @@
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 3]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 5]
    ["zip" (fn [j] (zip [1 2] [3 4])) 25 [25 32]]
-   ["sort" (fn [j] (sort [3 1 2])) 0] ["reverse" (fn [j] (reverse [1 2 3])) 2]
+   ["sort" (fn [j] (sort [3 1 2])) 0]
+   ["reverse" (fn [j] (reverse [1 2 3])) 2]  # F1a witness (memory.md § F1). `(rest array)` copies the tail into a fresh
+   # immutable array slice whose call-result region is never reclaimed — the
+   # transform-scratch root the whole HOF family rides: `fold`/`reduce` eagerly
+   # `(->array coll)` then walk with `first`/`rest`, so even a list leaks one slice
+   # per element. `(rest list)` shares its tail and reads 0. Shrink-only.
+   ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 1]
    ["distinct" (fn [j] (distinct [1 2 1 3])) 3]
    ["take-drop"
     (fn [j]
@@ -446,12 +452,12 @@
         (push items {:k j}))) 2]  # The capture-back-edge cycle: a container captured by a closure it holds
    # (`m ⊇ c` store, `c ⊇ m` capture). Per-region RC cannot collect the m↔c
    # cycle, and no region root can own it (the captured member's live decref
-   # over-extends past the closure), so the flag-off baseline this dashboard
-   # runs leaks it per op. The activation-owner cut reclaims it under
-   # --region-ownership (runtime::tests::ownership::
-   # region_ownership_capture_back_edge_cycle_reclaims pins bounded flag-on);
-   # this pin is the flag-off leak rate, shrink-only — it drops when the cut
-   # defaults on.
+   # over-extends past the closure), so it leaks per op. The activation-owner cut
+   # reclaims the INTRINSIC form of this shape (runtime::tests::ownership::
+   # region_ownership_capture_back_edge_cycle_reclaims, without_stdlib /
+   # %array-push), but here the full-stdlib `push`/`length` wrappers keep the
+   # containment out of the cut's reach, so it stays on the RC baseline — a
+   # promptness residual, shrink-only.
    ["capture-backedge"
     (fn [j]
       (let [root @[]
@@ -464,16 +470,15 @@
    # its root back across the return frontier; the consumer discards it.
    # Per-region RC cannot collect the cycle (the interior back-edge outlives
    # every release) and no region root can own it (the root crosses the
-   # frontier), so the flag-off baseline this dashboard runs leaks it per call.
-   # The transfer cut reclaims it under --region-ownership
+   # frontier). The transfer cut (owner = the consuming activation's node)
+   # reclaims it — rate 0, on the production checked-on path this dashboard runs
    # (runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls
-   # pins bounded flag-on); this pin is the flag-off leak rate, shrink-only —
-   # it drops when the cut defaults on.
+   # pins it bounded).
    ["returned-cycle"
     (fn [j]
       (begin
         (cyc-mk)
-        nil)) 2]  # string ops + realistic patterns
+        nil)) 0]  # string ops + realistic patterns
     ["string-interp" (fn [j] (string "x=" j " y=" (%add j 1))) 0]
    ["concat" (fn [j] (concat "a" "b" "c")) 13]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
@@ -762,7 +767,7 @@
                    60 0.4 0.5) 2)
 
 # ── Stdlib / native-tail / discarded-tail leak classes ────────────────
-# Three more leak classes pinned in the one dashboard (memory.md §11 — leak state
+# Three more leak classes pinned in the one dashboard (memory.md §5 — leak state
 # read in one place). Each pin is the TRUE CURRENT rate, shrink-only: a fix LOWERS
 # it.
 #
@@ -788,23 +793,29 @@
 
 (println "── folded suite: stdlib / native-tail / discarded-tail canaries ──")
 
-# Stdlib per-call leak: the headline recursive-helper + cons-building leak.
-# `concat`/`fold` over their arguments leak per call (object count). Also reflected
-# in the HOF suite above (concat/fold/reduce); pinned here at the exact
-# `(concat "a" "b")` / 2-element `fold` shapes.
+# Stdlib per-call leak (memory.md § F1a — the transform-scratch retain). The leaked
+# objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
+# `recur-local-*` probes read 0) and NOT, mostly, cons cells: `fold`/`reduce` eagerly
+# `(->array coll)` then walk with `first`/`rest`, minting a fresh array slice per
+# element (`rest-array-copy` above), and `concat` builds a fresh accumulator + per-arg
+# combiner closures. All are non-escaping, acyclic call-result regions no static slot
+# can name. Pinned at the exact `(concat "a" "b")` / 2-element `fold` shapes.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
                    count-gauge 100 6 60 0.4 0.5) 10)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
                    count-gauge 100 6 60 0.4 0.5) 5)
 
-# Native-tail fresh-result leak: a native `Call` returning a FRESH heap result in
-# TAIL position, discarded, leaks whole REGIONS — the native-tail double mint
-# (`wrap_tail_returns`' ReturnValue retain stacked on the call's own post-TailCall
-# retain). `put` on an immutable aggregate is a fresh copy (the WITNESS); `del` is
-# routed through the %del opcode and reclaims (the CONTROL). Region count; the rate
-# is vm/jit-divergent (the opcode tier mints one fewer), so the unchecked pin is a
-# range.
+# Dispatch-wrapper passthrough leak (memory.md § F1b) — NOT a "native-tail double
+# mint". The direct intrinsic `%put-struct` and the single non-dispatching native
+# `del` both reclaim a fresh copy at 0/op (the CONTROLS: `native-tail-del-ctl` below,
+# `put-slot-source` above), so the fresh copy is a red herring. The leak is the stdlib
+# `put`/`push` `(match (type-of coll) …)` WRAPPER: its container arg + fresh result get
+# ONE `decref_point` in the textually-last arm, so multi-arm usage strands them on the
+# other paths — the open residual of the settled branch-compensation class
+# (`branch_arm_decrefs` releases the stored value, not the container/result). `put` on
+# an immutable aggregate also mints a fresh container (2/op vs 1/op when reused). Region
+# count; vm/jit-divergent (the opcode tier mints one fewer), so the unchecked pin is a range.
 (pin (measure-core "native-tail-put-struct" (stmt-run (fn [] (put {:a 1} :b 2)))
                    region-gauge 100 6 60 0.4 0.5) 2 [1 2])
 (pin (measure-core "native-tail-put-array" (stmt-run (fn [] (put [10 20] 0 99)))
@@ -903,7 +914,7 @@
                                           (fiber/resume f))
                                         (yield i)
                                         (assign i (%add i 1)))) |:yield|)) b))
-                   count-gauge 100 6 60 0.4 0.5) 1)
+                   count-gauge 100 6 60 0.4 0.5) 0)
 
 # ── Channel send/recv — the genuinely-Shared (class 7) incoming-count ──
 # `chan/send` is the sole `RegionEffect::Sends` declarant: its message crosses the
@@ -929,8 +940,12 @@
 # ── Persistent fn-local containers ────────────────────────────────────
 # The container is `def`'d fn-local INSIDE the run-block (the faithful shape — a
 # captured let-local or module binding hits a different region path) and reused
-# across the block's ops. The accumulators (push-accum / push-outer / *-outer)
-# grow with each op like the originals, bounded by the estimator's early stop.
+# across the block's ops. `push-outer`/`push-accum` are GENUINE growth — the
+# accumulator retains every prior (a live-growth discriminator, not a defect; do not
+# "fix" it). `struct-outer` is the fn-local reassign-1-slot over-keep (memory.md § F5).
+# `string-outer`/`append-outer` are the `concat`/`append` per-call scratch leak
+# (§ F1a), NOT accumulator growth — flat per-iter (minus the 1 the self-reassign
+# reclaims), so they shrink when F1a closes, not when the loop ends.
 (println "── folded suite: persistent containers ──")
 (pin (measure-core "put-overwrite"
                    (fn [b]
@@ -1017,22 +1032,26 @@
                      (while (%lt j b)
                        (if (%lt (mod j 2) 1) (t17-h) (t17-h2))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# slot-source / put-churn are mode-divergent AND thunk-position-sensitive (the
-# thunk wrapper inflates the unchecked rate by 1), so direct while-statements
+# The raw `%array-push`/`%put` into a fresh container, discarded: the CONTROL for
+# F1b (memory.md § F1b — the dispatch-wrapper passthrough leak). The raw intrinsic
+# reclaims the container in BOTH intrinsics modes (rate 0), so the over-keep
+# `put-churn` shows below (2/op) rides the stdlib `put`/`push` type-dispatch WRAPPER,
+# not the store funnel. Direct while-statements (a thunk wrapper's return convention
+# would inflate the rate by 1).
 (pin (measure-core "push-slot-source"
                    (fn [b]
                      (def @j 0)
                      (while (%lt j b)
                        (let [items @[]]
                          (%array-push items (%pair 1 2)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "put-slot-source"
                    (fn [b]
                      (def @j 0)
                      (while (%lt j b)
                        (let [s @{}]
                          (%put s :k (%pair 1 2)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # put-churn mints a FRESH container per op and hands it through the stdlib
 # `put`; the container's region survives the discard and cascades its stored
 # struct — 2/op in BOTH intrinsics modes, every tier (pure interpreter
