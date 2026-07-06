@@ -456,6 +456,11 @@ pub(crate) fn handle_intr_pop(vm: &mut VM) {
         vm.set_error("argument-error", "pop: empty @array");
         vm.fiber.stack.push(Value::NIL);
     } else {
+        // `pop_with_decref` MOVES the element out, holding the caller's owning
+        // reference before releasing the container's. This unchecked opcode path
+        // takes no pass-through retain of its own — the body's retain IS the
+        // caller's reference (the checked native path skips its retain for the
+        // `moves_out` `%pop`; `dispatch_native_call`).
         let popped = crate::value::arena::pop_with_decref(unsafe { &mut *vm.heap_ptr }, val);
         vm.fiber.stack.push(popped);
     }

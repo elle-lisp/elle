@@ -424,8 +424,7 @@ fn userfn_call_site_records_no_arg_clique() {
     // through the runtime-counted mutable-store funnel (Rule 5,
     // statically complete) or via a counted edge in its OWN compilation,
     // so a caller-side clique incref is pure redundancy that leaks one
-    // region per alloc-region heap argument per call (the dominant leak
-    // class — leakfiber.lisp's t0c-concat tiers;
+    // region per alloc-region heap argument per call (pinned by
     // region-userfn-clique-noleak.lisp). So a `None`-effect call records
     // NO arg-clique edges at all — distinct from a Mixed/Unknown NATIVE,
     // which can store uncounted and keeps the full clique. The site is of

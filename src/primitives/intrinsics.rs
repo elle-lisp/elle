@@ -460,7 +460,12 @@ primitive! {
         doc: "Remove/return last element",
         params: &["arr"],
         category: "intrinsic",
+        // PassThrough: the result lives in the popped element's region, not the
+        // call's own. moves_out: that element is REMOVED from the @array, so its
+        // pass-through retain is taken in-body BEFORE the container's reference is
+        // released (dispatch skips its own — see `moves_out`).
         effect: RegionEffect::PassThrough,
+        moves_out: true,
     }
     "%string-push" => prim_string_push {
         arity: Arity::Exact(2),

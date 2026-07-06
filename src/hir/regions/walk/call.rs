@@ -217,9 +217,8 @@ impl RegionInference {
                 // compilation. So every store on an argument is
                 // already counted at its site, and a caller-side
                 // clique incref is pure redundancy that leaks one
-                // region per alloc-region heap argument per call (the
-                // dominant leak class — leakfiber.lisp's t0c-concat
-                // tiers; region-userfn-clique-noleak.lisp). Unlike a
+                // region per alloc-region heap argument per call
+                // (pinned by region-userfn-clique-noleak.lisp). Unlike a
                 // Mixed/Unknown native, a user fn cannot perform an
                 // UNCOUNTED store, so there is nothing for the clique
                 // to cover. (Call-result sources were already a

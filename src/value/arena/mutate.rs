@@ -48,9 +48,23 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
     collection
 }
 
-/// Pop a value from a mutable @array, tracking the cross-region reference removal.
+/// Pop a value from a mutable @array, MOVING it out to the caller.
 /// Panics if `collection` is not an @array or if it's empty.
 /// Returns the popped value.
+///
+/// Unlike the other remove funnels (`struct_remove`/`set_del`/`remove_at`), which
+/// DISCARD the removed value, `pop` hands it back as the call's result. So it must
+/// hold the caller's owning reference (the pass-through retain) BEFORE releasing
+/// the container's: `decref_removed_element` alone would take a sole-owned
+/// element's region to rc 0 and free it while the returned Value still points into
+/// it — the free-before-retain UAF the `raw-pop` oracle probe and the
+/// `mutable_array_push_keeps_region_alive` unit test pin. The retain here is what a
+/// pass-through result normally receives from `dispatch_native_call`; `%pop`/`pop`
+/// declare `moves_out` so dispatch SKIPS its own `pass_through_retain` (applying it
+/// twice would leak one region per op). The un-record + decref stay paired (the
+/// two-ledger co-location invariant, docs/impl/region-model.md § "The outgoing edge
+/// table"): the container's outgoing edge and its incoming RC drop together, only
+/// now the incoming RC never transiently reaches zero.
 pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
     let vec_ref = collection
         .as_array_mut_raw()
@@ -59,9 +73,11 @@ pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
         .borrow_mut()
         .pop()
         .expect("pop_with_decref: empty @array");
-    // Un-record the edge BEFORE the RC decref: the decref may free the popped
-    // value's region, after which resolving its region (inside `unrecord_store`)
-    // would be a stale deref. The value is still mapped here.
+    // Hold the caller's reference first (the popped value is the call result), so
+    // the region survives the container's release below.
+    incref_for_escape(heap, region_of(heap, popped), EscapeSite::NativeCallResult);
+    // Release the container's reference — un-record the edge co-located with the RC
+    // decref. Both resolve `popped`'s region, which the retain above kept live.
     unrecord_store(heap, collection, popped);
     decref_removed_element(heap, popped);
     popped

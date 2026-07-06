@@ -49,9 +49,9 @@
 
 # (c) Captured mutable LOCAL, minted fresh per `make-acc` call: `@total` is a
 # captured-and-mutated local, so `populate_env`'s local-cell path allocates
-# its cell into make-acc's env region. Distinct from leakfiber.lisp's
-# `t0c-closure-while`, where the captured local's lbox is created ONCE
-# (outside the loop) and reused — here a NEW env region is minted each call.
+# its cell into make-acc's env region. Unlike a captured local whose lbox is
+# created ONCE (outside a loop) and reused, here a NEW env region is minted
+# each call.
 (defn make-acc ()
   (def @total 0)
   (fn (x)
@@ -60,9 +60,8 @@
 
 # (d) The same captured-mutated-param closure wrapped in a fiber, built fresh
 # per iteration. The env-region leak is amplified by the fiber/closure the
-# fiber/new path allocates (leakfiber.lisp's `t0c fiber-while` is bounded —
-# its old RED was a ratio-shape misfire on warmup negatives; this isolates
-# the per-call closure-env contribution). NON-tail
+# fiber/new path allocates; this isolates the per-call closure-env
+# contribution from a bare fiber-while (which is bounded). NON-tail
 # position: `fiber/resume` is inside the while body, not a function tail (a
 # tail call would route through `tail_call_inner`, a different region path).
 (defn req-fiber (i)

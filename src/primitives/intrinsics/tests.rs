@@ -53,10 +53,18 @@ fn push_track_inserts_cross_region_value() {
 }
 
 /// Counterfactual: `%pop` (the NativeFn `prim_pop` reached under
-/// `--checked-intrinsics`) must call `decref_removed_element` on the popped
-/// value to undo the `incref_inserted_element` from the matching push. Without
-/// it, the source region's RC stays bumped — region-RC leak. The
-/// symmetric defect of `push_track_inserts_cross_region_value`.
+/// `--checked-intrinsics`) MOVES the popped element out to the caller. It must do
+/// two things in lockstep: release the container's stored reference
+/// (`decref_removed_element`, undoing the push's `incref_inserted_element`) AND
+/// hold the caller's owning reference (the pass-through retain), the retain taken
+/// BEFORE the release so a sole-owned element's region is never transiently freed
+/// under the returned Value (the free-before-retain UAF; `arena::pop_with_decref`,
+/// the `raw-pop` oracle probe). So the source region's RC is UNCHANGED from the
+/// push state after the pop — not dropped to baseline — and returns to baseline
+/// only when the caller releases the moved-out result. Two defects this pins:
+/// forgetting the release leaves RC one too high (a region-RC leak, the symmetric
+/// defect of `push_track_inserts_cross_region_value`); forgetting the retain drops
+/// RC to baseline here and frees the element under the returned Value.
 #[test]
 fn pop_track_removes_cross_region_value() {
     use crate::value::arena::push_with_incref;
@@ -101,10 +109,24 @@ fn pop_track_removes_cross_region_value() {
             (cross.tag, cross.payload),
             "prim_pop must return the popped Value"
         );
+        // The MOVE: the container's stored reference is released and the caller's
+        // acquired in lockstep, so the source region's RC is unchanged from the
+        // push state (baseline + 1), NOT dropped to baseline. Dropping it here
+        // would free a sole-owned element under the returned Value.
+        assert_eq!(
+            region_rc(unsafe { &*heap_ptr }, source_rid),
+            rc_baseline + 1,
+            "prim_pop holds the caller's reference (RC unchanged from push, not dropped)"
+        );
+        // The caller releasing the moved-out result (its `DecrefValueRegion` at the
+        // result's decref_point — the whole caller side, since dispatch skips its
+        // own pass-through retain for the `moves_out` `%pop`) completes the move,
+        // returning the source region's RC to baseline.
+        crate::value::arena::decref_region(unsafe { &mut *heap_ptr }, Some(source_rid));
         assert_eq!(
             region_rc(unsafe { &*heap_ptr }, source_rid),
             rc_baseline,
-            "prim_pop must call decref_removed_element on cross-region value (RC=baseline)"
+            "releasing the moved-out result returns the source region RC to baseline"
         );
     });
 }

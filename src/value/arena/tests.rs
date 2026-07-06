@@ -143,18 +143,42 @@ fn mutable_array_push_keeps_region_alive() {
         "push should incref val's region"
     );
 
+    // Release the initial owning reference, leaving the @array as val's sole
+    // holder (rc 1). This is the shape that exposes the pop UAF: the element the
+    // array holds is now sole-owned by the array's stored reference.
     decref_if_present(unsafe { &mut *heap_ptr }, rid_a);
+    assert_eq!(region_rc(unsafe { &*heap_ptr }, rid_a), 1);
 
-    {
+    let popped = {
         let mut ctx = crate::primitives::ctx::Alloc::with_region(rid_b, unsafe { &mut *heap_ptr });
-        let _ = crate::primitives::seq::seq_pop(&arr, &mut ctx);
-    }
-    // rc was 2 (init=1 + push=1), decref_if_present decrefs to 1,
-    // pop decrefs to 0 → region fully freed.
+        crate::primitives::seq::seq_pop(&arr, &mut ctx).expect("pop of a non-empty @array")
+    };
+    // `pop` MOVES the last element out to the caller — it does NOT destroy it
+    // (unlike `del`/`remove`, which discard the removed value). The @array's
+    // stored reference is released, but the RETURNED value carries its own owning
+    // reference, so val's region survives the pop (rc stays 1) and the returned
+    // Value still points into a LIVE region. Freeing it here (a bare
+    // `decref_removed_element` taking rc 1 → 0) is the free-before-retain UAF: the
+    // call would hand back a Value into a region it just freed (the `raw-pop`
+    // oracle probe; docs/impl/region-model.md § "The outgoing edge table").
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_a),
+        1,
+        "pop moves the element out — its region survives, held by the returned value"
+    );
+    assert_eq!(
+        region_of(unsafe { &mut *heap_ptr }, popped),
+        Some(rid_a),
+        "the popped value still lives in its region (not freed under the returned Value)"
+    );
+
+    // The caller releasing the popped value (its `DecrefValueRegion` at the
+    // result's decref_point) is what finally frees the region.
+    decref_if_present(unsafe { &mut *heap_ptr }, rid_a);
     assert_eq!(
         region_rc(unsafe { &*heap_ptr }, rid_a),
         0,
-        "pop should decref val's region to 0 (freed)"
+        "releasing the moved-out value frees its region"
     );
 }
 

@@ -83,8 +83,9 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   returns the container). No solver edges: a compile-time clique incref
   would double-count the funnel's runtime incref against the container's
   single free-time cascade decref — one leaked region per stored value
-  per call (the leakcollect.lisp t11 / leakfiber.lisp t14 `put`/`push`
-  tiers pin this). No
+  per call, which is exactly why `Funnel` emits no clique edge (the
+  `put`/`push` store probes in `tests/elle/oracle.lisp` pin the seam
+  reclaiming). No
   result-side oracle constraint (either freshness is legal), exactly as
   `Mixed`. It exists so a funnel-storing op is not forced into
   `Mixed`'s clique.

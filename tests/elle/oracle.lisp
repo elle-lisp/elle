@@ -262,26 +262,24 @@
                        " ∉ [0.28,0.40] (expect 0.33)")))
 
 # ── The folded leak suite ─────────────────────────────────────────────
-# Every probe from the five leak*.lisp files, on the estimator. The shapes need
-# different DRIVERS — one run-block per shape, all feeding the one measure-core:
+# One dashboard covering every leak class (memory.md § 4), on the estimator. The
+# shapes need different DRIVERS — one run-block per shape, all feeding the one
+# measure-core:
 #   - direct-loop (the table below): a per-op thunk run b times;
 #   - tail-call rotation: the recursive call itself is the run-block;
 #   - fiber-internal yield: a fiber that runs b iterations then completes, drained
-#     (loop-scope reclaims, as the originals do — a forever-generator would not);
+#     (a drained loop reclaims at scope-exit; a forever-generator never exits its
+#     loop, so its per-iteration values would falsely read as leaks);
 #   - persistent containers: the container is def'd fn-local in the run-block;
 #   - discarded call-result / break-escape / match-scrutinee: a DIRECT
 #     while-statement run-block (a thunk's return convention would reclaim the
-#     over-keep the originals leak);
+#     over-keep the discarded-statement shape leaks);
 #   - byte-gauge: the same drivers under arena/bytes;
 #   - value-survival: plain asserts (correctness, not a rate).
 #
-# Pins are the TRUE CURRENT rate the estimator measures, mode-aware (checked +
-# optional unchecked alt) and cross-validated against each source file's own
-# slope. That cross-validation surfaced that the source files are themselves RED
-# on several tiers (stale pins — varying strings leak 1/op, the byte-gauge leaks
-# ~8KB/op, …); the oracle pins the current rate the source's slope also measures,
-# including io-yield's sub-integer fraction the integer slope floored to 0. Each
-# pin is exact (or a [lo hi] range) and shrink-only: a fix LOWERS it, never raises it.
+# Each pin is the TRUE CURRENT rate the estimator measures, mode-aware (the checked-
+# intrinsics rate plus an optional `--checked-intrinsics=off` alt), exact (or a
+# [lo hi] range) and shrink-only: a fix LOWERS it, never raises it.
 
 (defn make-struct [i]
   {:iter i :val (%add i 1)})
@@ -628,7 +626,22 @@
                            9) |:yield|)]
         (fiber/resume f)
         (fiber/cancel f :dead)
-        (fiber/status f))) 3]])
+        (fiber/status f))) 3]  # `fiber/abort` of a PARKED fiber (memory.md § F2). Abort injects an error
+   # and resumes the fiber for unwinding; with no in-body handler it lands `:error`,
+   # which the model keeps RESUMABLE (the restarts system) — so the terminal teardown
+   # (`take_fiber_owned`/`release_fiber_owned`) never fires and the fiber's parked
+   # activation node + region-map borrows + operand stack strand, plus the fresh error
+   # struct the abort mints. `protect` catches the propagated error. A hard `fiber/cancel`
+   # of the same shape (`cancel-discard`, 3) routes through `kill_fiber` and frees the
+   # owned set — the gap is precisely the resumable-`:error` non-teardown. Shrink-only:
+   # closes when a discarded `:error` fiber is routed through the terminal teardown.
+   ["abort-discard"
+    (fn [j]
+      (let [f (fiber/new (fn []
+                           (yield j)
+                           9) |:yield|)]
+        (fiber/resume f)
+        (protect (fiber/abort f "boom")))) 8]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
 # the real-valued estimate) or a [lo hi] inclusive range (for the rare tier whose
@@ -833,6 +846,83 @@
                    100 6 60 0.4 0.5) 0)
 (pin (measure-core "discard-closure" (stmt-run (fn [] (ora-ret-closure 1)))
                    count-gauge 100 6 60 0.4 0.5) 0)
+
+# ── The mutable-store funnel — remove/rebind half ─────────────────────
+# The store half (push/put/add) is pinned above (push-churn/struct-put/set-array/…);
+# these pin the REMOVE and REBIND half of the same seam (docs/impl/region-model.md
+# § "The outgoing edge table"; src/value/arena/mutate.rs). The funnel SEAM is
+# complete-by-construction — every remove co-locates its RC decref with the outgoing
+# un-record, the raw accessors are private (an uncounted store is a compile error), and
+# a debug equivalence oracle asserts the recorded table matches a content scan at every
+# free. These pins read the seam THROUGH the surface that reaches it, and split cleanly:
+#
+#   SETTLED (rate 0) — the seam balances: a box store+rebind, an @set add, and the raw
+#   @array remove intrinsic `%pop` each reclaim their cross-region member. `raw-pop` is
+#   the reclaiming CONTROL (the peer of push-slot-source/put-slot-source) that proves the
+#   remove funnel itself is sound — so a wrapper that leaks over it is the wrapper's leak.
+#   Like those store-side peers it is a DIRECT while-statement, not a thunk: the popped
+#   value is discarded as a statement (never returned), so this isolates the remove
+#   funnel's own reclamation — from the return convention (a thunk's return would
+#   inflate the rate by 1) and from the ownership forest's separate handling of a value
+#   pushed into a LOCAL and then popped OUT and RETURNED (an escape the forest resolves,
+#   not the funnel seam). The seam's reclamation is what this control pins.
+#
+#   F1b remove-wrapper (memory.md § F1b) — the stdlib `pop`/`del` `(match (type-of coll)
+#   …)` dispatch wrapper strands the container arg + fresh result on the arms the
+#   textually-last arm does not reach, exactly as the STORE wrappers (put/push/set) do.
+#   `raw-pop` reclaims (0) where `pop` leaks (3): the leak is the multi-arm wrapper, not
+#   the funnel. Closes by the SAME mechanism as the store half — per-arm compensation of
+#   the container+result, or dispatch prune on a statically-typed scrutinee.
+#
+#   The raw remove-funnel residual — `%del` leaks even raw, in-place, on an IMMEDIATE
+#   value (raw-del-immediate below reads 1, raw-del reads 2 = that 1 plus the removed
+#   heap member's region): the @struct/@set remove intrinsic does not reach the parity
+#   `%pop` demonstrates. Closes by bringing `%del`'s result/removed-value accounting to
+#   `%pop`'s balance. Distinct from the F1b wrapper leak, which rides every remove op.
+(println "── folded suite: mutable-store funnel (remove/rebind half) ──")
+(pin (measure-core "box-rebind"
+                   (stmt-run (fn []
+                               (let [b (box (list 1 2))]
+                                 (rebox b (list 3 4))))) count-gauge 100 6 60
+                   0.4 0.5) 0)
+(pin (measure-core "set-add"
+                   (stmt-run (fn []
+                               (let [s @||]
+                                 (add s (list 1 2))))) count-gauge 100 6 60 0.4
+                   0.5) 0)
+(pin (measure-core "raw-pop"
+                   (fn [b]
+                     (def @j 0)
+                     (while (%lt j b)
+                       (let [a @[]]
+                         (%array-push a (%pair 1 2))
+                         (%pop a))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(pin (measure-core "pop-wrapper"
+                   (stmt-run (fn []
+                               (let [a @[]]
+                                 (push a (list 1 2))
+                                 (pop a)))) count-gauge 100 6 60 0.4 0.5) 3)
+(pin (measure-core "del-wrapper"
+                   (stmt-run (fn []
+                               (let [m @{}]
+                                 (put m :k (list 1 2))
+                                 (del m :k)))) count-gauge 100 6 60 0.4 0.5) 1)
+(pin (measure-core "set-del-wrapper"
+                   (stmt-run (fn []
+                               (let [s @||]
+                                 (add s 7)
+                                 (del s 7)))) count-gauge 100 6 60 0.4 0.5) 1)
+(pin (measure-core "raw-del"
+                   (stmt-run (fn []
+                               (let [m @{}]
+                                 (%put m :k (%pair 1 2))
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 2)
+(pin (measure-core "raw-del-immediate"
+                   (stmt-run (fn []
+                               (let [m @{}]
+                                 (%put m :k 7)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 1)
 
 # ── Fiber-internal yielding loops ─────────────────────────────────────
 # The loop and the yield live inside the fiber. The run-block creates a fiber

@@ -379,13 +379,14 @@ pub extern "C" fn elle_jit_bytes_push(
 
 /// Pop — panics on type error or empty (intrinsic contract).
 ///
-/// Routes through `arena::pop_with_decref` so the popped value's source
-/// region RC is dropped, mirroring `handle_intr_pop` in
-/// `src/vm/types.rs` which calls `decref_removed_element(popped)`. Skipping the
-/// decref is the leak counterpart of the Family D `incref_inserted_element` skip
-/// fixed in commit 1a0d9e4c: the matching `incref_inserted_element` from the
-/// original `push_with_incref` stays in effect and the source region's RC
-/// never returns to zero.
+/// Routes through `arena::pop_with_decref`, the single move-out funnel every tier
+/// shares: it hands the popped element back to the caller, holding the caller's
+/// owning reference before releasing the container's so a sole-owned element's
+/// region is never freed under the returned Value. Like the interpreter opcode
+/// (`handle_intr_pop`), this unchecked JIT path takes no pass-through retain of its
+/// own — the body's retain IS the caller's reference. (The checked native-call
+/// path routes through `dispatch_native_call`, which skips its own
+/// `pass_through_retain` for the `moves_out` `%pop`/`pop`.)
 #[no_mangle]
 pub extern "C" fn elle_jit_pop(
     tag: u64,

@@ -364,7 +364,14 @@ primitive! {
         params: &["arr"],
         category: "array",
         example: "(pop @[1 2 3]) #=> 3",
+        // The @array path returns the removed element (moved out of the
+        // container via `arena::pop_with_decref`); the @string path returns a
+        // fresh cluster, @bytes an immediate. moves_out so dispatch skips the
+        // pass-through retain the body already took for the moved @array element
+        // (a fresh/immediate result's retain is a no-op, so the skip is safe
+        // there too — see `moves_out`).
         effect: RegionEffect::Funnel,
+        moves_out: true,
     }
     "popn" => prim_popn {
         signal: Signal::errors(),

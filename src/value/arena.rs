@@ -297,9 +297,8 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
     // a different HeapObject variant. The stale Value still has the
     // original tag but the memory now holds something else.
     //
-    // Caught telemetry.lisp's bug (LStructMut tagged TAG_STRUCT after
-    // an over-eager region free). If you hit this in debug, walk back
-    // to find what freed the region while a Value still referenced it.
+    // If you hit this in debug, walk back to find what freed the region
+    // while a Value still referenced it.
     // The first 8-byte block of the payload is dumped so a UAF panic
     // shows what's actually at the slot: all-zero distinguishes
     // "page reclaimed by madvise(MADV_DONTNEED) and re-zeroed" from

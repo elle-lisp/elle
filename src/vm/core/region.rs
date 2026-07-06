@@ -250,11 +250,20 @@ impl VM {
         // immediate), so the caller's decref balances the incref instead of
         // freeing a region owned elsewhere. Shared with the intrinsic opcode
         // handlers (`%put`/`%del`/`%string-push`) via `pass_through_retain`.
-        crate::value::arena::pass_through_retain(
-            unsafe { &mut *self.heap_ptr },
-            value,
-            alloc_region,
-        );
+        //
+        // EXCEPT a `moves_out` native (`%pop`/`pop`): its result is an element
+        // REMOVED from a container arg, and the body already took the pass-through
+        // retain in-place — necessarily BEFORE releasing the container's reference,
+        // or a sole-owned element would be freed under the returned Value
+        // (`arena::pop_with_decref`). Retaining again here would double-count (one
+        // leaked region per op — the `raw-pop` oracle probe).
+        if !def.moves_out {
+            crate::value::arena::pass_through_retain(
+                unsafe { &mut *self.heap_ptr },
+                value,
+                alloc_region,
+            );
+        }
         (bits, value)
     }
     /// Resolve a static region id for a `DecrefRegion` (the compiler's

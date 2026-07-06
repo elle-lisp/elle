@@ -12,8 +12,7 @@
 # store an argument through the runtime-counted mutable-store funnel
 # (region-rules.md Rule 5 is statically complete), so no caller-side compile-
 # time incref is ever needed. Each call leaked one region per alloc-region
-# heap argument — the dominant leak class (leakfiber.lisp's t0c-concat tiers;
-# every multi-heap-arg opaque user-fn call).
+# heap argument — every multi-heap-arg opaque user-fn call.
 #
 # `f2`/`f3` are opaque user fns that store nothing. Region growth must be
 # bounded and must NOT scale with the number of calls or the arg count.

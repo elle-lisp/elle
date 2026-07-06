@@ -103,8 +103,8 @@ pub enum RegionEffect {
     /// struct, returns a mutable one). No solver edges — a compile-time
     /// clique incref would double-count the funnel's runtime incref
     /// against the container's single free-time cascade decref (the
-    /// leakcollect.lisp t11 / leakfiber.lisp t14 `put`/`push` tiers
-    /// pin this). No result-side
+    /// `put`/`push` store probes in `tests/elle/oracle.lisp` pin the
+    /// seam reclaiming). No result-side
     /// oracle constraint, exactly as `Mixed`.
     Funnel,
     /// Examined, and confirmed to store NO argument (every argument is read
@@ -182,6 +182,20 @@ pub struct PrimitiveDef {
     pub embeds: &'static [usize],
     /// Statically known return type, for type inference. See [`RetType`].
     pub ret: RetType,
+    /// The native's heap result is an element MOVED OUT of a container argument
+    /// (`%pop`/`pop` remove and return the last @array element), not shared with
+    /// it (`first`/`get`) nor discarded (`del`/`remove`). A moved-out result needs
+    /// the pass-through retain (the caller's owning reference), but it must be
+    /// taken BEFORE the container releases its own — otherwise a sole-owned
+    /// element's region is freed while the returned Value still points into it
+    /// (the free-before-retain UAF the `raw-pop` oracle probe pins). The native
+    /// body performs that retain itself (`arena::pop_with_decref`), so
+    /// `dispatch_native_call` must SKIP its own `pass_through_retain` — applying it
+    /// again double-counts (a per-op leak). Orthogonal to `effect` (`%pop` is
+    /// `PassThrough`, `pop` is `Funnel`): the retain-ordering fact is not a
+    /// store/result-shape claim, so it rides its own flag. Empty/false (the
+    /// default) for every non-removing native.
+    pub moves_out: bool,
 }
 
 impl PrimitiveDef {
@@ -200,6 +214,7 @@ impl PrimitiveDef {
         effect: RegionEffect::Unknown,
         embeds: &[],
         ret: RetType::Unknown,
+        moves_out: false,
     };
 }
 
