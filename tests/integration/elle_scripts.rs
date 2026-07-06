@@ -379,6 +379,28 @@ fn region_mutable_reassign_param_uaf() {
     run_elle_script_with_args("region-mutable-reassign-param", &["--trace=guardfree"]);
 }
 
+// Guard — a leaf helper called many times from a driver. The callee closure lives
+// in a letrec forward-reference cell the driver captures BY INDIRECTION (an
+// uncounted cell store the ownership scan cannot see). The forest must treat that
+// capture as a borrow (`needs_capture` in `capture_containment_edges`), never
+// folding the callee's region into the driver's Owned subtree nor claiming it Owned:
+// the closure region reclaims on the per-region-RC baseline (kept live by the
+// runtime auto-incref over the driver's env). Adopting it — the acyclic
+// forward-reference the closure-cycle MERGE does not cover — defers the cell's free
+// past the closure's own, so a later region's free-time cross-ref scan reads the
+// reclaimed closure page. Runs under guardfree so a regression faults
+// deterministically at that stale read; the harness runs the file under its vm/jit
+// policies WITHOUT the oracle, where the read is stale-but-intact and the
+// bounded-growth asserts pass. Canonical shape:
+// tests/elle/region-repeated-call-adopt-uaf.lisp.
+#[test]
+fn region_repeated_call_adopt_uaf() {
+    run_elle_script_with_args(
+        "region-repeated-call-adopt-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — an os/spawn worker pre-allocates a capture cell for each of the
 // spawned closure's captured LOCALS so the body's UpdateCapture/DecrefCellRegion
 // find them in the env. Each such cell must live in its OWN region, never the

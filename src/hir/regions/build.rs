@@ -117,6 +117,7 @@ impl RegionInference {
             // stays Shared (the RC baseline).
             owned_adopt_edges: HashMap::new(),
             capture_adopt_edges: HashMap::new(),
+            cell_content_adopt_bindings: rustc_hash::FxHashSet::default(),
             // Populated by the `regions::ownership` post-pass in `analyze_regions_with`
             // (the co-owned-cycle and activation-owner cuts). Empty here; empty after
             // the pass too for a shape that stays Shared.

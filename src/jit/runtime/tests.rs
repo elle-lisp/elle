@@ -199,15 +199,18 @@ fn test_lt_keywords() {
     );
 }
 
-/// elle_jit_pop must drop the popped value's region RC, mirroring
-/// handle_intr_pop in src/vm/types.rs which calls
-/// arena::decref_removed_element(popped). Without the decref, popping a
-/// cross-region heap value leaves the source region's RC bumped by
-/// the matching incref_inserted_element (from the original push) — a region-RC
-/// leak: the source region never reaches RC=0 and its allocations
-/// outlive their last reference. Same VM-vs-JIT contract drift
-/// shape as the Family D push/extend UAF (commit 1a0d9e4c), but
-/// the symptom here is a leak rather than corruption.
+/// `elle_jit_pop` MOVES the popped element out to the caller, mirroring
+/// `handle_intr_pop` in src/vm/types.rs (both route through
+/// `arena::pop_with_decref`). The move releases the container's stored
+/// reference (`decref_removed_element`, undoing the push's
+/// `incref_inserted_element`) AND holds the caller's owning reference (the
+/// pass-through retain), taken BEFORE the release so a sole-owned element's
+/// region is never freed under the returned Value. Net: the source region's RC
+/// stays at the post-push state (baseline + 1), held now by the returned value
+/// rather than the container; it returns to baseline only when the caller
+/// releases the moved-out result. Dropping the RC to baseline HERE (the pre-move
+/// destroy semantics) would free the element under the returned Value — the
+/// free-before-retain UAF the `raw-pop` oracle probe pins.
 #[test]
 fn pop_track_removes_cross_region_value() {
     use crate::value::arena::{alloc_in_fresh_region, push_with_incref, region_rc};
@@ -240,8 +243,9 @@ fn pop_track_removes_cross_region_value() {
             rc_baseline + 1,
             "precondition: push_with_incref must bump source region RC"
         );
-        // Pop via the JIT helper. It must call decref_removed_element to undo
-        // the push-side incref_inserted_element, returning the RC to baseline.
+        // Pop via the JIT helper. The move releases the container's reference and
+        // holds the caller's, so the source region's RC is UNCHANGED from the
+        // post-push state (baseline + 1) — held now by the returned value.
         let mut jit_ctx = crate::jit::JitCtx::new(&mut vm as *mut crate::vm::VM);
         let popped = elle_jit_pop(
             arr.tag,
@@ -259,9 +263,19 @@ fn pop_track_removes_cross_region_value() {
         );
         let rc_after_pop = region_rc(unsafe { &*heap_ptr }, source_rid);
         assert_eq!(
-                rc_after_pop,
-                rc_baseline,
-                "elle_jit_pop must decref the popped cross-region value's source region (decref_removed_element)"
-            );
+            rc_after_pop,
+            rc_baseline + 1,
+            "elle_jit_pop MOVES the element out — its region survives the pop, held by the returned value (not dropped to baseline)"
+        );
+        // The caller releasing the moved-out result (its `DecrefValueRegion` at
+        // the result's decref_point — the whole caller side, since dispatch skips
+        // its own pass-through retain for the `moves_out` `%pop`/`pop`) completes
+        // the move, returning the source region's RC to baseline.
+        crate::value::arena::decref_region(unsafe { &mut *heap_ptr }, Some(source_rid));
+        let rc_after_release = region_rc(unsafe { &*heap_ptr }, source_rid);
+        assert_eq!(
+            rc_after_release, rc_baseline,
+            "releasing the moved-out result returns the source region RC to baseline"
+        );
     });
 }

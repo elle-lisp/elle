@@ -15,8 +15,19 @@ pub(in crate::hir::regions) struct AdoptEdges {
     /// **Lambda** (closure-construction) HirId → `(captured, closure)` adopts the
     /// lowerer emits in `lower_lambda_expr` in place of the capture `IncrefRegion`
     /// (`RegionInfo::capture_adopt_edges`). Capture records no `cross_region_refs` store
-    /// site, so its adopt is keyed by the closure rather than a store node.
+    /// site, so its adopt is keyed by the closure rather than a store node. A member that
+    /// is a **cell** region (a re-pointed `closure ⊇ cell` edge) is emitted as
+    /// `AdoptCellRegion` (its own region, not the unwrapped content); a by-value member as
+    /// `AdoptRegion` — `lower_lambda_expr` distinguishes by the captured binding.
     pub capture: HashMap<HirId, Vec<(Region, Region)>>,
+    /// The bindings whose compiled capture cell adopts its stored **content** (a
+    /// `cell ⊇ content` edge — `RegionInfo::cell_content_adopt_bindings`). At each such
+    /// binding's cell-store site the lowerer emits `AdoptCellRegion(cell, content)`,
+    /// linking the content's runtime region into the cell's own region (never unwrapped).
+    /// Only immutable letrec cells reach here — a re-storable cell's content is refused
+    /// (§3 loop hazard). The cell itself is capture-adopted into the holding closure via
+    /// `capture` above, so the whole `closure ⊇ cell ⊇ content` chain frees as one subtree.
+    pub cell_content: Vec<Binding>,
 }
 
 /// The interior containment edges to emit as `AdoptRegion`, split by emit site —
@@ -122,10 +133,27 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
     let is_merged = |r: Region| -> bool {
         info.merged_parent.contains_key(&r) || info.merged_parent.values().any(|&p| p == r)
     };
+    // Compiled capture-cell region → its binding, and the set of all such regions. A
+    // `cell ⊇ content` containment edge is one whose CONTAINER is a cell region; it is
+    // an emittable owner-edge only for an IMMUTABLE letrec cell — a re-storable cell's
+    // content lifetime is per-rebind, so adopting it into the cell's subtree would free a
+    // displaced prior under the live cell (§3 loop hazard; `region-capture-cell-loop-uaf`).
+    let mut cell_binding_of: FxHashMap<Region, Binding> = FxHashMap::default();
+    for cells in info.begin_cell_regions.values() {
+        for &(b, cell_r) in cells {
+            cell_binding_of.insert(cell_r, b);
+        }
+    }
+    let adoptable_cell = |cell_r: Region| -> bool {
+        cell_binding_of
+            .get(&cell_r)
+            .is_some_and(|&b| !arena.get(b).is_restorable_capture_cell())
+    };
 
     let mut out = AdoptEdges {
         store: HashMap::new(),
         capture: HashMap::new(),
+        cell_content: Vec::new(),
     };
     for (&root, members) in &owned {
         // The root's single decref drops the whole subtree, so the root must have a
@@ -179,6 +207,21 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
                         .is_some_and(|stored| stored.contains(src))
             })
             .collect();
+        // CELL edges (`cell ⊇ content`): a `containment_edges` entry whose CONTAINER is a
+        // compiled capture-cell region (`begin_cell_regions`), recorded by the walk at the
+        // cell's mint scope. Emittable only for an IMMUTABLE letrec cell (`adoptable_cell`
+        // — the re-storable loop hazard is refused, §3); the adopt is value-resolved at the
+        // cell store as `AdoptCellRegion(cell, content)`, keyed by the cell's binding. A
+        // funnel/embed containment edge never targets a cell region, so the two are
+        // disjoint by construction.
+        let interior_cell: Vec<(HirId, Region, Region)> = info
+            .containment_edges
+            .iter()
+            .copied()
+            .filter(|(_site, src, dst)| {
+                members.contains(src) && members.contains(dst) && adoptable_cell(*dst)
+            })
+            .collect();
         // Assign each non-root member its single owner — its **actual parent** in the
         // containment graph (store + capture edges both count). The in-subtree containers
         // of `m` are the targets of interior edges sourced at `m`. Prefer the root when it
@@ -204,6 +247,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
             .iter()
             .chain(interior_capture.iter())
             .chain(interior_funnel.iter())
+            .chain(interior_cell.iter())
         {
             containers_of.entry(src).or_default().insert(dst);
         }
@@ -222,13 +266,15 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
                 }
             };
             // The `m → owner` edge must be EMITTABLE: an intrinsic store edge, a
-            // retaining funnel edge, or a capture edge (any kind). A member with none
-            // (funnel containment with no retaining site — a `%del`/key read) refuses
-            // the subtree to Shared (the always-legal baseline) rather than
-            // suppress-without-adopt (a leak).
+            // retaining funnel edge, a capture edge (any kind), or a cell⊇content edge
+            // (an immutable letrec cell). A member with none (funnel containment with no
+            // retaining site — a `%del`/key read; or a re-storable cell's content, whose
+            // edge `adoptable_cell` excludes) refuses the subtree to Shared (the
+            // always-legal baseline) rather than suppress-without-adopt (a leak).
             let via_store = interior_store
                 .iter()
                 .chain(interior_funnel.iter())
+                .chain(interior_cell.iter())
                 .any(|&(_, s, d)| s == m && d == owner);
             let via_capture = interior_capture
                 .iter()
@@ -341,6 +387,17 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         for &(lambda, src, dst) in &interior_capture {
             if owner_of.get(&src) == Some(&dst) && adopted.insert(src) {
                 out.capture.entry(lambda).or_default().push((src, dst));
+            }
+        }
+        // A `cell ⊇ content` adopt is emitted at the cell's own store site (not a
+        // `cross_region_refs` node), keyed by the cell's binding: the lowerer emits
+        // `AdoptCellRegion(cell, content)` there. The cell (dst) is itself capture-adopted
+        // into the holding closure via `interior_capture` above, so the chain frees as one.
+        for &(_site, src, dst) in &interior_cell {
+            if owner_of.get(&src) == Some(&dst) && adopted.insert(src) {
+                if let Some(&binding) = cell_binding_of.get(&dst) {
+                    out.cell_content.push(binding);
+                }
             }
         }
     }

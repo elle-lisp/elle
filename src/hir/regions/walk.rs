@@ -219,6 +219,14 @@ impl RegionInference {
                     self.binding_regions.insert(*b, init_regions);
                 }
 
+                // `cell ⊇ content`: the cells minted above hold their init value by an
+                // uncounted compiled store the external-uniqueness scan cannot see. Record
+                // the containment now that `binding_regions` is known, keyed at the same
+                // `!in_lambda` gate the mint uses. (see `record_cell_content_edges`.)
+                if !self.in_lambda() {
+                    self.record_cell_content_edges(hir.id);
+                }
+
                 let body_regions = self.walk(body);
                 self.current_region = saved;
                 body_regions
@@ -295,6 +303,15 @@ impl RegionInference {
                     }
                 }
 
+                // `cell ⊇ content`: a compiled forward cell holds its closure (or other
+                // init value) by an uncounted `StoreCaptureCell` the scan cannot see.
+                // Record the containment, gated by the `inline_depth == 0` structural walk
+                // that minted the cells (a re-walk at a deeper inline depth would duplicate
+                // it). (see `record_cell_content_edges`.)
+                if self.inline_depth == 0 {
+                    self.record_cell_content_edges(hir.id);
+                }
+
                 let body_regions = self.walk(body);
                 self.current_region = saved;
                 body_regions
@@ -356,6 +373,39 @@ impl RegionInference {
             _ => self.walk_rest(hir),
         }
     }
+
+    /// Record `cell ⊇ content` containment edges for every compiled capture cell this
+    /// scope minted (`begin_cell_regions[scope_id]`), keyed at the scope's HirId — the
+    /// cell's structural mint site. A `MakeCaptureCell` holds its stored value by an
+    /// **uncounted** compiled store (`StoreCaptureCell` at mint, the rebind funnel on
+    /// re-store), so the containment records **no** `cross_region_refs` edge and is
+    /// invisible to the external-uniqueness scan otherwise. This re-supplies it into
+    /// `containment_edges` (feeding ONLY the ownership inference, never an `IncrefRegion`
+    /// — the runtime alloc-scan over the cell already counts the store), so external
+    /// uniqueness sees the CELL, not the content, as the container a capturing closure
+    /// holds. Only compiled cells get the edge; the `populate_env` env-cell route mints
+    /// no `begin_cell_regions` entry and stays a borrow. Emit is idempotent per structural
+    /// walk — the callers gate it on the same condition that minted the cells.
+    fn record_cell_content_edges(&mut self, scope_id: HirId) {
+        // Collect first: reading `begin_cell_regions` and `binding_regions` borrows
+        // `self` immutably, while the push borrows it mutably.
+        let mut edges: Vec<(Region, Region)> = Vec::new();
+        if let Some(cells) = self.begin_cell_regions.get(&scope_id) {
+            for &(b, cell_r) in cells {
+                if let Some(contents) = self.binding_regions.get(&b) {
+                    for &content_r in contents {
+                        if content_r != cell_r {
+                            edges.push((content_r, cell_r));
+                        }
+                    }
+                }
+            }
+        }
+        for (content_r, cell_r) in edges {
+            self.containment_edges.push((scope_id, content_r, cell_r));
+        }
+    }
+
     /// Try to inline a Call's callee Lambda body for region analysis.
     ///
     /// When the callee is a Var whose binding has a known Lambda init

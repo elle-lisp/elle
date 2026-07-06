@@ -72,6 +72,12 @@ impl<'a> Lowerer<'a> {
                         dst: cell_reg,
                         value: init_reg,
                     });
+                    // `cell ⊇ content`: adopt the init value into the cell's own region if
+                    // the forest admitted it. A `lower_let` compiled cell is always a
+                    // re-storable `@`-mutable local (a `let` binding is never prebound), so
+                    // this is a no-op today (gate D refuses re-storable content); kept for
+                    // uniformity with the letrec/define cell-store sites.
+                    self.maybe_emit_cell_content_adopt(*binding, cell_reg, init_reg);
                     self.emit_binding_store(slot, cell_reg);
                 } else {
                     self.emit_binding_store(slot, init_reg);
@@ -226,7 +232,7 @@ impl<'a> Lowerer<'a> {
             let is_upvalue = self.upvalue_bindings.contains(binding);
 
             if compiled_cell {
-                self.store_captured_cell_init(slot, init_reg, init, captured_reassigned);
+                self.store_captured_cell_init(*binding, slot, init_reg, init, captured_reassigned);
             } else if self.in_lambda && is_upvalue {
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
@@ -456,7 +462,7 @@ impl<'a> Lowerer<'a> {
             // into it; if the binding is reassigned, drop the init's alloc
             // reference off its own register (NOT via the binding slot, which
             // holds the cell — see the suppressed `record_region_slot` above).
-            self.store_captured_cell_init(slot, value_reg, value, captured_reassigned);
+            self.store_captured_cell_init(binding, slot, value_reg, value, captured_reassigned);
             // Reload from cell
             let cell_reg2 = self.fresh_reg();
             self.emit(LirInstr::LoadLocal {

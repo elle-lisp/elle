@@ -291,6 +291,7 @@ pub fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::IncrefValueRegion { .. }
         | LirInstr::AssertRegionMatches { .. }
         | LirInstr::AdoptRegion { .. }
+        | LirInstr::AdoptCellRegion { .. }
         | LirInstr::AdoptIntoActivation { .. }
         | LirInstr::FreeRegionGroup { .. }
         | LirInstr::PushParamFrame { .. }
@@ -463,7 +464,7 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         // The ownership-forest ops load their operand values (the handler pops
         // them to drive the adopt / group free); record those uses so liveness
         // keeps them alive even though this backend never executes the op.
-        LirInstr::AdoptRegion { parent, child } => {
+        LirInstr::AdoptRegion { parent, child } | LirInstr::AdoptCellRegion { parent, child } => {
             f(*parent);
             f(*child);
         }

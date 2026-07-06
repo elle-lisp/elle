@@ -598,6 +598,11 @@ pub fn analyze_regions_with(
     }
     info.owned_adopt_edges = adopt.store;
     info.capture_adopt_edges = adopt.capture;
+    // The cell⊇content adopts are emitted at the cell's own store site (keyed by binding),
+    // as `AdoptCellRegion(cell, content)`. The content is store-adopted (its own decref is
+    // a frozen no-op under the Owned region), so it is NOT suppressed here; the cell region
+    // — a capture-adopted member of `adopt.capture` — already was, above.
+    info.cell_content_adopt_bindings = adopt.cell_content.iter().copied().collect();
 
     // Co-owned-cycle cut: a rootless mutual reference cycle is reclaimed
     // symmetrically as one `FreeRegionGroup` at its collective last use, disjoint

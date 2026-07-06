@@ -96,19 +96,18 @@ impl BindingInner {
     /// A capture cell whose content is RE-STORED over the binding's life — a
     /// `@`-mutable captured local or a mutated captured parameter. A strict subset
     /// of [`needs_capture`](Self::needs_capture): it EXCLUDES the prebound *immutable*
-    /// letrec cell (content set once, governed by the closure-cycle merge and the
-    /// lifetime obligation).
+    /// letrec cell (content set once, not re-stored).
     ///
-    /// The ownership forest must not fold a capture of such a binding into the
-    /// capturing closure's Owned subtree. The closure captures the CELL by
-    /// indirection — a borrow — and the cell is minted once per activation
-    /// (`populate_env`) with its release hoisted past enclosing loops, so it (and
-    /// the content it holds by an uncounted cell store the ownership scan cannot
-    /// see) outlives any per-iteration closure. Adopting the content would free it
-    /// under the still-live cell, and the next re-store reads the freed page
-    /// (`capture_store_with_rebind` deref of the stale prior content). See
-    /// `regions::ownership::capture::capture_containment_edges` and
-    /// tests/elle/region-capture-cell-loop-uaf.lisp.
+    /// This is the RE-STORE predicate: a whole-value read of such a cell needs a
+    /// counted reference because the next re-store (`capture_store_with_rebind`)
+    /// decrefs the displaced prior (`RegionInfo::counted_cell_read_sites`,
+    /// regions.rs). It is NOT the forest's "capture is a borrow" predicate — that
+    /// is the broader [`needs_capture`](Self::needs_capture), which folds in the
+    /// prebound letrec cell too (a capture of ANY cell-materialized binding is a
+    /// borrow through a separately-owned env cell, never a containment the closure
+    /// owns; `regions::ownership::capture::capture_containment_edges`). The letrec
+    /// cell is not re-stored, so it needs no counted read, but it IS a cell borrow,
+    /// so its capture yields no containment edge — the two concerns split here.
     pub fn is_restorable_capture_cell(&self) -> bool {
         match self.scope {
             BindingScope::Local => self.is_captured && !self.is_immutable,

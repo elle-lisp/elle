@@ -45,6 +45,20 @@ thread_local! {
     /// stdlib init (which has its own benign init-time frees) and armed
     /// once user code starts, so the first fault is a real user-program UAF.
     static GUARD_ARMED: Cell<bool> = const { Cell::new(false) };
+    /// The region whose contents the free-time cross-ref scan is currently
+    /// walking (0 = not scanning). Set per member by `find_region_cross_refs`
+    /// and cleared when it returns. The SIGSEGV attribution names the region
+    /// that FREED the faulting page; this names the region still HOLDING the
+    /// dangling edge into it (the over-freed target's referrer) when the fault
+    /// lands inside the scan's `region_of_page_ptr`. A single Cell write per
+    /// member — no allocation, so it does not perturb free-time timing.
+    static SCAN_MEMBER: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Mark the region whose contents the free-time cross-ref scan is walking (or 0
+/// to clear). See `SCAN_MEMBER`.
+pub(crate) fn set_scan_member(region: u32) {
+    SCAN_MEMBER.with(|m| m.set(region));
 }
 
 /// Arm guardfree page-protection (called once stdlib init completes).
@@ -65,8 +79,14 @@ extern "C" fn segv_handler(_sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: 
         format!("addr 0x{addr:x} faulted but is not in any recorded freed range")
     });
     let ctx = context();
+    let held = SCAN_MEMBER.with(|m| m.get());
+    let held_line = if held != 0 {
+        format!("\n    held by: region {held} (its contents were being cross-ref scanned at its own free)")
+    } else {
+        String::new()
+    };
     let s = format!(
-        "\n[guardfree] SIGSEGV — use-after-free at 0x{addr:x}\n    {msg}\n    context: {ctx}\n"
+        "\n[guardfree] SIGSEGV — use-after-free at 0x{addr:x}\n    {msg}{held_line}\n    context: {ctx}\n"
     );
     unsafe {
         libc::write(2, s.as_ptr() as *const libc::c_void, s.len());

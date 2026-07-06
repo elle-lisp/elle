@@ -359,6 +359,27 @@ pub enum LirInstr {
     /// structural-arena handling (step 5).
     AdoptRegion { parent: Reg, child: Reg },
 
+    /// Link the region of `child` as an **Owned** member of the region of
+    /// `parent`'s subtree, resolving BOTH operands with `region_of` — NOT
+    /// `result_region_of`. The one difference from [`AdoptRegion`](Self::AdoptRegion):
+    /// it does **not** see through a `CaptureCell` wrapper, so it adopts the CELL's
+    /// **own** region (the capture-cell↔closure containment the ownership forest
+    /// needs to reclaim a local recursive/letrec closure clique as a unit —
+    /// docs/impl/region-model.md § "The capture adopt"). `AdoptRegion` would unwrap a
+    /// cell operand to its content (a self-edge no-op for `cell ⊇ content`, and the
+    /// content — skipping the cell — for `closure ⊇ cell`), so a cell's own region is
+    /// otherwise unreachable by any ownership cut (only `DecrefCellRegion` names it).
+    /// This is the `region_of`-adopt counterpart, exactly as `DecrefCellRegion` is the
+    /// `region_of` counterpart of `DecrefValueRegion`.
+    ///
+    /// Value-resolved, no region slot: the handler pops both values (loaded from
+    /// their binding slots purely to drive the adopt), resolves their runtime regions
+    /// with `region_of`, and calls `RegionStore::adopt_region`, freezing the child's
+    /// RC. Realized on the interpreter (`handle_adopt_cell_region`) and the JIT
+    /// (`elle_jit_adopt_cell_region`); a structural no-op on WASM and GPU-ineligible
+    /// on MLIR, like `AdoptRegion`.
+    AdoptCellRegion { parent: Reg, child: Reg },
+
     /// Free a **co-owned region group** as one unit — the runtime `FreeRegionGroup`
     /// of the ownership forest. An
     /// externally-unique mutual reference cycle with no container parent has no owner

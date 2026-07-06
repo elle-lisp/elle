@@ -226,6 +226,14 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_adopt_region",
             &make_sig(module, &[I64, I64, I64, I64, I64], &[]),
         )?,
+        // adopt_cell_region: same ABI as adopt_region — (parent, child, vm) -> ()
+        // — but the helper resolves both operands with `region_of`, so a capture
+        // cell's OWN region is adopted (the cell↔closure containment).
+        adopt_cell_region: declare(
+            module,
+            "elle_jit_adopt_cell_region",
+            &make_sig(module, &[I64, I64, I64, I64, I64], &[]),
+        )?,
         // adopt_into_activation: (child_tag, child_payload, vm) -> () — the
         // child is value-resolved; the parent (the activation's owner node) is
         // VM state, so no parent operand exists.

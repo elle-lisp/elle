@@ -72,6 +72,7 @@ impl<'a> Lowerer<'a> {
     ///   orphan the block-end cleanup consumes.
     pub(super) fn store_captured_cell_init(
         &mut self,
+        binding: Binding,
         slot: u16,
         value_reg: Reg,
         value: &Hir,
@@ -86,6 +87,13 @@ impl<'a> Lowerer<'a> {
             cell: cell_reg,
             value: value_reg,
         });
+        // `cell ⊇ content`: adopt the just-stored content into the cell's OWN region when
+        // the ownership forest admitted this cell's `closure ⊇ cell ⊇ content` clique. The
+        // `StoreCaptureCell` above already increfed the content via the alloc-scan, so the
+        // adopt consumes that count (the funnel-adopt discipline). No-op for a
+        // re-storable cell (never in `cell_content_adopt_bindings`), so it is emitted here
+        // BEFORE the reassigned drop below without disturbing it.
+        self.maybe_emit_cell_content_adopt(binding, cell_reg, value_reg);
         if reassigned {
             let coalesced = self.coalescible_region(value);
             super::rcstats::record_captured_init(coalesced.is_some());
@@ -102,6 +110,38 @@ impl<'a> Lowerer<'a> {
             }
         }
     }
+    /// Emit the `cell ⊇ content` adopt for `binding` if the ownership forest admitted it
+    /// (`RegionInfo::cell_content_adopt_bindings`): `AdoptCellRegion(cell, content)` links
+    /// the content's runtime region into the CELL's own region (`region_of`, never the
+    /// unwrapped content — that is exactly what `AdoptRegion` would do wrongly), so a
+    /// local `closure ⊇ cell ⊇ content` clique frees as one subtree. Both operands are in
+    /// registers at the cell store (`cell_reg` the just-loaded cell, `value_reg` the
+    /// content), so no slot reload is needed. No-op for a binding whose cell was not
+    /// admitted (Shared baseline) — empty set without the forest.
+    pub(super) fn maybe_emit_cell_content_adopt(
+        &mut self,
+        binding: Binding,
+        cell_reg: Reg,
+        value_reg: Reg,
+    ) {
+        if self
+            .region_info
+            .cell_content_adopt_bindings
+            .contains(&binding)
+        {
+            self.emit(LirInstr::AdoptCellRegion {
+                parent: cell_reg,
+                child: value_reg,
+            });
+            if crate::config::get().has_trace("rc") {
+                eprintln!(
+                    "[trace:rc:emit] adopt_cell_region cell⊇content binding={:?}",
+                    binding
+                );
+            }
+        }
+    }
+
     /// Record `region_to_slot[cell_r] = slot` for a captured local's env-cell
     /// placeholder (the analysis put it in `binding_source_regions[binding]` and
     /// `cell_release_regions`; see `RegionInference::env_cell_placeholder`). This

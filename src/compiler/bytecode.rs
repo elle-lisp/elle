@@ -336,6 +336,18 @@ pub enum Instruction {
     /// interpreter and the JIT (`elle_jit_adopt_region`).
     AdoptRegion,
 
+    /// Adopt the region of one value into another's Owned subtree, resolving
+    /// BOTH operands with `region_of` — NOT `result_region_of` (the
+    /// `AdoptCellRegion` LIR instruction). No operand. Pops `child` (top) then
+    /// `parent`, resolves each to its runtime region via `region_of` (so a
+    /// `CaptureCell` operand is NOT unwrapped — its OWN region is used), and calls
+    /// `RegionStore::adopt_region`. This is the only ownership cut that can name a
+    /// capture cell's own region, letting the forest reclaim a cell↔closure clique
+    /// as a unit (docs/impl/region-model.md § "The capture adopt"). Emitted by the
+    /// ownership forest; realized on the interpreter (`handle_adopt_cell_region`)
+    /// and the JIT (`elle_jit_adopt_cell_region`).
+    AdoptCellRegion,
+
     /// Debug-only region-coalescing oracle (the `AssertRegionMatches` LIR
     /// instruction). Operand: u32 region slot. Peeks the value on top of the
     /// operand stack (does NOT pop — it is the return value), resolves the slot

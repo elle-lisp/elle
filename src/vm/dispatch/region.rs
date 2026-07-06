@@ -198,6 +198,36 @@ pub(crate) fn handle_adopt_region(vm: &mut VM) {
     }
 }
 
+pub(crate) fn handle_adopt_cell_region(vm: &mut VM) {
+    // The cell-aware adopt of the ownership forest: like `handle_adopt_region`,
+    // but resolves BOTH operands with `region_of`, NOT `result_region_of`, so a
+    // `CaptureCell` operand's OWN region is used (never unwrapped to its content).
+    // This is what lets the forest own a capture cell's arena and reclaim a local
+    // recursive/letrec closure clique — cell↔closure — as one subtree
+    // (docs/impl/region-model.md § "The capture adopt"). An immediate operand (no
+    // region) or a self-edge (same region) is a no-op, exactly as `AdoptRegion`.
+    let child = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: stack underflow on AdoptCellRegion (child)");
+    let parent = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: stack underflow on AdoptCellRegion (parent)");
+    let child_region = crate::value::arena::region_of(unsafe { &mut *vm.heap_ptr }, child);
+    let parent_region = crate::value::arena::region_of(unsafe { &mut *vm.heap_ptr }, parent);
+    if let (Some(p), Some(c)) = (parent_region, child_region) {
+        if p != c {
+            if crate::config::get().has_trace("rc") {
+                eprintln!("[trace:rc] AdoptCellRegion parent={p} child={c}");
+            }
+            vm.heap().adopt_region(p, c);
+        }
+    }
+}
+
 pub(crate) fn handle_adopt_into_activation(vm: &mut VM) {
     // The ownership forest's activation owner: adopt the child value's region
     // into the CURRENT activation's owner node (docs/impl/region-model.md

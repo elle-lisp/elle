@@ -466,6 +466,10 @@ impl VM {
                     region::handle_adopt_region(self);
                 }
 
+                Instruction::AdoptCellRegion => {
+                    region::handle_adopt_cell_region(self);
+                }
+
                 Instruction::AdoptIntoActivation => {
                     region::handle_adopt_into_activation(self);
                 }

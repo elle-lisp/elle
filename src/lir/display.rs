@@ -278,6 +278,9 @@ impl fmt::Display for LirInstr {
             LirInstr::AdoptRegion { parent, child } => {
                 write!(f, "adopt-region parent={parent} child={child}")
             }
+            LirInstr::AdoptCellRegion { parent, child } => {
+                write!(f, "adopt-cell-region parent={parent} child={child}")
+            }
             LirInstr::AdoptIntoActivation { child } => {
                 write!(f, "adopt-into-activation {child}")
             }

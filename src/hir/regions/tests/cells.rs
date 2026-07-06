@@ -92,6 +92,157 @@ fn begin_with_captured_define_has_alloc_region() {
     );
 }
 
+#[test]
+fn walk_records_cell_contains_content_for_compiled_letrec_cell() {
+    // A local letrec forward-reference cell holds its closure by a compiled
+    // `MakeCaptureCell` (`leaf`, captured by `drive` before its initializer runs). The
+    // walk must record `cell ⊇ content` in `containment_edges`, keyed at the letrec's
+    // scope id, so external uniqueness sees the CELL as the container of the closure —
+    // the uncounted cell store is otherwise invisible to the scan.
+    //
+    // Counter-factual: with no such edge the content region is a free-standing top
+    // container the scan cannot bound through its cell (the invisible-containment hole
+    // this modeling closes; region-model.md § "The capture adopt").
+    let src = "(defn build [n] \
+                 (letrec [drive (fn [m] (if (%le m 0) 0 (begin (leaf m) (drive (%sub m 1))))) \
+                          leaf (fn [m] m)] \
+                   (drive n)))";
+    let (_hir, _arena, info) = pipeline(src);
+    // At least one compiled cell exists (the `leaf` forward cell).
+    let cells: Vec<(HirId, Binding, Region)> = info
+        .begin_cell_regions
+        .iter()
+        .flat_map(|(&scope, v)| v.iter().map(move |&(b, r)| (scope, b, r)))
+        .collect();
+    assert!(
+        !cells.is_empty(),
+        "shape must mint at least one compiled capture cell (the leaf forward cell); \
+         begin_cell_regions={:?}",
+        info.begin_cell_regions,
+    );
+    // Every compiled cell's content is recorded contained in the cell.
+    for (scope, b, cell_r) in cells {
+        let contents = info
+            .binding_source_regions
+            .get(&b)
+            .cloned()
+            .unwrap_or_default();
+        for content_r in contents {
+            if content_r == cell_r {
+                continue;
+            }
+            assert!(
+                info.containment_edges.contains(&(scope, content_r, cell_r)),
+                "cell r{} (binding {:?}) must contain its content r{} via a containment \
+                 edge keyed at the scope @{}; containment_edges={:?}",
+                cell_r.0,
+                b,
+                content_r.0,
+                scope.0,
+                info.containment_edges,
+            );
+        }
+    }
+}
+
+#[test]
+fn walk_records_no_cell_content_for_populate_env_route() {
+    // An in-lambda captured MUTABLE local goes through the runtime `populate_env` env
+    // cell (`StoreCapture`), not a compiled `MakeCaptureCell` — a phantom region the
+    // runtime env owns. It mints NO `begin_cell_regions` entry, so the walk records NO
+    // `cell ⊇ content` edge for it; the env cell stays a borrow (region-model.md
+    // non-goal: only compiled cells get the edge).
+    let src = "(defn mk [] (let [@x (%pair 1 2)] (fn [] x)))";
+    let (_hir, _arena, info) = pipeline(src);
+    // No compiled cell is minted for the env-cell route.
+    assert!(
+        info.begin_cell_regions.values().all(|v| v.is_empty()),
+        "an in-lambda captured mutable local must NOT mint a compiled cell (populate_env \
+         route); begin_cell_regions={:?}",
+        info.begin_cell_regions,
+    );
+    // ...and no cell⊇content edge targets an env-cell phantom (a cell_release_region).
+    for &(_, _, dst) in &info.containment_edges {
+        assert!(
+            !info.cell_release_regions.contains(&dst),
+            "no cell⊇content edge may target an env-cell phantom r{} (the populate_env \
+             route stays a borrow); containment_edges={:?}",
+            dst.0,
+            info.containment_edges,
+        );
+    }
+}
+
+#[test]
+fn capture_edge_points_at_cell_region_not_content() {
+    // §5b — the re-pointed capture edge. `drive` captures the letrec forward binding
+    // `leaf` before its initializer runs, so `leaf` is a compiled `MakeCaptureCell`. The
+    // capture records NO `cross_region_refs` edge (the RC double-count fix), so
+    // `capture_containment_edges` re-derives it — and it must point at the CELL region,
+    // not `leaf`'s content: paired with the walk's `cell ⊇ content` edge, external
+    // uniqueness then sees the true chain `closure ⊇ cell ⊇ content`
+    // (region-model.md § "The capture adopt"; the emit realizes it via `AdoptCellRegion`).
+    //
+    // Counter-factual: before the re-point, `capture_containment_edges` resolved a capture
+    // through `binding_source_regions[leaf]` — the CONTENT region — so the edge read
+    // `closure ⊇ content`, skipping the cell entirely and leaving the forest unable to
+    // bound the content through its cell (the invisible-containment hole).
+    let (_hir, _arena, info, edges) = capture_edges(
+        "(defn build [n] \
+           (letrec [drive (fn [m] (leaf m)) \
+                    leaf (fn [m] m)] \
+             (%add (drive n) 0)))",
+    );
+    // The sole compiled cell is `leaf`'s forward cell.
+    let cells: Vec<(Binding, Region)> = info
+        .begin_cell_regions
+        .values()
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(
+        cells.len(),
+        1,
+        "shape must mint exactly one compiled cell (leaf's forward cell); got {cells:?}",
+    );
+    let (leaf_binding, cell_r) = cells[0];
+    // Its content region — the `(site, content, cell)` walk edge — is what the old
+    // capture edge wrongly pointed at.
+    let content_r = info
+        .containment_edges
+        .iter()
+        .find(|&&(_, _, cell)| cell == cell_r)
+        .map(|&(_, content, _)| content)
+        .expect("the cell must carry a `cell ⊇ content` edge (§5a)");
+    // The re-point resolves the cell through `single_cell_region_of`, the same gate the
+    // lowerer uses — so analysis and emit name the same cell.
+    assert_eq!(
+        info.single_cell_region_of(leaf_binding),
+        Some(cell_r),
+        "single_cell_region_of(leaf) must name the sole compiled cell r{}",
+        cell_r.0,
+    );
+    // The capture edge points at the CELL (r{cell_r}), for some capturing closure.
+    let cell_edges: Vec<(HirId, Region, Region)> = edges
+        .iter()
+        .copied()
+        .filter(|&(_, src, _)| src == cell_r)
+        .collect();
+    assert!(
+        !cell_edges.is_empty(),
+        "capture_containment_edges must carry a `closure ⊇ cell` edge for the cell r{} \
+         (the capturing closure is `drive`); edges={edges:?}",
+        cell_r.0,
+    );
+    // ...and NEVER at the content region (the pre-fix mis-pointing).
+    assert!(
+        !edges.iter().any(|&(_, src, _)| src == content_r),
+        "no capture edge may point at leaf's CONTENT region r{} — that is the invisible- \
+         containment mis-pointing the re-point corrects; edges={edges:?}",
+        content_r.0,
+    );
+}
+
 /// Counter-factual for the destructure-binding-regions overwrite bug.
 ///
 /// At top level, `(begin (def (a & r) (list 1 2 3)) (length r))` lowers

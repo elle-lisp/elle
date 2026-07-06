@@ -884,36 +884,77 @@ A capture containment edge (`closure ⊇ captured`) has no store site — captur
 `cross_region_refs` edge (the RC double-count fix: the runtime auto-incref over the
 `Closure` env stands in for a static `IncrefRegion`) — so its adopt is keyed by the
 closure's **construction**: at `MakeClosure`, `lower_lambda_expr` reloads each adopted
-captured value and emits a value-resolved `AdoptRegion(closure, captured)` in place of the
-capture's baseline `IncrefRegion`, and `analyze_regions_with` suppresses the member's own
-compiler decref (the closure's subtree drop is its sole reclamation). The reload covers
-**every capture kind**: a direct local is reloaded from its binding slot (`LoadLocal`); an
-upvalue or transitive capture from the constructing function's environment (`LoadCapture`,
-or the raw cell load for a cell-held binding — the adopt is value-resolved through
-`result_region_of`, which unwraps a capture cell either way). The capture-adopt contract —
-every suppressed member is adopted — is therefore discharged by **emit capability**, not by
-refusing shapes the emit cannot reach; the `debug_assert` at the emit is the backstop that
-every adopt edge matches a real capture of the constructed closure. Pinned by
-`lir::lower::tests` (`capture_adopt_reloads_upvalue_via_load_capture` — the env-reloaded
+captured value and emits a value-resolved adopt in place of the capture's baseline
+`IncrefRegion`, and `analyze_regions_with` suppresses the member's own compiler decref (the
+closure's subtree drop is its sole reclamation). How the edge points depends on how the
+captured binding is materialized (`ownership::capture`):
+
+- **By-value capture** — an immutable, non-prebound local the closure holds directly: the
+  edge is `closure ⊇ content`, adopted with `AdoptRegion(closure, content)`. The reload
+  covers a direct local (from its binding slot, `LoadLocal`) and a by-value
+  upvalue/transitive capture (from the constructing function's environment, `LoadCapture`).
+- **Immutable letrec forward-reference cell** — a prebound `MakeCaptureCell` a sibling
+  references before its initializer runs. The closure holds the CELL, not the content, so
+  the edge is re-pointed at the **cell region** (`single_cell_region_of`) → `closure ⊇ cell`.
+  Paired with the walk's `cell ⊇ content` edge (`record_cell_content_edges`, keyed at the
+  cell's mint scope), external uniqueness sees the true chain `closure ⊇ cell ⊇ content`, so a
+  **local, non-escaping `{closure, cell, content}` clique** is externally unique → Owned →
+  reclaimed as a unit by the closure's subtree drop, the interior cell↔closure reference
+  included. The cell store is UNCOUNTED, so this re-pointed edge is the ONLY way the scan sees
+  the cell is held; the runtime realizes it with **`AdoptCellRegion`**, which resolves BOTH
+  operands with `region_of` (never `result_region_of`, which would unwrap the cell to its
+  content) so a cell's OWN region is named. A second `AdoptCellRegion` at the cell store links
+  the content into the cell (`cell ⊇ content`, `maybe_emit_cell_content_adopt`) where the
+  lifetime obligation admits; elsewhere the content reclaims by the cell's free-time RC
+  cascade. Pinned by `regions::tests::cells::{walk_records_cell_contains_content_for_compiled_letrec_cell,
+  capture_edge_points_at_cell_region_not_content}`,
+  `regions::tests::adopt::owned_subtrees_admits_local_capture_cell_clique` (with its escaping /
+  two-sibling refusals), and the emit by
+  `lir::lower::tests::preallocated_capture_cells_get_distinct_regions_each_released`.
+- **Re-storable cell** (`is_restorable_capture_cell` — an `@`-mutable captured local or a
+  mutated captured parameter): a **borrow**, no owner edge. Its content lifetime is
+  per-rebind — the rebind funnel decrefs each displaced prior — and SHORTER than the cell's,
+  whose release is hoisted once past enclosing loops; adopting the content into the cell's
+  subtree would free a displaced prior under the live cell (the loop over-free). So
+  `capture_containment_edges` skips the capture and `compute_adopt_edges`'s `adoptable_cell`
+  refuses its `cell ⊇ content` edge — which the walk still records (the cell holds *a*
+  content) for external-uniqueness counting — and the content reclaims on the per-region-RC
+  baseline. Pinned by `region_capture_cell_loop_uaf_ownership` (the guardfree witness) and
+  `regions::tests::adopt::{capture_edge_skips_restorable_cell_admits_immutable_in_one_clique,
+  restorable_compiled_cell_records_content_edge_but_is_not_adopted}`.
+
+A mutually-recursive `letrec` closure **cycle** (each closure holds the other's forward
+cell) is a *cyclic* clique, not a rooted subtree, so it is reclaimed by the closure-cycle
+**MERGE** (§ "The letrec closure-cycle merge"), which collapses the SCC ∪ its cells onto one
+arena before this pass — never by this capture-adopt path (`recur-local-mutual` /
+`recur-local-self` read closed in `oracle.lisp`). The capture-adopt path serves the *acyclic*
+rooted clique above.
+
+The capture-adopt contract — every suppressed member is adopted — is discharged by **emit
+capability**, not by refusing shapes the emit cannot reach: `lower_lambda_expr`'s reload
+covers every capture kind, and the `debug_assert` at the emit is the backstop that every
+adopt edge matches a real capture of the constructed closure. Pinned by
+`lir::lower::tests::capture_adopt_reloads_upvalue_via_load_capture` (the env-reloaded
 emission) and `regions::tests::adopt::capture_adopt_edges_are_emittable`.
 
 What bounds the *admission* of a capture owner-edge is the general subtree filters — no
-lowerability filter exists — and for a **cross-activation (upvalue) owner-edge the
-lifetime obligation (below) refuses by construction**: an
-upvalue member is, by definition, also captured by the lexically enclosing (forwarding)
-lambda, so the member's resolved tight last-use lands at or past that enclosing lambda's
-own node — while a subtree rooted at the *nested* closure has its single drop inside the
-enclosing lambda's body, which every position in that body strictly precedes in post-order.
-The refusal is not conservatism: such a root genuinely must not own the member — the nested
-closure's region is minted per call of the enclosing closure, so claiming a member that
-survives across calls would free it under the enclosing environment's still-live reference
-and re-adopt an already-owned region on the next call. A member reachable through an
-upvalue capture is Owned only by an owner that outlives **every** capturer — the
-activation/fiber owner node of the owner = activation cut — never by a region root; until
-that owner exists the shape stays Shared (the always-legal baseline). Pinned by
+lowerability filter exists — and the **cross-activation (upvalue) owner-edge is refused at the
+lifetime obligation**. With the capture edge re-pointed through the cell the containment is
+now VISIBLE, so a subtree over an upvalue member DOES form: external uniqueness admits
+`{nested, cell, enclosing, member}`, the member being captured by BOTH the nested closure and
+the enclosing forwarding lambda. The refusal then holds structurally at the lifetime
+obligation — the nested closure's region is minted per CALL of the enclosing closure, so
+claiming a member that survives across calls would free it under the enclosing environment's
+still-live reference and re-adopt an already-owned region on the next call. The forwarding
+capture resolves the member's tight last-use to a position at/past the enclosing lambda's
+node, after the nested root's in-body drop in post-order, so the obligation cannot prove the
+member dies before the root and refuses. A member reachable through an upvalue capture is
+therefore Owned only by an owner that outlives **every** capturer — the activation/fiber owner
+node of the owner = activation cut — never by a region root; until that owner exists the shape
+stays Shared (the always-legal baseline). Pinned by
 `regions::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime` and
 `closure_web_capture_not_yet_claimed`, and at runtime by
-`runtime::tests::ownership::region_ownership_upvalue_capture_family_stays_on_baseline`.
+`runtime::tests::ownership::upvalue_capture_family_runs_sound`.
 
 ### The funnel adopt — the checked-on store face
 

@@ -182,6 +182,21 @@ impl<'a> Lowerer<'a> {
             })
     }
 
+    /// The compiled capture-cell region for `binding` — the same single-cell resolution
+    /// the ownership forest's `closure ⊇ cell` re-point uses
+    /// ([`RegionInfo::single_cell_region_of`]). Unlike
+    /// [`cell_region_for`](Self::cell_region_for), which keys on the CURRENT node, this
+    /// resolves a binding whose scope is not the current node — the `closure ⊇ cell`
+    /// capture adopt in `lower_lambda_expr` runs at the CLOSURE's construction. `None` for
+    /// a binding with no compiled cell OR with an ambiguous multi-cell double-declare (so
+    /// analysis and emit agree to name the same cell, or agree to refuse).
+    pub(super) fn cell_region_of_binding(
+        &self,
+        binding: crate::hir::Binding,
+    ) -> Option<crate::hir::region::Region> {
+        self.region_info.single_cell_region_of(binding)
+    }
+
     /// Look up the region for the current HIR node and return the u16
     /// index into the function's region_table.
     pub(super) fn alloc_region_id(&mut self) -> Option<StaticRegion> {

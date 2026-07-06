@@ -134,6 +134,11 @@ pub(crate) struct RuntimeHelpers {
     /// Link a child value's region as Owned by a parent value's region — the
     /// `AdoptRegion` instruction's JIT helper, mirroring `handle_adopt_region`.
     pub(crate) adopt_region: FuncId,
+    /// Link a child value's region as Owned by a parent value's region using
+    /// `region_of` (NOT `result_region_of`) — the `AdoptCellRegion` instruction's
+    /// JIT helper, mirroring `handle_adopt_cell_region`. Adopts a capture cell's
+    /// OWN region (never unwrapped).
+    pub(crate) adopt_cell_region: FuncId,
     /// Adopt a child value's region into the current activation's owner node —
     /// the `AdoptIntoActivation` instruction's JIT helper, mirroring
     /// `handle_adopt_into_activation`.
@@ -431,6 +436,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol(
         "elle_jit_adopt_region",
         dispatch::elle_jit_adopt_region as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_adopt_cell_region",
+        dispatch::elle_jit_adopt_cell_region as *const u8,
     );
     builder.symbol(
         "elle_jit_adopt_into_activation",

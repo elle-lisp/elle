@@ -461,6 +461,21 @@ pub struct RegionInfo {
     /// single owner through exactly one of the two maps (the store site or the capture
     /// site), never both.
     pub capture_adopt_edges: HashMap<HirId, Vec<(Region, Region)>>,
+    /// Ownership forest, **cell⊇content** half: the bindings whose compiled capture cell
+    /// adopts its stored content. At each such binding's cell-store site (the
+    /// `MakeCaptureCell`/`StoreCaptureCell`) the lowerer emits
+    /// `AdoptCellRegion(cell, content)` — linking the content's runtime region into the
+    /// CELL's own region (`region_of`, not the unwrapped content), so a local
+    /// `closure ⊇ cell ⊇ content` clique frees as one subtree. The cell store is uncounted,
+    /// but the runtime alloc-scan over the cell already increfs the content, so the adopt
+    /// consumes that count with no explicit balancing (the funnel-adopt discipline). Only
+    /// an IMMUTABLE letrec cell reaches here — a re-storable cell's content is refused (the
+    /// loop hazard; `region-capture-cell-loop-uaf.lisp`). The cell region itself is
+    /// capture-adopted into the holding closure via `capture_adopt_edges`, and its own
+    /// decref is suppressed (`suppressed_decref_regions`); the content keeps its own decref
+    /// (a frozen no-op under the Owned region). Populated by the ownership pass; empty when
+    /// the shape stays Shared.
+    pub cell_content_adopt_bindings: FxHashSet<Binding>,
     /// Ownership forest, **co-owned-cycle** cut, populated by the ownership pass;
     /// empty when no such cycle is present. A
     /// mutual reference cycle with no container parent (an externally-unique source
@@ -564,6 +579,7 @@ impl RegionInfo {
             closure_cycle_members: FxHashSet::default(),
             owned_adopt_edges: HashMap::new(),
             capture_adopt_edges: HashMap::new(),
+            cell_content_adopt_bindings: FxHashSet::default(),
             owned_region_groups: HashMap::new(),
             owned_group_members: FxHashSet::default(),
             transfer_adopt_regions: FxHashSet::default(),
@@ -572,6 +588,32 @@ impl RegionInfo {
             branch_arm_decrefs: HashMap::new(),
             stats: RegionStats::default(),
         }
+    }
+
+    /// The compiled capture-cell region for `binding`, ONLY when the binding minted
+    /// exactly ONE cell across all `begin_cell_regions` scopes. `None` for a binding with
+    /// no compiled cell (a `populate_env` route or a by-value capture) OR with MORE than
+    /// one — a file-body/nested-`begin` double-declare, where which physical cell a given
+    /// closure holds is not resolvable from the binding alone (the two cells have distinct
+    /// regions). The ownership forest's `closure ⊇ cell` re-point
+    /// (`regions::ownership::capture`) and its `AdoptCellRegion` emit
+    /// (`lir::lower::cell_region_of_binding`) both gate on this, so analysis and the lowerer
+    /// name the same cell — or agree to refuse (leave the capture a borrow, Shared).
+    pub fn single_cell_region_of(&self, binding: Binding) -> Option<Region> {
+        let mut found: Option<Region> = None;
+        for cells in self.begin_cell_regions.values() {
+            for &(b, r) in cells {
+                if b == binding {
+                    match found {
+                        None => found = Some(r),
+                        Some(prev) if prev == r => {}
+                        // A second, distinct cell for the same binding — ambiguous.
+                        Some(_) => return None,
+                    }
+                }
+            }
+        }
+        found
     }
 
     /// Does this scope have any allocations whose solved region matches it?

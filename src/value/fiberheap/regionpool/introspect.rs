@@ -53,6 +53,10 @@ impl RegionPool {
         page_size: usize,
         valid_region: &dyn Fn(u32, *const ()) -> bool,
     ) -> Vec<u32> {
+        // Breadcrumb the member under scan so a guardfree fault inside
+        // `region_of_page_ptr` (an over-freed target page) names the region that
+        // still HELD the dangling edge, not only the region that freed the target.
+        crate::value::fiberheap::freelog::set_scan_member(own_id);
         let mut refs = Vec::new();
         for &ptr in self.dtors.iter().chain(self.ref_objs.iter()) {
             if ptr.is_null() {
@@ -61,6 +65,7 @@ impl RegionPool {
             let obj = unsafe { &*ptr };
             Self::find_object_cross_refs(obj, own_id, page_size, valid_region, &mut refs);
         }
+        crate::value::fiberheap::freelog::set_scan_member(0);
         refs
     }
 

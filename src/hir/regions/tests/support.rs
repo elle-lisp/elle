@@ -218,6 +218,27 @@ pub(super) fn adopt_edges_checked_on(
     (hir, info, edges)
 }
 
+/// Compile under the REAL primitive classification and re-derive the capture
+/// containment edges `(lambda_id, captured_region, closure_region)` the ownership
+/// walks consume ([`capture_containment_edges`](super::ownership::capture_containment_edges)).
+/// Returns the arena alongside so a test can read a captured binding's
+/// `is_restorable_capture_cell` classification and the info's `single_cell_region_of`.
+/// These edges read only the WALK's output (`binding_source_regions`, `alloc_region`,
+/// `begin_cell_regions`), untouched by the ownership-pass suppressions, so no
+/// pre-ownership-view restore is needed.
+pub(super) fn capture_edges(
+    source: &str,
+) -> (Hir, BindingArena, RegionInfo, Vec<(HirId, Region, Region)>) {
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, _) = compile_fhir(source, &mut symbols);
+    let meta = crate::primitives::build_primitive_meta(&mut symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
+    let cc = pc.call_classification;
+    let info = analyze_regions_with(&hir, &arena, cc.clone());
+    let edges = super::ownership::capture_containment_edges(&hir, &info, &arena);
+    (hir, arena, info, edges)
+}
+
 /// Compile under the REAL primitive classification and compute the co-owned-cycle
 /// groups (`compute_owned_region_groups`): drop-site HirId → member regions. Mirrors
 /// [`adopt_edges`], threading the `compute_order` index the group walk needs for the

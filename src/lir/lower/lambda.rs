@@ -200,7 +200,10 @@ impl<'a> Lowerer<'a> {
                     Slot(u16),
                     Env { index: u16, raw: bool },
                 }
-                let mut adopt_loads: Vec<AdoptReload> = Vec::new();
+                // Each adopt reload with whether it names a CELL (a re-pointed
+                // `closure ⊇ cell` edge → `AdoptCellRegion`, the cell's OWN region) or a
+                // by-value capture (`closure ⊇ content` → `AdoptRegion`).
+                let mut adopt_loads: Vec<(AdoptReload, bool)> = Vec::new();
                 // The member regions actually adopted here — checked against `adopt_edges`
                 // below so a suppressed-decref member can never be left un-adopted (a leak).
                 let mut adopted_members = Vec::new();
@@ -211,24 +214,32 @@ impl<'a> Lowerer<'a> {
                     if matches!(cap.kind, crate::hir::CaptureKind::Recursive { .. }) {
                         continue;
                     }
-                    // The value regions of this capture that are children of an adopt edge
-                    // into this closure. The edge keys the *static* region; the emit is
-                    // value-resolved off the reload, so the closure adopts the captured
-                    // value's actual runtime region.
-                    let matched = self
-                        .region_info
-                        .binding_source_regions
-                        .get(&cap.binding)
-                        .map(|regs| {
-                            regs.iter()
-                                .copied()
-                                .filter(|r| adopt_edges.contains(&(*r, closure_region)))
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
+                    // Mirror the capture-collection loop's access paths exactly.
+                    let needs_cell = self.arena.get(cap.binding).needs_capture();
+                    // The member regions of this capture that are children of an adopt edge
+                    // into this closure. For a CELL-materialized capture the edge names the
+                    // CELL region (re-pointed by `capture_containment_edges`), not the
+                    // value's `binding_source_regions` — the closure holds the cell, and
+                    // `AdoptCellRegion` will adopt the cell's own region. For a by-value
+                    // capture the edge names the value's region. The edge keys the *static*
+                    // region; the emit is value-resolved off the reload.
+                    let candidate_regions: Vec<crate::hir::region::Region> = if needs_cell {
+                        self.cell_region_of_binding(cap.binding)
+                            .into_iter()
+                            .collect()
+                    } else {
+                        self.region_info
+                            .binding_source_regions
+                            .get(&cap.binding)
+                            .cloned()
+                            .unwrap_or_default()
+                    };
+                    let matched = candidate_regions
+                        .iter()
+                        .copied()
+                        .filter(|r| adopt_edges.contains(&(*r, closure_region)))
+                        .collect::<Vec<_>>();
                     if !matched.is_empty() {
-                        // Mirror the capture-collection loop's access paths exactly.
-                        let needs_cell = self.arena.get(cap.binding).needs_capture();
                         let reload = match cap.kind {
                             crate::hir::CaptureKind::Local => {
                                 self.binding_to_slot.get(&cap.binding).copied().map(|slot| {
@@ -255,7 +266,7 @@ impl<'a> Lowerer<'a> {
                             crate::hir::CaptureKind::Recursive { .. } => None,
                         };
                         if let Some(reload) = reload {
-                            adopt_loads.push(reload);
+                            adopt_loads.push((reload, needs_cell));
                             adopted_members.extend(matched);
                             continue;
                         }
@@ -300,7 +311,7 @@ impl<'a> Lowerer<'a> {
                         slot: scratch,
                         src: dst,
                     });
-                    for reload in adopt_loads {
+                    for (reload, is_cell) in adopt_loads {
                         let preg = self.fresh_reg();
                         self.emit(LirInstr::LoadLocal {
                             dst: preg,
@@ -321,14 +332,32 @@ impl<'a> Lowerer<'a> {
                                 ("env-raw", index)
                             }
                         };
-                        self.emit(LirInstr::AdoptRegion {
-                            parent: preg,
-                            child: creg,
-                        });
+                        // A cell capture (`closure ⊇ cell`) adopts the cell's OWN region
+                        // via `AdoptCellRegion` (`region_of`, not the unwrapped content —
+                        // the reload gives the raw cell); a by-value capture adopts the
+                        // value's region via `AdoptRegion`.
+                        if is_cell {
+                            self.emit(LirInstr::AdoptCellRegion {
+                                parent: preg,
+                                child: creg,
+                            });
+                        } else {
+                            self.emit(LirInstr::AdoptRegion {
+                                parent: preg,
+                                child: creg,
+                            });
+                        }
                         if crate::config::get().has_trace("rc") {
                             eprintln!(
-                                "[trace:rc:emit] adopt_region capture closure_region={} {}={}",
-                                closure_region.0, trace_load.0, trace_load.1
+                                "[trace:rc:emit] {} capture closure_region={} {}={}",
+                                if is_cell {
+                                    "adopt_cell_region"
+                                } else {
+                                    "adopt_region"
+                                },
+                                closure_region.0,
+                                trace_load.0,
+                                trace_load.1
                             );
                         }
                     }

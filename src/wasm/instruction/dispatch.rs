@@ -213,6 +213,7 @@ impl WasmEmitter {
             // structurally here — a no-op arm, like every other region op in
             // this backend (the arena boundary reclaims).
             LirInstr::AdoptRegion { .. }
+            | LirInstr::AdoptCellRegion { .. }
             | LirInstr::AdoptIntoActivation { .. }
             | LirInstr::FreeRegionGroup { .. } => {}
             // Region/refcount support is VM-only in this backend.

@@ -156,4 +156,6 @@ pub(super) use seeds::compute_shared_seeds;
 // re-export keeps their `ownership::NAME` path stable for it without dangling in a
 // normal build (each is reached internally via its own submodule path).
 #[cfg(test)]
-pub(super) use {adopt::AdoptEdges, subtree::compute_owned_subtrees};
+pub(super) use {
+    adopt::AdoptEdges, capture::capture_containment_edges, subtree::compute_owned_subtrees,
+};

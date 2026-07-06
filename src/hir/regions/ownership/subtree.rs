@@ -135,11 +135,12 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
     order: &HashMap<HirId, u32>,
 ) -> HashMap<HirId, Vec<Region>> {
     let inputs = ownership_inputs(hir, info, escape, arena);
-    // Closure regions — refused below: a `letrec` closure cycle is a capture-cell↔closure
-    // structure whose cell⊇closure containment is invisible to the external-uniqueness scan,
-    // so a wholesale group free dangles the cell and its decref over-frees (guardfree UAF).
-    // Conservative until that containment is modeled (`closure_regions` doc); the shape stays
-    // Shared (leaks, the always-legal baseline) rather than corrupting memory.
+    // Closure regions — refused below: the group free is the STORE-ONLY-cycle mechanism, and
+    // a closure-involving cycle belongs to a different owner. A `letrec` cell↔closure clique
+    // goes to the closure-cycle MERGE (which collapses it to one arena); a capture-back-edge
+    // SCC to the activation cut. The group free resolves members with `result_region_of`
+    // (which unwraps a `CaptureCell`), so it cannot name a cell member's own region — the
+    // boundary this refusal draws (`closure_regions` doc).
     let closure_regs = closure_regions(hir, info);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     // Region → its allocation HirId — the structural site whose enclosing scope frees the
@@ -181,17 +182,14 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
         {
             continue;
         }
-        // Refuse a closure cycle (a `letrec` self/mutual recursion): it is a
-        // capture-cell↔closure structure whose cell⊇closure containment is invisible to the
-        // external-uniqueness scan, so a wholesale group free would dangle the cell and its
-        // decref over-free — a use-after-free guardfree detonates under the full stdlib. The
-        // group-free is the wrong instrument here regardless: a mergeable closure cycle is
-        // collapsed by the closure-cycle MERGE (`regions::merge`), which runs before this pass
-        // and resolves its members through `merged_root`, so it never reaches the group walk;
-        // only a merge-REFUSED cycle (escaping, a mutated in-lambda letrec binding kept on the
-        // env-cell route, or a letrec body tail-calling a non-member) lands here, and it stays
-        // Shared (leaks, the always-legal baseline), never UAFs. See `closure_regions` for why
-        // the scan cannot see the containment.
+        // Refuse a closure-involving cycle: the group free is the store-only-cycle
+        // instrument, and it resolves each member with `result_region_of` (which unwraps a
+        // `CaptureCell`), so it cannot name a cell member's own region. A mergeable `letrec`
+        // cell↔closure clique is collapsed by the closure-cycle MERGE (`regions::merge`, run
+        // before this pass, resolving through `merged_root`) and never reaches the group walk;
+        // a capture-back-edge SCC is claimed by the activation cut. What lands here and is
+        // refused is the residual closure cycle no other cut owns — it stays Shared (the
+        // always-legal baseline). See `closure_regions` for the mechanism boundary.
         if scc.iter().any(|&m| closure_regs.contains(&m)) {
             continue;
         }

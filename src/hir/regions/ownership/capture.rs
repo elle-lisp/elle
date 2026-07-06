@@ -20,23 +20,34 @@ use rustc_hash::FxHashSet;
 /// region (not in `live_regions`, in `call_result_regions`) that owns no allocation —
 /// the caller/env owns it, so it is a borrow, not a containment the closure can own.
 ///
-/// A capture of a **re-storable cell** (`is_restorable_capture_cell()` — a `@`-mutable
-/// captured local or a mutated captured parameter, materialized as a `CaptureCell`/
-/// `populate_env` env cell) yields **no** edge: the closure captures the CELL by
-/// indirection, a BORROW through a separately-owned env cell, not a containment of the
-/// cell's contents. `binding_source_regions` records where the value *points* (the live
-/// content region), not the phantom cell region, so the `live_regions` filter alone would
-/// let the content through and fold it into the closure's Owned subtree. That is unsound:
-/// the env cell is minted once per activation and its release is hoisted past enclosing
-/// loops, so it (and its contents, held by an uncounted cell store the ownership scan
-/// cannot see) outlives any per-iteration closure — the closure's subtree drop would free
-/// the cell's contents while the persistent cell still references them, and the next
-/// iteration's re-store derefs the freed page (`region-capture-cell-loop-uaf.lisp`).
-/// The cell owns its contents and releases them; the closure only
-/// reads through it. A prebound *immutable* letrec cell is excluded (its content is set
-/// once, not re-stored): that closure-cycle structure is governed by the closure-cycle
-/// merge and the lifetime obligation instead.
-pub(super) fn capture_containment_edges(
+/// A capture is resolved by its binding's materialization:
+///
+/// - **By-value capture** (an immutable, non-prebound local): the closure holds the value
+///   directly — a genuine containment `closure ⊇ content`, so the edge points at the
+///   captured value's `binding_source_regions` (the content region), exactly as a store
+///   edge does. This is the forest's per-call closure↔capture reclamation.
+/// - **Prebound immutable letrec cell** (`needs_capture` but not re-storable — a compiled
+///   `MakeCaptureCell` forward reference): the closure holds the CELL, not the content. The
+///   edge is re-pointed at the **cell region** (`begin_cell_regions`), yielding
+///   `closure ⊇ cell`. Paired with the walk's `cell ⊇ content` edge, external uniqueness
+///   sees the true chain `closure ⊇ cell ⊇ content`, so a local, non-escaping clique
+///   `{closure, cell, content}` reclaims as a unit (the cell's own arena included) by the
+///   closure's subtree drop — the interior cell↔closure cycle reclaimed with it. An
+///   escaping/externally-referenced clique fails external uniqueness and stays Shared.
+///   Because the cell store is uncounted (no `cross_region_refs` edge), this edge is the
+///   ONLY way the scan sees the cell is held; the runtime realizes the adopt via
+///   `AdoptCellRegion` (`region_of` the cell, not the unwrapped content).
+/// - **Re-storable cell** (`is_restorable_capture_cell` — an `@`-mutable captured local or
+///   a mutated captured parameter): yields **no** edge. Its content lifetime is per-rebind
+///   (shorter than the cell's, whose release is hoisted past enclosing loops), so adopting
+///   the content into the cell's subtree would free a displaced prior under a live cell —
+///   the loop over-free (`region-capture-cell-loop-uaf.lisp`). The re-storable cell stays a
+///   borrow (the content reclaims on the per-region-RC baseline). `compute_adopt_edges`
+///   independently refuses to adopt a re-storable cell's `cell ⊇ content` edge (§3 gate).
+/// - **`populate_env` env cell** (an in-lambda captured binding with no compiled cell): a
+///   phantom region the runtime env owns (no `begin_cell_regions` entry), so it yields no
+///   edge and stays a borrow.
+pub(in crate::hir::regions) fn capture_containment_edges(
     hir: &Hir,
     info: &RegionInfo,
     arena: &BindingArena,
@@ -50,11 +61,29 @@ pub(super) fn capture_containment_edges(
         if let HirKind::Lambda { captures, .. } = &h.kind {
             if let Some(&closure_r) = info.alloc_region.get(&h.id) {
                 for c in captures {
+                    let bi = arena.get(c.binding);
                     // A re-storable cell capture is a borrow through a separately-owned
-                    // env cell, not a containment the closure owns (see the doc above).
-                    if arena.get(c.binding).is_restorable_capture_cell() {
+                    // env cell whose content lifetime is per-rebind (shorter than the
+                    // cell's) — no owner edge (see the doc above; §3 hazard).
+                    if bi.is_restorable_capture_cell() {
                         continue;
                     }
+                    if bi.needs_capture() {
+                        // A prebound immutable letrec cell: re-point the edge at the CELL
+                        // region so external uniqueness sees `closure ⊇ cell` (paired with
+                        // the walk's `cell ⊇ content`). `single_cell_region_of` yields the
+                        // cell only when the binding minted exactly one — a `populate_env`
+                        // route (no compiled cell) OR an ambiguous multi-cell double-declare
+                        // yields `None` and stays a borrow. The lowerer applies the SAME
+                        // gate, so the emitted `AdoptCellRegion` names the same cell.
+                        if let Some(cell_r) = info.single_cell_region_of(c.binding) {
+                            if cell_r != closure_r && info.live_regions.contains(&cell_r) {
+                                out.push((h.id, cell_r, closure_r));
+                            }
+                        }
+                        continue;
+                    }
+                    // A by-value capture: `closure ⊇ content`, pointed at the content.
                     let Some(regions) = info.binding_source_regions.get(&c.binding) else {
                         continue;
                     };
@@ -73,27 +102,35 @@ pub(super) fn capture_containment_edges(
     out
 }
 
-/// Regions that hold a **closure** (a `Lambda`'s `alloc_region`). A `letrec` self/mutual
-/// recursive closure is not a clean region cycle: it is a capture-cell↔closure structure —
-/// the forward-reference cell holds the closure (`StoreCaptureCell`) and the closure
-/// captures the cell. Crucially the **cell⊇closure containment records no `cross_region_ref`
-/// edge** (capture-cell stores are uncounted, like ordinary capture), so it is *invisible*
-/// to the external-uniqueness scan: a co-owned SCC over the closure regions looks externally
-/// unique while the cell still references the closures from outside the SCC. Freeing the SCC
-/// wholesale then dangles the cell, and the cell's own `DecrefRegion` over-frees — a
-/// use-after-free that `--trace=guardfree` detonates under the full stdlib (the
-/// `region_ownership_reclaims_*_recursion_closure_cycle` runtime tests pin the shapes; the
-/// `without_stdlib` plain-VM harness reads the freed-but-intact page and masks it).
+/// Regions that hold a **closure** (a `Lambda`'s `alloc_region`) — the members
+/// [`compute_owned_region_groups`] refuses, holding the co-owned-group free to its charter:
+/// **store-only** runtime cycles (a bare `@array ↔ @array` knot with no closure member). A
+/// closure-involving cycle is owned by a *different* mechanism, so routing it here would be
+/// unsound or redundant. This refusal is a **mechanism boundary**, not a conservatism.
 ///
-/// Until the cell⊇closure containment is modeled (so external uniqueness can see it),
-/// [`compute_owned_region_groups`] **refuses** any cycle touching a closure region — it
-/// stays Shared (per-region RC: leaks an immutable closure cycle, which is acceptable; a
-/// UAF is not). This is the always-legal baseline, correct by construction. The
-/// capture-back-edge subset (a container captured by a closure it holds — an SCC whose
-/// interior edges mix capture AND store) does not rest there: `compute_activation_adopts`
-/// claims it for the activation owner node, whose completion release frees the cycle
-/// wholesale (no cell is involved — the closure is `let`-bound, not a letrec forward
-/// reference — so the invisible-containment hazard above does not arise).
+/// - A **`letrec` closure clique** — a forward cell holds the closure (`StoreCaptureCell`)
+///   and the sibling closures capture the cell (the `cell ↔ closure` cycle) — is collapsed
+///   onto one arena by the closure-cycle **MERGE** (`regions::merge`, O(1), which runs before
+///   this pass), so its members resolve through `merged_root` and never reach the group walk
+///   as independent regions. A merge-REFUSED such clique is refused *here* too, because the
+///   group free resolves each member value with `result_region_of`, which UNWRAPS a
+///   `CaptureCell` to its content — so it cannot name a cell member's OWN region, and freeing
+///   the set would dangle the cell and over-free (a `--trace=guardfree` UAF). The group cut is
+///   structurally the wrong owner for a cell-bearing cycle; the merge is the right one (and the
+///   `targets.len() != scc.len()` gate below independently refuses a multi-cell letrec clique,
+///   whose cells share one `begin_cell_regions` mint site).
+/// - The **capture-back-edge SCC** — a container captured by a closure it holds (`m ⊇ c`
+///   store, `c ⊇ m` capture) — is claimed by the ACTIVATION cut
+///   (`compute_activation_adopts`), whose owner-node completion release frees it. Refusing
+///   closure regions here is exactly what leaves it for that cut (pinned by
+///   `activation_adopts_capture_back_edge_scc` and `activation_adopt_excludes_other_mechanisms`:
+///   a store-only cycle goes to the group free, a capture cycle to the activation node).
+///
+/// The `closure ⊇ cell ⊇ content` containment the walk now records
+/// (`capture_containment_edges` re-pointed through the cell + the `cell ⊇ content` edge) does
+/// NOT move a cyclic closure clique into the group cut; it lets the rooted-subtree cut
+/// ([`compute_owned_subtrees`]) reclaim a **non-cyclic** local capture clique via
+/// `AdoptCellRegion` (pinned by `owned_subtrees_admits_local_capture_cell_clique`).
 pub(super) fn closure_regions(hir: &Hir, info: &RegionInfo) -> FxHashSet<Region> {
     fn walk(h: &Hir, info: &RegionInfo, out: &mut FxHashSet<Region>) {
         if matches!(h.kind, HirKind::Lambda { .. }) {

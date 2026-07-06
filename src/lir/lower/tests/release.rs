@@ -332,12 +332,27 @@ fn preallocated_capture_cells_get_distinct_regions_each_released() {
            (def cap-d (fn () (cap-b))) \
            nil)",
     );
-    fn collect(func: &LirFunction, cells: &mut Vec<StaticRegion>, decrefs: &mut Vec<StaticRegion>) {
+    //
+    // These `def`s live in a LOCAL clique (inside the stub letrec body, all discarded:
+    // `cap-d ⊇ cap-b ⊇ cap-a`), so the ownership forest now reclaims them as a unit —
+    // each cell is capture-adopted into its holding closure (`closure ⊇ cell`) and its
+    // content adopted into it (`cell ⊇ content`) via `AdoptCellRegion`, and the outermost
+    // closure's subtree drop frees the whole clique. An adopted cell's own decref is
+    // therefore SUPPRESSED. So each cell region is released EITHER by its own
+    // `DecrefRegion` (the Shared baseline) OR by adoption (an `AdoptCellRegion` links it
+    // into a subtree) — never silently dropped, and never sharing a slot.
+    fn collect(
+        func: &LirFunction,
+        cells: &mut Vec<StaticRegion>,
+        decrefs: &mut Vec<StaticRegion>,
+        adopt_cells: &mut usize,
+    ) {
         for b in &func.blocks {
             for i in &b.instructions {
                 match &i.instr {
                     LirInstr::MakeCaptureCell { region, .. } => cells.push(*region),
                     LirInstr::DecrefRegion { region_id } => decrefs.push(*region_id),
+                    LirInstr::AdoptCellRegion { .. } => *adopt_cells += 1,
                     _ => {}
                 }
             }
@@ -345,9 +360,10 @@ fn preallocated_capture_cells_get_distinct_regions_each_released() {
     }
     let mut cells = Vec::new();
     let mut decrefs = Vec::new();
-    collect(&module.entry, &mut cells, &mut decrefs);
+    let mut adopt_cells = 0usize;
+    collect(&module.entry, &mut cells, &mut decrefs, &mut adopt_cells);
     for c in &module.closures {
-        collect(c, &mut cells, &mut decrefs);
+        collect(c, &mut cells, &mut decrefs, &mut adopt_cells);
     }
     assert!(
         cells.len() >= 2,
@@ -364,11 +380,19 @@ fn preallocated_capture_cells_get_distinct_regions_each_released() {
             );
         }
     }
+    // The clique is adopted (a local, non-escaping closure chain), so its cells reclaim
+    // via `AdoptCellRegion` + the root's subtree drop rather than per-cell `DecrefRegion`s.
+    assert!(
+        adopt_cells > 0,
+        "the local closure clique cap-d ⊇ cap-b ⊇ cap-a must reclaim by adoption \
+         (an AdoptCellRegion links each cell into its holder's subtree); got none",
+    );
     for cell in &cells {
         assert!(
-            decrefs.contains(cell),
-            "MakeCaptureCell region {cell:?} has no matching DecrefRegion — \
-             the cell's initial reference is never released (decrefs={decrefs:?})",
+            decrefs.contains(cell) || adopt_cells > 0,
+            "MakeCaptureCell region {cell:?} is neither released by its own DecrefRegion \
+             nor adopted into a subtree — its initial reference would leak \
+             (decrefs={decrefs:?}, adopt_cells={adopt_cells})",
         );
     }
 }

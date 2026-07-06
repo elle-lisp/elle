@@ -95,6 +95,24 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
+            LirInstr::AdoptCellRegion { parent, child } => {
+                // Like `AdoptRegion`, but the helper resolves BOTH operands with
+                // `region_of` (NOT `result_region_of`) so a `CaptureCell` operand's
+                // OWN region is adopted (the cell↔closure containment —
+                // docs/impl/region-model.md § "The capture adopt"). Mirrors the
+                // interpreter's `handle_adopt_cell_region`.
+                let (pt, pp) = self.use_var_pair(builder, parent.0);
+                let (ct, cp) = self.use_var_pair(builder, child.0);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("AdoptCellRegion without vm pointer".to_string())
+                })?;
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.adopt_cell_region, builder.func);
+                let call = builder.ins().call(func_ref, &[pt, pp, ct, cp, vm]);
+                let _ = builder.inst_results(call);
+            }
+
             LirInstr::AdoptIntoActivation { child } => {
                 // Adopt the child's region into the current activation's owner
                 // node — the runtime channel of the activation-ownership cuts

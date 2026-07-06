@@ -225,6 +225,43 @@ pub extern "C" fn elle_jit_adopt_region(
     }
 }
 
+/// Link the child value's region as an Owned member of the parent value's
+/// region, resolving BOTH operands with `region_of` — NOT `result_region_of` —
+/// the `AdoptCellRegion` instruction. Mirrors the interpreter's
+/// `handle_adopt_cell_region` arm: a `CaptureCell` operand's OWN region is
+/// adopted (never unwrapped to its content), which is what lets the forest own a
+/// capture cell's arena and reclaim a local recursive/letrec closure clique as a
+/// unit (docs/impl/region-model.md § "The capture adopt"). This is the
+/// `region_of`-adopt counterpart of `elle_jit_adopt_region`, exactly as
+/// `elle_jit_decref_cell_region` is the `region_of` counterpart of
+/// `elle_jit_decref_value_region`. An immediate operand (no region) or a self-edge
+/// (same region) is a no-op.
+#[no_mangle]
+pub extern "C" fn elle_jit_adopt_cell_region(
+    parent_tag: u64,
+    parent_payload: u64,
+    child_tag: u64,
+    child_payload: u64,
+    vm: *mut (),
+) {
+    let parent = Value {
+        tag: parent_tag,
+        payload: parent_payload,
+    };
+    let child = Value {
+        tag: child_tag,
+        payload: child_payload,
+    };
+    let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
+    let parent_region = crate::value::arena::region_of(heap, parent);
+    let child_region = crate::value::arena::region_of(heap, child);
+    if let (Some(p), Some(c)) = (parent_region, child_region) {
+        if p != c {
+            heap.adopt_region(p, c);
+        }
+    }
+}
+
 /// Adopt the child value's region into the CURRENT activation's owner node —
 /// the `AdoptIntoActivation` instruction. Mirrors the interpreter's
 /// `handle_adopt_into_activation` arm (src/vm/dispatch/region.rs): resolve the
