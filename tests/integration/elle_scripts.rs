@@ -190,6 +190,25 @@ fn region_native_tail_mutual_cycle_uaf() {
     );
 }
 
+// Guard — a fresh `%pair` pushed into a fresh, let-bound `@[]` whose push result is
+// DISCARDED, in a loop, must reclaim its Owned subtree without a double-free. The pair
+// is a store-adopted member whose own slot-resolved `DecrefRegion` is a no-op only
+// while it is still `Owned`, so it must be emitted before the container's subtree drop.
+// At the let-body the pair and the container share a `decref_point`, and the container
+// is freed by TWO releases there (its binding release and the discarded pass-through
+// result of `%array-push`, which returns its container); the pre-fix bucket sort placed
+// the pair's plain `DecrefRegion` LAST, so the drop reclaimed the pair before its own
+// decref — a phantom/double-free (SIGSEGV under guardfree). The members-first bucket
+// sort (`with_region_info`) orders the member's release ahead of the container's.
+// docs/impl/region-model.md § "The lifetime obligation the root carries".
+#[test]
+fn region_array_push_pair_loop_uaf() {
+    run_elle_script_with_args(
+        "region-array-push-pair-loop-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Correctness guard — the splice/`apply` manifestation of the native-tail-return
 // retain. `(first ;argv)` lowers to `TailCallArrayMut`, whose post-block emits
 // the ReturnValue retain (lower_call splice arm). Known limitation: the splice

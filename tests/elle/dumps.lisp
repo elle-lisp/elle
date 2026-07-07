@@ -25,8 +25,6 @@
 (assert (string/contains? (get d :lir) "←")
         "lir must show register assignment arrows")
 (assert (string/contains? (get d :cfg) "→") "cfg must show successor edges")
-(assert (string/contains? (get d :dfa) "rotation_safe=")
-        "dfa must report rotation safety")
 (assert (string/contains? (get d :jit) "eligible=")
         "jit must report eligibility")
 

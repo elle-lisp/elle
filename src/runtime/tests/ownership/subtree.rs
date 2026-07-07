@@ -337,3 +337,54 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
          drop through the store-adopted closure `c` (a stranded leak)",
     );
 }
+
+/// End-to-end soundness of the store-adopt **emit order** at a shared `decref_point`.
+/// A fresh `%pair` is pushed into a fresh, LET-BOUND `(@array)` whose push result is
+/// DISCARDED (the `let` is not the loop body's tail), driven in a loop. The container
+/// is a `Fresh` call-result freed value-based, and at the let-body it is freed by TWO
+/// releases — its binding release AND the discarded pass-through result of
+/// `%array-push` (which returns its container) — while the pushed pair is a
+/// store-adopted member whose OWN slot-resolved `DecrefRegion` shares that same
+/// `decref_point`. The member's decref is a structural no-op only while it is still
+/// `Owned`, so it must be emitted before the container's rc-zeroing release; the
+/// members-first bucket sort (`with_region_info`) guarantees it. Pre-fix the sort put
+/// the member's plain `DecrefRegion` LAST, so the container's discarded-pass-through
+/// release subtree-dropped the pair before its own decref — the pair's slot-resolved
+/// `DecrefRegion` then landed on a freed region (the phantom/double-free panic at
+/// `regionstore/refcount.rs`). This is the counterfactual: `steady_region_growth`
+/// runs the loop and would PANIC on the first double-free before the fix.
+///
+/// Requires the intrinsic (`--checked-intrinsics=off`) path — the ambient default in
+/// these tests — where `%pair` lowers as an intrinsic freed by a slot-resolved
+/// `DecrefRegion`; checked-on the member is a `Fresh` value-based release that
+/// tolerates the freed case. Bounded growth beside the leaking discriminator confirms
+/// the subtree still reclaims each iteration (the fix reorders releases, it does not
+/// refuse the adopt).
+#[test]
+fn region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims() {
+    // The pushed pair is a store-adopted member of the let-bound container's Owned
+    // subtree; the loop rebuilds and reclaims it every iteration. The container's push
+    // result is discarded (the `let` precedes `(assign j …)`), so the discarded
+    // pass-through release coincides with the member's decref — the emit order the fix
+    // corrects.
+    const SUBJECT: &str = "(begin (def @j 0) \
+                           (while (%lt j 3) \
+                             (let [items (@array)] (%array-push items (%pair 1 2))) \
+                             (assign j (%add j 1))) \
+                           nil)";
+    let leak = leak_discriminator();
+    // Pre-fix this call panics on the first iteration's double-free (the counterfactual);
+    // post-fix it returns a bounded growth.
+    let on = steady_region_growth(SUBJECT);
+    assert!(
+        leak > 0,
+        "gauge live: the discriminator must leak (per-run region growth {leak}); if 0 \
+         the gauge is dead and the bounded assertion below is vacuous",
+    );
+    assert!(
+        on <= 0,
+        "the let-bound container's Owned subtree must reclaim the pushed pair each \
+         iteration — per-run live-region growth {on} must be <= 0 (the discriminator \
+         leaks {leak})",
+    );
+}

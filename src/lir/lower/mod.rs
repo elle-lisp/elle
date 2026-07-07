@@ -370,24 +370,46 @@ impl<'a> Lowerer<'a> {
                 .or_default()
                 .push(r);
         }
+        // A store-adopted member (`owned_adopt_edges`: each store site maps to
+        // `(member, owner)` interior edges) keeps its OWN decref, which is a structural
+        // no-op only while the member is still `Owned` — i.e. only before its owner's
+        // subtree drop. So at a shared decref_point it must sort BEFORE every release
+        // that can free the member's owner there (the owner's holder-binding release AND
+        // the discarded pass-through result of a `%array-push`/`%put`, which returns its
+        // container — both value-gated below). Ordering an `Owned` no-op ahead of the
+        // page-reading releases is safe: it reads and frees nothing; it then no-ops, and
+        // the owner's later release subtree-drops the member exactly once. Without this
+        // the readers-before-freers order below sorted the member's plain `DecrefRegion`
+        // LAST, so the owner's release reclaimed the member before its own decref, which
+        // then faulted on the freed region (the emit-order half of the lifetime
+        // obligation — docs/impl/region-model.md § "The lifetime obligation the root
+        // carries"; region-array-push-pair-loop-uaf.lisp).
+        let store_adopted_members: rustc_hash::FxHashSet<crate::hir::region::Region> = info
+            .owned_adopt_edges
+            .values()
+            .flatten()
+            .map(|&(member, _owner)| member)
+            .collect();
         // Release order at a shared decref_point is deterministic and
-        // dependency-safe (docs/impl/region-rules.md Rule 4): releases that READ pages
-        // come before releases that FREE them. Class 0 — `DecrefValueRegion`
-        // (loads a slot and derefs the value, unwrapping a capture cell);
-        // class 1 — `DecrefCellRegion` (reads the cell's page header via
-        // `region_of`); class 2 — plain `DecrefRegion` (frees, reads nothing).
-        // Region id breaks ties so the order never depends on hash iteration
-        // (`region_data` is a HashMap; its iteration order is random per
+        // dependency-safe (docs/impl/region-rules.md Rule 4): a store-adopted member's
+        // `Owned` no-op sorts FIRST (class 0), then releases that READ pages come before
+        // releases that FREE them. Class 1 — `DecrefValueRegion` (loads a slot and
+        // derefs the value, unwrapping a capture cell); class 2 — `DecrefCellRegion`
+        // (reads the cell's page header via `region_of`); class 3 — plain `DecrefRegion`
+        // (frees, reads nothing). Region id breaks ties so the order never depends on
+        // hash iteration (`region_data` is a HashMap; its iteration order is random per
         // instance — the unsorted order was the flaky capture-cell UAF,
         // region-capture-cell-noreassign-uaf.lisp).
         for regions in decrefs_by_decref_point.values_mut() {
             regions.sort_by_key(|r| {
-                let class = if info.cell_release_regions.contains(r) {
-                    1
-                } else if info.call_result_regions.contains(r) {
+                let class = if store_adopted_members.contains(r) {
                     0
-                } else {
+                } else if info.cell_release_regions.contains(r) {
                     2
+                } else if info.call_result_regions.contains(r) {
+                    1
+                } else {
+                    3
                 };
                 (class, r.0)
             });

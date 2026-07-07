@@ -192,19 +192,33 @@ fn release_order_value_gated_before_plain_in_shared_bucket() {
     // (`DecrefValueRegion`/`DecrefCellRegion`) reads them (it derefs the
     // loaded value — unwrapping the capture cell — to find its region). At a
     // shared decref_point every value-gated release must therefore be ordered
-    // before every plain free. The bucket order must not depend on std
+    // before every plain FREE. The bucket order must not depend on std
     // HashMap iteration (random per instance) — hence the rounds: one unsafe
     // permutation fails the test.
+    //
+    // Exception: a store-adopted member's plain `DecrefRegion` is an `Owned` no-op
+    // (frees and reads nothing), so it is NOT a page-freeing release — it sorts ahead
+    // of the value-gated readers on purpose (it must precede its owner's drop; see
+    // `store_adopted_member_release_precedes_owner_in_shared_bucket`). So the
+    // "value-gated before plain" invariant is over the plain releases that actually
+    // FREE — store-adopted members excluded.
     for round in 0..16 {
         let (lowerer, _hir) = make_lowerer(CAPTURE_CELL_SHAPE);
         let info = &lowerer.region_info;
+        let store_adopted: std::collections::HashSet<_> = info
+            .owned_adopt_edges
+            .values()
+            .flatten()
+            .map(|&(member, _owner)| member)
+            .collect();
         let mut saw_mixed = false;
         for (point, regions) in &lowerer.decrefs_by_decref_point {
             // cell_release_regions ⊆ call_result_regions: membership in
-            // call_result_regions is exactly "released value-gated".
+            // call_result_regions is exactly "released value-gated". A store-adopted
+            // member is an Owned no-op, not a genuine freer, so exclude it.
             let first_plain = regions
                 .iter()
-                .position(|r| !info.call_result_regions.contains(r));
+                .position(|r| !info.call_result_regions.contains(r) && !store_adopted.contains(r));
             let last_value_gated = regions
                 .iter()
                 .rposition(|r| info.call_result_regions.contains(r));
@@ -395,6 +409,61 @@ fn preallocated_capture_cells_get_distinct_regions_each_released() {
              (decrefs={decrefs:?}, adopt_cells={adopt_cells})",
         );
     }
+}
+
+#[test]
+fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
+    // A store-adopted member's own `DecrefRegion` is an `Owned` no-op only while the
+    // member is still `Owned`, so it must be emitted BEFORE every release that can free
+    // the member's owner. At a shared `decref_point` the intra-bucket order is what
+    // enforces this (docs/impl/region-model.md § "The lifetime obligation the root
+    // carries"). The counterfactual is the `%pair`-into-`@[]` double-free
+    // (region-array-push-pair-loop-uaf.lisp): the container is a `Fresh` call-result
+    // freed value-based (and, when its push result is discarded, freed a second time by
+    // that pass-through result), and the pushed `%pair` is a plain-`DecrefRegion`
+    // member sharing the container's `decref_point`. The pre-fix bucket sort
+    // (readers-before-freers) placed the member's plain `DecrefRegion` LAST, so the
+    // container's rc-zeroing release subtree-dropped the pair before its own decref —
+    // which then faulted on the freed region. The members-first bucket class fixes it.
+    //
+    // Forces the intrinsic (`--checked-intrinsics=off`) path where the pushed pair is a
+    // slot-resolved `DecrefRegion` member (checked-on it is a value-resolved `Fresh`
+    // release, a different bucket class).
+    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(false);
+    let (lowerer, _hir) = make_lowerer("(let [items @[]] (%array-push items (%pair 1 2)))");
+    let has_adopt = !lowerer.region_info.owned_adopt_edges.is_empty();
+    assert!(
+        has_adopt,
+        "expected `(%array-push items (%pair 1 2))` to produce a store-adopt edge \
+         (owned_adopt_edges) on the checked-off path; got none — if intrinsic \
+         classification changed, update the shape so this test keeps biting",
+    );
+    let mut saw_shared = false;
+    for &(member, owner) in lowerer.region_info.owned_adopt_edges.values().flatten() {
+        for regions in lowerer.decrefs_by_decref_point.values() {
+            let mi = regions.iter().position(|r| *r == member);
+            let oi = regions.iter().position(|r| *r == owner);
+            if let (Some(mi), Some(oi)) = (mi, oi) {
+                saw_shared = true;
+                assert!(
+                    mi < oi,
+                    "store-adopted member r{} is released AFTER its owner r{} in a \
+                     shared decref bucket ({regions:?}) — the owner's rc-zeroing \
+                     release subtree-drops the member before its own (no-op) \
+                     DecrefRegion fires, which then faults on the freed region \
+                     (the %pair-into-@[] double-free)",
+                    member.0,
+                    owner.0,
+                );
+            }
+        }
+    }
+    assert!(
+        saw_shared,
+        "expected the store-adopted member and its owner to share a decref_point \
+         bucket (the coincident straight-line case the emit order must handle) — if \
+         region analysis changed, update the shape so this test keeps biting",
+    );
 }
 
 #[test]

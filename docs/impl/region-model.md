@@ -538,7 +538,14 @@ not expressible the other way.
   when the owner frees, its free-time cascade scans its contents and decrefs the
   interior child, but that decref finds an `Owned` region and no-ops, and the subtree
   drop below frees it explicitly. (So, as with mint-or-reuse, a missed interior-edge
-  suppression costs nothing — the `Owned` mode absorbs it.)
+  suppression costs nothing — the `Owned` mode absorbs it.) A **store-adopted** member
+  keeps its **own** compiler-emitted decref too (unlike a capture-adopted member, whose
+  decref is suppressed); that decref is likewise a structural no-op **provided it fires
+  while the member is still `Owned`** — i.e. **before** the root's subtree drop. The
+  emit guarantees that ordering even when member and root share a `decref_point` node
+  (§ "The lifetime obligation the root carries"): the member's release is sorted ahead
+  of the root's, so it lands on the frozen `Owned` region and no-ops, and the root's
+  later drop reclaims the member exactly once.
 - **`reparent_owned_children(from, to)`** hands `from`'s whole direct
   `owned_children` set to `to`: each child is re-stamped `Owned { owner: to }` and the
   set is appended to `to`'s children — a **move**, never a copy, so the forest's
@@ -1056,6 +1063,41 @@ loop clause is waived. The external-uniqueness walk
 does not by itself order lifetimes, so this obligation is the emit's, not the
 walk's. (The pinning test is the e2e reclamation tier; an interior-outlives-root
 shape must stay Shared, never adopt.)
+
+**Post-domination is necessary but not sufficient — the emit order carries the
+rest.** Node-granularity post-dominance admits a member whose `decref_point` is the
+**same node** as the root's demise (the straight-line coincident case — a fresh
+container built and consumed in one expression). At that shared node the *intra-node
+emission order* then decides soundness, because a store-adopted member keeps its own
+`DecrefRegion`, whose no-op depends on the member still being **`Owned`**: it must be
+emitted **before** every release that can free the member's owner at that node. Two
+facts make "before" non-trivial for a container root:
+
+- The root of a mutable-store subtree is typically a `Fresh` **call-result** region
+  freed value-based, and it carries **more than one** runtime reference — the
+  holder-binding release *and* the **discarded pass-through result** of the store
+  itself (`%array-push`/`%put` return their container, so the store's own result is a
+  second call-result region that resolves to the root at runtime and, when the result
+  is discarded, releases the root). Whichever release zeroes the root triggers the
+  subtree drop; the obligation's single `region_data[root].decref_point` names only
+  one of them.
+- A store-adopted member's own `DecrefRegion` is a structural no-op **only while the
+  member is `Owned`**; once the subtree drop has reclaimed it, that slot-resolved
+  decref faults (`regionstore/refcount.rs`, the phantom/double-free assert).
+
+So the emit orders every store-adopted member's release **first** at each shared
+`decref_point` — the members-first class in `with_region_info`'s bucket sort — ahead of
+the call-result readers and the plain freers. A member's release reads and frees
+nothing while `Owned`, so ordering it before the readers is safe; it then no-ops, and
+whichever root-freeing release fires afterward subtree-drops the member exactly once.
+The invariant this restores is stated positively in § "The runtime: a reclamation
+typestate and `owned_children`": a store-adopted member's decref hits the still-frozen
+`Owned` region — a no-op — because it is emitted before the root's drop. The reference
+for the inverted-order double-free it prevents is a test, never this prose:
+`lir::lower::tests::release::store_adopted_member_release_precedes_owner_in_shared_bucket`
+(the emit-order pin), `region_array_push_pair_loop_uaf` (the guardfree witness), and
+`runtime::tests::ownership::region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims`
+(bounded + panic-clean).
 
 ### Why this is hybrid, and where RC remains
 

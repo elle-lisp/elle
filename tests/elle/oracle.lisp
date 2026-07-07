@@ -882,29 +882,45 @@
 # a debug equivalence oracle asserts the recorded table matches a content scan at every
 # free. These pins read the seam THROUGH the surface that reaches it, and split cleanly:
 #
-#   SETTLED (rate 0) — the seam balances: a box store+rebind, an @set add, and the raw
-#   @array remove intrinsic `%pop` each reclaim their cross-region member. `raw-pop` is
-#   the reclaiming CONTROL (the peer of push-slot-source/put-slot-source) that proves the
-#   remove funnel itself is sound — so a wrapper that leaks over it is the wrapper's leak.
-#   Like those store-side peers it is a DIRECT while-statement, not a thunk: the popped
-#   value is discarded as a statement (never returned), so this isolates the remove
-#   funnel's own reclamation — from the return convention (a thunk's return would
-#   inflate the rate by 1) and from the ownership forest's separate handling of a value
-#   pushed into a LOCAL and then popped OUT and RETURNED (an escape the forest resolves,
-#   not the funnel seam). The seam's reclamation is what this control pins.
+#   Several of these pins DIVERGE by intrinsics mode (the `pin` unchecked-rate arg): the
+#   raw remove intrinsics reach the value through a different funnel checked-on (an opaque
+#   native call, `dispatch_native_call`) than checked-off (an inlined opcode), and the two
+#   are not yet at parity — the migration seam `--checked-intrinsics` exists for
+#   (docs/impl memory model §3). Each mode's pin is the true current rate for that path,
+#   shrink-only.
+#
+#   `%pop` — checked-on the seam balances (rate 0): a box store+rebind, an @set add, and
+#   `%pop`'s `moves_out` native each reclaim their cross-region member, so `raw-pop` is
+#   the reclaiming CONTROL (the peer of push-slot-source/put-slot-source) proving the
+#   remove funnel sound, and a wrapper that leaks over it is the wrapper's leak. It is a
+#   DIRECT while-statement, not a thunk: the popped value is discarded as a statement, so
+#   it isolates the remove funnel's own reclamation from the return convention and from
+#   the ownership forest's handling of a value pushed into a LOCAL then popped OUT and
+#   RETURNED. Checked-OFF it instead LEAKS one object/op (unchecked pin 1): the popped
+#   `%pair` is a slot-`DecrefRegion` intrinsic whose single region decref fires at its
+#   push-site last use, BEFORE `%pop`'s in-body `moves_out` retain (`pop_with_decref`)
+#   hands the element back as its result — so that retained reference is never released.
+#   Checked-on `%pop` is a native call whose result is a distinct `call_result` region
+#   with its own `DecrefValueRegion`, which balances the retain. The checked-off opcode's
+#   moved-out result has no such release; the region walk does not yet model it. A member
+#   of the checked-off-intrinsic escape-correctness gap (memory.md §3 / § F5), not the
+#   store-side double-free the ownership forest resolves (push-slot-source, closed 0 both
+#   modes).
 #
 #   F1b remove-wrapper (memory.md § F1b) — the stdlib `pop`/`del` `(match (type-of coll)
 #   …)` dispatch wrapper strands the container arg + fresh result on the arms the
 #   textually-last arm does not reach, exactly as the STORE wrappers (put/push/set) do.
-#   `raw-pop` reclaims (0) where `pop` leaks (3): the leak is the multi-arm wrapper, not
-#   the funnel. Closes by the SAME mechanism as the store half — per-arm compensation of
-#   the container+result, or dispatch prune on a statically-typed scrutinee.
+#   `pop` leaks (3): the leak is the multi-arm wrapper. Closes by the SAME mechanism as
+#   the store half — per-arm compensation of the container+result, or dispatch prune on a
+#   statically-typed scrutinee.
 #
-#   The raw remove-funnel residual — `%del` leaks even raw, in-place, on an IMMEDIATE
-#   value (raw-del-immediate below reads 1, raw-del reads 2 = that 1 plus the removed
-#   heap member's region): the @struct/@set remove intrinsic does not reach the parity
-#   `%pop` demonstrates. Closes by bringing `%del`'s result/removed-value accounting to
-#   `%pop`'s balance. Distinct from the F1b wrapper leak, which rides every remove op.
+#   The raw remove-funnel residual — `%del` leaks CHECKED-ON, in-place, even on an
+#   IMMEDIATE value (raw-del-immediate reads 1, raw-del reads 2 = that 1 plus the removed
+#   heap member's region): the @struct/@set remove native does not reach the parity `%pop`
+#   demonstrates checked-on. Checked-OFF `%del` reclaims (unchecked pin 0) — the inlined
+#   opcode balances where the native does not — the mirror image of `%pop`'s divergence.
+#   Closes by bringing both faces of `%del`'s result/removed-value accounting to parity.
+#   Distinct from the F1b wrapper leak, which rides every remove op.
 (println "── folded suite: mutable-store funnel (remove/rebind half) ──")
 (pin (measure-core "box-rebind"
                    (stmt-run (fn []
@@ -923,7 +939,7 @@
                        (let [a @[]]
                          (%array-push a (%pair 1 2))
                          (%pop a))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0 1)
 (pin (measure-core "pop-wrapper"
                    (stmt-run (fn []
                                (let [a @[]]
@@ -943,12 +959,14 @@
                    (stmt-run (fn []
                                (let [m @{}]
                                  (%put m :k (%pair 1 2))
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 2)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 2
+     0)
 (pin (measure-core "raw-del-immediate"
                    (stmt-run (fn []
                                (let [m @{}]
                                  (%put m :k 7)
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 1)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 1
+     0)
 
 # ── Fiber-internal yielding loops ─────────────────────────────────────
 # The loop and the yield live inside the fiber. The run-block creates a fiber
