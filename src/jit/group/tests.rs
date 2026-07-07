@@ -349,6 +349,7 @@ fn test_find_targets_with_tail_call() {
                 arity_checked: false,
                 region: crate::hir::region::StaticRegion::new(2).unwrap(),
                 adopt_callee: false,
+                adopt_region_slot: None,
             },
             Span::synthetic(),
         ));

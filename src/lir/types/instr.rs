@@ -122,6 +122,23 @@ pub enum LirInstr {
         /// callee (no frame replacement). See `TailCallInfo` and
         /// `tests/elle/region-tailcall-closure-callee-leak.lisp`.
         adopt_callee: bool,
+        /// The static slot of a **closure-cycle merged arena** this letrec body
+        /// tail-calls a NON-member out of — set by `lower_call` from
+        /// `RegionInfo::cycle_tail_adopt` (docs/impl/region-model.md § The letrec
+        /// closure-cycle merge). The merged arena's binding-scope `DecrefRegion`
+        /// is dead past this frame-replacing `TailCall`, so when the callee turns
+        /// out to be a **closure** at runtime (a redefined operator, a foreign
+        /// fn) the new activation resolves this slot through its region map and
+        /// ADOPTS the arena — `adopted_closures` frees it once at the recursion's
+        /// completion. When the callee is a **native** (`%add`, checked-on) the
+        /// frame is NOT replaced, this slot is never consumed, and the live
+        /// scope-exit `DecrefRegion` frees the arena instead — the two paths are
+        /// mutually exclusive per call, so exactly one release fires however the
+        /// callee resolves (the compiler never classifies it). `None` for every
+        /// tail call that is not a merged clique's non-member body tail; distinct
+        /// from `adopt_callee` (the MEMBER path, `region_of(callee)`), never both
+        /// set on one call.
+        adopt_region_slot: Option<StaticRegion>,
     },
 
     // === Data Construction ===

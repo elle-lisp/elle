@@ -141,6 +141,30 @@ fn disassemble_skips_check_signal_bound_operand() {
 }
 
 #[test]
+fn disassemble_skips_tail_call_operands() {
+    // TailCall carries args(u16) + region(u32) + adopt_callee(u8) +
+    // adopt_region_slot(u32) = 11 operand bytes. The disassembler must skip
+    // exactly those and decode the following opcode, so the closure-cycle
+    // adopt slot (0 = None) keeps the stream aligned. See
+    // `LirInstr::TailCall::adopt_region_slot`.
+    let mut bc = Bytecode::new();
+    bc.emit(Instruction::TailCall);
+    bc.emit_u16(2); // arg_count
+    bc.emit_u32(7); // region slot
+    bc.emit_byte(0); // adopt_callee = false
+    bc.emit_u32(9); // adopt_region_slot = Some(9)
+    bc.emit(Instruction::Return);
+    let lines = disassemble_lines(&bc.instructions);
+    assert_eq!(lines.len(), 2, "got: {lines:?}");
+    assert!(lines[0].contains("TailCall"), "got: {lines:?}");
+    assert!(
+        lines[0].contains("adopt_callee=0") && lines[0].contains("adopt_region_slot=9"),
+        "got: {lines:?}"
+    );
+    assert!(lines[1].contains("Return"), "got: {lines:?}");
+}
+
+#[test]
 fn disassemble_does_not_panic_on_unknown_opcode() {
     // A byte that does not map to any Instruction variant must not
     // panic the disassembler. This guards against the

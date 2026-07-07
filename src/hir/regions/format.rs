@@ -69,6 +69,38 @@ pub fn format_regions(
         }
     }
 
+    // The merge forest (docs/impl/region-model.md § Merging, § The letrec
+    // closure-cycle merge): each child → its `merged_root`, tagged `[closure-cycle]`
+    // for a mutual-recursion SCC/cell member (vs a builder-idiom aggregate child),
+    // plus the non-member body-tail adopt sites keyed to their merged arena. The
+    // permanent instrument for which cliques merged and how each is released.
+    if !info.merged_parent.is_empty() || !info.cycle_tail_adopt.is_empty() {
+        writeln!(buf).unwrap();
+        writeln!(buf, ";; ── merge forest ──").unwrap();
+        let mut merges: Vec<_> = info.merged_parent.iter().collect();
+        merges.sort_by_key(|(c, _)| c.0);
+        for (child, _parent) in &merges {
+            let tag = if info.closure_cycle_members.contains(child) {
+                " [closure-cycle]"
+            } else {
+                ""
+            };
+            writeln!(
+                buf,
+                "  r{} → root r{}{}",
+                child.0,
+                info.merged_root(**child).0,
+                tag
+            )
+            .unwrap();
+        }
+        let mut sites: Vec<_> = info.cycle_tail_adopt.iter().collect();
+        sites.sort_by_key(|(id, _)| id.0);
+        for (site, root) in &sites {
+            writeln!(buf, "  tail-adopt @{} → arena r{}", site.0, root.0).unwrap();
+        }
+    }
+
     fn set_line(buf: &mut String, label: &str, set: &rustc_hash::FxHashSet<Region>) {
         use std::fmt::Write;
         if !set.is_empty() {

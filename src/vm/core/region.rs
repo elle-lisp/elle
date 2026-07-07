@@ -266,6 +266,27 @@ impl VM {
         }
         (bits, value)
     }
+    /// Resolve a static slot to the physical region it currently maps to in this
+    /// activation, WITHOUT minting or clearing — the read a closure-cycle
+    /// merged-arena tail-call adopt needs (`TailCall::adopt_region_slot`,
+    /// docs/impl/region-model.md § The letrec closure-cycle merge).
+    ///
+    /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping
+    /// in place: the arena is handed to the completing activation's
+    /// `adopted_closures`, and its own scope-exit `DecrefRegion` is dead code past
+    /// the frame-replacing tail call, so the mapping is never consumed by a drop.
+    /// `None` when the slot is unmapped — the merged alloc did not execute in this
+    /// activation (nothing to adopt).
+    #[inline]
+    pub(crate) fn runtime_region_for_adopt_slot(
+        &self,
+        static_id: StaticRegion,
+    ) -> Option<RuntimeRegion> {
+        self.fiber
+            .activation_region_maps
+            .last()
+            .and_then(|frame| frame.get(&static_id.get()).copied())
+    }
     /// Resolve a static region id for a `DecrefRegion` (the compiler's
     /// initial-reference drop at a value's decref_point). Returns the physical
     /// region and clears the slot; `None` if the allocation never executed

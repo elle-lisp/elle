@@ -287,6 +287,7 @@ impl Emitter {
                 arity_checked,
                 region,
                 adopt_callee,
+                adopt_region_slot,
                 // The stack-based VM leaves a normally-completing native's
                 // result on the operand stack for `Return` to pop; `dst` is a
                 // JIT-only binding (see `LirInstr::TailCall`).
@@ -327,6 +328,14 @@ impl Emitter {
                 // region when the new activation completes (the dead-past-TailCall
                 // decref). See `LirInstr::TailCall::adopt_callee`.
                 self.bytecode.emit_byte(if *adopt_callee { 1 } else { 0 });
+                // Closure-cycle merged-arena adopt slot (u32; `0` = None, since a
+                // `StaticRegion` is `NonZeroU32`). When the callee resolves to a
+                // closure at runtime the new activation adopts THIS slot's region;
+                // a native callee never consumes it (the live scope-exit
+                // `DecrefRegion` frees the arena). See
+                // `LirInstr::TailCall::adopt_region_slot`.
+                self.bytecode
+                    .emit_u32(adopt_region_slot.map_or(0, |s| s.get()));
             }
 
             LirInstr::List {

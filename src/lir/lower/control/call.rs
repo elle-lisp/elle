@@ -272,6 +272,19 @@ impl<'a> Lowerer<'a> {
                 // on the stack and ignores it.
                 let dst = self.fresh_reg();
                 let adopt_callee = self.tail_callee_adopts(func);
+                // A letrec body tail-calling a NON-member out of a closure-cycle
+                // merged arena carries the arena's root slot: the binding-scope
+                // `DecrefRegion` is dead past this frame-replacing `TailCall`, so a
+                // closure callee's new activation adopts and frees the arena at the
+                // recursion's completion (a native callee never consumes it and the
+                // live scope-exit drop fires). Keyed by the tail-call HirId in
+                // `cycle_tail_adopt`; canonicalized through `merged_root` by
+                // `static_slot` like every merge slot. A MEMBER callee is absent from
+                // the map and keeps `adopt_callee` (the two never both fire).
+                let adopt_region_slot = self
+                    .current_hir_id
+                    .and_then(|id| self.region_info.cycle_tail_adopt.get(&id).copied())
+                    .map(|root| self.static_slot(root));
                 self.emit_alloc(|region| LirInstr::TailCall {
                     region,
                     dst,
@@ -279,6 +292,7 @@ impl<'a> Lowerer<'a> {
                     args: arg_regs,
                     arity_checked,
                     adopt_callee,
+                    adopt_region_slot,
                 });
                 // ReturnValue retain on the native-completion fall-through, the
                 // tail-position mirror of `lower_return`'s `IncrefValueRegion`.

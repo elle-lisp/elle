@@ -427,14 +427,30 @@ pub struct RegionInfo {
     /// Every member region of a letrec closure-cycle merge — the SCC closures
     /// and their forward cells, roots included
     /// (docs/impl/region-model.md § The letrec closure-cycle merge). The merged
-    /// arena is released exactly once by the merge's own channel (the root's
-    /// binding-scope `DecrefRegion`, or the stranded-cycle tail-call adopt when
-    /// the letrec body tail-calls a member), so `tail_callee_adopts` refuses any
-    /// OTHER tail call to a member — an interior sibling rotation's callee
-    /// region demises at that call node and would otherwise pass the general
-    /// dies-here adopt, double-releasing the arena. A subset of the merge
-    /// forest's keys/roots; empty when no cycle merged.
+    /// arena is released exactly once by the merge's own channel: the root's
+    /// binding-scope `DecrefRegion` (a non-tail body, OR a native body tail whose
+    /// frame is not replaced), the stranded-cycle tail-call adopt (a MEMBER body
+    /// tail — `stranded_cycle_bindings`), or the explicit arena adopt on a
+    /// NON-member body tail whose callee resolves to a closure (`cycle_tail_adopt`
+    /// → `TailCall::adopt_region_slot`). So `tail_callee_adopts` refuses any OTHER
+    /// tail call to a member — an interior sibling rotation's callee region demises
+    /// at that call node and would otherwise pass the general dies-here adopt,
+    /// double-releasing the arena. A subset of the merge forest's keys/roots; empty
+    /// when no cycle merged.
     pub closure_cycle_members: FxHashSet<Region>,
+    /// Non-member body-tail-call sites of a closure-cycle merge: tail-call HirId →
+    /// the merged arena's canonical root region (docs/impl/region-model.md § The
+    /// letrec closure-cycle merge). A `letrec` whose body ends in a tail call to a
+    /// NON-member (a native `%add`, a redefined operator `+`, a foreign closure `g`)
+    /// strands the merged arena's binding-scope `DecrefRegion` as dead code past the
+    /// frame-replacing `TailCall`; the lowerer reads this to carry the arena's static
+    /// slot on that `TailCall` (`adopt_region_slot`), so when the callee resolves to a
+    /// closure the new activation adopts and frees it at the recursion's completion,
+    /// while a native callee falls through to the live scope-exit drop. A MEMBER body
+    /// tail keeps the `stranded_cycle_bindings` → `tail_callee_adopts` path and is NOT
+    /// recorded here. Empty when no cycle merged (or every merged cycle's body
+    /// tail-calls only members). Populated from `ClosureCycleMerge::tail_adopt_sites`.
+    pub cycle_tail_adopt: HashMap<HirId, Region>,
     /// Ownership forest (docs/impl/region-model.md § "Adoption and subtree
     /// drop"), populated by the ownership pass; empty when the shape stays Shared,
     /// so the lowerer's emission is then the per-region-RC baseline. Store-site HirId → the interior
@@ -577,6 +593,7 @@ impl RegionInfo {
             begin_cell_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),
+            cycle_tail_adopt: HashMap::new(),
             owned_adopt_edges: HashMap::new(),
             capture_adopt_edges: HashMap::new(),
             cell_content_adopt_bindings: FxHashSet::default(),

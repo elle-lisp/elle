@@ -171,6 +171,25 @@ fn region_selfrec_captured_tail_adopt() {
     );
 }
 
+// Guard — a local mutual-recursion clique (`ev`/`od`) whose `letrec` body ends in a
+// tail call to a NON-member (a native `%add`, the redefined-closure operator `+`, a
+// foreign fn `g`, and a MIXED member+non-member `if`) must reclaim its merged arena
+// soundly. The frame-replacing `TailCall` strands the arena's binding-scope drop, so
+// a closure callee rides the explicit arena adopt (`TailCall::adopt_region_slot`) at
+// recursion completion while a native callee falls through to the live scope-exit
+// drop — mutually exclusive per call, exactly one release. A premature free leaves
+// `ev`/`od` (whose regions ARE the merged arena) dereferencing recycled pages on the
+// next recursion step (SIGSEGV under guardfree). Also drives the clique PER LOOP
+// ITERATION, the per-call reclamation granularity an activation-owner-node cut would
+// double-free. docs/impl/region-model.md § The letrec closure-cycle merge.
+#[test]
+fn region_native_tail_mutual_cycle_uaf() {
+    run_elle_script_with_args(
+        "region-native-tail-mutual-cycle-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Correctness guard — the splice/`apply` manifestation of the native-tail-return
 // retain. `(first ;argv)` lowers to `TailCallArrayMut`, whose post-block emits
 // the ReturnValue retain (lower_call splice arm). Known limitation: the splice

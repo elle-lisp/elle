@@ -738,6 +738,32 @@
 (pin (measure "recur-local-self" (fn [j] (lcl-self 3)) 100 6 60 0.4 0.5) 0)
 (pin (measure "recur-local-mutual" (fn [j] (lcl-mutual 3)) 100 6 60 0.4 0.5) 0)
 
+# NON-member body tail — the same ev/od cycle, but the letrec BODY ends in a tail call
+# to a NON-member. `(ev n)` above is a tail call to a MEMBER (its stranded binding-scope
+# drop rides `stranded_cycle_bindings`); here `(%add (ev n) 0)` (a native `Call`
+# checked-on) and `(+ (ev n) 0)` (the stdlib redefines `+` to a bytecode CLOSURE) end in
+# a frame-replacing tail call to a non-member. That strands the merged arena's
+# binding-scope drop as dead code, so the release rides the explicit arena adopt
+# (`TailCall::adopt_region_slot`, `RegionInfo::cycle_tail_adopt`): a closure callee (`+`)
+# adopts the arena at the recursion's completion, a native callee (`%add`) never replaces
+# the frame and falls through to the live scope-exit drop — mutually exclusive per call,
+# so exactly one release fires however the callee resolves. Both reclaim (rate 0); the
+# closure-cycle merge previously REFUSED a non-member-tail clique, leaving it Shared and
+# leaking its whole arena ~4/op (docs/impl/region-model.md § The letrec closure-cycle
+# merge). The base cases return 0/1 so `(%add (ev n) 0)` is well-typed.
+(defn lcl-mutual-native [n]
+  (letrec [ev (fn [m] (if (%lt m 1) 0 (od (%sub m 1))))
+           od (fn [m] (if (%lt m 1) 1 (ev (%sub m 1))))]
+    (%add (ev n) 0)))
+(defn lcl-mutual-op [n]
+  (letrec [ev (fn [m] (if (%lt m 1) 0 (od (%sub m 1))))
+           od (fn [m] (if (%lt m 1) 1 (ev (%sub m 1))))]
+    (+ (ev n) 0)))
+(pin (measure "recur-local-mutual-native" (fn [j] (lcl-mutual-native 3)) 100 6
+              60 0.4 0.5) 0)
+(pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
+              0.5) 0)
+
 # ── The per-call object MINT (a second axis: mint count, not leak rate) ──
 # `recur-local-self` above pins the LEAK rate (0 — the cell-free closure is reclaimed
 # per call). These two pin the orthogonal axis: how many heap objects a self-recursive

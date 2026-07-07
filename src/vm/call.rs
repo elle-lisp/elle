@@ -150,6 +150,10 @@ impl VM {
         let arg_count = self.read_u16(bytecode, ip) as usize;
         let region_id = self.read_static_region(bytecode, ip);
         let adopt_callee = self.read_u8(bytecode, ip) != 0;
+        // Closure-cycle merged-arena adopt slot: `0` encodes `None` (a
+        // `StaticRegion` is `NonZeroU32`, so a real slot is never 0). See
+        // `LirInstr::TailCall::adopt_region_slot`.
+        let adopt_region_slot = StaticRegion::new(self.read_u32(bytecode, ip));
         let func = self
             .fiber
             .stack
@@ -167,7 +171,14 @@ impl VM {
         }
         args.reverse();
 
-        self.tail_call_inner(func, args, checked, region_id, adopt_callee)
+        self.tail_call_inner(
+            func,
+            args,
+            checked,
+            region_id,
+            adopt_callee,
+            adopt_region_slot,
+        )
     }
 
     /// Handle the TailCallArrayMut instruction.
@@ -210,10 +221,10 @@ impl VM {
         };
 
         // Splice/apply tail call (`TailCallArrayMut`): closure-callee adoption
-        // not wired through this path yet — `false` keeps today's behaviour (no
-        // regression). The common `(f …)` tail call uses `TailCall`, which does
-        // carry the flag.
-        self.tail_call_inner(func, args, checked, region_id, false)
+        // and the closure-cycle merged-arena adopt are not wired through this
+        // path yet — `false`/`None` keep today's behaviour (no regression). The
+        // common `(f …)` tail call uses `TailCall`, which carries both.
+        self.tail_call_inner(func, args, checked, region_id, false, None)
     }
 
     /// Dispatch a collection-as-function call-index (`(arr i)` / `(m :k)` /

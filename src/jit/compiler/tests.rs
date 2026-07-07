@@ -410,6 +410,7 @@ fn test_compile_batch_mutual_calls() {
             arity_checked: false,
             region: crate::hir::region::StaticRegion::new(2).unwrap(),
             adopt_callee: false,
+            adopt_region_slot: None,
         },
         Span::synthetic(),
     ));

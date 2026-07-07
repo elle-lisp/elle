@@ -111,6 +111,9 @@ impl RegionInference {
             // coincident-decref_point gate reads them). Empty here.
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),
+            // Populated by the `regions::merge` closure-cycle post-pass in
+            // `analyze_regions_with` (the non-member body-tail adopt sites). Empty here.
+            cycle_tail_adopt: HashMap::new(),
             // Populated by the `regions::ownership` post-pass in
             // `analyze_regions_with` (it reads the final `region_data` and
             // `merged_parent`). Empty here; empty after the pass too for a shape that

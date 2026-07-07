@@ -537,6 +537,15 @@ pub fn analyze_regions_with(
                 info.merged_parent.insert(m, cm.root);
             }
         }
+        // A NON-member body tail (a native `%add`, a redefined `+`, a foreign `g`)
+        // strands the binding-scope drop past the frame-replacing `TailCall`; the
+        // lowerer keys `adopt_region_slot = static_slot(root)` at each such site so a
+        // closure callee's frame replacement is balanced by the activation-completion
+        // adopt (region-model.md § The letrec closure-cycle merge). A member tail
+        // keeps its own `stranded_cycle_bindings` channel and is not recorded here.
+        for &site in &cm.tail_adopt_sites {
+            info.cycle_tail_adopt.insert(site, cm.root);
+        }
         info.region_data
             .entry(cm.root)
             .and_modify(|d| d.decref_point = cm.drop_site)

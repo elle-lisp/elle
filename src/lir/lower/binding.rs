@@ -281,7 +281,7 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
-        // A letrec body that TAIL-CALLS a closure-cycle merge member strands the
+        // A letrec body that TAIL-CALLS a closure-cycle merge MEMBER strands the
         // merged arena's binding-scope DecrefRegion as dead code past the
         // frame-replacing TailCall; mark those callees so the body's tail call
         // adopts the merged region (`tail_callee_adopts`) — the runtime then
@@ -292,10 +292,12 @@ impl<'a> Lowerer<'a> {
         // non-upvalue guard in `tail_callee_adopts` is the second half of that
         // exclusion). Marked BEFORE lowering the body so the body's own call
         // sites see it; the init lambdas were lowered above, so an interior
-        // sibling rotation (`ev` tail-calling `od`) is never marked. The merge
-        // admits a cycle only when every body tail call targets a member
-        // (`compute_closure_cycle_merges`), so no admitted cycle is left with an
-        // unmarked stranding tail path.
+        // sibling rotation (`ev` tail-calling `od`) is never marked. A NON-member
+        // body tail (a native / redefined operator / foreign fn) instead rides the
+        // explicit `TailCall::adopt_region_slot` (keyed by HirId in
+        // `RegionInfo::cycle_tail_adopt`), NOT this binding-keyed marking — the two
+        // channels are disjoint, so every admitted cycle's stranding tail paths are
+        // covered exactly once (`compute_closure_cycle_merges`).
         {
             let mut tail_callees: Vec<Binding> = Vec::new();
             Self::collect_body_tail_callees(body, &mut tail_callees);

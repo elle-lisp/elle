@@ -17,6 +17,7 @@ impl VM {
         checked: bool,
         region_id: StaticRegion,
         adopt_callee: bool,
+        adopt_region_slot: Option<StaticRegion>,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             let blocked = def
@@ -130,7 +131,21 @@ impl VM {
             // run, so the release is deferred to the trampoline-loop break, NOT
             // done here. A program-root callee is never flagged, so its
             // program-lifetime region is never released. See `TailCallInfo`.
-            let adopt_region = if adopt_callee {
+            //
+            // `adopt_region_slot` takes precedence: a letrec body tail-calling a
+            // NON-member out of a closure-cycle merged arena carries the arena's
+            // static slot (`RegionInfo::cycle_tail_adopt`), which we resolve
+            // through THIS activation's region map — the arena was minted during
+            // the letrec setup and its scope-exit `DecrefRegion` is dead past this
+            // frame-replacing tail call. We reached the closure arm, so the frame
+            // IS replaced; the adopt supplies that dead release at the recursion's
+            // completion. (A native callee never reaches here — it keeps the frame
+            // and runs the live scope-exit drop — so the slot and `adopt_callee`
+            // are mutually exclusive per call and never both apply.) See
+            // `LirInstr::TailCall::adopt_region_slot`.
+            let adopt_region = if let Some(slot) = adopt_region_slot {
+                self.runtime_region_for_adopt_slot(slot)
+            } else if adopt_callee {
                 self.tail_callee_adopt_region(func)
             } else {
                 None

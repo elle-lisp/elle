@@ -58,10 +58,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (args={}, region={})", arg_count, region_id));
                 i += 6;
             }
-            // TailCall carries one extra byte after the region: the adopt-callee
-            // flag (release the callee closure's region at activation end — see
-            // `LirInstr::TailCall::adopt_callee`).
-            Instruction::TailCall | Instruction::TailCallChecked if i + 6 < instructions.len() => {
+            // TailCall carries, after the region: the adopt-callee flag (1 byte —
+            // release the callee closure's region at activation end) and the
+            // closure-cycle merged-arena adopt slot (u32, `0` = None). See
+            // `LirInstr::TailCall::{adopt_callee, adopt_region_slot}`.
+            Instruction::TailCall | Instruction::TailCallChecked if i + 10 < instructions.len() => {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let region_id = u32::from_be_bytes([
                     instructions[i + 2],
@@ -70,11 +71,17 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     instructions[i + 5],
                 ]);
                 let adopt = instructions[i + 6];
+                let adopt_slot = u32::from_be_bytes([
+                    instructions[i + 7],
+                    instructions[i + 8],
+                    instructions[i + 9],
+                    instructions[i + 10],
+                ]);
                 line.push_str(&format!(
-                    " (args={}, region={}, adopt_callee={})",
-                    arg_count, region_id, adopt
+                    " (args={}, region={}, adopt_callee={}, adopt_region_slot={})",
+                    arg_count, region_id, adopt, adopt_slot
                 ));
-                i += 7;
+                i += 11;
             }
             Instruction::DupN if i < instructions.len() => {
                 let offset = instructions[i];

@@ -582,13 +582,54 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     );
 }
 
+/// Analyze `source` on the **checked-on** (native-Call) production path — where a
+/// `%add` / `+` / foreign-fn tail is a frame-replacing `TailCall` (checked-off it is
+/// an inlined `Intrinsic` or a non-tail node), the path the non-member body-tail
+/// adopt exists for. Returns arena so `letrec_binding_node` can locate the cycle.
+fn analyze_cycle_checked_on(
+    source: &str,
+    symbols: &mut SymbolTable,
+) -> (Hir, BindingArena, RegionInfo) {
+    let meta = crate::primitives::build_primitive_meta(symbols);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
+    let cc = pc.call_classification;
+    let (hir, arena) = {
+        let _guard = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
+        let (hir, arena, _) = compile_fhir(source, symbols);
+        (hir, arena)
+    };
+    let info = analyze_regions_with(&hir, &arena, cc);
+    (hir, arena, info)
+}
+
+/// The forward-cell regions of the in-lambda `ev`/`od` letrec, and the merged root
+/// they collapse onto (the SCC closure of least program order).
+fn ev_od_cells(
+    hir: &Hir,
+    arena: &BindingArena,
+    symbols: &SymbolTable,
+    info: &RegionInfo,
+) -> Vec<Region> {
+    let letrec_id =
+        letrec_binding_node(hir, arena, symbols, "ev").expect("the in-lambda letrec binding `ev`");
+    info.begin_cell_regions
+        .get(&letrec_id)
+        .map(|v| v.iter().map(|&(_, r)| r).collect())
+        .unwrap_or_default()
+}
+
 #[test]
-fn merge_refuses_in_lambda_cycle_with_foreign_tail_callee() {
-    // The letrec body tail-calls a NON-member closure `g`: the frame-replacing
-    // TailCall strands the binding-scope drop as dead code, and only an SCC-member
-    // callee has an adopt channel to supply it — so the merge must refuse the cycle
-    // (it stays Shared, the always-legal baseline). The cells are still compiled
-    // static-slot cells; only the merge admission changes.
+fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
+    // INVERTED from the old tail-strand refusal: a letrec body tail-calling a
+    // NON-member closure `g` (a foreign fn) now MERGES. The frame-replacing
+    // TailCall strands the binding-scope drop, but the non-member release channel —
+    // `RegionInfo::cycle_tail_adopt` → `TailCall::adopt_region_slot` — is wired, so a
+    // closure callee's new activation adopts and frees the arena at recursion
+    // completion. The tail argument is `(ev k)`'s RESULT (a value), not a member, so
+    // no member flows in by-move (contrast
+    // `merge_refuses_member_passed_by_move_to_foreign_tail`). `g` is a user closure,
+    // so its `(g r)` tail is a `Call` even checked-off — no `ScopedCheckedIntrinsics`
+    // needed here.
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(
         "(def g (fn [x] x)) \
@@ -599,30 +640,121 @@ fn merge_refuses_in_lambda_cycle_with_foreign_tail_callee() {
         &mut symbols,
     );
     let info = analyze_regions(&hir, &arena);
-    let letrec_id = letrec_binding_node(&hir, &arena, &symbols, "ev")
-        .expect("the in-lambda letrec binding `ev`");
-    let cells: Vec<Region> = info
-        .begin_cell_regions
-        .get(&letrec_id)
-        .map(|v| v.iter().map(|&(_, r)| r).collect())
-        .unwrap_or_default();
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
     assert_eq!(
         cells.len(),
         2,
-        "precondition: the in-lambda letrec's two forward cells are compiled \
-         static-slot cells keyed at the letrec node; got {cells:?}",
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "a foreign-closure body tail ((g (ev k))) must now MERGE the cycle — the \
+         non-member tail adopt supplies the stranded release; cells={cells:?} \
+         merged_parent={:?}",
+        info.merged_parent,
+    );
+    let root = roots.into_iter().next().unwrap();
+    assert!(
+        !cells.contains(&root),
+        "the merged root must be a closure region, not a cell; root=r{} cells={cells:?}",
+        root.0,
+    );
+    // The non-member tail site is recorded, keyed to the merged root — the datum the
+    // lowerer reads to set `adopt_region_slot`.
+    assert!(
+        info.cycle_tail_adopt.values().any(|&r| r == root),
+        "the (g r) tail site must record cycle_tail_adopt → merged root r{}; got {:?}",
+        root.0,
+        info.cycle_tail_adopt,
+    );
+}
+
+#[test]
+fn merge_admits_native_tail_checked_on() {
+    // The native body tail `(%add (ev k) 0)` on the checked-ON (production) path,
+    // where `%add` is a frame-replacing `Call` (checked-off it inlines to an
+    // `Intrinsic` and the tail is not a Call at all). The cycle must MERGE and record
+    // the `%add` site in `cycle_tail_adopt`: at runtime the native keeps the frame and
+    // the live scope-exit drop frees the arena, but the adopt slot is carried anyway
+    // (the compiler never classifies the callee), so a rebound `%add` closure is also
+    // covered. This is the checked-on shape the whole class regressed on.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, info) = analyze_cycle_checked_on(
+        "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
+                                 od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
+                          (%add (ev k) 0)))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
+    );
+    let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&c| info.merged_root(c)).collect();
+    assert_eq!(
+        roots.len(),
+        1,
+        "a native body tail ((%add (ev k) 0)) checked-on must MERGE the cycle; \
+         cells={cells:?} merged_parent={:?}",
+        info.merged_parent,
+    );
+    let root = roots.into_iter().next().unwrap();
+    assert!(
+        info.cycle_tail_adopt.values().any(|&r| r == root),
+        "the (%add …) tail site must record cycle_tail_adopt → merged root r{}; got {:?}",
+        root.0,
+        info.cycle_tail_adopt,
+    );
+}
+
+#[test]
+fn merge_refuses_member_passed_by_move_to_foreign_tail() {
+    // THE SAFETY BOUNDARY. A member closure `od` passed BY-MOVE as an argument to a
+    // non-member tail call `(g od)` must REFUSE the merge. Freeing the arena at the
+    // recursion's completion (the adopt) collides with `od`'s own move/return
+    // machinery — which also decrefs the merged arena — a double-free. The escape
+    // gate does NOT catch this (an opaque callee's argument is not a return/fiber
+    // Shared-seed), and the ANF hoist temp aliasing `od` is a synthetic holder
+    // excluded from the sole-held count, so this by-move refusal is the tail gate's
+    // own: `arg_bindings` sees a binding whose source region is in the SCC. Contrast
+    // `merge_admits_in_lambda_cycle_with_foreign_tail_callee`, where the argument is a
+    // value (`(ev k)`'s result), not the member itself.
+    let mut symbols = SymbolTable::new();
+    let (hir, arena, _) = compile_fhir(
+        "(def g (fn [x] x)) \
+         (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
+                                 od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
+                          (g od)))) \
+         (f 3)",
+        &mut symbols,
+    );
+    let info = analyze_regions(&hir, &arena);
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
+    assert_eq!(
+        cells.len(),
+        2,
+        "precondition: two compiled forward cells; got {cells:?}"
     );
     for &c in &cells {
         assert_eq!(
             info.merged_root(c),
             c,
-            "a cycle whose letrec body tail-calls a non-member (g) must not merge — \
-             the binding-scope drop would be stranded past the TailCall with no adopt \
-             channel; cell r{} was merged; merged_parent={:?}",
+            "a cycle passing a member (od) BY-MOVE into a non-member tail (g od) must \
+             NOT merge — the adopt would double-free the arena against od's own \
+             move/return release; cell r{} merged; merged_parent={:?}",
             c.0,
             info.merged_parent,
         );
     }
+    assert!(
+        info.cycle_tail_adopt.is_empty(),
+        "a refused cycle records no non-member tail adopt site; got {:?}",
+        info.cycle_tail_adopt,
+    );
 }
 
 #[test]

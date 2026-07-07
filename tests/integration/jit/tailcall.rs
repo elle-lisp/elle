@@ -22,6 +22,7 @@ fn test_jit_tail_call_compiles() {
             args: vec![],
             arity_checked: false,
             adopt_callee: false,
+            adopt_region_slot: None,
             region: elle::hir::region::StaticRegion::new(2).unwrap(),
         },
         span(),
