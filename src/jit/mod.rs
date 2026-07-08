@@ -63,7 +63,7 @@ use std::fmt;
 /// each helper reaching its own instance's VM. The compiled function's prologue
 /// (`compiler/translate.rs`) builds a `JitCtx` in a stack slot — holding the
 /// driving VM, its 4th entry parameter — and the intrinsic emit sites thread its
-/// address to each helper, which resolves the VM from it (docs/impl/region-ctx.md
+/// address to each helper, which resolves the VM from it (docs/impl/region/ctx.md
 /// "JIT intrinsic helpers reach the VM through a JitCtx").
 ///
 /// `#[repr(C)]` with the VM at offset 0 so the prologue's raw `stack_store` of the

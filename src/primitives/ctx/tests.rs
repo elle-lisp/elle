@@ -39,7 +39,7 @@ fn alloc_routes_into_ctx_region() {
 }
 
 /// `rich_error!` builds a `(SIG_ERROR, {:error :message …})` whose every
-/// field is born in the error's own region (docs/impl/region-errors.md): the
+/// field is born in the error's own region (docs/impl/region/errors.md): the
 /// `:path` string field, written `path = ctx.string(...)`, must share the
 /// error struct's region. The counterfactual is exact — make `error_extra`
 /// build the struct in any region other than the one `ctx.string` used and
@@ -113,7 +113,7 @@ fn with_ctx_over_distinct_region<R>(f: impl FnOnce(&mut Alloc, RuntimeRegion) ->
     out
 }
 
-// The `ctx.*` ergonomic constructors (docs/impl/region-ctx.md "the
+// The `ctx.*` ergonomic constructors (docs/impl/region/ctx.md "the
 // body-migration surface") build into the ctx's OWN region — every value is
 // born there, not in a fresh per-call region (the region-free bare ctor).
 #[test]

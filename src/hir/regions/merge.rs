@@ -4,7 +4,7 @@
 //! the lowerer may collapse onto one physical region. The seed is narrow and
 //! purpose-built — a freshly-built child aggregate merged into the parent `%pair`
 //! it is stored into — and its soundness is pinned entirely by the predicate
-//! below (docs/impl/region-model.md § Merging). The lowerer consumes it through
+//! below (docs/impl/region/merging.md § Merging). The lowerer consumes it through
 //! `static_slot`'s `merged_root` canonicalization: every member of a merge tree
 //! resolves to the root's slot, so child and parent allocate into one physical
 //! region, the child's `DecrefRegion` is suppressed, and the merged store edge's
@@ -155,7 +155,7 @@ pub(super) fn compute_merges(
         //     (the child still dies within it) but is the deferred widening — start
         //     narrow with the parent as a genuine LOCAL owner (the discarded /
         //     together-consumed nested literal), widen cut by cut
-        //     (docs/impl/region-model.md § Merging).
+        //     (docs/impl/region/merging.md § Merging).
         if returned_regions.contains(&child)
             || returned_regions.contains(&parent)
             || !holder_non_escaping(child)
@@ -167,7 +167,7 @@ pub(super) fn compute_merges(
         //     drop point (the shared region's `DecrefRegion` at the parent's
         //     `decref_point`) must not precede the child's own last *direct* use.
         //     Decided STRUCTURALLY over the scope tree, not by `ord` magnitude
-        //     (region-model.md § Merging, condition 6). `EmitMode::Merge`
+        //     (region/merging.md § Merging, condition 6). `EmitMode::Merge`
         //     waives the loop-enclosure clause: gates 1+4 make the child reachable
         //     only through the parent (containment), so a loop rebuilding the parent
         //     rebuilds the only path to the child — an in-loop nested literal still
@@ -207,7 +207,7 @@ pub(super) fn compute_merges(
     merged_parent
 }
 
-/// A `letrec` closure-cycle merge (docs/impl/region-model.md § The letrec closure-cycle merge): one SCC of
+/// A `letrec` closure-cycle merge (docs/impl/region/letrec.md § The letrec closure-cycle merge): one SCC of
 /// mutually-recursive closures (plus a self-recursive member a sibling also
 /// captures), plus their prebound capture cells, collapsed onto one arena and freed
 /// by a single `DecrefRegion` at the cycle's binding scope. A *purely* self-recursive
@@ -222,7 +222,7 @@ pub(super) struct ClosureCycleMerge {
     /// member's capture cell. Its scope-exit frees the merged arena: it post-dominates
     /// every direct (binding-scoped) use of the members, while a foreign capture of a
     /// member is RC-counted and outlives the single decref (structural ancestry, never
-    /// a numeric `ord` compare — docs/impl/region-model.md § The lifetime obligation
+    /// a numeric `ord` compare — docs/impl/region/adopt.md § The lifetime obligation
     /// the root carries).
     pub drop_site: HirId,
     /// The HirIds of the letrec body's tail calls to a **non-member** callee — the
@@ -237,7 +237,7 @@ pub(super) struct ClosureCycleMerge {
 }
 
 /// One tail call in a `letrec` body, as the closure-cycle merge's tail gate reads
-/// it (docs/impl/region-model.md § The letrec closure-cycle merge). A tail call
+/// it (docs/impl/region/letrec.md § The letrec closure-cycle merge). A tail call
 /// replaces the frame, stranding the merged arena's binding-scope `DecrefRegion`;
 /// the gate must know both the callee and whether any cycle MEMBER flows in as an
 /// argument, so a member passed by-move (`(g od)`) is refused — its own
@@ -263,12 +263,12 @@ struct TailCallSite {
     arg_bindings: Vec<crate::hir::Binding>,
 }
 
-/// Detect the mergeable `letrec` closure cycles (docs/impl/region-model.md § The letrec closure-cycle merge).
+/// Detect the mergeable `letrec` closure cycles (docs/impl/region/letrec.md § The letrec closure-cycle merge).
 ///
 /// A `letrec` mutually-recursive closure is a capture-cell↔closure cycle: each
 /// member's prebound forward-reference cell holds the closure (`StoreCaptureCell`) and
 /// the sibling closures capture the cell. Per-region RC cannot collect the immutable
-/// cycle (region-rules.md Rule 8); the merge instead collapses the whole SCC ∪ its
+/// cycle (region/rules.md Rule 8); the merge instead collapses the whole SCC ∪ its
 /// cells onto one region, so the interior cell↔closure references become intra-region —
 /// the alloc-scan incref, the capture-store incref, and the free-time cascade all
 /// self-skip same-region refs (`regionpool/introspect.rs` `rid != own_id`,
@@ -482,7 +482,7 @@ pub(super) fn compute_closure_cycle_merges(
         let drop_site = cell_scopes.into_iter().next().unwrap();
         // Eligibility gate: LETREC-SUBTREE CONTAINMENT, decided structurally over the
         // post-order subtree interval `[low, order]` (never a bare numeric compare —
-        // region-model.md § The lifetime obligation the root carries). Every member's
+        // region/adopt.md § The lifetime obligation the root carries). Every member's
         // allocation site must lie within the binding-scope letrec's own subtree: a
         // cell's site IS the letrec node, a closure's Lambda is an init descendant —
         // so the drop site is a structural ancestor-or-self of every member by

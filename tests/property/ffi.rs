@@ -20,7 +20,7 @@ use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use elle::Value;
 use proptest::prelude::*;
 
-// The FFI primitives take a `NativeCtx` (docs/impl/region-ctx.md); these
+// The FFI primitives take a `NativeCtx` (docs/impl/region/ctx.md); these
 // bare-signature shims route each call through the `with_test_ctx` seam so the
 // property-test bodies below stay unchanged.
 fn prim_ffi_malloc(args: &[Value]) -> (SignalBits, Value) {

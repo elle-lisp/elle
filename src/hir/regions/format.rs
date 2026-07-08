@@ -69,8 +69,8 @@ pub fn format_regions(
         }
     }
 
-    // The merge forest (docs/impl/region-model.md § Merging, § The letrec
-    // closure-cycle merge): each child → its `merged_root`, tagged `[closure-cycle]`
+    // The merge forest (docs/impl/region/merging.md § Merging, region/letrec.md
+    // § The letrec closure-cycle merge): each child → its `merged_root`, tagged `[closure-cycle]`
     // for a mutual-recursion SCC/cell member (vs a builder-idiom aggregate child),
     // plus the non-member body-tail adopt sites keyed to their merged arena. The
     // permanent instrument for which cliques merged and how each is released.

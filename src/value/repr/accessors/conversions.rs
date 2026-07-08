@@ -2,7 +2,7 @@ use super::*;
 
 /// Read-only handle on a mutable container's `RefCell`: exposes `borrow()`
 /// and nothing else. The public face of the mutable-store seam
-/// (docs/impl/region-rules.md Rule 5, mutable store) — code outside `value/` can read
+/// (docs/impl/region/rules.md Rule 5, mutable store) — code outside `value/` can read
 /// an @array/@struct/@set/box/capture cell through this, but storing a
 /// `Value` is only possible through the tracked funnels in `value/arena.rs`.
 pub struct ReadCell<'a, T>(&'a std::cell::RefCell<T>);
@@ -106,7 +106,7 @@ impl Value {
     /// Read-only view of a mutable array — `borrow()` only. The mutation
     /// channel is the `value/`-scoped raw-cell accessor (`as_array_mut_raw`);
     /// every `Value` store flows through the tracked funnels in
-    /// `value/arena.rs` (docs/impl/region-rules.md Rule 5, mutable store).
+    /// `value/arena.rs` (docs/impl/region/rules.md Rule 5, mutable store).
     #[inline]
     pub fn as_array_mut(&self) -> Option<ReadCell<'_, Vec<Value>>> {
         self.as_array_mut_raw().map(ReadCell)
@@ -235,7 +235,7 @@ impl Value {
 
     // ── Read-only views of the mutable containers ───────────────────
     //
-    // The seam's public half (docs/impl/region-rules.md Rule 5, mutable store): borrow
+    // The seam's public half (docs/impl/region/rules.md Rule 5, mutable store): borrow
     // guards and copy-outs that cannot store. Same borrow semantics as the
     // raw cells (panic on a conflicting mutable borrow).
 

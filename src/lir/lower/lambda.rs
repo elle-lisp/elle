@@ -190,7 +190,7 @@ impl<'a> Lowerer<'a> {
                     .unwrap_or_default();
                 // How to RELOAD each adopted captured value for the value-resolved adopt,
                 // by the capture's access path — the emit covers EVERY capture kind
-                // (region-model.md § "The capture adopt"): a direct local from its binding
+                // (region/adopt.md § "The capture adopt"): a direct local from its binding
                 // slot (`LoadLocal`); an upvalue or transitive capture from the constructing
                 // function's environment (`LoadCapture`, or the raw cell load for a
                 // cell-held binding — `result_region_of` unwraps the cell either way, so

@@ -11,7 +11,7 @@ use crate::value::fiberheap::FiberHeap;
 
 /// Build a rich error `(SIG_ERROR, {:error <kind> :message <msg> …fields})`
 /// through `scope.error_extra` — the one region-coherent error routine
-/// (docs/impl/region-errors.md). `scope` is `ctx` or the VM (`self`/`vm`): the
+/// (docs/impl/region/errors.md). `scope` is `ctx` or the VM (`self`/`vm`): the
 /// region source is explicit, so each error names the region it is born in.
 ///
 /// Field values are written by the caller as `name = <expr>` — a string field

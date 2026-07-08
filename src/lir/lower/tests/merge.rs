@@ -8,7 +8,7 @@ use super::*;
 // `debug_assertions` by the equivalence oracle `AssertRegionMatches` on the same
 // slot), instead of the value-resolved `IncrefValueRegion`. A refused return (the
 // dynamic boundary — a parameter, an immediate, a pass-through) keeps
-// `IncrefValueRegion`. Spec: docs/impl/region-rules.md § "Compile-time region
+// `IncrefValueRegion`. Spec: docs/impl/region/mechanism.md § "Compile-time region
 // selection (coalescing)".
 //
 // These pins are counterfactual against a value-resolved-at-every-tail lowerer:
@@ -80,7 +80,7 @@ fn coalesced_string_literal_return_is_slot_resolved() {
 // `debug_assertions` with `AssertRegionMatches`. A module-scope container's value
 // stays value-resolved (it is in `mutated_binding_value_regions`, the runtime fact
 // the container tracks), as does the drop-old of the displaced content. Spec:
-// docs/impl/region-rules.md § "Compile-time region selection (coalescing)".
+// docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)".
 
 #[test]
 fn captured_reassign_init_drop_is_slot_resolved() {
@@ -171,7 +171,7 @@ fn param_return_stays_value_resolved() {
 
 // ── The builder-idiom merge flip ─────────────────────────────────────────────
 //
-// The merge flip (docs/impl/region-model.md § "Emission: one slot per merge tree,
+// The merge flip (docs/impl/region/merging.md § "Emission: one slot per merge tree,
 // one demise at the root"): a builder-idiom merge collapses a fresh child
 // aggregate into the parent `%pair` it is stored into, so child and parent
 //   (1) allocate against ONE static slot — the root's; `static_slot` canonicalizes

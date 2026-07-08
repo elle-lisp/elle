@@ -2,11 +2,11 @@
 # Counterfactual for the with-traits payload-aliasing UAF.
 #
 # `with-traits` is declared Fresh: the whole result lives in the call's own
-# result region (docs/impl/region-effects.md "Native region effects"). Its clone of a
+# result region (docs/impl/region/effects.md "Native region effects"). Its clone of a
 # slice-backed immutable (string, array, bytes, set) must therefore COPY the
 # payload into the clone's region — RegionSlice is Copy, and copying the
 # (ptr, len) pair instead aliases backing pages in the SOURCE's region with
-# no counted edge (docs/impl/region-model.md "RegionSlice contents share their
+# no counted edge (docs/impl/region/model.md "RegionSlice contents share their
 # object's region", metadata-only clones). The source literal dies at its
 # ordinary decref point right after the with-traits call, freeing the
 # aliased payload under the live clone.

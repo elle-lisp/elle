@@ -2,7 +2,7 @@
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
-treatment (see [region-rules.md](region-rules.md)) to a single slot.
+treatment (see [rules.md](rules.md)) to a single slot.
 
 A binding that is reassigned (`assign` / `set-cell`) holds different values
 over time, so no single static program point names "the value's last use" —
@@ -239,5 +239,5 @@ container): a read consumed *within the same expression* that also removes or
 overwrites the value (`(list x (begin (assign x nil) 1))`) can observe the
 removal's release mid-expression. The static analysis does not order
 intra-expression reads against runtime removals; this is the mutable-store
-analogue of the [theory](../regions/semantics.md)'s cycle incompleteness —
+analogue of the [theory](../../regions/semantics.md)'s cycle incompleteness —
 confined to mutation, named here so it is not rediscovered as a separate bug.

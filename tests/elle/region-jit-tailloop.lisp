@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Oracle: the JIT must honor the per-execution region model on a hot tail loop
-# (Increment 6 — JIT region parity). docs/impl/region-model.md "The per-execution region
+# (Increment 6 — JIT region parity). docs/impl/region/model.md "The per-execution region
 # model" + Rule 8 (no leaks).
 #
 # The interpreter mints a fresh physical region per allocation EXECUTION

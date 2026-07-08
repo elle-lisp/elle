@@ -1,5 +1,5 @@
 //! Compile-time RC-coalescing benchmark — the measured win of compile-time
-//! region selection (docs/impl/region-rules.md § "Compile-time region selection
+//! region selection (docs/impl/region/mechanism.md § "Compile-time region selection
 //! (coalescing)" / "Self-edge elimination").
 //!
 //! Reports, across real compilations, how many region-mints the lowerer resolved
@@ -17,7 +17,7 @@
 //! runs under the library-default config (`checked_intrinsics = false`), so
 //! `%pair` survives as a `Pair` intrinsic and the builder-idiom merge — hence
 //! transform 2 — can fire (CLI default `checked_intrinsics = true` dissolves
-//! `%pair` to a native call and leaves the merge inert; see region-model.md
+//! `%pair` to a native call and leaves the merge inert; see region/merging.md
 //! § Merging).
 
 use std::panic::{catch_unwind, AssertUnwindSafe};

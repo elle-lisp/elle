@@ -44,7 +44,7 @@ pub enum RetType {
 
 /// Declared region behavior of a primitive — the native-call analogue of
 /// Rule 2's opaque-call exception and Rule 5's escape list
-/// (docs/impl/region-effects.md "Native region effects: declared, not guessed").
+/// (docs/impl/region/effects.md "Native region effects: declared, not guessed").
 ///
 /// The region solver keys the opaque-call arg clique on this:
 /// `Immediate`/`Fresh`/`PassThrough` calls record no may-store edges
@@ -117,7 +117,7 @@ pub enum RegionEffect {
     /// and no result-side oracle constraint (the result may live anywhere).
     /// The clique is keyed on the *store*, not the result shape, so a no-store
     /// opaque-result native is `Opaque`, never `Mixed`
-    /// (docs/impl/region-effects.md § Opaque).
+    /// (docs/impl/region/effects.md § Opaque).
     Opaque,
     /// Examined, and the native stores arguments *uncounted* (the property
     /// the arg clique exists to cover) — and/or returns a result that is
@@ -174,7 +174,7 @@ pub struct PrimitiveDef {
     /// (`find_object_cross_refs`) that counts the same embedding at allocation. Without
     /// it the ownership forest cannot see a captured value flow OUT through an escaping
     /// result and would fold it into the capturing closure's Owned subtree
-    /// (docs/impl/region-effects.md § "Native region effects"; region-model.md § "The
+    /// (docs/impl/region/effects.md § "Native region effects"; region/adopt.md § "The
     /// funnel adopt" — the side-field embed analog). Empty (the default) for a `Fresh`
     /// native that embeds none of its arguments (`popn`), which is exactly why `Fresh`
     /// alone cannot carry the fact. `with-traits` is the canonical declarant (`&[1]` —

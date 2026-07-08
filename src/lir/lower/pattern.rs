@@ -272,7 +272,7 @@ impl<'a> Lowerer<'a> {
                 // unlike the immediate literals below — it cannot be a pooled
                 // constant. Materialize it FRESH into a transient per-activation
                 // region, compare, then free that region immediately: a heap
-                // literal is an ordinary, reclaimable allocation (region-model.md,
+                // literal is an ordinary, reclaimable allocation (region/model.md,
                 // "Constants lower as ordinary allocations"), never a process-
                 // pinned constant. The string is dead the instant the comparison
                 // reads it, so the region's whole life is these three instructions.

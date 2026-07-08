@@ -1,6 +1,6 @@
 # fiberheap
 
-The per-VM heap: the physical region allocator (docs/impl/region-model.md). One
+The per-VM heap: the physical region allocator (docs/impl/region/model.md). One
 `FiberHeap` per VM, shared by all of that VM's fibers; every allocation names its
 heap and region explicitly through `arena`.
 
@@ -9,7 +9,7 @@ heap and region explicitly through `arena`.
 - Own the `RegionStore`: physical region id → `RegionEntry` (pages + reclamation
   typestate + ownership children + outgoing edge table)
 - Allocate `HeapObject`s and `RegionSlice` data into specific regions
-- Reclaim regions **two ways** (docs/impl/region-model.md § "Adoption and subtree drop"):
+- Reclaim regions **two ways** (docs/impl/region/ownership.md § "Adoption and subtree drop"):
   by **RC** (`decref` → cascade — the `Counted` baseline) and by **subtree / set drop**
   over an owner's `owned_children` (the `Owned` forest — adoption, owner nodes, and
   cross-fiber transfer). The two modes are a mutually-exclusive `Reclaim` typestate, so
@@ -49,7 +49,7 @@ blowup). The magic makes that ~`1/2^32`; the authoritative resolver,
 `RegionStore::region_of_ptr`, additionally requires the matched region to
 *own* the pointer, so a mid-page coincidence never wins over the true base.
 
-## Region generations (docs/impl/region-generations.md § "Region generations")
+## Region generations (docs/impl/region/generations.md § "Region generations")
 
 `RegionStore` keeps a generation counter per physical id, bumped on every
 path that returns the id's pages (`free_runtime_region_pages`,

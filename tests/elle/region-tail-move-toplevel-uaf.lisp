@@ -27,7 +27,7 @@
 # is NOT flagged, so it IS pure-moved into the owned-param callee. The over-free the
 # original hypothesis predicted from that move does not happen: the top-level escape
 # is increfed through the Rule 5 EscapeSite funnel, so the callee's owned-param
-# release leaves the region's RC intact. docs/impl/region-rules.md Rules 5 (every escape
+# release leaves the region's RC intact. docs/impl/region/rules.md Rules 5 (every escape
 # increfs) and 8 (no UAF / no double-free).
 #
 # STATUS: GREEN on the vm and jit tiers, including under `--trace=guardfree` (the

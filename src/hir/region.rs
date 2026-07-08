@@ -21,7 +21,7 @@ use std::num::NonZeroU32;
 /// into bytecode (minted by `new_static_region`). A static slot is **not** a
 /// live region — the VM resolves it to a [`RuntimeRegion`] per activation
 /// through the activation_region_map; it is never indexed into `RegionStore`
-/// (docs/impl/region-model.md § "Two id-spaces").
+/// (docs/impl/region/model.md § "Two id-spaces").
 ///
 /// `NonZeroU32` by construction: a real slot is always ≥ 1, so there is no
 /// "slot 0". "Region not applicable to this instruction" is encoded *structurally*
@@ -62,7 +62,7 @@ impl std::fmt::Display for StaticRegion {
 /// A runtime *physical* region id: a real, pages-owning region in a per-heap
 /// `RegionStore`, minted per allocation *execution* (and recycled on free).
 ///
-/// `NonZeroU32` by construction, because docs/impl/region-rules.md Rule 1 says **there is
+/// `NonZeroU32` by construction, because docs/impl/region/rules.md Rule 1 says **there is
 /// no region 0** — an unassigned region is `Option::None`, never
 /// `RuntimeRegion(0)`. This is the *only* type the runtime RC paths and
 /// `RegionStore` are indexed by; a compile-time static slot (`StaticRegion`)
@@ -116,7 +116,7 @@ pub struct CallClassification {
     /// Intrinsic SymbolIds (BinOp, CmpOp, etc.) — return immediates.
     pub intrinsic_ops: FxHashSet<SymbolId>,
     /// Primitive SymbolId → declared `RegionEffect` from `PrimitiveDef`
-    /// (docs/impl/region-effects.md "Native region effects"). Keys the opaque-call
+    /// (docs/impl/region/effects.md "Native region effects"). Keys the opaque-call
     /// arg clique (`Mixed`/absent → full mutual clique; `Stores` →
     /// directed edges from the listed args; the rest → no edges) and the
     /// immediate-result classification (`Immediate` → no result region).
@@ -275,7 +275,7 @@ pub struct RegionInfo {
     /// container. The cell's overwrite (`capture_store_with_rebind`) decrefs the
     /// displaced prior unconditionally, so a reader that merely aliases the
     /// cell's value is freed under it by the next overwrite (the captured-alias
-    /// use-after-free; docs/impl/region-bindings.md § "Captured reassigned
+    /// use-after-free; docs/impl/region/bindings.md § "Captured reassigned
     /// cells"). The read is treated as Rule 5's "new reference" pass-through: the
     /// lowerer emits an `IncrefValueRegion` here so the reader holds a counted
     /// reference of its own, and the read's placeholder region (minted at this
@@ -289,7 +289,7 @@ pub struct RegionInfo {
     /// The subset of `call_result_regions` whose callee declares
     /// [`RegionEffect::Fresh`](crate::primitives::def::RegionEffect::Fresh): the
     /// result is freshly allocated in the call's own region, so it is genuinely
-    /// caller-owned (region-effects.md § `Fresh`). A `call_result` region is
+    /// caller-owned (region/effects.md § `Fresh`). A `call_result` region is
     /// ordinarily refused by the ownership inference as a runtime placeholder
     /// (a possible borrow / opaque result), but a `Fresh` one is a legitimate
     /// Owned candidate — `regions::ownership` admits it, which is what makes a
@@ -306,13 +306,13 @@ pub struct RegionInfo {
     /// membership. Under the production (`--checked-intrinsics`) path the funnel
     /// store is an opaque native call that records NO `cross_region_refs` edge
     /// (the funnel counts the store at runtime — a compile-time edge would
-    /// double-count; region-effects.md § `Funnel`). This set re-supplies that
+    /// double-count; region/effects.md § `Funnel`). This set re-supplies that
     /// containment for the forest **without** any `IncrefRegion` — it is read
     /// only by `regions::ownership`, never by the lowerer's incref/decref
     /// emission of RC, so the baseline stream is unchanged. The **site** is the
     /// funnel `Call` node, carried exactly as `cross_region_refs` carries its
     /// store site, so an adopt for a funnel-contained member can be keyed at the
-    /// funnel call (the checked-on store face — region-model.md § "The funnel
+    /// funnel call (the checked-on store face — region/adopt.md § "The funnel
     /// adopt"; the emit is value-resolved, needing no store opcode).
     /// `@string`/`@bytes` containers (which copy bytes, retaining no region) are
     /// excluded by their non-container `RetType`. This vector ALSO carries a `Fresh`
@@ -342,7 +342,7 @@ pub struct RegionInfo {
     /// captured-mutable local cell). The lowerer releases these with
     /// `LoadCaptureRaw` + `DecrefCellRegion` (free the CELL's own region via
     /// `region_of`) instead of `LoadLocal` + `DecrefValueRegion` (which would
-    /// unwrap the cell to the inner value's caller-owned region). docs/impl/region-rules.md
+    /// unwrap the cell to the inner value's caller-owned region). docs/impl/region/rules.md
     /// Rule 8 (no leaks) — these env cells need an explicit release.
     pub cell_release_regions: FxHashSet<Region>,
     /// Call HirIds whose may-store edges are HARD: native call sites with a
@@ -353,7 +353,7 @@ pub struct RegionInfo {
     /// reference — the call-result-arg clique UAF). Edges recorded at opaque
     /// user-fn sites keep the slot path, the no-op for call-result
     /// sources: a wrapper's inner runtime funnel already counts a real store,
-    /// so a real outer incref would never balance (docs/impl/region-effects.md "Hard
+    /// so a real outer incref would never balance (docs/impl/region/effects.md "Hard
     /// edges: how a may-store edge is emitted").
     pub hard_edge_sites: FxHashSet<HirId>,
     /// Regions whose ordinary compiler-emitted decref the lowerer must SKIP,
@@ -377,7 +377,7 @@ pub struct RegionInfo {
     /// release. The lowerer must therefore SKIP the incref-on-store at these
     /// sites: born + drop-on-overwrite already balances, so an extra incref would
     /// hold every displaced prior to frame teardown — the unbounded per-iteration
-    /// over-keep of a reassign-in-loop (docs/impl/region-bindings.md "Reassigned
+    /// over-keep of a reassign-in-loop (docs/impl/region/bindings.md "Reassigned
     /// mutable bindings are 1-slot containers"). FN-LOCAL
     /// drop-on-overwrite sites are absent here: their assign-value decref is KEPT
     /// (the scope-exit demise), so they take a counted incref-on-store that the
@@ -386,7 +386,7 @@ pub struct RegionInfo {
     pub donated_overwrite_sites: FxHashSet<HirId>,
     /// Init + assign-value regions of every reassigned TOP-LEVEL (file-letrec)
     /// slot binding, recorded unconditionally — independent of the suppression
-    /// gate. The backstop for docs/impl/region-bindings.md "a mutated slot is not
+    /// gate. The backstop for docs/impl/region/bindings.md "a mutated slot is not
     /// a release route": a reassigned binding's slot holds different values over
     /// time, so the lowerer's value-routed release (a `LoadLocal slot` then
     /// `DecrefValueRegion`) at a region's `decref_point` would load whatever the
@@ -404,11 +404,11 @@ pub struct RegionInfo {
     /// (`lower_begin`'s MakeCaptureCell pre-pass), in `collect_preallocate_
     /// bindings` order. One region PER CELL — emitting every cell against the
     /// Begin's single slot orphans all but the last minted physical region
-    /// (docs/impl/region-model.md, "one allocation execution per slot between drops";
+    /// (docs/impl/region/model.md, "one allocation execution per slot between drops";
     /// the shared-slot capture-cell leak). Each region's `decref_point` is
     /// extended over its own binding's uses by the binding-chain post-pass.
     pub begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
-    /// The builder-idiom merge seed (docs/impl/region-model.md § Merging): for a
+    /// The builder-idiom merge seed (docs/impl/region/merging.md § Merging): for a
     /// fresh child aggregate that is stored into the parent `%pair` it becomes a
     /// field of — sole-held, non-escaping, and dying at the same `decref_point` —
     /// `merged_parent[child] = parent`. A region has at most one merge parent
@@ -419,14 +419,14 @@ pub struct RegionInfo {
     /// canonicalizes every region through `merged_root`, so a merge tree's child,
     /// parent, and deeper nests all allocate against, incref, and decref ONE static
     /// slot (the root's), landing in one physical region freed by the root's single
-    /// `DecrefRegion` (docs/impl/region-model.md § Merging). Empty unless a
+    /// `DecrefRegion` (docs/impl/region/merging.md § Merging). Empty unless a
     /// builder-idiom merge fired (a nested `%pair` literal under
     /// `--checked-intrinsics=off`); when empty `merged_root` is the identity and the
     /// lowerer's behaviour is the unmerged one-region-per-value baseline.
     pub merged_parent: HashMap<Region, Region>,
     /// Every member region of a letrec closure-cycle merge — the SCC closures
     /// and their forward cells, roots included
-    /// (docs/impl/region-model.md § The letrec closure-cycle merge). The merged
+    /// (docs/impl/region/letrec.md § The letrec closure-cycle merge). The merged
     /// arena is released exactly once by the merge's own channel: the root's
     /// binding-scope `DecrefRegion` (a non-tail body, OR a native body tail whose
     /// frame is not replaced), the stranded-cycle tail-call adopt (a MEMBER body
@@ -439,7 +439,7 @@ pub struct RegionInfo {
     /// when no cycle merged.
     pub closure_cycle_members: FxHashSet<Region>,
     /// Non-member body-tail-call sites of a closure-cycle merge: tail-call HirId →
-    /// the merged arena's canonical root region (docs/impl/region-model.md § The
+    /// the merged arena's canonical root region (docs/impl/region/letrec.md § The
     /// letrec closure-cycle merge). A `letrec` whose body ends in a tail call to a
     /// NON-member (a native `%add`, a redefined operator `+`, a foreign closure `g`)
     /// strands the merged arena's binding-scope `DecrefRegion` as dead code past the
@@ -451,7 +451,7 @@ pub struct RegionInfo {
     /// recorded here. Empty when no cycle merged (or every merged cycle's body
     /// tail-calls only members). Populated from `ClosureCycleMerge::tail_adopt_sites`.
     pub cycle_tail_adopt: HashMap<HirId, Region>,
-    /// Ownership forest (docs/impl/region-model.md § "Adoption and subtree
+    /// Ownership forest (docs/impl/region/ownership.md § "Adoption and subtree
     /// drop"), populated by the ownership pass; empty when the shape stays Shared,
     /// so the lowerer's emission is then the per-region-RC baseline. Store-site HirId → the interior
     /// containment edges `(child_region, parent_region)` of an externally-unique
@@ -505,7 +505,7 @@ pub struct RegionInfo {
     /// decrefs. The runtime
     /// frees the set as one four-phase subtree drop, so interior member↔member
     /// references reclaim with the group (the cycle per-region RC cannot collect,
-    /// region-rules.md Rule 8) and only genuinely-Shared frontier references cascade.
+    /// region/rules.md Rule 8) and only genuinely-Shared frontier references cascade.
     pub owned_region_groups: HashMap<HirId, Vec<Region>>,
     /// The union of every [`owned_region_groups`](Self::owned_region_groups) member
     /// region — the O(1) set the lowerer's `emit_decrefs_for` consults to SKIP a
@@ -517,7 +517,7 @@ pub struct RegionInfo {
     /// ownership pass; empty when no such transfer is present. The consumer-site
     /// call-result regions of a summarized producer (a callee/fiber body whose
     /// returned subtree is externally unique and cyclic — docs/impl/
-    /// region-model.md § "Owner nodes" — "The transferred returned subtree").
+    /// region/owner.md § "Owner nodes" — "The transferred returned subtree").
     /// At each such region's release point the lowerer emits
     /// `AdoptIntoActivation` IN PLACE OF the value-resolved `DecrefValueRegion`
     /// (slot-loaded or discarded-result path alike): the adopt consumes the
@@ -532,7 +532,7 @@ pub struct RegionInfo {
     /// structural scope enclosing every member's allocation — → the member regions of
     /// a capture-back-edge SCC (a container captured by a closure it holds:
     /// `m ⊇ c` by store, `c ⊇ m` by capture — the cycle no region root can own;
-    /// docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge SCC").
+    /// docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC").
     /// At the site the lowerer emits one value-resolved `AdoptIntoActivation` per
     /// member (`emit_adopt_into_activation`), moving it `Counted → Owned` under the
     /// executing activation's owner node; each member's own compiler decref is
@@ -641,7 +641,7 @@ impl RegionInfo {
     }
 
     /// The region a builder-idiom merge collapses `r` onto — the outermost
-    /// ancestor in the `merged_parent` forest (docs/impl/region-model.md
+    /// ancestor in the `merged_parent` forest (docs/impl/region/merging.md
     /// § Merging). `r` itself when it is not a merge child. Bounded by the forest
     /// depth; a small guard rejects any cycle (there are none by construction).
     pub fn merged_root(&self, r: Region) -> Region {
@@ -660,7 +660,7 @@ impl RegionInfo {
     /// True when the cross-region store edge `source → target` becomes an
     /// intra-region **self-edge** once the builder-idiom merge collapses both
     /// endpoints onto one physical region — the eliminable class of transform 2
-    /// (docs/impl/region-rules.md § "Self-edge elimination").
+    /// (docs/impl/region/mechanism.md § "Self-edge elimination").
     ///
     /// Soundness of elimination: the free-time cascade skips a region's
     /// references into *itself* (regionpool/introspect.rs decrefs a referenced

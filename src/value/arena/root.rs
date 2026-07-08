@@ -19,7 +19,7 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value) {
 /// the number released. This is the *only* heap-region action the teardown sweep
 /// takes — it decrefs roots and lets the RC cascade do the rest (Rule 5/7); it
 /// never iterates the region table freeing live entries (see
-/// docs/impl/region-rules.md § "Teardown", property 1).
+/// docs/impl/region/rules.md § "Teardown", property 1).
 ///
 /// Draining the registry makes a second call a no-op, so teardown is idempotent.
 pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
@@ -48,7 +48,7 @@ fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     r
 }
 
-/// Open a macro-expansion allocation scope (docs/impl/region-rules.md § "Macro
+/// Open a macro-expansion allocation scope (docs/impl/region/rules.md § "Macro
 /// expansion — a closed allocation scope"). Every region minted until the
 /// matching [`reclaim_macro_scope`] is recorded so its dead scratch can be
 /// reclaimed by RC.

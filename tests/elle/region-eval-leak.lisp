@@ -3,8 +3,8 @@
 # lambdas, quoted data) must compile that form with its constants as ORDINARY
 # reclaimable allocations: each is born in its own region, dies at its
 # decref_point, and is reclaimed when the eval's transient compilation unwinds.
-# So repeated runtime eval stays BOUNDED in object count. docs/impl/region-rules.md
-# Rule 8; docs/impl/region-model.md § "Constants lower as ordinary allocations".
+# So repeated runtime eval stays BOUNDED in object count. docs/impl/region/rules.md
+# Rule 8; docs/impl/region/model.md § "Constants lower as ordinary allocations".
 #
 # Why eval is the sharp case: runtime eval makes compile-time happen at runtime,
 # where the compiled form is transient — its constants must die with the eval,

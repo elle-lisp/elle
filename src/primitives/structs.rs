@@ -326,7 +326,7 @@ pub(crate) fn prim_pairs(
         let mut result = Value::EMPTY_LIST;
         for (key, value) in entries.iter().rev() {
             // `to_value` is the single source of truth for TableKey → Value
-            // (docs/impl/region-ctx.md): born in the call's region via `ctx`.
+            // (docs/impl/region/ctx.md): born in the call's region via `ctx`.
             let key_val = key.to_value(ctx);
             let pair = ctx.array(vec![key_val, *value]);
             result = ctx.pair(pair, result);

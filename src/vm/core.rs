@@ -312,7 +312,7 @@ impl VM {
 
     /// Discard the LIVE fiber's suspended frames (squelch / abort) — the
     /// chokepoint for abandoning suspended work while the fiber runs on, the
-    /// discard counterpart of `resume_suspended` (docs/impl/region-diagnostics.md
+    /// discard counterpart of `resume_suspended` (docs/impl/region/diagnostics.md
     /// § "The squelch/abort discard"; a fiber reaching a TERMINAL state instead
     /// releases through `vm::fiber::take_fiber_owned`/`release_fiber_owned`,
     /// which also frees the fiber owner node this discard leaves alone — the
@@ -337,7 +337,7 @@ impl VM {
     /// and moved in through `AdoptIntoActivation`, so freeing them cannot touch
     /// a region any live frame still counts on. The map's regions stay leaked
     /// on this path until an ownership cut adopts them (UAF-safe, bounded per
-    /// discard; docs/impl/region-model.md § "Owner nodes").
+    /// discard; docs/impl/region/owner.md § "Owner nodes").
     pub(crate) fn discard_suspended_frames(&mut self) {
         if let Some(frames) = self.fiber.suspended.take() {
             for node in crate::vm::fiber::parked_owner_nodes(frames) {

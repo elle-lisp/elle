@@ -670,36 +670,47 @@
 
 (defn zip [& colls]
   "Zip collections element-wise into a collection of lists. Stops at the shortest input."
-  (letrec [to-list (fn (c)
-                     (cond
-                       (or (pair? c) (empty? c)) c
-                       (or (array? c) (array? c))
-                         (letrec [loop (fn (i acc)
-                                         (if (>= i (length c))
-                                           (reverse acc)
-                                           (loop (+ i 1) (pair (get c i) acc))))]
-                           (loop 0 ()))
-                       true (error {:error :type-error
-                                    :reason :not-a-sequence
-                                    :message "not a sequence"})))
-           from-list (fn (lst orig)
-                       (cond
-                         (or (pair? orig) (empty? orig)) lst
-                         (array? orig)
-                           (let [arr @[]]
-                             (each x in lst
-                               (push arr x))
-                             arr)
-                         (array? orig) (apply array lst)))
-           zip-lists (fn (lists)
-                       (if (any? empty? lists)
-                         ()
-                         (pair (map first lists) (zip-lists (map rest lists)))))]
-    (if (empty? colls)
-      ()
-      (let* [lists (map to-list colls)
-             result (zip-lists lists)]
-        (from-list result (first colls))))))
+  # One index walk builds each column tuple directly, over the inputs normalized
+  # to arrays for O(1) positional access. The tuple is consed from the last input
+  # backward so it comes out in order with no reversal pass. Result family follows
+  # the first input (array-family → mutable @array, list → list), matching the
+  # per-element list tuples callers expect.
+  (if (empty? colls)
+    ()
+    (let* [carr (->array colls)
+           k (length carr)
+           arrs (let [a @[]]
+                  (letrec [go (fn [j]
+                                (when (< j k)
+                                  (push a (->array (get carr j)))
+                                  (go (+ j 1))))]
+                    (go 0))
+                  a)
+           n (letrec [mn (fn [j m]
+                           (if (>= j k)
+                             m
+                             (mn (+ j 1) (min m (length (get arrs j))))))]
+               (mn 1 (length (get arrs 0))))
+           tuple-at (fn [i]
+                      (letrec [go (fn [j acc]
+                                    (if (< j 0)
+                                      acc
+                                      (go (- j 1)
+                                      (pair (get (get arrs j) i) acc))))]
+                        (go (- k 1) ())))]
+      (if (array? (first colls))
+        (let [out @[]]
+          (letrec [go (fn [i]
+                        (when (< i n)
+                          (push out (tuple-at i))
+                          (go (+ i 1))))]
+            (go 0))
+          out)
+        (letrec [go (fn [i acc]
+                      (if (< i 0)
+                        acc
+                        (go (- i 1) (pair (tuple-at i) acc))))]
+          (go (- n 1) ()))))))
 
 (defn flatten [coll]
   (letrec [to-list (fn (c)

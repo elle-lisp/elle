@@ -172,7 +172,7 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     let capture_locals_mask = &template.capture_locals_mask;
 
     // Each env value gets its OWN fresh per-execution region (mirroring the
-    // interpreter's `env_value_region`, docs/impl/region-rules.md Rule 6, no
+    // interpreter's `env_value_region`, docs/impl/region/rules.md Rule 6, no
     // commingling). The heap is the driving instance's, reached through the host's
     // VM pointer (`WasmEnvHost::heap_ptr`); the raw pointer lets each
     // `value::build::*` call reborrow it for exactly one allocation (no two `&mut`

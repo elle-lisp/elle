@@ -46,7 +46,7 @@ fn instr_kind_name(instr: &LirInstr) -> &'static str {
 /// number baked into bytecode. A static id is a per-function slot, NOT a live
 /// region: each activation remaps it to a freshly-minted `new_runtime_region`
 /// via its `activation_region_map`. Never index a static id into the
-/// `RegionStore` (see docs/impl/region-model.md § id-spaces).
+/// `RegionStore` (see docs/impl/region/model.md § id-spaces).
 pub fn new_static_region() -> StaticRegion {
     let id = NEXT_STATIC_REGION.fetch_add(1, Ordering::Relaxed);
     assert!(
@@ -215,7 +215,7 @@ pub struct Lowerer<'a> {
     /// actually names) so `emit_increfs_for` can classify a post-merge
     /// intra-region self-edge — `is_merge_self_edge(source, target)` — and DROP it
     /// (transform 2: a merged `source→target` store edge is intra-region, so its
-    /// incref is unbalanced by the self-skipping cascade; region-rules.md
+    /// incref is unbalanced by the self-skipping cascade; region/mechanism.md
     /// § "Self-edge elimination").
     increfs_by_site: HashMap<HirId, Vec<(crate::hir::region::Region, crate::hir::region::Region)>>,
     /// `region_data` indexed by `decref_point` HirId — regions whose demise
@@ -382,7 +382,7 @@ impl<'a> Lowerer<'a> {
         // the readers-before-freers order below sorted the member's plain `DecrefRegion`
         // LAST, so the owner's release reclaimed the member before its own decref, which
         // then faulted on the freed region (the emit-order half of the lifetime
-        // obligation — docs/impl/region-model.md § "The lifetime obligation the root
+        // obligation — docs/impl/region/adopt.md § "The lifetime obligation the root
         // carries"; region-array-push-pair-loop-uaf.lisp).
         let store_adopted_members: rustc_hash::FxHashSet<crate::hir::region::Region> = info
             .owned_adopt_edges
@@ -391,7 +391,7 @@ impl<'a> Lowerer<'a> {
             .map(|&(member, _owner)| member)
             .collect();
         // Release order at a shared decref_point is deterministic and
-        // dependency-safe (docs/impl/region-rules.md Rule 4): a store-adopted member's
+        // dependency-safe (docs/impl/region/rules.md Rule 4): a store-adopted member's
         // `Owned` no-op sorts FIRST (class 0), then releases that READ pages come before
         // releases that FREE them. Class 1 — `DecrefValueRegion` (loads a slot and
         // derefs the value, unwrapping a capture cell); class 2 — `DecrefCellRegion`

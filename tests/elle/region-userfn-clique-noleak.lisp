@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Counterfactual for the alloc-region side of the user-fn arg-clique rule
-# (docs/impl/region-effects.md "Native region effects" — the `None`/user-fn case).
+# (docs/impl/region/effects.md "Native region effects" — the `None`/user-fn case).
 #
 # An opaque USER-FN call site (callee is not a registered primitive, so the
 # solver knows nothing about its store behaviour) historically recorded the
@@ -10,7 +10,7 @@
 # (a direct heap literal — its static slot IS populated at runtime) the
 # slot-based `IncrefRegion` is REAL and never balances: a user fn can only
 # store an argument through the runtime-counted mutable-store funnel
-# (region-rules.md Rule 5 is statically complete), so no caller-side compile-
+# (region/rules.md Rule 5 is statically complete), so no caller-side compile-
 # time incref is ever needed. Each call leaked one region per alloc-region
 # heap argument — every multi-heap-arg opaque user-fn call.
 #

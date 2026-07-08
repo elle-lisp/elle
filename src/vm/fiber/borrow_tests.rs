@@ -1,5 +1,5 @@
 //! Counterfactual tests for the uncounted cross-fiber borrow check
-//! (docs/impl/region-generations.md § "Uncounted-borrow check").
+//! (docs/impl/region/generations.md § "Uncounted-borrow check").
 //!
 //! A child fiber snapshots heap values from its parent's dynamic-parameter
 //! baseline without a reference count (the scheduler-via-parameter borrow). The
@@ -73,7 +73,7 @@ fn record_param_borrows_snapshots_heap_bindings_only() {
 /// The suspended-frame borrow check: the recorded-generation analogue of the
 /// param-snapshot one, for the uncounted region references a `BytecodeFrame`'s
 /// `activation_region_map` holds across park/resume
-/// (docs/impl/region-generations.md § "Two borrow shapes"). `record_region_borrows`
+/// (docs/impl/region/generations.md § "Two borrow shapes"). `record_region_borrows`
 /// snapshots each `(slot, region, generation)` at suspend; the shared
 /// `first_stale_borrow` flags any whose region's generation has since moved — a
 /// region freed while the fiber was parked.

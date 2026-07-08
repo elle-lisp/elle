@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# udp/send-to declares RegionEffect::Immediate (docs/impl/region-effects.md):
+# udp/send-to declares RegionEffect::Immediate (docs/impl/region/effects.md):
 # the io completion returns (SIG_OK . result_code) — the number of bytes sent —
 # so the result is always an immediate, with no heap region for the solver to
 # release.

@@ -2,7 +2,7 @@ use super::*;
 
 // ── The outgoing edge table ──────────────────────────────────────────────────
 //
-// docs/impl/region-model.md § "The outgoing edge table". Every cross-region
+// docs/impl/region/ownership.md § "The outgoing edge table". Every cross-region
 // CONTENT edge — a `Value` in a region's heap objects pointing into another
 // region — is recorded at creation into the source region's `outgoing` table, so
 // reclamation walks the table (O(edges)) instead of scanning page contents. The

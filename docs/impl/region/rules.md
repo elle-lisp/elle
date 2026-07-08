@@ -1,12 +1,14 @@
 # Region rules — the implementor's correctness obligations
 
 This is implementation-facing: the exhaustive correctness contract the
-compiler and runtime must uphold. Read it before touching the region code.
+compiler and runtime must uphold. Read it before touching the region code. The RC-instruction mechanism these
+rules constrain — value/slot resolution, coalescing, self-edge elimination, and
+the equivalence oracle — is in [mechanism.md](mechanism.md).
 For the consumer-facing model — how to write Elle that is sympathetic to the
-memory system — see [docs/regions.md](../regions.md) and the
-[docs/regions/](../regions/) series; the semantics (Tofte–Talpin for immutable
+memory system — see [docs/regions.md](../../regions.md) and the
+[docs/regions/](../../regions/) series; the semantics (Tofte–Talpin for immutable
 values, reference counting for mutation) and the single known leak are in
-[regions/semantics.md](../regions/semantics.md).
+[regions/semantics.md](../../regions/semantics.md).
 
 ## There are exactly two measures: correct, then optimal
 
@@ -28,163 +30,6 @@ the *implementation* correct with a test written from the idea — not from what
 the implementation happens to produce. Greening an individual failing test by
 patching its symptom is how a codebase reaches "almost all tests pass" while
 never being correct. The tests support the specification; they do not define it.
-
-## The mechanism
-
-A region owns pages and carries one `u32` reference count. RC starts at **1** —
-the compiler's initial reference, i.e. the TT `letregion` owner. Cross-region
-references raise it above 1.
-
-- `IncrefRegion` raises RC. The runtime also auto-increfs at two points: scanning
-  an immutable object's contents at allocation (`alloc_obj`), and storing into a
-  mutable container at runtime.
-- `DecrefRegion` lowers RC. At 0 the region's pages return to the pool **and**
-  every region its contents reference is decremented (the cascade), recursively.
-- `DecrefRegion` is the only demise instruction. There is no `FreeRegion`.
-
-If a value escapes — into a container, a closure, a yielded signal — its region's
-RC was already raised at the escape site, so the `DecrefRegion` at its `decref_point`
-drops the initial reference without freeing. The region lives exactly as long as
-RC says. There is no promotion pass that moves a value to a longer-lived region;
-the value is born in the right region (Rule 3) and RC tracks the rest.
-
-### Two resolutions: value-resolved and slot-resolved
-
-Each region-RC instruction names its region in one of two ways:
-
-- **value-resolved** (`IncrefValueRegion`/`DecrefValueRegion`): the operand is a
-  *register*; the runtime reads the value and asks `region_of` for its physical
-  region. This is the honest encoding whenever the region cannot be named at
-  compile time — a passed-through arg, a branch-dependent mix, an opaque call
-  result, a runtime mutable store. The prediction-free calling convention is
-  built on it: a callee hands its caller one owning reference to the result's
-  *runtime* region (`IncrefValueRegion` at every tail) and the caller consumes it
-  (`DecrefValueRegion` at the result's `decref_point`), neither side naming the
-  other's region statically.
-- **slot-resolved** (`IncrefRegion`/`DecrefRegion`): the operand is a
-  *`StaticRegion` slot*; the runtime resolves it through the current activation's
-  `activation_region_map` to the physical region this execution minted for that
-  slot. Usable only where the region is statically known.
-
-### Compile-time region selection (coalescing)
-
-Where the compiler can prove a value is a **fresh local allocation whose region
-is a known slot** — the value was allocated in this function (`alloc_region` has
-an entry, or for a returned binding `binding_source_regions` resolves to one such
-region), that region is `live`, and it is none of the dynamic classes below — it
-substitutes the slot-resolved `IncrefRegion` for the value-resolved
-`IncrefValueRegion` (and likewise on the decref side). This is **instruction
-selection, not a change of RC unit**: the slot resolves — through the activation
-map — to the *same physical region* `region_of(value)` would return, because the
-allocation stamped that slot to that region and a value never moves regions. So
-every region's RC trajectory is bit-identical and leak counts and teardown
-residue are unchanged *by construction*. The win is one fewer runtime deref per
-coalesced site, and the slot-resolved form touches no operand stack (the value
-register stays on top as the return value — stack-neutral).
-
-The substitution is **purely callee-mint-side** for the return convention: the
-caller still cannot name the callee's region, so the caller's balancing
-`DecrefValueRegion` stays value-resolved. The pervasive coalescible site is the
-prediction-free return mint at every function tail. The two narrower sites are
-both reassigned-binding traffic over a value the lowerer just allocated locally:
-the **reassign incref-on-store** (`lower_assign`'s drop-on-overwrite — pinning a
-1-slot container's new content; coalesces only for a *fn-local* container, since a
-*module-scope* container's value is in `mutated_binding_value_regions` and stays
-value-resolved), and the decref-side **captured-reassign init-drop**
-(`store_captured_cell_init` — dropping the producer's reference to a captured
-binding's fresh init value, `DecrefValueRegion` → `DecrefRegion`). Both reach the
-same `coalescible_region` predicate, so the runtime-population guard (the region's
-slot must be stamped by an allocation emitted in this function) refuses any
-captured/cross-thread value at all three sites alike.
-
-The reduction this buys — coalesced (slot-resolved) versus value-resolved mints at
-the candidate sites, plus the self-edges eliminated below — is *measured, not
-asserted*: the lowerer records each decision in the thread-local instrument
-`lir::lower::rcstats` (the choice is not recoverable from the final LIR — a
-coalesced mint's `IncrefRegion` is indistinguishable from a store-edge's, and an
-eliminated self-edge leaves no instruction), and `benches/regionrc.rs` reports the
-totals across the stdlib load and the `tests/elle` corpus.
-
-### The dynamic boundary (stays value-resolved)
-
-These sites are genuinely runtime facts and must **never** coalesce — the region
-is not knowable at compile time:
-
-| Site / class | Why it stays value-resolved |
-|---|---|
-| caller-side `DecrefValueRegion` of a call result | the caller cannot name the callee's region — prediction-free by design |
-| tail borrowed-arg incref (`tail_arg_is_borrowed`) | a captured upvalue / env **cell** region — dynamic |
-| tail native-result retain | pass-through native result; region named only at runtime |
-| reassign drop-old (`DecrefValueRegion{old_reg}`) | the displaced 1-slot-container content — the runtime fact the container tracks |
-| `Mixed`/`Unknown` `RegionEffect` results | region unknown; the clique is a may-store over-keep |
-| pass-through natives (`first`/`rest`/`get`) | result lives in an arg's region, named only at runtime |
-| capture cells (`cell_release_regions`, `DecrefCellRegion`) | release frees the *cell's* own region, not the inner value's |
-| phantom param regions | no `alloc_here`, filtered from `live_regions` — runtime-counted |
-| suspended frames | `activation_region_map` captured/restored across resume; the slot is per-activation |
-| terminal fiber signals | set-once park-retain, no compile-time edge |
-| runtime mutable-store traffic | the `push_with_incref` funnel counts at the store site (the TT gap is dynamic) |
-| ownership-forest ops (`AdoptRegion`, `FreeRegionGroup`, `AdoptIntoActivation`) | a forest member is a runtime fact (a call-result / cross-activation region); `AdoptIntoActivation`'s parent — the activation's pages-less owner node — has no slot at all (docs/impl/region-model.md § "Owner nodes") |
-
-### Self-edge elimination
-
-`emit_increfs_for` emits one `IncrefRegion(source)` per cross-region store edge
-`(site, source, target)` — a value in `source` stored into a structure in
-`target` — balanced by `target`'s free-time cascade at `DecrefRegion(target)`.
-The cascade **skips self-references** (`regionpool/introspect.rs` decrefs a
-referenced region only when `rid != own_id`). So a `source == target` self-edge
-`R→R` has no balancing decref: keeping its `IncrefRegion(R)` **leaks** `R`.
-Eliminating a self-edge is therefore the sound transform — the compiler-side
-mirror of the cascade's own `own_id` self-skip. It is the *only* redundant case:
-
-- **alias edges** — `(%pair x x)` and repeated-arg shapes emit N edges into a
-  *distinct* target; the cascade finds N references and decrefs N times, so all N
-  increfs are required. Collapsing them is an over-collapse UAF.
-- **may-store clique edges** — over-approximations whose balancing decref is the
-  target's runtime content scan (per *actual* store, not per emitted edge).
-  Eliminating them trades a known leak for a possible UAF.
-
-A self-edge appears only when a region **merge** collapses a store edge's source
-and target into one region (a value merged into the aggregate it is stored into);
-see [region-model.md](region-model.md) § Merging. The compiler detects one with
-`RegionInfo::is_merge_self_edge` — `merged_root(source) == merged_root(target)`
-over the merge forest — which is exactly the slot coincidence the merged
-allocation resolves to (`static_slot` canonicalizes through that forest). When the
-predicate fires, `emit_increfs_for` **drops** the `IncrefRegion` rather than
-emitting it; the detection isolates the redundant self-edge from the two must-keep
-classes above by construction, because the merge seed never collapses an escaping
-alias (it is not sole-held) nor a clique edge (it is not a `%pair` immutable
-store), so their endpoints keep distinct merge roots.
-
-This elimination is half of one mechanism with the merge's allocation
-canonicalization and child-decref suppression (region-model.md § "Emission: one
-slot per merge tree, one demise at the root"): a self-edge dropped without the
-merge frees early, and a merge without the drop leaks, so neither side is emitted
-without the other. Its correctness net is not a per-edge runtime assert — once both
-endpoints share a slot, a slot-vs-slot check is a tautology — but the compile-time
-decref-dominance assertion (exactly one `DecrefRegion` per merged slot,
-`record_merged_slots`) together with `--trace=guardfree` over the builder corpus
-(an over-collapse surfaces as a UAF; a self-edge left in place grows the live
-region count). The pinning test is the canonical reference
-(`tests/elle/region-merge-builder-loop.lisp`).
-
-### The equivalence oracle
-
-A mis-coalesce is a use-after-free: a slot resolved to the wrong physical region
-makes its cascade free a live region. The net for a coalesced *mint* (the
-value→slot substitution, § "Compile-time region selection") is the debug-only
-`AssertRegionMatches { region_id, src }`, emitted immediately before every
-coalesced `IncrefRegion`. (Self-edge *elimination* carries no coalesced incref to
-guard — its net is the decref-dominance assertion and guardfree, § "Self-edge
-elimination".) In the bytecode interpreter it panics when
-`activation_region_map.resolve(region_id) != region_of(src)` — turning an
-inference bug into a deterministic panic at the exact instruction, under the
-trustworthy guardfree oracle, instead of a later heap corruption (the mirror of
-the native-effect declaration oracle, [region-effects.md](region-effects.md)).
-Release builds and the JIT/WASM tiers treat it as a no-op (the GPU tiers exclude
-any function carrying it via the `is_gpu_instruction` whitelist); their coalesced
-sites are covered instead by the runner's cross-tier divergence detection and the
-escape golden. The instruction renders into no `[region_instrs]` golden line — it
-is scaffolding, not part of the semantic RC stream.
 
 ## The rules
 
@@ -288,7 +133,7 @@ is a correctness defect, not a tuning knob.
      the closure is built;
    - *reassigned mutable binding cell* — a reassigned binding is a 1-slot
      mutable container (see
-     [region-bindings.md](region-bindings.md)): the store increfs the new
+     [bindings.md](bindings.md)): the store increfs the new
      content's region, the overwrite decrefs the displaced content's region,
      and a binding read out of a reassigned **captured** cell takes a counted
      reference (incref at the bind, value-based release at the reader's last
@@ -327,7 +172,7 @@ is a correctness defect, not a tuning knob.
    is **allocated exactly once per process**: a value re-allocated on every
    `(eval …)` or module load is not a root no matter how "compile-time" it looks.
    A scope that drops a value without freeing it is a defect, including the
-   mutable-cycle case of the [theory](../regions/semantics.md) (which we tolerate
+   mutable-cycle case of the [theory](../../regions/semantics.md) (which we tolerate
    only because it is currently the sole known incompleteness, not because
    leaking is ever correct).
 

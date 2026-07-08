@@ -5,7 +5,7 @@ use super::subtree::compute_owned_subtrees;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The two adopt-edge maps the ownership forest's emit consumes, by emit site — the
-/// output of `compute_adopt_edges` (docs/impl/region-model.md § "Adoption and subtree
+/// output of `compute_adopt_edges` (docs/impl/region/ownership.md § "Adoption and subtree
 /// drop"). Computed by the ownership pass in `analyze_regions_with`.
 pub(in crate::hir::regions) struct AdoptEdges {
     /// `cross_region_refs` **store-site** HirId → `(member, owner)` adopts the lowerer
@@ -59,7 +59,7 @@ pub(in crate::hir::regions) struct AdoptEdges {
 /// `cross_region_refs` edge) carries its funnel **call-site** HirId and rides
 /// `AdoptEdges::store` keyed there: the value-resolved adopt reloads both endpoints from
 /// their binding slots, so it needs no store opcode — the same F-b face the activation
-/// and transfer cuts carry (region-model.md § "The funnel adopt — the checked-on store
+/// and transfer cuts carry (region/adopt.md § "The funnel adopt — the checked-on store
 /// face"). A funnel edge is emittable only at a **retaining-store** site recording the
 /// member as its stored value (`funnel_store_sites`; a `%del`/key read retains nothing
 /// and stays unemittable). All three feed owner assignment, so a value captured by a
@@ -72,7 +72,7 @@ pub(in crate::hir::regions) struct AdoptEdges {
 /// 1. **Lifetime obligation** (the shared `postdom::drop_post_dominates`, `EmitMode::Adopt`),
 ///    **owner-aware**: the root's `decref_point` must **structurally post-dominate** every
 ///    member's relevant last use over the scope tree (not a numeric `ord` compare —
-///    region-model.md § "The lifetime obligation the root carries") — else the root's single
+///    region/adopt.md § "The lifetime obligation the root carries") — else the root's single
 ///    decref subtree-drops a region still derefed afterward (a UAF), and across a branch arm or
 ///    loop back-edge order is not a post-dominance proxy. Which last-use bounds a member depends
 ///    on whether its own decref is SUPPRESSED. A **capture-adopted**
@@ -101,7 +101,7 @@ pub(in crate::hir::regions) struct AdoptEdges {
 ///    refuses the whole subtree to Shared (the always-legal baseline).
 ///    A capture owner-edge is emittable for **every** capture kind — `lower_lambda_expr`
 ///    reloads a direct local from its binding slot and an upvalue/transitive capture from
-///    the constructing function's environment (region-model.md § "The capture adopt") —
+///    the constructing function's environment (region/adopt.md § "The capture adopt") —
 ///    so the capture-adopt contract (suppress ⊆ adopt) is held by emit capability, and no
 ///    lowerability refusal exists. The **lifetime obligation** (filter 1) is what keeps
 ///    the cross-activation (upvalue) family out, by construction: an upvalue member is
@@ -125,7 +125,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
     // owner-edges, emitted at the closure's construction site rather than a store node.
     let all_captures = capture_containment_edges(hir, info, arena);
     // Structural post-dominance over the scope tree — the lifetime obligation's
-    // authority (region-model.md § "The lifetime obligation the root carries").
+    // authority (region/adopt.md § "The lifetime obligation the root carries").
     // Built once, queried per member below.
     let pd = PostDom::new(hir, order);
     // A region collapsed by a builder-idiom MERGE (as child or parent) is owned by
@@ -237,7 +237,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         // chosen CAPTURE owner-edge is emittable for EVERY capture kind —
         // `lower_lambda_expr` reloads a direct local from its binding slot and an
         // upvalue/transitive capture from the constructing function's environment
-        // (region-model.md § "The capture adopt") — so no lowerability refusal is needed
+        // (region/adopt.md § "The capture adopt") — so no lowerability refusal is needed
         // here, and the `lower_lambda_expr` `debug_assert` is the backstop that every edge
         // matches a real capture. What keeps the cross-activation (upvalue) family out is
         // the lifetime obligation below, by construction — see the single-owner filter's
@@ -377,7 +377,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         // or a redundant store/capture into a non-owner) carries no adopt and needs none:
         // a Fresh member has no populated static slot so its `IncrefRegion` is a runtime
         // no-op, and the frozen-RC no-op absorbs any that resolves — the cycle reclaims
-        // with the root's subtree drop (region-rules.md Rule 8).
+        // with the root's subtree drop (region/rules.md Rule 8).
         let mut adopted: FxHashSet<Region> = FxHashSet::default();
         for &(site, src, dst) in interior_store.iter().chain(interior_funnel.iter()) {
             if owner_of.get(&src) == Some(&dst) && adopted.insert(src) {

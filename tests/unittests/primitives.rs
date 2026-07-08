@@ -25,7 +25,7 @@ fn get_primitive(meta: &PrimitiveMeta, symbols: &mut SymbolTable, name: &str) ->
 #[allow(clippy::result_large_err)]
 fn call_primitive(prim: &Value, args: &[Value]) -> Result<Value, LError> {
     if let Some(f) = prim.as_native_fn() {
-        // Natives take a NativeCtx (docs/impl/region-ctx.md); the seam mints one
+        // Natives take a NativeCtx (docs/impl/region/ctx.md); the seam mints one
         // over a fresh region. Use the region-keeping variant: the returned
         // `value` (and the error struct `format_error` reads) is heap-backed and
         // inspected AFTER this call, so the region must not be released here —

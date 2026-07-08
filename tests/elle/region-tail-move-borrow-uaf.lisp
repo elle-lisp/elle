@@ -2,7 +2,7 @@
 # Counterfactual: a BORROWED value (a closure's by-value capture) passed as a
 # TAIL-CALL ARGUMENT to an owned-param callee is over-released — use-after-free.
 #
-# The owned-params calling convention (docs/impl/region-rules.md Rule 5) makes a
+# The owned-params calling convention (docs/impl/region/rules.md Rule 5) makes a
 # tail-call arg a pure MOVE: the caller emits no `CallArgument` incref, and the
 # owned-param callee releases the arg at its last use. That is sound ONLY when the
 # caller actually OWNS a transferable reference — a value built in the body, an
@@ -19,7 +19,7 @@
 #     the closure env STILL references it.
 #   - The next read of the capture (`UpdateCapture` / a field access) touches the
 #     freed page: `tag/object mismatch` panic (no guardfree) or SIGSEGV
-#     (guardfree). docs/impl/region-rules.md Rules 5 (every escape increfs)
+#     (guardfree). docs/impl/region/rules.md Rules 5 (every escape increfs)
 #     and 8 (no UAF).
 #
 # This is the minimal, scheduler-free, squelch-free shape of the

@@ -38,7 +38,7 @@ impl WasmEmitter {
                         // instance's symbol table, so a compound literal with a
                         // quoted *symbol* leaf is unsupported here — part of the
                         // deferred wasm-build debt (the NativeCtx capability split;
-                        // docs/impl/region-ctx.md). String/list/array literals
+                        // docs/impl/region/ctx.md). String/list/array literals
                         // without symbols materialize fine.
                         let value = other.materialize(unsafe { &mut *heap_ptr }, region, None);
                         self.emit_value_const(f, *dst, value);

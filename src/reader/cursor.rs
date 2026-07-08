@@ -1,7 +1,7 @@
 //! Cursor over a token stream, and the token-index newtype it walks.
 //!
 //! The reader frontends move through two distinct integer index-spaces that
-//! must never be confused — the same discipline `docs/impl/region-model.md` applies to
+//! must never be confused — the same discipline `docs/impl/region/model.md` applies to
 //! region ids, applied here to source positions:
 //!
 //! * **token-index** — a position in a `Vec<Tok>` token stream, walked by the

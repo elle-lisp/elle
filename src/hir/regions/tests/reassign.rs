@@ -2,7 +2,7 @@ use super::*;
 
 // ── 1-slot-container gate: sole-held AND not-returned ───────────────
 //
-// docs/impl/region-bindings.md "Reassigned mutable bindings are 1-slot containers":
+// docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot containers":
 // the drop-on-overwrite + suppression model may be applied only when
 // every region the cell may hold is sole-held by the binding AND not
 // claimed by ownership transfer at a return/tail boundary (two static
@@ -141,7 +141,7 @@ fn reassign_gate_applies_to_sole_held_unescaped() {
     );
 }
 
-/// The mutated-slot backstop (docs/impl/region-bindings.md "The fallback's
+/// The mutated-slot backstop (docs/impl/region/bindings.md "The fallback's
 /// value route is not unconditionally safe"). A top-level reassigned binding's
 /// init + assign-value regions are recorded in `mutated_binding_value_regions`
 /// UNCONDITIONALLY — even when the suppression gate succeeds — so the lowerer
@@ -177,7 +177,7 @@ fn mutated_slot_backstop_records_top_level_reassign_value_regions() {
     );
 }
 
-/// The producer-reference donation split (docs/impl/region-bindings.md
+/// The producer-reference donation split (docs/impl/region/bindings.md
 /// "Reassigned mutable bindings are 1-slot containers"). A
 /// MODULE-SCOPE (file-letrec) 1-slot container suppresses its assign-value
 /// region's ordinary decref, donating the producer's reference to the cell — so

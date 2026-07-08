@@ -6,7 +6,7 @@
 //! context), registers primitives and
 //! (optionally) loads the stdlib, and — on `Drop` or an explicit
 //! [`Runtime::teardown`] — runs the **process teardown sweep** specified in
-//! docs/impl/region-rules.md § "Teardown — every region frees":
+//! docs/impl/region/rules.md § "Teardown — every region frees":
 //!
 //! 1. **RC-driven, never iterate-and-free.** It releases the registered process
 //!    roots (each decref'd once) and lets the ordinary region RC cascade reclaim
@@ -26,7 +26,7 @@ use crate::symbol::SymbolTable;
 use crate::vm::VM;
 use crate::{init_stdlib, register_primitives};
 
-/// The observable result of a teardown sweep (docs/impl/region-rules.md §
+/// The observable result of a teardown sweep (docs/impl/region/rules.md §
 /// "Teardown — every region frees", property 2). The standing target is
 /// `live_regions == 0`; a non-zero value is the current set of open leaks — the
 /// remaining work, not a tuning knob.

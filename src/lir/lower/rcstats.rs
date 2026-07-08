@@ -1,5 +1,5 @@
 //! Compile-time RC-coalescing statistics — the measured win of compile-time
-//! region selection (docs/impl/region-rules.md § "Compile-time region selection
+//! region selection (docs/impl/region/mechanism.md § "Compile-time region selection
 //! (coalescing)" / "Self-edge elimination").
 //!
 //! Every region-mint the lowerer emits at a coalescing-candidate site is either

@@ -103,7 +103,7 @@ fn test_cell_operations() {
 // (`env_value_region` / `args_to_list`, src/vm/env.rs). The prologue must do the
 // same. On a JIT->JIT call the callee inherits the caller's region; an env value
 // allocated into the *caller's* region commingles with it
-// (docs/impl/region-rules.md Rule 6) and its value-based `DecrefCellRegion` /
+// (docs/impl/region/rules.md Rule 6) and its value-based `DecrefCellRegion` /
 // `DecrefValueRegion` decrefs the caller's region — a leak (Rule 8) and a latent
 // use-after-free. The owned helpers (`elle_jit_make_capture_owned` /
 // `elle_jit_collect_rest_list`) mint a fresh region per value, exactly like the

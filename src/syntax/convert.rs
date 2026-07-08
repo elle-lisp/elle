@@ -67,10 +67,10 @@ impl Syntax {
     /// Convert Syntax to a runtime Value as an **ordinary allocation** into the
     /// ctx's own region (reclaimed by RC). Used by the read-time primitives `read`
     /// / `read-all` / `syntax->datum`, whose native call mints a fresh region for
-    /// the result (region-model.md, "Constants lower as ordinary allocations").
+    /// the result (region/model.md, "Constants lower as ordinary allocations").
     ///
     /// `ctx` is the allocation capability — the read-time primitives pass their
-    /// call's ctx (docs/impl/region-ctx.md). The whole tree lands in the ctx's
+    /// call's ctx (docs/impl/region/ctx.md). The whole tree lands in the ctx's
     /// region, reclaimed at the caller's `decref_point`.
     pub fn to_value(&self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
         self.to_value_in(symbols, ctx)
@@ -192,7 +192,7 @@ impl Syntax {
     /// Convert Syntax to a `ConstTemplate` — the allocation-free compile-time
     /// form of [`to_value`](Self::to_value): plain recursive data that
     /// `MaterializeConst` materializes fresh into a reclaimable region each
-    /// execution (region-model.md, "Constants lower as ordinary allocations").
+    /// execution (region/model.md, "Constants lower as ordinary allocations").
     /// The desugaring matches `to_value` — a quoted `{:a 1}` becomes the list
     /// template `(struct :a 1)`, etc. — so the quoted datum's value is unchanged.
     ///
@@ -266,7 +266,7 @@ impl Syntax {
             // A hygiene-bearing macro-template symbol (always a `Symbol`,
             // produced by quasiquote): carry its scope set verbatim into a
             // `SyntaxSymbol` template so it materializes as an ordinary
-            // allocation with hygiene intact (region-model.md, "Constants lower
+            // allocation with hygiene intact (region/model.md, "Constants lower
             // as ordinary allocations").
             SyntaxKind::SyntaxLiteral(s) => {
                 if let SyntaxKind::Symbol(name) = &s.kind {

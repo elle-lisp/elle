@@ -1,0 +1,279 @@
+# Owner nodes — an activation as a forest root
+
+An owned subtree's root need not be a pages-owning region: the forest's owner lattice is
+{region, activation, fiber}, and the runtime realizes an **activation owner** as an **owner
+node** — a pages-less region used purely as a forest root. The node id is minted by
+`new_runtime_region()` (so it can never alias a live region) and no allocation ever targets
+it; its `RegionEntry` exists only to carry `owned_children`. A member joins by the ordinary
+`adopt_region(node, member)` — `Counted → Owned`, count consumed — so every typestate
+guarantee above holds unchanged: a member's stray decref is a structural no-op, a second
+adoption is a debug-asserted bug, and the node's demise is one `free_region_set` over node +
+transitive children (interior cycles reclaim with the set; the Shared frontier, read from the
+recorded `outgoing` tables, cascades once). **No new reclamation mode exists** — the node
+rides the same subtree drop a region root does; tearing down its own entry returns zero
+pages. Pinned by `regionstore::tests::forest::pages_less_owner_node_subtree_drops_members`
+and `…::interior_cycle_in_owner_node_reclaims`.
+
+**The channel is `AdoptIntoActivation { child }`** — value-resolved like `AdoptRegion` (the
+handler resolves the child's runtime region through `result_region_of`, unwrapping a capture
+cell) but carrying **no parent operand and no static slot**: the parent is the *current
+activation's* node, minted lazily at the first adopt so an activation that adopts nothing
+pays nothing (an immediate child — no region — adopts nothing and mints no node). The
+channel is **idempotent on an already-Owned child**: the handler adopts nothing when the
+child's region is already a forest member, so a program that hands one region to the channel
+twice — a masked-`:error` fiber restarted after delivering the same payload, a value handed
+back twice — leaves it owned by its **first** adopter (whose release post-dominates the later
+hand-off's use, every consumer being gated to discard) instead of tripping the one-owner
+adopt assert. The compiler-paired `AdoptRegion` sites keep the strict assert — their
+inference claims each member exactly once; only this consumer-facing channel absorbs
+re-delivery. Its production consumers, under `--region-ownership`, are the
+capture-back-edge cut and the transferred-returned-subtree cut (both below).
+
+**The capture-back-edge SCC — owner = activation.** The one containment-graph shape neither
+region-rooted mode can own is the **capture-back-edge cycle**: a container captured by a
+closure it holds (`m ⊇ c` by store, `c ⊇ m` by capture — the m↔c SCC). A region root cannot
+own it — `m` is captured, so its `decref_point` is over-extended one structural step past
+the closure, and `m` is store-adopted (its own `DecrefValueRegion` stays live), so the
+owner-aware lifetime obligation refuses the subtree (the refusal
+`adopt_edges_refuses_captured_store_member_on_lifetime` pins) — and the co-owned group free
+cannot either (`c` is a closure region, whose cell⊇closure containment the
+external-uniqueness scan cannot see). The activation owns it instead
+(`regions::ownership::compute_activation_adopts` → `RegionInfo::activation_adopt_sites`):
+the SCC's members are adopted into the executing activation's owner node and freed by its
+completion release, which post-dominates every in-activation use by construction. Admission
+gates, each refusing to Shared (the always-legal baseline):
+
+- **the signature** — a genuine mutual-reach SCC (≥ 2 members) whose interior edges include
+  at least one *capture* AND at least one *store* (a non-hard `cross_region_refs` edge, or
+  a funnel-recovered `containment_edges` edge — so the cut admits the checked-on production
+  path, where the store is an opaque `Funnel` call, exactly as it admits the intrinsic
+  path). A capture-only SCC is the letrec closure web (the merge's instrument, or class 4/6
+  admission); a store-only SCC is the co-owned group's;
+- **member gates** — every member ownable (no frontier crossing, no dynamic-lifetime
+  class), sole-held, with pairwise-distinct holder bindings (each member must have its own
+  slot for the value-resolved adopt to load);
+- **disjointness** — no member is claimed by another mechanism: a merge participant
+  (builder-idiom or closure-cycle), a co-owned group member, or a store/capture-adopt
+  subtree region is never also node-adopted (the one-owner invariant at the emit level);
+- **the hull** — every region referencing INTO the SCC, transitively over all edge kinds
+  (hard may-stores included), must itself be ownable: the members free at the activation's
+  completion, so every holder must provably die within the activation (a holder that
+  returns or crosses a fiber frontier refuses the SCC). The hull members keep their own
+  baseline releases — their cascades onto the Owned members are structural no-ops;
+- **one activation, no loop seam** — the members' allocation sites share an innermost
+  enclosing structural scope (the adopt site; a cross-lambda SCC refuses), and no
+  `While`/`Loop` encloses a member's allocation without also enclosing the adopt site
+  (adopt-per-iteration is sound — fresh regions each round; alloc-inside/adopt-outside is
+  not — the static suppression would outlive the slot's last iteration value).
+
+The lowerer emits one value-resolved `AdoptIntoActivation` per member at the adopt site
+(`emit_adopt_into_activation`, driven by `emit_decrefs_for` exactly like the co-owned
+group's free), and `analyze_regions_with` suppresses **both** members' own compiler decrefs
+through `suppressed_decref_regions` — the same suppress ⊆ adopt contract the capture adopt
+carries, and the same set every decref-emit site (`emit_decrefs_for`, `emit_arm_decrefs`,
+`emit_branch_compensation`) already re-checks defensively, so no release path can double a
+node member's demise. The members stay `Counted` between construction and the adopt (normal
+RC absorbs the interval — an outside holder's earlier cascade decref just lowers the count
+the adopt then consumes); from the adopt to the activation's completion they are `Owned`,
+and the node's release frees the cycle wholesale, interior m↔c references reclaiming with
+the set. Pinned by `regions::tests::adopt::activation_adopts_capture_back_edge_scc`
+(rooted and bare shapes, both intrinsic and funnel-recovered stores),
+`…::activation_adopt_excludes_other_mechanisms` (merge/group disjointness), and at runtime
+by `runtime::tests::ownership::region_ownership_capture_back_edge_cycle_reclaims`
+(bounded flag-on beside the leaking flag-off counterfactual, panic-clean, on the
+interpreter and under the JIT).
+
+**The transferred returned subtree — owner = the consuming activation.** The second
+containment shape no region root can own is the **returned cycle**: a callee builds an
+externally-unique subtree containing a reference cycle and hands its root back across the
+return (or fiber) frontier. Inside the producer every member crosses no frontier but the
+root does, so the region-rooted cuts refuse (a Shared seed poisons the subtree walk and the
+group walk alike); in the consumer the root is an opaque call-result whose
+`DecrefValueRegion` releases one reference — but a cycle's interior back-edge holds another,
+so the cycle survives every release and leaks per call. The owner that reclaims it is the
+**consuming activation**: its owner node's release post-dominates every use of the result,
+on either side of the frontier (every producer-side use precedes the return; every
+consumer-side use precedes the completion). The cut
+(`regions::ownership::compute_transfer_adopts` → `RegionInfo::transfer_adopt_regions` plus
+interior edges merged into the adopt maps) has a producer half and a consumer half, admitted
+only together — the interior adopts freeze member counts, so an unadopted consumer would
+hold uncounted borrows; one inadmissible consumer site refuses the whole callee:
+
+- **the producer summary** — a lambda reachable only through an immutable, single-init,
+  never-mutated binding (or as a bare `fiber/new` body), whose body tail resolves through
+  the structural wrappers to a single binding with exactly **one** source region: the
+  **root**. The root must be allocated in the lambda, may cross the **return** frontier
+  (that is the shape) but not the **fiber** frontier (an emitted/sent root has an unbounded
+  second consumer), and must not be any dynamic-lifetime class. Every other member of
+  `reach(root)` is born AND last-used inside the lambda (a captured outer value, or a member
+  a later sibling still reads, refuses — freeing at the consumer's completion must not free
+  anything with a life of its own), crosses no frontier, is sole-held, and is claimed by no
+  other mechanism. The subtree must be externally unique (no edge from inside to outside —
+  the return itself records none) and must contain an **interior cycle** (an acyclic
+  returned subtree reclaims promptly by the RC cascade today; adopting it would only trade
+  promptness away). Each non-root member gets its single owner exactly as the store/capture
+  adopt assigns one — and, uniquely to this cut, a **funnel-recovered** owner edge is
+  emittable too: the adopt is keyed at the funnel *call site* (`funnel_store_sites` joined
+  with `containment_edges`), so the checked-on production path admits identically to the
+  intrinsic path (the value-resolved adopt needs no store opcode).
+- **the consumer gate, at every call site of the summarized callee** — the call's result
+  region must cross no frontier, appear in **no** edge of any kind (hard may-stores
+  included), belong to no dynamic class, and be **discard-shaped**: no user binding holds
+  it, or its sole holder's every read is an argument of an `Immediate`-effect native. A
+  consumer that stores, captures, returns, or extracts from the result refuses the callee —
+  extraction through a pass-through native (`get`/`first`) records no edge, so the
+  discard-shape gate is what keeps an uncounted member borrow from escaping the node's
+  reclamation horizon.
+- **the fiber face** — the same summary applied to a `fiber/new` body whose inferred signal
+  can deliver no non-terminal value (no yield / io / debug / wait bits, not polymorphic): a
+  completing `fiber/resume` then hands back the body's **terminal** value — the returned
+  subtree, crossing the fiber frontier — and every other resume outcome is a fresh error
+  struct or an immediate, each safely adoptable. The fiber binding must be single-init,
+  never mutated, **uncaptured**, and bound in the same function body as its every use
+  (each activation of the consumer then drives its own private fiber, so no delivery can
+  outlive the adopting activation — the restarted-`:error` re-delivery lands in the same
+  activation, where the channel's idempotence absorbs it); each use must be arg0 of a
+  `fiber/resume` (a gated consumer site) or an argument of an `Immediate`-effect native
+  (`fiber/status`). `fiber/value` is pass-through — a second route to the terminal subtree —
+  and is refused by the use gate.
+
+Emission is two-sided. The producer's interior owner edges ride the ordinary adopt maps
+(`owned_adopt_edges` at store/funnel sites, `capture_adopt_edges` at the closure — capture
+members suppressed under the same suppress ⊆ adopt contract), building the runtime ownership
+tree under the root while the root itself stays `Counted` through the hand-off (its count at
+the consumer's release is ≥ 1 by construction: the release *is* the adopt). At each consumer
+site the root's release — the slot-loaded or discarded-result `DecrefValueRegion` — is
+**replaced** by `AdoptIntoActivation`: the adopt consumes the whole count (the interior
+back-edge's stuck reference included), and the node's completion release set-drops root +
+owned members in one collection, interior cycle edges dropping in-set. Promptness is the
+designed activation bound: the subtree frees at the consuming activation's completion (for a
+top-level consumer, the root activation's exit) rather than at the result's last use — paid
+only for a discarded returned *cycle*, which the baseline never frees at all. The **fiber
+tier** of the owner lattice is reached structurally, not by a distinct opcode: a consumer
+that parks moves its node into the suspended frame like any activation state, and the
+terminal-fiber teardown gathers parked nodes under the fiber node for one set-drop — the
+transfer runtime below. Pinned by `regions::tests::adopt::transfer_adopts_*` (admission,
+both intrinsic and funnel-recovered faces; the refusal family) and at runtime by
+`runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls`,
+`…_reclaims_fiber_terminal_cycle`, and `…_transfer_adopt_rides_parks_and_fiber_teardown`
+(bounded flag-on beside the leaking flag-off counterfactual, on both `--checked-intrinsics`
+settings and under the JIT).
+
+**Lifecycle.** The node slot is per-activation state carried beside the region-remap frame:
+`Fiber::activation_owner_nodes` parallels `activation_region_maps`, pushed empty on every
+fresh activation entry (the interpreter's `saving_stack` push, the JIT prologue's
+`push_region_map`) and popped with it. The node is freed **implicitly at the activation's
+normal completion** — the interpreter trampoline's clean
+break and the compiled function's `Return` path
+(`elle_jit_release_activation_owner_node`) each take the slot and run one
+`decref_region_if_present(node)`: rc 1→0, subtree drop — never by an emitted drop
+instruction (no single static site covers return + tail + yield + error + squelch). This is
+the same clean-break discipline as the trampoline's tail-call-adopted closure release, and a
+frame-replacing tail call likewise keeps the activation — and its node — alive to the
+recursion's completion.
+
+**A park moves the node into the suspended frame.** A suspending exit — a yield, a
+suspending native, `fiber/resume`'s SIG_SWITCH handoff, a fuel pause, a capability denial —
+parks the activation's continuation as a `BytecodeFrame`; the frame **takes** the
+activation's node (`BytecodeFrame::activation_owner_node`, a parameter of
+`BytecodeFrame::suspend` so every suspend site must decide it) exactly as it carries the
+activation's `activation_region_map`. The members stay Owned (RC frozen) across the park,
+so the node is the only route to them; losing it at the suspend would strand every adopted
+member. Where the park is built by the *caller* of the already-unwound activation (a fiber
+body's pause in `do_fiber_first_resume`, a callee interrupted mid-instruction in
+`call_inner`), the node rides out in `ExecResult::activation_owner_node`, captured by
+`execute_bytecode_saving_stack` beside the region map just before the frame pops.
+`resume_suspended` restores the parked node into the slot beside
+`restore_activation_region_map`, so the resumed body's normal completion frees it through
+the same trampoline clean break, and a body that parks again re-captures it (the yield
+handler's take, or the re-suspend frame built from the exec result). The node is **moved**
+at every step — taken from the slot into exactly one frame, restored from the frame into
+exactly one live slot, never cloned — so a second release path is unrepresentable by
+construction. Pinned by
+`runtime::tests::ownership::activation_owner_node_survives_yield_resume_completion`,
+`…_survives_repeated_parks`, and `…_rides_exec_result_across_fuel_pause` (interpreter park /
+re-park / caller-built park), and `jit::suspend::tests::park` (the JIT yield side-exit
+parks the node; the interpreted resume completes and frees it).
+
+**A discard frees the parked node (squelch/abort = subtree drop).** Abandoning suspended
+work — a squelch/attune signal-violation, an abort — flows through one chokepoint,
+`VM::discard_suspended_frames` (reached from `enforce_squelch` on every tier: the
+interpreter trampoline, `compile/run-on`, and the JIT call paths). The discarded frames'
+continuations will never run, so the completion release above never fires for them; the
+chokepoint therefore runs it *at the discard*: each discarded `BytecodeFrame`'s parked node
+gets the same one tolerant decref — rc 1→0, subtree drop over node + adopted members, the
+Shared frontier cascading once from the recorded `outgoing` tables. This frees **only** the
+node: the regions named by the frame's `activation_region_map` are a borrowed view —
+possibly shared with an outer, non-discarded frame or the activation that catches the
+squelch — and releasing them here would over-release (the historical squelch double-free);
+a node's members, by contrast, are exactly the regions the inference proved externally
+unique and moved in through `AdoptIntoActivation`, so the discard release cannot touch a
+region any live frame still counts on. A frame dropped *outside* the chokepoint (an
+abandoned error park) still abandons its node — a bounded leak, never a double-free (the
+members have no count for any other release route to reach). Pinned by
+`runtime::tests::ownership::discard_frees_parked_activation_owner_node` (single frame and
+multi-frame chains; the member's generation bumps at the discard, bounded across repeated
+park-discard cycles) with the full-stdlib squelch corpus under `--trace=guardfree` as the
+panic-clean gate.
+
+**Exactly one reclamation path (the double-free invariant, positively).** A node member is
+`Owned`: it has no count for any other release route to reach, the inference that emits its
+adopt must suppress the member's own compiler decref (the same suppress ⊆ adopt contract the
+store/capture adopts carry), and membership is granted only through `AdoptIntoActivation`
+for a region proven externally unique. The node's completion free is therefore the member's
+sole demise.
+
+**All-tier.** The interpreter arm (`handle_adopt_into_activation`,
+`src/vm/dispatch/region.rs`) and the JIT helper (`elle_jit_adopt_into_activation`,
+`src/jit/dispatch/region.rs`) share the VM's lazy-mint + adopt body; the WASM backend
+handles the op structurally (a no-op arm — the arena boundary reclaims); a function carrying
+it is GPU-ineligible (`is_gpu_instruction`). Pinned end-to-end by
+`runtime::tests::ownership::activation_owner_node_frees_adopted_member_on_normal_completion`
+(interpreter) and `jit::compiler::tests::adopt_into_activation_frees_member_at_compiled_return`
+(JIT), each asserting the member's generation bump at completion and bounded region growth
+across repeated activations.
+
+**The fiber owner node.** The owner lattice's fiber tier is a second pages-less node,
+`Fiber::fiber_owner_node` — the forest root for a region whose owner is the **fiber**
+itself: a member that outlives every single activation of that fiber (the cross-call /
+cross-fiber transfer class). It is fiber state on the `Fiber` struct, so — unlike the
+per-activation node, which every park must move into a frame — it rides suspension,
+resumption, and fiber swaps structurally, with nothing to transfer. Minted lazily; `None`
+for a fiber that owns nothing. No production lowering targets it *directly* — the
+transferred-returned-subtree cut adopts into the consuming **activation's** node, and the
+fiber tier is reached structurally: a parked consumer's activation node rides its frame, and
+the teardown below gathers every parked node under the fiber node for one set-drop.
+
+**Fiber teardown frees everything the fiber owns.** The members a fiber owns are released
+at its **terminal** transitions, through one take-then-release pair
+(`take_fiber_owned` / `release_fiber_owned`, `src/vm/fiber.rs`): the taking empties the
+fiber's owned slots (each still-parked `BytecodeFrame`'s activation owner node, and the
+fiber node) under the fiber borrow; the releasing then runs against the heap with the
+borrow already dropped, so heap mutation never overlaps fiber access and a cascade that
+frees the fiber's own heap value cannot invalidate a live borrow. When a fiber node
+exists, each parked node's members are first gathered under it
+(`reparent_owned_children`) and the emptied node freed, so the teardown is **one**
+set-drop over the fiber's whole owned set — node + members + interior cycles, the Shared
+frontier cascading once from the recorded `outgoing` tables; with no fiber node each
+parked node subtree-drops directly. The terminal transitions are: normal completion
+(`with_child_fiber`'s `:dead` arm), a halt (`VM::finalize_dead_fiber`, at every
+`SIG_HALT → Dead` promotion), and the hard kills — `fiber/cancel` of a new/parked fiber
+and `fiber/abort` of a not-yet-started one (`kill_fiber`, which the discarding
+`suspended = None` sites route through). An `:error` fiber is **not** terminal — it is
+resumable (the restarts system replays its re-parked frame) — so an error promotion
+releases nothing: its parked chain and nodes stay live for the resume. The contract a
+fiber-node member carries: it must never hold the fiber's **terminal result** — a result
+that outlives its fiber is transferred out (`reparent_owned_children`) before completion,
+never left to be freed under the consumer's read. Pinned by
+`runtime::tests::ownership::fiber_owner_node_freed_at_fiber_completion`,
+`…_survives_parks_and_frees_at_completion` (a multi-frame chain: every parked frame's
+node and the fiber node reclaim), and `fiber_kill_frees_parked_and_fiber_owned`
+(cancel of a parked fiber; abort of a new one), with
+`tests/elle/region-fiber-cancel.lisp` under `--trace=guardfree` as the
+frees-nothing-live gate.
+
+A fiber abandoned **outside** those transitions — a parked fiber whose last handle drops,
+or a chain replaced without a discard — still strands its nodes until heap teardown
+(`RegionStore::teardown_all`), the same bounded abandoned-park class as an error park
+whose fiber is never resumed.
+

@@ -6,7 +6,7 @@ use crate::hir::{Hir, HirId, HirKind};
 /// Compile a source file to canonical (functionalized) HIR for the escape
 /// tests, threading a fresh per-call `CompileCtx`. Every compile names its
 /// instance's compile state explicitly, threading the compile context as a
-/// parameter (docs/impl/region-ctx.md).
+/// parameter (docs/impl/region/ctx.md).
 fn compile_fhir(
     src: &str,
     symbols: &mut crate::symbol::SymbolTable,

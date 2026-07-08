@@ -26,7 +26,7 @@
 #
 # NOT a call_collection defect: `first` and `get` fault IDENTICALLY to the
 # call-index `(xs i)` (this file proves it), so the fix belongs to the
-# native-tail return convention, not to `call_collection`. docs/impl/region-rules.md
+# native-tail return convention, not to `call_collection`. docs/impl/region/rules.md
 # Rules 4, 5, 8.
 #
 # RED now (under guardfree): the three tail-return subjects SIGSEGV. GREEN once

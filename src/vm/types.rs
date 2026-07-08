@@ -312,7 +312,7 @@ pub(crate) fn handle_intr_get(vm: &mut VM) {
 /// Both the driving `vm` and the `heap` are explicit: the interpreter handlers
 /// pass their own `vm`/`vm.heap_ptr`; the JIT helpers resolve the `vm` from the
 /// threaded `JitCtx` and pass `(*vm).heap_ptr` for the heap. The VM is named at
-/// every call (docs/impl/region-ctx.md "JIT intrinsic helpers reach the VM through
+/// every call (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through
 /// a JitCtx").
 pub(crate) fn run_alloc_intrinsic(
     vm: *mut crate::vm::VM,

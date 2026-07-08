@@ -29,7 +29,7 @@
 #
 # This is a MEASUREMENT INSTRUMENT, not the soundness oracle. The trustworthy
 # UAF signal is `--trace=guardfree` under the full stdlib (docs/impl/
-# region-diagnostics.md); a tight, confident rate here does not prove the
+# region/diagnostics.md); a tight, confident rate here does not prove the
 # absence of a use-after-free, only the size of a leak.
 #
 # ── The gauge-live discriminator (non-negotiable) ─────────────────────
@@ -410,8 +410,7 @@
         (assign k (%add k 1)))) 0]  # collection ops
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 3]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 5]
-   ["zip" (fn [j] (zip [1 2] [3 4])) 25 [25 32]]
-   ["sort" (fn [j] (sort [3 1 2])) 0]
+   ["zip" (fn [j] (zip [1 2] [3 4])) 10] ["sort" (fn [j] (sort [3 1 2])) 0]
    ["reverse" (fn [j] (reverse [1 2 3])) 2]  # F1a witness (memory.md § F1). `(rest array)` copies the tail into a fresh
    # immutable array slice whose call-result region is never reclaimed — the
    # transform-scratch root the whole HOF family rides: `fold`/`reduce` eagerly
@@ -726,7 +725,7 @@
 # closure-cycle merge collapses the SCC + cells onto one arena in-lambda exactly as at
 # top level. The tail-call letrec body `(ev n)` strands the binding-scope drop; the
 # tail-call adopt releases the merged arena once at the recursion's normal completion
-# (docs/impl/region-model.md § The letrec closure-cycle merge).
+# (docs/impl/region/letrec.md § The letrec closure-cycle merge).
 (defn lcl-self [n]
   (letrec [go (fn [m] (if (%lt m 1) :done (go (%sub m 1))))]
     (go n)))
@@ -749,7 +748,7 @@
 # the frame and falls through to the live scope-exit drop — mutually exclusive per call,
 # so exactly one release fires however the callee resolves. Both reclaim (rate 0); the
 # closure-cycle merge previously REFUSED a non-member-tail clique, leaving it Shared and
-# leaking its whole arena ~4/op (docs/impl/region-model.md § The letrec closure-cycle
+# leaking its whole arena ~4/op (docs/impl/region/letrec.md § The letrec closure-cycle
 # merge). The base cases return 0/1 so `(%add (ev n) 0)` is well-typed.
 (defn lcl-mutual-native [n]
   (letrec [ev (fn [m] (if (%lt m 1) 0 (od (%sub m 1))))
@@ -845,6 +844,54 @@
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
                    count-gauge 100 6 60 0.4 0.5) 5)
 
+# ── HOF-composition dissolution debt — the zip-tower witness ───────────
+# `zip-tower` is a zip built as a TOWER of higher-order calls: it converts every
+# input to a list (`map to-list`), then recurses building the result with `(map
+# first lists)` AND `(map rest lists)` at every step, then rebuilds an array. It is
+# `map`/`pair`/`reverse`/`push` stacked several deep — and it leaks ~25 objects per
+# `(zip-tower [1 2] [3 4])` where a direct index walk over the same inputs leaks ~10
+# (the `zip` probe above, the production form). That ~15-object gap is not zip-specific:
+# it is the general fact that COMPOSING higher-order calls COMPOUNDS the collection-builder
+# over-keep — each layer's fresh accumulator/closures leak, so the total scales with
+# composition DEPTH, not per-call constant. This is the shape the north star says the
+# compiler should DISSOLVE: fuse the map-of-map into one loop, leaving no intermediate
+# collections to leak. Until dissolution loop-ifies HOF composition, this probe pins the
+# debt; it closes when a towered composition reclaims to the same floor as the hand-fused
+# form — NOT by hand-rewriting each composition, which is the programmer bridging a gap the
+# compiler should close. (The production `zip` WAS so rewritten, for the RSS win; this probe
+# is the standing record of what that rewrite worked around.) Shrink-only.
+(defn zip-tower [& colls]
+  (letrec [to-list (fn (c)
+                     (cond
+                       (or (pair? c) (empty? c)) c
+                       (array? c)
+                         (letrec [loop (fn (i acc)
+                                         (if (>= i (length c))
+                                           (reverse acc)
+                                           (loop (+ i 1) (pair (get c i) acc))))]
+                           (loop 0 ()))
+                       true (error {:error :type-error
+                                    :reason :not-a-sequence
+                                    :message "not a sequence"})))
+           from-list (fn (lst orig)
+                       (if (array? orig)
+                         (let [arr @[]]
+                           (each x in lst
+                             (push arr x))
+                           arr)
+                         lst))
+           zip-lists (fn (lists)
+                       (if (any? empty? lists)
+                         ()
+                         (pair (map first lists) (zip-lists (map rest lists)))))]
+    (if (empty? colls)
+      ()
+      (let* [lists (map to-list colls)
+             result (zip-lists lists)]
+        (from-list result (first colls))))))
+(pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
+                   count-gauge 100 6 60 0.4 0.5) 25 [25 32])
+
 # Dispatch-wrapper passthrough leak (memory.md § F1b) — NOT a "native-tail double
 # mint". The direct intrinsic `%put-struct` and the single non-dispatching native
 # `del` both reclaim a fresh copy at 0/op (the CONTROLS: `native-tail-del-ctl` below,
@@ -875,7 +922,7 @@
 
 # ── The mutable-store funnel — remove/rebind half ─────────────────────
 # The store half (push/put/add) is pinned above (push-churn/struct-put/set-array/…);
-# these pin the REMOVE and REBIND half of the same seam (docs/impl/region-model.md
+# these pin the REMOVE and REBIND half of the same seam (docs/impl/region/ownership.md
 # § "The outgoing edge table"; src/value/arena/mutate.rs). The funnel SEAM is
 # complete-by-construction — every remove co-locates its RC decref with the outgoing
 # un-record, the raw accessors are private (an uncounted store is a compile error), and
@@ -1058,7 +1105,7 @@
 # message region at the send site to hold it in the buffer until received ("a store
 # into a Shared region bumps its count"); the receive removes it from the buffer, so
 # its region's incoming count is lowered there ("an overwrite/drop lowers it" —
-# region-model.md § class 7, the Shared incoming-count). Reclaimed: rate 0. The
+# region/ownership.md § class 7, the Shared incoming-count). Reclaimed: rate 0. The
 # fresh channel each block is created and freed within the run-block, so only the
 # per-op message reclamation shows; RED (2/op) without the receive-side release.
 (pin (measure-core "chan-send-recv"

@@ -160,7 +160,7 @@ fn mutable_array_push_keeps_region_alive() {
     // Value still points into a LIVE region. Freeing it here (a bare
     // `decref_removed_element` taking rc 1 → 0) is the free-before-retain UAF: the
     // call would hand back a Value into a region it just freed (the `raw-pop`
-    // oracle probe; docs/impl/region-model.md § "The outgoing edge table").
+    // oracle probe; docs/impl/region/ownership.md § "The outgoing edge table").
     assert_eq!(
         region_rc(unsafe { &*heap_ptr }, rid_a),
         1,
@@ -184,7 +184,7 @@ fn mutable_array_push_keeps_region_alive() {
 
 // ── The outgoing edge table: the mutable-store seam ──────────────────────────
 //
-// docs/impl/region-model.md § "The outgoing edge table". A post-alloc store into a
+// docs/impl/region/ownership.md § "The outgoing edge table". A post-alloc store into a
 // mutable container is a content edge added after the alloc-time scan, so the
 // mutable-store seam (`value/arena/mutate.rs`) records it co-located with the RC
 // incref/decref. Each pin is a counterfactual against the pre-step-0 seam (RC

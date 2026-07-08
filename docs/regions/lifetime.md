@@ -4,8 +4,8 @@ This is the consumer's view of how long things live: what persists for the whole
 process, why your "constants" are not eternal, and what is true after your
 program ends. The machinery behind these guarantees — how literals lower as
 ordinary allocations, the teardown sweep — is in
-[docs/impl/region-model.md](../impl/region-model.md) and
-[docs/impl/region-rules.md](../impl/region-rules.md).
+[docs/impl/region/model.md](../impl/region/model.md) and
+[docs/impl/region/rules.md](../impl/region/rules.md).
 
 ## The naive user model
 

@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # region-merge-builder-loop.lisp — the builder-idiom merge seed, in a loop
-# (docs/impl/region-model.md § Merging).
+# (docs/impl/region/merging.md § Merging).
 #
 # A fresh nested `%pair` literal — `(%pair (%pair i i) i)` — built and DISCARDED
 # each iteration is the canonical builder idiom: the inner pair is stored as the

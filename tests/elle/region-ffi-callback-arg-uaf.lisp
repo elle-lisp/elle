@@ -10,7 +10,7 @@
 # is a FRESH heap value (`Value::array`) and a u8 array a fresh `Value::bytes`.
 # The fix mints a fresh per-execution region per converted HEAP arg (mirroring
 # `env_value_region`); the BUG was allocating every arg into the AMBIENT TLS
-# region, so with >1 heap arg they shared ONE region (docs/impl/region-rules.md Rule 6
+# region, so with >1 heap arg they shared ONE region (docs/impl/region/rules.md Rule 6
 # violation: no commingling). The callback is invoked with move/owned-param
 # semantics (`build_callback_env` own_params=false: the trampoline's fresh mints
 # transfer to the callee, which releases each owned param value-based at its last

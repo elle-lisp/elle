@@ -46,7 +46,7 @@ fn release_fiber_value(
 }
 
 /// The FIBER owner node is freed at the fiber's normal completion
-/// (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown frees everything
+/// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees everything
 /// the fiber owns"). No production lowering targets the fiber node yet, so the
 /// test stands in for the cross-fiber ownership cuts: it mints the node, adopts
 /// a fresh-region member into it, and runs the fiber to completion
@@ -102,7 +102,7 @@ fn fiber_owner_node_freed_at_fiber_completion() {
 /// The fiber owner node SURVIVES parks — it is fiber state, riding suspension
 /// structurally — and is freed at the resumed fiber's completion, alongside a
 /// MULTI-FRAME parked chain whose per-frame activation nodes each reclaim at
-/// their own frame's completion (docs/impl/region-model.md § "Owner nodes").
+/// their own frame's completion (docs/impl/region/owner.md § "Owner nodes").
 /// The body adopts a member into its ACTIVATION node and yields (frame 1); a
 /// second hand-built frame carrying its own node + member is appended (the
 /// outer-caller shape of a yield-through chain); the fiber node holds a third
@@ -229,7 +229,7 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
 /// fiber releases both the parked frame's activation owner node and the fiber
 /// owner node (gathered under it by `reparent_owned_children` — one set-drop),
 /// and `fiber/abort` of a not-yet-started fiber releases the fiber node
-/// (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown frees
+/// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees
 /// everything the fiber owns"). Both route through `kill_fiber`; before it, the
 /// cancel arm dropped the chain bare (`suspended = None`), stranding every
 /// parked node. The counterfactual is exactly that strand: without the
@@ -337,7 +337,7 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
 }
 
 /// A squelch/abort DISCARD frees the parked owner node
-/// (docs/impl/region-model.md § "Owner nodes" — "A discard frees the parked
+/// (docs/impl/region/owner.md § "Owner nodes" — "A discard frees the parked
 /// node"). The hand-emitted body adopts a fresh-region member into the
 /// activation's node and yields; instead of resuming, the park is abandoned
 /// through the one discard chokepoint (`VM::discard_suspended_frames`, the

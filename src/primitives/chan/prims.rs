@@ -3,9 +3,9 @@ use crate::primitives::ctx::NativeCtx;
 
 /// Lower the incoming count the send bumped, now that this message has left the
 /// channel buffer — the receive half of the genuinely-Shared (class 7) message's
-/// incoming-count accounting (docs/impl/region-model.md § "Why this is hybrid").
+/// incoming-count accounting (docs/impl/region/adopt.md § "Why this is hybrid").
 ///
-/// `chan/send` is `RegionEffect::Sends` (docs/impl/region-effects.md § `Sends`): the
+/// `chan/send` is `RegionEffect::Sends` (docs/impl/region/effects.md § `Sends`): the
 /// message crosses the fiber frontier, so it can never be Owned and stays on the
 /// per-region RC path, and the `Sends` edge increfs its region at the send site to
 /// keep it alive in the buffer *until received* — "a store into a Shared region bumps

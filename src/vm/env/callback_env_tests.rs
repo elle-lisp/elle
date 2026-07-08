@@ -78,7 +78,7 @@ fn captured_upvalue_is_copied_then_params() {
 }
 
 // ── Counterfactuals: every env value the callback builder mints must land in
-// its OWN per-execution region (docs/impl/region-rules.md Rule 6), distinct from
+// its OWN per-execution region (docs/impl/region/rules.md Rule 6), distinct from
 // any other live region — `vm_with_ambient`'s extra region stands in for a live
 // caller region the cell must not reuse. The builder unifies on `populate_env` +
 // `env_value_region`, so each value is born in its own region.

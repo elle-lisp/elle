@@ -20,7 +20,7 @@ fn make_lowerer(source: &str) -> (Lowerer<'static>, crate::hir::Hir) {
 /// that need an edge the inference does not produce for any shape (an upvalue
 /// capture-adopt edge: a region-rooted upvalue owner is refused on the lifetime
 /// obligation, and the admitting owner is the activation/fiber node — see
-/// region-model.md § "The capture adopt").
+/// region/adopt.md § "The capture adopt").
 fn make_lowerer_with(
     source: &str,
     mutate: impl FnOnce(&mut crate::hir::region::RegionInfo, &crate::hir::Hir),

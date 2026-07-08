@@ -1,7 +1,7 @@
 use super::*;
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the interpreter
-/// (docs/impl/region-model.md § "Owner nodes — an activation as a forest root").
+/// (docs/impl/region/owner.md § "Owner nodes — an activation as a forest root").
 /// No production lowering emits `AdoptIntoActivation` yet, so the activation body
 /// is hand-emitted bytecode: load a fresh-region member from the constant pool,
 /// adopt it into the current activation's (lazily-minted) owner node, return nil.
@@ -63,7 +63,7 @@ fn activation_owner_node_frees_adopted_member_on_normal_completion() {
 }
 
 /// The activation owner node SURVIVES a yield→resume park
-/// (docs/impl/region-model.md § "Owner nodes" — "A park moves the node into the
+/// (docs/impl/region/owner.md § "Owner nodes" — "A park moves the node into the
 /// suspended frame"). The hand-emitted body (no production lowering emits
 /// `AdoptIntoActivation`) adopts a fresh-region member into the activation's
 /// node, yields, and — once resumed — completes normally. The park must carry
@@ -221,7 +221,7 @@ fn activation_owner_node_survives_repeated_parks() {
 
 /// The node rides `ExecResult::activation_owner_node` when the park is built by
 /// the CALLER of the already-unwound activation — the fuel-pause channel
-/// (docs/impl/region-model.md § "Owner nodes"). A fuel pause (unlike a yield)
+/// (docs/impl/region/owner.md § "Owner nodes"). A fuel pause (unlike a yield)
 /// creates no suspended frame inside the dispatch loop: the activation unwinds
 /// through `execute_bytecode_saving_stack`, which must move the node into the
 /// `ExecResult` beside the region map, and the caller builds the park from that

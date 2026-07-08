@@ -104,7 +104,7 @@ pub extern "C" fn elle_jit_yield(
         // MOVE the activation's owner node into the frame (its slot is
         // likewise still on top) so it rides the park to the resumed body's
         // completion — the compiled twin of the interpreter yield park
-        // (docs/impl/region-model.md § "Owner nodes").
+        // (docs/impl/region/owner.md § "Owner nodes").
         let activation_owner_node = vm.take_activation_owner_node();
         // The yielding body's own closure — park it so a self-edge resolved after
         // resume (re-entering via the interpreter) names the right closure. The JIT

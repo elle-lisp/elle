@@ -36,7 +36,7 @@
 # Fixed by the native-tail ReturnValue retain (commit 434d9d1f; splice-tail in
 # 56781a2c): the post-`TailCall` `Return` now retains the heap result before
 # `Return`. GREEN under guardfree; a regression that drops the retain SIGSEGVs in
-# the first subject's loop. docs/impl/region-rules.md Rules 4, 5, 8.
+# the first subject's loop. docs/impl/region/rules.md Rules 4, 5, 8.
 
 # ── controls: HOF result CONSUMED by a borrowing native, not tail-returned ──────
 (defn ctl_map (xs)

@@ -25,7 +25,7 @@ pub(super) fn read_reg_pairs(
 }
 /// Dispatch a data operation by opcode. `vm` is the host's driving VM, so the
 /// intrinsic arms (`IntrLength`/`Get`/`Put`/…) run their `PrimFn` bodies through a
-/// VM-bearing `NativeCtx` (docs/impl/region-ctx.md).
+/// VM-bearing `NativeCtx` (docs/impl/region/ctx.md).
 ///
 /// `vm` is a raw pointer rather than a reference because it arrives from the wasm
 /// runtime's call trampoline; the caller holds the live VM for the call's

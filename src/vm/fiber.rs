@@ -147,7 +147,7 @@ pub(crate) fn release_parked_signal(
 
 /// Everything a fiber owns through the ownership forest, TAKEN out of the fiber
 /// (its slots emptied) so the release can run after the fiber borrow is dropped
-/// (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown frees everything
+/// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees everything
 /// the fiber owns"). Splitting the take from the release keeps heap mutation
 /// disjoint from fiber access: the release's cascades can free the fiber's own
 /// heap value without invalidating a live borrow.
@@ -273,7 +273,7 @@ fn flatten_param_frames(frames: &[Vec<(u32, Value)>]) -> Vec<(u32, Value)> {
 /// `resolve_parameter` checks later confirm the region has not been freed since.
 /// Immediate (non-heap) bindings carry no region and are skipped. Debug-only —
 /// the check it feeds runs only under `debug_assertions`
-/// (docs/impl/region-generations.md § "Uncounted-borrow check").
+/// (docs/impl/region/generations.md § "Uncounted-borrow check").
 ///
 /// The region and its generation are read from the SAME `heap`
 /// (`region_of_ptr`/`generation_raw`), so the recorded pair and the later
@@ -315,7 +315,7 @@ pub(crate) fn first_stale_borrow(
 
 impl VM {
     /// Promote a fiber to `:dead` and free everything it owns — the halt-promotion
-    /// twin of `with_child_fiber`'s completion arm (docs/impl/region-model.md
+    /// twin of `with_child_fiber`'s completion arm (docs/impl/region/owner.md
     /// § "Owner nodes" — "Fiber teardown frees everything the fiber owns"). Dead is
     /// terminal (`fiber/resume` refuses it), so the parked chain and owner nodes can
     /// never be replayed. An `:error` promotion must NOT come here — an errored
@@ -403,7 +403,7 @@ impl VM {
                 .unwrap_or_default();
             // MOVE the caller's owner node into its continuation park — this
             // activation unwinds with the SIG_SWITCH handoff
-            // (docs/impl/region-model.md § "Owner nodes").
+            // (docs/impl/region/owner.md § "Owner nodes").
             let activation_owner_node = self.take_activation_owner_node();
             // The closure that called `fiber/resume` is the one to resume into.
             let current_closure = self.fiber.current_closure;
@@ -488,7 +488,7 @@ impl VM {
                         .unwrap_or_default();
                     // MOVE the caller's owner node into its continuation park —
                     // this activation unwinds with the child's suspending
-                    // signal (docs/impl/region-model.md § "Owner nodes").
+                    // signal (docs/impl/region/owner.md § "Owner nodes").
                     let activation_owner_node = self.take_activation_owner_node();
                     // Caller activation's remap (the resumed sub-fiber runs
                     // on its own frame stack; this frame continues us).

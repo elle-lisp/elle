@@ -120,7 +120,7 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
   - the builder-idiom **merge** gate's not-returned check (`returned_regions` = the
     return frontier, together with the region capture-graph
     (`regions::escape::captured_bindings`) for gate 5's sole-held reachability refusal
-    — [region-model.md](region-model.md) § Merging; storing the child into the parent
+    — [region/merging.md](region/merging.md) § Merging; storing the child into the parent
     is the *allowed* escape, so the seed reads the return facet, not the full set). The
     capture refusal is a *reachability* question the region forest answers from its own
     capture-graph, never the lexical proxy `is_captured` the solver is locked out of;
@@ -128,7 +128,7 @@ Every consumer reads `EscapeInfo`; nothing keeps a parallel escape judgment.
     regions are the caller's to free, so compensating them would double-free);
   - the reassign 1-slot-container gate's *not-returned* check
     (`binding_escapes_via_return`, per binding —
-    [region-bindings.md](region-bindings.md); read per binding, never by projecting
+    [region/bindings.md](region/bindings.md); read per binding, never by projecting
     a returned region onto a cell, since `binding_source_regions` is "where the
     value points," not "where it lives").
 - **The lowerer** (`lir/lower`) reads `lambda_escapes_definition` /
@@ -253,6 +253,6 @@ cell layout, with no escape-authority. The capture *kind* has no ownership
 authority either: the forest's capture-adopt emit reloads an adopted captured
 value through whichever access path the kind implies (a binding slot for a direct
 local, the constructing function's environment for an upvalue or transitive
-capture — region-model.md § "The capture adopt"), so admission of a capture
+capture — region/adopt.md § "The capture adopt"), so admission of a capture
 owner-edge is bounded by the subtree admission filters (decisively, the lifetime
 obligation), never by how the capture happens to be loaded.

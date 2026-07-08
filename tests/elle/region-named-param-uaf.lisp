@@ -8,7 +8,7 @@
 # last USE; when every destructured binding is UNUSED, that last use is the
 # inner Var itself, so the lowerer frees the struct's region BEFORE the
 # field extraction reads it (LIR: `decref-value-region` precedes
-# `r.:name?`). Rule 4 (docs/impl/region-rules.md): a Destructure consumes its value
+# `r.:name?`). Rule 4 (docs/impl/region/rules.md): a Destructure consumes its value
 # after the value's last read — the value's regions extend to the
 # Destructure node, exactly as Return extends a returned region.
 #

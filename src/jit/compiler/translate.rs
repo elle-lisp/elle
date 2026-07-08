@@ -95,7 +95,7 @@ impl JitCompiler {
         // layout). Its address is threaded to the intrinsic fast-path helpers so
         // they resolve the VM from the bundle, keeping the VM dependency explicit so
         // two embedded instances on one thread each reach their own VM
-        // (docs/impl/region-ctx.md "JIT intrinsic helpers reach the VM through a
+        // (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through a
         // JitCtx"). The heap axis grows this slot with a heap capability.
         let jit_ctx_slot =
             builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
@@ -111,7 +111,7 @@ impl JitCompiler {
         // `execute_bytecode_saving_stack`). Emitted before the variadic
         // rest-collection and the body so per-execution alloc regions and
         // slot-resolved `DecrefRegion`s resolve against this frame. Every
-        // `return` pops it (via `emit_pop_then_return`). docs/impl/region-rules.md Rule 4.
+        // `return` pops it (via `emit_pop_then_return`). docs/impl/region/rules.md Rule 4.
         translator.emit_push_region_map(&mut builder)?;
 
         if is_list_variadic {
@@ -219,7 +219,7 @@ impl JitCompiler {
             // transfer down the chain — `elle_jit_collect_rest_list`, the JIT
             // analog of the interpreter's `args_to_list` (src/vm/env.rs). Each
             // cons owning its own per-execution region keeps the rest list's
-            // regions independent of a JIT->JIT callee's. docs/impl/region-rules.md.
+            // regions independent of a JIT->JIT callee's. docs/impl/region/rules.md.
             let rest_var_idx = arg_var_base + non_rest_params as u32;
             let start_const = builder.ins().iconst(I32, non_rest_params as i64);
             let nargs_i32 = builder.ins().ireduce(I32, nargs);

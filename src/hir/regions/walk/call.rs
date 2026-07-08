@@ -52,7 +52,7 @@ impl RegionInference {
         }
 
         // Opaque fallback, keyed on the callee's declared
-        // RegionEffect (docs/impl/region-effects.md "Native region effects"):
+        // RegionEffect (docs/impl/region/effects.md "Native region effects"):
         // - Immediate/Fresh/PassThrough store no argument — no
         //   may-store edges. An edge here becomes a compile-time
         //   IncrefRegion balanced only by the target's free-time
@@ -74,7 +74,7 @@ impl RegionInference {
                 // A Fresh result is freshly allocated in the call's own
                 // region — genuinely caller-owned, so it is an Owned
                 // candidate for the forest even though it is a call-result
-                // placeholder for baseline release (region-effects.md
+                // placeholder for baseline release (region/effects.md
                 // § Fresh; `RegionInfo::fresh_result_regions`). Recording
                 // this is the only effect on the walk; release is unchanged
                 // (value-gated `DecrefValueRegion`, as for any call-result),
@@ -170,7 +170,7 @@ impl RegionInference {
                 // value-released call-result region below
                 // (`call_returns_immediate` is false for Opaque). This is
                 // the variant that keeps the clique keyed on the *store*,
-                // not the result shape (docs/impl/region-effects.md § Opaque).
+                // not the result shape (docs/impl/region/effects.md § Opaque).
             }
             Some(RegionEffect::Stores { args: stored }) => {
                 // A declared native's uncounted store is real: its edges are
@@ -195,7 +195,7 @@ impl RegionInference {
                 // invisible to the funnel seam and the solver — so the
                 // full mutual clique is its only cover. Its edges are
                 // HARD (the lowerer increfs a call-result source by
-                // value; docs/impl/region-effects.md "Hard edges").
+                // value; docs/impl/region/effects.md "Hard edges").
                 self.hard_edge_sites.insert(hir.id);
                 let heap_args: Vec<Region> = arg_regions.iter().flatten().copied().collect();
                 for i in 0..heap_args.len() {
@@ -223,7 +223,7 @@ impl RegionInference {
                 // UNCOUNTED store, so there is nothing for the clique
                 // to cover. (Call-result sources were already a
                 // slot-based no-op here; this drops the alloc-region
-                // leak that remained — docs/impl/region-effects.md
+                // leak that remained — docs/impl/region/effects.md
                 // "What the solver derives", the user-functions case.)
             }
         }

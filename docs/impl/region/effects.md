@@ -3,7 +3,7 @@
 Implementation-facing: how each primitive declares its region behavior, what
 the solver derives from the declaration, and the oracle that keeps a
 declaration honest. This is the native-call analogue of Rule 2's opaque-call
-exception and Rule 5's escape list (see [region-rules.md](region-rules.md)),
+exception and Rule 5's escape list (see [rules.md](rules.md)),
 made explicit per callee instead of assumed worst-case for all.
 
 Every primitive declares its region behavior in its `PrimitiveDef` as a
@@ -58,7 +58,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   channel buffer is **external** to the region system, so nothing cascades
   it. The message is a genuinely-Shared (no-bounded-dominator) region, and
   its incoming count is maintained the way § class 7 of
-  [region-model.md](region-model.md) prescribes: the send bumps it (this
+  [ownership.md](ownership.md) prescribes: the send bumps it (this
   edge), and the **receive lowers it** — `chan/recv` / `chan/try-select` /
   `chan/wait-ready` each decref the message's region as it leaves the buffer
   (`release_received_message`, guarded by `value_in_region_store` so a
@@ -77,7 +77,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 - **`Funnel`** — every argument store goes through the mutable-store
   funnel (arena.rs `push_with_incref`-style, runtime-counted — the
   statically-complete store seam; the same seam records the *outgoing edge* the
-  free-time walk consumes, [region-model.md](region-model.md) § The outgoing edge
+  free-time walk consumes, [ownership.md](ownership.md) § The outgoing edge
   table), and the result may be fresh
   OR pass-through (`put` on an immutable struct copies; on a mutable one
   returns the container). No solver edges: a compile-time clique incref

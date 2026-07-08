@@ -21,7 +21,7 @@ use super::*;
 // The root's single decref subtree-drops every member, so it must post-dominate every
 // member's last use. That is decided by structural post-dominance over the scope tree
 // (`regions::postdom::drop_post_dominates`, `EmitMode::Adopt`), NOT by a numeric
-// `ord(member) <= ord(root)` (region-model.md § "The lifetime obligation the root carries"):
+// `ord(member) <= ord(root)` (region/adopt.md § "The lifetime obligation the root carries"):
 // across a branch arm or a loop back-edge, post-order index is not a post-dominance
 // proxy. These two pins exercise the cases where the numeric test admits but structural
 // post-dominance refuses — both straight-line-admitted by the old `ord` compare, both
@@ -113,7 +113,7 @@ fn adopt_edges_claims_interior_cycle_member_by_root() {
     // {root, a, b} is an externally-unique Owned subtree (nothing escapes), and the
     // shared-container cut adopts every member DIRECTLY by the root — a flat star — so
     // the root's single decref subtree-drops the cycle, which per-region RC could never
-    // collect (region-rules.md Rule 8). The interior a↔b edges carry no adopt.
+    // collect (region/rules.md Rule 8). The interior a↔b edges carry no adopt.
     //
     // The push order makes `root` the LAST region used (its `%array-push`es come after
     // the cycle is built), so its `decref_point` post-dominates a and b — the lifetime
@@ -252,7 +252,7 @@ fn adopt_edges_refuses_ambiguous_multiparent() {
 
 #[test]
 fn adopt_edges_claims_funnel_recovered_subtree_checked_on() {
-    // The funnel face of the store-keyed adopt (region-model.md § "The funnel adopt —
+    // The funnel face of the store-keyed adopt (region/adopt.md § "The funnel adopt —
     // the checked-on store face"). On the checked-on (native-Call) production path the
     // interior-cycle shape's stores are opaque `Funnel` calls recording NO
     // `cross_region_refs` edge — the containment reaches the walk only as site-keyed
@@ -446,7 +446,7 @@ fn adopt_edges_refuses_captured_value_used_after_closure() {
 // ── ownership inference: a `Fresh` native's embed declaration ────────────────────
 //
 // A `Fresh` native whose result EMBEDS an argument declares which args it embeds
-// (`PrimitiveDef::embeds`, region-effects.md § "Native region effects"). The walk's
+// (`PrimitiveDef::embeds`, region/effects.md § "Native region effects"). The walk's
 // `Fresh` arm then records `result ⊇ arg` in `containment_edges` — the compile-time
 // analog of the runtime alloc-scan (`find_object_cross_refs`) that counts the same
 // embedding. Without it the forest cannot see a captured value flow OUT through an
@@ -998,7 +998,7 @@ fn adopt_edges_refuses_captured_store_member_on_lifetime() {
 // (it is reclaimed solely by its closure's subtree drop), and `lower_lambda_expr` emits
 // the matching `AdoptRegion` by reloading the captured value through the capture's own
 // access path — a binding slot for a direct local, the constructing function's
-// environment for an upvalue or transitive capture (region-model.md § "The capture
+// environment for an upvalue or transitive capture (region/adopt.md § "The capture
 // adopt"). The contract is therefore held by EMIT CAPABILITY: an edge is emittable iff
 // the closure genuinely captures a binding holding the member's region, which is true of
 // every capture containment edge by construction — the `debug_assert` at the emit seam
@@ -1070,7 +1070,7 @@ fn closure_captures_region(hir: &Hir, info: &RegionInfo, member: Region, closure
 
 #[test]
 fn owned_subtree_upvalue_capture_owner_refused_on_lifetime() {
-    // The cross-activation boundary (region-model.md § "The capture adopt"): a nested
+    // The cross-activation boundary (region/adopt.md § "The capture adopt"): a nested
     // closure `o` (inside `e`) captures `e` (the letrec recursion) AND the pair `m`, and
     // `e` ALSO captures `m` (the forward every upvalue implies). With the capture edge
     // re-pointed through the cell (`closure ⊇ cell ⊇ content`), external uniqueness ADMITS
@@ -1422,7 +1422,7 @@ fn restorable_compiled_cell_records_content_edge_but_is_not_adopted() {
 // activation's owner node: `RegionInfo::activation_adopt_sites` maps the SCC's
 // enclosing-scope adopt site to its members, and BOTH members' own decrefs are
 // suppressed, the node's completion release being their sole demise
-// (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge SCC"). These pins
+// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC"). These pins
 // read the flag-on `RegionInfo` (the lowerer's view), so they pin the wiring —
 // admission, suppression, and the map — not just the walk.
 
@@ -1621,7 +1621,7 @@ fn activation_adopt_refuses_escaping_hull() {
 // node: the producer's interior owner edges merge into the ordinary adopt maps
 // and each consumer site's call-result region lands in
 // `RegionInfo::transfer_adopt_regions`, whose release the lowerer replaces
-// with `AdoptIntoActivation` (docs/impl/region-model.md § "Owner nodes" — "The
+// with `AdoptIntoActivation` (docs/impl/region/owner.md § "Owner nodes" — "The
 // transferred returned subtree"). These pins read the fully-analyzed `RegionInfo`
 // (the lowerer's view), so they pin the wiring — not just the walk.
 

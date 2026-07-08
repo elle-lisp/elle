@@ -1,5 +1,5 @@
 //! The JIT yield side-exits PARK the activation's owner node
-//! (docs/impl/region-model.md § "Owner nodes" — "A park moves the node into
+//! (docs/impl/region/owner.md § "Owner nodes" — "A park moves the node into
 //! the suspended frame"), the compiled-tier twin of the interpreter's
 //! `handle_emit` take. Each test runs exactly the helper sequence compiled
 //! code emits — the prologue's region-map push, an `AdoptIntoActivation` that

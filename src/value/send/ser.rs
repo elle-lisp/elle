@@ -28,7 +28,7 @@ pub(super) struct SerContext<'s> {
     visited: HashMap<u64, usize>,
     /// The SENDER's symbol table — used to resolve a symbol value's id to its name
     /// so it crosses the thread boundary by name (ids are per-table). Threaded
-    /// explicitly (docs/impl/region-ctx.md § "Symbols through the ctx").
+    /// explicitly (docs/impl/region/ctx.md § "Symbols through the ctx").
     pub(super) symbols: &'s crate::symbol::SymbolTable,
     /// The SENDER's heap — `send_traits` reads its default-traits table to skip
     /// registry-default traitsets (the receiver rebuilds them). The value being

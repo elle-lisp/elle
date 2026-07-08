@@ -1,7 +1,7 @@
 (elle/epoch 12)
 ## region/termination-sweep — the region-level dual of region-eval-leak.
 ##
-## docs/impl/region-model.md § "Constants lower as ordinary allocations" + the
+## docs/impl/region/model.md § "Constants lower as ordinary allocations" + the
 ## termination sweep invariant: after any eval completes and its result is
 ## dropped, every region it created is freed, so the live region count returns to
 ## its pre-run baseline. And a heap literal an eval RETURNS lives in a RECLAIMABLE

@@ -22,7 +22,7 @@
 # leaks whole.
 #
 # Net: every closure call whose `populate_env` allocates into the env region
-# leaks at least one region (and its objects) per call. docs/impl/region-rules.md Rule 8
+# leaks at least one region (and its objects) per call. docs/impl/region/rules.md Rule 8
 # ("Nothing leaks but true process-lifetime roots"). Confirmed a pure leak,
 # not a UAF, under `--trace=guardfree` (no fault — the regions accumulate, the
 # pages are never freed, so nothing reads freed memory).

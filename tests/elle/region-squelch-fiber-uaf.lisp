@@ -27,7 +27,7 @@
 #
 # RED now (the teardown scan faults); GREEN once the fiber-resume path hands
 # the squelch-shared closure region an owning reference balanced against the
-# release that currently underruns it. docs/impl/region-rules.md Rules 5/8.
+# release that currently underruns it. docs/impl/region/rules.md Rules 5/8.
 
 # ── minimal: squelch + fiber/new + fiber/resume ──
 (def sq (squelch (fn [] 42) :yield))

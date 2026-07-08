@@ -158,7 +158,7 @@ fn make_adopt_into_activation_lir() -> LirFunction {
 }
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the JIT
-/// (docs/impl/region-model.md § "Owner nodes — an activation as a forest root"),
+/// (docs/impl/region/owner.md § "Owner nodes — an activation as a forest root"),
 /// the compiled twin of
 /// `runtime::tests::ownership::activation_owner_node_frees_adopted_member_on_normal_completion`.
 /// The compiled body adopts its argument's region into the activation's

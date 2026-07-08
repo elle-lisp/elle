@@ -10,7 +10,7 @@
 # and frees it at the recursion's completion; a NATIVE callee never replaces the
 # frame and falls through to the live scope-exit drop. The two are mutually exclusive
 # per call, so exactly one release fires however the callee resolves at runtime — the
-# compiler never classifies the callee (docs/impl/region-model.md § The letrec
+# compiler never classifies the callee (docs/impl/region/letrec.md § The letrec
 # closure-cycle merge). A premature free would leave `ev`/`od` (whose regions ARE the
 # merged arena) dereferencing recycled pages on the next recursion step — a stale
 # closure-env read: a generation panic on the plain VM, a SIGSEGV under

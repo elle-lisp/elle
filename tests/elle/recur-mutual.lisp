@@ -5,7 +5,7 @@
 ## closure capturing the other through its forward cell. The closure-cycle merge
 ## collapses the pair and its cells onto one arena, freed at the letrec binding
 ## scope or — when the letrec body tail-calls a member — by the tail-call adopt
-## at the recursion's normal completion (docs/impl/region-model.md § The letrec
+## at the recursion's normal completion (docs/impl/region/letrec.md § The letrec
 ## closure-cycle merge). The leak side is pinned by oracle.lisp
 ## (recur-local-mutual); these assert VALUES, which neither the leak gauge nor
 ## guardfree can see (docs/testing.md "Correctness the leak and UAF oracles

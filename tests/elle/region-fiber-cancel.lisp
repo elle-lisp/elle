@@ -5,7 +5,7 @@
 # one are hard kills: both route through `kill_fiber` (src/vm/fiber.rs),
 # which consumes the parked chain and frees everything the fiber owns —
 # each parked frame's activation owner node and the fiber owner node
-# (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown frees
+# (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees
 # everything the fiber owns"). No production lowering emits owner-node
 # adopts yet, so the node-freeing half is pinned Rust-side
 # (`runtime::tests::ownership::fiber_kill_frees_parked_and_fiber_owned`);

@@ -197,7 +197,7 @@ pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::A
 /// `cross_region_refs` edge — the containment reaches the adopt walk only as
 /// site-keyed funnel-recovered `containment_edges`, and the emitted adopt is keyed at
 /// the funnel call site (the funnel face of the store-keyed adopt;
-/// region-model.md § "The funnel adopt — the checked-on store face").
+/// region/adopt.md § "The funnel adopt — the checked-on store face").
 pub(super) fn adopt_edges_checked_on(
     source: &str,
 ) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
@@ -317,7 +317,7 @@ pub(super) fn container_root_and_members(info: &RegionInfo) -> (Region, Vec<Regi
 
 /// Which reload path would `lower_lambda_expr` use for the capture-adopt edge
 /// `(member, closure)` — true for a LOCAL-SLOT reload (`LoadLocal`), false for an
-/// env reload (`LoadCapture` — an upvalue or transitive capture; region-model.md
+/// env reload (`LoadCapture` — an upvalue or transitive capture; region/adopt.md
 /// § "The capture adopt"). Slot-loaded iff the lambda whose `alloc_region` is
 /// `closure` captures the binding holding `member` with `CaptureKind::Local` AND no
 /// lambda lexically *enclosing* it also captures that binding. Both paths are

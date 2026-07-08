@@ -380,7 +380,7 @@ impl VM {
             Rc::new(bc.child_protos),
         );
         // Carry the module body's builder-idiom merge metadata (mint-or-reuse;
-        // docs/impl/region-model.md § Merging). Empty unless a merge fired.
+        // docs/impl/region/merging.md § Merging). Empty unless a merge fired.
         code.merged_slots = bc.merged_slots;
         let empty_env = Rc::new(vec![]);
         // Drive the module body, including any nested fiber/resume SIG_SWITCH

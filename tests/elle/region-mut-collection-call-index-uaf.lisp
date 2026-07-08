@@ -8,7 +8,7 @@
 # region-struct-call-index-uaf.lisp (immutable struct). Same root defect: the
 # collection-as-function call-index path (`call_collection`, src/vm/call.rs) does
 # NOT incref the returned element's region the way `get`/`first` DO
-# (docs/impl/region-rules.md Rule 5, native-result pass-through). A fix for the call-index
+# (docs/impl/region/rules.md Rule 5, native-result pass-through). A fix for the call-index
 # path must cover EVERY collection that hands back a heap element — the two
 # immutable forms AND these two mutable forms.
 #

@@ -4,7 +4,7 @@
 //! point — the parent/root's `DecrefRegion`, fired at its `decref_point` after
 //! that node's whole subtree executes (post-order). For that single drop to be
 //! sound it must come **after** the member's last use on every path, with no
-//! re-execution of the use afterward (region-model.md § "The lifetime obligation
+//! re-execution of the use afterward (region/adopt.md § "The lifetime obligation
 //! the root carries").
 //!
 //! Domination is **structural, never numeric**: a smaller `compute_order` index

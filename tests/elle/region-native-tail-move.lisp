@@ -8,7 +8,7 @@
 # past the `TailCall`. So the release must happen in the runtime: after
 # `dispatch_native_call` runs (its pass-through retain first), the calling
 # convention releases each owned arg. Until then the moved value leaks.
-# docs/impl/region-rules.md Rule 8.
+# docs/impl/region/rules.md Rule 8.
 #
 # `length` is a native that borrows its arg and returns an immediate (int), so
 # the only thing that can leak is the MOVED value's region — never a result.

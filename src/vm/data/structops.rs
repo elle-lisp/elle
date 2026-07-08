@@ -138,7 +138,7 @@ pub(crate) fn handle_struct_rest(
 
     // Collect all keys not in exclude set from struct or @struct. The fresh
     // sub-struct is the destructure-rest binding's value: born in its own fresh
-    // region (Rule 3; docs/impl/region-ctx.md) via a `NativeCtx`
+    // region (Rule 3; docs/impl/region/ctx.md) via a `NativeCtx`
     // over a freshly minted region, freed value-based by the binding's consumer,
     // like the native-result discipline.
     if let Some(struct_map) = val.as_struct() {

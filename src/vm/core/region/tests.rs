@@ -71,7 +71,7 @@ fn oracle_allows_truthful_fresh() {
 }
 
 /// `VM::set_error` / `escaping_*` build their error in a FRESH region of
-/// their own (docs/impl/region-ctx.md). Mint a
+/// their own (docs/impl/region/ctx.md). Mint a
 /// distinct live region `other` first; the error must land in neither it nor
 /// any pre-existing region. The counterfactual: route `set_error` through a
 /// shared region and `region_of(payload) == Some(other)` fires the assert.
@@ -111,7 +111,7 @@ fn escaping_match_fail_is_born_in_a_fresh_region() {
     });
 }
 
-// ── merged-slot mint-or-reuse (docs/impl/region-model.md § Merging) ──
+// ── merged-slot mint-or-reuse (docs/impl/region/merging.md § Merging) ──
 //
 // A merged slot is shared by ≥2 alloc instructions (child, then parent) after a
 // builder-idiom merge: the child's alloc mints the physical region, the parent's

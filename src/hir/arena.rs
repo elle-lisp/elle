@@ -130,9 +130,9 @@ impl BindingInner {
     /// captures), and inside a lambda body for the recursive-closure shape —
     /// immutable, never mutated, lambda-initialized — so the cell is a
     /// static-slot allocation the closure-cycle merge can collapse with its SCC
-    /// (docs/impl/region-model.md § The letrec closure-cycle merge). Any other
+    /// (docs/impl/region/letrec.md § The letrec closure-cycle merge). Any other
     /// in-lambda captured letrec binding keeps the runtime `populate_env`
-    /// env-cell route (`StoreCapture`; docs/impl/region-bindings.md "Env cells
+    /// env-cell route (`StoreCapture`; docs/impl/region/bindings.md "Env cells
     /// in loops"). The region walk's Letrec arm and `lower_letrec` both read
     /// this one predicate — the walk must mirror the lowerer's `MakeCaptureCell`
     /// sites exactly, or a cell region is a phantom (no allocation) or missing

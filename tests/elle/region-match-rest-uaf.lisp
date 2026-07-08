@@ -3,7 +3,7 @@
 # region — `(a & rest)` binds `rest` to a sublist sharing the subject list's
 # cells; `(h . t)`, an immutable-array element `[a b]`, an immutable-struct value
 # `{:k v}` likewise hand back a pointer co-located in the subject's region pages
-# (docs/impl/region-model.md § "RegionSlice contents share their object's region"). The
+# (docs/impl/region/model.md § "RegionSlice contents share their object's region"). The
 # region solver's `Match` arm (src/hir/regions.rs) DISCARDED the scrutinee's
 # regions (`let _ = self.walk(value)`) and recorded every pattern binding with an
 # EMPTY `binding_regions`, so the subject region's `decref_point` was NOT extended
@@ -73,7 +73,7 @@
             _ :fail)))
 
 # ── controls: the SAME extraction via native `rest`/`first`/`get`, which DO the
-# pass-through retain (docs/impl/region-rules.md Rule 5). Correct NOW — bisection that the
+# pass-through retain (docs/impl/region/rules.md Rule 5). Correct NOW — bisection that the
 # defect is the match binding, not aliasing access in general.
 (defn c_rest ()
   (length (rest (list 1 2 3))))

@@ -47,7 +47,7 @@ cost a user would pay for a fresh compilation unit.
 `regionrc.rs` reports how many region-mints the lowerer resolves to a static slot
 (transform 1's value→slot reduction) versus leaves value-resolved at the dynamic
 boundary, plus the merge-induced self-edges transform 2 eliminates
-(docs/impl/region-rules.md § "Compile-time region selection (coalescing)" /
+(docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)" /
 "Self-edge elimination"). It is a *reporting* bench (prints counts, asserts
 nothing — "the win is measured, not asserted") driven by the thread-local
 instrument in `elle::lir::lower::rcstats`, which the lowerer bumps at each
@@ -57,7 +57,7 @@ builder-idiom witness. Compilation runs under the library-default config
 (`checked_intrinsics = false`), so `%pair` survives as an intrinsic and the
 builder merge — hence transform 2 — can fire; under the CLI default
 (`checked_intrinsics = true`) the merge is inert and self-edges are 0
-(region-model.md § Merging).
+(region/merging.md § Merging).
 
 ```bash
 cargo bench --bench regionrc

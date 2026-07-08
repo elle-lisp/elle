@@ -21,7 +21,7 @@ impl<'a> Lowerer<'a> {
     /// pass-through — so the cell's next overwrite
     /// (`capture_store_with_rebind`, which decrefs the displaced prior
     /// unconditionally) cannot free the value under the reader
-    /// (docs/impl/region-bindings.md § "Captured reassigned cells"). The
+    /// (docs/impl/region/bindings.md § "Captured reassigned cells"). The
     /// balancing `DecrefValueRegion` fires at the reader's last use: the walk
     /// minted the read's placeholder region at `hir_id`, so it lands in
     /// `call_result_regions` and its `decref_point` is the reader's last use.
@@ -59,7 +59,7 @@ impl<'a> Lowerer<'a> {
     ///   free cascade (the final value) or by the next reassignment's
     ///   drop-on-overwrite.
     ///
-    ///   This drop is transform 1's **decref side** (docs/impl/region-rules.md
+    ///   This drop is transform 1's **decref side** (docs/impl/region/mechanism.md
     ///   § "Compile-time region selection (coalescing)"): when `value` is a fresh
     ///   local allocation whose region is a known slot (the usual case for a
     ///   captured binding's init), the release is slot-resolved
@@ -163,7 +163,7 @@ impl<'a> Lowerer<'a> {
         }
     }
     /// The static region **slot** to coalesce a value's mint onto, or `None` to
-    /// stay value-resolved (docs/impl/region-rules.md § "Compile-time region
+    /// stay value-resolved (docs/impl/region/mechanism.md § "Compile-time region
     /// selection (coalescing)"). Layers the lowering-time runtime-population guard
     /// over [`coalescible_solver_region`]'s solver-fact class logic: the region's
     /// slot must already be mapped (`region_to_table`) AND stamped by an allocation
@@ -239,7 +239,7 @@ impl<'a> Lowerer<'a> {
 
     /// Emit `AdoptRegion(parent, child)` for an interior owned-subtree edge: load
     /// both values from their binding slots and link the child's runtime region
-    /// into the parent's Owned subtree (docs/impl/region-model.md § "Adoption and
+    /// into the parent's Owned subtree (docs/impl/region/ownership.md § "Adoption and
     /// subtree drop"). A missing slot for an endpoint (no value-resolved home)
     /// skips the adopt — the regions then stay independently RC'd, the always-legal
     /// fallback (the frozen-RC contract makes the skip correctness-neutral).
@@ -279,7 +279,7 @@ impl<'a> Lowerer<'a> {
     /// Emit `AdoptIntoActivation` for each member of a capture-back-edge SCC:
     /// load the member's value from its binding slot and adopt its runtime
     /// region into the executing activation's owner node
-    /// (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge
+    /// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge
     /// SCC"). The adopt transfers ownership only; the free is the node's release
     /// at the activation's completion. A member with no slot is skipped — its
     /// region stays `Counted` and, its decref being suppressed, over-kept to
@@ -315,7 +315,7 @@ impl<'a> Lowerer<'a> {
         // becomes an `AdoptRegion` (parent adopts the child's region; no RC),
         // emitted here in place of the edge's `IncrefRegion`. `owned_adopt_edges`
         // is empty for a shape that stays Shared, so this is then inert
-        // (docs/impl/region-model.md § "Adoption and subtree drop").
+        // (docs/impl/region/ownership.md § "Adoption and subtree drop").
         let adopt_edges = self
             .region_info
             .owned_adopt_edges
@@ -351,7 +351,7 @@ impl<'a> Lowerer<'a> {
             // steals a live reference (the call-result-arg clique UAF,
             // tests/elle/region-native-clique-callresult-uaf.lisp). At a HARD
             // edge site (a declared native uncounted-store effect —
-            // docs/impl/region-effects.md "Hard edges") incref by VALUE instead, the
+            // docs/impl/region/effects.md "Hard edges") incref by VALUE instead, the
             // exact mirror of `emit_decrefs_for`'s call-result branch: load
             // the value from its binding slot and retain the runtime region
             // it actually lives in. Opaque user-fn sites keep the slot path
@@ -379,7 +379,7 @@ impl<'a> Lowerer<'a> {
                 // unpopulated-slot `IncrefRegion` this replaces.
                 continue;
             }
-            // Self-edge elimination (transform 2; docs/impl/region-rules.md
+            // Self-edge elimination (transform 2; docs/impl/region/mechanism.md
             // § "Self-edge elimination"). A builder-idiom merge collapses this
             // `src → dst` store edge's endpoints onto one region (they share a
             // `merged_root`), making it an intra-region self-edge. The free-time
@@ -406,7 +406,7 @@ impl<'a> Lowerer<'a> {
     }
     /// Record the static slots a builder-idiom merge collapses two or more
     /// allocations onto — the `merged_slots` set the runtime mint-or-reuses
-    /// (docs/impl/region-model.md § Merging) — into the current function, after its
+    /// (docs/impl/region/merging.md § Merging) — into the current function, after its
     /// body is lowered (so `region_to_table` holds this function's slots). Called at
     /// each function's finalization (the entry in `lower`, every lambda in
     /// `lower_lambda_body`).

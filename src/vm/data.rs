@@ -348,7 +348,7 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutSliceFrom");
     // The fresh sub-array is the destructure-rest binding's value: born in its
-    // own fresh region (Rule 3; docs/impl/region-ctx.md), freed
+    // own fresh region (Rule 3; docs/impl/region/ctx.md), freed
     // value-based by the binding's consumer. A borrowing structural opcode that
     // the solver assigns no region slot, so it builds a `NativeCtx` over a
     // freshly minted region here, mirroring the native-result discipline.

@@ -22,7 +22,7 @@
 ## The fix hoists a cell-release region's `decref_point` to the OUTERMOST
 ## enclosing While/Loop node (`hoist_cell_release_past_loops`), which the
 ## lowerer emits AFTER the loop — once per activation, matching the once-per-
-## activation populate_env allocation. See docs/impl/region-bindings.md "Env
+## activation populate_env allocation. See docs/impl/region/bindings.md "Env
 ## cells in loops: release once per activation, not per iteration".
 ##
 ## This is the deferred Stage-2 captured-cell facet from hand-off.md; the

@@ -20,7 +20,7 @@
 # while a genuinely captured local at index >= 64 is still celled correctly.
 #
 # RED before the fix (leaks (locals - 64) regions/call); bounded after.
-# docs/impl/region-rules.md Rule 8 ("Nothing leaks but true process-lifetime roots").
+# docs/impl/region/rules.md Rule 8 ("Nothing leaks but true process-lifetime roots").
 
 # ── a function the compiler gives > 64 local slots ────────────────
 # 80 sequential `let*` bindings — each lifts a local; none is captured by a

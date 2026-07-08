@@ -122,7 +122,7 @@ pub extern "C" fn elle_jit_make_closure(
     let region = crate::hir::region::RuntimeRegion::new(region)
         .expect("JIT alloc region id is a live mortal region");
     // The heap is the driving VM's own, reached through the threaded vm pointer —
-    // this instance's heap, not a per-thread slot (docs/impl/region-ctx.md).
+    // this instance's heap, not a per-thread slot (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     let result =
         crate::vm::closure::materialize_closure_in_region(heap, blueprint, env_slice, region);

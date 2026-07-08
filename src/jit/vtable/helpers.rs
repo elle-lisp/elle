@@ -288,7 +288,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         // get/pop allocate nothing through a PrimFn and read no VM state, so they
         // take no `JitCtx`. The rest run `PrimFn` bodies and resolve their VM from
         // the threaded `JitCtx` (trailing I64), keeping the VM dependency explicit
-        // (docs/impl/region-ctx.md "JIT intrinsic helpers reach the VM through a
+        // (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through a
         // JitCtx").
         get: declare(module, "elle_jit_get", &value_binary)?,
         put: declare(module, "elle_jit_put", &put_ctx_sig)?,

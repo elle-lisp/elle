@@ -49,7 +49,7 @@ pub(super) enum ReconState {
 /// Holds the receiving thread's `Alloc` allocation capability so every
 /// reconstructed heap object is born explicitly in the call's region on the
 /// call's heap. Region coherence is safety-critical here — a cross-thread message
-/// tree must land entirely in one region (docs/impl/region-ctx.md).
+/// tree must land entirely in one region (docs/impl/region/ctx.md).
 pub(super) struct DeserContext<'a, 'h, 's> {
     /// Owned closure data. Entries are `take`n as they are reconstructed.
     closures: Vec<Option<SendableClosure>>,
@@ -64,7 +64,7 @@ pub(super) struct DeserContext<'a, 'h, 's> {
     pub(super) ctx: &'a mut crate::primitives::ctx::Alloc<'h>,
     /// The RECEIVER's symbol table — a symbol value re-interns its name here on
     /// arrival (ids are per-table). Threaded explicitly
-    /// (docs/impl/region-ctx.md § "Symbols through the ctx").
+    /// (docs/impl/region/ctx.md § "Symbols through the ctx").
     pub(super) symbols: &'s mut crate::symbol::SymbolTable,
 }
 

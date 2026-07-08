@@ -55,7 +55,7 @@ pub fn read_str(
 
     let mut reader = Reader::with_locations(tokens, locations);
     // The read's allocation capability over a fresh region on the caller's heap
-    // (docs/impl/region-ctx.md — explicit region). The returned Value lives in
+    // (docs/impl/region/ctx.md — explicit region). The returned Value lives in
     // this region and escapes to the caller value-based; the caller owns its
     // lifetime (this entry point runs no per-read teardown).
     let region = heap.new_runtime_region();

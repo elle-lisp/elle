@@ -144,7 +144,7 @@ fn region_native_tail_return_uaf() {
 // `DecrefValueRegion` at its last use). This is the std/process scheduler's
 // `ready` double-buffer (`sched-run`'s `(let [batch ready] (assign ready @[])
 // (each pid in batch (run-one pid)))`), whose regression SIGSEGVs
-// tests/elle/process-io.lisp. docs/impl/region-bindings.md § "Captured
+// tests/elle/process-io.lisp. docs/impl/region/bindings.md § "Captured
 // reassigned cells".
 #[test]
 fn region_reassign_captured_cell_reader() {
@@ -181,7 +181,7 @@ fn region_selfrec_captured_tail_adopt() {
 // `ev`/`od` (whose regions ARE the merged arena) dereferencing recycled pages on the
 // next recursion step (SIGSEGV under guardfree). Also drives the clique PER LOOP
 // ITERATION, the per-call reclamation granularity an activation-owner-node cut would
-// double-free. docs/impl/region-model.md § The letrec closure-cycle merge.
+// double-free. docs/impl/region/letrec.md § The letrec closure-cycle merge.
 #[test]
 fn region_native_tail_mutual_cycle_uaf() {
     run_elle_script_with_args(
@@ -200,7 +200,7 @@ fn region_native_tail_mutual_cycle_uaf() {
 // the pair's plain `DecrefRegion` LAST, so the drop reclaimed the pair before its own
 // decref — a phantom/double-free (SIGSEGV under guardfree). The members-first bucket
 // sort (`with_region_info`) orders the member's release ahead of the container's.
-// docs/impl/region-model.md § "The lifetime obligation the root carries".
+// docs/impl/region/adopt.md § "The lifetime obligation the root carries".
 #[test]
 fn region_array_push_pair_loop_uaf() {
     run_elle_script_with_args(
@@ -301,7 +301,7 @@ fn region_capture_cell_reassign_uaf() {
 //     order after the init's page-READING `DecrefValueRegion` (which unwraps
 //     the cell); a freeing-first permutation would tear the page the unwrap
 //     reads. The dependency-safe class sort in `Lowerer::with_region_info`
-//     fixes the order (docs/impl/region-rules.md Rule 4).
+//     fixes the order (docs/impl/region/rules.md Rule 4).
 //
 // A regression would fault only timing-dependently (~⅓ of runs under
 // guardfree), so the guard loops: 25 runs at p≈0.37 witness a regression with

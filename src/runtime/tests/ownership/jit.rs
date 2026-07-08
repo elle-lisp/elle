@@ -98,7 +98,7 @@ fn region_ownership_adopt_subtree_drop_under_jit() {
 
 /// VM≡JIT parity for the **interior-cycle adopt**. A container `root` directly
 /// holds `a` and `b`, which reference each other (`a ⊇ b`, `b ⊇ a`). Per-region RC
-/// cannot collect the a↔b cycle (region-rules.md Rule 8), so flag-OFF it leaks
+/// cannot collect the a↔b cycle (region/rules.md Rule 8), so flag-OFF it leaks
 /// under the JIT exactly as on the VM; under the flag the cut adopts a and b by
 /// root, whose JIT subtree drop reclaims the cycle. The bounded-vs-leaking
 /// counterfactual proves the cut (not the shape) reclaims it, AND — because before

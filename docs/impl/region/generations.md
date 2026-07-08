@@ -3,7 +3,7 @@
 Implementation-facing: the per-region generation counter and page stamping that
 turn a stale region deref into a deterministic debug-build panic at the exact
 deref site. Pairs with the `--trace=guardfree` oracle described in
-[region-diagnostics.md](region-diagnostics.md).
+[diagnostics.md](diagnostics.md).
 
 Physical region ids are recycled (a freed id returns to the mint pool) and
 freed pages are cached for reuse, so a stale reference — a `Value` or region

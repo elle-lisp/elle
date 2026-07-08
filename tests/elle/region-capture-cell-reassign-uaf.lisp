@@ -12,7 +12,7 @@
 # which a later reassignment has already repointed (a slot-load + unwrap would then
 # free a different, live value: the capture-cell reassign UAF).
 #
-# That init-drop is transform 1's DECREF side (docs/impl/region-rules.md
+# That init-drop is transform 1's DECREF side (docs/impl/region/mechanism.md
 # § "Compile-time region selection (coalescing)"): when the init is a fresh local
 # allocation whose region is a known static slot — a
 # heap LITERAL (`'(…)`, `"…"`) materializes fresh in its own region, the

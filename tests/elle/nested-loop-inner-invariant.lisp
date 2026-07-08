@@ -93,7 +93,7 @@
 ## extension. It is covered — single-loop AND the bound-between-nested-loops
 ## (cap2) shape — by tests/elle/region-capture-cell-loop-uaf.lisp, and pinned at
 ## the solver layer by `env_cell_release_in_loop_hoisted_past_loop`. See
-## docs/impl/region-bindings.md "Env cells in loops: release once per
+## docs/impl/region/bindings.md "Env cells in loops: release once per
 ## activation, not per iteration".
 
 (println "nested-loop-inner-invariant: all tests passed")

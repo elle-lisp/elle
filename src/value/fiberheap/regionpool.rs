@@ -15,7 +15,7 @@
 //!
 //! Page header stores `region_id: u32` at offset 0, enabling O(1)
 //! `region_of_ptr()`: round down to page alignment, read header. It also
-//! stores the region's `(generation, store)` stamp (docs/impl/region-generations.md
+//! stores the region's `(generation, store)` stamp (docs/impl/region/generations.md
 //! § "Region generations"), letting debug builds detect a deref through a
 //! freed-but-cached page.
 //!
@@ -34,7 +34,7 @@ use crate::value::Value;
 #[repr(C)]
 struct PageHeader {
     region_id: u32,
-    /// The claiming store's identity for this page (docs/impl/region-generations.md
+    /// The claiming store's identity for this page (docs/impl/region/generations.md
     /// § "Region generations"): which `RegionStore` claimed it, at which
     /// generation of `region_id`. A debug-build `region_of` compares the
     /// generation against the store's current one — a mismatch is a deref
@@ -72,7 +72,7 @@ fn size_tag(size: usize) -> u32 {
 }
 
 /// The `(generation, store)` pair stamped into each claimed page's header
-/// alongside the region id (docs/impl/region-generations.md § "Region generations") —
+/// alongside the region id (docs/impl/region/generations.md § "Region generations") —
 /// grouped so the two u32s can't be swapped at a call site.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -175,7 +175,7 @@ pub(crate) struct RegionPool {
     pages: Vec<RegionPage>,
     region_id: u32,
     /// The `(generation, store)` stamp written into every page header this
-    /// pool claims (docs/impl/region-generations.md § "Region generations"). Fixed for the
+    /// pool claims (docs/impl/region/generations.md § "Region generations"). Fixed for the
     /// pool's lifetime: a region is created at one generation, by one
     /// store, and freed whole.
     stamp: PageStamp,
@@ -401,7 +401,7 @@ pub(crate) unsafe fn header_if_valid(addr: usize, size: usize) -> Option<(u32, P
 
 /// Read just the region_id from the page header at a given pointer — the
 /// generation-blind probe for paths that must not generation-check (the
-/// free-time cascade scan; see docs/impl/region-generations.md § "Region generations").
+/// free-time cascade scan; see docs/impl/region/generations.md § "Region generations").
 ///
 /// # Safety
 /// Same contract as [`header_of_page_ptr`].

@@ -22,7 +22,7 @@
 # and it BECOMES a real use-after-free guard the moment the args-array leak is
 # fixed — at which point a missing retain would free the result under the
 # caller's borrow and this assert would read torn bytes. Keeping the retain in
-# now means that future leak fix lands UAF-free. docs/impl/region-rules.md Rules 4/5/8.
+# now means that future leak fix lands UAF-free. docs/impl/region/rules.md Rules 4/5/8.
 #
 # Run under the guardfree oracle in tests/integration/elle_scripts.rs, mirroring
 # region-native-tail-return-uaf.

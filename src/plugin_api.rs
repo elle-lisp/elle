@@ -88,7 +88,7 @@ pub fn register_plugin_fn(def: &'static PrimitiveDef, func: PluginPrimFn) {
 /// `region` is the call's own region — the same region `ctx` owns, threaded in
 /// from `dispatch_native_call` (which minted it) so the stable-ABI constructors
 /// land plugin allocations exactly where the ctx's would, WITHOUT a region
-/// getter on `NativeCtx` (docs/impl/region-ctx.md "Plugins").
+/// getter on `NativeCtx` (docs/impl/region/ctx.md "Plugins").
 pub(crate) fn call_plugin(
     def: &PrimitiveDef,
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -104,7 +104,7 @@ pub(crate) fn call_plugin(
     // Build this call's `(region, heap)` capability and pass it to the plugin as
     // an opaque first argument, so the stable-ABI constructors (`make_string`, …)
     // allocate into the call's own region on the dispatching instance's own heap
-    // (docs/impl/region-ctx.md "Plugins"). The capability lives on this stack
+    // (docs/impl/region/ctx.md "Plugins"). The capability lives on this stack
     // frame for exactly the synchronous plugin call — no ambient slot to install
     // or clear, and no way for a (future) nested plugin call to clobber it.
     let mut call_ctx = CallCtx {
@@ -183,7 +183,7 @@ pub(crate) fn build_api_loader() -> ApiLoader {
     ApiLoader {
         // ABI version 3: plugin primitives receive an opaque per-call ctx (region
         // + heap) as their leading argument and thread it into the allocating
-        // constructors (docs/impl/region-ctx.md "Plugins"). This changed the
+        // constructors (docs/impl/region/ctx.md "Plugins"). This changed the
         // primitive calling convention, so a v2 plugin (no ctx arg) is incompatible
         // and must be recompiled; the SDK's version guard turns the mismatch into a
         // clean load failure rather than a corrupt call.

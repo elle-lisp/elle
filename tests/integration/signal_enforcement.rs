@@ -33,7 +33,7 @@ fn setup() -> (SymbolTable, VM) {
 // global. A fresh per-call `CompileCtx` (primitives + core + prelude, no stdlib)
 // is exactly that environment; signal inference reads only the instance's
 // compile-time metadata, none of which is shared across these independent
-// analyses (the no-ambient-compile-cache model, docs/impl/region-ctx.md).
+// analyses (the no-ambient-compile-cache model, docs/impl/region/ctx.md).
 fn analyze(
     source: &str,
     symbols: &mut SymbolTable,

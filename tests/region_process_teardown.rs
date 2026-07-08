@@ -1,4 +1,4 @@
-//! Process-teardown contract (docs/impl/region-rules.md § "Teardown — every
+//! Process-teardown contract (docs/impl/region/rules.md § "Teardown — every
 //! region frees").
 //!
 //! `elle foo.lisp` ≡ `(eval (wrap-in-letrec (read-all (slurp "foo.lisp"))))`:

@@ -7,7 +7,7 @@ capability, and a primitive handed no other region cannot allocate anywhere but
 its own call's region.
 
 Correctness context: an allocation is sound only if it is born in the region the
-solver assigned it (Rules 1 and 3, [region-rules.md](region-rules.md)). A
+solver assigned it (Rules 1 and 3, [rules.md](rules.md)). A
 capability that names the region at every allocation site makes "allocate into
 whatever region happens to be around" unrepresentable — and with it the two
 defect classes such ambiguity generates: a native allocating into a region its
@@ -121,7 +121,7 @@ Invariants:
   `new_runtime_region_for_call_slot` and handed in via `with_region_vm`; on a call
   *boundary* with no such slot (`new`/`boundary`/`boundary_vm`) the ctx mints a
   fresh one. The pass-through retain, the declaration oracle
-  ([region-effects.md](region-effects.md)), and the caller's value-based release
+  ([effects.md](effects.md)), and the caller's value-based release
   of the result are unchanged.
 - `dispatch_query` (the in-dispatch `SIG_QUERY` answer) builds its answer through
   the same ctx, preserving "the answer is born in the call's own region"
@@ -195,7 +195,7 @@ and thread names all the way down. Every *user-facing* render has a table:
 `VM::format_error_with_location` uses `self.symbols()`, and the `string`/`print`
 path resolves through `ctx.vm().symbols()`. Only bare `{:?}`/`{}` in internal Rust
 logging and panics loses names — acceptable, and noted in
-[docs/testing.md](../testing.md) so the cold reader knows why a unit-test `{:?}`
+[docs/testing.md](../../testing.md) so the cold reader knows why a unit-test `{:?}`
 on a symbol-bearing `Value` prints `#<sym:id>` (reach for `debug_with`).
 
 Pinned by `two_instances_resolve_their_own_symbols` (`src/runtime/tests/lifecycle.rs`): two
@@ -246,7 +246,7 @@ RuntimeRegion`) as needed; pure helpers that never allocate take nothing.
 Rich error values (`{:error :kind :message … :field v}`) are built through the
 one region-coherent routine `error_extra` and its `rich_error!` macro sugar — so
 the error's message and every field are born in one region. See
-[region-errors.md](region-errors.md).
+[errors.md](errors.md).
 
 ## Direct `PrimFn` invocation sites (not via VM dispatch)
 
@@ -341,7 +341,7 @@ stdlib/REPL definitions stay invisible to another.)
 
 ## Gates
 
-- The declaration oracle ([region-effects.md](region-effects.md)) polices result
+- The declaration oracle ([effects.md](effects.md)) polices result
   regions: a body that allocates its result into the wrong region panics in
   debug, naming the primitive.
 - `--trace=guardfree` over the region suite is the UAF oracle for every change to

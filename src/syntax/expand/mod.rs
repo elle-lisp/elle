@@ -227,7 +227,7 @@ impl Expander {
         // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
         // interns into the same table the expander threads. Idempotent across
         // recursion; the table is reborrowed per transformer call, never touched
-        // simultaneously (docs/impl/region-ctx.md § "Symbols").
+        // simultaneously (docs/impl/region/ctx.md § "Symbols").
         vm.set_symbols(symbols as *mut SymbolTable);
         match &syntax.kind {
             SyntaxKind::Symbol(_) => Ok(syntax),

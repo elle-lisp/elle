@@ -160,7 +160,7 @@ pub struct BytecodeFrame {
     /// This activation's owner node at the moment of suspension — MOVED (taken,
     /// never cloned) out of the activation's `Fiber::activation_owner_nodes`
     /// slot by the suspend site, so the node lives in exactly one place: the
-    /// live slot or one parked frame (docs/impl/region-model.md § "Owner nodes"
+    /// live slot or one parked frame (docs/impl/region/owner.md § "Owner nodes"
     /// — "A park moves the node into the suspended frame"). Its members are
     /// `Owned` (RC frozen) with no other release route, so the node must ride
     /// the park to the resumed body's completion, where the trampoline's
@@ -182,7 +182,7 @@ pub struct BytecodeFrame {
     /// Debug-only snapshot of the uncounted region borrows `activation_region_map`
     /// holds at suspension: `(slot, region, generation)` per mapped region. The
     /// suspended-frame analogue of the cross-fiber param snapshot's `param_borrows`
-    /// (docs/impl/region-generations.md § "Two borrow shapes"). The mapped regions
+    /// (docs/impl/region/generations.md § "Two borrow shapes"). The mapped regions
     /// are this activation's own allocations, kept alive by its still-pending
     /// `DecrefRegion`s while the fiber is parked; `resume_suspended` re-checks each
     /// recorded generation before `restore_activation_region_map`, so a region freed
@@ -196,7 +196,7 @@ pub struct BytecodeFrame {
 impl BytecodeFrame {
     /// Build a suspended bytecode frame, snapshotting (debug builds) the uncounted
     /// region borrows its `activation_region_map` holds — the suspended-frame
-    /// recorded-generation handle (docs/impl/region-generations.md § "Two borrow
+    /// recorded-generation handle (docs/impl/region/generations.md § "Two borrow
     /// shapes"). Every suspend site goes through this one constructor
     /// ("constructor, not literal"), so the snapshot is taken once, centrally, at the
     /// moment the map is captured. `heap` is read only under `debug_assertions`; the
@@ -239,7 +239,7 @@ impl BytecodeFrame {
 /// `resume_suspended`'s `first_stale_borrow` confirm the region has not been freed
 /// since the fiber parked. The region and its generation are read from the SAME
 /// `heap`, so the recorded pair and the later check compare within one store. Debug
-/// builds only (docs/impl/region-generations.md § "Two borrow shapes").
+/// builds only (docs/impl/region/generations.md § "Two borrow shapes").
 #[cfg(debug_assertions)]
 pub(crate) fn record_region_borrows(
     map: &rustc_hash::FxHashMap<u32, crate::hir::region::RuntimeRegion>,
@@ -411,7 +411,7 @@ pub struct Fiber {
     /// the recorded generation lets the resume and `resolve_parameter` checks
     /// confirm that (debug builds), turning a violated invariant into a panic at
     /// the borrow instead of a stale read. Populated only under
-    /// `debug_assertions`; empty otherwise (docs/impl/region-generations.md
+    /// `debug_assertions`; empty otherwise (docs/impl/region/generations.md
     /// § "Uncounted-borrow check").
     pub param_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
     /// Signal value from this fiber. Canonical location for both
@@ -430,7 +430,7 @@ pub struct Fiber {
     /// outermost (last index).
     pub suspended: Option<Vec<SuspendedFrame>>,
 
-    /// Per-activation region-slot remap (docs/impl/region-model.md — every value its
+    /// Per-activation region-slot remap (docs/impl/region/model.md — every value its
     /// own region). Each entry maps a static bytecode region id (a per-
     /// function "slot") to a fresh physical region id minted for *this*
     /// activation. The stack mirrors the call stack: the top is the current
@@ -444,7 +444,7 @@ pub struct Fiber {
     /// `VM::push_activation_region_map` / `restore_activation_region_map` /
     /// `pop_activation_region_map`, which keep the two stacks in lockstep). An
     /// entry holds the activation's pages-less owner-node region — the forest
-    /// root `AdoptIntoActivation` adopts members into (docs/impl/region-model.md
+    /// root `AdoptIntoActivation` adopts members into (docs/impl/region/owner.md
     /// § "Owner nodes — an activation as a forest root") — or `None` until the
     /// activation's first adopt lazily mints it. Freed at the activation's
     /// normal completion (`VM::release_activation_owner_node`); a suspend MOVES
@@ -455,7 +455,7 @@ pub struct Fiber {
 
     /// The FIBER's own owner node — the pages-less forest root for a region whose
     /// owner is the fiber itself, outliving every single activation
-    /// (docs/impl/region-model.md § "Owner nodes" — "The fiber owner node").
+    /// (docs/impl/region/owner.md § "Owner nodes" — "The fiber owner node").
     /// Fiber state, so it rides parks and fiber swaps structurally — nothing
     /// moves it, unlike the per-activation slots above. Minted lazily; `None`
     /// for a fiber that owns nothing. Freed only at the fiber's terminal
@@ -599,7 +599,7 @@ impl Fiber {
     }
 
     /// Set an error signal on this fiber, the error value born in the
-    /// caller-supplied `region` (Rule 3; docs/impl/region-ctx.md).
+    /// caller-supplied `region` (Rule 3; docs/impl/region/ctx.md).
     ///
     /// The `Fiber` owns no heap, so the region is minted by the caller: a VM
     /// caller via `VM::set_error` (a fresh

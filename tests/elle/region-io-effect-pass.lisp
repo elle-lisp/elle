@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # tests/elle/region-io-effect-pass.lisp — runtime guard for the io / fiber
-# region-effect pass (docs/impl/region-effects.md "Native region effects").
+# region-effect pass (docs/impl/region/effects.md "Native region effects").
 #
 # These primitives YIELD (SIG_YIELD | SIG_IO), so the declaration oracle in
 # `dispatch_native_call` is EXEMPT on their result — an over-claim is silent,

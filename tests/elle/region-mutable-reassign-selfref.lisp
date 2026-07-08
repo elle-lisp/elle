@@ -30,7 +30,7 @@
 #   also clean — the fault needs the read to consume the loaded value within
 #   the same expression as the binding's last-use decref.
 #
-# INTENDED FIX (container model, derived from docs/impl/region-bindings.md "a store into a
+# INTENDED FIX (container model, derived from docs/impl/region/bindings.md "a store into a
 # mutable container increfs the stored value's region; a removal decrefs it"):
 #   - escape-incref the stored value (it now lives >= the binding, balancing
 #     its producing temp's demise);

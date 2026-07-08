@@ -16,7 +16,7 @@ impl<'a> Analyzer<'a> {
     /// A quoted COMPOUND datum (list / array / nested structure) becomes a
     /// `HirKind::QuoteConst` carrying a `ConstTemplate` — plain compile-time data
     /// that `MaterializeConst` materializes fresh into a reclaimable region each
-    /// execution (region-model.md, "Constants lower as ordinary allocations"). An
+    /// execution (region/model.md, "Constants lower as ordinary allocations"). An
     /// IMMEDIATE datum (`'5`, `'foo`, `'()`) stays a `HirKind::Quote` immediate on
     /// the no-region fast path.
     ///

@@ -47,7 +47,7 @@ Return values:
 1. Create function in appropriate module
 2. Register in that module's `register_*` function
 3. That function is called by `registration.rs`
-4. Declare its `effect: RegionEffect::…` (def.rs; spec in docs/impl/region-effects.md
+4. Declare its `effect: RegionEffect::…` (def.rs; spec in docs/impl/region/effects.md
    § "Native region effects"). Every shipped table is fully declared —
    do not leave a new primitive at the `Unknown` default. The claim is
    checked forever by the declaration oracle (`dispatch_native_call`,

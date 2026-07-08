@@ -21,7 +21,7 @@
 # region-tailloop-uniqueness.lisp. The closure-ENV path here is the remaining
 # env-region commingling.)
 #
-# docs/impl/region-rules.md Rule 6 ("No commingling") + Rule 8 ("No leaks"). RED now,
+# docs/impl/region/rules.md Rule 6 ("No commingling") + Rule 8 ("No leaks"). RED now,
 # GREEN once the tail-call env path mints/owns per-execution regions like the
 # Call-position path.
 

@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Counterfactual for the call-result-arg clique UAF
-# (docs/impl/region-effects.md "Native region effects" — the incref side of
+# (docs/impl/region/effects.md "Native region effects" — the incref side of
 # "What the solver derives").
 #
 # A Mixed/Unknown call's arg-clique incref was a compile-time
@@ -27,7 +27,7 @@
 # value actually lives in, the exact mirror of the call-result decref
 # path (src/lir/lower/regionemit.rs `emit_increfs_for`). This applies
 # exactly at hard-edge sites: native calls with declared uncounted-store
-# effects (Stores/Mixed/Unknown — docs/impl/region-effects.md "Hard edges"). Opaque
+# effects (Stores/Mixed/Unknown — docs/impl/region/effects.md "Hard edges"). Opaque
 # user-fn sites keep the no-op slot path, pinned by
 # region-userfn-clique-callresult-noleak.lisp.
 

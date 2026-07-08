@@ -28,7 +28,7 @@ struct Channels {
 ///
 /// Exhaustive by construction: a new `HeapObject` variant does not
 /// compile until it gets an arm here, i.e. an explicit scan decision
-/// (docs/impl/region-diagnostics.md § Validation — the exhaustive-scan pin).
+/// (docs/impl/region/diagnostics.md § Validation — the exhaustive-scan pin).
 fn obj_with_value_in_every_channel(
     tag: HeapTag,
     v2: Value,
@@ -207,7 +207,7 @@ fn obj_with_value_in_every_channel(
         HeapTag::External => (
             // The Rc<dyn Any> payload is opaque BY CONSTRUCTION — a
             // plugin storing region Values inside it hides them from the
-            // scan (docs/impl/region-diagnostics.md § Validation names this boundary).
+            // scan (docs/impl/region/diagnostics.md § Validation names this boundary).
             // Traits is the only visible channel.
             HeapObject::External {
                 obj: crate::value::heap::ExternalObject {
@@ -294,7 +294,7 @@ const ALL_TAGS: &[HeapTag] = &[
     HeapTag::ClosureTemplate,
 ];
 
-/// The exhaustive-scan pin (docs/impl/region-diagnostics.md § Validation): every
+/// The exhaustive-scan pin (docs/impl/region/diagnostics.md § Validation): every
 /// variant that CAN hold a cross-region `Value` must surface it through
 /// `find_object_cross_refs` — each channel independently — and every
 /// variant that can't must surface nothing. A missing scan arm fails

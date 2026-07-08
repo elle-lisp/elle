@@ -1,6 +1,6 @@
 use super::*;
 
-// ── Plugin-boundary allocation capability (docs/impl/region-ctx.md "Plugins") ──
+// ── Plugin-boundary allocation capability (docs/impl/region/ctx.md "Plugins") ──
 //
 // The stable-ABI constructors (`make_string`, …) must allocate into the *call's*
 // region on the *call's* heap, yet a C function returns a value with no knowledge

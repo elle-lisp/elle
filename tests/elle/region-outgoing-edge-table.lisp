@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# The outgoing edge table (docs/impl/region-model.md § "The outgoing edge table").
+# The outgoing edge table (docs/impl/region/ownership.md § "The outgoing edge table").
 # Every cross-region CONTENT edge — a value stored into another region's container —
 # is recorded at creation (the alloc funnel + the mutable-store seam) so reclamation
 # walks the recorded table instead of scanning page contents. This exercises the seam

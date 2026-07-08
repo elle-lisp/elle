@@ -1,6 +1,6 @@
 use super::*;
 
-// ── native region effects (docs/impl/region-effects.md "Native region effects") ──
+// ── native region effects (docs/impl/region/effects.md "Native region effects") ──
 //
 // A primitive's declared `RegionEffect` keys the opaque-call arg clique:
 // Immediate/Fresh/PassThrough natives store no argument, so a call to one
@@ -171,7 +171,7 @@ fn effect_sends_emits_same_edges_as_stores() {
 fn hard_edge_sites_marks_native_uncounted_store_sites() {
     // `has?` is declared `Mixed` (a trait-dispatched native whose stores are uncounted at
     // compile time), so its clique edges are HARD — the lowerer emits the incref
-    // value-based for a call-result source (docs/impl/region-effects.md "Hard edges: how a
+    // value-based for a call-result source (docs/impl/region/effects.md "Hard edges: how a
     // may-store edge is emitted"). Pins the inclusion side of the hard/soft split, the
     // Mixed companion of `hard_edge_sites_marks_declared_stores_sites`, through the REAL
     // classification.
@@ -261,7 +261,7 @@ fn subprocess_exec_declares_opaque_no_arg_clique() {
     // it is `Opaque`, not `Mixed`: it records NO arg-clique edges. Under `Mixed`
     // the full mutual clique increfed every heap arg's region and never balanced
     // (nothing is stored) — a per-call leak on a no-store primitive, exactly the
-    // gap `Opaque` closes (docs/impl/region-effects.md § Opaque: the clique is
+    // gap `Opaque` closes (docs/impl/region/effects.md § Opaque: the clique is
     // keyed on the store, not the result shape). RED under a regression to Mixed.
     let (hir, arena, symbols, info) =
         analyze_with_class("(subprocess/exec \"echo\" (list \"hi\"))");
@@ -278,14 +278,14 @@ fn subprocess_exec_declares_opaque_no_arg_clique() {
 
 #[test]
 fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
-    // The io / fiber pass (docs/impl/region-effects.md "Native region effects").
+    // The io / fiber pass (docs/impl/region/effects.md "Native region effects").
     // Every primitive
     // here yields (`SIG_YIELD|SIG_IO`) or returns a signal, so the result-side
     // declaration ORACLE is exempt — it never panics on an over-claim. This
     // solver counterfactual is the guard instead:
     //
     //   * a tightened native must NOT be a `hard_edge_sites` member — only
-    //     Mixed/Unknown insert one (walkrest.rs's Mixed arm; region-effects.md
+    //     Mixed/Unknown insert one (walkrest.rs's Mixed arm; region/effects.md
     //     "What the solver derives"). Every call below is single-heap-arg, so the
     //     clique edge set is already empty under both Mixed and the tightened
     //     effect — `hard_edge_sites`, NOT `edges_at_site`, is what distinguishes
@@ -429,7 +429,7 @@ fn userfn_call_site_records_no_arg_clique() {
     // NO arg-clique edges at all — distinct from a Mixed/Unknown NATIVE,
     // which can store uncounted and keeps the full clique. The site is of
     // course also NOT a hard-edge site (only declared natives are).
-    // (docs/impl/region-effects.md "What the solver derives", the
+    // (docs/impl/region/effects.md "What the solver derives", the
     // user-functions case.)
     let (hir, arena, symbols, info) = analyze_with_class("((fn (h) (h \"a\" \"b\")) f)");
     let calls = find_calls_to_primitive(&hir, "h", &arena, &symbols);

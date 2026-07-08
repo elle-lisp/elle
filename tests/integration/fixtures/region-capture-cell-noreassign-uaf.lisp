@@ -36,7 +36,7 @@
 #      (which unwraps the cell) came from hash iteration; the freeing-first
 #      permutation tears the page the unwrap reads. Fixed by the
 #      dependency-safe class sort in `Lowerer::with_region_info`
-#      (docs/impl/region-rules.md Rule 4: read-releases before free-releases,
+#      (docs/impl/region/rules.md Rule 4: read-releases before free-releases,
 #      deterministic order always).
 #
 # Compile-level twins of this guard live in src/lir/lower/tests.rs

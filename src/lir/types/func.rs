@@ -65,7 +65,7 @@ pub struct LirFunction {
     /// `ClosureTemplate`.
     pub region_table: Vec<StaticRegion>,
     /// Static region slots SHARED by ≥2 of this function's allocations after a
-    /// builder-idiom merge (docs/impl/region-model.md § Merging). Recorded by
+    /// builder-idiom merge (docs/impl/region/merging.md § Merging). Recorded by
     /// `record_merged_slots` (the root slot a merge tree's allocations resolve to,
     /// via `static_slot`'s `merged_root` canonicalization), and propagated to
     /// `ClosureTemplate`/`Bytecode` so the alloc dispatch mint-or-reuses them. Empty

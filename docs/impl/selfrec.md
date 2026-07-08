@@ -4,8 +4,8 @@ Implementation-facing: how a self-recursive closure bound inside a lambda body �
 `(letrec [loop (fn [m] … (loop …))] …)`, or the same as a nested `def` — refers
 to itself without a forward cell, so it is reclaimed by ordinary region RC exactly
 like a top-level recursive `defn`. Builds on the region model
-([region-model.md](region-model.md)), the escape authority ([escape.md](escape.md)),
-and the tail-call adopt ([region-rules.md](region-rules.md) Rule 5).
+([region/model.md](region/model.md)), the escape authority ([escape.md](escape.md)),
+and the tail-call adopt ([region/rules.md](region/rules.md) Rule 5).
 
 ## The shape this serves
 
@@ -31,7 +31,7 @@ once, at `mark_captured`:
 - A **sibling/foreign** capture (a *different* closure captures this binding — the
   mutual-recursion case, `ev` capturing `od`) *does* mark → that binding keeps its
   forward cell, which the **closure-cycle merge** collapses
-  ([region-model.md](region-model.md) § The letrec closure-cycle merge). A member
+  ([region/letrec.md](region/letrec.md) § The letrec closure-cycle merge). A member
   that is *both* self-recursive *and* sibling-captured uses the executing-closure
   mechanism for its **own** self-edge while still exposing a cell for the sibling.
 
@@ -156,7 +156,7 @@ where no external owner (a forward cell) exists, and forbidden where one does.
 
 ## Relationship to the closure-cycle merge (mutual recursion)
 
-The **merge** ([region-model.md](region-model.md) § The letrec closure-cycle merge) serves
+The **merge** ([region/letrec.md](region/letrec.md) § The letrec closure-cycle merge) serves
 **mutual** recursion: sibling-captured members each keep a forward cell, and the merge
 collapses the closure SCC and its cells onto one arena. Pure self-recursion is cell-free
 and never reaches the merge (it has no cell to merge). A member that is both self-recursive

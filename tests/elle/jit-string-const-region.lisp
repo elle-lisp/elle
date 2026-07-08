@@ -2,7 +2,7 @@
 ## jit/string-const-region — a forced-JIT string literal is an ORDINARY
 ## allocation in a reclaimable region.
 ##
-## A string literal lowers to a `MaterializeConst` (docs/impl/region-model.md §
+## A string literal lowers to a `MaterializeConst` (docs/impl/region/model.md §
 ## "Constants lower as ordinary allocations"). The JIT bakes no pointer: it emits
 ## an alloc-helper call (`elle_jit_make_string`, bracketed by push/pop_alloc_region
 ## like List/MakeArrayMut) that materializes a FRESH `LString` into the caller's

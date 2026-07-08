@@ -79,7 +79,7 @@ fn begin_with_captured_define_has_alloc_region() {
     assert!(!begins.is_empty(), "expected at least one Begin");
     // Per-cell regions live in `begin_cell_regions` (one region PER captured
     // binding — a single shared alloc_region for all of a Begin's cells is
-    // the shared-slot capture-cell leak; see docs/impl/region-model.md, "one
+    // the shared-slot capture-cell leak; see docs/impl/region/model.md, "one
     // allocation execution per slot between drops").
     let any_cells = begins.iter().any(|id| {
         info.begin_cell_regions
@@ -102,7 +102,7 @@ fn walk_records_cell_contains_content_for_compiled_letrec_cell() {
     //
     // Counter-factual: with no such edge the content region is a free-standing top
     // container the scan cannot bound through its cell (the invisible-containment hole
-    // this modeling closes; region-model.md § "The capture adopt").
+    // this modeling closes; region/adopt.md § "The capture adopt").
     let src = "(defn build [n] \
                  (letrec [drive (fn [m] (if (%le m 0) 0 (begin (leaf m) (drive (%sub m 1))))) \
                           leaf (fn [m] m)] \
@@ -150,7 +150,7 @@ fn walk_records_no_cell_content_for_populate_env_route() {
     // An in-lambda captured MUTABLE local goes through the runtime `populate_env` env
     // cell (`StoreCapture`), not a compiled `MakeCaptureCell` — a phantom region the
     // runtime env owns. It mints NO `begin_cell_regions` entry, so the walk records NO
-    // `cell ⊇ content` edge for it; the env cell stays a borrow (region-model.md
+    // `cell ⊇ content` edge for it; the env cell stays a borrow (region/adopt.md
     // non-goal: only compiled cells get the edge).
     let src = "(defn mk [] (let [@x (%pair 1 2)] (fn [] x)))";
     let (_hir, _arena, info) = pipeline(src);
@@ -181,7 +181,7 @@ fn capture_edge_points_at_cell_region_not_content() {
     // `capture_containment_edges` re-derives it — and it must point at the CELL region,
     // not `leaf`'s content: paired with the walk's `cell ⊇ content` edge, external
     // uniqueness then sees the true chain `closure ⊇ cell ⊇ content`
-    // (region-model.md § "The capture adopt"; the emit realizes it via `AdoptCellRegion`).
+    // (region/adopt.md § "The capture adopt"; the emit realizes it via `AdoptCellRegion`).
     //
     // Counter-factual: before the re-point, `capture_containment_edges` resolved a capture
     // through `binding_source_regions[leaf]` — the CONTENT region — so the edge read

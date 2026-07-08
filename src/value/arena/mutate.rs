@@ -2,7 +2,7 @@ use super::*;
 
 // ── Tracked mutation helpers ────────────────────────────────────────
 //
-// THE mutable-store funnel (docs/impl/region-rules.md Rule 5, mutable store): the raw
+// THE mutable-store funnel (docs/impl/region/rules.md Rule 5, mutable store): the raw
 // `RefCell` accessors of the Value-bearing mutable containers are visible
 // only inside `value/`, so these helpers are the only way the rest of the
 // crate can store a `Value` into (or remove one from) an @array, @struct,
@@ -13,7 +13,7 @@ use super::*;
 // Region tracking is two ledgers, both maintained here: the incoming RC
 // (`incref_inserted_element`/`decref_removed_element`/`rebind_stored_element`,
 // arena.rs) and the source region's outgoing edge table (`record_store`/
-// `unrecord_store` below — docs/impl/region-model.md § "The outgoing edge table").
+// `unrecord_store` below — docs/impl/region/ownership.md § "The outgoing edge table").
 // Co-locating the edge op with its RC op is what keeps the two from drifting; the
 // free-time equivalence oracle asserts the result.
 
@@ -62,7 +62,7 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
 /// pass-through result normally receives from `dispatch_native_call`; `%pop`/`pop`
 /// declare `moves_out` so dispatch SKIPS its own `pass_through_retain` (applying it
 /// twice would leak one region per op). The un-record + decref stay paired (the
-/// two-ledger co-location invariant, docs/impl/region-model.md § "The outgoing edge
+/// two-ledger co-location invariant, docs/impl/region/ownership.md § "The outgoing edge
 /// table"): the container's outgoing edge and its incoming RC drop together, only
 /// now the incoming RC never transiently reaches zero.
 pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
@@ -311,7 +311,7 @@ pub fn capture_store_with_rebind(heap: &mut FiberHeap, cell_val: Value, new_valu
                 decref_region(heap, Some(old_r));
                 // The cell's outgoing edge to its old contents, removed in lockstep
                 // with the RC decref (the source is the CELL's region, not a
-                // container — docs/impl/region-model.md § "The outgoing edge table").
+                // container — docs/impl/region/ownership.md § "The outgoing edge table").
                 heap.unrecord_outgoing_edge(Some(cell_r), Some(old_r));
             }
         }

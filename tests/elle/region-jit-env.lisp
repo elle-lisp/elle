@@ -3,7 +3,7 @@
 # region for every env value it builds — capture cells (a mutable-captured param
 # or local) and the variadic rest cons-list — exactly as the interpreter's
 # `populate_env` does via `env_value_region` / `args_to_list` (src/vm/env.rs).
-# docs/impl/region-model.md "RegionSlice contents share their object's region",
+# docs/impl/region/model.md "RegionSlice contents share their object's region",
 # Rule 6 (no commingling), Rule 8 (no leaks).
 #
 # THE BUG: the JIT body's allocations are each straddled

@@ -271,7 +271,7 @@ primitive! {
         // struct). Mixed would force the multi-heap-arg clique on a no-store
         // primitive — a per-call leak. Pinned by effects.rs
         // `subprocess_exec_declares_opaque_no_arg_clique`. Yielding, so the
-        // result side is oracle-exempt. (docs/impl/region-effects.md § Opaque.)
+        // result side is oracle-exempt. (docs/impl/region/effects.md § Opaque.)
         effect: RegionEffect::Opaque,
     }
     "subprocess/wait" => prim_subprocess_wait {

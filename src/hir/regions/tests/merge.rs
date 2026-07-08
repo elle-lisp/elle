@@ -2,7 +2,7 @@ use super::*;
 
 // ── merge seed: the builder-idiom child→parent merge ──────────────────
 //
-// docs/impl/region-model.md § Merging. A freshly-built child aggregate stored
+// docs/impl/region/merging.md § Merging. A freshly-built child aggregate stored
 // into the parent `%pair` it becomes a field of merges into the parent's region
 // (the down-payment on the forest's owned-subtree drop), but ONLY when the child
 // is fresh, sole-held, non-escaping, stored solely into that parent, and dies at
@@ -316,11 +316,11 @@ fn merge_self_edge_refuses_escaping_alias() {
 
 // ── The letrec closure-cycle merge ────────────────────────────────────
 //
-// docs/impl/region-model.md § The letrec closure-cycle merge. A `letrec`
+// docs/impl/region/letrec.md § The letrec closure-cycle merge. A `letrec`
 // self/mutual recursive closure is a
 // capture-cell↔closure cycle: the prebound forward-reference cell holds the closure
 // (`StoreCaptureCell`) and the closure captures the cell. Per-region RC cannot
-// collect the immutable cycle (region-rules.md Rule 8), but every member is
+// collect the immutable cycle (region/rules.md Rule 8), but every member is
 // static-slot (the closure's `alloc_region`, the cell's `begin_cell_regions`),
 // sole-held, and non-escaping — so the merge collapses the whole SCC ∪ its cells
 // onto ONE region. The interior cell↔closure references become intra-region (the
@@ -450,7 +450,7 @@ fn merge_collapses_mutual_recursion_letrec_closure_cycle() {
 
 #[test]
 fn merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing() {
-    // PROMPTNESS (docs/impl/region-model.md § The lifetime obligation the root
+    // PROMPTNESS (docs/impl/region/adopt.md § The lifetime obligation the root
     // carries; the §9 promptness ledger). The merged cycle's single `DecrefRegion`
     // must fire at the cycle's BINDING SCOPE — the `letrec` that prebinds its
     // capture cells — not at that scope's enclosing post-dominator. Exercised on

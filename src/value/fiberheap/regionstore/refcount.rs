@@ -32,17 +32,40 @@ impl RegionStore {
     }
     /// Decrement with optional cascade source (for tracing).
     /// Returns the number of objects freed (0 if RC > 0 after decrement).
+    ///
+    /// The free itself runs the iterative worklist driver
+    /// ([`Self::free_region_set`]), so a decref that reaches rc 0 never recurses
+    /// per cascaded link — a chain of N cross-region references frees in O(1)
+    /// native stack regardless of N.
     pub(super) fn decref_with_cascade(
         &mut self,
         id: RuntimeRegion,
         from_cascade: Option<RuntimeRegion>,
     ) -> usize {
+        if self.decref_reaches_zero(id, from_cascade) {
+            self.free_runtime_region_pages(id, from_cascade)
+        } else {
+            0
+        }
+    }
+
+    /// Decrement `id`'s reference count, returning `true` iff it just reached 0
+    /// and its pages must now be freed. This is the pure bookkeeping half of
+    /// [`Self::decref_with_cascade`] — it performs **no** free, so the free
+    /// cascade can drive reclamation from an explicit worklist
+    /// ([`Self::free_region_set`]) instead of recursing through
+    /// `decref → free → decref` once per cross-region link.
+    pub(super) fn decref_reaches_zero(
+        &mut self,
+        id: RuntimeRegion,
+        from_cascade: Option<RuntimeRegion>,
+    ) -> bool {
         let idx = id.get() as usize;
         // Direct decrefs (not from cascade) must hit a region that
         // was actually allocated. A miss here means either (a) the
         // solver assigned a region id that no instruction
         // alloc_in_region'd (the phantom-region class of bug —
-        // see docs/impl/region-rules.md § "Every region must correspond to a
+        // see docs/impl/region/rules.md § "Every region must correspond to a
         // real allocation"), or (b) a double-free. Cascade decrefs
         // are exempt because a single region may be referenced
         // multiple times by another's contents and may have already
@@ -51,15 +74,15 @@ impl RegionStore {
             from_cascade.is_some() || (idx < self.regions.len() && self.regions[idx].is_some()),
             "DecrefRegion({id}) but region was never alloc_in_region'd \
              (or already freed) — phantom region or double-free; \
-             see docs/impl/region-rules.md § 'Every region must correspond to a \
+             see docs/impl/region/rules.md § 'Every region must correspond to a \
              real allocation'",
         );
         if idx >= self.regions.len() {
-            return 0;
+            return false;
         }
-        let should_free = match self.regions[idx].as_mut() {
+        match self.regions[idx].as_mut() {
             None => false,
-            // owned ⇒ RC frozen (docs/impl/region-model.md § "The runtime: a
+            // owned ⇒ RC frozen (docs/impl/region/ownership.md § "The runtime: a
             // reclamation typestate"): an `Owned` region has no count to
             // decrement — it is reclaimed only by its owner's subtree drop. Both a
             // direct decref and a cascade decref (the owner's free-time content
@@ -67,7 +90,7 @@ impl RegionStore {
             // drop frees the child explicitly. The no-op is *structural* (the
             // variant carries no `u32`), which is what lets the interior
             // containment edge stay un-suppressed at runtime.
-            Some(e) if matches!(e.reclaim, Reclaim::Owned { .. }) => return 0,
+            Some(e) if matches!(e.reclaim, Reclaim::Owned { .. }) => false,
             Some(entry) => {
                 let Reclaim::Counted(rc) = &mut entry.reclaim else {
                     unreachable!("Owned handled by the arm above")
@@ -95,11 +118,6 @@ impl RegionStore {
                 }
                 freed
             }
-        };
-        if should_free {
-            self.free_runtime_region_pages(id, from_cascade)
-        } else {
-            0
         }
     }
     /// Get the current RC for a region (0 if not created).
@@ -142,7 +160,7 @@ impl RegionStore {
         self.decref(id)
     }
     /// Record one outgoing content edge `src → dst` into `src`'s edge table
-    /// (docs/impl/region-model.md § "The outgoing edge table"). Applies the same
+    /// (docs/impl/region/ownership.md § "The outgoing edge table"). Applies the same
     /// filter `find_object_cross_refs` applies — a reserved target (0/1) or a
     /// self-edge (`dst == src`) records nothing — so the recorded table stays
     /// scan-equivalent, which the free-time oracle asserts. `src` must already
@@ -182,7 +200,7 @@ impl RegionStore {
                 None => debug_assert!(
                     false,
                     "unrecord_outgoing({src} → {dst}): no recorded edge to remove — \
-                     outgoing-edge accounting drift (docs/impl/region-model.md \
+                     outgoing-edge accounting drift (docs/impl/region/ownership.md \
                      § 'The outgoing edge table')"
                 ),
             }
@@ -214,7 +232,7 @@ impl RegionStore {
             // Record the outgoing edge in the SAME loop that increfs it, so the
             // alloc-path table is scan-equivalent by construction — `refs` is the
             // very output of `find_object_cross_refs`, the function the free-time
-            // oracle scans with (docs/impl/region-model.md § "The outgoing edge
+            // oracle scans with (docs/impl/region/ownership.md § "The outgoing edge
             // table"). The reserved/self filter lives in `record_outgoing`.
             self.record_outgoing(own_id, rid);
         }

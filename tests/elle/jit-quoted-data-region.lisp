@@ -3,7 +3,7 @@
 ## allocation in a reclaimable region.
 ##
 ## Quoted compound data lowers to a `MaterializeConst` with a recursive template
-## (docs/impl/region-model.md § "Constants lower as ordinary allocations"). The
+## (docs/impl/region/model.md § "Constants lower as ordinary allocations"). The
 ## JIT emits an alloc-helper call (bracketed by push/pop_alloc_region like
 ## List/MakeArrayMut) that materializes a FRESH structure into the caller's
 ## per-activation region on every execution, freed at its decref_point — no baked

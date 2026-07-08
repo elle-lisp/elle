@@ -1,6 +1,6 @@
 use super::*;
 
-/// End-to-end exercise of the ownership forest (docs/impl/region-model.md
+/// End-to-end exercise of the ownership forest (docs/impl/region/ownership.md
 /// § "Adoption and subtree drop"). The never-mergeable shape — a Fresh mutable
 /// container `(@array)` and the value `(array 1 2)` pushed into it, both
 /// call-result regions no static slot can name, so MERGE cannot collapse them —
@@ -55,7 +55,7 @@ fn region_ownership_adopt_subtree_drop_reclaims_in_a_real_run() {
 /// End-to-end exercise of the **interior-cycle** ownership cut. A Fresh container
 /// `root` directly holds two members
 /// `a` and `b`, which reference EACH OTHER (`a ⊇ b`, `b ⊇ a`). Per-region RC cannot
-/// collect the a↔b reference cycle (region-rules.md Rule 8), so flag-OFF this leaks —
+/// collect the a↔b reference cycle (region/rules.md Rule 8), so flag-OFF this leaks —
 /// the live-region count grows every run. Under `--region-ownership` the cut adopts a
 /// and b directly by the root, whose single decref subtree-drops the whole cycle, so
 /// the count stays bounded. The push order makes `root` the last region used, so its
@@ -71,7 +71,7 @@ fn region_ownership_reclaims_interior_cycle_subtree() {
     // push order makes `root` the last region used, so its decref_point post-dominates
     // the members (the lifetime obligation). The forest adopts a and b by the root,
     // whose single decref subtree-drops the whole cycle — which per-region RC could
-    // never collect (region-rules.md Rule 8).
+    // never collect (region/rules.md Rule 8).
     const SUBJECT: &str = "(begin (let [root (@array) a (@array) b (@array)] \
                            (begin (%array-push a b) (%array-push b a) \
                                   (%array-push root a) (%array-push root b) nil)) \
@@ -91,7 +91,7 @@ fn region_ownership_reclaims_interior_cycle_subtree() {
 
     // The checked-on (native-Call) production face: the stores are opaque `Funnel`
     // calls whose containment is funnel-recovered, and the adopt is keyed at the
-    // funnel call site (region-model.md § "The funnel adopt — the checked-on store
+    // funnel call site (region/adopt.md § "The funnel adopt — the checked-on store
     // face"); the cut must reclaim identically.
     let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
     let leak_checked = leak_discriminator();
@@ -169,7 +169,7 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
 /// — two `@array`s pushing each other (`a ⊇ b`,
 /// `b ⊇ a`) with NO container parent — has no owner among its members, so neither the
 /// flat nor the interior-cycle adopt cut (both need a top container) can reclaim it.
-/// Per-region RC cannot collect the a↔b cycle (region-rules.md Rule 8), so flag-OFF this
+/// Per-region RC cannot collect the a↔b cycle (region/rules.md Rule 8), so flag-OFF this
 /// leaks — the live-region count grows every run. Under `--region-ownership` the cut frees
 /// the whole cycle as one `FreeRegionGroup` at its collective last use, so the count stays
 /// bounded. This is the distinguishing case from `region_ownership_reclaims_interior_cycle_subtree`,
@@ -183,7 +183,7 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
 fn region_ownership_reclaims_bare_cycle_group() {
     // a ⊇ b (push a b); b ⊇ a (push b a). No container holds a or b — the bare cycle,
     // reclaimed by one `FreeRegionGroup` at its collective last use (per-region RC
-    // cannot collect the a↔b cycle, region-rules.md Rule 8). This is the distinguishing
+    // cannot collect the a↔b cycle, region/rules.md Rule 8). This is the distinguishing
     // case from the interior-cycle subtree, which has a `root` container; here there is
     // none.
     const SUBJECT: &str = "(begin (let [a (@array) b (@array)] \
@@ -232,7 +232,7 @@ fn region_ownership_reclaims_bare_cycle_group() {
 /// not reach.
 ///
 /// Counterfactual built in: the SAME bytecode must leak flag-off (the nested a↔b cycle is
-/// uncollectable by per-region RC, region-rules.md Rule 8) and be bounded flag-on, and
+/// uncollectable by per-region RC, region/rules.md Rule 8) and be bounded flag-on, and
 /// flag-on must run panic-clean (a mis-ordered adopt or a missing recursive drop would
 /// free `b` early or twice, tripping a debug generation/decref assert).
 #[test]
@@ -263,7 +263,7 @@ fn region_ownership_reclaims_nested_cycle_subtree() {
     // The checked-on (native-Call) production face: the multi-level containment is
     // funnel-recovered — `b`'s adopt through its actual parent `a` must be keyed at
     // `(%array-push a b)`'s funnel call site exactly as at the intrinsic store
-    // (region-model.md § "The funnel adopt — the checked-on store face").
+    // (region/adopt.md § "The funnel adopt — the checked-on store face").
     let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
     let leak_checked = leak_discriminator();
     let on_checked = steady_region_growth(SUBJECT);

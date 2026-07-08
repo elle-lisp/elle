@@ -46,7 +46,7 @@ impl Linter {
     /// Drives a full [`Runtime`] per call — the lint path is an entry path
     /// like file-run/REPL/embedding, so it uses the same one lifecycle:
     /// primitives + stdlib on construction, the process-teardown sweep on
-    /// drop (docs/impl/region-rules.md § Teardown — every region frees). Building the VM and stdlib
+    /// drop (docs/impl/region/rules.md § Teardown — every region frees). Building the VM and stdlib
     /// by hand here and tearing nothing down left each call's entire stdlib
     /// live on the thread's root heap (~300 MiB of address space per call).
     pub fn lint_str(&mut self, code: &str, filename: &str) -> Result<(), String> {

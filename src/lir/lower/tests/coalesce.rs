@@ -8,7 +8,7 @@ use super::*;
 // value-resolved (the dynamic boundary). The predicate is computed and logged
 // under --trace=rc; emission consumes it without changing behavior.
 //
-// These pins are written from docs/impl/region-rules.md § "Compile-time region
+// These pins are written from docs/impl/region/mechanism.md § "Compile-time region
 // selection (coalescing)", NOT from emission output: each is counterfactual
 // against a predicate that misclassifies the case (an accept-all-live predicate
 // accepts every "refused" pin; a reject-all predicate refuses every "accepted"
@@ -20,7 +20,7 @@ fn coalescible_predicate_class_logic() {
     // This pins every dynamic-class exclusion — including the reassign classes
     // (`suppressed_decref_regions`, `mutated_binding_value_regions`) that
     // functionalize's assignment-conversion makes unreachable from straight-line
-    // Elle source in this unit harness — exactly per docs/impl/region-rules.md
+    // Elle source in this unit harness — exactly per docs/impl/region/mechanism.md
     // § "Compile-time region selection (coalescing)": Some iff the region is `live`
     // and in NONE of the four dynamic classes, and (for a returned `Var`)
     // `binding_source_regions` names exactly one region.
@@ -80,7 +80,7 @@ fn coalescible_predicate_class_logic() {
             lw(build(Some(class), true, vec![target])).coalescible_solver_region(&var),
             None,
             "a returned Var whose region is in {class} must NOT coalesce (the \
-             dynamic boundary, docs/impl/region-rules.md)",
+             dynamic boundary, docs/impl/region/mechanism.md)",
         );
     }
     // Not live (a phantom region — e.g. a param's placeholder) refuses.
@@ -187,7 +187,7 @@ fn coalescible_region_requires_locally_emitted_slot() {
 fn coalescible_accepts_returned_fresh_pair() {
     // `(fn () (%pair 1 2))` — the tail is a fresh `%pair` allocation wrapped in
     // `Return`. Its region is a real local allocation (walk.rs `op.allocates()`),
-    // so the return mint is coalescible (docs/impl/region-rules.md § "Compile-time
+    // so the return mint is coalescible (docs/impl/region/mechanism.md § "Compile-time
     // region selection (coalescing)", the direct-alloc branch). Counterfactual: a
     // reject-all predicate refuses it.
     let (lowerer, hir) = make_lowerer("(fn () (%pair 1 2))");

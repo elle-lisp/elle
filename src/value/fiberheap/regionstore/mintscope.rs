@@ -1,7 +1,7 @@
 use super::*;
 
 impl RegionStore {
-    /// Open a closed-scope mint log (docs/impl/region-rules.md § "Macro
+    /// Open a closed-scope mint log (docs/impl/region/rules.md § "Macro
     /// expansion — a closed allocation scope"). Every region minted until the
     /// matching [`reclaim_mint_scope`] is recorded. The scope does not nest:
     /// macro transformer bodies are compiled code that does not re-enter the

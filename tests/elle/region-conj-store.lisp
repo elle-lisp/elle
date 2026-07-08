@@ -2,7 +2,7 @@
 # Counterfactual: the trait-registry default `:Collection :conj` stores into a
 # MUTABLE collection (@array push / @set insert, `trait_coll_conj` in
 # src/primitives/traitregistry/methods.rs) WITHOUT the Rule-5 mutable-store
-# incref (docs/impl/region-rules.md Rule 5; `incref_inserted_element` in value/arena.rs).
+# incref (docs/impl/region/rules.md Rule 5; `incref_inserted_element` in value/arena.rs).
 # The stored element's producing region is released at its statement's decref
 # point — RC reaches 0 with the container still holding the value, and the
 # next read is a use-after-free.
@@ -10,7 +10,7 @@
 # Witness in a debug build: the read-back `get` performs the pass-through
 # retain, whose `region_of` trips the region-generation check on the freed
 # page — a deterministic "stale region deref" panic at the read (docs/
-# docs/impl/region-generations.md § "Region generations"). Without generation tags the same defect
+# docs/impl/region/generations.md § "Region generations"). Without generation tags the same defect
 # is a wrong-value read or a guardfree fault.
 #
 # Control: `push` routes through the tracked funnel (`push_with_incref`) and

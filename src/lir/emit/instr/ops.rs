@@ -286,7 +286,7 @@ impl Emitter {
                 // shape to `AdoptRegion`, but the handler resolves both operands with
                 // `region_of` (NOT `result_region_of`), so a `CaptureCell` child's OWN
                 // region is adopted — the cell↔closure containment
-                // (docs/impl/region-model.md § "The capture adopt").
+                // (docs/impl/region/adopt.md § "The capture adopt").
                 self.ensure_binary_on_top(*parent, *child);
                 self.bytecode.emit(Instruction::AdoptCellRegion);
                 self.pop(); // child
@@ -298,7 +298,7 @@ impl Emitter {
                 // node): bring the child value to the top, emit the op, and
                 // consume it. The handler resolves the child's runtime region
                 // and links it into the current activation's lazily-minted
-                // owner node (docs/impl/region-model.md § "Owner nodes").
+                // owner node (docs/impl/region/owner.md § "Owner nodes").
                 self.ensure_on_top(*child);
                 self.bytecode.emit(Instruction::AdoptIntoActivation);
                 self.pop(); // child

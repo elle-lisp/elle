@@ -114,7 +114,7 @@ pub struct ElleHost {
     /// to the pre-compiled Module instead of call_indirect on the full table.
     pub precached_closures: Vec<Option<PrecachedClosure>>,
     /// The driving VM, threaded so host primitive calls build a VM-bearing
-    /// `NativeCtx` (docs/impl/region-ctx.md). Set by every Store-creation site
+    /// `NativeCtx` (docs/impl/region/ctx.md). Set by every Store-creation site
     /// from the VM in scope (the lazy tier's `run_wasm` pointer, `eval_wasm_raw`'s
     /// own VM, or an enclosing wasm call's host); null only on a freshly
     /// constructed host before that install, which never runs a primitive.
@@ -260,7 +260,7 @@ impl ElleHost {
         // threaded to `call_plugin` (the plugin region slot — no `NativeCtx`
         // region getter survives) and owned by the ctx the native body uses. The
         // VM comes from the host (`self.vm`), so a re-entrant primitive reaches it
-        // through `ctx.vm()` (docs/impl/region-ctx.md).
+        // through `ctx.vm()` (docs/impl/region/ctx.md).
         let region = heap.new_runtime_region();
         let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, self.vm);
         if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {

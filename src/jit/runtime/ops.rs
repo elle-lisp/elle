@@ -396,7 +396,7 @@ pub extern "C" fn elle_jit_pop(
     let v = Value { tag, payload };
     assert!(v.is_array_mut(), "%pop: expected @array");
     // The heap comes from the threaded `JitCtx`'s VM — this instance's own heap,
-    // not a per-thread slot (docs/impl/region-ctx.md "JIT intrinsic helpers reach
+    // not a per-thread slot (docs/impl/region/ctx.md "JIT intrinsic helpers reach
     // the VM through a JitCtx").
     let heap = unsafe { &mut *(*(*jit_ctx).vm()).heap_ptr };
     JitValue::from_value(crate::value::arena::pop_with_decref(heap, v))

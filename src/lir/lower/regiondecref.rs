@@ -10,7 +10,7 @@ impl<'a> Lowerer<'a> {
     /// - Call-result regions without a slot whose decref_point is the
     ///   call node ITSELF (`alloc_region[hir_id] == r` — a discarded
     ///   result): release by value off `result_reg`, the freshly-
-    ///   lowered result (docs/impl/region-rules.md Rule 2, "discarded result").
+    ///   lowered result (docs/impl/region/rules.md Rule 2, "discarded result").
     /// - All other regions: emit `DecrefRegion(rid)` — the
     ///   compile-time region ID matches the runtime region (alloc
     ///   opcodes used the compile-time ID as the bytecode operand).
@@ -63,7 +63,7 @@ impl<'a> Lowerer<'a> {
             // A builder-idiom merge child (a non-root region) carries no demise of
             // its own: its region is the merged root's, freed by the SINGLE
             // `DecrefRegion` at the root's (the outer aggregate's) `decref_point`,
-            // which post-dominates the child's last use (region-model.md § Merging
+            // which post-dominates the child's last use (region/merging.md § Merging
             // gate 6 — a child never outlives its parent). After `static_slot`
             // canonicalization the child's own decref would name the same root slot;
             // emitting it would free the shared region at the child's earlier
@@ -76,7 +76,7 @@ impl<'a> Lowerer<'a> {
             if self.region_info.call_result_regions.contains(&r) {
                 if let Some(&slot) = self.region_to_slot.get(&r) {
                     // Backstop — "a mutated slot is not a release route"
-                    // (docs/impl/region-bindings.md). `slot` belongs to a
+                    // (docs/impl/region/bindings.md). `slot` belongs to a
                     // reassigned binding, so by this region's `decref_point` the
                     // slot no longer holds the value whose region we mean to
                     // release — it holds whatever was last assigned. Loading it
@@ -138,7 +138,7 @@ impl<'a> Lowerer<'a> {
                     // stuck back-edge reference included), and the activation
                     // owner node's completion release set-drops root + the
                     // producer-adopted interior members
-                    // (docs/impl/region-model.md § "Owner nodes" — "The
+                    // (docs/impl/region/owner.md § "Owner nodes" — "The
                     // transferred returned subtree"). Same operand shape as the
                     // decref it replaces (one value consumed); the nil-stamp
                     // below still applies. Empty when no transfer subtree is present.
@@ -195,7 +195,7 @@ impl<'a> Lowerer<'a> {
                 // wrap keys the slot recording on the outer Let, so the
                 // placeholder reaches its decref_point (this very call
                 // node) with no slot — release by value off the freshly-
-                // lowered result register (docs/impl/region-rules.md Rule 2,
+                // lowered result register (docs/impl/region/rules.md Rule 2,
                 // "discarded result"). The guard excludes branch-union
                 // regions whose decref_point lands here (their
                 // alloc_region entry names a different node) — those keep
@@ -248,7 +248,7 @@ impl<'a> Lowerer<'a> {
         // the executing activation's owner node at the SCC's enclosing-scope site
         // (this node). The adopt transfers ownership only — the free is the
         // node's release at the activation's completion
-        // (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge
+        // (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge
         // SCC"). Empty when no such SCC is present, so then inert.
         if let Some(members) = self
             .region_info

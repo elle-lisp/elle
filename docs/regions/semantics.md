@@ -2,7 +2,7 @@
 
 This is the consumer's view of *what* the memory system guarantees, so you can
 write Elle that is sympathetic to it. For the implementor's correctness
-obligations see [docs/impl/region-rules.md](../impl/region-rules.md).
+obligations see [docs/impl/region/rules.md](../impl/region/rules.md).
 
 Elle frees memory at compile-time-known program points: no tracing collector, no
 liveness scan, no `Rc<Value>` (a `Value` is a `Copy` 16-byte tag+pointer). Every

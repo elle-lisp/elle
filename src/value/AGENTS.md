@@ -19,7 +19,7 @@ Runtime value representation using a tagged union.
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
 | `closure.rs` | `Closure` (template + env + squelch mask), `ClosureTemplate`, `TemplateRef` |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
-| `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs (docs/impl/region-errors.md) |
+| `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs (docs/impl/region/errors.md) |
 | `ffi.rs` | `LibHandle` for C interop |
 | `fiberheap/` | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`. One heap per VM, shared by all of that VM's fibers. |
 | `arena.rs` | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
@@ -74,7 +74,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
    (`as_array_mut` & co.) or copy-outs (`lbox_get`, `capture_cell_get`), and
    every store/remove goes through the tracked funnels in `arena.rs`
    (`push_with_incref`, `struct_put_with_rebind`,
-   `capture_store_with_rebind`, …) — docs/impl/region-rules.md Rule 5, mutable store:
+   `capture_store_with_rebind`, …) — docs/impl/region/rules.md Rule 5, mutable store:
    an uncounted container store is a compile error. Membership-neutral
    mutation uses `with_array_mut_neutral`.
 

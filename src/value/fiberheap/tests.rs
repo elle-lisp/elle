@@ -80,7 +80,7 @@ fn free_region_physical_frees_matching_slots() {
 #[test]
 #[should_panic(expected = "stale region")]
 fn region_of_panics_on_stale_value_in_debug() {
-    // The arena-level funnel (docs/impl/region-generations.md § "Region generations"):
+    // The arena-level funnel (docs/impl/region/generations.md § "Region generations"):
     // every runtime RC decision reads a value's region through
     // arena::region_of, so the generation check there converts a stale-id
     // deref from a silent wrong read into a deterministic panic.
@@ -96,7 +96,7 @@ fn region_of_panics_on_stale_value_in_debug() {
 fn pass_through_borrow_detonates_at_region_of() {
     // The pass-through borrow's check is `region_of` itself — NOT a
     // recorded-generation handle like the cross-fiber param snapshot
-    // (docs/impl/region-generations.md § "Two borrow shapes"). The
+    // (docs/impl/region/generations.md § "Two borrow shapes"). The
     // `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`) hand back
     // a value that aliases into the *source* collection's region with NO incref —
     // an uncounted borrow (unlike a *native* `first`/`rest`/`get`, whose result the
@@ -128,7 +128,7 @@ fn pass_through_borrow_detonates_at_region_of() {
     let _ = crate::value::arena::region_of(&heap, borrowed);
 }
 
-// The `ensure_raw` backstop (docs/impl/region-generations.md § "Region
+// The `ensure_raw` backstop (docs/impl/region/generations.md § "Region
 // generations"): a garbage region id must NOT drive the lazy region-table
 // resize. A corrupt page-header read (the diagnosed cause was a misidentified
 // page base — closed by the `region_of_ptr` ownership-validated walk and the
@@ -175,7 +175,7 @@ fn region_zero_and_one_are_unrepresentable() {
 // index the same `RegionStore`, so a transient's `new_static_region()`
 // value can equal a LIVE runtime region's `new_runtime_region()` id. The
 // transient's `decref_region_if_present` then frees that live region — a
-// use-after-free that violates docs/impl/region-rules.md invariant #1 ("no freeing
+// use-after-free that violates docs/impl/region/rules.md invariant #1 ("no freeing
 // while RC > 0"). A cached macro transformer closure lives in such a
 // runtime region; when a later macro expansion's transient collides with
 // it, the cached closure's region is freed and recycled, and the next
@@ -216,7 +216,7 @@ fn transient_does_not_free_a_live_region_sharing_its_id() {
         "a transient region freed a LIVE region sharing its id — the \
          macro-transformer-cache UAF: a transient drew its id from the global \
          new_static_region() counter, colliding with a live runtime region \
-         (docs/impl/region-rules.md invariant #1: no freeing while RC > 0)"
+         (docs/impl/region/rules.md invariant #1: no freeing while RC > 0)"
     );
 }
 

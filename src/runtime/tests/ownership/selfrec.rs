@@ -3,7 +3,7 @@ use super::*;
 /// End-to-end reclamation of the **mutually-recursive** immutable closure cycle by
 /// the closure-cycle MERGE. A local `letrec` (`ping`/`pong`) builds an immutable
 /// reference cycle: each closure's env references the other, captured at the
-/// `letrec`, never mutated. Per-region RC cannot collect it (region-rules.md Rule
+/// `letrec`, never mutated. Per-region RC cannot collect it (region/rules.md Rule
 /// 8); unlike a *mutable* `@array` cycle (the deliberate class-8 boundary) an
 /// immutable one is reclaimable, and the merge collapses the closures+cells onto one
 /// arena freed at the enclosing scope.
@@ -35,7 +35,7 @@ fn region_ownership_reclaims_mutual_recursion_closure_cycle() {
     );
 }
 
-/// PROMPTNESS of the closure-cycle merge's drop site (docs/impl/region-model.md
+/// PROMPTNESS of the closure-cycle merge's drop site (docs/impl/region/letrec.md
 /// § The letrec closure-cycle merge; the §9 promptness ledger). A *discarded*
 /// top-level letrec closure cycle must be freed at its BINDING SCOPE — the `letrec`
 /// that prebinds its capture cells — its true last use, NOT held to the enclosing
@@ -220,7 +220,7 @@ fn closure_cycle_nested_letrec_reclaims_per_call() {
 }
 
 /// Per-CALL reclamation of an in-lambda MUTUAL letrec cycle — the closure-cycle
-/// merge's in-lambda case (docs/impl/region-model.md § The letrec closure-cycle
+/// merge's in-lambda case (docs/impl/region/letrec.md § The letrec closure-cycle
 /// merge; oracle.lisp `recur-local-mutual`). Each `(f 3)` builds one ev↔od
 /// cell↔closure cycle inside `f`'s body; the merge collapses the four members
 /// (two closures + two forward cells) onto one arena, and — the letrec body

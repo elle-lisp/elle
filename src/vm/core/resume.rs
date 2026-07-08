@@ -130,7 +130,7 @@ impl VM {
                     // while the fiber was parked would be silently restored below and
                     // corrupt the resumed body's allocs/decrefs. Panic at the
                     // boundary, naming the slot, instead of at a later stale read
-                    // (docs/impl/region-generations.md § "Two borrow shapes").
+                    // (docs/impl/region/generations.md § "Two borrow shapes").
                     #[cfg(debug_assertions)]
                     if let Some((slot, r)) =
                         crate::vm::fiber::first_stale_borrow(&frame.region_borrows, self.heap())
@@ -139,7 +139,7 @@ impl VM {
                             "stale suspended-frame region borrow on resume: activation \
                              region slot {slot} maps to region {r}, which was freed while \
                              this fiber was parked — an uncounted suspended-frame borrow \
-                             outlived its region (docs/impl/region-generations.md \
+                             outlived its region (docs/impl/region/generations.md \
                              § 'Uncounted-borrow check')"
                         );
                     }
@@ -147,7 +147,7 @@ impl VM {
                     // Restore this activation's static→physical region remap
                     // as the current frame before re-entering its body, so
                     // post-resume allocs/decrefs resolve in the same frame the
-                    // pre-yield allocations did (docs/impl/region-model.md). The
+                    // pre-yield allocations did (docs/impl/region/owner.md). The
                     // parked owner node is restored with it, so the resumed
                     // body's normal completion frees it through the trampoline's
                     // clean break. The chain is

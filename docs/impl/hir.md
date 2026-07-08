@@ -121,7 +121,7 @@ comment char and `%` the intrinsic prefix) whose default expansion is exactly
 that `letrec`. Two consequences fall out: the file body stops being special, and
 its heap literals are **ordinary allocations** (`MaterializeConst`) into the file
 body's own per-activation regions, freed by the termination sweep (see
-[region-model.md](region-model.md) — *Constants lower as ordinary allocations*),
+[region/model.md](region/model.md) — *Constants lower as ordinary allocations*),
 closing the per-`eval` leak.
 
 ## Files

@@ -139,7 +139,7 @@ impl VM {
                     "stale param-snapshot borrow on resume: parameter {pid} holds a \
                      value in region {r}, which was freed since this fiber inherited \
                      it — an uncounted cross-fiber borrow outlived its region \
-                     (docs/impl/region-generations.md § 'Uncounted-borrow check')"
+                     (docs/impl/region/generations.md § 'Uncounted-borrow check')"
                 );
             }
         }

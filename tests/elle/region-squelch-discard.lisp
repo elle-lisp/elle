@@ -5,7 +5,7 @@
 # `VM::discard_suspended_frames` (src/vm/core.rs): the frames parked between
 # the signal site and the squelch boundary are abandoned, and the chokepoint
 # subtree-drops each frame's parked activation owner node — and releases
-# NOTHING else (docs/impl/region-diagnostics.md § "The squelch/abort
+# NOTHING else (docs/impl/region/diagnostics.md § "The squelch/abort
 # discard"). The frames' `activation_region_map` regions may be shared with
 # an outer, non-discarded frame or with the activation that catches the
 # violation, so a discard that over-releases them frees live state: the

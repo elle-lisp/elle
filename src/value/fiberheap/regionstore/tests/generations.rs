@@ -1,6 +1,6 @@
 use super::*;
 
-// ── Region generations (docs/impl/region-generations.md § "Region generations") ─────
+// ── Region generations (docs/impl/region/generations.md § "Region generations") ─────
 //
 // Written from the spec: a per-physical-id generation counter, bumped on
 // every free, stamped in each claimed page's header, checked by the
@@ -75,7 +75,7 @@ fn stale_value_deref_panics_after_teardown_all() {
 #[test]
 fn foreign_store_page_is_not_generation_checked() {
     // Generations from two different stores are unrelated numbers
-    // (docs/impl/region-generations.md § "Region generations"): a worker thread reading a
+    // (docs/impl/region/generations.md § "Region generations"): a worker thread reading a
     // value allocated by its parent's heap must not compare the parent's
     // page stamp against its own counter. Store ids scope the check; a
     // foreign page resolves to its stamped region id exactly as before,
@@ -103,7 +103,7 @@ fn foreign_store_page_is_not_generation_checked() {
 
 #[test]
 fn reclaimed_page_resolves_to_new_region_undetected() {
-    // The documented boundary (docs/impl/region-generations.md § "Region generations"): once
+    // The documented boundary (docs/impl/region/generations.md § "Region generations"): once
     // the freed page is RE-CLAIMED by a new region the header is restamped,
     // so a stale pointer resolves — wrongly but self-consistently — to the
     // new region. That window belongs to --trace=guardfree (which never

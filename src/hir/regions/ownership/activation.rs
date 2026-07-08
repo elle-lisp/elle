@@ -1,5 +1,5 @@
 //! The activation-owner cut: the capture-back-edge SCC
-//! (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge SCC").
+//! (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC").
 //!
 //! A container captured by a closure it holds (`m ⊇ c` by store, `c ⊇ m` by
 //! capture — the m↔c SCC) is the one containment-graph cycle neither

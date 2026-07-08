@@ -2,7 +2,7 @@
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding (the exhaustive free-cascade pin and the leak suite) that keeps
-the region rules ([region-rules.md](region-rules.md)) honest.
+the region rules ([rules.md](rules.md)) honest.
 
 ## Diagnostics — telling correct from broken
 
@@ -15,13 +15,13 @@ the region rules ([region-rules.md](region-rules.md)) honest.
 - **Generation panic** (debug builds, always on): `region_of` on a value whose
   region was freed panics deterministically at the deref, naming the page's
   stamped generation and the id's current one
-  ([region-generations.md](region-generations.md)). The
+  ([generations.md](generations.md)). The
   first instrument to consult: it needs no flag and no timing luck. Guardfree
   remains the oracle for derefs of *re-claimed* pages.
 - **Edge-table equivalence oracle** (debug builds, always on): at each region free
   the recorded `outgoing` edge table is asserted multiset-equal to a one-time content
   scan (`find_region_cross_refs`) of the freed members
-  ([region-model.md](region-model.md) § The outgoing edge table). The production
+  ([ownership.md](ownership.md) § The outgoing edge table). The production
   reclamation path walks the table (O(edges), no heap scan); the content scan survives
   only as this oracle, so a missed store-funnel edge (a silent leak) or a double-record
   (a UAF) detonates at the free site, naming the region and both edge sets, instead.
@@ -108,7 +108,7 @@ Abandoning suspended work routes through one chokepoint, `VM::discard_suspended_
 (src/vm/core.rs), on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s
 squelch enforcement, and the JIT call paths. The chokepoint subtree-drops each discarded
 frame's parked activation owner node
-([region-model.md](region-model.md) § "Owner nodes") and releases nothing else: the
+([owner.md](owner.md) § "Owner nodes") and releases nothing else: the
 frame's `activation_region_map` is a borrowed view of regions that may be shared with an
 outer, non-discarded frame or with the activation that catches the squelch, so a per-slot
 release there over-frees (the historical squelch double-free — a non-unwinding abort in
@@ -127,7 +127,7 @@ The discard chokepoint serves the LIVE fiber (a squelch/abort abandons its own p
 chain; the fiber runs on). A fiber that reaches a **terminal** state instead — completion,
 halt, `fiber/cancel`, `fiber/abort` of a not-yet-started fiber — releases everything it
 owns through `take_fiber_owned` / `release_fiber_owned`
-([region-model.md](region-model.md) § "Owner nodes" — "Fiber teardown frees everything
+([owner.md](owner.md) § "Owner nodes" — "Fiber teardown frees everything
 the fiber owns"): every still-parked frame's activation owner node plus the fiber owner
 node, gathered under the fiber node (`reparent_owned_children`) so the teardown is one
 set-drop. An `:error` fiber is NOT torn down — it is resumable (restarts), so its parked

@@ -7,7 +7,7 @@
 # This is the STRUCT sibling of region-array-element-uaf.lisp. Both are the same
 # root defect: the collection-as-function call-index path (`call_collection`,
 # src/vm/call.rs) does NOT incref the returned element's region the way `get`/
-# `first` DO (docs/impl/region-rules.md Rule 5, native-result pass-through). A fix for the
+# `first` DO (docs/impl/region/rules.md Rule 5, native-result pass-through). A fix for the
 # array case must cover structs too — this file pins that obligation so the next
 # agent's `call_collection` retain lands for every collection that returns a
 # co-located heap element, not just arrays.
@@ -16,7 +16,7 @@
 #   free site: `DecrefValueRegion of <value> (runtime region N) @ <the (m :k)>`,
 #   the consumer then reads the freed value.
 # An immutable struct stores its values as a RegionSlice in the struct's OWN
-# region pages (docs/impl/region-model.md § "RegionSlice contents share their object's
+# region pages (docs/impl/region/model.md § "RegionSlice contents share their object's
 # region"), so a co-located heap value has no region of its own — its lifetime
 # IS the struct's region. The struct is a let-bound value released value-based at
 # its last use (the `(m :k)` expression); that frees the whole struct region,

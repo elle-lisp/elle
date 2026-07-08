@@ -122,7 +122,7 @@ struct RegionInference {
     /// `HirKind::Destructure`. A Destructure is a *consuming node*: its
     /// field extraction reads the value AFTER the value expression's own
     /// last read, so the post-pass extends each region's `decref_point` to
-    /// the Destructure node (docs/impl/region-rules.md Rule 4). Without it, a
+    /// the Destructure node (docs/impl/region/rules.md Rule 4). Without it, a
     /// destructure whose bindings are all unused anchors the value's
     /// release at the inner read and the extraction reads freed pages (the
     /// `&named`-param prologue UAF, region-named-param-uaf.lisp).
@@ -385,7 +385,7 @@ impl RegionInference {
     /// overwrite (`capture_store_with_rebind`) decrefs the displaced prior
     /// unconditionally, so an uncounted alias is freed under the reader by the
     /// next overwrite — the captured-alias use-after-free
-    /// (docs/impl/region-bindings.md § "Captured reassigned cells").
+    /// (docs/impl/region/bindings.md § "Captured reassigned cells").
     ///
     /// Realised as Rule 5's "new reference" pass-through: mint a placeholder
     /// region at the read node (it lands in `call_result_regions`, so the reader
@@ -436,7 +436,7 @@ impl RegionInference {
     /// `MakeCaptureCell`, which the lowerer emits only at top level / outside a
     /// lambda; see `lower_define`/`lower_let` `self.in_lambda` split). Such an
     /// env cell has no compiled `DecrefRegion`, so without a release its initial
-    /// rc=1 leaks (docs/impl/region-rules.md Rule 8 — the env region needs an explicit release).
+    /// rc=1 leaks (docs/impl/region/rules.md Rule 8 — the env region needs an explicit release).
     ///
     /// Give it a phantom cell placeholder (no `alloc_here` → filtered from
     /// `live_regions`, so no spurious compile-time `IncrefRegion` edge) in
@@ -449,7 +449,7 @@ impl RegionInference {
     /// enclosing loop: the box is minted once per activation, so its release
     /// must fire once per activation — a binding-last-use release that sits
     /// inside a loop frees the box on iteration 1 and the next iteration reads
-    /// the recycled cell (the env-cell-in-loop UAF; docs/impl/region-bindings.md
+    /// the recycled cell (the env-cell-in-loop UAF; docs/impl/region/bindings.md
     /// "Env cells in loops: release once per activation, not per iteration").
     /// This mirrors the captured-param treatment in the Lambda arm. Returns the
     /// placeholder region iff the binding is such an env cell; `None` for
@@ -459,7 +459,7 @@ impl RegionInference {
         if self.in_lambda() && self.arena().get(binding).needs_capture() {
             // Idempotent per binding: a captured local is materialized as
             // EXACTLY ONE per-value CaptureCell (`populate_env`), released by a
-            // single `DecrefCellRegion` at its last use (docs/impl/region-rules.md Rule 4
+            // single `DecrefCellRegion` at its last use (docs/impl/region/rules.md Rule 4
             // — "exactly once per activation"). `try_inline_call` re-walks an
             // inlined callee's body to discover cross-region edges, so a
             // captured local's `(var …)` Define inside a *nested* lambda (a
@@ -497,7 +497,7 @@ impl RegionInference {
     /// Record the may-store edges for a declared-store native call at `site`: from
     /// each listed (stored) argument's regions to every OTHER heap argument's
     /// regions (the possible in-argument store targets), and mark the site HARD (the
-    /// lowerer increfs a call-result source by value; docs/impl/region-effects.md
+    /// lowerer increfs a call-result source by value; docs/impl/region/effects.md
     /// "Hard edges"). Shared by the `Stores` and `Sends` effects: both perform this
     /// same edge/lifetime accounting (the message stays alive in the channel buffer
     /// for `Sends`). The fiber-frontier escape of a `Sends` message is escape's

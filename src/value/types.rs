@@ -317,7 +317,7 @@ impl Ord for TableKey {
 /// Render a `TableKey`, optionally resolving a symbol key's name through
 /// `symbols` — the shared body for `Display` (`debug == false`) and `Debug`
 /// (`debug == true`), and the entry `Value`'s struct rendering threads its table
-/// through (docs/impl/region-ctx.md § "Symbols through the ctx"). The two modes
+/// through (docs/impl/region/ctx.md § "Symbols through the ctx"). The two modes
 /// diverge only in the symbol arm (Display prints the raw `SymbolId`; Debug
 /// resolves a name, falling back to `'#<sym:id>` with no table) and in the nested
 /// recursion of array/heap keys (which follows the outer mode).
@@ -436,7 +436,7 @@ pub fn sorted_struct_remove(
 /// handles.
 ///
 /// The leading `&mut NativeCtx` is the allocation capability — the call's
-/// own fresh result region plus heap access (docs/impl/region-ctx.md). A
+/// own fresh result region plus heap access (docs/impl/region/ctx.md). A
 /// primitive cannot allocate without it, and only into its own call's region.
 pub type PrimFn = fn(
     &mut crate::primitives::ctx::NativeCtx<'_>,

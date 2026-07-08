@@ -33,7 +33,7 @@ pub extern "C" fn elle_jit_pair(
         tag: cdr_tag,
         payload: cdr_payload,
     };
-    // The driving VM's own heap, via the threaded vm pointer (docs/impl/region-ctx.md).
+    // The driving VM's own heap, via the threaded vm pointer (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     JitValue::from_value(crate::value::build::pair(
         heap,
@@ -90,7 +90,7 @@ pub extern "C" fn elle_jit_make_array(
         let v = unsafe { *elements.add(i) };
         vec.push(v);
     }
-    // The driving VM's own heap, via the threaded vm pointer (docs/impl/region-ctx.md).
+    // The driving VM's own heap, via the threaded vm pointer (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     JitValue::from_value(crate::value::build::array_mut(
         heap,
@@ -363,7 +363,7 @@ pub extern "C" fn elle_jit_make_capture(
     vm: *mut (),
 ) -> JitValue {
     let val = Value { tag, payload };
-    // The driving VM's own heap, via the threaded vm pointer (docs/impl/region-ctx.md).
+    // The driving VM's own heap, via the threaded vm pointer (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     JitValue::from_value(crate::value::build::capture_cell(
         heap,
@@ -378,7 +378,7 @@ pub extern "C" fn elle_jit_make_capture(
 /// builds the cell there; src/vm/env.rs). The prologue must use THIS, not
 /// `elle_jit_make_capture` (which builds the cell in the region slot it is
 /// handed): on a JIT->JIT call the callee inherits the caller's region, so a cell
-/// allocated there commingles with it (docs/impl/region-rules.md Rule 6) and its
+/// allocated there commingles with it (docs/impl/region/rules.md Rule 6) and its
 /// value-based `DecrefCellRegion` decrefs the caller's region — a leak (Rule 8)
 /// and a latent use-after-free. `alloc_in_region` → `alloc_obj` scans the cell
 /// and increfs the wrapped value's region (the cross-region capture edge),
@@ -390,7 +390,7 @@ pub extern "C" fn elle_jit_make_capture_owned(tag: u64, payload: u64, vm: *mut (
     use std::rc::Rc;
     let val = Value { tag, payload };
     // The driving instance's heap, reached through the threaded vm pointer
-    // (docs/impl/region-ctx.md).
+    // (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     let region = heap.new_runtime_region();
     let obj = HeapObject::CaptureCell {

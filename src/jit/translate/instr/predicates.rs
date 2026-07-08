@@ -78,7 +78,7 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::AdoptRegion { parent, child } => {
                 // Link the child's region as Owned by the parent's region — the
-                // runtime `AdoptRegion` (docs/impl/region-model.md § "Adoption and
+                // runtime `AdoptRegion` (docs/impl/region/ownership.md § "Adoption and
                 // subtree drop"). Value-resolved like `IncrefValueRegion`/
                 // `DecrefValueRegion`: load both values and hand them to the
                 // helper, which resolves each to its runtime region and adopts.
@@ -99,7 +99,7 @@ impl<'a> FunctionTranslator<'a> {
                 // Like `AdoptRegion`, but the helper resolves BOTH operands with
                 // `region_of` (NOT `result_region_of`) so a `CaptureCell` operand's
                 // OWN region is adopted (the cell↔closure containment —
-                // docs/impl/region-model.md § "The capture adopt"). Mirrors the
+                // docs/impl/region/adopt.md § "The capture adopt"). Mirrors the
                 // interpreter's `handle_adopt_cell_region`.
                 let (pt, pp) = self.use_var_pair(builder, parent.0);
                 let (ct, cp) = self.use_var_pair(builder, child.0);
@@ -116,7 +116,7 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::AdoptIntoActivation { child } => {
                 // Adopt the child's region into the current activation's owner
                 // node — the runtime channel of the activation-ownership cuts
-                // (docs/impl/region-model.md § "Owner nodes"). Value-resolved
+                // (docs/impl/region/owner.md § "Owner nodes"). Value-resolved
                 // like `AdoptRegion`, with no parent operand (the node is VM
                 // state, minted lazily by the helper). Mirrors the
                 // interpreter's `handle_adopt_into_activation`.
@@ -171,7 +171,7 @@ impl<'a> FunctionTranslator<'a> {
             // The coalescing equivalence oracle is a VM-interp-only debug
             // instrument; the JIT translates it to nothing. Coalesced sites on
             // the optimizing tiers are covered by cross-tier divergence + the
-            // escape golden (docs/impl/region-rules.md § "the equivalence oracle").
+            // escape golden (docs/impl/region/mechanism.md § "the equivalence oracle").
             LirInstr::AssertRegionMatches { .. } => {}
 
             LirInstr::PushParamFrame { pairs } => {

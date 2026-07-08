@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# CANARY + COUNTERFACTUAL (open defect, shrink-only — docs/impl/region-diagnostics.md
+# CANARY + COUNTERFACTUAL (open defect, shrink-only — docs/impl/region/diagnostics.md
 # § Validation). Pins the PRECISE disposition of the native-tail-return /
 # allocating-intrinsic leaks, measured against `target/debug/elle`. The two
 # lowerings of a `%`-op have OPPOSITE leak dispositions:

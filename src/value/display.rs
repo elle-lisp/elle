@@ -2,7 +2,7 @@
 //!
 //! The tagged-union `Value` renders through one body, `fmt_value`, parameterized
 //! by a `debug` flag and an optional `&SymbolTable`. Symbol-name resolution is
-//! per-instance (docs/impl/region-ctx.md § "Symbols through the ctx"): a bare
+//! per-instance (docs/impl/region/ctx.md § "Symbols through the ctx"): a bare
 //! `Display`/`Debug` carries no table and renders a symbol as `#<sym:id>`, while
 //! [`Value::display_with`] / [`Value::debug_with`] thread an instance's table so
 //! names resolve all the way down.
@@ -81,7 +81,7 @@ fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
 /// every nested symbol. `symbols` is `None` for a bare trait render — a symbol
 /// then prints `#<sym:id>` — and `Some` when a caller threads its instance's
 /// table via [`Value::display_with`] / [`Value::debug_with`]
-/// (docs/impl/region-ctx.md § "Symbols through the ctx").
+/// (docs/impl/region/ctx.md § "Symbols through the ctx").
 ///
 /// Where the two renderings diverge they branch on `debug`: strings (Debug quotes
 /// and escapes), and the element/key recursion of cons/array/set/struct. A struct
@@ -434,7 +434,7 @@ impl fmt::Display for DebugWith<'_> {
 impl Value {
     /// Render through `symbols`, resolving symbol names (`'name`); pass `None` to
     /// render `#<sym:id>`. The threaded-table alternative to a bare `Display`
-    /// (docs/impl/region-ctx.md § "Symbols through the ctx").
+    /// (docs/impl/region/ctx.md § "Symbols through the ctx").
     pub fn display_with<'a>(&self, symbols: Option<&'a SymbolTable>) -> DisplayWith<'a> {
         DisplayWith {
             value: *self,

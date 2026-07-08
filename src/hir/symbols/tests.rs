@@ -6,7 +6,7 @@ use crate::primitives::register_primitives;
 use crate::vm::VM;
 
 /// Analyze test source with a fresh per-call `CompileCtx` — each compile names
-/// its instance's compile state explicitly (docs/impl/region-ctx.md), so the
+/// its instance's compile state explicitly (docs/impl/region/ctx.md), so the
 /// compile context is threaded as a parameter rather than shared. A thin shim
 /// over `pipeline::analyze` so the call
 /// sites read exactly as the runtime entry point did.

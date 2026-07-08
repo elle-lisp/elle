@@ -1,5 +1,5 @@
 (elle/epoch 12)
-## The transferred-returned-cycle shapes (docs/impl/region-model.md § "Owner
+## The transferred-returned-cycle shapes (docs/impl/region/owner.md § "Owner
 ## nodes" — "The transferred returned subtree") run soundly on the default
 ## baseline: a producer hands an a<->b cycle across the return (or
 ## fiber-terminal) frontier and the consumer discards or reads it. On the

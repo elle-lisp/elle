@@ -190,7 +190,7 @@ to write and where, see [`tests/AGENTS.md`](../tests/AGENTS.md) and
 the cargo suite into the same DB, is specced but not yet implemented.)
 
 **Symbol names in assertions.** Symbol name resolution is per-instance
-(docs/impl/region-ctx.md § "Symbols through the ctx"). So a
+(docs/impl/region/ctx.md § "Symbols through the ctx"). So a
 bare `{:?}`/`{}` on a symbol-bearing `Value` (as in `assert_eq!` output) renders
 `#<sym:id>`, not the bare `name`, because the trait `fmt` has no table to thread.
 When a failing assertion needs readable names, put `v.debug_with(symbols)` /

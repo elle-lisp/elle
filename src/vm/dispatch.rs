@@ -91,7 +91,7 @@ impl VM {
             // MOVE the activation's owner node into the frame (its slot is
             // likewise still on top): the members are Owned with no other
             // release route, so the node must ride the park to the resumed
-            // body's completion (docs/impl/region-model.md § "Owner nodes").
+            // body's completion (docs/impl/region/owner.md § "Owner nodes").
             let activation_owner_node = self.take_activation_owner_node();
             // The yielding activation runs the current closure — park it so the
             // recursion resolves to the same closure after resume.

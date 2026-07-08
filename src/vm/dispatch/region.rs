@@ -2,7 +2,7 @@
 //!
 //! These arms of the dispatch loop manage the per-region RC baseline and the
 //! ownership forest's adopt / subtree-drop / co-owned-group emit
-//! (docs/impl/region-model.md). They are factored out of the dispatch table so
+//! (docs/impl/region/ownership.md). They are factored out of the dispatch table so
 //! it stays a flat one-line-per-opcode jump table; the heavy tracing/freelog
 //! bookkeeping lives here.
 
@@ -170,7 +170,7 @@ pub(crate) fn handle_incref_value_region(vm: &mut VM) {
 
 pub(crate) fn handle_adopt_region(vm: &mut VM) {
     // The ownership forest: link the child value's region as Owned
-    // by the parent value's region (docs/impl/region-model.md
+    // by the parent value's region (docs/impl/region/ownership.md
     // § "Adoption and subtree drop"). Pop both (the lowerer loaded
     // them solely to drive this adopt), resolve each to its runtime
     // region, and adopt — freezing the child's RC so it frees only
@@ -204,7 +204,7 @@ pub(crate) fn handle_adopt_cell_region(vm: &mut VM) {
     // `CaptureCell` operand's OWN region is used (never unwrapped to its content).
     // This is what lets the forest own a capture cell's arena and reclaim a local
     // recursive/letrec closure clique — cell↔closure — as one subtree
-    // (docs/impl/region-model.md § "The capture adopt"). An immediate operand (no
+    // (docs/impl/region/adopt.md § "The capture adopt"). An immediate operand (no
     // region) or a self-edge (same region) is a no-op, exactly as `AdoptRegion`.
     let child = vm
         .fiber
@@ -230,7 +230,7 @@ pub(crate) fn handle_adopt_cell_region(vm: &mut VM) {
 
 pub(crate) fn handle_adopt_into_activation(vm: &mut VM) {
     // The ownership forest's activation owner: adopt the child value's region
-    // into the CURRENT activation's owner node (docs/impl/region-model.md
+    // into the CURRENT activation's owner node (docs/impl/region/owner.md
     // § "Owner nodes — an activation as a forest root"). Pop the child (the
     // lowerer loads it solely to drive this adopt), resolve its runtime region
     // (`result_region_of` — unwraps a capture cell), lazily mint the node, and
@@ -250,7 +250,7 @@ pub(crate) fn handle_adopt_into_activation(vm: &mut VM) {
         // post-dominates the later hand-off's discard-gated use — instead of
         // tripping `adopt_region`'s one-owner assert. The compiler-paired
         // `AdoptRegion` sites keep the strict assert; only this consumer-facing
-        // channel absorbs re-delivery (docs/impl/region-model.md § "Owner
+        // channel absorbs re-delivery (docs/impl/region/owner.md § "Owner
         // nodes").
         if vm.heap().region_is_owned(c) {
             return;
@@ -308,7 +308,7 @@ pub(crate) fn handle_assert_region_matches(vm: &mut VM, bytecode: &[u8], ip: &mu
     // was made to name the wrong region; its free-time cascade
     // would reclaim a live region (a UAF). Detonate here, at the
     // exact instruction, under the trustworthy guardfree oracle,
-    // rather than corrupt the heap later (docs/impl/region-rules.md
+    // rather than corrupt the heap later (docs/impl/region/mechanism.md
     // § "the equivalence oracle").
     #[cfg(debug_assertions)]
     {
@@ -327,7 +327,7 @@ pub(crate) fn handle_assert_region_matches(vm: &mut VM, bytecode: &[u8], ip: &mu
             resolved == actual,
             "AssertRegionMatches: coalesced slot {region} resolved to \
              {resolved:?} but the value ({}) lives in {actual:?} — a \
-             mis-coalesce (docs/impl/region-rules.md § \"the equivalence \
+             mis-coalesce (docs/impl/region/mechanism.md § \"the equivalence \
              oracle\")",
             value.type_name(),
         );

@@ -7,7 +7,7 @@
 # region-mut-collection-call-index-uaf.lisp. Same root defect: the
 # collection-as-function call-index path (`call_collection`, src/vm/call.rs) did
 # NOT incref the returned element's region the way `get`/`first` DO
-# (docs/impl/region-rules.md Rule 5, native-result pass-through). The fix routes every
+# (docs/impl/region/rules.md Rule 5, native-result pass-through). The fix routes every
 # collection call-index through `VM::dispatch_collection_call`, which mints the
 # per-execution result region and applies the pass-through retain exactly like
 # `dispatch_native_call` does for `get`/`first` — interpreter AND JIT, tail AND
@@ -17,7 +17,7 @@
 #   free site: `DecrefValueRegion of array (runtime region N) @ <the (a i)>`,
 #   the consumer then reads the freed element.
 # An array's payload is an immutable RegionSlice in the array's OWN region pages
-# (docs/impl/region-model.md § "RegionSlice contents share their object's region"), so an
+# (docs/impl/region/model.md § "RegionSlice contents share their object's region"), so an
 # element has no region of its own — its lifetime IS the array's region. The
 # array is a let-bound value released value-based at its last use (the `(a i)`
 # expression); without the retain that frees the whole array region, element

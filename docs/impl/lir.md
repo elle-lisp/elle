@@ -62,7 +62,7 @@ into the executing instance's table (the explicitly-threaded `SymbolTable`),
 exactly as a sent symbol `Value` re-interns. This makes the template
 self-contained and portable.
 
-See [region-model.md](region-model.md) — *Constants lower as ordinary
+See [region/model.md](region/model.md) — *Constants lower as ordinary
 allocations* — for why a code-object-lifetime "constant-pool region" is forbidden.
 
 ## Self-reference: `LoadSelf`

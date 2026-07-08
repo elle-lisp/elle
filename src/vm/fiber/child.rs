@@ -69,7 +69,7 @@ impl VM {
         //     the fiber owner node (and, defensively, any leftover parked
         //     chain's activation nodes; a completing resume consumes the
         //     chain) — before the terminal result is pinned below
-        //     (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown
+        //     (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown
         //     frees everything the fiber owns"). The child is the live
         //     `self.fiber` here, so the take needs no handle borrow.
         if bits.is_ok() {
@@ -105,7 +105,7 @@ impl VM {
         if is_terminal_signal(result_bits) {
             incref_signal_region(unsafe { &mut *self.heap_ptr }, &self.fiber.signal);
             // Record the matching outgoing content edge `fiber-region → result-region`
-            // (docs/impl/region-model.md § "The outgoing edge table"): the scan's Fiber
+            // (docs/impl/region/ownership.md § "The outgoing edge table"): the scan's Fiber
             // arm reads this terminal `signal` value, so it is a content edge the
             // free-time walk must release when the fiber frees. There is no explicit
             // un-record — a terminal fiber is read (`fiber/value`), never resumed, the

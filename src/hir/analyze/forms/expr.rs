@@ -215,7 +215,7 @@ impl<'a> Analyzer<'a> {
             // Syntax literal — a hygiene-bearing template symbol (always a
             // `Symbol`, produced by quasiquote). Materialize it as an ORDINARY
             // allocation per execution via `QuoteConst`/`ConstTemplate::SyntaxSymbol`
-            // (region-model.md, "Constants lower as ordinary allocations"). The
+            // (region/model.md, "Constants lower as ordinary allocations"). The
             // non-symbol case cannot arise (quasiquote only wraps symbols), but is
             // handled defensively as an ordinary quoted datum.
             SyntaxKind::SyntaxLiteral(s) => {

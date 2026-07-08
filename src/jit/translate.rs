@@ -44,7 +44,7 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) vm_ptr: Option<cranelift_codegen::ir::Value>,
     /// Address of this activation's `JitCtx` capability bundle, built in the
     /// prologue (a stack slot holding `vm_ptr`). Threaded to the intrinsic
-    /// fast-path helpers so they resolve the VM from it (docs/impl/region-ctx.md).
+    /// fast-path helpers so they resolve the VM from it (docs/impl/region/ctx.md).
     /// `None` until the prologue runs.
     pub(crate) jit_ctx_ptr: Option<cranelift_codegen::ir::Value>,
     /// (tag, payload) Cranelift values for the closure being executed
@@ -255,7 +255,7 @@ impl<'a> FunctionTranslator<'a> {
     ///   native arg. This is the Inc4 native-tail trick the interpreter
     ///   performs by NOT replacing the frame for a normally-completing native;
     ///   without it the moved arg leaks (region-native-tail-move.lisp;
-    ///   docs/impl/region-rules.md Rule 8).
+    ///   docs/impl/region/rules.md Rule 8).
     ///
     /// On return the builder is positioned on the continue (fall-through)
     /// block, with `dst` defined.
@@ -318,7 +318,7 @@ impl<'a> FunctionTranslator<'a> {
         // child mints and the parent reuses one physical region — the JIT mirror of
         // the interpreter's `runtime_region_for_alloc_slot_maybe_merged`. The
         // membership is decided here, at compile time, so the hot path carries no
-        // set lookup (docs/impl/region-model.md § Merging).
+        // set lookup (docs/impl/region/merging.md § Merging).
         let helper = if self.lir.merged_slots.contains(&slot) {
             self.helpers.resolve_alloc_region_merged
         } else {
@@ -349,7 +349,7 @@ impl<'a> FunctionTranslator<'a> {
                 let (tag, payload) = self.use_var_pair(builder, reg.0);
                 // Free this activation's owner node at normal completion — the
                 // JIT twin of the interpreter trampoline's clean-break release
-                // (docs/impl/region-model.md § "Owner nodes"). Emitted before
+                // (docs/impl/region/owner.md § "Owner nodes"). Emitted before
                 // the region-map pop, mirroring the interpreter's ordering, and
                 // only for a function whose LIR can mint a node.
                 if self.uses_activation_owner_node {

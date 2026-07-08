@@ -8,7 +8,7 @@
 //! local beyond bit 63 as a captured cell, because the mask cannot say
 //! otherwise. That fallback mints a fresh per-execution region holding a dead
 //! `CaptureCell` for every uncaptured high local — one leaked region per such
-//! local PER CALL (docs/impl/region-rules.md Rule 8). Functions with > 64 locals
+//! local PER CALL (docs/impl/region/rules.md Rule 8). Functions with > 64 locals
 //! (stdlib `map`/`merge`/`group-by`, and `zip` transitively) would leak
 //! `num_locals - 64` regions on every call. The newtype carries an unbounded
 //! bitset, so no such fallback is needed.

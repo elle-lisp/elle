@@ -4,7 +4,7 @@
 # param cell's last-use release. Guards the owned-params "value-freed-under-a-move"
 # surface, the same family region-tail-move-borrow-uaf.lisp pins.
 #
-# Mechanism (docs/impl/region-rules.md Rules 4, 5, 8):
+# Mechanism (docs/impl/region/rules.md Rules 4, 5, 8):
 #   - A mutable param `@x` is materialized as a capture cell the callee OWNS
 #     (`push_param` wraps the incoming arg; the cell's cross-region incref counts it).
 #   - `(assign x …)` overwrites the cell (UpdateCapture: decref the displaced prior,

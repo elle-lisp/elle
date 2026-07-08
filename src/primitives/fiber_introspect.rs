@@ -76,7 +76,7 @@ pub(crate) fn prim_fiber_mask(
 /// `parent_value`. The cache is a `Value` pointing at the parent's
 /// `HeapObject::Fiber` in whatever region the parent lived in *at resume
 /// time*; the region-based RC reclaims that region at the parent's own
-/// `decref_point` (`docs/impl/region-rules.md` Rule 4), so dereferencing the cache
+/// `decref_point` (`docs/impl/region/rules.md` Rule 4), so dereferencing the cache
 /// after the parent is gone reads freed pages. Resolving through the weak handle
 /// keeps that pointer from being followed once the parent's region is reclaimed
 /// (see `release_completed_resume_carrier`). The weak handle upgrades iff the
@@ -226,7 +226,7 @@ pub(crate) fn prim_fiber_cancel(
             // Cancel another fiber: the hard-kill teardown sets the terminal
             // error state, consumes the parked chain, and frees everything the
             // fiber owned — its parked frames' activation owner nodes and its
-            // fiber owner node (docs/impl/region-model.md § "Owner nodes" —
+            // fiber owner node (docs/impl/region/owner.md § "Owner nodes" —
             // "Fiber teardown frees everything the fiber owns").
             crate::vm::fiber::kill_fiber(ctx.heap_mut(), handle, error_value);
             (SIG_OK, error_value)

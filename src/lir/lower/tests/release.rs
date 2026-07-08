@@ -70,7 +70,7 @@ fn release_emitted_for_discarded_let_tail_call_result() {
     // Let's id, not the tail Call's, so the call-result placeholder
     // reaches its decref_point (the Call node itself) with no slot bound.
     // The release must then be emitted by VALUE off the freshly-lowered
-    // result register (docs/impl/region-rules.md Rule 2, "discarded result") —
+    // result register (docs/impl/region/rules.md Rule 2, "discarded result") —
     // before that rule the lowerer skipped it ("leak until fiber
     // teardown"): one leaked object per loop iteration, the
     // tests/elle/arena-count.lisp class.
@@ -87,7 +87,7 @@ fn named_param_release_follows_destructure_field_reads() {
     // `(destructure {:frame frame} (var __named_param))`. The collected
     // keyword struct's region must be released AFTER the destructure's
     // field reads (`StructGetOrNil`) — the Destructure node extends the
-    // value's regions' decref_point to itself (docs/impl/region-rules.md Rule 4),
+    // value's regions' decref_point to itself (docs/impl/region/rules.md Rule 4),
     // exactly as Return extends a returned region. Pre-fix, with `frame`
     // unused, the struct's last USE was the inner Var, so the
     // `DecrefValueRegion` was emitted before the field read — a freed-page
@@ -174,7 +174,7 @@ fn decref_region_emitted_once_for_merged_pair() {
 // region-splice-tail-return.lisp (a correctness guard — the splice UAF is
 // masked by the args-array leak, so it asserts the result value instead).
 
-// ── Release order at a shared decref_point (docs/impl/region-rules.md Rule 4) ─────
+// ── Release order at a shared decref_point (docs/impl/region/rules.md Rule 4) ─────
 //
 // When several releases land on one decref_point, page-READING releases
 // (`DecrefValueRegion` — loads a slot and derefs the value, unwrapping a
@@ -309,7 +309,7 @@ fn region_analysis_is_deterministic_across_compiles() {
 fn release_order_is_deterministic_across_compiles() {
     // Release order may never depend on hash-map iteration: the same source
     // must lower to the identical instruction stream on every compile
-    // (docs/impl/region-rules.md Rule 4), up to the process-global static-region
+    // (docs/impl/region/rules.md Rule 4), up to the process-global static-region
     // counter (canonicalized away above). Two regions sharing a decref_point
     // are enough to expose a hash-ordered emission as a cross-compile diff.
     let first = canonicalize_static_regions(&format!("{:?}", compile_to_lir(CAPTURE_CELL_SHAPE)));
@@ -326,7 +326,7 @@ fn release_order_is_deterministic_across_compiles() {
 
 #[test]
 fn preallocated_capture_cells_get_distinct_regions_each_released() {
-    // docs/impl/region-model.md, "The per-execution region model": one allocation
+    // docs/impl/region/model.md, "The per-execution region model": one allocation
     // execution per static slot between drops. `lower_begin` pre-allocates one
     // `MakeCaptureCell` per captured top-level binding; emitting two cells
     // against ONE slot orphans the first cell's physical region (the runtime
@@ -416,7 +416,7 @@ fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
     // A store-adopted member's own `DecrefRegion` is an `Owned` no-op only while the
     // member is still `Owned`, so it must be emitted BEFORE every release that can free
     // the member's owner. At a shared `decref_point` the intra-bucket order is what
-    // enforces this (docs/impl/region-model.md § "The lifetime obligation the root
+    // enforces this (docs/impl/region/adopt.md § "The lifetime obligation the root
     // carries"). The counterfactual is the `%pair`-into-`@[]` double-free
     // (region-array-push-pair-loop-uaf.lisp): the container is a `Fresh` call-result
     // freed value-based (and, when its push result is discarded, freed a second time by

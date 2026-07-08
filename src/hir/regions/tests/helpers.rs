@@ -4,7 +4,7 @@ use super::*;
 
 /// Compile Elle source to canonical (functionalized) HIR with a fresh per-call
 /// `CompileCtx` (every compile names its instance's compile state explicitly,
-/// threading the compile context as a parameter — docs/impl/region-ctx.md).
+/// threading the compile context as a parameter — docs/impl/region/ctx.md).
 pub(super) fn compile_fhir(
     source: &str,
     symbols: &mut SymbolTable,

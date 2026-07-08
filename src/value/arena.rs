@@ -26,7 +26,7 @@ pub use root::*;
 // for single-object `Value` builders that have no region to thread (test
 // scaffolding). The value's owner governs the region's lifetime. Slice-backed
 // builders (`string`/`array`/`bytes`/`set`) go through `value::build::*` instead,
-// so their payload slice and header share one region (region-model.md).
+// so their payload slice and header share one region (region/model.md).
 
 /// Allocate a single heap object into a freshly-minted region on `heap`. For
 /// objects with no `RegionSlice` payload (a slice would land in a different fresh
@@ -92,7 +92,7 @@ pub unsafe fn drop_heap(_value: Value) {}
 ///
 /// This is the funnel every runtime RC decision reads a value's region
 /// through, so it carries the debug-build stale-deref generation check
-/// (docs/impl/region-generations.md § "Region generations"): a value whose region was freed
+/// (docs/impl/region/generations.md § "Region generations"): a value whose region was freed
 /// panics here deterministically instead of yielding a recycled id.
 pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
     if !val.is_heap() {
@@ -135,7 +135,7 @@ pub fn incref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
 
 /// The exhaustive set of Rule 5 escape sites — every place a runtime
 /// reference-count is *raised* because a value escapes the scope it was born
-/// in. This enum is the audit surface docs/impl/region-rules.md Rule 5 demands ("the
+/// in. This enum is the audit surface docs/impl/region/rules.md Rule 5 demands ("the
 /// escape-site list being complete *is* correctness for the RC half"): every
 /// runtime escape incref goes through [`incref_for_escape`], so `git grep
 /// EscapeSite` enumerates the whole set in one greppable place. A missing arm

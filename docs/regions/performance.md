@@ -1,8 +1,9 @@
 # Region performance — merging and the cost model
 
 This is the consumer's view of where region performance comes from and what you
-can and cannot affect. The implementor's account of the page pool and the merge
-predicate is in [docs/impl/region-model.md](../impl/region-model.md).
+can and cannot affect. The implementor's account of the page pool is in
+[docs/impl/region/model.md](../impl/region/model.md) and the merge predicate in
+[region/merging.md](../impl/region/merging.md).
 
 ## Correctness first, performance second — never the trade
 

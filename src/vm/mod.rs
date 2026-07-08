@@ -77,7 +77,7 @@ impl VM {
         ctx.error(kind, msg)
     }
 
-    /// The VM-scope rich-error routine (docs/impl/region-errors.md): build
+    /// The VM-scope rich-error routine (docs/impl/region/errors.md): build
     /// `{:error :kind :message msg …extra}` in a fresh result region,
     /// freed value-based by the consumer's `DecrefValueRegion`. Same name as
     /// [`NativeCtx::error_extra`](crate::primitives::ctx::NativeCtx::error_extra)
@@ -102,7 +102,7 @@ impl VM {
     }
 
     /// Set an error signal on the current fiber, the error value built through a
-    /// `NativeCtx` over the VM's heap (docs/impl/region-ctx.md), which mints and
+    /// `NativeCtx` over the VM's heap (docs/impl/region/ctx.md), which mints and
     /// owns its own fresh result region. The error escapes as the fiber's signal
     /// payload and is freed value-based by the consumer's `DecrefValueRegion`.
     pub(crate) fn set_error(&mut self, kind: &str, msg: impl Into<String>) {
@@ -160,7 +160,7 @@ impl VM {
             Rc::new(child_protos.to_vec()),
         );
         // Carry the function's builder-idiom merge metadata so the alloc dispatch
-        // mint-or-reuses merged slots (docs/impl/region-model.md § Merging). The
+        // mint-or-reuses merged slots (docs/impl/region/merging.md § Merging). The
         // caller supplies it from the `Bytecode`/`ClosureTemplate` whose body this
         // runs; empty unless a merge fired.
         code.merged_slots = merged_slots;
@@ -271,7 +271,7 @@ impl VM {
         // The root activation's clean break: release the base slot's owner node
         // (one tolerant decref → subtree drop over node + adopted members) at the
         // program's completion, the root counterpart of `trampoline_loop`'s
-        // normal-break release (docs/impl/region-model.md § "Owner nodes"). Runs
+        // normal-break release (docs/impl/region/owner.md § "Owner nodes"). Runs
         // on every root exit — a finished program has no resumable state at this
         // boundary, so an error exit releases identically.
         if at_root {
@@ -378,7 +378,7 @@ impl VM {
                 child_protos: Rc::new(bytecode.child_protos.clone()),
                 // The real program's builder-idiom merge metadata: the thunk runs
                 // the top-level bytecode, so its allocations mint-or-reuse merged
-                // slots through this template's `Code` (docs/impl/region-model.md
+                // slots through this template's `Code` (docs/impl/region/merging.md
                 // § Merging). Without this the top-level merge would diverge from the
                 // unit/embedding paths (which carry it). Empty unless a merge fired.
                 merged_slots: bytecode.merged_slots.clone(),
@@ -482,7 +482,7 @@ fn gated_reason(err_value: Value) -> Option<String> {
 //
 // `result_region()` mints a fresh, reclaimable region from the activation's heap
 // for a VM-internal result value; the result is freed value-based by the
-// consumer's `DecrefValueRegion` (docs/impl/region-ctx.md). These pins fix its
+// consumer's `DecrefValueRegion` (docs/impl/region/ctx.md). These pins fix its
 // contract.
 #[cfg(test)]
 mod result_region_tests {

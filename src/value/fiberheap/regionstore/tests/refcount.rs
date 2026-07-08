@@ -34,7 +34,7 @@ fn decref_of_unallocated_region_panics_in_debug() {
     // is the "phantom region" class of bug — solver assigned a
     // region id to a node whose lowerer emits no alloc
     // instruction (DerefCell, MakeCell pre-fix; Eval without
-    // call_result_regions registration). docs/impl/region-rules.md
+    // call_result_regions registration). docs/impl/region/rules.md
     // § "Every region must correspond to a real allocation"
     // documents the rule; this debug_assert! catches violators
     // at the runtime boundary.
@@ -246,6 +246,54 @@ fn cascade_box_cross_region() {
         store.rc(rr(2)),
         1,
         "cascade should decref box's cross-region ref"
+    );
+}
+
+#[test]
+fn deep_cascade_chain_does_not_overflow_stack() {
+    // A linear chain of N regions: region k holds an @array containing region
+    // (k+1)'s value, so freeing the head must cascade-free the whole chain.
+    // The free cascade is driven by an explicit worklist (free.rs
+    // `free_region_set`), NOT native recursion — otherwise a chain of a few
+    // thousand links overflows the stack. This is the region-store shape behind
+    // the `(apply concat <thousands-of-chunks>)` and deep-list/nested-structure
+    // programs (tests/elle/region-deep-chain.lisp): each link is one more
+    // frontier decref, and a recursive cascade spends one stack frame per link.
+    //
+    // N is chosen well past a worker thread's default stack: a recursive
+    // cascade dies here, an iterative one frees in O(1) stack.
+    const N: u32 = 40_000;
+    let mut store = RegionStore::default();
+    let leaf = |s: &mut RegionStore, id: u32| s.alloc_obj(rr(id), cons_obj());
+    let link = |s: &mut RegionStore, id: u32, child: Value| {
+        s.alloc_obj(
+            rr(id),
+            HeapObject::LArrayMut {
+                data: std::rc::Rc::new(std::cell::RefCell::new(vec![child])),
+                traits: Value::NIL,
+            },
+        )
+    };
+    // Region ids 2..=N+1 (0/1 are reserved). Tail (N+1) is the leaf; each region
+    // k<N+1 holds region k+1's value, auto-increfing k+1 to rc=2 (scope + the
+    // one incoming cross-ref). The head (region 2) keeps rc=1.
+    let mut child = leaf(&mut store, N + 1);
+    for k in (2..=N).rev() {
+        child = link(&mut store, k, child);
+    }
+    // Drop every non-head region's scope reference (rc 2→1) so each is held
+    // solely by its predecessor's cross-ref; none frees yet.
+    for k in 3..=(N + 1) {
+        store.decref(rr(k));
+        assert_eq!(store.rc(rr(k)), 1, "region {k} still held by its parent");
+    }
+    assert_eq!(store.total_obj_count() as u32, N, "chain fully built");
+    // Free the head: rc 1→0 triggers the whole-chain cascade in one call.
+    store.decref(rr(2));
+    assert_eq!(
+        store.total_obj_count(),
+        0,
+        "entire chain reclaimed by the head free's cascade"
     );
 }
 

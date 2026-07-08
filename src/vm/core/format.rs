@@ -49,7 +49,7 @@ impl VM {
 
         // Error value last. Render through this instance's symbol table so a
         // symbol-bearing error value shows names (`'name`), not `#<sym:id>` — a
-        // bare `{:?}` has no table (docs/impl/region-ctx.md § "Symbols").
+        // bare `{:?}` has no table (docs/impl/region/ctx.md § "Symbols").
         result.push_str(&format!(
             "✗ Runtime error: {}",
             err_value.debug_with(self.symbols().as_deref())

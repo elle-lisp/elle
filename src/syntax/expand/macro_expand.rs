@@ -28,7 +28,7 @@
 //! the root FiberHeap via `alloc()` and reclaimed only at teardown
 //! (`release_cached_transformers`). The one-time compilation cost stays resident.
 //! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
-//! (docs/impl/region-rules.md § "Macro expansion — a closed allocation scope"):
+//! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
 //! a per-call mint log records every region the transformer mints, and after the
 //! result is deep-copied to owned Syntax the scope is reclaimed by balancing each
 //! survivor's unexplained references. This keeps the per-invocation region cost
@@ -54,9 +54,9 @@ use crate::vm::VM;
 /// closure call.
 ///
 /// These are **ordinary mortal allocations** born in the per-expansion transient
-/// `region` the sole caller mints (docs/impl/region-ctx.md — the region is named
+/// `region` the sole caller mints (docs/impl/region/ctx.md — the region is named
 /// explicitly as an argument). That region is part of the expansion's closed allocation scope
-/// (docs/impl/region-rules.md), so the wrapped args are reclaimed with the rest
+/// (docs/impl/region/rules.md), so the wrapped args are reclaimed with the rest
 /// of the transformer's scratch once the result is deep-copied to owned Syntax —
 /// they do not leak per expansion. Only the heap cases (`String`, compound
 /// `_ => syntax`) take the region; the atom cases are immediates with no region.
@@ -241,7 +241,7 @@ impl Expander {
         // --- Phase 2: Call the closure and convert result ---
         //
         // The per-expansion transient `region_id` is the explicit allocation
-        // region for the Rust-side argument wrapping below (docs/impl/region-ctx.md
+        // region for the Rust-side argument wrapping below (docs/impl/region/ctx.md
         // — named explicitly as an argument). The transformer's own body allocates elsewhere:
         // through its ctx (native calls mint fresh result regions) and its
         // activation region map (data instructions). Those regions, plus
@@ -266,7 +266,7 @@ impl Expander {
         // two without tracking provenance through the transformer.
         let intro_scope = self.fresh_scope();
 
-        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region-rules.md
+        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md
         // § "Macro expansion — a closed allocation scope"): the transformer's
         // entire `Value` output is deep-copied to owned `Syntax` below, so every
         // region it mints — the arg-wrap region `region_id`, the constructed

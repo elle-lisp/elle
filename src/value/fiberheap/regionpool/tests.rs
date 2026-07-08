@@ -185,7 +185,7 @@ fn page_header_region_id() {
 #[test]
 fn page_header_stamp_roundtrip() {
     // Every claimed page is stamped (region_id, generation, store) at
-    // claim time (docs/impl/region-generations.md § "Region generations").
+    // claim time (docs/impl/region/generations.md § "Region generations").
     let mut pool = PagePool::default();
     let stamp = PageStamp {
         generation: 7,

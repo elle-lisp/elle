@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Counterfactual: a top-level Begin with TWO OR MORE captured defs leaks every
-# pre-allocated capture cell but the last (docs/impl/region-model.md, "The per-execution
+# pre-allocated capture cell but the last (docs/impl/region/model.md, "The per-execution
 # region model": one allocation execution per slot between drops).
 #
 # Mechanism: `lower_begin` pre-allocates one `MakeCaptureCell` per captured

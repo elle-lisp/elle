@@ -1,7 +1,7 @@
 (elle/epoch 12)
 # Per-execution region uniqueness — unoptimized Tofte-Talpin: every value gets
 # its own region, period (merging is the only thing that may collapse regions,
-# and merging is off). docs/impl/region-model.md "The per-execution region model".
+# and merging is off). docs/impl/region/model.md "The per-execution region model".
 #
 # Counterfactual for the tail-loop region co-location bug: a `%pair` allocated as
 # a tail-call argument has a DEAD `DecrefRegion` (the compiler emits it past the

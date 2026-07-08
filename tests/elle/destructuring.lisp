@@ -1099,7 +1099,7 @@
 # signal AFTER the region is gone, so an in-region error is a use-after-free
 # (region-generation guard: "stale region deref"). One shot reads plausible
 # freed memory; looping recycles the region id so the guard fires
-# deterministically. See docs/impl/region-generations.md.
+# deterministically. See docs/impl/region/generations.md.
 (var kw-err-iters 0)
 (while (< kw-err-iters 400)  # odd number of keyword arguments
   (let [[ok? _] (protect ((fn () ((fn (a &keys opts) opts) 1 :x 10 :y))))]

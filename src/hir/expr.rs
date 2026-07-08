@@ -272,7 +272,7 @@ pub enum HirKind {
     /// Quote of COMPOUND DATA (`'(a b c)`, `'[1 2]`, nested structures): stores
     /// the immutable structure as a `ConstTemplate` — plain compile-time data,
     /// not a pre-baked pinned `Value`. `MaterializeConst` builds a fresh value
-    /// from it into the literal's own region each execution (docs/impl/region-model.md
+    /// from it into the literal's own region each execution (docs/impl/region/model.md
     /// § "Constants lower as ordinary allocations").
     QuoteConst(crate::value::ConstTemplate),
 

@@ -237,7 +237,7 @@ impl VM {
     /// from the collection's region (an immutable array/struct element shares the
     /// container's region pages; a mutable container's stored value has its own
     /// region kept alive only by the container's stored reference). The borrowed
-    /// case is a Rule-5 native-result pass-through (docs/impl/region-rules.md): without an
+    /// case is a Rule-5 native-result pass-through (docs/impl/region/rules.md): without an
     /// incref the caller's `DecrefValueRegion` cascade-frees the element under its
     /// consumer's borrow — the call-index UAF family (region-array-element-uaf,
     /// region-struct-call-index-uaf, region-mut-collection-call-index-uaf). The

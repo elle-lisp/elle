@@ -9,7 +9,7 @@
 //! region (the VM via `set_error`, a native via its `ctx`) and builds the error
 //! there, so these pure functions allocate only through the region source the
 //! caller supplies — they mint nothing on their own (Rule 3;
-//! docs/impl/region-ctx.md). The VM's unchecked intrinsic handlers
+//! docs/impl/region/ctx.md). The VM's unchecked intrinsic handlers
 //! discard the description entirely (wrong types → garbage sentinel).
 //!
 //! Integer arithmetic is 64-bit two's-complement and WRAPS on overflow

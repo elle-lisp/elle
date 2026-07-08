@@ -20,7 +20,7 @@ impl RegionInference {
                         // sharing the subject's cells, `(h . t)` / an
                         // immutable-array element `[a b]` / an immutable-struct
                         // value `{:k v}` likewise hand back a pointer co-located
-                        // in the subject's region pages (docs/impl/region-model.md
+                        // in the subject's region pages (docs/impl/region/model.md
                         // § "RegionSlice contents share their object's region").
                         // Conservatively propagate the scrutinee's regions —
                         // EXACTLY as the `HirKind::Destructure` arm does for
@@ -81,7 +81,7 @@ impl RegionInference {
                     // overwrites the slot's activation mapping, so N
                     // MakeCaptureCells against one slot orphan the first
                     // N−1 regions — the shared-slot capture-cell leak
-                    // (docs/impl/region-model.md, "one allocation execution per slot
+                    // (docs/impl/region/model.md, "one allocation execution per slot
                     // between drops"; region-capture-cell-shared-slot-leak.lisp).
                     //
                     // Each cell must outlive ITS binding's last use —
@@ -258,7 +258,7 @@ impl RegionInference {
                 // A Destructure CONSUMES its value: the field extraction
                 // reads it after the value expression's last read. Record
                 // the site so the post-pass extends the value's regions'
-                // decref_point to this node (docs/impl/region-rules.md Rule 4) —
+                // decref_point to this node (docs/impl/region/rules.md Rule 4) —
                 // otherwise an all-bindings-unused destructure (the
                 // `&named`-param prologue) frees the source before the
                 // extraction (region-named-param-uaf.lisp).

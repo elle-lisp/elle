@@ -3,7 +3,7 @@
 # its result into `fiber.signal` WITHOUT the Rule-5 suspend-escape retain that
 # the interpreter performs — so the escaped value's region is freed once by the
 # resuming consumer and a second time by the scheduler: double-free / UAF.
-# docs/impl/region-rules.md Rule 5 ("suspended frame" / suspend-escape) and Rule 8.
+# docs/impl/region/rules.md Rule 5 ("suspended frame" / suspend-escape) and Rule 8.
 # This is the redis.lisp eager+adaptive crash in its minimal, network-server-free
 # form (a loopback TCP pair in one process).
 #

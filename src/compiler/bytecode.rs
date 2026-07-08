@@ -313,7 +313,7 @@ pub enum Instruction {
     /// see through a `CaptureCell` wrapper — it frees the CELL's own region.
     /// Emitted at a captured (env-allocated) binding's `decref_point` to
     /// release the per-value env cell `populate_env` minted for it (the
-    /// owned-binding release for capture cells; docs/impl/region-rules.md Rule 8).
+    /// owned-binding release for capture cells; docs/impl/region/rules.md Rule 8).
     /// `DecrefValueRegion` would unwrap to the inner value's region instead —
     /// freeing a caller-owned region and leaking the cell.
     DecrefCellRegion,
@@ -331,7 +331,7 @@ pub enum Instruction {
     /// (top) then `parent` — resolves each to its runtime region via
     /// `result_region_of`, and calls `RegionStore::adopt_region(parent_region,
     /// child_region)`, freezing the child's RC so it is reclaimed only by the
-    /// parent's subtree drop (docs/impl/region-model.md § "Adoption and subtree
+    /// parent's subtree drop (docs/impl/region/ownership.md § "Adoption and subtree
     /// drop"). Emitted by the ownership forest; realized on the
     /// interpreter and the JIT (`elle_jit_adopt_region`).
     AdoptRegion,
@@ -343,7 +343,7 @@ pub enum Instruction {
     /// `CaptureCell` operand is NOT unwrapped — its OWN region is used), and calls
     /// `RegionStore::adopt_region`. This is the only ownership cut that can name a
     /// capture cell's own region, letting the forest reclaim a cell↔closure clique
-    /// as a unit (docs/impl/region-model.md § "The capture adopt"). Emitted by the
+    /// as a unit (docs/impl/region/adopt.md § "The capture adopt"). Emitted by the
     /// ownership forest; realized on the interpreter (`handle_adopt_cell_region`)
     /// and the JIT (`elle_jit_adopt_cell_region`).
     AdoptCellRegion,
@@ -381,7 +381,7 @@ pub enum Instruction {
     /// region via `result_region_of`, lazily mints the activation's pages-less
     /// owner node, and calls `RegionStore::adopt_region(node, child_region)` —
     /// freezing the child's RC so it is reclaimed only by the node's subtree
-    /// drop at the activation's normal completion (docs/impl/region-model.md
+    /// drop at the activation's normal completion (docs/impl/region/owner.md
     /// § "Owner nodes — an activation as a forest root"). An immediate child
     /// (no region) adopts nothing and mints no node. Realized on the
     /// interpreter and the JIT (`elle_jit_adopt_into_activation`).
@@ -447,7 +447,7 @@ pub struct Bytecode {
     /// RC, never pinned for the process lifetime.
     pub child_protos: Vec<std::rc::Rc<crate::value::closure::ClosureTemplate>>,
     /// The static region slots this (top-level / entry) function's allocations
-    /// SHARE after a builder-idiom merge (docs/impl/region-model.md § Merging),
+    /// SHARE after a builder-idiom merge (docs/impl/region/merging.md § Merging),
     /// carried from the entry `LirFunction.merged_slots` so the executing `Code`
     /// can mint-or-reuse them. The per-lambda equivalent rides
     /// `ClosureTemplate.merged_slots`; this is the entry-function path

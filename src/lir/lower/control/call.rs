@@ -230,7 +230,7 @@ impl<'a> Lowerer<'a> {
             };
 
             if is_tail {
-                // Move-on-tail-call, per argument (docs/impl/region-rules.md Rule 5).
+                // Move-on-tail-call, per argument (docs/impl/region/rules.md Rule 5).
                 //
                 // A tail call replaces the frame, so the caller's value-based
                 // release for an arg is emitted dead (after the `TailCall`, by
@@ -306,7 +306,7 @@ impl<'a> Lowerer<'a> {
                 // collection call-index `(xs i)`, a tail-returned HOF result) has
                 // its single owning reference drained by the caller and is freed
                 // under the caller's borrow (region-native-tail-return-uaf.lisp,
-                // docs/impl/region-rules.md Rules 4/5/8). This incref must PRECEDE the dead
+                // docs/impl/region/rules.md Rules 4/5/8). This incref must PRECEDE the dead
                 // owned-arg `DecrefValueRegion`s (emitted next by the enclosing
                 // `lower_expr`), matching `lower_return`'s retain-before-decref
                 // ordering. The frame-replacing closure tail call never reaches
@@ -436,7 +436,7 @@ impl<'a> Lowerer<'a> {
                 // (`(first ;argv)`, `(get ;argv)`, an `apply`'d accessor) needs
                 // the same retain or its result is freed under the caller's
                 // borrow once the args-array leak that currently masks it is
-                // fixed (region-splice-tail-return.lisp; docs/impl/region-rules.md
+                // fixed (region-splice-tail-return.lisp; docs/impl/region/rules.md
                 // Rules 4/5). Dead for a frame-replacing closure tail call;
                 // no-op for an immediate result. The emitter peeks the operand
                 // stack top — the native's pushed result.

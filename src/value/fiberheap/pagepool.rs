@@ -162,7 +162,7 @@ const NUM_CLASSES: usize = 11;
 // `[stats]` lines. It measures how often geometric growth escalates past
 // `BASE_PAGE` across a run — the precondition for the large-page
 // region-attribution cost (a large page is the only place `region_of_ptr`'s
-// sub-alignment search can be fooled; see docs/impl/region-diagnostics.md).
+// sub-alignment search can be fooled; see docs/impl/region/diagnostics.md).
 // Off by default and zero-cost then: the per-claim path is a single config-flag
 // read, so production pays nothing.
 use std::sync::atomic::{AtomicU64, Ordering};

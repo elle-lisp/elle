@@ -196,7 +196,7 @@ fn eval_inner(
         Rc::new(bytecode.child_protos),
     );
     // Carry the entry function's builder-idiom merge metadata so the alloc
-    // dispatch mint-or-reuses merged slots (docs/impl/region-model.md § Merging).
+    // dispatch mint-or-reuses merged slots (docs/impl/region/merging.md § Merging).
     code.merged_slots = bytecode.merged_slots;
     let empty_env = Rc::new(vec![]);
 

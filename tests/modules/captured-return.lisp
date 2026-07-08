@@ -12,7 +12,7 @@
   (def stored cfg)  # `fetch` RETURNS `stored`, so it escapes via the return facet; `fetch`
   # itself escapes because the sibling methods below capture it and are returned in the module
   # struct. Escape (the authority) marks `stored` returned, so the region solver treats
-  # fetch's return as an ESCAPE under the move convention (docs/impl/region-bindings.md).
+  # fetch's return as an ESCAPE under the move convention (docs/impl/region/bindings.md).
   (defn fetch []
     stored)
   (defn tag-a []

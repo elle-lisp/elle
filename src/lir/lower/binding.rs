@@ -63,7 +63,7 @@ impl<'a> Lowerer<'a> {
                     // One region PER cell, looked up by binding — multiple
                     // captured bindings in one Let must not share this node's
                     // single slot (the shared-slot capture-cell leak;
-                    // docs/impl/region-model.md, "one allocation execution per slot
+                    // docs/impl/region/model.md, "one allocation execution per slot
                     // between drops").
                     let region = self.cell_region_for(*binding);
                     let cell_reg = self.fresh_reg();
@@ -148,7 +148,7 @@ impl<'a> Lowerer<'a> {
                 // One region PER cell — a letrec pre-allocates one cell per
                 // captured binding, and emitting them all against the letrec's
                 // single slot leaks every cell but the last (the shared-slot
-                // capture-cell leak; docs/impl/region-model.md, "one allocation
+                // capture-cell leak; docs/impl/region/model.md, "one allocation
                 // execution per slot between drops").
                 let region = self.cell_region_for(*binding);
                 let cell_reg = self.fresh_reg();
@@ -537,7 +537,7 @@ impl<'a> Lowerer<'a> {
                 .is_some_and(|id| self.region_info.drop_on_overwrite_sites.contains(&id))
             {
                 // A reassigned, sole-held, top-level (file-letrec) mutable is a
-                // 1-slot mutable container (docs/impl/region-bindings.md Rule 5). The cell
+                // 1-slot mutable container (docs/impl/region/bindings.md Rule 5). The cell
                 // owns its current content: increment the NEW value's region (the
                 // cell now holds a reference — the root pin), and decrement the
                 // displaced OLD value's region (the cell no longer holds it; its
@@ -565,7 +565,7 @@ impl<'a> Lowerer<'a> {
                 // reference to the cell; the drop-on-overwrite below is that
                 // reference's sole release, so an incref-on-store here would be
                 // unbalanced (born + store − overwrite = +1), holding every
-                // displaced prior to frame teardown (docs/impl/region-bindings.md
+                // displaced prior to frame teardown (docs/impl/region/bindings.md
                 // "Reassigned mutable bindings are 1-slot containers"). These sites
                 // are marked `donated_overwrite_sites`. A FN-LOCAL container instead
                 // KEEPS the assign-value decref (its scope-exit demise), so it must
@@ -574,7 +574,7 @@ impl<'a> Lowerer<'a> {
                     .current_hir_id
                     .is_some_and(|id| self.region_info.donated_overwrite_sites.contains(&id));
                 if !donated {
-                    // Transform 1 (docs/impl/region-rules.md § "Compile-time region
+                    // Transform 1 (docs/impl/region/mechanism.md § "Compile-time region
                     // selection (coalescing)"): a fresh local allocation whose region
                     // is a known slot pins slot-resolved (`IncrefRegion`, guarded by
                     // the equivalence oracle), mirroring `lower_return`; otherwise

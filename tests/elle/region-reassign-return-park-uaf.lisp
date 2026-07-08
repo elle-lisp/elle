@@ -19,7 +19,7 @@
 # The hazard this guards: were the mint dropped, or the gate to suppress the
 # callee decref on a returned mutable, the result would be released twice — one
 # reference, two decrefs. See `src/hir/regions/analyze.rs` (the fn-local
-# reassign gate) and docs/impl/region-bindings.md "Reassigned mutable bindings
+# reassign gate) and docs/impl/region/bindings.md "Reassigned mutable bindings
 # are 1-slot containers".
 #
 # WHY IT HID. The double-release is LATENT: with no park the returned value

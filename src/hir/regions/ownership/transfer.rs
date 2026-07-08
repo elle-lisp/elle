@@ -1,7 +1,7 @@
 //! The transferred-returned-subtree cut: a callee-built, externally-unique
 //! subtree containing a reference cycle, handed to its consumer across the
 //! return (or fiber-terminal) frontier and owned by the **consuming
-//! activation** (docs/impl/region-model.md § "Owner nodes" — "The transferred
+//! activation** (docs/impl/region/owner.md § "Owner nodes" — "The transferred
 //! returned subtree").
 //!
 //! Inside the producer the root crosses the return frontier, so every
@@ -319,7 +319,7 @@ struct Summary {
     capture_edges: Vec<(HirId, Region, Region)>,
 }
 
-/// Compute the transfer cut (docs/impl/region-model.md § "Owner nodes" — "The
+/// Compute the transfer cut (docs/impl/region/owner.md § "Owner nodes" — "The
 /// transferred returned subtree"). Producer and consumer halves are admitted
 /// only together: the interior adopts freeze member counts, so a consumer that
 /// could alias a member out of the node's reclamation horizon refuses the

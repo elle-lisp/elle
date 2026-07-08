@@ -48,7 +48,7 @@ fn test_lower_begin() {
     assert!(!func.entry.blocks.is_empty());
 }
 
-// ── Ownership forest: AdoptRegion emission (docs/impl/region-model.md
+// ── Ownership forest: AdoptRegion emission (docs/impl/region/ownership.md
 // § "Adoption and subtree drop") ──
 //
 // The never-mergeable shape: a Fresh mutable container (`@array`) and the value
@@ -138,7 +138,7 @@ fn adopt_region_emitted_for_captured_value() {
 
 #[test]
 fn capture_adopt_reloads_upvalue_via_load_capture() {
-    // The capture-adopt contract's env-reload half (region-model.md § "The capture
+    // The capture-adopt contract's env-reload half (region/adopt.md § "The capture
     // adopt"): a `capture_adopt_edges` entry whose captured binding is an UPVALUE of the
     // constructing function (the enclosing lambda also captures it, forwarding) is
     // emitted by reloading the captured value from the closure environment

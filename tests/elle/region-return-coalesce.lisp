@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # region-return-coalesce.lisp — transform 1, the coalesced return mint
-# (docs/impl/region-rules.md § "Compile-time region selection (coalescing)").
+# (docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)").
 #
 # When a function returns a value that is a fresh local allocation whose region is
 # a known static slot, `lower_return` mints slot-resolved (`IncrefRegion`, guarded
@@ -13,7 +13,7 @@
 # This pins the coalesced path's CORRECTNESS end-to-end. A heap literal returned
 # directly from a thunk (`(fn [] "lit")`, `(fn [] '(1 2 3))`) is the canonical
 # fresh-aggregate return: the literal materializes fresh each call
-# (docs/impl/region-model.md § "Constants lower as ordinary allocations"), in its
+# (docs/impl/region/model.md § "Constants lower as ordinary allocations"), in its
 # own region, and the return is the coalesced site. A mis-coalesce — the slot
 # resolving to a wrong/dead physical region — frees the returned value's region
 # early; the junk allocation between the return and the read reuses that region, so

@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Counterfactual for the opaque-call arg-clique leak class
-# (docs/impl/region-effects.md "Native region effects: declared, not guessed").
+# (docs/impl/region/effects.md "Native region effects: declared, not guessed").
 #
 # For an opaque native call the solver historically assumed every heap
 # argument may be stored into every other — mutual may-store edges, a

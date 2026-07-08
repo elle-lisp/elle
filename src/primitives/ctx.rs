@@ -1,4 +1,4 @@
-//! Allocation capabilities for native code (docs/impl/region-ctx.md).
+//! Allocation capabilities for native code (docs/impl/region/ctx.md).
 //! `Alloc` carries a call's region and heap; `NativeCtx` wraps it with the
 //! driving VM. A native cannot allocate without being handed one, so every
 //! value names the region it is born in.
@@ -17,7 +17,7 @@ use std::ops::{Deref, DerefMut};
 /// re-enter the interpreter. Built at allocation-only sites with no VM in scope
 /// (the reader, the io completion builders, `send` reconstruction, plugin ctors,
 /// FFI arg marshalling, test scaffolding). A native-call capability
-/// [`NativeCtx`] wraps it with a VM and `Deref`s to it (docs/impl/region-ctx.md
+/// [`NativeCtx`] wraps it with a VM and `Deref`s to it (docs/impl/region/ctx.md
 /// "The capability split"). It cannot be stored (borrows the call) and cannot be
 /// forged (private fields).
 pub struct Alloc<'h> {
@@ -42,7 +42,7 @@ impl<'h> Alloc<'h> {
     /// escapes to the caller (returned / marshaled across an ABI) and is freed
     /// value-based by the consumer's `DecrefValueRegion`, so the ctx holds no
     /// `Drop`. Crate-private: only the dispatch sites enumerated in
-    /// docs/impl/region-ctx.md may mint a ctx.
+    /// docs/impl/region/ctx.md may mint a ctx.
     pub(crate) fn new(heap: &'h mut FiberHeap) -> Self {
         let region = heap.new_runtime_region();
         Self::with_region(region, heap)
@@ -64,7 +64,7 @@ impl<'h> Alloc<'h> {
 
     /// A ctx for a native-call *boundary* with no compiler-assigned result slot
     /// — trait-method dispatch and the WASM host trampolines
-    /// (docs/impl/region-ctx.md). It mints its **own** fresh result region,
+    /// (docs/impl/region/ctx.md). It mints its **own** fresh result region,
     /// exactly like [`new`](Self::new); the native's result escapes to the
     /// caller and is freed value-based by the consumer's `DecrefValueRegion`.
     pub(crate) fn boundary(heap: &'h mut FiberHeap) -> Self {
@@ -74,7 +74,7 @@ impl<'h> Alloc<'h> {
     /// Test-only view of the ctx's own region. Exists ONLY under `cfg(test)` so
     /// the spec-pin tests can assert "born in the ctx's region". It is invisible
     /// to production code, which has no region getter at all
-    /// (docs/impl/region-ctx.md: the ctx owns its region and exposes no way to
+    /// (docs/impl/region/ctx.md: the ctx owns its region and exposes no way to
     /// read it).
     #[cfg(test)]
     pub(crate) fn test_region(&self) -> RuntimeRegion {
@@ -120,7 +120,7 @@ impl<'h> Alloc<'h> {
     }
 
     /// Allocate a `RegionSlice` payload into the ctx's region — it shares
-    /// the region of the object that will embed it (region-model.md).
+    /// the region of the object that will embed it (region/model.md).
     pub fn alloc_slice<T: Copy + 'static>(&self, items: &[T]) -> RegionSlice<T> {
         let region = self.region;
         self.heap().alloc_region_slice_in_region(items, region)
@@ -128,7 +128,7 @@ impl<'h> Alloc<'h> {
 }
 
 /// The native-call capability: an [`Alloc`] plus the **non-null** driving VM
-/// (docs/impl/region-ctx.md "The capability split"). `Deref`s to `Alloc`, so
+/// (docs/impl/region/ctx.md "The capability split"). `Deref`s to `Alloc`, so
 /// every `ctx.string(..)`/`ctx.alloc(..)`/`ctx.error(..)` works unchanged, and
 /// adds [`vm`](Self::vm) for state access and synchronous interpreter re-entry.
 /// Built only where a VM drives the call: bytecode dispatch, the WASM hosts, and
@@ -206,7 +206,7 @@ impl<'h> NativeCtx<'h> {
     }
 }
 
-/// Generate the ergonomic `ctx.*` constructors (docs/impl/region-ctx.md
+/// Generate the ergonomic `ctx.*` constructors (docs/impl/region/ctx.md
 /// "the body-migration surface"): each forwards to the matching
 /// `value::build::*` source with the ctx's own heap and region, so a native
 /// body reads `ctx.string("x")` and the value is born on the ctx's heap in the
@@ -404,7 +404,7 @@ impl<'h> Alloc<'h> {
 pub fn with_test_ctx<R>(f: impl FnOnce(&mut NativeCtx) -> R) -> R {
     // A real VM so `ctx.vm()` is valid for primitives that read VM state or
     // re-enter the interpreter; `f` allocates through the ctx over a fresh
-    // region on the VM's heap (docs/impl/region-ctx.md).
+    // region on the VM's heap (docs/impl/region/ctx.md).
     let mut vm = crate::vm::VM::new();
     let vm_ptr: *mut VM = &mut vm as *mut VM;
     let heap_ptr = vm.heap_ptr;
@@ -510,13 +510,13 @@ impl TestHeap {
     }
 }
 
-// ── Spec pins (docs/impl/region-ctx.md) ─────────────────────────────
+// ── Spec pins (docs/impl/region/ctx.md) ─────────────────────────────
 //
 // Written from the spec BEFORE the implementation (CLAUDE.md: docs →
 // tests → code). Each pins a contract line:
 //  - `alloc` routes the object into exactly the ctx's region (Rule 3:
 //    born in the right region — not a sibling region).
-//  - `alloc_slice` payload shares the ctx's region (region-model.md
+//  - `alloc_slice` payload shares the ctx's region (region/model.md
 //    "RegionSlice contents share their object's region").
 //  - the captured `RuntimeRegion` (threaded by `with_ctx`, or read via the
 //    `cfg(test)`-only `test_region`) is where every `ctx.*` allocation lands —

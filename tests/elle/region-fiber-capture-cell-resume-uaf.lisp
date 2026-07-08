@@ -1,7 +1,7 @@
 (elle/epoch 12)
 ## tests/elle/region-fiber-capture-cell-resume-uaf.lisp
 ##
-## docs/impl/region-model.md Rule 4/5 + "Two id-spaces": a captured, mutated local held by
+## docs/impl/region/model.md Rule 4/5 + "Two id-spaces": a captured, mutated local held by
 ## a generator fiber across a `yield` is materialized as a per-value CaptureCell
 ## (`populate_env`), released ONCE by a `DecrefCellRegion` at the binding's last
 ## use. The region solver must give such a binding EXACTLY ONE cell-release

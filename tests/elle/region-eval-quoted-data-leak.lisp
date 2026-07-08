@@ -6,7 +6,7 @@
 # region on every execution, freed at its `decref_point` by normal RC. So the
 # whole structure shares one reclaimable region (an immutable aggregate), the
 # eval'd result is reclaimable, and repeated eval stays bounded.
-# docs/impl/region-rules.md Rule 8; docs/impl/region-model.md § "Constants lower
+# docs/impl/region/rules.md Rule 8; docs/impl/region/model.md § "Constants lower
 # as ordinary allocations".
 #
 # This is the quoted-DATA sibling of region-eval-leak.lisp (which pins the

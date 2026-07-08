@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # A whole-value binding read out of a REASSIGNED CAPTURED CELL must take a
-# counted reference (docs/impl/region-bindings.md "Captured reassigned cells").
+# counted reference (docs/impl/region/bindings.md "Captured reassigned cells").
 #
 # A captured, reassigned mutable binding is a 1-slot container whose overwrite
 # (`UpdateCapture` / `capture_store_with_rebind`) decrefs the displaced prior

@@ -39,7 +39,7 @@ impl VM {
     /// a region freed since this fiber inherited it — the deref-site companion
     /// of the resume checkpoint. Reads only the generation counter, never the
     /// resolved value's page, so it cannot itself fault on a stale value
-    /// (docs/impl/region-generations.md § "Uncounted-borrow check").
+    /// (docs/impl/region/generations.md § "Uncounted-borrow check").
     #[cfg(debug_assertions)]
     fn check_param_borrow_fresh(&self, id: u32) {
         // SAFETY: `heap_ptr` is the VM's own region heap (a leaked Box, shared
@@ -53,7 +53,7 @@ impl VM {
                     heap.generation_raw(r.get()) == gen,
                     "stale param-snapshot borrow at deref: parameter {pid} resolved \
                      to a value in region {r}, which was freed since this fiber \
-                     inherited it (docs/impl/region-generations.md \
+                     inherited it (docs/impl/region/generations.md \
                      § 'Uncounted-borrow check')"
                 );
             }

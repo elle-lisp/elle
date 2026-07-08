@@ -218,7 +218,7 @@ impl VM {
                                 // `activation_region_maps.last()`) is the caller's.
                                 // MOVE the caller's owner node into its park — this
                                 // activation unwinds with the suspending signal
-                                // (docs/impl/region-model.md § "Owner nodes").
+                                // (docs/impl/region/owner.md § "Owner nodes").
                                 let caller_owner_node = self.take_activation_owner_node();
                                 // The JIT callee suspended without entering an
                                 // interpreter activation, so `current_closure` is
@@ -372,7 +372,7 @@ impl VM {
                         .unwrap_or_default();
                     // MOVE the caller's owner node into its park — this activation
                     // unwinds with the suspending signal
-                    // (docs/impl/region-model.md § "Owner nodes").
+                    // (docs/impl/region/owner.md § "Owner nodes").
                     let caller_owner_node = self.take_activation_owner_node();
                     // `saving_stack` restored `current_closure` to this caller on the
                     // callee's suspending return, so park the caller's value here; the

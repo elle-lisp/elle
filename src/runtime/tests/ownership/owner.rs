@@ -1,7 +1,7 @@
 use super::*;
 
 /// End-to-end reclamation of the **capture-back-edge cycle** — the activation-owner cut
-/// (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge SCC"; inference
+/// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC"; inference
 /// pin `regions::tests::adopt::activation_adopts_capture_back_edge_scc`). A Fresh container
 /// `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store `m ⊇ c`), and `c`
 /// captures `m` back (capture `c ⊇ m`) — the m↔c cycle through a closure env. No REGION root
@@ -15,7 +15,7 @@ use super::*;
 /// interior m↔c references reclaiming with the set.
 ///
 /// The flag-off measurement is the built-in counterfactual: per-region RC cannot collect the
-/// m↔c cycle (region-rules.md Rule 8), so the SAME bytecode shape must leak flag-off and be
+/// m↔c cycle (region/rules.md Rule 8), so the SAME bytecode shape must leak flag-off and be
 /// bounded flag-on — proving the cut, not the shape, reclaims it. Both `--checked-intrinsics`
 /// settings are pinned: checked-off the interior store is a `cross_region_refs` edge;
 /// checked-on it is funnel-recovered `containment_edges` (the value-resolved adopt needs no
@@ -23,7 +23,7 @@ use super::*;
 #[test]
 fn region_ownership_capture_back_edge_cycle_reclaims() {
     // root ⊇ m (store), m ⊇ c (store), c ⊇ m (capture) — the m↔c cycle through a
-    // closure env, the cycle no region root can own (region-model.md § "Owner nodes" —
+    // closure env, the cycle no region root can own (region/owner.md § "Owner nodes" —
     // "The capture-back-edge SCC"). Both members are `AdoptIntoActivation`'d and the
     // activation's completion release subtree-drops the cycle; a broken adopt or a
     // doubled member release trips a debug generation/decref assert, so completing
@@ -64,7 +64,7 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
 }
 
 /// End-to-end reclamation of the **transferred returned cycle** — the
-/// consuming-activation owner cut (docs/impl/region-model.md § "Owner nodes" —
+/// consuming-activation owner cut (docs/impl/region/owner.md § "Owner nodes" —
 /// "The transferred returned subtree"; inference pin
 /// `regions::tests::adopt::transfer_adopts_returned_cycle_to_consumer`). A
 /// producer `mk` builds an a↔b cycle and returns its root; the top-level
@@ -338,7 +338,7 @@ fn adopt_into_activation_absorbs_redelivery() {
     );
 }
 
-/// Boundary pin for the capture-adopt admission (region-model.md § "The capture
+/// Boundary pin for the capture-adopt admission (region/adopt.md § "The capture
 /// adopt"): the nested-closure-captures-its-encloser family — the only shape family
 /// whose owner-capture is an UPVALUE and which external uniqueness admits — must NOT be
 /// over-claimed by the forest's capture adopt. The nested closure's region is minted
@@ -373,12 +373,12 @@ fn upvalue_capture_family_runs_sound() {
 
 /// A TOP-LEVEL (file-letrec) mutable reassigned in a loop must
 /// not accumulate its overwritten PRIOR values until frame teardown (the over-keep
-/// blocker; docs/impl/region-bindings.md "Reassigned mutable bindings are 1-slot
+/// blocker; docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
 /// containers"). Each prior is
 /// dead the instant the next `assign` displaces it; holding it to program exit is
 /// unbounded RSS growth in a long-running loop (the production blocker).
 ///
-/// The 1-slot container model (docs/impl/region-bindings.md) suppresses the
+/// The 1-slot container model (docs/impl/region/bindings.md) suppresses the
 /// module-scope value's ordinary decref and lets the cell ADOPT that producer
 /// reference — so the drop-on-overwrite is its sole release and the lowerer must
 /// emit NO incref-on-store (`donated_overwrite_sites`). The bug an unbalanced

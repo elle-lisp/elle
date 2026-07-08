@@ -9,7 +9,7 @@
 //! fields on every suspended frame.
 //!
 //! Bundling them into one value lets the core thread a single reference,
-//! and — load-bearing for the closure-template work in docs/impl/region-model.md
+//! and — load-bearing for the closure-template work in docs/impl/region/model.md
 //! (§ "Constants lower as ordinary allocations") — so a NEW code-object field
 //! (`child_protos`, the per-definition nested-lambda blueprints) is added in one
 //! place and rides through suspend/resume/tail-call for free.
@@ -62,7 +62,7 @@ pub struct Code {
     /// object (see the module docs).
     pub child_protos: Rc<Vec<Rc<ClosureTemplate>>>,
     /// The static region slots this function's allocations SHARE after a
-    /// builder-idiom merge (docs/impl/region-model.md § Merging). The alloc
+    /// builder-idiom merge (docs/impl/region/merging.md § Merging). The alloc
     /// dispatch consults it through `runtime_region_for_alloc_slot_maybe_merged`:
     /// a slot here mint-or-reuses (child mints, parent reuses) instead of always
     /// minting. Empty unless a merge fired (a nested `%pair` literal under

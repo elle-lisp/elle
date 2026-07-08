@@ -8,7 +8,7 @@
 //!
 //! The recommended embedding entry point is [`Runtime`](runtime::Runtime): it
 //! installs the contexts, registers primitives, loads the stdlib, and — on drop
-//! — runs the principled, RC-driven process-teardown sweep (docs/impl/region-rules.md
+//! — runs the principled, RC-driven process-teardown sweep (docs/impl/region/rules.md
 //! § "Teardown — every region frees"), the same lifecycle `elle foo.lisp` and the REPL use.
 //!
 //! ```

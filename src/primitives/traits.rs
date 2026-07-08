@@ -89,7 +89,7 @@ unsafe fn clone_with_traits(
         // copying the (ptr, len) pair instead aliases backing pages in the
         // SOURCE's region with no counted edge — the source's ordinary
         // demise frees the payload under the live clone, and the declared
-        // Fresh effect is falsified (docs/impl/region-model.md, "RegionSlice contents
+        // Fresh effect is falsified (docs/impl/region/model.md, "RegionSlice contents
         // share their object's region"; the with-traits UAF,
         // tests/elle/region-withtraits-slice-uaf.lisp).
         HeapObject::LString { s, .. } => Ok(ctx.alloc(HeapObject::LString {
@@ -223,7 +223,7 @@ primitive! {
         // the result never references arg 0's region. Declaring `&[1]` makes the region
         // walk record `result ⊇ table`, so the ownership forest sees a captured table flow
         // out through an escaping traited value and keeps it Shared instead of adopting it
-        // (region-effects.md § "Native region effects").
+        // (region/effects.md § "Native region effects").
         embeds: &[1],
     }
     "traits" => prim_traits {

@@ -110,7 +110,7 @@ impl<'a> Lowerer<'a> {
             HirKind::QuoteConst(template) => {
                 // Quoted compound data is an ordinary allocation: materialize a
                 // FRESH structure from the template into this literal's OWN
-                // solver-assigned region each execution (docs/impl/region-model.md
+                // solver-assigned region each execution (docs/impl/region/model.md
                 // § "Constants lower as ordinary allocations"). `emit_alloc` stamps the
                 // region (arming its `DecrefRegion` at `decref_point`), exactly
                 // like `HirKind::String`.
@@ -367,7 +367,7 @@ impl<'a> Lowerer<'a> {
                     // One region PER cell (`begin_cell_regions`): emitting all
                     // cells against this Begin's single slot orphans all but
                     // the last minted physical region — the shared-slot
-                    // capture-cell leak (docs/impl/region-model.md, "one allocation
+                    // capture-cell leak (docs/impl/region/model.md, "one allocation
                     // execution per slot between drops").
                     let region = self.cell_region_for(binding);
                     let nil_reg = self.emit_const(LirConst::Nil)?;
@@ -479,7 +479,7 @@ impl<'a> Lowerer<'a> {
     /// result region survives its callee-side release.
     ///
     /// Two encodings, chosen by `coalescible_region` (the staticness predicate,
-    /// docs/impl/region-rules.md § "Compile-time region selection (coalescing)"):
+    /// docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)"):
     ///
     /// - **slot-resolved** when the returned value is a fresh local allocation
     ///   whose region is a known static slot — emit the equivalence oracle
@@ -498,7 +498,7 @@ impl<'a> Lowerer<'a> {
     /// region — prediction-free — so the substitution is purely callee-mint-side).
     fn lower_return(&mut self, value: &Hir) -> Result<Reg, String> {
         let reg = self.lower_expr(value)?;
-        // Transform 1 (docs/impl/region-rules.md § "Compile-time region selection
+        // Transform 1 (docs/impl/region/mechanism.md § "Compile-time region selection
         // (coalescing)"): when the returned value is a fresh local allocation whose
         // region is a known static slot, the mint is slot-resolved; otherwise the
         // region is a genuine runtime fact (the dynamic boundary) and the mint stays

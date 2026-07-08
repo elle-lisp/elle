@@ -10,7 +10,7 @@
 # JIT compiles it → the measured loop runs the alloc in JIT code.
 #
 # RED today: OOM under `--jit=adaptive` (the broken JIT explodes). GREEN once the
-# JIT mints+frees a per-execution region per allocation. docs/impl/region-rules.md Rule 8.
+# JIT mints+frees a per-execution region per allocation. docs/impl/region/rules.md Rule 8.
 
 (defn g (n)
   (var i 0)

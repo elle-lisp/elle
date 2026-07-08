@@ -90,7 +90,7 @@ impl CompileCtx {
         // `init_symbols` is a throwaway used only for this setup; `expand` pointed
         // the macro VM at it. Reset to null so the dropped table is never reached
         // — the next `expand` (a real compile) re-points the VM at the instance's
-        // table (docs/impl/region-ctx.md § "Symbols").
+        // table (docs/impl/region/ctx.md § "Symbols").
         vm.set_symbols(std::ptr::null_mut());
         CompileCtx {
             vm,

@@ -460,7 +460,7 @@ fn main() {
 
     // One runtime drives every entry path (file / eval / stdin / REPL); its
     // Drop (or the explicit `teardown` below) runs the principled, RC-driven
-    // teardown sweep (docs/impl/region-rules.md § "Teardown — every region frees").
+    // teardown sweep (docs/impl/region/rules.md § "Teardown — every region frees").
     let mut rt = if elle::config::get().no_stdlib {
         Runtime::without_stdlib()
     } else {

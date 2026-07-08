@@ -124,7 +124,7 @@ impl<'a> Lowerer<'a> {
     /// SEVERAL allocations at one HirId (`lower_begin`'s capture-cell
     /// pre-pass; one region per cell via `begin_cell_regions`, since N
     /// allocations against one slot orphan all but the last minted physical
-    /// region — docs/impl/region-model.md, "one allocation execution per slot between
+    /// region — docs/impl/region/model.md, "one allocation execution per slot between
     /// drops").
     pub(super) fn emit_alloc_in(
         &mut self,
@@ -219,7 +219,7 @@ impl<'a> Lowerer<'a> {
     /// A region in a builder-idiom **merge** tree resolves to its `merged_root`'s
     /// slot, so every member of the tree (child, parent, deeper nests) allocates
     /// against, increfs, and decrefs ONE slot — the root's. This is the emission
-    /// half of the merge (docs/impl/region-model.md § "Emission: one slot per merge
+    /// half of the merge (docs/impl/region/merging.md § "Emission: one slot per merge
     /// tree, one demise at the root"): canonicalizing here is what makes the child
     /// and parent share a physical region at runtime, and what `record_merged_slots`
     /// detects (two regions resolving to one slot) to flag the slot for

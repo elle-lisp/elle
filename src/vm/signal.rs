@@ -99,7 +99,7 @@ impl VM {
                     .unwrap_or_default();
                 // MOVE the activation's owner node into the frame (its slot is
                 // likewise still on top) so it rides the park to the resumed
-                // body's completion (docs/impl/region-model.md § "Owner nodes").
+                // body's completion (docs/impl/region/owner.md § "Owner nodes").
                 let activation_owner_node = self.take_activation_owner_node();
                 // Suspending primitive: this activation's remap is still on top
                 // (the wrapping `saving_stack` pops it after we return), and the

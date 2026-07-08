@@ -2,7 +2,7 @@
 
 Implementation-facing. An Elle error is an ordinary struct
 `{:error <kind-keyword> :message "<text>" …extra-fields}` — there is no
-exception machinery (signals carry the value; see [vm.md](vm.md)). "Rich" means
+exception machinery (signals carry the value; see [vm.md](../vm.md)). "Rich" means
 the struct carries fields beyond `:error`/`:message` (`:path`, `:value`,
 `:tier`, …). This page defines the single construction surface and the
 region-coherence invariant it guarantees.
@@ -10,7 +10,7 @@ region-coherence invariant it guarantees.
 ## Why errors need their own care
 
 An error value is a heap struct, so it is born in a region (Rule 3,
-[region-ctx.md](region-ctx.md)). Its **field values are themselves heap
+[ctx.md](ctx.md)). Its **field values are themselves heap
 allocations** — a `:path` string, a `:message` string — and they must live in
 the *same* region as the struct that points at them. If a field value were built
 in a different region, freeing the error's region would either strand that

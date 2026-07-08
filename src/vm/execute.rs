@@ -258,7 +258,7 @@ impl VM {
                 // ... and free this activation's owner node, if an
                 // `AdoptIntoActivation` minted one: the node's single decref
                 // subtree-drops every member the activation adopted
-                // (docs/impl/region-model.md § "Owner nodes"). The same
+                // (docs/impl/region/owner.md § "Owner nodes"). The same
                 // clean-break discipline as the adopted-closure releases above —
                 // a frame-replacing tail call keeps the activation (and its
                 // node) alive to the recursion's completion here.
@@ -321,7 +321,7 @@ impl VM {
         // Rust call stack unwinds. Capture it into the result first so a
         // suspending caller can attach it to the `SuspendedFrame::Bytecode` it
         // builds from this activation's returned context (cross-yield remap
-        // preservation — docs/impl/region-model.md). TCO loops inside `trampoline_loop`
+        // preservation — docs/impl/region/model.md). TCO loops inside `trampoline_loop`
         // without re-entering here, so a tail call correctly reuses the frame.
         self.push_activation_region_map();
         let mut result = self.trampoline_loop(code, closure_env, 0);
@@ -336,7 +336,7 @@ impl VM {
             // handler that parked a frame already took it (this reads None),
             // but a pause with no frame of its own (fuel) leaves it here, and
             // the caller that builds the park from this result re-attaches it
-            // (docs/impl/region-model.md § "Owner nodes").
+            // (docs/impl/region/owner.md § "Owner nodes").
             result.activation_owner_node = self.take_activation_owner_node();
         }
         self.pop_activation_region_map();

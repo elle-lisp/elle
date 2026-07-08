@@ -2,7 +2,7 @@
 # A top-level compile-time literal belongs to the program's lifetime: it is held
 # in a reclaimable program-extent region that the termination sweep frees. It is
 # an ordinary allocation, exactly like a literal inside `eval`
-# (docs/impl/region-model.md § "Constants lower as ordinary allocations") — the
+# (docs/impl/region/model.md § "Constants lower as ordinary allocations") — the
 # file body is just compile-time happening once, the same machinery the repeated
 # `eval` in region-eval-leak.lisp exercises.
 #

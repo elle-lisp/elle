@@ -3,13 +3,13 @@ use super::*;
 impl RegionStore {
     /// Free the entire **owned subtree** rooted at `id` — `id` plus every region
     /// transitively reachable through `owned_children` — as a unit (subtree drop,
-    /// docs/impl/region-model.md § "Adoption and subtree drop"). For a region with no
+    /// docs/impl/region/ownership.md § "Adoption and subtree drop"). For a region with no
     /// owned children this is an ordinary single-region free; for an owner it frees
     /// the whole subtree, interior reference cycles included.
     ///
     /// **Phased, so the debug oracle never reads a freed sibling.** The production
     /// frontier comes from each member's recorded `outgoing` edge table
-    /// (docs/impl/region-model.md § "The outgoing edge table"), so reclamation derefs
+    /// (docs/impl/region/ownership.md § "The outgoing edge table"), so reclamation derefs
     /// **no** heap page. In debug builds an equivalence oracle additionally scans member
     /// contents (`find_region_cross_refs` → `region_of_page_ptr`, which derefs each
     /// pointer's page) and asserts it matches the table; that scan must run while all
@@ -27,8 +27,12 @@ impl RegionStore {
     ///    `(push a b)(push b a)` knot) never reads a sibling's returned page.
     /// 3. **Tear down** every member's pages and bump its generation (a later stale
     ///    deref detonates at the next debug `region_of`), recycling the id.
-    /// 4. **Cascade** the collected Shared-frontier refs once — their pages lie outside
-    ///    the subtree, untouched by the teardown.
+    ///
+    /// Steps 1–3 are [`Self::teardown_set`], which returns the Shared frontier rather than
+    /// freeing it. [`Self::free_region_set`] then **cascades** those refs iteratively — a
+    /// frontier ref that reaches rc 0 becomes another set fed back through the same three
+    /// steps — so a deep chain of cross-region references frees in O(1) native stack (their
+    /// pages lie outside the subtree, untouched by the teardown).
     ///
     /// Production reads no page to discover an edge; the only page reads are the debug
     /// oracle's scan (phase 2) and teardown (phase 3), both before any sibling's pages
@@ -48,23 +52,78 @@ impl RegionStore {
     /// the same wholesale drop, freed at the group's collective last use regardless of its
     /// reference count. Interior member↔member references resolve to unindexed siblings in
     /// phase 2 and are dropped (the cycle reclaims with the group, which per-region RC
-    /// cannot do — region-rules.md Rule 8); genuinely-Shared frontier references cascade
+    /// cannot do — region/rules.md Rule 8); genuinely-Shared frontier references cascade
     /// once. Pinned by `free_region_group_reclaims_bare_cycle` (`regionstore::tests`).
     pub(crate) fn free_region_group(&mut self, members: &[RuntimeRegion]) -> usize {
         self.free_region_set(members, None)
     }
 
-    /// The four-phase wholesale free shared by single-root subtree drop
+    /// The wholesale free shared by single-root subtree drop
     /// ([`free_runtime_region_pages`]) and co-owned group drop ([`free_region_group`]):
-    /// `roots` seeds the collection — one region for a subtree, the whole member set for a
-    /// group. The phase split (unindex all, then frontier-from-table, then tear down) is
-    /// what lets the debug oracle's content scan never read a freed sibling; see the body
-    /// comments.
+    /// `roots` seeds the first tear-down — one region for a subtree, the whole member set
+    /// for a group.
+    ///
+    /// **Iterative cascade, not recursive.** Tearing a set down ([`Self::teardown_set`])
+    /// yields a frontier of genuinely-Shared cross-region references to decref; a frontier
+    /// reference that reaches rc 0 is itself a new set to tear down, whose frontier feeds
+    /// the same loop. Driving that with a heap worklist (rather than
+    /// `teardown → decref → free → teardown` native recursion) frees a chain of N
+    /// cross-region references — a long list, a deeply-nested structure, `(apply concat
+    /// <thousands-of-chunks>)` — in O(1) native stack instead of one frame per link.
+    /// Pinned by `deep_cascade_chain_does_not_overflow_stack` (`regionstore::tests`) and
+    /// `tests/elle/region-deep-chain.lisp`.
+    ///
+    /// A cascaded free's set is a single Counted region that just hit rc 0, so re-tearing
+    /// an already-unindexed root is a harmless no-op ([`Self::teardown_set`] phase 1 skips
+    /// an absent slot); the rc bookkeeping guarantees each region is enqueued exactly once
+    /// under balanced accounting.
     fn free_region_set(
         &mut self,
         roots: &[RuntimeRegion],
         from_cascade: Option<RuntimeRegion>,
     ) -> usize {
+        let mut freed = 0;
+        // Each item is a set to tear down and the cascade source that reached it
+        // (`from_cascade`, carried only for the free-log label). The seed is the caller's
+        // root set; every later item is a single frontier region that reached rc 0.
+        let mut worklist: Vec<(Vec<RuntimeRegion>, Option<RuntimeRegion>)> =
+            vec![(roots.to_vec(), from_cascade)];
+        while let Some((set, fc)) = worklist.pop() {
+            let (set_freed, frontier) = self.teardown_set(&set, fc);
+            freed += set_freed;
+            if frontier.is_empty() {
+                continue;
+            }
+            // The cascade source is a representative root of the set just torn down
+            // (tracing/label only — a group's members are co-equal).
+            let cascade_src = set.first().copied();
+            if crate::config::get().has_trace("rc") {
+                eprintln!("[trace:rc] free_region_set({set:?}) cascade: {frontier:?}");
+            }
+            for ref_id in frontier {
+                if let Some(r) = RuntimeRegion::new(ref_id) {
+                    // Decrement here (no free), and enqueue the region for tear-down only
+                    // if this reference was its last — the loop, not the native stack,
+                    // carries the cascade to the next link.
+                    if self.decref_reaches_zero(r, cascade_src) {
+                        worklist.push((vec![r], cascade_src));
+                    }
+                }
+            }
+        }
+        freed
+    }
+
+    /// Tear down one region set as a unit and return `(objects freed, cascade frontier)`.
+    /// The frontier is the list of genuinely-Shared cross-region references (with
+    /// multiplicity) the caller must decref; it derefs no freed page to produce it. This
+    /// is phases 1–3 of the wholesale free — the free itself of the frontier is the
+    /// caller's iterative concern ([`Self::free_region_set`]).
+    fn teardown_set(
+        &mut self,
+        roots: &[RuntimeRegion],
+        from_cascade: Option<RuntimeRegion>,
+    ) -> (usize, Vec<u32>) {
         // Phase 1 — collect and unindex the owned subtree (roots + transitive
         // owned_children). `seen` guards a member reachable through two owner edges
         // (defensive — the inference adopts each member once). Each entry on the
@@ -93,7 +152,7 @@ impl RegionStore {
                     },
                     "owned-subtree edge inconsistency: region {r} reached as a child of \
                      {expected_owner:?}, but its reclaim mode does not record that owner \
-                     (docs/impl/region-model.md § 'The runtime: a reclamation typestate')",
+                     (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
                 );
                 for &c in &entry.owned_children {
                     stack.push((c, Some(r)));
@@ -103,10 +162,10 @@ impl RegionStore {
             }
         }
         if members.is_empty() {
-            return 0;
+            return (0, Vec::new());
         }
         // Phase 2 — build the cascade frontier from each member's RECORDED `outgoing`
-        // edge table (docs/impl/region-model.md § "The outgoing edge table"), NOT a
+        // edge table (docs/impl/region/ownership.md § "The outgoing edge table"), NOT a
         // content scan. A target unindexed in phase 1 (interior to the freed set) fails
         // `valid_region` and is dropped — reclaimed with the set, never cascaded; a
         // target outside is a genuinely-Shared frontier ref, pushed once per recorded
@@ -162,7 +221,7 @@ impl RegionStore {
                     "outgoing-edge table drift freeing {roots:?}: recorded frontier \
                      {recorded:?} != content scan {scanned:?} — a missed store-funnel \
                      edge (a leak) or a double-record (a UAF) \
-                     (docs/impl/region-model.md § 'The outgoing edge table')",
+                     (docs/impl/region/ownership.md § 'The outgoing edge table')",
                 );
             }
         }
@@ -184,17 +243,8 @@ impl RegionStore {
             self.bump_generation(r.get());
             self.free_physical.push(r.get());
         }
-        // Phase 4 — cascade the genuinely-Shared frontier refs once. The cascade source
-        // is a representative root (tracing only — a group's members are co-equal).
-        let cascade_src = roots.first().copied();
-        if crate::config::get().has_trace("rc") && !frontier.is_empty() {
-            eprintln!("[trace:rc] free_region_set({roots:?}) cascade: {frontier:?}");
-        }
-        for ref_id in frontier {
-            if let Some(r) = RuntimeRegion::new(ref_id) {
-                self.decref_with_cascade(r, cascade_src);
-            }
-        }
-        freed
+        // The genuinely-Shared frontier refs lie outside this subtree, untouched by the
+        // teardown; the caller cascades them iteratively.
+        (freed, frontier)
     }
 }

@@ -2,7 +2,7 @@ use super::*;
 
 // ── "Every region corresponds to a real allocation" tests ──────
 //
-// These pin the rule documented in docs/impl/region-rules.md § "Every region
+// These pin the rule documented in docs/impl/region/rules.md § "Every region
 // must correspond to a real allocation": the regions walk must
 // NOT call alloc_here at HIR nodes the lowerer is transparent for
 // (MakeCell, DerefCell, SetCell) and MUST register call-shaped

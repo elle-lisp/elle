@@ -26,7 +26,7 @@ pub extern "C" fn elle_jit_region_rotate() -> JitValue {
 /// (`elle_jit_resolve_alloc_region`) and slot-resolved `DecrefRegion`s
 /// (`elle_jit_decref_region`) resolve against THIS activation's slot→phys map,
 /// not the caller's. Covers every entry path (top-level, JIT-to-JIT, SCC direct)
-/// because it is part of the compiled function. docs/impl/region-rules.md Rule 4
+/// because it is part of the compiled function. docs/impl/region/rules.md Rule 4
 /// ("per activation").
 #[no_mangle]
 pub extern "C" fn elle_jit_push_region_map(vm: *mut ()) {
@@ -48,7 +48,7 @@ pub extern "C" fn elle_jit_pop_region_map(vm: *mut ()) {
 
 /// Resolve (mint + record in the current activation's slot→phys map) this
 /// allocation's per-slot physical region and return its raw id
-/// (docs/impl/region-ctx.md). The emitter passes the returned id straight to
+/// (docs/impl/region/ctx.md). The emitter passes the returned id straight to
 /// the alloc helper (`elle_jit_pair`, `_make_array`, …) as its explicit region
 /// argument. Mirrors the interpreter's `runtime_region_for_alloc_slot` feeding
 /// the handler an explicit `region_id`.
@@ -63,7 +63,7 @@ pub extern "C" fn elle_jit_resolve_alloc_region(vm: *mut (), slot: u32) -> u32 {
 }
 
 /// Resolve a **merged** slot's per-execution physical region with mint-or-reuse —
-/// the builder-idiom merge runtime (docs/impl/region-model.md § Merging). The
+/// the builder-idiom merge runtime (docs/impl/region/merging.md § Merging). The
 /// emitter calls this instead of `elle_jit_resolve_alloc_region` for a slot it
 /// found in `LirFunction.merged_slots` at compile time, so the first member (the
 /// child) mints `R` and a later member (the parent) reuses it: both land in one
@@ -140,7 +140,7 @@ pub extern "C" fn elle_jit_decref_value_region(tag: u64, payload: u64, vm: *mut 
     let value = Value { tag, payload };
     // The heap is the driving VM's own — threaded explicitly through the helper
     // ABI so two embedded instances each reach their own heap, never a per-thread
-    // slot (docs/impl/region-ctx.md "JIT intrinsic helpers reach the VM").
+    // slot (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM").
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
     if let Some(region) = crate::value::arena::result_region_of(heap, value) {
         heap.decref_region(region);
@@ -231,7 +231,7 @@ pub extern "C" fn elle_jit_adopt_region(
 /// `handle_adopt_cell_region` arm: a `CaptureCell` operand's OWN region is
 /// adopted (never unwrapped to its content), which is what lets the forest own a
 /// capture cell's arena and reclaim a local recursive/letrec closure clique as a
-/// unit (docs/impl/region-model.md § "The capture adopt"). This is the
+/// unit (docs/impl/region/adopt.md § "The capture adopt"). This is the
 /// `region_of`-adopt counterpart of `elle_jit_adopt_region`, exactly as
 /// `elle_jit_decref_cell_region` is the `region_of` counterpart of
 /// `elle_jit_decref_value_region`. An immediate operand (no region) or a self-edge
@@ -268,7 +268,7 @@ pub extern "C" fn elle_jit_adopt_cell_region(
 /// child to its runtime region (`result_region_of`, which unwraps a capture
 /// cell), lazily mint the activation's pages-less owner node, and adopt —
 /// freezing the child's RC so the node's subtree drop at the activation's
-/// normal completion is its sole demise (docs/impl/region-model.md § "Owner
+/// normal completion is its sole demise (docs/impl/region/owner.md § "Owner
 /// nodes — an activation as a forest root"). An immediate child (no region)
 /// adopts nothing and mints no node. The child arrives as an explicit Value
 /// pair (compiled code loads it purely to drive the adopt), not popped off an
@@ -284,7 +284,7 @@ pub extern "C" fn elle_jit_adopt_into_activation(child_tag: u64, child_payload: 
     if let Some(c) = child_region {
         // Idempotent on an already-Owned child, mirroring the interpreter arm:
         // a re-delivered region keeps its first owner instead of tripping the
-        // one-owner adopt assert (docs/impl/region-model.md § "Owner nodes").
+        // one-owner adopt assert (docs/impl/region/owner.md § "Owner nodes").
         if vm.heap().region_is_owned(c) {
             return;
         }

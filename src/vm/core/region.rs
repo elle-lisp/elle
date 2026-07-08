@@ -5,7 +5,7 @@ impl VM {
     /// allocation that has a matching compiler-emitted `DecrefRegion` at its
     /// decref_point (Pair, arrays, structs, closures, capture cells).
     ///
-    /// Tofte-Talpin (docs/impl/region-model.md): **every allocation execution gets
+    /// Tofte-Talpin (docs/impl/region/merging.md): **every allocation execution gets
     /// its own physical region, period** — merging is the only thing that may
     /// collapse regions onto a shared slot, and a merged slot routes through
     /// `runtime_region_for_alloc_slot_maybe_merged` / `_for_merged_alloc_slot`
@@ -41,7 +41,7 @@ impl VM {
         phys
     }
     /// Resolve a static region slot for an allocation, honoring builder-idiom
-    /// **merging** (docs/impl/region-model.md § Merging).
+    /// **merging** (docs/impl/region/merging.md § Merging).
     ///
     /// For a slot NOT in `merged_slots` this is exactly
     /// [`Self::runtime_region_for_alloc_slot`] — mint a fresh physical region
@@ -79,7 +79,7 @@ impl VM {
     /// `runtime_region_for_alloc_slot_maybe_merged`. The single `DecrefRegion` at the
     /// merged root's `decref_point` clears the slot each loop iteration
     /// (`take_runtime_region_for_drop_slot`), preserving per-iteration uniqueness.
-    /// (docs/impl/region-model.md § Merging, mint-or-reuse.)
+    /// (docs/impl/region/merging.md § Merging, mint-or-reuse.)
     #[inline]
     pub(crate) fn runtime_region_for_merged_alloc_slot(
         &mut self,
@@ -152,7 +152,7 @@ impl VM {
         let (bits, value) = {
             // The native-call capability: this call's fresh result region, the
             // VM's heap, and the driving VM itself, so the primitive can reach
-            // VM state / re-enter through `ctx.vm()` (docs/impl/region-ctx.md).
+            // VM state / re-enter through `ctx.vm()` (docs/impl/region/ctx.md).
             let vm_ptr: *mut VM = self as *mut VM;
             let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
                 alloc_region,
@@ -170,7 +170,7 @@ impl VM {
             // `Value::struct_from`, …). Build it through THIS call's `ctx` so the
             // answer is born in `alloc_region`, the call's own region, like any
             // native result (Rule 3: values are born in their solver-assigned
-            // region; docs/impl/region-rules.md). The escape/skip accounting below
+            // region; docs/impl/region/rules.md). The escape/skip accounting below
             // then treats it exactly as a native result: a fresh answer lives in
             // `alloc_region` (skip), a pass-through answer (`fiber/self`) lives
             // elsewhere and is retained. Building it in any region but this call's
@@ -189,7 +189,7 @@ impl VM {
                 (bits, value)
             }
         };
-        // The declaration oracle (docs/impl/region-effects.md "Native region effects"):
+        // The declaration oracle (docs/impl/region/effects.md "Native region effects"):
         // in debug builds, check the declared RegionEffect's result-side
         // claim against where the result actually lives, on every normally-
         // completing native call. A mis-declared primitive panics
@@ -211,7 +211,7 @@ impl VM {
                 RegionEffect::Immediate => assert!(
                     result_region.is_none(),
                     "primitive `{}` declares RegionEffect::Immediate but returned \
-                     a heap value in {:?} (declaration oracle; docs/impl/region-effects.md \
+                     a heap value in {:?} (declaration oracle; docs/impl/region/effects.md \
                      \"Native region effects\")",
                     def.name,
                     result_region,
@@ -221,7 +221,7 @@ impl VM {
                         result_region.is_none() || fresh,
                         "primitive `{}` declares RegionEffect::{:?} but returned a \
                      non-fresh heap value in {:?}, not this call's own region \
-                     {:?} (declaration oracle; docs/impl/region-effects.md \"Native region \
+                     {:?} (declaration oracle; docs/impl/region/effects.md \"Native region \
                      effects\")",
                         def.name,
                         def.effect,
@@ -233,7 +233,7 @@ impl VM {
                     !fresh,
                     "primitive `{}` declares RegionEffect::PassThrough but \
                      returned a value freshly allocated in this call's own \
-                     region {:?} (declaration oracle; docs/impl/region-effects.md \"Native \
+                     region {:?} (declaration oracle; docs/impl/region/effects.md \"Native \
                      region effects\")",
                     def.name, alloc_region,
                 ),
@@ -269,7 +269,7 @@ impl VM {
     /// Resolve a static slot to the physical region it currently maps to in this
     /// activation, WITHOUT minting or clearing — the read a closure-cycle
     /// merged-arena tail-call adopt needs (`TailCall::adopt_region_slot`,
-    /// docs/impl/region-model.md § The letrec closure-cycle merge).
+    /// docs/impl/region/letrec.md § The letrec closure-cycle merge).
     ///
     /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping
     /// in place: the arena is handed to the completing activation's
@@ -302,7 +302,7 @@ impl VM {
             .and_then(|frame| frame.remove(&static_id.get()))
     }
     /// Push a fresh region-remap frame on closure entry, with its (empty)
-    /// parallel owner-node slot (docs/impl/region-model.md § "Owner nodes").
+    /// parallel owner-node slot (docs/impl/region/owner.md § "Owner nodes").
     #[inline]
     pub(crate) fn push_activation_region_map(&mut self) {
         self.fiber
@@ -324,7 +324,7 @@ impl VM {
     /// parked frame (`BytecodeFrame::activation_owner_node`) — `None` when the
     /// activation had not adopted — so the resumed body's normal completion
     /// frees it through the trampoline's clean break
-    /// (docs/impl/region-model.md § "Owner nodes").
+    /// (docs/impl/region/owner.md § "Owner nodes").
     #[inline]
     pub(crate) fn restore_activation_region_map(
         &mut self,
@@ -335,7 +335,7 @@ impl VM {
         self.fiber.activation_owner_nodes.push(owner_node);
     }
     /// The current activation's owner node — the pages-less forest root
-    /// `AdoptIntoActivation` adopts members into (docs/impl/region-model.md
+    /// `AdoptIntoActivation` adopts members into (docs/impl/region/owner.md
     /// § "Owner nodes — an activation as a forest root") — minted lazily on
     /// first use so an activation that adopts nothing pays nothing. The slot
     /// parallels the activation's region-remap frame
@@ -371,7 +371,7 @@ impl VM {
     /// completion on every tier — the interpreter trampoline's clean break and
     /// the compiled `Return` path (`elle_jit_release_activation_owner_node`) —
     /// never from an emitted drop instruction
-    /// (docs/impl/region-model.md § "Owner nodes").
+    /// (docs/impl/region/owner.md § "Owner nodes").
     pub(crate) fn release_activation_owner_node(&mut self) {
         if let Some(node) = self.take_activation_owner_node() {
             self.heap().decref_region_if_present(node);
@@ -412,7 +412,7 @@ impl VM {
     }
 }
 
-// ── The declaration oracle (docs/impl/region-effects.md "Native region effects") ──
+// ── The declaration oracle (docs/impl/region/effects.md "Native region effects") ──
 //
 // A `RegionEffect` declaration is a soundness claim; these tests pin that
 // a primitive whose result contradicts its declaration panics

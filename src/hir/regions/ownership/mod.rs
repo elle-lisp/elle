@@ -67,7 +67,7 @@
 //! ## The consumer — externally-unique Owned subtrees
 //!
 //! [`compute_owned_subtrees`] is the consumer of the seed set (external uniqueness;
-//! docs/impl/region-model.md § "Adoption and subtree drop"). It walks the region containment graph
+//! docs/impl/region/ownership.md § "Adoption and subtree drop"). It walks the region containment graph
 //! outward from each candidate root and reports the subtrees that are **externally
 //! unique**: no value inside crosses a frontier (none is a Shared seed) and no region
 //! *outside* the subtree references one *inside*. Such a subtree is an Owned candidate
@@ -93,14 +93,14 @@
 //!    `%array-push`/`%put` containment under the production (`--checked-intrinsics`)
 //!    path, where the op is an opaque `Funnel` native call that records NO
 //!    `cross_region_refs` edge (the funnel counts the store at runtime; a compile-time
-//!    edge would double-count — region-effects.md § `Funnel`). The walk recovers it
+//!    edge would double-count — region/effects.md § `Funnel`). The walk recovers it
 //!    from the container argument's `RetType` (`MutableArray`/`MutableStruct`), so the
 //!    forest sees the same containment checked-on as checked-off, with no incref. The
 //!    same `containment_edges` vector ALSO carries a `Fresh` native's **embed**
 //!    containment `result ⊇ arg` (`PrimitiveDef::embeds`, recorded by the walk's `Fresh`
 //!    arm — `with-traits`'s `traits` side-field), the compile-time analog of the runtime
 //!    alloc-scan; consumed here identically to the funnel-recovered edges
-//!    (region-effects.md § `Fresh`).
+//!    (region/effects.md § `Fresh`).
 //!
 //! [`compute_owned_subtrees`] is wrapped by [`compute_adopt_edges`], which
 //! `analyze_regions_with` calls unconditionally to populate
@@ -115,14 +115,14 @@
 //! `analyze_regions_with` suppresses its decref so the closure's subtree drop is its
 //! single reclamation path). The capture emit covers **every** capture kind — a direct
 //! local reloaded from its binding slot, an upvalue/transitive capture from the
-//! constructing function's environment (region-model.md § "The capture adopt") — so no
+//! constructing function's environment (region/adopt.md § "The capture adopt") — so no
 //! lowerability refusal exists; the lifetime obligation alone bounds admission, and it
 //! refuses the cross-activation (upvalue) family by construction until an owner that
 //! outlives every capturer exists. The store-keyed path carries the same checked-on
 //! face itself — the **funnel adopt**: a funnel-recovered `containment_edges` edge
 //! (site-keyed at its funnel call) is an emittable interior owner-edge wherever the
 //! site is a retaining store recording the member, so a funnel-built subtree adopts
-//! identically on the production path (region-model.md § "The funnel adopt — the
+//! identically on the production path (region/adopt.md § "The funnel adopt — the
 //! checked-on store face"), so the forest reclaims on the checked-on (native-Call)
 //! default as well as the intrinsic path. The owner-node cuts sit beside
 //! these region-rooted modes: the capture-back-edge SCC (`compute_activation_adopts`)

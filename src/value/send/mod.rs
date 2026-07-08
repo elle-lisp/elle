@@ -73,7 +73,7 @@ pub struct SendableClosure {
     /// has empty `env`/`squelch_mask` — a blueprint is a pure template.
     pub child_protos: Vec<SendableClosure>,
     /// The static region slots this code object's allocations SHARE after a
-    /// builder-idiom merge (`ClosureTemplate.merged_slots`; docs/impl/region-model.md
+    /// builder-idiom merge (`ClosureTemplate.merged_slots`; docs/impl/region/merging.md
     /// § Merging), serialized so the worker mint-or-reuses them and its region count
     /// matches the sender's. Empty unless a merge fired.
     pub merged_slots: Vec<u32>,

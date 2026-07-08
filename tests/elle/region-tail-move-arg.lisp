@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Counterfactual: a value whose last use is a TAIL-CALL ARGUMENT leaks (the
-# owned-params calling convention — docs/impl/region-rules.md Rule 5).
+# owned-params calling convention — docs/impl/region/rules.md Rule 5).
 #
 # The law (verified): a heap value BOUND IN A SCOPE leaks iff that scope's last
 # expression is a tail call AND the value is passed as an argument to it. The
@@ -10,7 +10,7 @@
 # whole run, so freeing first is a use-after-free. The only leak-free AND
 # UAF-free resolution is ownership MOVE: the caller pure-moves the arg into the
 # tail callee (no incref, no caller release), and the callee releases it at the
-# param's last use (the owned-params calling convention). docs/impl/region-rules.md Rule 8.
+# param's last use (the owned-params calling convention). docs/impl/region/rules.md Rule 8.
 #
 # This file pins the CLOSURE-tail case for three value kinds the calling
 # convention can produce — a value built in the body, the rest-arg list, and the

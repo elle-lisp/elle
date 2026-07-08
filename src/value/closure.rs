@@ -73,7 +73,7 @@ pub struct ClosureTemplate {
     /// (the common case). Every slot is ≥ 2 (slot 1 is reserved and never minted).
     pub region_table: Vec<StaticRegion>,
     /// The static region slots this function's allocations SHARE after a
-    /// builder-idiom merge (docs/impl/region-model.md § Merging), cloned from its
+    /// builder-idiom merge (docs/impl/region/merging.md § Merging), cloned from its
     /// `LirFunction` and threaded into the executing `Code` (`code()`), where the
     /// alloc dispatch consults it for mint-or-reuse. Empty unless a merge fired,
     /// so byte-identical to the plain mint on the default path.

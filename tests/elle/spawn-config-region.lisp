@@ -7,7 +7,7 @@
 # the call's solver-assigned region (Rule 3 — values are born in their own
 # region), like any native-call result. The defect resolved the query in the
 # caller's `SignalAction::Query` arm, where the active region is the ambient TLS
-# region — which docs/impl/region-rules.md reserves for the opaque-native-fn placeholder,
+# region — which docs/impl/region/rules.md reserves for the opaque-native-fn placeholder,
 # "no business holding a compiler-known [VM-built] value".
 #
 # On the main thread that was benign: the ambient holds only strays, so the
@@ -20,7 +20,7 @@
 # never alloc_in_region'd` phantom/double-free panic).
 #
 # The fix is in the VM (`dispatch_native_call`): resolve SIG_QUERY inside the
-# call's region. See docs/impl/region-model.md § "Constants lower as ordinary
+# call's region. See docs/impl/region/model.md § "Constants lower as ordinary
 # allocations" (the ambient TLS is the opaque-call placeholder) and Rule 3.
 
 # Heavy worker (sys/spawn, runs init_stdlib): drain the ambient region with many

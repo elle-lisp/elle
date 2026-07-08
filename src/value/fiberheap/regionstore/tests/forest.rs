@@ -2,7 +2,7 @@ use super::*;
 
 // ── The ownership forest: adoption + subtree drop ───────────────────────────
 //
-// docs/impl/region-model.md § "Adoption and subtree drop". `adopt_region(parent,
+// docs/impl/region/ownership.md § "Adoption and subtree drop". `adopt_region(parent,
 // child)` links `child` as an Owned member of `parent`'s subtree, freezing the
 // child's RC (owned ⇒ RC frozen). Freeing the root subtree-drops every owned
 // member recursively — the structural reclamation the per-region RC cascade
@@ -57,7 +57,7 @@ fn owned_child_rc_is_frozen() {
 /// **no independent reference count** — the count is *consumed* by the move into the
 /// owner's subtree, so "owned-and-RC'd" (a region a stray decref could free out from
 /// under the owner's subtree drop) is unrepresentable, not merely guarded
-/// (docs/impl/region-model.md § "The runtime: a reclamation typestate"). `rc` of an
+/// (docs/impl/region/ownership.md § "The runtime: a reclamation typestate"). `rc` of an
 /// `Owned` region therefore reads 0. Counterfactual: the prior `rc:u32 + owner:Option`
 /// pair left the scope count (1) in place after adoption, so this read 1.
 #[test]
@@ -280,7 +280,7 @@ fn subtree_drop_cascades_shared_frontier_not_interior_cycle() {
 }
 
 /// An owner NODE — a pages-less region minted purely as a forest root, with no
-/// allocation ever targeting it (docs/impl/region-model.md § "Owner nodes — an
+/// allocation ever targeting it (docs/impl/region/owner.md § "Owner nodes — an
 /// activation as a forest root") — adopts members exactly as a pages-owning
 /// parent does, and its single decref subtree-drops them all. Pins the owner-node
 /// substrate: `adopt_region` `ensure`s the node's (empty) entry, the members move
@@ -324,7 +324,7 @@ fn pages_less_owner_node_subtree_drops_members() {
 
 /// An interior reference cycle whose members are adopted by a pages-less owner
 /// node reclaims with the node's drop — the `(push a b)(push b a)` knot per-region
-/// RC cannot collect (region-rules.md Rule 8), rooted at an owner that owns no
+/// RC cannot collect (region/rules.md Rule 8), rooted at an owner that owns no
 /// pages itself. The frozen member RCs absorb the cascade's interior decrefs and
 /// the node's single decref frees the whole set.
 #[test]
@@ -367,7 +367,7 @@ fn interior_cycle_in_owner_node_reclaims() {
 }
 
 /// `reparent_owned_children` hands the whole owned set to a new owner — the
-/// ownership-TRANSFER primitive (docs/impl/region-model.md § "The runtime: a
+/// ownership-TRANSFER primitive (docs/impl/region/ownership.md § "The runtime: a
 /// reclamation typestate"). Move-only: after the transfer the old owner's drop
 /// frees only itself (the members survive it), and the new owner's drop frees
 /// every member. Each moved child is re-stamped to record the new owner, so the
@@ -422,7 +422,7 @@ fn reparent_owned_children_moves_the_set() {
 /// The terminal-fiber-teardown shape: two owner nodes' member sets gathered
 /// under one pages-less node (the fiber node), each emptied node freed, and the
 /// gathering node's single decref reclaiming the whole set as ONE subtree drop
-/// (docs/impl/region-model.md § "Owner nodes" — "Fiber teardown frees everything
+/// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees everything
 /// the fiber owns").
 #[test]
 fn reparent_gathers_owned_sets_under_pages_less_node() {
@@ -504,7 +504,7 @@ fn reparent_degenerate_cases_are_noops() {
 
 /// Subtree drop bumps each freed child's generation, exactly as an ordinary
 /// RC-zero free does — so a stale pointer into a subtree-dropped child detonates
-/// at the next debug `region_of` (docs/impl/region-generations.md), not silently.
+/// at the next debug `region_of` (docs/impl/region/generations.md), not silently.
 #[test]
 fn subtree_drop_bumps_owned_child_generation() {
     let mut store = RegionStore::default();

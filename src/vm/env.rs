@@ -102,7 +102,7 @@ impl VM {
     ///
     /// The env values `populate_env` itself constructs (capture cells, rest-list
     /// conses, captured-local cells, `&keys`/`&named` structs) each get their
-    /// OWN fresh per-execution region via `env_value_region` (docs/impl/region-rules.md
+    /// OWN fresh per-execution region via `env_value_region` (docs/impl/region/rules.md
     /// Rule 6, no commingling). `populate_env` allocates every env value through
     /// an explicit region (`env_value_region`/`alloc_in_region`), so no region is
     /// established here.
@@ -375,7 +375,7 @@ impl VM {
         // `fiber.signal`, read later via `fiber/value`/propagation. An error
         // born in `sr` would point into a freed (and recycled) region — a stale
         // deref the region-generation guard catches under `protect`/`fiber`
-        // (docs/impl/region-generations.md). The error is instead set AFTER the
+        // (docs/impl/region/generations.md). The error is instead set AFTER the
         // alloc-region bracket closes, so it is born in its own durable region
         // (`heap.new_runtime_region()`) — like every other param-binding error
         // (e.g. `check_arity`) — which survives until the fiber dies.

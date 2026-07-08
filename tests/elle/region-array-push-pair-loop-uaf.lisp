@@ -7,7 +7,7 @@
 # store-adopted member of its Owned subtree (`AdoptRegion(container, pair)` at the
 # push). The container's subtree drop is the pair's demise, and the pair keeps its
 # OWN `DecrefRegion` — a structural no-op only while the pair is still `Owned`, so it
-# must fire BEFORE that drop (docs/impl/region-model.md § "The lifetime obligation the
+# must fire BEFORE that drop (docs/impl/region/adopt.md § "The lifetime obligation the
 # root carries"). At the let-body the pair's `decref_point` coincides with the
 # container's: the container is freed by TWO releases there — its holder-binding release
 # AND the discarded pass-through result of `%array-push` (which returns its container).

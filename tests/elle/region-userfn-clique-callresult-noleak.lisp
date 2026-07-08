@@ -1,6 +1,6 @@
 (elle/epoch 12)
 # Counterfactual for the user-fn side of the hard-edge rule
-# (docs/impl/region-effects.md "Hard edges: how a may-store edge is emitted").
+# (docs/impl/region/effects.md "Hard edges: how a may-store edge is emitted").
 #
 # An opaque USER-FN call site (callee effect unknowable — here the
 # stdlib `put` wrapper, whose `& rest` defeats inlining) records the

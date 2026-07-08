@@ -73,7 +73,7 @@ pub fn analyze_regions_with(
     // values over time; no single static program point names "the value's last
     // use", so a static last-use `decref_point` against the cell is a category
     // error (it mis-targets whatever the slot holds at that point — the read
-    // UAF). Model the cell as a 1-slot mutable container instead (docs/impl/region-bindings.md
+    // UAF). Model the cell as a 1-slot mutable container instead (docs/impl/region/bindings.md
     // Rule 5): `lower_assign` increfs the new content on store and decrefs the
     // displaced content on overwrite, so each value's region reaches 0 exactly
     // when the cell stops holding it — the next overwrite, or, for the final
@@ -108,7 +108,7 @@ pub fn analyze_regions_with(
         }
         let sole_held = |b: Binding, r: Region| -> bool { region_holders.sole_held(b, r) };
         // ── Returned-value exclusion ────────────────────────────────────────
-        // (docs/impl/region-bindings.md "Reassigned mutable bindings are 1-slot
+        // (docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
         // containers".) The container model claims each value region's single
         // compiler-owned reference for the cell (released by drop-on-overwrite
         // or frame/scope teardown) and suppresses the region's ordinary decref.
@@ -137,7 +137,7 @@ pub fn analyze_regions_with(
                 .get(b)
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
-            // Backstop (docs/impl/region-bindings.md "a mutated slot is not a
+            // Backstop (docs/impl/region/bindings.md "a mutated slot is not a
             // release route"), recorded UNCONDITIONALLY — before the
             // sole/returned gate. A top-level (file-letrec) reassigned binding's
             // slot is overwritten over time, so a value-routed release
@@ -195,7 +195,7 @@ pub fn analyze_regions_with(
             // drop-on-overwrite is its sole release and NO incref-on-store is added.
             // `donated_overwrite_sites` carries that to `lower_assign` — without it
             // an unbalanced incref holds every displaced prior to teardown
-            // (docs/impl/region-bindings.md "Reassigned mutable bindings are 1-slot
+            // (docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
             // containers"). The fn-local loop deliberately does NOT mark its
             // sites here (its assign-value decref is kept, balancing the incref).
             for &s in sites {
@@ -238,7 +238,7 @@ pub fn analyze_regions_with(
         // duplicate. SOLE-HELD gates this, as for the top-level path.
         //
         // The gate is sole-held AND not-returned, as for the top-level path
-        // (`returned_regions` above; docs/impl/region-bindings.md "Reassigned mutable
+        // (`returned_regions` above; docs/impl/region/bindings.md "Reassigned mutable
         // bindings are 1-slot containers"). Distinct mechanism: a `@`-mutable PARAMETER
         // (a captured cell the callee owns) reassigned then moved into a tail call is
         // released by the callee's own cell `DecrefCellRegion`, and the tail move's
@@ -412,7 +412,7 @@ pub fn analyze_regions_with(
     // the value-binding rule the `capture_loop_ext` "bound outside" guard
     // enforces: a value bound INSIDE a loop is re-allocated per iteration and its
     // release must stay per-iteration, but an env cell's allocation is
-    // loop-independent. See docs/impl/region-bindings.md "Env cells in loops:
+    // loop-independent. See docs/impl/region/bindings.md "Env cells in loops:
     // release once per activation, not per iteration".
     if !info.cell_release_regions.is_empty() {
         let low = compute_subtree_low(hir, &order);
@@ -472,7 +472,7 @@ pub fn analyze_regions_with(
     // value expression's own last read, so a release anchored at the inner
     // read frees the source under the extraction. Bites exactly when no
     // destructured binding is used afterwards — the `&named`-param
-    // prologue with unused params (docs/impl/region-rules.md Rule 4;
+    // prologue with unused params (docs/impl/region/rules.md Rule 4;
     // tests/elle/region-named-param-uaf.lisp, the lib/http2 import segv).
     for (destructure_id, regions) in &destructure_sites {
         let lu = *destructure_id;
@@ -506,7 +506,7 @@ pub fn analyze_regions_with(
     info.branch_compensation = branch_comp.head;
     info.branch_arm_decrefs = branch_comp.tail;
 
-    // The builder-idiom merge seed (docs/impl/region-model.md § Merging). Runs
+    // The builder-idiom merge seed (docs/impl/region/merging.md § Merging). Runs
     // LAST: its coincident-decref_point gate reads the final `region_data`, so it
     // must follow every decref_point post-pass above. The lowerer consumes the
     // resulting `merged_parent` forest through `static_slot`'s `merged_root`
@@ -514,14 +514,14 @@ pub fn analyze_regions_with(
     // identity, i.e. the unmerged baseline.
     info.merged_parent = super::merge::compute_merges(hir, arena, &info, &escape_info, &order);
 
-    // The letrec closure-cycle merge (docs/impl/region-model.md § The letrec
+    // The letrec closure-cycle merge (docs/impl/region/letrec.md § The letrec
     // closure-cycle merge): a self/mutual
     // recursive closure SCC and its prebound capture cells collapse onto one arena,
     // extending the same `merged_parent` forest and riding the same `merged_root`
     // canonicalization as the builder-idiom seed. Unconditional (not flag-gated), so it
     // lands on every tier. The single `DecrefRegion` fires at the root region's
     // `decref_point`, which is set here to the cycle's binding scope — the `letrec`
-    // that prebinds the members' capture cells (region-model.md § The lifetime
+    // that prebinds the members' capture cells (region/adopt.md § The lifetime
     // obligation the root carries). Its scope-exit post-dominates every direct use of
     // the members (they are bound there), while a foreign capture of a member is
     // RC-counted and outlives the single decref. Runs after the builder seed (it
@@ -541,7 +541,7 @@ pub fn analyze_regions_with(
         // strands the binding-scope drop past the frame-replacing `TailCall`; the
         // lowerer keys `adopt_region_slot = static_slot(root)` at each such site so a
         // closure callee's frame replacement is balanced by the activation-completion
-        // adopt (region-model.md § The letrec closure-cycle merge). A member tail
+        // adopt (region/letrec.md § The letrec closure-cycle merge). A member tail
         // keeps its own `stranded_cycle_bindings` channel and is not recorded here.
         for &site in &cm.tail_adopt_sites {
             info.cycle_tail_adopt.insert(site, cm.root);
@@ -554,7 +554,7 @@ pub fn analyze_regions_with(
             });
     }
 
-    // Ownership forest (docs/impl/region-model.md § "Adoption and subtree drop").
+    // Ownership forest (docs/impl/region/ownership.md § "Adoption and subtree drop").
     // Classify externally-unique Owned subtrees and record their interior
     // containment edges as `AdoptRegion` sites (with the lifetime obligation and
     // merge-overlap filters applied). Runs LAST, after the final `region_data`
@@ -565,7 +565,7 @@ pub fn analyze_regions_with(
     // simply stays Shared (the always-legal per-region-RC baseline), so no adopt
     // edge is emitted for it and its emission is the RC baseline by construction.
     let mut adopt = super::ownership::compute_adopt_edges(hir, &info, &escape_info, arena, &order);
-    // The transferred-returned-subtree cut (docs/impl/region-model.md
+    // The transferred-returned-subtree cut (docs/impl/region/owner.md
     // § "Owner nodes" — "The transferred returned subtree"): a producer's
     // externally-unique returned cycle is owned by its CONSUMING activation. Its
     // interior owner edges merge into the ordinary adopt maps here — BEFORE the
@@ -625,7 +625,7 @@ pub fn analyze_regions_with(
     // The activation-owner cut: a capture-back-edge SCC — a container captured by a
     // closure it holds, the cycle no region root can own — is adopted into the
     // executing activation's owner node and freed by its completion release
-    // (docs/impl/region-model.md § "Owner nodes" — "The capture-back-edge SCC").
+    // (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC").
     // Runs LAST among the ownership passes: its disjointness gate reads the merge,
     // adopt, and group claims above. Each member's own compiler decref is suppressed
     // — the node's release is the members' sole demise (the suppress ⊆ adopt

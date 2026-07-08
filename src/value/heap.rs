@@ -289,7 +289,7 @@ pub enum HeapObject {
 
     /// A region-allocated closure **template** (code object). Materialized per
     /// execution by `MakeClosure` from a compile-time blueprint, into the same
-    /// region as the closure instance that references it (docs/impl/region-model.md
+    /// region as the closure instance that references it (docs/impl/region/model.md
     /// § "Constants lower as ordinary allocations" — closure templates are no
     /// exception). Reclaimed by region RC.
     /// Never user-visible: it carries no `traits` and is never compared,

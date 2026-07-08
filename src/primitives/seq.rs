@@ -5,7 +5,7 @@
 //! bytes, @bytes.  Not sets or structs (unordered).
 //!
 //! Every operation that may allocate takes the call's `ctx`
-//! (docs/impl/region-ctx.md): results are born in the caller's region
+//! (docs/impl/region/ctx.md): results are born in the caller's region
 //! (Rule 3), through the allocation capability the primitive wrapper hands
 //! down — the region is named and passed down explicitly.
 use crate::primitives::ctx::NativeCtx;

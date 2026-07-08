@@ -21,7 +21,7 @@ pub enum LirInstr {
     /// `decref_point`, and every escape is tracked by normal RC. The whole
     /// structure shares the one `region` (an immutable aggregate). The `template`
     /// itself stays immutable compile-time data
-    /// (docs/impl/region-model.md § "Constants lower as ordinary allocations").
+    /// (docs/impl/region/model.md § "Constants lower as ordinary allocations").
     MaterializeConst {
         dst: Reg,
         template: crate::value::ConstTemplate,
@@ -98,7 +98,7 @@ pub enum LirInstr {
         /// does NOT replace the frame (a native pushes no bytecode frame), so
         /// the compiler's own post-`TailCall` owned-arg releases must run before
         /// the trailing `Return` — the Inc4 native-tail trick (src/vm/call.rs
-        /// `tail_call_inner`; docs/impl/region-rules.md Rule 8). The JIT binds `dst` to
+        /// `tail_call_inner`; docs/impl/region/rules.md Rule 8). The JIT binds `dst` to
         /// the native's result on that completion path so it can keep
         /// translating those releases instead of returning at the call. The
         /// stack-based interpreter ignores `dst`: a normally-completing native
@@ -124,7 +124,7 @@ pub enum LirInstr {
         adopt_callee: bool,
         /// The static slot of a **closure-cycle merged arena** this letrec body
         /// tail-calls a NON-member out of — set by `lower_call` from
-        /// `RegionInfo::cycle_tail_adopt` (docs/impl/region-model.md § The letrec
+        /// `RegionInfo::cycle_tail_adopt` (docs/impl/region/letrec.md § The letrec
         /// closure-cycle merge). The merged arena's binding-scope `DecrefRegion`
         /// is dead past this frame-replacing `TailCall`, so when the callee turns
         /// out to be a **closure** at runtime (a redefined operator, a foreign
@@ -297,7 +297,7 @@ pub enum LirInstr {
     /// `DecrefValueRegion`: a slot is usable only when the lowerer can name the
     /// region statically (the allocation is local to this function), which is
     /// exactly the precondition compile-time region coalescing harvests
-    /// (docs/impl/region-rules.md § "Compile-time region selection (coalescing)").
+    /// (docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)").
     /// It touches no operand stack.
     IncrefRegion { region_id: StaticRegion },
 
@@ -324,7 +324,7 @@ pub enum LirInstr {
     /// `DecrefValueRegion`, this does NOT see through a `CaptureCell` wrapper —
     /// it frees the CELL's own region. Emitted at a captured (env-allocated)
     /// binding's `decref_point` to release the per-value env cell
-    /// `populate_env` minted for it (docs/impl/region-rules.md Rule 8). Using
+    /// `populate_env` minted for it (docs/impl/region/rules.md Rule 8). Using
     /// `DecrefValueRegion` here would free the inner value's (caller-owned)
     /// region and leak the cell.
     DecrefCellRegion { src: Reg },
@@ -353,12 +353,12 @@ pub enum LirInstr {
     /// region is a known slot, it substitutes the slot-resolved `IncrefRegion`
     /// for this value-resolved mint (one fewer runtime deref, stack-neutral);
     /// the substitution is guarded by `AssertRegionMatches`
-    /// (docs/impl/region-rules.md § "Compile-time region selection (coalescing)").
+    /// (docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)").
     IncrefValueRegion { src: Reg },
 
     /// Link the region of `child` as an **Owned** member of the region of
     /// `parent`'s subtree — the runtime `AdoptRegion` of the ownership forest
-    /// (docs/impl/region-model.md § "Adoption and subtree drop"). Value-resolved,
+    /// (docs/impl/region/ownership.md § "Adoption and subtree drop"). Value-resolved,
     /// like `IncrefValueRegion`/`DecrefValueRegion`: the handler reads both
     /// values, resolves their *runtime* regions (`result_region_of`), and calls
     /// `RegionStore::adopt_region`, which freezes the child's RC. No operand
@@ -382,7 +382,7 @@ pub enum LirInstr {
     /// it does **not** see through a `CaptureCell` wrapper, so it adopts the CELL's
     /// **own** region (the capture-cell↔closure containment the ownership forest
     /// needs to reclaim a local recursive/letrec closure clique as a unit —
-    /// docs/impl/region-model.md § "The capture adopt"). `AdoptRegion` would unwrap a
+    /// docs/impl/region/adopt.md § "The capture adopt"). `AdoptRegion` would unwrap a
     /// cell operand to its content (a self-edge no-op for `cell ⊇ content`, and the
     /// content — skipping the cell — for `closure ⊇ cell`), so a cell's own region is
     /// otherwise unreachable by any ownership cut (only `DecrefCellRegion` names it).
@@ -419,7 +419,7 @@ pub enum LirInstr {
 
     /// Adopt the region of `child` as an **Owned** member of the CURRENT
     /// ACTIVATION's owner node — the pages-less forest root realizing
-    /// owner = activation (docs/impl/region-model.md § "Owner nodes — an
+    /// owner = activation (docs/impl/region/owner.md § "Owner nodes — an
     /// activation as a forest root"). Value-resolved like `AdoptRegion`
     /// (`result_region_of` unwraps a capture cell) but carrying NO parent
     /// operand and NO static slot: the parent is the executing activation's
@@ -438,7 +438,7 @@ pub enum LirInstr {
     /// summarized producer's consumer sites — `RegionInfo::transfer_adopt_regions`,
     /// where this replaces the result's `DecrefValueRegion`). The handlers are
     /// idempotent on an already-Owned child (a re-delivered region keeps its
-    /// first owner — docs/impl/region-model.md § "Owner nodes").
+    /// first owner — docs/impl/region/owner.md § "Owner nodes").
     AdoptIntoActivation { child: Reg },
 
     /// Debug-only equivalence oracle for compile-time region coalescing: assert
@@ -457,7 +457,7 @@ pub enum LirInstr {
     /// in waiting (its cascade would free a live region); this turns it into a
     /// deterministic panic at the exact instruction, under the trustworthy
     /// guardfree oracle, instead of a later heap corruption (the mirror of the
-    /// native-effect declaration oracle, docs/impl/region-effects.md).
+    /// native-effect declaration oracle, docs/impl/region/effects.md).
     ///
     /// Build/tier behavior: under `debug_assertions` the interpreter performs
     /// the check; in release it reads the slot operand and does nothing (the

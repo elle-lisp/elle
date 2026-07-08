@@ -27,7 +27,7 @@ impl RegionInference {
             // `MaterializeConst` each execution, and is freed at its
             // `decref_point` like any value. Its region flows up so the caller
             // tracks every escape (return/store/capture/call-arg) by normal RC
-            // (docs/impl/region-model.md § "Constants lower as ordinary allocations"). A
+            // (docs/impl/region/model.md § "Constants lower as ordinary allocations"). A
             // quoted aggregate's whole structure shares this one region.
             HirKind::String(_) | HirKind::QuoteConst(_) => {
                 let r = self.alloc_here(hir.id);
@@ -76,7 +76,7 @@ impl RegionInference {
                 // callee releases it at the param's true last use. Mint a
                 // placeholder region per such param and register it in
                 // `call_result_regions`, mirroring the opaque-Call treatment
-                // (docs/impl/region-rules.md Rule 2 "opaque Call"): the lowerer will emit
+                // (docs/impl/region/rules.md Rule 2 "opaque Call"): the lowerer will emit
                 // a value-based `DecrefValueRegion` (reading the param's slot)
                 // at `decref_point`, releasing the arg's *runtime* region —
                 // whatever it turns out to be. Crucially we do NOT `alloc_here`
@@ -143,7 +143,7 @@ impl RegionInference {
                         //     (`(length opts)`): last use is the native tail
                         //     call → dead past `TailCall` → released by the
                         //     native-tail path (Increment 4).
-                        // docs/impl/region-rules.md Rule 8 (the unmodeled env region).
+                        // docs/impl/region/rules.md Rule 8 (the unmodeled env region).
                         // `&keys`/`&named` collect into a single struct; the
                         // variadic rest LIST is built per-cons with ownership
                         // transferred to the HEAD (`args_to_list`), so a single
@@ -186,7 +186,7 @@ impl RegionInference {
                 // Let (`lower_let` wraps each captured binding's init in a
                 // MakeCaptureCell when outside a lambda). A single shared
                 // region slot orphans all but the last minted physical
-                // region — the shared-slot capture-cell leak (docs/impl/region-model.md,
+                // region — the shared-slot capture-cell leak (docs/impl/region/model.md,
                 // "one allocation execution per slot between drops"). The
                 // `!in_lambda` gate mirrors the lowerer exactly: inside a
                 // lambda a captured let binding goes through StoreCapture
@@ -241,7 +241,7 @@ impl RegionInference {
                 // keeps the env-cell route (StoreCapture), so a region here
                 // would be a phantom. One region per cell, never one shared
                 // slot — N cells against one slot orphan all but the last
-                // minted physical region (docs/impl/region-model.md, "one
+                // minted physical region (docs/impl/region/model.md, "one
                 // allocation execution per slot between drops"). Skipped on an
                 // inline re-walk: `try_inline_call` revisits a callee's body
                 // with the CALLER's lambda depth, which would mint duplicate
@@ -501,7 +501,7 @@ impl RegionInference {
         }
     }
 
-    /// The callee's declared `RegionEffect` (docs/impl/region-effects.md "Native
+    /// The callee's declared `RegionEffect` (docs/impl/region/effects.md "Native
     /// region effects"), when the callee is an immutable, unshadowed
     /// binding naming a declared primitive. `None` for unknown callees —
     /// the caller must treat that as `Mixed` (the full arg clique).

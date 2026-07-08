@@ -231,7 +231,7 @@ impl FiberHeap {
     /// Mint a fresh **runtime** region id — a real, pages-owning region in the
     /// per-heap `RegionStore`, minted per allocation execution (recycled on
     /// free). The runtime counterpart of a compile-time `new_static_region`
-    /// slot; the two id-spaces are distinct (see docs/impl/region-model.md § id-spaces).
+    /// slot; the two id-spaces are distinct (see docs/impl/region/model.md § id-spaces).
     pub fn new_runtime_region(&mut self) -> RuntimeRegion {
         self.region_store.new_runtime_region()
     }
@@ -259,7 +259,7 @@ impl FiberHeap {
 
     /// Record an outgoing content edge `src → dst` — the mutable-store seam's and
     /// fiber-signal funnel's hook into the §"The outgoing edge table" recorded table
-    /// (docs/impl/region-model.md). `src` is the container/fiber's region, `dst` the
+    /// (docs/impl/region/ownership.md). `src` is the container/fiber's region, `dst` the
     /// stored value's; an immediate value (no region, `None`) or absent source is a
     /// no-op, and the reserved/self filter lives in `RegionStore::record_outgoing`.
     pub fn record_outgoing_edge(&mut self, src: Option<RuntimeRegion>, dst: Option<RuntimeRegion>) {
@@ -282,13 +282,13 @@ impl FiberHeap {
 
     /// Whether a region is currently an Owned forest member — the
     /// `AdoptIntoActivation` handlers' idempotence check (a re-delivered region
-    /// keeps its first owner; docs/impl/region-model.md § "Owner nodes").
+    /// keeps its first owner; docs/impl/region/owner.md § "Owner nodes").
     pub fn region_is_owned(&self, id: RuntimeRegion) -> bool {
         self.region_store.region_is_owned(id)
     }
 
     /// Link `child`'s region as an Owned member of `parent`'s region's subtree —
-    /// the runtime `AdoptRegion` of the ownership forest (docs/impl/region-model.md
+    /// the runtime `AdoptRegion` of the ownership forest (docs/impl/region/ownership.md
     /// § "Adoption and subtree drop"). Delegates to the region store, which freezes
     /// the child's RC so it is reclaimed only by `parent`'s subtree drop.
     pub fn adopt_region(&mut self, parent: RuntimeRegion, child: RuntimeRegion) {
@@ -296,7 +296,7 @@ impl FiberHeap {
     }
 
     /// Hand every owned child of `from` to `to` — the ownership-transfer primitive
-    /// of the forest (docs/impl/region-model.md § "The runtime: a reclamation
+    /// of the forest (docs/impl/region/ownership.md § "The runtime: a reclamation
     /// typestate"). Move-only: each child is re-stamped to record `to` as its
     /// owner, so one set-drop at `to`'s demise reclaims them all.
     pub fn reparent_owned_children(&mut self, from: RuntimeRegion, to: RuntimeRegion) {
@@ -313,7 +313,7 @@ impl FiberHeap {
     }
 
     /// Open a closed-scope mint log around a macro expansion
-    /// (docs/impl/region-rules.md § "Macro expansion — a closed allocation
+    /// (docs/impl/region/rules.md § "Macro expansion — a closed allocation
     /// scope"). Pair with `reclaim_macro_scope`.
     pub fn begin_region_mint_log(&mut self) {
         self.region_store.begin_mint_log();
@@ -333,7 +333,7 @@ impl FiberHeap {
     }
 
     /// Region id stamped on the page `ptr` points into (0 = no region page),
-    /// with the debug-build stale-deref generation check (docs/impl/region-generations.md
+    /// with the debug-build stale-deref generation check (docs/impl/region/generations.md
     /// § "Region generations"). The backend of `arena::region_of`.
     pub fn region_of_ptr(&self, ptr: *const ()) -> u32 {
         self.region_store.region_of_ptr(ptr)
@@ -352,7 +352,7 @@ impl FiberHeap {
         self.region_store.outgoing_edges(id)
     }
 
-    /// Current generation of a physical region id (docs/impl/region-generations.md
+    /// Current generation of a physical region id (docs/impl/region/generations.md
     /// § "Region generations"). The companion to `region_of_ptr` for the
     /// uncounted-borrow check: a reference that snapshots `(region, generation)`
     /// where it is established dangles once this value moves (the region's pages

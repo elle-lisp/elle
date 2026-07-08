@@ -24,7 +24,7 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 use rustc_hash::FxHashMap;
 
-/// How a live region is reclaimed — a **typestate** (docs/impl/region-model.md
+/// How a live region is reclaimed — a **typestate** (docs/impl/region/ownership.md
 /// § "The runtime: a reclamation typestate"), not an `(rc, owner)` pair. A region
 /// is reclaimed *exactly one way*, and the two ways are mutually exclusive
 /// variants, so **owned-and-RC'd** — a region carrying both a live count and an
@@ -55,7 +55,7 @@ struct RegionEntry {
     /// node of a deep subtree is itself `Owned` *and* has `owned_children`.
     owned_children: Vec<RuntimeRegion>,
     /// Outgoing cross-region reference edges from this region: `target → count`
-    /// (docs/impl/region-model.md § "The outgoing edge table"). The *content*
+    /// (docs/impl/region/ownership.md § "The outgoing edge table"). The *content*
     /// edges — a `Value` in this region's heap objects pointing into another
     /// region — recorded at creation (the alloc funnel + the mutable-store seam +
     /// the fiber terminal-signal funnel) so reclamation walks this table
@@ -96,7 +96,7 @@ pub(crate) struct RegionStore {
     /// the `regions` Vec bounded by the max *concurrently-live* region count
     /// even though allocation mints a fresh region per execution.
     free_physical: Vec<u32>,
-    /// Per-physical-id generation counter (docs/impl/region-generations.md § "Region
+    /// Per-physical-id generation counter (docs/impl/region/generations.md § "Region
     /// generations"), indexed like `regions`. Bumped on every path that
     /// returns an id's pages (RC-zero free, wholesale teardown); a recycled
     /// id mints its next region at the bumped generation. Each claimed page
@@ -111,7 +111,7 @@ pub(crate) struct RegionStore {
     /// generation-compared.
     store_id: u32,
     /// Active mint log for a *closed allocation scope* (macro expansion —
-    /// docs/impl/region-rules.md § "Macro expansion — a closed allocation
+    /// docs/impl/region/rules.md § "Macro expansion — a closed allocation
     /// scope"). When `Some`, every id `new_runtime_region` mints is recorded
     /// with the generation it is about to be stamped at, so the scope's
     /// reclaim pass can balance each surviving region's unexplained references
@@ -130,7 +130,7 @@ mod refcount;
 static NEXT_STORE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
 /// Upper bound on a physically-plausible region id, the `ensure_raw` backstop's
-/// tripwire (docs/impl/region-generations.md § "Region generations"). The region
+/// tripwire (docs/impl/region/generations.md § "Region generations"). The region
 /// table is indexed by id and bounded by the max *concurrently-live* regions —
 /// freed ids recycle through `free_physical`, and static-slot ids are bounded by
 /// the compiler's region-slot count — so a real id stays far below this. An id
@@ -211,7 +211,7 @@ impl RegionStore {
             // read handed back as a region id — a misidentified page base or a
             // stale/foreign read — so detonate here, naming it, instead of
             // resizing the table to ~584 GB and OOM-aborting far from the deref
-            // (docs/impl/region-generations.md § "Region generations").
+            // (docs/impl/region/generations.md § "Region generations").
             assert!(
                 id <= MAX_PLAUSIBLE_REGION_ID,
                 "region id {id} (0x{id:08x}) reaching ensure_raw would grow the \
@@ -220,7 +220,7 @@ impl RegionStore {
                  stale/foreign read) handed back as a region id. The in-situ \
                  detectors are the ownership-validated walk and generation check \
                  in region_of_ptr and --trace=guardfree \
-                 (docs/impl/region-generations.md)",
+                 (docs/impl/region/generations.md)",
                 idx + 1,
             );
             self.regions.resize_with(idx + 1, || None);
@@ -292,7 +292,7 @@ impl RegionStore {
     }
 
     /// Link `child` as an Owned member of `parent`'s subtree — the runtime
-    /// `AdoptRegion` (docs/impl/region-model.md § "Adoption and subtree drop").
+    /// `AdoptRegion` (docs/impl/region/ownership.md § "Adoption and subtree drop").
     /// **Moves** `child` from `Counted` into `Owned`, *consuming* its reference
     /// count: from here the child is reclaimed only by `parent`'s subtree drop
     /// (`free_runtime_region_pages`), never by its own RC reaching zero — there is
@@ -316,7 +316,7 @@ impl RegionStore {
             matches!(c.reclaim, Reclaim::Counted(_)),
             "region {child} adopted while already Owned — a region has at most one \
              owner; owned-and-RC'd is unrepresentable, so a double adoption is a bug \
-             (docs/impl/region-model.md § 'The runtime: a reclamation typestate')",
+             (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
         );
         c.reclaim = Reclaim::Owned { owner: parent };
         self.regions[parent.get() as usize]
@@ -341,7 +341,7 @@ impl RegionStore {
     }
 
     /// Hand `from`'s whole direct `owned_children` set to `to` — the ownership-
-    /// **transfer** primitive of the forest (docs/impl/region-model.md § "The
+    /// **transfer** primitive of the forest (docs/impl/region/ownership.md § "The
     /// runtime: a reclamation typestate"). Each child is re-stamped
     /// `Owned { owner: to }` and the set is appended to `to`'s children: a move,
     /// never a copy, so the forest's forward/back edges stay consistent (the
@@ -375,7 +375,7 @@ impl RegionStore {
                 matches!(entry.reclaim, Reclaim::Owned { owner } if owner == from),
                 "reparent_owned_children({from} -> {to}): child {child} does not \
                  record {from} as its owner — forward/back edge inconsistency \
-                 (docs/impl/region-model.md § 'The runtime: a reclamation typestate')",
+                 (docs/impl/region/ownership.md § 'The runtime: a reclamation typestate')",
             );
             entry.reclaim = Reclaim::Owned { owner: to };
         }
@@ -560,7 +560,7 @@ impl RegionStore {
 
     /// Region id of the page `ptr` points into (0 = not a region page of this
     /// store) — the funnel through which every runtime RC decision classifies a
-    /// value's region (docs/impl/region-generations.md § "Region generations").
+    /// value's region (docs/impl/region/generations.md § "Region generations").
     ///
     /// **Ownership-validated page-base walk.** A variable-sized page's base is
     /// found by masking `ptr` to each candidate power-of-2 alignment and reading
@@ -608,7 +608,7 @@ impl RegionStore {
                          current — region {rid} was freed (and possibly recycled) \
                          after this Value was created; this deref is the \
                          use-after-free site \
-                         (docs/impl/region-generations.md § 'Region generations')",
+                         (docs/impl/region/generations.md § 'Region generations')",
                         stamp.generation,
                     );
                 }

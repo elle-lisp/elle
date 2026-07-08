@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# port/write declares RegionEffect::Immediate (docs/impl/region-effects.md
+# port/write declares RegionEffect::Immediate (docs/impl/region/effects.md
 # "Native region effects"): every non-error path yields an integer byte count
 # — the empty-write short-circuit returns (SIG_OK . 0) directly, and the io
 # completion returns (SIG_OK . result_code). The result is therefore always an
