@@ -173,7 +173,7 @@ JIT helper, and is not gated by `--region-ownership` (it lands on the flag-indep
 onto one `merged_root`; `merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle`
 — the same collapse and binding-scope drop for a letrec that is a lambda body;
 `merge_admits_in_lambda_cycle_with_foreign_tail_callee` and
-`merge_admits_native_tail_checked_on` — a non-member (foreign closure / native) body
+`merge_admits_native_tail` — a non-member (foreign closure / native) body
 tail now MERGES and records `cycle_tail_adopt`;
 `merge_refuses_member_passed_by_move_to_foreign_tail` — the by-move boundary (`(g od)`
 double-free) still refuses; `merge_refuses_escaping_letrec_closure`;
@@ -182,10 +182,9 @@ double-free) still refuses; `merge_refuses_escaping_letrec_closure`;
 and is never a member; `merge_collapses_self_and_sibling_captured_member_cell` — the mixed
 self+sibling-captured member's retained cell still merges), the guardfree fixture
 `region_native_tail_mutual_cycle_uaf` (every non-member tail kind, mixed, and
-per-loop-iteration reclamation, panic-clean under `--trace=guardfree` on both
-`--checked-intrinsics` settings), and
+per-loop-iteration reclamation, panic-clean under `--trace=guardfree`), and
 `runtime::tests::ownership::region_ownership_reclaims_mutual_recursion_closure_cycle`
-(bounded per-run region growth beside a leaking discriminator, at both flag settings), with
+(bounded per-run region growth beside a leaking discriminator), with
 `region_ownership_reclaims_nested_mutual_recursion_per_call` driving the in-lambda cycle
 per call (bounded beside the live-chain discriminator, base case included) and
 `closure_cycle_discarded_release_is_prompt` pinning the binding-scope drop's promptness (a

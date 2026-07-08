@@ -45,9 +45,9 @@ gates, each refusing to Shared (the always-legal baseline):
 
 - **the signature** — a genuine mutual-reach SCC (≥ 2 members) whose interior edges include
   at least one *capture* AND at least one *store* (a non-hard `cross_region_refs` edge, or
-  a funnel-recovered `containment_edges` edge — so the cut admits the checked-on production
-  path, where the store is an opaque `Funnel` call, exactly as it admits the intrinsic
-  path). A capture-only SCC is the letrec closure web (the merge's instrument, or class 4/6
+  a funnel-recovered `containment_edges` edge — so the cut admits the funnel store face,
+  where the store is an opaque `Funnel` call, exactly as it admits a compile-time store
+  edge). A capture-only SCC is the letrec closure web (the merge's instrument, or class 4/6
   admission); a store-only SCC is the co-owned group's;
 - **member gates** — every member ownable (no frontier crossing, no dynamic-lifetime
   class), sole-held, with pairwise-distinct holder bindings (each member must have its own
@@ -77,7 +77,7 @@ RC absorbs the interval — an outside holder's earlier cascade decref just lowe
 the adopt then consumes); from the adopt to the activation's completion they are `Owned`,
 and the node's release frees the cycle wholesale, interior m↔c references reclaiming with
 the set. Pinned by `regions::tests::adopt::activation_adopts_capture_back_edge_scc`
-(rooted and bare shapes, both intrinsic and funnel-recovered stores),
+(rooted and bare shapes, funnel-recovered stores),
 `…::activation_adopt_excludes_other_mechanisms` (merge/group disjointness), and at runtime
 by `runtime::tests::ownership::region_ownership_capture_back_edge_cycle_reclaims`
 (bounded flag-on beside the leaking flag-off counterfactual, panic-clean, on the
@@ -114,8 +114,8 @@ hold uncounted borrows; one inadmissible consumer site refuses the whole callee:
   promptness away). Each non-root member gets its single owner exactly as the store/capture
   adopt assigns one — and, uniquely to this cut, a **funnel-recovered** owner edge is
   emittable too: the adopt is keyed at the funnel *call site* (`funnel_store_sites` joined
-  with `containment_edges`), so the checked-on production path admits identically to the
-  intrinsic path (the value-resolved adopt needs no store opcode).
+  with `containment_edges`), so a funnel-recovered edge admits identically to a
+  compile-time store edge (the value-resolved adopt needs no store opcode).
 - **the consumer gate, at every call site of the summarized callee** — the call's result
   region must cross no frontier, appear in **no** edge of any kind (hard may-stores
   included), belong to no dynamic class, and be **discard-shaped**: no user binding holds
@@ -153,11 +153,10 @@ tier** of the owner lattice is reached structurally, not by a distinct opcode: a
 that parks moves its node into the suspended frame like any activation state, and the
 terminal-fiber teardown gathers parked nodes under the fiber node for one set-drop — the
 transfer runtime below. Pinned by `regions::tests::adopt::transfer_adopts_*` (admission,
-both intrinsic and funnel-recovered faces; the refusal family) and at runtime by
+the funnel-recovered face; the refusal family) and at runtime by
 `runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls`,
 `…_reclaims_fiber_terminal_cycle`, and `…_transfer_adopt_rides_parks_and_fiber_teardown`
-(bounded flag-on beside the leaking flag-off counterfactual, on both `--checked-intrinsics`
-settings and under the JIT).
+(bounded flag-on beside the leaking flag-off counterfactual, under the JIT too).
 
 **Lifecycle.** The node slot is per-activation state carried beside the region-remap frame:
 `Fiber::activation_owner_nodes` parallels `activation_region_maps`, pushed empty on every

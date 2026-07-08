@@ -85,6 +85,7 @@
 (defn gpu-add [a b]
   (silence)
   (muffle :error)
+  (numeric!)
   (%add a b))
 
 (git gpu-add)

@@ -223,10 +223,9 @@ impl<'a> Lowerer<'a> {
     /// tree, one demise at the root"): canonicalizing here is what makes the child
     /// and parent share a physical region at runtime, and what `record_merged_slots`
     /// detects (two regions resolving to one slot) to flag the slot for
-    /// mint-or-reuse. With no merge (`merged_parent` empty — the
-    /// `--checked-intrinsics=on` default has no `Pair` nodes to seed one)
-    /// `merged_root` is the identity and this is the unmerged one-region-per-value
-    /// slot.
+    /// mint-or-reuse. With no merge (`merged_parent` empty — a compile whose
+    /// `%pair` allocation nodes seed no builder idiom) `merged_root` is the
+    /// identity and this is the unmerged one-region-per-value slot.
     ///
     /// Slots are globally unique (via the atomic counter in
     /// `new_static_region`) so that different compilation units never collide

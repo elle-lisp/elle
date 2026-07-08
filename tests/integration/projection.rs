@@ -183,9 +183,12 @@ safe
 #[test]
 fn test_projection_bytecode_field() {
     // compile_file should populate signal_projection on the bytecode.
+    // `(numeric!)` proves the params for the intrinsic operand contract
+    // without adding an :error guard — the projections must stay silent
+    // for the may_suspend assertions below.
     let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
+(defn add [x y] (numeric!) (%add x y))
+(defn double [x] (numeric!) (%mul x 2))
 {:add add :double double}
 "#;
     let mut symbols = SymbolTable::new();

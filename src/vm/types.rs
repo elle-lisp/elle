@@ -268,14 +268,17 @@ pub(crate) fn handle_intr_get(vm: &mut VM) {
         let i = key.as_int().expect("%get: @array index must be int") as usize;
         a.borrow()[i]
     } else if let Some(pairs) = obj.as_struct() {
+        // An unhashable key (a float, a mutable container) is a program bug:
+        // it can never have been stored, so a lookup with one is nonsense
+        // rather than an absent key. Panic — the interpreter contract is that
+        // `%get`'s callers only reach the struct arm with a hashable key.
         let tk = TableKey::from_value(&key).expect("%get: unhashable key");
         crate::value::sorted_struct_get(pairs, &tk)
             .copied()
             .unwrap_or(Value::NIL)
     } else if let Some(t) = obj.as_struct_mut() {
         let tk = TableKey::from_value(&key).expect("%get: unhashable key");
-        let b = t.borrow();
-        b.get(&tk).copied().unwrap_or(Value::NIL)
+        t.borrow().get(&tk).copied().unwrap_or(Value::NIL)
     } else if let Some(r) = obj.with_string(|s| {
         use unicode_segmentation::UnicodeSegmentation;
         let i = key.as_int().expect("%get: string index must be int") as usize;
@@ -302,7 +305,7 @@ pub(crate) fn handle_intr_get(vm: &mut VM) {
 
 /// Run a conditionally-allocating intrinsic body (`%put`/`%del`/`%string-push`)
 /// with the same per-call result-region discipline as `VM::dispatch_native_call`
-/// — these opcodes are the unchecked fast path for those very primitives. Mint a
+/// — these opcodes run the very primitive bodies the funnel natives use. Mint a
 /// fresh region, run the body into it, then pass-through-retain so the caller's
 /// `DecrefValueRegion` (emitted because the region walk now marks these ops as
 /// `call_result_regions`) frees the right *runtime* region: the minted region
@@ -335,9 +338,9 @@ pub(crate) fn handle_intr_put(vm: &mut VM) {
     let obj = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     // Delegate to prim_put — it handles all the polymorphic cases. Runtime type
     // errors (e.g. unhashable key) propagate via fiber.signal so `protect` can
-    // observe them, matching the NativeFn `prim_put` path used under
-    // --checked-intrinsics. The immutable-copy result is born in this call's
-    // own minted region (run_alloc_intrinsic).
+    // observe them, matching the `prim_put` funnel native that compiled
+    // call-position `%put` lowers to. The immutable-copy result is born in this
+    // call's own minted region (run_alloc_intrinsic).
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::access::prim_put(ctx, &[obj, key, val])
     });
@@ -394,9 +397,10 @@ pub(crate) fn handle_intr_push(vm: &mut VM) {
         crate::primitives::intrinsics::prim_push(ctx, &[collection, value])
     });
     if bits.contains(crate::value::SIG_ERROR) {
-        // A type mismatch reaching this unchecked intrinsic is a compiler bug
-        // (emitted without the proof it requires) — panic like the sibling
-        // intrinsics, not signal. The catchable path is --checked-intrinsics.
+        // A type mismatch reaching this opcode is a compiler bug (emitted
+        // without the operand proof it requires) — panic like the sibling
+        // intrinsics, not signal. The catchable path is the registered
+        // NativeFn, which validates dynamic value-position calls.
         panic!("%array-push: unsupported type {}", collection.type_name());
     }
     vm.fiber.stack.push(result);
@@ -406,12 +410,13 @@ pub(crate) fn handle_intr_string_push(vm: &mut VM) {
     let value = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     let collection = vm.fiber.stack.pop().expect("VM bug: Stack underflow");
     // Delegate to prim_string_push for the push itself. A runtime type
-    // mismatch here means the compiler emitted the unchecked intrinsic
-    // without the proof it requires — a compiler bug, so panic loudly like
-    // the sibling intrinsics (%array-push, %bytes-push, %get, %length).
-    // The catchable-error path is the NativeFn used under
-    // --checked-intrinsics; signaling from here instead would let code the
-    // compiler stamped signal-free raise SIG_ERROR at runtime.
+    // mismatch here means the compiler emitted the intrinsic opcode
+    // without the operand proof it requires — a compiler bug, so panic
+    // loudly like the sibling intrinsics (%array-push, %bytes-push, %get,
+    // %length). The catchable-error path is the registered NativeFn that
+    // validates dynamic value-position calls; signaling from here instead
+    // would let code the compiler stamped signal-free raise SIG_ERROR at
+    // runtime.
     let (bits, result) = run_alloc_intrinsic(vm, vm.heap_ptr, |ctx| {
         crate::primitives::intrinsics::prim_string_push(ctx, &[collection, value])
     });
@@ -458,10 +463,10 @@ pub(crate) fn handle_intr_pop(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
     } else {
         // `pop_with_decref` MOVES the element out, holding the caller's owning
-        // reference before releasing the container's. This unchecked opcode path
-        // takes no pass-through retain of its own — the body's retain IS the
-        // caller's reference (the checked native path skips its retain for the
-        // `moves_out` `%pop`; `dispatch_native_call`).
+        // reference before releasing the container's. This opcode path takes
+        // no pass-through retain of its own — the body's retain IS the
+        // caller's reference (the funnel-native path likewise skips its retain
+        // for the `moves_out` `%pop`; `dispatch_native_call`).
         let popped = crate::value::arena::pop_with_decref(unsafe { &mut *vm.heap_ptr }, val);
         vm.fiber.stack.push(popped);
     }

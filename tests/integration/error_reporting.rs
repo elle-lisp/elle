@@ -230,7 +230,7 @@ fn test_location_map_has_correct_line_numbers() {
 fn test_closure_has_location_map() {
 
     let mut symbols = SymbolTable::new();
-    let source = "(fn (x) (%add x 1))";
+    let source = "(fn (x) (numeric!) (%add x 1))";
 
     let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok());

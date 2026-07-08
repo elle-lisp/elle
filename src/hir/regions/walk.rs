@@ -279,6 +279,21 @@ impl RegionInference {
                         self.binding_lambda.insert(*b, init as *const Hir);
                     }
                     let init_regions = self.walk(init);
+                    // Rule 5 counted reader, exactly as the Let arm applies it:
+                    // a letrec binding whose init is a whole-value read of a
+                    // RE-STORABLE capture cell (the file-letrec statement
+                    // wrapper around a trailing `(deref-cell x)` read of a
+                    // mutated `(var x …)`) must NOT inherit the cell's static
+                    // source regions — those name the init value (or the cell),
+                    // not whatever the cell holds at read time, and a static
+                    // route against them (a coalesced return retain through the
+                    // wrapper) resolves the slot against repointed content (the
+                    // `AssertRegionMatches` mis-coalesce;
+                    // file_scope::captures::test_mutable_var_mutation_visible_after_call).
+                    // The counted read mints a placeholder (a call-result
+                    // region), so the reader stays value-resolved and takes its
+                    // own balanced reference.
+                    let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
                     // Union with any existing entry instead of
                     // overwriting. An earlier init's walk may have
                     // side-effected `binding_regions[b]` via a

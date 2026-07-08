@@ -1,24 +1,115 @@
 use super::*;
 use crate::hir::pattern::{HirPattern, PatternLiteral};
 
-/// Collect which bindings are lambda definitions and what their params are.
+/// A binding initializer with any capture-cell wrapper peeled off: a
+/// self-recursive or captured lambda arrives as `MakeCell { Lambda }`, and
+/// the lambda inside is what inference cares about.
+pub(super) fn unwrap_make_cell(h: &Hir) -> &Hir {
+    match &h.kind {
+        HirKind::MakeCell { value } => value,
+        _ => h,
+    }
+}
+
+/// Bindings written by `Assign`/`SetCell` anywhere in the tree. A parameter
+/// in this set never receives call-site proofs — its value after the first
+/// write is invisible to the per-pass recomputation.
+pub(super) fn collect_mutated_bindings(hir: &Hir) -> std::collections::HashSet<Binding> {
+    let mut out = std::collections::HashSet::new();
+    fn go(h: &Hir, out: &mut std::collections::HashSet<Binding>) {
+        match &h.kind {
+            HirKind::Assign { target, .. } => {
+                out.insert(*target);
+            }
+            HirKind::SetCell { cell, .. } => {
+                if let HirKind::Var(b) = &cell.kind {
+                    out.insert(*b);
+                }
+            }
+            _ => {}
+        }
+        h.for_each_child(|c| go(c, out));
+    }
+    go(hir, &mut out);
+    out
+}
+
+/// Collect every binding read in VALUE position — anywhere except as the
+/// direct callee of a `Call`. A lambda binding with even one value-position
+/// use (stored, passed as an argument, returned, exported) has callers the
+/// call-site scan cannot see, so its parameter joins are not a proof
+/// (`infer_node`'s forwarding consults this set).
+pub(super) fn collect_value_position_uses(hir: &Hir, out: &mut std::collections::HashSet<Binding>) {
+    match &hir.kind {
+        HirKind::Call { func, args, .. } => {
+            // The callee itself is a callee-position use; anything nested
+            // deeper in a computed callee is a value use.
+            match &func.kind {
+                HirKind::Var(_) => {}
+                HirKind::DerefCell { cell } if matches!(cell.kind, HirKind::Var(_)) => {}
+                _ => collect_value_position_uses(func, out),
+            }
+            for a in args {
+                collect_value_position_uses(&a.expr, out);
+            }
+        }
+        HirKind::Var(b) => {
+            out.insert(*b);
+        }
+        HirKind::DerefCell { cell } => {
+            if let HirKind::Var(b) = &cell.kind {
+                out.insert(*b);
+            } else {
+                collect_value_position_uses(cell, out);
+            }
+        }
+        _ => {
+            hir.for_each_child(|c| collect_value_position_uses(c, out));
+        }
+    }
+}
+
+/// Collect which bindings are lambda definitions and what their params are,
+/// plus the params covered by a `(numeric!)` declaration (their caller-join is
+/// floored at Number — the declared contract holds whatever callers pass).
 pub(super) fn collect_lambda_info(
     hir: &Hir,
     _arena: &BindingArena,
     lambda_params: &mut HashMap<Binding, Vec<Binding>>,
+    declared_numeric: &mut std::collections::HashSet<Binding>,
 ) {
+    let record = |binding: &Binding,
+                  value: &Hir,
+                  lambda_params: &mut HashMap<Binding, Vec<Binding>>,
+                  declared_numeric: &mut std::collections::HashSet<Binding>| {
+        if let HirKind::Lambda {
+            params,
+            assert_numeric,
+            ..
+        } = &unwrap_make_cell(value).kind
+        {
+            lambda_params.insert(*binding, params.clone());
+            if *assert_numeric {
+                declared_numeric.extend(params.iter().copied());
+            }
+        }
+    };
     match &hir.kind {
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
-                if let HirKind::Lambda { params, .. } = &value.kind {
-                    lambda_params.insert(*binding, params.clone());
-                }
-                collect_lambda_info(value, _arena, lambda_params);
+                record(binding, value, lambda_params, declared_numeric);
+                collect_lambda_info(value, _arena, lambda_params, declared_numeric);
             }
-            collect_lambda_info(body, _arena, lambda_params);
+            collect_lambda_info(body, _arena, lambda_params, declared_numeric);
+        }
+        HirKind::Define { binding, value } => {
+            record(binding, value, lambda_params, declared_numeric);
+            collect_lambda_info(value, _arena, lambda_params, declared_numeric);
         }
         _ => {
-            hir.for_each_child(|child| collect_lambda_info(child, _arena, lambda_params));
+            hir.for_each_child(|child| {
+                collect_lambda_info(child, _arena, lambda_params, declared_numeric)
+            });
         }
     }
 }
@@ -35,6 +126,8 @@ pub(super) fn infer_types(
     lambda_body_type: &mut HashMap<Binding, TyId>,
     symbol_names: &HashMap<u32, String>,
     binding_min_length: &mut HashMap<Binding, usize>,
+    value_used: &std::collections::HashSet<Binding>,
+    param_joins: &mut HashMap<Binding, TyId>,
 ) -> bool {
     let ty = infer_node(
         hir,
@@ -46,6 +139,9 @@ pub(super) fn infer_types(
         lambda_body_type,
         symbol_names,
         binding_min_length,
+        &mut Vec::new(),
+        value_used,
+        param_joins,
     );
     let old = hir_types.insert(hir.id, ty);
     old != Some(ty)
@@ -63,6 +159,24 @@ pub(super) fn infer_node(
     lambda_body_type: &mut HashMap<Binding, TyId>,
     symbol_names: &HashMap<u32, String>,
     binding_min_length: &mut HashMap<Binding, usize>,
+    // The letrec lambdas whose own bodies are currently being inferred. A
+    // call to one of these from within its own body contributes BOTTOM to
+    // the type flow (the recursive contribution to a return-type join is
+    // exactly the base cases — Kleene iteration from below), which is what
+    // keeps a self-recursive body from poisoning itself with Top before any
+    // call site has forwarded its parameter types.
+    selfrec: &mut Vec<Binding>,
+    // Bindings with at least one value-position use (`collect_value_position_uses`):
+    // their callers are not all visible, so call-site joins must not prove
+    // their parameters.
+    value_used: &std::collections::HashSet<Binding>,
+    // This pass's call-site contributions to parameter types. RECOMPUTED per
+    // pass (the driver replaces each contributed parameter's binding type
+    // wholesale at pass end): a join that only ever accumulates can never
+    // come back down, so unknown-typed call sites would have to be skipped —
+    // and a skipped unknown is exactly the unsound "typed callers alone prove
+    // the parameter" hole. Here Top contributes honestly.
+    param_joins: &mut HashMap<Binding, TyId>,
 ) -> TyId {
     macro_rules! recurse {
         ($e:expr) => {
@@ -76,6 +190,9 @@ pub(super) fn infer_node(
                 lambda_body_type,
                 symbol_names,
                 binding_min_length,
+                selfrec,
+                value_used,
+                param_joins,
             )
         };
     }
@@ -108,20 +225,29 @@ pub(super) fn infer_node(
         // Let/Letrec — seed binding types from init values
         HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
             for (binding, init) in bindings {
+                let is_lambda_init = matches!(&unwrap_make_cell(init).kind, HirKind::Lambda { .. });
+                if is_lambda_init {
+                    selfrec.push(*binding);
+                }
                 let ty = recurse!(init);
+                if is_lambda_init {
+                    selfrec.pop();
+                }
                 hir_types.insert(init.id, ty);
-                // For lambda bindings, track their body's return type
-                if let HirKind::Lambda { body: lam_body, .. } = &init.kind {
+                // For lambda bindings (possibly cell-wrapped when
+                // self-recursive/captured), track their body's return type.
+                // REPLACE, don't join: on the first pass a self-recursive
+                // body reads its own parameters before any call site has
+                // forwarded them, so it computes Top — and a join can never
+                // come back down from Top on the later passes that know
+                // better. Each pass re-derives the body type from strictly
+                // more information; the last pass's value is the answer.
+                if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(init).kind {
                     let body_ty = hir_types
                         .get(&lam_body.id)
                         .copied()
                         .unwrap_or(TypeInterner::TOP);
-                    let old = lambda_body_type
-                        .get(binding)
-                        .copied()
-                        .unwrap_or(TypeInterner::BOTTOM);
-                    let joined = interner.join(old, body_ty);
-                    lambda_body_type.insert(*binding, joined);
+                    lambda_body_type.insert(*binding, body_ty);
                 } else {
                     let old = binding_types
                         .get(binding)
@@ -143,14 +269,34 @@ pub(super) fn infer_node(
         }
 
         // Lambda — infer body type and track return type
-        HirKind::Lambda { body, .. } => {
+        HirKind::Lambda {
+            params,
+            assert_numeric,
+            body,
+            ..
+        } => {
+            // A `(numeric!)` assertion is the programmer's declared numeric
+            // contract for the whole body (the GPU-eligibility gate holds the
+            // lowered code to it), so it proves every parameter ⊑ Number for
+            // the operand contracts — the declared analog of a call-site join.
+            if *assert_numeric {
+                for p in params {
+                    let old = binding_types.get(p).copied().unwrap_or(TypeInterner::TOP);
+                    binding_types.insert(*p, interner.meet(old, TypeInterner::NUMBER));
+                }
+            }
             let body_ty = recurse!(body);
             hir_types.insert(body.id, body_ty);
             // We return Top for the lambda value itself — it's a closure
             TypeInterner::TOP
         }
 
-        // If — join branches, with type guard narrowing
+        // If — join branches, with guard narrowing on both sides: the
+        // then-branch gets the condition's truthy facts (`(%int? x)` refines
+        // x to Int), the else-branch its falsy facts (`(%not (number? b))`
+        // false means b IS a number). `meet` because a predicate refines a
+        // union (`Number ∧ Int = Int`) rather than fully determining the type
+        // (contrast the authoritative `match (type-of x)` override below).
         HirKind::If {
             cond,
             then_branch,
@@ -159,39 +305,17 @@ pub(super) fn infer_node(
             let _cond_ty = recurse!(cond);
             hir_types.insert(cond.id, _cond_ty);
 
-            // Type guard narrowing: if cond is a type predicate call,
-            // narrow the binding's type in the true branch
-            let guard = extract_type_guard(cond, arena);
-            let saved_types: Vec<(Binding, Option<TyId>)>;
-            if let Some((binding, narrow_ty)) = guard {
-                saved_types = vec![(binding, binding_types.get(&binding).copied())];
-                let old = binding_types
-                    .get(&binding)
-                    .copied()
-                    .unwrap_or(TypeInterner::TOP);
-                let narrowed = interner.meet(old, narrow_ty);
-                binding_types.insert(binding, narrowed);
-            } else {
-                saved_types = Vec::new();
-            }
+            let facts = super::guard::cond_facts(cond, arena, symbol_names);
 
+            let saved = apply_type_facts(&facts.when_true, binding_types, interner);
             let then_ty = recurse!(then_branch);
             hir_types.insert(then_branch.id, then_ty);
+            restore_type_facts(saved, binding_types);
 
-            // Restore type environment for else branch
-            for (binding, saved) in &saved_types {
-                match saved {
-                    Some(ty) => {
-                        binding_types.insert(*binding, *ty);
-                    }
-                    None => {
-                        binding_types.remove(binding);
-                    }
-                }
-            }
-
+            let saved = apply_type_facts(&facts.when_false, binding_types, interner);
             let else_ty = recurse!(else_branch);
             hir_types.insert(else_branch.id, else_ty);
+            restore_type_facts(saved, binding_types);
 
             interner.join(then_ty, else_ty)
         }
@@ -203,14 +327,17 @@ pub(super) fn infer_node(
         // silent opcode (pinned by the `match_typeof_narrows_*` tests). Children are
         // visited exactly as `for_each_child` (value, then each guard+body); the
         // narrowing is saved/restored per arm so it never leaks to a sibling — the
-        // same discipline as the `If` then/else branches above. The Match node
-        // itself stays `Top`: its value is an arm join no consumer relies on, and
-        // keeping it `Top` leaves every other inference result unchanged.
+        // same discipline as the `If` then/else branches above. The Match node's
+        // own type is the join of its arm bodies: a type-dispatch helper that
+        // returns the same type from every arm (the stdlib `compare`'s `rank`,
+        // all-Int) carries that type to its callers, which is what proves the
+        // downstream intrinsic operands.
         HirKind::Match { value, arms } => {
             let val_ty = recurse!(value);
             hir_types.insert(value.id, val_ty);
 
             let subject = typeof_subject_binding(value, arena, symbol_names);
+            let mut arm_join = TypeInterner::BOTTOM;
             for (pat, guard, body) in arms {
                 if let Some(g) = guard {
                     let g_ty = recurse!(g);
@@ -244,6 +371,7 @@ pub(super) fn infer_node(
                     });
                 let body_ty = recurse!(body);
                 hir_types.insert(body.id, body_ty);
+                arm_join = interner.join(arm_join, body_ty);
                 if let Some((b, prev)) = saved {
                     match prev {
                         Some(t) => {
@@ -255,7 +383,11 @@ pub(super) fn infer_node(
                     }
                 }
             }
-            TypeInterner::TOP
+            if arms.is_empty() {
+                TypeInterner::TOP
+            } else {
+                arm_join
+            }
         }
 
         // Call — forward arg types to callee params; result = callee return type
@@ -274,23 +406,42 @@ pub(super) fn infer_node(
 
             // Forward arg types to callee params.
             // Handle both Var(b) and DerefCell { Var(b) } (letrec recursive calls).
+            // Forwarding is a complete proof only for a callee used EXCLUSIVELY
+            // in call position — a single value-position use (stored, passed,
+            // returned, exported) means invisible callers exist, so the joins
+            // must not prove its parameters.
             let callee_binding = unwrap_callee_binding(func);
             if let Some(callee_binding) = callee_binding {
-                if let Some(params) = lambda_params.get(&callee_binding) {
+                if let Some(params) = lambda_params
+                    .get(&callee_binding)
+                    .filter(|_| !value_used.contains(&callee_binding))
+                {
                     for (i, param) in params.iter().enumerate() {
                         if let Some(&arg_ty) = arg_types.get(i) {
-                            // Don't forward Top — it poisons the parameter type
-                            // and prevents convergence in recursive functions.
-                            if arg_ty != TypeInterner::TOP {
-                                let old = binding_types
-                                    .get(param)
-                                    .copied()
-                                    .unwrap_or(TypeInterner::BOTTOM);
-                                let joined = interner.join(old, arg_ty);
-                                binding_types.insert(*param, joined);
-                            }
+                            // Top contributes honestly: an unknown-typed call
+                            // site makes the parameter unprovable (the driver
+                            // REPLACES the binding type from this map at pass
+                            // end, so recursion converges from below instead
+                            // of needing a Top skip).
+                            let old = param_joins
+                                .get(param)
+                                .copied()
+                                .unwrap_or(TypeInterner::BOTTOM);
+                            param_joins.insert(*param, interner.join(old, arg_ty));
                         }
                     }
+                }
+                // A call to a lambda whose own body is being inferred (a
+                // recursive call) contributes BOTTOM — the recursive
+                // contribution to a return-type join is exactly the base
+                // cases (Kleene iteration from below). It must NOT read the
+                // running estimate: on the first pass that is Top (the body
+                // was walked before any call site forwarded its parameters),
+                // and Top can never come back down through a join. Argument
+                // forwarding above still runs — a self-call is usually the
+                // sole source of its own parameters' step types.
+                if selfrec.contains(&callee_binding) {
+                    return TypeInterner::BOTTOM;
                 }
                 // Return type = whatever the callee's body returns.
                 // Only use BOTTOM for known lambdas (in lambda_params) where the
@@ -317,21 +468,68 @@ pub(super) fn infer_node(
             TypeInterner::TOP
         }
 
-        // Begin/Block — type is last expression
+        // Begin/Block — type is last expression. Flow-through guard
+        // narrowing: a one-armed diverging guard statement —
+        // `(when (%not (number? b)) (error …))` — proves its fall-through
+        // facts for every statement after it (the stdlib wrapper shape: the
+        // guard that raises the wrapper's :error is the same fact that
+        // discharges the intrinsic's contract downstream). Facts are scoped
+        // to the sequence and restored on exit.
         HirKind::Begin(exprs) => {
             let mut ty = TypeInterner::NIL;
+            let mut saved = Vec::new();
             for expr in exprs {
                 ty = recurse!(expr);
                 hir_types.insert(expr.id, ty);
+                let facts = super::guard::facts_after_statement(expr, arena, symbol_names);
+                saved.extend(apply_type_facts(&facts, binding_types, interner));
             }
+            restore_type_facts(saved, binding_types);
             ty
         }
         HirKind::Block { body, .. } => {
             let mut ty = TypeInterner::NIL;
+            let mut saved = Vec::new();
             for expr in body {
                 ty = recurse!(expr);
                 hir_types.insert(expr.id, ty);
+                let facts = super::guard::facts_after_statement(expr, arena, symbol_names);
+                saved.extend(apply_type_facts(&facts, binding_types, interner));
             }
+            restore_type_facts(saved, binding_types);
+            ty
+        }
+
+        // Cond — sequential If chain: each clause body gets its test's truthy
+        // facts; each later clause (and the else) additionally knows every
+        // earlier test was falsy. Result is the join of all bodies.
+        HirKind::Cond {
+            clauses,
+            else_branch,
+        } => {
+            let mut ty = TypeInterner::BOTTOM;
+            let mut fallthrough_saved = Vec::new();
+            for (test, body) in clauses {
+                let test_ty = recurse!(test);
+                hir_types.insert(test.id, test_ty);
+                let facts = super::guard::cond_facts(test, arena, symbol_names);
+                let saved = apply_type_facts(&facts.when_true, binding_types, interner);
+                let body_ty = recurse!(body);
+                hir_types.insert(body.id, body_ty);
+                restore_type_facts(saved, binding_types);
+                ty = interner.join(ty, body_ty);
+                fallthrough_saved.extend(apply_type_facts(
+                    &facts.when_false,
+                    binding_types,
+                    interner,
+                ));
+            }
+            if let Some(els) = else_branch {
+                let else_ty = recurse!(els);
+                hir_types.insert(els.id, else_ty);
+                ty = interner.join(ty, else_ty);
+            }
+            restore_type_facts(fallthrough_saved, binding_types);
             ty
         }
 
@@ -360,13 +558,31 @@ pub(super) fn infer_node(
             body_ty
         }
 
-        // Assign/Define — update binding type
+        // Assign/Define — update binding type. A Define whose value is a
+        // lambda (the in-function `defn` idiom — a letrec*-semantics local)
+        // records its return type exactly like a Let/Letrec lambda binding,
+        // with the same selfrec discipline; `collect_lambda_info` records its
+        // params.
         HirKind::Assign { target, value }
         | HirKind::Define {
             binding: target,
             value,
         } => {
+            let is_lambda_init = matches!(&unwrap_make_cell(value).kind, HirKind::Lambda { .. });
+            if is_lambda_init {
+                selfrec.push(*target);
+            }
             let ty = recurse!(value);
+            if is_lambda_init {
+                selfrec.pop();
+                if let HirKind::Lambda { body: lam_body, .. } = &unwrap_make_cell(value).kind {
+                    let body_ty = hir_types
+                        .get(&lam_body.id)
+                        .copied()
+                        .unwrap_or(TypeInterner::TOP);
+                    lambda_body_type.insert(*target, body_ty);
+                }
+            }
             hir_types.insert(value.id, ty);
             let old = binding_types
                 .get(target)
@@ -379,6 +595,38 @@ pub(super) fn infer_node(
                     binding_min_length.insert(*target, call);
                 }
             }
+            ty
+        }
+
+        // Quoted compound data has the type its template's outermost node
+        // materializes to — a quoted proper list IS a pair chain, which is
+        // what proves `(%first '(a b c))`.
+        HirKind::QuoteConst(template) => {
+            use crate::value::ConstTemplate;
+            match template {
+                ConstTemplate::Pair(_, _) => TypeInterner::PAIR,
+                ConstTemplate::Array(_) => TypeInterner::ARRAY,
+                ConstTemplate::ArrayMut(_) => TypeInterner::MUTABLE_ARRAY,
+                ConstTemplate::String(_) => TypeInterner::STRING,
+                ConstTemplate::StringMut(_) => TypeInterner::MUTABLE_STRING,
+                ConstTemplate::EmptyList => TypeInterner::EMPTY_LIST,
+                ConstTemplate::Int(_) => TypeInterner::INT,
+                ConstTemplate::Float(_) => TypeInterner::FLOAT,
+                ConstTemplate::Bool(_) => TypeInterner::BOOL,
+                ConstTemplate::Keyword(_) => TypeInterner::KEYWORD,
+                ConstTemplate::Symbol(_) => TypeInterner::SYMBOL,
+                ConstTemplate::Nil => TypeInterner::NIL,
+                _ => TypeInterner::TOP,
+            }
+        }
+
+        // Return — the function-return ownership boundary is region-only and
+        // type-transparent: the result is the same value. Without this arm a
+        // lambda's body type (wrapped in Return by wrap_tail_returns) would
+        // read Top and no callee return type would ever flow to callers.
+        HirKind::Return { value } => {
+            let ty = recurse!(value);
+            hir_types.insert(value.id, ty);
             ty
         }
 
@@ -461,8 +709,49 @@ pub(super) fn typeof_subject_binding(
     var_of(subject)
 }
 
+/// Apply the `TypeIs` facts to the binding environment (meet with the
+/// accumulated type), returning the saved prior entries for `restore_type_facts`.
+/// `Nonzero` facts are the contract checker's flow, not a type — skipped here.
+pub(super) fn apply_type_facts(
+    facts: &[super::guard::Fact],
+    binding_types: &mut HashMap<Binding, TyId>,
+    interner: &TypeInterner,
+) -> Vec<(Binding, Option<TyId>)> {
+    let mut saved = Vec::new();
+    for fact in facts {
+        let super::guard::Fact::TypeIs(binding, narrow_ty) = fact else {
+            continue;
+        };
+        saved.push((*binding, binding_types.get(binding).copied()));
+        let old = binding_types
+            .get(binding)
+            .copied()
+            .unwrap_or(TypeInterner::TOP);
+        binding_types.insert(*binding, interner.meet(old, *narrow_ty));
+    }
+    saved
+}
+
+/// Undo `apply_type_facts`, in reverse so a twice-narrowed binding restores
+/// its original entry.
+pub(super) fn restore_type_facts(
+    saved: Vec<(Binding, Option<TyId>)>,
+    binding_types: &mut HashMap<Binding, TyId>,
+) {
+    for (binding, prior) in saved.into_iter().rev() {
+        match prior {
+            Some(ty) => {
+                binding_types.insert(binding, ty);
+            }
+            None => {
+                binding_types.remove(&binding);
+            }
+        }
+    }
+}
+
 /// A `Var(b)` or `DerefCell { Var(b) }` reference's binding, else `None`.
-fn var_of(h: &Hir) -> Option<Binding> {
+pub(super) fn var_of(h: &Hir) -> Option<Binding> {
     match &h.kind {
         HirKind::Var(b) => Some(*b),
         HirKind::DerefCell { cell } => match &cell.kind {
@@ -478,7 +767,7 @@ fn var_of(h: &Hir) -> Option<Binding> {
 /// unwraps that single-use naming (iteratively, in case of nesting) so the
 /// underlying `type-of` call is visible. A `Let` whose body is not one of its
 /// own bindings is returned as-is.
-fn unwrap_anf_let(h: &Hir) -> &Hir {
+pub(super) fn unwrap_anf_let(h: &Hir) -> &Hir {
     let mut cur = h;
     while let HirKind::Let { bindings, body } = &cur.kind {
         let Some(b) = var_of(body) else { break };
@@ -490,79 +779,14 @@ fn unwrap_anf_let(h: &Hir) -> &Hir {
     cur
 }
 
-/// The container family a monomorphic data op trusts its first argument to be,
-/// as the pair `(family-name, accepted TyIds)`. `None` for ops with no such
-/// obligation — arithmetic, predicates, and the *polymorphic* `%put`/`%array-push`,
-/// which dispatch on the runtime value rather than a static proof.
-///
-/// Both mutabilities are accepted: this slice's gate is *legality* (the container
-/// type is statically known, so the silent opcode is type-sound), not the tighter
-/// mutability proof that the region-precision slice (the `funnel_store_edges`
-/// work) will demand of the `-mut` variants. Pinning only the family keeps the
-/// landed `push_array_*`/`put_*` return-type tests — which deliberately feed an
-/// opposite-mutability literal to attribute the result type to the op — green.
-fn monomorphic_container_family(op: IntrinsicOp) -> Option<(&'static str, [TyId; 2])> {
-    match op {
-        IntrinsicOp::PushArray
-        | IntrinsicOp::PushArrayMut
-        | IntrinsicOp::PutArray
-        | IntrinsicOp::PutArrayMut => {
-            Some(("array", [TypeInterner::ARRAY, TypeInterner::MUTABLE_ARRAY]))
-        }
-        IntrinsicOp::PutStruct | IntrinsicOp::PutStructMut => Some((
-            "struct",
-            [TypeInterner::STRUCT, TypeInterner::MUTABLE_STRUCT],
-        )),
-        _ => None,
-    }
-}
+// The per-op operand contracts and the prove-or-reject walk live in
+// `contract.rs` (`check_intrinsic_operand_proofs`) — the generalization of the
+// monomorphic-container obligation to every %-intrinsic in call position.
 
-/// The monomorphization proof obligation: in
-/// silent (unchecked-intrinsics) context a monomorphic container op lowers to a
-/// raw opcode with **no runtime type guard**, so its container argument must be
-/// statically proven a container of the op's family. Walk the tree and reject any
-/// site whose first argument's inferred type (`hir_types`, which after match-arm
-/// narrowing records the *narrowed* container type per occurrence) is not in that
-/// family — `Top` (an unproven binding) and any non-container type alike.
-///
-/// Runs only on the silent path: `infer_and_rewrite` early-returns under
-/// `--checked-intrinsics`, where the op instead routes through its type-checking
-/// `NativeFn` and the runtime guard catches a mismatch. Pinned by
-/// `silent_unproven_monomorphic_op_is_compile_error` (the unproven binding) and
-/// `proven_monomorphic_op_compiles_under_match_narrowing` (the discharged case).
-pub(super) fn check_monomorphic_proof_obligations(
-    hir: &Hir,
-    hir_types: &HashMap<HirId, TyId>,
-) -> Result<(), String> {
-    if let HirKind::Intrinsic { op, args } = &hir.kind {
-        if let Some((family, accepted)) = monomorphic_container_family(*op) {
-            let arg_ty = args
-                .first()
-                .and_then(|a| hir_types.get(&a.id).copied())
-                .unwrap_or(TypeInterner::TOP);
-            if !accepted.contains(&arg_ty) {
-                return Err(format!(
-                    "{}: {}: container argument is not a statically-proven {} — a \
-                     monomorphic container op requires its container proven in silent \
-                     (unchecked-intrinsics) context",
-                    hir.span,
-                    op.name(),
-                    family,
-                ));
-            }
-        }
-    }
-    let mut result = Ok(());
-    hir.for_each_child(|child| {
-        if result.is_ok() {
-            result = check_monomorphic_proof_obligations(child, hir_types);
-        }
-    });
-    result
-}
-
-/// The concrete container type a keyword-literal arm pattern proves for a
-/// `(type-of x)` scrutinee — array/struct/string/bytes/set in both mutabilities.
+/// The concrete type a keyword-literal arm pattern proves for a `(type-of x)`
+/// scrutinee — the containers in both mutabilities, plus the scalar type
+/// keywords (`:integer`/`:float`/…) so a scalar dispatch arm (the stdlib `/`'s
+/// int-vs-float divisor split) proves its scrutinee too.
 fn pattern_type_keyword(pat: &HirPattern) -> Option<TyId> {
     let HirPattern::Literal(PatternLiteral::Keyword(s)) = pat else {
         return None;
@@ -580,6 +804,12 @@ fn pattern_type_keyword(pat: &HirPattern) -> Option<TyId> {
         "bytes" => Some(TypeInterner::BYTES),
         "@set" => Some(TypeInterner::MUTABLE_SET),
         "set" => Some(TypeInterner::SET),
+        "integer" => Some(TypeInterner::INT),
+        "float" => Some(TypeInterner::FLOAT),
+        "boolean" => Some(TypeInterner::BOOL),
+        "keyword" => Some(TypeInterner::KEYWORD),
+        "symbol" => Some(TypeInterner::SYMBOL),
+        "nil" => Some(TypeInterner::NIL),
         _ => None,
     }
 }

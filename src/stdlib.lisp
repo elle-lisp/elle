@@ -355,8 +355,15 @@
                     (go (%mul acc b) (rest xs)))))]
     (go 1 args)))
 
+## The div-family wrappers dispatch the divisor on type-of: an INTEGER divisor
+## is zero-guarded (the guard's fall-through proves it nonzero, which is what
+## lets the silent %div/%rem lower); a FLOAT divisor divides directly under
+## IEEE semantics (±inf/NaN) — the float arm's narrowing is the proof the
+## intrinsic's float exemption accepts.
+
 (defn / [x & args]
-  "Divide arguments left-to-right. Single arg takes reciprocal."
+  "Divide arguments left-to-right. Single arg takes reciprocal.
+   Integer division by zero errors; float division follows IEEE (±inf/NaN)."
   (when (%not (number? x))
     (error {:error :type-error
             :message (string "/: expected number, got " (type x))}))
@@ -373,25 +380,50 @@
                         (error {:error :type-error
                                 :message (string "/: expected number, got "
                                 (type b))}))
-                      (when (if (and (integer? acc) (integer? b))
-                              (%eq b 0)
-                              false)
-                        (error {:error :division-by-zero
-                                :message "/: division by zero"}))
-                      (go (%div acc b) (rest xs)))))]
+                      (match (type-of b)
+                        :integer
+                          (match (type-of acc)
+                            :integer
+                              (begin
+                                (when (%eq b 0)
+                                  (error {:error :division-by-zero
+                                  :message "/: division by zero"}))
+                                (go (%div acc b) (rest xs)))
+                            ## Float dividend, int divisor: IEEE, even for a
+                            ## zero divisor (1.0/0 is inf) — matching the
+                            ## opcode, whose only undefined zero case is
+                            ## int÷int.
+                            :float (go (%div acc b) (rest xs))
+                            _
+                              (error {:error :type-error
+                                      :message (string "/: expected number, got "
+                                      (type acc))}))
+                        :float (go (%div acc b) (rest xs))
+                        _
+                          (error {:error :type-error
+                                  :message (string "/: expected number, got "
+                                  (type b))})))))]
       (go x args))))
 
 (defn rem [a b]
-  "Truncated remainder. Result has same sign as dividend."
+  "Truncated remainder. Result has same sign as dividend.
+   Integer remainder by zero errors; float remainder follows IEEE (NaN)."
   (when (%not (number? a))
     (error {:error :type-error
             :message (string "rem: expected number, got " (type a))}))
   (when (%not (number? b))
     (error {:error :type-error
             :message (string "rem: expected number, got " (type b))}))
-  (when (if (integer? b) (%eq b 0) false)
-    (error {:error :division-by-zero :message "rem: division by zero"}))
-  (%rem a b))
+  (match (type-of b)
+    :integer
+      (begin
+        (when (%eq b 0)
+          (error {:error :division-by-zero :message "rem: division by zero"}))
+        (%rem a b))
+    :float (%rem a b)
+    _
+      (error {:error :type-error
+              :message (string "rem: expected number, got " (type b))})))
 
 (defn mod [a b]
   "Euclidean modulo. Result has same sign as divisor."
@@ -424,25 +456,51 @@
             :message (string op ": incomparable types " (type a) " and "
                              (type b))})))
 
+## Ordering dispatch: a proven number/number pair takes the silent opcode; the
+## other comparable families (strings and keywords, whose mutability mix the
+## type lattice cannot pin) go through the ordering NativeFn called as a
+## VALUE — the documented dynamic form (docs/intrinsics.md § Intrinsics as
+## callable values), which validates at runtime exactly like the wrapper's
+## own contract promises. check-comparable has already rejected everything
+## the native would.
+
+(def dynamic-lt %lt)
+(def dynamic-gt %gt)
+(def dynamic-le %le)
+(def dynamic-ge %ge)
+
+(defn lt-pair [a b]
+  "Compare one check-comparable-validated pair for <. Internal."
+  (if (and (number? a) (number? b)) (%lt a b) (dynamic-lt a b)))
+(defn gt-pair [a b]
+  "Compare one check-comparable-validated pair for >. Internal."
+  (if (and (number? a) (number? b)) (%gt a b) (dynamic-gt a b)))
+(defn le-pair [a b]
+  "Compare one check-comparable-validated pair for <=. Internal."
+  (if (and (number? a) (number? b)) (%le a b) (dynamic-le a b)))
+(defn ge-pair [a b]
+  "Compare one check-comparable-validated pair for >=. Internal."
+  (if (and (number? a) (number? b)) (%ge a b) (dynamic-ge a b)))
+
 (defn < [a b & more]
   "Test strictly ascending order. Works on numbers, strings, and keywords."
   (check-comparable :< a b)
-  (if (empty? more) (%lt a b) (and (%lt a b) (apply < b more))))
+  (if (empty? more) (lt-pair a b) (and (lt-pair a b) (apply < b more))))
 
 (defn > [a b & more]
   "Test strictly descending order. Works on numbers, strings, and keywords."
   (check-comparable :> a b)
-  (if (empty? more) (%gt a b) (and (%gt a b) (apply > b more))))
+  (if (empty? more) (gt-pair a b) (and (gt-pair a b) (apply > b more))))
 
 (defn <= [a b & more]
   "Test non-descending order. Works on numbers, strings, and keywords."
   (check-comparable :<= a b)
-  (if (empty? more) (%le a b) (and (%le a b) (apply <= b more))))
+  (if (empty? more) (le-pair a b) (and (le-pair a b) (apply <= b more))))
 
 (defn >= [a b & more]
   "Test non-ascending order. Works on numbers, strings, and keywords."
   (check-comparable :>= a b)
-  (if (empty? more) (%ge a b) (and (%ge a b) (apply >= b more))))
+  (if (empty? more) (ge-pair a b) (and (ge-pair a b) (apply >= b more))))
 
 ## ── Logic and pairs ──────────────────────────────────────────────────
 
@@ -462,8 +520,8 @@
 ## The `(match (type-of coll) …)` arms route to the MONOMORPHIC data ops:
 ## each arm narrows `coll` to a concrete container family (`:array → Array`,
 ## `:@array → MutableArray`, etc.), which is exactly the static proof the
-## silent monomorphic op demands (the proof obligation in
-## `hir/typeinfer/infer.rs` — `check_monomorphic_proof_obligations` — rejects
+## silent monomorphic op demands (the operand contract in
+## `hir/typeinfer/contract.rs` — `check_intrinsic_operand_proofs` — rejects
 ## an arm whose container is unproven). Routing is the *legality* vehicle: the
 ## arms type-check as silent leaves. It is not, on its own, a reclamation win
 ## at a `push`/`put` caller — the closure call convention is the residue there.
@@ -485,11 +543,16 @@
               :message (string "push: expected array, string, or bytes, got "
                                (type coll))})))
 
+## The polymorphic fallback arm's container is exactly what the dispatch
+## could NOT prove, so it calls the put NativeFn as a value — the runtime-
+## validating dynamic form, like the ordering wrappers' fallback.
+(def dynamic-put %put)
+
 (defn put [coll key & rest]
   "Associate key with val in coll. For sets, (put s val) delegates to add."
   (if (empty? rest)
     (add coll key)
-    (if (%gt (%length rest) 1)
+    (if (%gt (length rest) 1)
       (error {:error :arity-error
               :message "put: too many arguments (expected 2 or 3)"})
       (let [val (first rest)]
@@ -498,7 +561,7 @@
           :@array (%put-array-mut coll key val)
           :struct (%put-struct coll key val)
           :@struct (%put-struct-mut coll key val)
-          _ (%put coll key val))))))
+          _ (dynamic-put coll key val))))))
 
 ## ── Higher-order functions ──────────────────────────────────────────
 

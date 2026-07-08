@@ -339,23 +339,24 @@ pub struct CallFrame {
     pub location_map: Rc<crate::error::LocationMap>,
 }
 
-/// Maximum non-tail call depth before emitting a catchable stack-overflow
-/// error.
+/// Maximum non-tail call depth before emitting a stack-overflow halt
+/// (`SIG_HALT`).
 ///
-/// Regular Elle→Elle calls push frames onto the Fiber's heap-resident call
-/// stack (`call_closure_inner`) and the dispatch loop continues — the Rust
-/// stack does not recurse.  Only `execute_bytecode_saving_stack` (used for
-/// `run_on` and native re-entry) actually recurses on the Rust stack.
+/// Every non-tail Elle→Elle closure call recurses on the Rust stack
+/// (`call_inner` → `execute_bytecode_saving_stack`), costing ~25–30 KB per
+/// level (dominated by the `SmallVec<[Value; 256]>` stack-save buffer). With
+/// the default 8 MB thread stack the hard crash (SIGABRT) limit is ~280–310
+/// levels, so the guard sits well below that — leaving headroom for the call
+/// chain above user code (compilation, dispatch loop, primitives) and for
+/// platforms with smaller default stacks. A larger constant here is a lie:
+/// the process aborts on Rust stack exhaustion long before the counter trips
+/// (integration::repl_exit_codes::test_stack_overflow_exits_with_error).
 ///
-/// Because native re-entry paths share this counter, the limit must stay
-/// below what would overflow the default 8 MB Rust thread stack (~4K–8K
-/// frames of `execute_bytecode_saving_stack`).  10,000 is well above any
-/// legitimate recursion depth while staying safely below the hard crash.
-///
-/// Tail calls bypass this check entirely — they reuse the current frame.
+/// Tail calls bypass this check entirely — they are trampolined in
+/// `execute_bytecode_saving_stack`'s loop and never grow the Rust stack.
 ///
 /// Shared by the interpreter (`vm::call`) and JIT (`jit::calls`) paths.
-pub const MAX_CALL_DEPTH: usize = 1_000_000;
+pub const MAX_CALL_DEPTH: usize = 200;
 
 /// The fiber: an independent execution context.
 ///

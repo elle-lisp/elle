@@ -311,6 +311,16 @@ impl<'a> Lowerer<'a> {
     /// Sequential match lowering: try each arm in order. Used as fallback
     /// when guards may suspend (yield/debug/polymorphic), since the decision
     /// tree cannot safely backtrack past a suspending guard.
+    ///
+    /// Each arm's top-level or-pattern is expanded into its alternatives, and
+    /// **each alternative re-checks the arm's guard**: a failed guard retries
+    /// the next alternative (re-binding from a different structural position)
+    /// before the match moves on to the next arm (docs/match.md § Guards). All
+    /// alternatives of one arm share a single lowered body — the or-pattern
+    /// binds the same variables in every alternative, so the body reads them
+    /// from the same slots regardless of which alternative matched, and one
+    /// body copy keeps cell initialization (`MakeCapture`) from being emitted
+    /// only on the first alternative's path.
     fn lower_match_sequential(
         &mut self,
         arms: &[(HirPattern, Option<Hir>, Hir)],
@@ -319,11 +329,12 @@ impl<'a> Lowerer<'a> {
         result_reg: Reg,
         done_label: Label,
     ) -> Result<(), String> {
-        // Pre-allocate labels for each arm
+        use crate::hir::decision::expand_or_pattern;
+
+        // Pre-allocate an entry label for each arm.
         let arm_labels: Vec<Label> = (0..arms.len()).map(|_| self.fresh_label()).collect();
         let no_match_label = self.fresh_label();
 
-        // Process each arm
         for (i, (pattern, guard, body)) in arms.iter().enumerate() {
             let next_arm_label = if i + 1 < arms.len() {
                 arm_labels[i + 1]
@@ -331,41 +342,61 @@ impl<'a> Lowerer<'a> {
                 no_match_label
             };
 
-            // Reload the match value from the local slot for each arm.
-            let arm_value_reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal {
-                dst: arm_value_reg,
-                slot: scrutinee_slot,
-            });
+            // The body is lowered once and shared by every alternative that
+            // reaches it (via its guard passing, or unconditionally when the
+            // arm has no guard).
+            let body_label = self.fresh_label();
+            let alternatives = expand_or_pattern(pattern);
 
-            // Generate pattern matching code
-            self.lower_pattern_match(pattern, arm_value_reg, next_arm_label)?;
+            for (j, alt) in alternatives.iter().enumerate() {
+                // Where a structural mismatch or a failed guard on this
+                // alternative goes: the next alternative, or the next arm when
+                // this is the last alternative.
+                let next_label = if j + 1 < alternatives.len() {
+                    self.fresh_label()
+                } else {
+                    next_arm_label
+                };
 
-            // Check guard if present
-            if let Some(guard_expr) = guard {
-                let guard_reg = self.lower_expr(guard_expr)?;
-                let guard_pass_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: guard_reg,
-                    then_label: guard_pass_label,
-                    else_label: next_arm_label,
+                // Reload the scrutinee for this alternative's test.
+                let alt_value_reg = self.fresh_reg();
+                self.emit(LirInstr::LoadLocal {
+                    dst: alt_value_reg,
+                    slot: scrutinee_slot,
                 });
+
+                self.lower_pattern_match(alt, alt_value_reg, next_label)?;
+
+                if let Some(guard_expr) = guard {
+                    let guard_reg = self.lower_expr(guard_expr)?;
+                    self.terminate(Terminator::Branch {
+                        cond: guard_reg,
+                        then_label: body_label,
+                        else_label: next_label,
+                    });
+                } else {
+                    self.terminate(Terminator::Jump(body_label));
+                }
                 self.finish_block();
-                self.current_block = BasicBlock::new(guard_pass_label);
+
+                // Start the next alternative's block (the last alternative's
+                // `next_label` is another arm's block, opened by the outer loop).
+                if j + 1 < alternatives.len() {
+                    self.current_block = BasicBlock::new(next_label);
+                }
             }
 
-            // Lower body
+            // Shared body block for this arm.
+            self.current_block = BasicBlock::new(body_label);
             let body_reg = self.lower_expr(body)?;
             self.emit(LirInstr::StoreLocal {
                 slot: result_slot,
                 src: body_reg,
             });
-
-            // Jump to done
             self.terminate(Terminator::Jump(done_label));
             self.finish_block();
 
-            // Start next arm block
+            // Start the next arm's block.
             if i + 1 < arms.len() {
                 self.current_block = BasicBlock::new(arm_labels[i + 1]);
             }

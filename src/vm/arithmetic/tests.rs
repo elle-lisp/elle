@@ -80,7 +80,8 @@ fn test_handle_shr() {
 
 #[test]
 fn test_handle_bit_and_type_mismatch_produces_garbage() {
-    // With unchecked intrinsics, wrong types produce garbage, not panics
+    // These opcodes trust the compile-time operand proof; an operand the
+    // proof would have rejected produces garbage, not a panic
     let mut vm = make_vm();
     vm.fiber.stack.push(Value::int(12));
     vm.fiber.stack.push(Value::float(10.0));

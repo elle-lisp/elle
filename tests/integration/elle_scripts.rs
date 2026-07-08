@@ -445,12 +445,9 @@ fn region_repeated_call_adopt_uaf() {
 // worker's `recv_region`: the body owns the cells and frees them with
 // `DecrefCellRegion` (value-resolved to the cell's region) at scope exit, so a
 // cell in recv_region would drive recv_region's RC to 0 mid-body and the worker's
-// cleanup `decref_region(recv_region)` then double-frees a phantom region. The
-// harness runs region-spawn-capture-mutate.lisp under its vm/jit policies with
-// `--checked-intrinsics` ON, where the cross-region accounting masks the
-// over-decref; this subprocess forces the inlined-intrinsic store path
-// (`--jit` implies `--checked-intrinsics=off`) under the guardfree oracle, where
-// a regression faults deterministically on the worker thread. (`src/primitives/
+// cleanup `decref_region(recv_region)` then double-frees a phantom region. This
+// subprocess runs the JIT tier under the guardfree oracle, where a regression
+// faults deterministically on the worker thread. (`src/primitives/
 // concurrency.rs`, the captured-local cell loop.)
 #[test]
 fn region_spawn_capture_mutate_guardfree() {
@@ -516,19 +513,14 @@ fn recur_mutual_guardfree() {
     );
 }
 
-// The inlined-intrinsic build of the same entry-boundary coverage:
-// `--checked-intrinsics=off` changes which functions the JIT accepts (inlined
-// intrinsics compile where checked-mode Funnel calls are rejected), so the
-// adaptive tier compiles a hot caller while its self-recursive callee is still
+// The adaptive-JIT build of the same entry-boundary coverage: the adaptive
+// tier compiles a hot caller while its self-recursive callee is still
 // interpreted — the compile-window shape the stdlib-HOF probe in the file
-// exercises. The harness runs the file checked-ON only; this subprocess covers
-// the checked-off half.
+// exercises. The harness runs the file on the default (VM) tier; this
+// subprocess covers the JIT half.
 #[test]
-fn recur_entry_checked_off() {
-    run_elle_script_with_args(
-        "recur-entry",
-        &["--checked-intrinsics=off", "--mlir=off"],
-    );
+fn recur_entry_jit() {
+    run_elle_script_with_args("recur-entry", &["--jit=adaptive", "--mlir=off"]);
 }
 
 // =============================================================================
@@ -558,50 +550,6 @@ fn region_jit_io_suspend_uaf() {
 #[test]
 fn posix_threadpool() {
     run_elle_script_with_args("posix", &["--no-uring"]);
-}
-
-// =============================================================================
-// Cross-mode semantic agreement (`--checked-intrinsics`)
-// =============================================================================
-
-// Integer overflow must mean the same thing in default and
-// `--checked-intrinsics` modes: ints are 64-bit two's-complement and wrap
-// (docs/intrinsics.md § Integer overflow). Both modes wrap, so a program's
-// meaning does not change under the `--checked-intrinsics` debugging flag
-// (whose purpose is type validation, not overflow semantics).
-// `--checked-intrinsics` is a process-global mode the `elle test` harness
-// cannot vary per file, hence the subprocess pin; see the fixture header.
-#[test]
-fn arithmetic_overflow_mode_agreement() {
-    let elle_bin = get_elle_binary();
-    let script = "tests/integration/fixtures/overflow-mode-agreement.lisp";
-
-    let run = |extra_args: &[&str]| -> String {
-        let output = Command::new(elle_bin)
-            .args(extra_args)
-            .arg(script)
-            .output()
-            .unwrap_or_else(|e| {
-                panic!("Failed to spawn elle for {} {:?}: {}", script, extra_args, e)
-            });
-        assert!(
-            output.status.success(),
-            "Elle script {} {:?} failed (exit {:?}):\nstdout: {}\nstderr: {}",
-            script,
-            extra_args,
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    };
-
-    let default_mode = run(&[]);
-    let checked_mode = run(&["--checked-intrinsics"]);
-    assert_eq!(
-        default_mode, checked_mode,
-        "integer overflow must mean the same thing in default and --checked-intrinsics modes"
-    );
 }
 
 // (Hygiene for syntax-case bindings is carried structurally — synthetic-ness

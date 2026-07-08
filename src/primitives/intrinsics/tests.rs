@@ -2,16 +2,16 @@ use super::*;
 use crate::value::arena::{alloc_in_fresh_region, region_rc};
 use crate::value::heap::{HeapObject, Pair};
 
-/// Counterfactual: `%array-push` (the NativeFn `prim_push` reached
-/// under `--checked-intrinsics`) must call `incref_inserted_element` on the
-/// pushed value so its source region's RC accounts for the new
-/// reference from the destination @array. Without this, the source
-/// region's RC stays at its baseline; when the destination @array
-/// is later freed, cascade decref drops the entry's source region
-/// RC and frees it while the pushed value is still live elsewhere
-/// — UAF. `handle_intr_push` (VM bytecode) and `elle_jit_push` (JIT)
-/// both route through `push_with_incref`; the NativeFn `prim_push`
-/// reached under `--checked-intrinsics` must do the same.
+/// Counterfactual: `%array-push` (the funnel native `prim_push` every
+/// compiled call-position use lowers to) must call
+/// `incref_inserted_element` on the pushed value so its source region's
+/// RC accounts for the new reference from the destination @array.
+/// Without this, the source region's RC stays at its baseline; when the
+/// destination @array is later freed, cascade decref drops the entry's
+/// source region RC and frees it while the pushed value is still live
+/// elsewhere — UAF. `handle_intr_push` (VM bytecode) and `elle_jit_push`
+/// (JIT) both route through `push_with_incref`; the NativeFn `prim_push`
+/// must do the same.
 #[test]
 fn push_track_inserts_cross_region_value() {
     crate::value::arena::with_test_region(|| {
@@ -109,8 +109,8 @@ fn bytes_push_bulk_appends_bytes_value() {
     });
 }
 
-/// Counterfactual: `%pop` (the NativeFn `prim_pop` reached under
-/// `--checked-intrinsics`) MOVES the popped element out to the caller. It must do
+/// Counterfactual: `%pop` (the funnel native `prim_pop` every compiled
+/// call-position use lowers to) MOVES the popped element out to the caller. It must do
 /// two things in lockstep: release the container's stored reference
 /// (`decref_removed_element`, undoing the push's `incref_inserted_element`) AND
 /// hold the caller's owning reference (the pass-through retain), the retain taken

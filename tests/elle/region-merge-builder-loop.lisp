@@ -11,9 +11,8 @@
 # region and overwrite the activation mapping, ORPHANING the child (the shared-slot
 # leak). `runtime_region_for_alloc_slot`'s mint-or-reuse (child mints, parent
 # reuses) resolves it, and the single `DecrefRegion` clears the slot each iteration
-# so per-iteration physical uniqueness holds. The merge fires where `%pair`
-# survives as an intrinsic (`--checked-intrinsics=off`); under the checked-on
-# default `%pair` is a native call and the loop runs the unmerged baseline.
+# so per-iteration physical uniqueness holds. `%pair` lowers as the inline
+# intrinsic (the emit_alloc/MERGE-seed op), so the merge fires on every compile.
 #
 # What this pin guarantees:
 #  - CORRECTNESS (guardfree): the nested literal reads back its own values. A

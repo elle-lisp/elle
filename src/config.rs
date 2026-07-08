@@ -41,58 +41,6 @@ pub fn init(config: Config) {
     let _ = CONFIG.set(config);
 }
 
-/// Whether `%`-intrinsics route through their checked `NativeFn` primitives
-/// (the CLI default, the escape-correct native-Call path) rather than inlining
-/// to unchecked opcodes — read by the analyzer's intrinsic-recognition gate.
-///
-/// This is a function rather than a bare `get().checked_intrinsics` read so a
-/// test can exercise the checked-on path without touching the write-once global
-/// `CONFIG` (which is process-wide and first-write-wins, so unsafe to flip per
-/// test under parallelism). In a non-test build it is exactly the global field.
-pub fn checked_intrinsics() -> bool {
-    #[cfg(test)]
-    {
-        if let Some(v) = test_override::get() {
-            return v;
-        }
-    }
-    get().checked_intrinsics
-}
-
-/// Test-only, thread-local override for [`checked_intrinsics`]. A unit test that
-/// must compile on the checked-on (native-Call) path sets it for the duration of
-/// one compile and clears it — scoped to the calling thread, so it cannot leak
-/// across the test runner's parallel threads. Use [`ScopedCheckedIntrinsics`].
-#[cfg(test)]
-pub(crate) mod test_override {
-    use std::cell::Cell;
-    thread_local! {
-        static OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
-    }
-    pub(crate) fn get() -> Option<bool> {
-        OVERRIDE.with(|c| c.get())
-    }
-    fn set(v: Option<bool>) {
-        OVERRIDE.with(|c| c.set(v));
-    }
-
-    /// RAII guard: forces `checked_intrinsics()` to `value` on this thread until
-    /// dropped, then restores the prior override (clearing on the common path).
-    pub(crate) struct ScopedCheckedIntrinsics(Option<bool>);
-    impl ScopedCheckedIntrinsics {
-        pub(crate) fn new(value: bool) -> Self {
-            let prev = get();
-            set(Some(value));
-            ScopedCheckedIntrinsics(prev)
-        }
-    }
-    impl Drop for ScopedCheckedIntrinsics {
-        fn drop(&mut self) {
-            set(self.0);
-        }
-    }
-}
-
 mod policy;
 pub use policy::{JitPolicy, MlirPolicy, WasmPolicy};
 
@@ -268,20 +216,6 @@ pub struct Config {
     /// O(live_regs * suspend_points). On by default.
     pub wasm_sparse_spill: bool,
 
-    /// Route %-intrinsic calls through registered NativeFn primitives
-    /// with runtime type validation instead of inlining to unchecked
-    /// BinOp/CmpOp/etc. Implies jit=off, mlir=off.
-    ///
-    /// CLI default: **on** (set by `Config::parse`; the struct `Default` is
-    /// off, the library/test baseline). Only the native `Call` path is
-    /// escape-correct — the inlined `%`-intrinsic opcodes (and the JIT's
-    /// inlined accessors) are not. Routing `%`-ops as real native `Call`s is
-    /// therefore the sound default; the opcode fast-path is an optimization to
-    /// be re-enabled later. Override with
-    /// `--checked-intrinsics=off` (restores the optimizing tiers) or by
-    /// explicitly enabling `--jit`/`--mlir`.
-    pub checked_intrinsics: bool,
-
     /// Enable the A-normal form lift pass (`src/hir/anf.rs`).
     ///
     /// Default: on. `--anf=off` short-circuits `anf_lift` to a
@@ -322,14 +256,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            // NOTE: the struct `Default` is the *library/test* baseline (the
-            // unoptimized opcode path: checked off, optimizing tiers on). The
-            // **CLI** effective default is different — `Config::parse` turns
-            // checked_intrinsics ON (and the optimizing tiers off) because that
-            // native-Call path is the only escape-correct one. Keeping the
-            // struct default at the old values means the region/anf solver unit
-            // tests (which exercise the intrinsic-opcode path and run off
-            // `Config::default`, never `parse`) stay meaningful. See `Config::parse`.
+            // NOTE: the struct `Default` is the *library/test* baseline
+            // (optimizing tiers adaptive). The CLI default differs —
+            // `Config::parse` starts with jit/mlir **off** and `--jit`/
+            // `--mlir` opt in. One intrinsic semantics either way
+            // (prove-or-reject; docs/intrinsics.md).
             jit: JitPolicy::Adaptive { threshold: 10 },
             stats: false,
             mlir: MlirPolicy::Adaptive { threshold: 10 },
@@ -344,7 +275,6 @@ impl Default for Config {
             wasm_lir: false,
             wasm_chunk: false,
             wasm_sparse_spill: true,
-            checked_intrinsics: false,
             anf: true,
             dump: HashSet::new(),
             trace_keywords: Vec::new(),

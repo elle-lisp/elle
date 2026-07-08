@@ -22,7 +22,6 @@
 # over-freed was a SEPARATE leaf callee driven in a loop (an acyclic letrec
 # forward reference the closure-cycle merge does not cover).
 
-(def checked? (vm/config :checked-intrinsics))
 
 (defn leaf (n)
   42)
@@ -44,10 +43,10 @@
        b2 (arena/region-count)
        _2 (drive 2000)
        d2000 (%sub (arena/region-count) b2)]
-  (assert (or checked? (%lt d200 20))
+  (assert (%lt d200 20)
           (concat "repeated-call region growth at n=200: delta="
                   (number->string d200)))
-  (assert (or checked? (%lt d2000 20))
+  (assert (%lt d2000 20)
           (concat "repeated-call region growth at n=2000: delta="
                   (number->string d2000))))
 

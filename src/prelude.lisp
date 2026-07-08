@@ -1,4 +1,4 @@
-(elle/epoch 11)
+(elle/epoch 12)
 ## Elle standard prelude
 ##
 ## Loaded automatically by the Expander before user code expansion.
@@ -397,10 +397,18 @@
 
 ## repeat - run body N times
 ## (repeat 3 (println "hi")) prints "hi" three times
+## The count guard both reports a non-integer loudly and proves the loop
+## counter comparison for the silent %lt (the count is a user expression the
+## expansion site cannot otherwise type). (Map literals don't splice under
+## quasiquote, so the error payload is built with struct, like assert's.)
 (defmacro repeat (n & body)
   (let* [g-n (gensym)
          g-i (gensym)]
     `(let [,g-n ,n]
+       (when (%not (integer? ,g-n))
+         (error (struct :error :type-error
+                        :message (string "repeat: expected integer count, got "
+                        (type ,g-n)))))
        (var ,g-i 0)
        (while (%lt ,g-i ,g-n)
          ,;body

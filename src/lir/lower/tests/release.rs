@@ -426,17 +426,16 @@ fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
     // container's rc-zeroing release subtree-dropped the pair before its own decref —
     // which then faulted on the freed region. The members-first bucket class fixes it.
     //
-    // Forces the intrinsic (`--checked-intrinsics=off`) path where the pushed pair is a
-    // slot-resolved `DecrefRegion` member (checked-on it is a value-resolved `Fresh`
-    // release, a different bucket class).
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(false);
+    // `%pair` is an inline intrinsic, so the pushed pair is a slot-resolved
+    // `DecrefRegion` member; the `%array-push` funnel call's recovered containment
+    // supplies the store-adopt edge.
     let (lowerer, _hir) = make_lowerer("(let [items @[]] (%array-push items (%pair 1 2)))");
     let has_adopt = !lowerer.region_info.owned_adopt_edges.is_empty();
     assert!(
         has_adopt,
         "expected `(%array-push items (%pair 1 2))` to produce a store-adopt edge \
-         (owned_adopt_edges) on the checked-off path; got none — if intrinsic \
-         classification changed, update the shape so this test keeps biting",
+         (owned_adopt_edges); got none — if intrinsic classification changed, update \
+         the shape so this test keeps biting",
     );
     let mut saw_shared = false;
     for &(member, owner) in lowerer.region_info.owned_adopt_edges.values().flatten() {

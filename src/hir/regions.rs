@@ -92,7 +92,7 @@ struct RegionInference {
     /// native's declared **embed** (`result ⊇ embedded_arg`, from `call_embeds` — e.g.
     /// `with-traits`'s trait side-field). Both are site-keyed exactly like
     /// `cross_region_refs`, so the forest can hang a value-resolved `AdoptRegion` on the
-    /// call (the checked-on store face), and both drive NO `IncrefRegion` (the funnel
+    /// call (the funnel store face), and both drive NO `IncrefRegion` (the funnel
     /// counts the store at runtime; the alloc-scan counts the embedding), feeding only
     /// the ownership inference. See `RegionInfo::containment_edges`.
     containment_edges: Vec<(HirId, Region, Region)>,

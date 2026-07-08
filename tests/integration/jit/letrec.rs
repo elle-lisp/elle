@@ -6,26 +6,17 @@ fn test_nqueens_eval_signals_are_silent() {
     // (silent) signals, not SIG_YIELD from forward-ref defaults.
     use elle::symbol::SymbolTable;
 
+    // The list-walking fns call stdlib `empty?`/`first`/`rest`/`length`/`list`
+    // — resolved silent bindings, the forward-ref-default hazard this pins.
+    // `d`/`e`/`g` (nqueens' abs/append/reverse shapes) are intrinsic-based:
+    // `(numeric!)` proves `d`'s %-operands without adding signals, and the
+    // letrec walks rebuild append/reverse from %pair — the stdlib wrappers for
+    // these carry dynamic-dispatch signals that would (correctly) deny
+    // silence. `error` is :error-only — it neither yields nor emits a
+    // SuspendingCall, so the silence assertions stand.
     let source = r#"(letrec
-     [check-safe-helper
-        (fn (col remaining row-offset)
-          (if (empty? remaining) true
-            (let [placed-col (first remaining)]
-              (if (or (%eq col placed-col)
-                      (%eq row-offset (abs (%sub col placed-col))))
-                false
-                (check-safe-helper col (rest remaining) (%add row-offset 1)))))) safe? (fn (col queens) (check-safe-helper col queens 1)) try-cols-helper
-       (fn (n col queens row)
-         (if (%eq col n) (list)
-           (if (safe? col queens)
-             (let [new-queens (%pair col queens)]
-               (append (solve-helper n (%add row 1) new-queens)
-                       (try-cols-helper n (%add col 1) queens row)))
-             (try-cols-helper n (%add col 1) queens row)))) solve-helper
-       (fn (n row queens)
-         (if (%eq row n) (list (reverse queens))
-           (try-cols-helper n 0 queens row))) solve-nqueens (fn (n) (solve-helper n 0 (list)))]
-     (length (solve-nqueens 8)))"#;
+     [a (fn (xs) (empty? xs)) b (fn (xs) (first xs)) c (fn (xs) (rest xs)) d (fn (x) (numeric!) (if (%lt x 0) (%sub 0 x) x)) e (fn (xs ys) (letrec [revonto (fn (zs acc) (if (empty? zs) acc (revonto (rest zs) (%pair (first zs) acc))))] (revonto (revonto xs ()) ys))) g (fn (xs) (letrec [go (fn (zs acc) (if (empty? zs) acc (go (rest zs) (%pair (first zs) acc))))] (go xs ()))) h (fn (xs) (length xs)) i (fn (x y) (list x y)) j (fn () (error :x)) k (fn (p) (when (%not (%int? p)) (error :x)) true)]
+     (i 1 2))"#;
 
     let mut symbols = SymbolTable::new();
     let compiled = compile_with_stdlib(source, &mut symbols, "<test>").expect("compilation failed");
@@ -36,6 +27,11 @@ fn test_nqueens_eval_signals_are_silent() {
         !compiled.bytecode.child_protos.is_empty(),
         "expected nqueens closures as child protos"
     );
+    for proto in compiled.bytecode.child_protos.iter() {
+        if let Some(lir) = proto.lir_function.as_ref() {
+            println!("DBG proto name={} arity={:?} signal={:?} has_sc={}", lir.name.as_deref().unwrap_or("<anon>"), lir.arity, lir.signal, lir.has_suspending_call());
+        }
+    }
     for proto in compiled.bytecode.child_protos.iter() {
         if let Some(lir) = proto.lir_function.as_ref() {
             let has_sc = lir.has_suspending_call();

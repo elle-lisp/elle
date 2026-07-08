@@ -431,8 +431,10 @@ That defeats the "`origin/main` is always green across every tier" invariant
 
 Every selected form runs under **every** tier, full stop. The *only* way a form
 opts out of a tier is the loud gate `gate!` (§ Gating), recorded as `status=skip`
-with a reason — visible, per-form, and earned, not a blanket coverage cut. The flag soup (`--checked-intrinsics --jit=off --mlir=off`) and
-the five `Makefile` smoke targets collapse into a single exhaustive run.
+with a reason — visible, per-form, and earned, not a blanket coverage cut. The
+per-tier flag soup (`--jit=off --mlir=off`, `--jit=eager`, …) and the
+per-backend `Makefile` smoke targets collapse into a single exhaustive run:
+`elle test`.
 
 Cross-tier disagreement is its own status. When a form produces different values
 (or different pass/fail) across tiers, the runner records `status=diverge` —

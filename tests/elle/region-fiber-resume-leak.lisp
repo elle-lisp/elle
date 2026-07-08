@@ -25,7 +25,6 @@
 # documented contract. No strong child→parent edge is introduced, so a parent
 # that captured its child does not form an unreclaimable RC cycle.
 
-(def checked? (vm/config :checked-intrinsics))
 
 # ── Leak bound: a completed-and-dropped fiber is reclaimed ──────────────
 # Each iteration builds a fiber, resumes it to :dead, drops it. A correct
@@ -42,7 +41,7 @@
   (%sub (arena/count) before))
 
 (let [d2000 (resume-churn 2000)]
-  (assert (or checked? (%lt d2000 100))
+  (assert (%lt d2000 100)
           (string "fiber-resume object leak: 2000 iters grew live count by "
                   d2000 " (must stay bounded — Rule 8)")))
 
@@ -58,7 +57,7 @@
   (%sub (arena/region-count) before))
 
 (let [d2000 (resume-region-churn 2000)]
-  (assert (or checked? (%lt d2000 100))
+  (assert (%lt d2000 100)
           (string "fiber-resume region leak: 2000 iters grew region count by "
                   d2000 " (must stay bounded — Rule 8)")))
 
@@ -123,6 +122,6 @@
   (%sub (arena/count) before))
 
 (let [d2000 (parent-churn 2000)]
-  (assert (or checked? (%lt d2000 100))
+  (assert (%lt d2000 100)
           (string "nested parent/child fiber leak: 2000 iters grew live count by "
                   d2000 " (no carrier leak, no parent RC cycle)")))

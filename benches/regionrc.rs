@@ -13,11 +13,9 @@
 //!
 //! The numbers come from the thread-local instrument in
 //! `elle::lir::lower::rcstats`, which the lowerer bumps at each coalescing-
-//! candidate site (the decision is not recoverable from the final LIR). Compiling
-//! runs under the library-default config (`checked_intrinsics = false`), so
-//! `%pair` survives as a `Pair` intrinsic and the builder-idiom merge — hence
-//! transform 2 — can fire (CLI default `checked_intrinsics = true` dissolves
-//! `%pair` to a native call and leaves the merge inert; see region/merging.md
+//! candidate site (the decision is not recoverable from the final LIR). `%pair`
+//! compiles as the `Pair` intrinsic on every compile, so the builder-idiom merge —
+//! hence transform 2 — always has sites to fire on (see region/merging.md
 //! § Merging).
 
 use std::panic::{catch_unwind, AssertUnwindSafe};

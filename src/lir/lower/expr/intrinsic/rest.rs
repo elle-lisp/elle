@@ -253,9 +253,9 @@ impl<'a> Lowerer<'a> {
                     key: arg_regs[1],
                 });
             }
-            // Monomorphic put variants reuse the existing Put opcode (intrinsics-mono.md
-            // Impl note 2): the runtime dispatches on the actual container type, so the
-            // variants differ only in static effect/RetType, not lowering.
+            // Monomorphic put variants reuse the existing Put opcode: the
+            // runtime dispatches on the actual container type, so the variants
+            // differ only in static effect/RetType, not lowering.
             IntrinsicOp::Put
             | IntrinsicOp::PutStruct
             | IntrinsicOp::PutArray
@@ -284,10 +284,10 @@ impl<'a> Lowerer<'a> {
             }
             // %array-push mutates @array in place, returns new array for immutable.
             // Distinct from ArrayMutPush which is splice infrastructure. The
-            // monomorphic %push-array / %push-array-mut reuse the same runtime opcode
-            // (intrinsics-mono.md Impl note 2): IntrPush already dispatches on the
-            // runtime type, so the variants differ only in their static effect/RetType,
-            // not their lowering — no new VM/jit/wasm/mlir opcode needed for the
+            // monomorphic %push-array / %push-array-mut reuse the same runtime
+            // opcode: IntrPush already dispatches on the runtime type, so the
+            // variants differ only in their static effect/RetType, not their
+            // lowering — no new VM/jit/wasm/mlir opcode needed for the
             // region/type win.
             IntrinsicOp::Push | IntrinsicOp::PushArray | IntrinsicOp::PushArrayMut => {
                 self.emit(LirInstr::IntrPush {

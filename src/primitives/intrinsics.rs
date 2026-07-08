@@ -1,9 +1,13 @@
 //! %-intrinsic NativeFn primitives.
 //!
-//! Each %-intrinsic is registered as a real `NativeFn` with `Signal::silent()`.
-//! When `--checked-intrinsics` is active, the compiler routes `%add` etc. through
-//! these functions instead of inlining to unchecked BinOp/CmpOp instructions.
-//! Each validates types and returns `(SIG_ERROR, error_val(...))` on mismatch.
+//! Each %-intrinsic is registered as a real `NativeFn` with `Signal::silent()`
+//! — the op's value-position face: a bare `%add` passed to a HOF or called
+//! dynamically validates its arguments here at runtime and returns
+//! `(SIG_ERROR, error_val(...))` on mismatch. The storing/removing/copying ops
+//! (`IntrinsicOp::routes_native_funnel()`) are additionally the funnel natives
+//! every compiled call-position use lowers to (docs/intrinsics.md § Lowering);
+//! the other ops lower to inline BinOp/CmpOp/... instructions in call position
+//! and reach these functions only as values.
 
 use crate::arithmetic;
 use crate::primitives::ctx::NativeCtx;
@@ -369,11 +373,13 @@ primitive! {
         // no store is uncounted, so no clique edges.
         effect: RegionEffect::Funnel,
     }
-    // Monomorphic put twins. Same runtime body
-    // (prim_put) as polymorphic %put; precise RetType is the available win, effect stays
-    // Funnel (no result-side oracle constraint) until the proof obligation makes the
-    // Fresh/funnel split sound. Registration is what makes them usable in checked mode
-    // and as callable values; checked-off lowers them to the Put opcode directly.
+    // Monomorphic put twins. Same runtime body (prim_put) as polymorphic %put;
+    // precise RetType is the monomorphization win. Effect stays Funnel (no
+    // result-side oracle constraint): the same NativeFn also serves dynamic
+    // value-position calls, where no compile-time proof constrains the input
+    // mutability, so the result is still conditionally fresh. Registration
+    // makes them the funnel natives compiled call-position uses lower to
+    // (`routes_native_funnel`) and bare callable values.
     "%put-struct" => prim_put {
         arity: Arity::Exact(3),
         doc: "Assoc into an immutable struct, returning a fresh struct (monomorphic immutable struct put)",
@@ -429,16 +435,16 @@ primitive! {
         // (runtime-counted); the immutable path returns a fresh copy.
         effect: RegionEffect::Funnel,
     }
-    // Monomorphic array-push twins. Same
-    // runtime body (prim_push) as the polymorphic %array-push; what differs is the
-    // *static* declaration. The NativeFn registration is what makes them usable in
-    // checked mode and as bare callable values (HOF); under --checked-intrinsics=off
-    // they lower to the IntrPush opcode directly. RetType is the monomorphization win
-    // already available: %push-array is a fresh immutable Array, %push-array-mut its
-    // mutable arg0. Effect stays Funnel for now (identical to %array-push, and Funnel
-    // carries no result-side oracle constraint); the precise Fresh-vs-funnel split is
-    // sound only once the proof obligation guarantees the input mutability, so it
-    // lands with that work, not here.
+    // Monomorphic array-push twins. Same runtime body (prim_push) as the
+    // polymorphic %array-push; what differs is the *static* declaration. The
+    // NativeFn registration makes them the funnel natives compiled
+    // call-position uses lower to (`routes_native_funnel`) and bare callable
+    // values (HOF). RetType is the monomorphization win already available:
+    // %push-array is a fresh immutable Array, %push-array-mut its mutable
+    // arg0. Effect stays Funnel (identical to %array-push, and Funnel carries
+    // no result-side oracle constraint): the same NativeFn also serves dynamic
+    // value-position calls, where no compile-time proof constrains the input
+    // mutability, so the precise Fresh-vs-funnel split stays unsound here.
     "%push-array" => prim_push {
         arity: Arity::Exact(2),
         doc: "Append to an immutable array, returning a fresh array (monomorphic immutable array-push)",
@@ -475,9 +481,9 @@ primitive! {
         // Funnel, not PassThrough: like %put/%array-push this is
         // conditionally allocating — the @string path appends in place
         // (pass-through), the immutable string path returns a FRESH copy in
-        // this call's own region. Declaring PassThrough trips the
-        // dispatch_native_call declaration oracle on the immutable case once
-        // the op routes as a real native Call (the default checked path).
+        // this call's own region. Declaring PassThrough would trip the
+        // dispatch_native_call declaration oracle on the immutable case,
+        // since the op routes as a real native Call.
         effect: RegionEffect::Funnel,
     }
     "%bytes-push" => prim_bytes_push {

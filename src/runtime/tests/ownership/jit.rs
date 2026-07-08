@@ -185,18 +185,21 @@ fn region_ownership_reclaims_bare_cycle_group_under_jit() {
 fn self_recursive_loop_is_cell_free() {
     use crate::pipeline::compile_file_repl;
 
-    // Object growth (`gauge`) over 200 closures built by `build` and RETAINED in a
-    // program-lifetime `@keep`, sampled mid-run after 50 then 250 builds; returns
-    // c250 - c50 (the per-200-call delta the program computes).
-    fn retained_growth(prelude: &str, build: &str, gauge: &str) -> i64 {
+    // Growth of `gauge` over 200 executions of the retaining `body`, sampled
+    // mid-run after 50 then 250 iterations; returns c250 - c50 (the per-200-call
+    // delta the program computes). The gauge results are opaque to inference; the
+    // match-arm dispatch proves them :integer for the closing `%sub` (no stdlib
+    // `-` on this runtime).
+    fn retained_growth(prelude: &str, body: &str, gauge: &str) -> i64 {
         let mut rt = Runtime::without_stdlib();
         let src = format!(
             "{prelude} (var n 0) \
-             (while (%lt n 50) (%array-push keep {build}) (assign n (%add n 1))) \
+             (while (%lt n 50) {body} (assign n (%add n 1))) \
              (def c50 ({gauge})) \
-             (while (%lt n 250) (%array-push keep {build}) (assign n (%add n 1))) \
+             (while (%lt n 250) {body} (assign n (%add n 1))) \
              (def c250 ({gauge})) \
-             (%sub c250 c50)"
+             (match (type-of c250) :integer \
+               (match (type-of c50) :integer (%sub c250 c50) _ -1) _ -1)"
         );
         let result = {
             let (_vm, symbols, cctx) = rt.parts();
@@ -223,18 +226,42 @@ fn self_recursive_loop_is_cell_free() {
     let for_prelude = "(def @keep @[]) \
         (def ffor (fn [k] (let [h (fn [m] (if m k k))] h)))";
 
-    let rec_obj = retained_growth(rec_prelude, "(frec false)", "arena/count");
-    let for_obj = retained_growth(for_prelude, "(ffor false)", "arena/count");
-    let pair_obj = retained_growth("(def @keep @[])", "(%pair 1 2)", "arena/count");
-    let rec_reg = retained_growth(rec_prelude, "(frec false)", "arena/region-count");
-    let for_reg = retained_growth(for_prelude, "(ffor false)", "arena/region-count");
+    let rec_obj = retained_growth(
+        rec_prelude,
+        "(%array-push keep (frec false))",
+        "arena/count",
+    );
+    let for_obj = retained_growth(
+        for_prelude,
+        "(%array-push keep (ffor false))",
+        "arena/count",
+    );
+    // Gauge-live discriminator: the chain accumulator retains every prior pair by
+    // REFERENCE (each new pair links the last), so the object count must grow ~1
+    // per call. A pushed fresh pair cannot serve here: the `%array-push` funnel
+    // store-adopts the pair's region, and an Owned member leaves the active
+    // accounting `arena/count` sums — retained values, invisible objects.
+    let pair_obj = retained_growth(
+        "(def @acc nil)",
+        "(assign acc (%pair n acc))",
+        "arena/count",
+    );
+    let rec_reg = retained_growth(
+        rec_prelude,
+        "(%array-push keep (frec false))",
+        "arena/region-count",
+    );
+    let for_reg = retained_growth(
+        for_prelude,
+        "(%array-push keep (ffor false))",
+        "arena/region-count",
+    );
 
-    // Gauge-live discriminator: retaining 200 fresh pairs must grow the object
-    // count ~200 (one per call). If small, `arena/count` is not tracking per-call
+    // If the discriminator reads small, `arena/count` is not tracking per-call
     // allocation and every assertion below is vacuous.
     assert!(
         pair_obj > 150,
-        "gauge-live: retaining 200 fresh pairs must grow the object count ~200, \
+        "gauge-live: chaining 200 fresh pairs must grow the object count ~200, \
          got {pair_obj}; if small, arena/count is dead and the pins below are void",
     );
 

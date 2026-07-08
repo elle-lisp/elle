@@ -582,22 +582,18 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     );
 }
 
-/// Analyze `source` on the **checked-on** (native-Call) production path — where a
-/// `%add` / `+` / foreign-fn tail is a frame-replacing `TailCall` (checked-off it is
-/// an inlined `Intrinsic` or a non-tail node), the path the non-member body-tail
-/// adopt exists for. Returns arena so `letrec_binding_node` can locate the cycle.
-fn analyze_cycle_checked_on(
+/// Analyze `source` under the REAL primitive classification, returning the arena
+/// so `letrec_binding_node` can locate the cycle. A storing/copying `%`-op compiles
+/// as a native funnel `Call`, so a body tail like `(%freeze …)` is a frame-replacing
+/// `TailCall` — the shape the non-member body-tail adopt exists for.
+fn analyze_cycle_with_effects(
     source: &str,
     symbols: &mut SymbolTable,
 ) -> (Hir, BindingArena, RegionInfo) {
     let meta = crate::primitives::build_primitive_meta(symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(symbols, &meta);
     let cc = pc.call_classification;
-    let (hir, arena) = {
-        let _guard = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-        let (hir, arena, _) = compile_fhir(source, symbols);
-        (hir, arena)
-    };
+    let (hir, arena, _) = compile_fhir(source, symbols);
     let info = analyze_regions_with(&hir, &arena, cc);
     (hir, arena, info)
 }
@@ -628,8 +624,7 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
     // completion. The tail argument is `(ev k)`'s RESULT (a value), not a member, so
     // no member flows in by-move (contrast
     // `merge_refuses_member_passed_by_move_to_foreign_tail`). `g` is a user closure,
-    // so its `(g r)` tail is a `Call` even checked-off — no `ScopedCheckedIntrinsics`
-    // needed here.
+    // so its `(g r)` tail is an ordinary `Call`.
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(
         "(def g (fn [x] x)) \
@@ -672,19 +667,20 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
 }
 
 #[test]
-fn merge_admits_native_tail_checked_on() {
-    // The native body tail `(%add (ev k) 0)` on the checked-ON (production) path,
-    // where `%add` is a frame-replacing `Call` (checked-off it inlines to an
-    // `Intrinsic` and the tail is not a Call at all). The cycle must MERGE and record
-    // the `%add` site in `cycle_tail_adopt`: at runtime the native keeps the frame and
-    // the live scope-exit drop frees the arena, but the adopt slot is carried anyway
-    // (the compiler never classifies the callee), so a rebound `%add` closure is also
-    // covered. This is the checked-on shape the whole class regressed on.
+fn merge_admits_native_tail() {
+    // The native body tail `(%freeze (ev k))`: a copying `%`-op compiles as a native
+    // funnel `Call`, so in tail position it is a frame-replacing `TailCall` (an inline
+    // arith `%`-op would be an `Intrinsic` node and not a Call tail at all). The cycle
+    // must MERGE and record the `%freeze` site in `cycle_tail_adopt`: at runtime the
+    // native keeps the frame and the live scope-exit drop frees the arena, but the
+    // adopt slot is carried anyway (the compiler never classifies the callee), so a
+    // rebound `%freeze` closure is also covered. This is the native-tail shape the
+    // whole class regressed on.
     let mut symbols = SymbolTable::new();
-    let (hir, arena, info) = analyze_cycle_checked_on(
+    let (hir, arena, info) = analyze_cycle_with_effects(
         "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
-                          (%add (ev k) 0)))) \
+                          (%freeze (ev k))))) \
          (f 3)",
         &mut symbols,
     );
@@ -698,14 +694,14 @@ fn merge_admits_native_tail_checked_on() {
     assert_eq!(
         roots.len(),
         1,
-        "a native body tail ((%add (ev k) 0)) checked-on must MERGE the cycle; \
+        "a native body tail ((%freeze (ev k))) must MERGE the cycle; \
          cells={cells:?} merged_parent={:?}",
         info.merged_parent,
     );
     let root = roots.into_iter().next().unwrap();
     assert!(
         info.cycle_tail_adopt.values().any(|&r| r == root),
-        "the (%add …) tail site must record cycle_tail_adopt → merged root r{}; got {:?}",
+        "the (%freeze …) tail site must record cycle_tail_adopt → merged root r{}; got {:?}",
         root.0,
         info.cycle_tail_adopt,
     );
@@ -723,11 +719,15 @@ fn merge_refuses_member_passed_by_move_to_foreign_tail() {
     // own: `arg_bindings` sees a binding whose source region is in the SCC. Contrast
     // `merge_admits_in_lambda_cycle_with_foreign_tail_callee`, where the argument is a
     // value (`(ev k)`'s result), not the member itself.
+    // `od` is used in value position (`(g od)`), so call-site forwarding cannot
+    // prove its `m` — the diverging guard does (ev stays callee-only and is
+    // proven by forwarding from od's `(ev (%sub m 1))`).
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(
         "(def g (fn [x] x)) \
          (def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
-                                 od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
+                                 od (fn [m] (when (%not (%int? m)) (error :m)) \
+                                      (if (%lt m 1) :odd (ev (%sub m 1))))] \
                           (g od)))) \
          (f 3)",
         &mut symbols,
@@ -763,9 +763,13 @@ fn merge_refuses_escaping_letrec_closure() {
     // closure outlives the activation, so the merge must refuse it (collapsing then
     // freeing at the enclosing scope would reclaim it while the caller holds it) —
     // it stays Shared (the always-legal baseline; reclaiming an escaping closure
-    // cycle awaits the owner = activation/fiber cut).
-    let (hir, _, info) =
-        pipeline("(letrec [loop (fn [n] (if (%lt n 1) :done (loop (%sub n 1))))] loop)");
+    // cycle awaits the owner = activation/fiber cut). `loop` is used in value
+    // position (returned), so call-site forwarding cannot prove `n` — the
+    // diverging guard does.
+    let (hir, _, info) = pipeline(
+        "(letrec [loop (fn [n] (when (%not (%int? n)) (error :n)) \
+                         (if (%lt n 1) :done (loop (%sub n 1))))] loop)",
+    );
     let (closures, cells) = letrec_cycle_members(&hir, &info);
     assert_eq!(closures.len(), 1, "one closure; got {closures:?}");
     for &r in closures.iter().chain(cells.iter()) {

@@ -80,3 +80,39 @@
              (or 1 3 5 7 9) :odd
              (or 0 2 4 6 8) :even
              _ :out) :even) "or-pattern: 4 is even")
+
+# ============================================================================
+# Or-pattern guard retry
+#
+# On a guarded arm, a failed guard retries the remaining alternatives of the
+# same or-pattern, re-binding and re-testing before the match moves on to the
+# next arm (docs/match.md § Guards). The guard here uses `=`, which may
+# suspend, so lowering takes the sequential path — the path that must retry
+# alternatives, not just the decision-tree path.
+# ============================================================================
+
+# alt 1 binds x to the head (:a) and the guard fails; alt 2 retries with x
+# bound to the tail (5) and passes.
+(assert (= (match (pair :a 5)
+             (or (x . _) (_ . x)) when
+             (= x 5) x
+             _ :none) 5) "or-guard retry: second alternative satisfies guard")
+
+# head is the satisfying side: alt 1 passes on the first try, no retry.
+(assert (= (match (pair 5 :b)
+             (or (x . _) (_ . x)) when
+             (= x 5) x
+             _ :none) 5) "or-guard retry: first alternative satisfies guard")
+
+# neither side satisfies the guard: every alternative's guard fails, so the
+# arm is abandoned and the catch-all runs.
+(assert (= (match (pair 1 2)
+             (or (x . _) (_ . x)) when
+             (= x 5) x
+             _ :none) :none) "or-guard retry: no alternative satisfies guard")
+
+# three alternatives, only the last satisfies the guard.
+(assert (= (match [1 2 7]
+             (or [a _ _] [_ a _] [_ _ a]) when
+             (= a 7) a
+             _ :none) 7) "or-guard retry: third alternative satisfies guard")

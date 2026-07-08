@@ -61,3 +61,13 @@
 (assert (not (has? env5 '__file_expr_0))
         "environment hides compiler temporaries")
 (assert (not (has? env5 '__signal_0)) "environment hides signal gensyms")
+
+# The `elle test` runner wraps each file in a barrier/whole-module transform
+# that injects a `__test-out` accumulator binding at file scope. It is
+# scope-stamped hygienic, so — like a macro-introduced binding — a reference
+# written here can never resolve to it and (environment) must not reify it.
+# Run directly (`elle FILE`) there is no such binding and this holds trivially;
+# under `elle test` the binding exists and must stay invisible. (Before this
+# was fixed, (environment) captured it and referencing it failed to compile.)
+(assert (not (has? env5 '__test-out))
+        "environment hides the test-runner accumulator")

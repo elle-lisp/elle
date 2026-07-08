@@ -22,6 +22,7 @@ pub enum RetType {
     /// Not statically known (the default).
     Unknown,
     Int,
+    Float,
     Bool,
     String,
     /// Mutable string (`@string`). Sound only for a primitive that *always*

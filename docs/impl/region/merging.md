@@ -94,12 +94,11 @@ construction:
   the two move together, which is why allocation-canonicalization, child-decref
   suppression, and self-edge elimination are one mechanism, not three.
 
-The whole mechanism is keyed on `RegionInfo::merged_parent` being non-empty. Under
-`--checked-intrinsics=on` (the CLI default) `%pair` lowers as a native call, not a
-`Pair` intrinsic node, so the seed predicate finds no sites, `merged_parent` is
-empty, `merged_root` is the identity, and every step above is inert — the emitted
-stream is byte-identical to the one-region-per-value baseline. The merge fires only
-where `%pair` survives as an intrinsic (`--checked-intrinsics=off`).
+The whole mechanism is keyed on `RegionInfo::merged_parent` being non-empty.
+`%pair` lowers as a `Pair` intrinsic node, so the seed predicate sees every
+builder idiom; in a function with no seed site `merged_parent` is empty,
+`merged_root` is the identity, and every step above is inert — the emitted
+stream is byte-identical to the one-region-per-value baseline.
 
 ## Runtime: the per-execution slot model and mint-or-reuse
 

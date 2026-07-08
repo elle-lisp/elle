@@ -300,6 +300,33 @@ impl IntrinsicOp {
         matches!(self, Self::Pair | Self::Freeze | Self::Thaw)
     }
 
+    /// Does this op lower as the **native funnel `Call`** rather than an
+    /// inline opcode (docs/intrinsics.md § Lowering)? The storing, removing,
+    /// and copying ops ride the escape-correct native path: their region
+    /// accounting (cross-region edge recording, call-result regions, `%pop`'s
+    /// moved-out element) lives in the natives. The analyzer routes a
+    /// call-position use of these through `analyze_call` to the registered
+    /// NativeFn; everything else becomes an `Intrinsic` opcode node.
+    pub fn routes_native_funnel(self) -> bool {
+        matches!(
+            self,
+            Self::Put
+                | Self::PutStruct
+                | Self::PutArray
+                | Self::PutStructMut
+                | Self::PutArrayMut
+                | Self::Push
+                | Self::PushArray
+                | Self::PushArrayMut
+                | Self::StringPush
+                | Self::BytesPush
+                | Self::Del
+                | Self::Pop
+                | Self::Freeze
+                | Self::Thaw
+        )
+    }
+
     /// Does this intrinsic produce a **call-result region** — a fresh per-call
     /// region for a conditionally-allocating native (`%put`/`%del`/
     /// `%string-push`/`%array-push`/`%bytes-push`) whose result is freed *by

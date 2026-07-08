@@ -103,7 +103,12 @@
 
 (let [xs '(a b c)]
   (assert (= (%first xs) 'a) "%first of quoted list")
-  (assert (= (%first (%rest xs)) 'b) "%rest then %first"))
+  # A %rest result is only a pair while elements remain, so walking a list
+  # with %-ops proves each step — the guard chain is the idiom.
+  (let [tl (%rest xs)]
+    (when (%not (%pair? tl))
+      (error {:error :type-error :message "tl: pair expected"}))
+    (assert (= (%first tl) 'b) "%rest then %first")))
 
 # ── Bitwise ───────────────────────────────────────────────────
 
@@ -159,18 +164,30 @@
 (assert (not ok3?) "unknown %-intrinsic should be compile error")
 
 # ── Intrinsic + stdlib interop ────────────────────────────────
+# A HOF callback's parameter has no proven type, so a call-position
+# intrinsic inside one needs a guard — the guard is what discharges the
+# operand contract (docs/intrinsics.md § The contract).
 
 # test_intrinsic_with_stdlib
-(assert (= (map (fn [x] (%mul x x)) '(1 2 3 4)) '(1 4 9 16))
-        "intrinsic inside map callback")
+(assert (= (map (fn [x] (if (%int? x) (%mul x x) 0)) '(1 2 3 4)) '(1 4 9 16))
+        "guarded intrinsic inside map callback")
 
-# test_intrinsic_in_fold
-(assert (= (fold (fn [a b] (%add a b)) 0 '(1 2 3 4 5)) 15)
-        "%add wrapped in lambda for fold")
+# test_intrinsic_in_fold — %add as a VALUE is the registered NativeFn,
+# runtime-checked; no guard needed in value position.
+(assert (= (fold %add 0 '(1 2 3 4 5)) 15) "%add as a value in fold")
 
 # test_intrinsic_in_filter
-(assert (= (filter (fn [x] (%gt x 3)) '(1 2 3 4 5)) '(4 5))
-        "intrinsic in filter predicate")
+(assert (= (filter (fn [x] (if (%int? x) (%gt x 3) false)) '(1 2 3 4 5)) '(4 5))
+        "guarded intrinsic in filter predicate")
+
+# ── Intrinsics as callable values ─────────────────────────────
+# A bare %-name anywhere but call position is the registered NativeFn:
+# storable, passable, runtime-validating when called dynamically.
+
+(def my-add %add)
+(assert (= (my-add 10 20) 30) "%add as callable value")
+(def [dyn-ok? dyn-err] (protect (my-add "a" "b")))
+(assert (not dyn-ok?) "dynamic call through the NativeFn validates at runtime")
 
 # ── Pair/First/Rest rename verification ──────────────────────
 # The Elle-level primitives are now pair/first/rest (not cons/car/cdr).
@@ -240,25 +257,32 @@
 (assert (= (%first (%pair nil true)) nil) "%pair with nil")
 (assert (= (%rest (%pair nil true)) true) "%pair with bool")
 
-# test_deeply_nested_pair
+# test_deeply_nested_pair — each %rest step re-proves pairness (the guard
+# chain from the "%rest then %first" test, extracted as a helper).
+(defn pair-step [p]
+  (when (%not (%pair? p))
+    (error {:error :type-error :message "pair-step: pair expected"}))
+  (%rest p))
 (let [deep (%pair 1 (%pair 2 (%pair 3 (%pair 4 ()))))]
-  (assert (= (%first (%rest (%rest (%rest deep)))) 4)
-          "deeply nested %pair/%rest/%first"))
+  (let [t3 (pair-step (pair-step (pair-step deep)))]
+    (when (%not (%pair? t3))
+      (error {:error :type-error :message "t3: pair expected"}))
+    (assert (= (%first t3) 4) "deeply nested %pair walk")))
 
 # ── Intrinsics as building blocks ─────────────────────────────
 
 # test_manual_sum_with_intrinsics
 (defn manual-sum [xs]
-  (fold (fn [acc x] (%add acc x)) 0 xs))
-(assert (= (manual-sum '(1 2 3 4 5)) 15) "manual sum with %add")
+  (fold %add 0 xs))
+(assert (= (manual-sum '(1 2 3 4 5)) 15) "manual sum with %add as a value")
 
 # test_manual_map_with_intrinsics
 (defn manual-map [f xs]
   (if (empty? xs)
     ()
     (%pair (f (%first xs)) (manual-map f (%rest xs)))))
-(assert (= (manual-map (fn [x] (%mul x x)) '(1 2 3)) '(1 4 9))
-        "manual map with %pair/%first/%rest/%mul")
+(assert (= (manual-map (fn [x] (if (%int? x) (%mul x x) 0)) '(1 2 3)) '(1 4 9))
+        "manual map with %pair/%first/%rest and a guarded callback")
 
 # ── %bit-not and %ne ─────────────────────────────────────────────────
 

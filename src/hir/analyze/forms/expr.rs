@@ -374,15 +374,23 @@ impl<'a> Analyzer<'a> {
                             }
                         }
                         _ => {
-                            // %-intrinsic recognition: %name (not bare %)
-                            // When --checked-intrinsics is active, skip inline
-                            // recognition — fall through to analyze_call so the
-                            // call compiles as Call to the registered NativeFn.
-                            if name.starts_with('%')
-                                && name.len() > 1
-                                && !crate::config::checked_intrinsics()
-                            {
-                                return self.analyze_intrinsic(name, &items[1..], span);
+                            // %-intrinsic recognition: %name (not bare %).
+                            // One lowering per op (docs/intrinsics.md
+                            // § Lowering): the storing/removing/copying ops
+                            // fall through to analyze_call — the escape-
+                            // correct native funnel Call to the registered
+                            // NativeFn — while everything else becomes the
+                            // opcode Intrinsic node. Both forms carry the
+                            // same prove-or-reject operand obligation
+                            // (typeinfer/contract.rs).
+                            if name.starts_with('%') && name.len() > 1 {
+                                use crate::hir::expr::IntrinsicOp;
+                                match IntrinsicOp::from_name(name) {
+                                    Some(op) if op.routes_native_funnel() => {}
+                                    _ => {
+                                        return self.analyze_intrinsic(name, &items[1..], span);
+                                    }
+                                }
                             }
                         }
                     }

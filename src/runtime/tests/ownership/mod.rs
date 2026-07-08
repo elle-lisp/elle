@@ -13,11 +13,9 @@ mod subtree;
 /// warm up, then run the same bytecode 50 times, returning the net live-region
 /// count delta. The shared steady-state harness every discarded-shape reclamation
 /// pin below uses — the ownership forest is unconditional, so there is no flag to
-/// vary; a shape reads bounded iff the forest reclaims it. Runs under the ambient
-/// `--checked-intrinsics` setting (a scoped `ScopedCheckedIntrinsics` selects the
-/// production checked-on face). `without_stdlib` keeps the measurement to region
-/// count; the trustworthy UAF oracle is full-stdlib `--trace=guardfree` (the elle
-/// corpus).
+/// vary; a shape reads bounded iff the forest reclaims it. `without_stdlib` keeps
+/// the measurement to region count; the trustworthy UAF oracle is full-stdlib
+/// `--trace=guardfree` (the elle corpus).
 pub(super) fn steady_region_growth(src: &str) -> i64 {
     use crate::pipeline::compile_file_repl;
     let mut rt = Runtime::without_stdlib();
@@ -60,9 +58,9 @@ pub(super) fn steady_region_growth(src: &str) -> i64 {
 /// that read it) go red, forcing a re-choice.
 pub(super) const LEAK_DISCRIMINATOR: &str = "(begin (let [a (@array)] (%array-push a a) nil) nil)";
 
-/// Per-run live-region growth of [`LEAK_DISCRIMINATOR`] over the shared harness,
-/// under the ambient `--checked-intrinsics` setting. Positive by construction — the
-/// gauge-live precondition for the bounded subject assertions.
+/// Per-run live-region growth of [`LEAK_DISCRIMINATOR`] over the shared harness.
+/// Positive by construction — the gauge-live precondition for the bounded subject
+/// assertions.
 pub(super) fn leak_discriminator() -> i64 {
     steady_region_growth(LEAK_DISCRIMINATOR)
 }

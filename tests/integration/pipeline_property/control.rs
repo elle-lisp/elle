@@ -34,6 +34,9 @@ proptest! {
 
     #[test]
     fn match_in_lambda(a in -50i64..50, b in -50i64..50) {
+        // Equal draws would make arm 2 a literal duplicate of arm 1, which
+        // the compiler rejects as an unreachable match arm.
+        prop_assume!(a != b);
         let h = elle::primitives::ctx::TestHeap::new();
         let expr = format!(
             "((fn (x) (match x {} \"a\" {} \"b\" _ \"other\")) {})",

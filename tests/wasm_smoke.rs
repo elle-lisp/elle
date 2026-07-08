@@ -2,15 +2,13 @@
 #![cfg(feature = "wasm")]
 
 fn eval(source: &str) -> String {
-    // Run the WASM backend the way `elle --wasm=full` does: with checked
-    // intrinsics (the native-Call path that is escape-correct on this backend;
-    // the inlined-opcode path is not), and with no shared disk cache so each
-    // test compiles its module independently and deterministically.
+    // Run the WASM backend the way `elle --wasm=full` does, with no shared
+    // disk cache so each test compiles its module independently and
+    // deterministically.
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         elle::config::init(elle::config::Config {
-            checked_intrinsics: true,
             cache: None,
             ..Default::default()
         });

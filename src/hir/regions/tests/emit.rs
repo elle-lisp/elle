@@ -64,33 +64,53 @@ fn yield_value_region_outlives_emit_scope() {
 }
 
 #[test]
-fn cross_region_edge_recorded_for_push() {
-    // The %array-push primitive emits a cross-region edge entry
-    // from the pushed value's region to the collection's value
-    // region (NOT the collection's binding region — under
-    // unique-per-alloc those are distinct).
+fn funnel_containment_recorded_for_push() {
+    // `%array-push` compiles as a native funnel Call: the store is runtime-counted,
+    // so the site records NO `cross_region_refs` edge (a compile-time IncrefRegion
+    // would double-count against the collection's single free-time cascade decref).
+    // The containment the ownership walks need is recovered structurally instead:
+    // `containment_edges` carries `value → collection` keyed at the funnel call
+    // site, and `funnel_store_sites` records the stored value for the compensate
+    // gate. Needs the real classification so the callee resolves to its declared
+    // `Funnel` effect and the `@[]` collection to its MutableArray RetType.
     let (hir, arena, symbols, info) =
-        analyze_with_hir("(let [acc @[] x (string \"a\")] (begin (%array-push acc x) acc))");
+        analyze_with_class("(let [acc @[] x (string \"a\")] (begin (%array-push acc x) acc))");
     let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
     assert_eq!(allocs.len(), 1, "expected one (string ...) call");
     let x_alloc = allocs[0];
     let x_region = info.alloc_region.get(&x_alloc).copied().expect("x region");
 
-    // Any edge whose source is x's region is a valid hit for this
-    // test — the destination is the @[] allocation's region, which
-    // we can't easily name without walking patterns. Asserting on
-    // the source side alone is enough to prove the push intrinsic
-    // produces an edge.
-    let edges_from_x: Vec<_> = info
-        .cross_region_refs
-        .iter()
-        .filter(|(_, src, _)| *src == x_region)
-        .collect();
     assert!(
-        !edges_from_x.is_empty(),
-        "expected an edge from x's region r{} into a collection; got {:?}",
+        !info
+            .cross_region_refs
+            .iter()
+            .any(|(_, src, _)| *src == x_region),
+        "a funnel store must record no cross_region_refs edge from the pushed \
+         value's region r{}; got {:?}",
         x_region.0,
         info.cross_region_refs,
+    );
+    // Any containment edge whose source is x's region is a valid hit — the
+    // destination is the @[] allocation's region, which we can't easily name
+    // without walking patterns. The source side alone proves the push recovers
+    // its containment.
+    assert!(
+        info.containment_edges
+            .iter()
+            .any(|&(_, src, _)| src == x_region),
+        "the funnel recovery must record a containment edge from the pushed \
+         value's region r{} into the collection; got {:?}",
+        x_region.0,
+        info.containment_edges,
+    );
+    assert!(
+        info.funnel_store_sites
+            .values()
+            .flatten()
+            .any(|&r| r == x_region),
+        "the funnel store site must record the stored value's region r{}; got {:?}",
+        x_region.0,
+        info.funnel_store_sites,
     );
 }
 

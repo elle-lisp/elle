@@ -72,11 +72,19 @@ fn closure_cycle_discarded_release_is_prompt() {
             } else {
                 format!("(r{k} 2)")
             };
+            // RETAIN uses r{k} in value position (the push), which disables
+            // call-site argument forwarding — the diverging guard proves `m` instead.
             src.push_str(&format!(
-                "(letrec [r{k} (fn [m] (if (%lt m 1) :done (r{k} (%sub m 1))))] {body})\n"
+                "(letrec [r{k} (fn [m] (when (%not (%int? m)) (error :m)) \
+                   (if (%lt m 1) :done (r{k} (%sub m 1))))] {body})\n"
             ));
         }
-        src.push_str("(def c1 (arena/region-count))\n(%sub c1 c0)");
+        // `arena/region-count` results are opaque to inference; the match-arm
+        // dispatch proves them :integer for the closing `%sub` (no stdlib `-` here).
+        src.push_str(
+            "(def c1 (arena/region-count))\n\
+             (match (type-of c1) :integer (match (type-of c0) :integer (%sub c1 c0) _ -1) _ -1)",
+        );
         let result = {
             let (_vm, symbols, cctx) = rt.parts();
             compile_file_repl(&src, symbols, cctx, "<embed>")
@@ -177,7 +185,7 @@ fn closure_cycle_nested_letrec_reclaims_per_call() {
              (def c50 (arena/region-count)) \
              (while (%lt n 250) {body} (assign n (%add n 1))) \
              (def c250 (arena/region-count)) \
-             (%sub c250 c50)"
+             (- c250 c50)"
         );
         let result = {
             let (_vm, symbols, cctx) = rt.parts();
@@ -249,7 +257,7 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
              (def c50 (arena/region-count)) \
              (while (%lt n 250) {body} (assign n (%add n 1))) \
              (def c250 (arena/region-count)) \
-             (%sub c250 c50)"
+             (- c250 c50)"
         );
         let result = {
             let (_vm, symbols, cctx) = rt.parts();
@@ -322,7 +330,7 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
         (f false) (f false) (f false) (f false) (f false) \
         (f false) (f false) (f false) (f false) (f false) \
         (def b (arena/region-count)) \
-        (%sub b a)";
+        (match (type-of b) :integer (match (type-of a) :integer (%sub b a) _ -1) _ -1)";
     let mut rt = Runtime::without_stdlib();
     let res = {
         let (_vm, symbols, cctx) = rt.parts();
@@ -422,7 +430,7 @@ fn self_recursive_define_with_arith_reclaims_per_call() {
              (def c50 (arena/region-count)) \
              (while (%lt n 250) {body} (assign n (%add n 1))) \
              (def c250 (arena/region-count)) \
-             (%sub c250 c50)"
+             (- c250 c50)"
         );
         let result = {
             let (_vm, symbols, cctx) = rt.parts();

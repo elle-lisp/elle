@@ -5,10 +5,21 @@
 # properties of closures for GPU compilation candidacy.
 
 # ── Eligible: pure %-intrinsic arithmetic ─────────────────────
-(assert (fn/gpu-eligible? (fn [a b] (%add a b))) "%add is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [x] (%mul x x))) "%mul is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [x] (%sub 0 x))) "%sub negate is gpu-eligible")
-(assert (fn/gpu-eligible? (fn [a b] (%lt a b))) "%lt is gpu-eligible")
+# (numeric!) is the kernel's declared numeric contract: it seeds the
+# parameters as Numbers for the intrinsic operand proofs (a bare parameter
+# has no proven type) and is what the GPU gate holds the body to.
+(assert (fn/gpu-eligible? (fn [a b]
+                            (numeric!)
+                            (%add a b))) "%add is gpu-eligible")
+(assert (fn/gpu-eligible? (fn [x]
+                            (numeric!)
+                            (%mul x x))) "%mul is gpu-eligible")
+(assert (fn/gpu-eligible? (fn [x]
+                            (numeric!)
+                            (%sub 0 x))) "%sub negate is gpu-eligible")
+(assert (fn/gpu-eligible? (fn [a b]
+                            (numeric!)
+                            (%lt a b))) "%lt is gpu-eligible")
 
 # stdlib arithmetic (+ * - <) goes through Call, not gpu-eligible
 (assert (not (fn/gpu-eligible? (fn [a b] (+ a b))))
@@ -18,7 +29,9 @@
 (assert (fn/gpu-eligible? (fn [] 42)) "constant is gpu-eligible")
 
 # ── Eligible: control flow ─────────────────────────────────────
-(assert (fn/gpu-eligible? (fn [x] (if (%gt x 0) x (%sub 0 x))))
+(assert (fn/gpu-eligible? (fn [x]
+                            (numeric!)
+                            (if (%gt x 0) x (%sub 0 x))))
         "if-then-else is gpu-eligible")
 
 # ── Not eligible: calls other functions ────────────────────────
@@ -29,7 +42,9 @@
 
 # ── Eligible: immutable capture is constant-propagated ─────────
 (def outer 10)
-(assert (fn/gpu-eligible? (fn [x] (%add x outer)))
+(assert (fn/gpu-eligible? (fn [x]
+                            (numeric!)
+                            (%add x outer)))
         "immutable capture is gpu-eligible (constant-propagated)")
 
 # ── Not eligible: variadic ─────────────────────────────────────

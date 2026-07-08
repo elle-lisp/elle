@@ -29,7 +29,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// the consumer-site call-result regions whose release the lowerer replaces
 /// with `AdoptIntoActivation` (`RegionInfo::transfer_adopt_regions`).
 pub(in crate::hir::regions) struct TransferAdopts {
-    /// Emit-site HirId (a store site, or a funnel call site — the checked-on
+    /// Emit-site HirId (a store site, or a funnel call site — the funnel store
     /// face, where the adopt is value-resolved and needs no store opcode) →
     /// interior `(member, owner)` adopts.
     pub store: HashMap<HirId, Vec<(Region, Region)>>,
@@ -476,9 +476,9 @@ pub(in crate::hir::regions) fn compute_transfer_adopts(
             return None;
         }
         // Interior owner edges, exactly as the store/capture adopt assigns
-        // them — plus the funnel face: a containment edge is emittable at the
-        // funnel call site recording the stored member (the checked-on path,
-        // where the adopt is value-resolved and needs no store opcode).
+        // them — plus the funnel store face: a containment edge is emittable
+        // at the funnel call site recording the stored member (the adopt is
+        // value-resolved there and needs no store opcode).
         let interior_store: Vec<(HirId, Region, Region)> = info
             .cross_region_refs
             .iter()

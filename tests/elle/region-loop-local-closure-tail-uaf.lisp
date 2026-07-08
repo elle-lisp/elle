@@ -24,7 +24,6 @@
 # GREEN once the closure no longer frees its tail-returned value, AND the result
 # is reclaimed per iteration (bounded) by the caller's discard-release.
 
-(def checked? (vm/config :checked-intrinsics))
 
 # Absolute small-delta bound (NOT the ratio-based `bounded?`): a reclaimed loop
 # here drives the per-iteration delta to/under zero (warmup frees outweigh the
@@ -72,13 +71,13 @@
 
 (let [d100 (drive-pair 100)
       d10k (drive-pair 10000)]
-  (assert (or checked? (small? d100 d10k))
+  (assert (small? d100 d10k)
           (string "loop-local closure tail %pair UAF/leak: d100=" d100 " d10k="
                   d10k)))
 
 (let [d100 (drive-struct 100)
       d10k (drive-struct 10000)]
-  (assert (or checked? (small? d100 d10k))
+  (assert (small? d100 d10k)
           (string "loop-local closure tail struct UAF/leak: d100=" d100 " d10k="
                   d10k)))
 

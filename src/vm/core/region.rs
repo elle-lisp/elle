@@ -56,9 +56,8 @@ impl VM {
     /// iteration's first member mints fresh.
     ///
     /// `merged_slots` is the current function's set (from its `Code`). It is empty
-    /// unless a builder-idiom merge fired (`--checked-intrinsics=off` with a nested
-    /// `%pair` literal), so this is byte-identical to the plain mint on the default
-    /// path.
+    /// unless a builder-idiom merge fired (a nested `%pair` literal seeding the
+    /// merge), so this is byte-identical to the plain mint when no merge exists.
     #[inline]
     pub(crate) fn runtime_region_for_alloc_slot_maybe_merged(
         &mut self,

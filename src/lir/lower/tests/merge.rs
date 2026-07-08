@@ -183,9 +183,9 @@ fn param_return_stays_value_resolved() {
 //   (4) record the shared slot in `merged_slots` for runtime mint-or-reuse.
 //
 // The canonical shape is the discarded nested literal `(begin (%pair (%pair 1 2) 3)
-// nil)` — exactly the source the merge-seed pins in `hir/regions/tests.rs` fire on,
-// under the unit harness's `--checked-intrinsics=off` default (where `%pair` is a
-// `Pair` intrinsic, lowered to `LirInstr::List`, so the seed has sites to merge).
+// nil)` — exactly the source the merge-seed pins in `hir/regions/tests.rs` fire on.
+// `%pair` compiles as the `Pair` intrinsic (lowered to `LirInstr::List`) on every
+// compile, so the seed always has sites to merge.
 //
 // Each pin is counterfactual against the pre-flip emission, which allocates child
 // and parent on DISTINCT slots, emits TWO `DecrefRegion`s, KEEPS the self-edge
@@ -284,8 +284,7 @@ fn merge_flip_inert_without_a_merge() {
     // nested child to merge) records no merged slot, drops no edge, and keeps its
     // one ordinary `DecrefRegion` — the one-region-per-value baseline. This pins
     // that the canonicalization/suppression/drop touch nothing when `merged_parent`
-    // is empty (the same inertness the `--checked-intrinsics=on` default relies on,
-    // where no `%pair` survives as an intrinsic at all).
+    // is empty.
     let module = compile_to_lir("(begin (%pair 1 2) nil)");
     let slots = builder_pair_slots(&module);
     assert_eq!(

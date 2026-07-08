@@ -66,10 +66,8 @@ pub(super) fn print_help() {
         );
     }
     println!("  --dump=all            Dump every stage");
-    println!("  --jit=POLICY          JIT policy: off, eager, adaptive, or integer N");
-    println!("                          (off by default under --checked-intrinsics; adaptive when enabled)");
-    println!("  --mlir=POLICY         MLIR policy: off, eager, adaptive, or integer N");
-    println!("                          (off by default under --checked-intrinsics; adaptive when enabled)");
+    println!("  --jit=POLICY          JIT policy: off (default), eager, adaptive, or integer N");
+    println!("  --mlir=POLICY         MLIR policy: off (default), eager, adaptive, or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
     println!("  --flip=on|off         Legacy no-op (accepted for backwards compat)");
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
@@ -79,13 +77,6 @@ pub(super) fn print_help() {
         println!("                          {line}");
     }
     println!("  --trace=all           Trace everything");
-    println!("  --checked-intrinsics=on|off");
-    println!("                        Validate argument types passed to %-intrinsics, panicking");
-    println!("                          on mismatch instead of inlining to opcodes that produce");
-    println!("                          silent garbage. Audits type-correctness before code");
-    println!("                          reaches JIT/SPIR-V/WASM. On by default; implies");
-    println!("                          --jit=off --mlir=off. Use =off to restore the");
-    println!("                          optimizing tiers.");
     println!("  --stats               Print statistics at normal program termination");
     println!("  --no-stdlib           Skip loading stdlib (debugging compile_core / prelude)");
     println!("  --no-uring            Linux: disable io_uring; route I/O through the thread pool");

@@ -266,8 +266,13 @@ fn return_escape_spec() {
 }
 
 /// Store-into-a-longer-lived-region escape (the store facet). A value stored
-/// into a freshly-allocated aggregate escapes its activation but is NOT returned;
-/// the store *target* (the container) is not a source and does not escape.
+/// into a freshly-allocated aggregate (`%pair`, an uncounted compile-time store)
+/// escapes its activation but is NOT returned; the store *target* (the container)
+/// is not a source and does not escape. A MUTABLE-container store (`%array-push`/
+/// `%put`) is different: it compiles as a `Funnel` native call whose store is
+/// runtime-counted (the funnel increfs the stored value; the container's
+/// free-time cascade balances it), so there is no uncounted store for the caller
+/// to account for and escape seeds NOTHING — neither the value nor the container.
 #[test]
 fn store_escape_spec() {
     // a let-local heap value stored into a pair: `s` escapes via the STORE, not
@@ -287,16 +292,16 @@ fn store_escape_spec() {
         "(let [s \"hi\"] (let [t s] (%pair t t)))",
         &[("s", true, false), ("t", true, false)],
     );
-    // pushed value escapes into a mutable array (arg 1); the collection (arg 0) is
-    // the store TARGET, not a source.
+    // pushed value: the mutable-array store rides the runtime-counted funnel, so
+    // neither the value nor the collection is an escape seed.
     assert_binding_escape(
         "(let [box @[] s \"hi\"] (%array-push box s))",
-        &[("s", true, false), ("box", false, false)],
+        &[("s", false, false), ("box", false, false)],
     );
-    // put value escapes into a mutable struct (arg 2); the struct is the target.
+    // put value: the mutable-struct store is the same funnel accounting.
     assert_binding_escape(
         "(let [m @{} s \"hi\"] (%put m :k s))",
-        &[("s", true, false), ("m", false, false)],
+        &[("s", false, false), ("m", false, false)],
     );
     // a value consumed by a non-storing op does NOT escape.
     assert_binding_escape("(let [s \"hi\"] (length s))", &[("s", false, false)]);

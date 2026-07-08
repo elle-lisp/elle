@@ -18,6 +18,15 @@
 //! cross-wired or stale self-reference yields a different integer. The
 //! `tests/elle/recur-after-{yield,tail-call}.lisp` and `recur-as-value.lisp`
 //! corpus files are the cross-tier (VM/JIT) and `--trace=guardfree` peers.
+//!
+//! The recursion bodies use raw `%`-ops. Call-site argument forwarding proves a
+//! function's parameters only when the binding is used exclusively in callee
+//! position; a `go` that is returned, stored, or passed as a value (the whole
+//! point of these pins) proves its parameters with an allocation-free diverging
+//! guard (`(when (%not (%int? m)) (error :m))`) instead. The final aggregations
+//! run over opaque call results — fiber resumes, def-bound closures — whose
+//! types the intrinsic contract cannot prove, so those sites use the stdlib
+//! wrappers (`+`/`*`).
 
 use super::*;
 use crate::pipeline::compile_file_repl;
@@ -66,7 +75,7 @@ fn self_recursion_survives_yield_resume_interleaved() {
           (assign fa (fiber/resume a)) \
           (assign fb (fiber/resume b)) \
           (assign r (%add r 1))) \
-        (%add fa (%mul 10000 fb))";
+        (+ fa (* 10000 fb))";
     assert_eq!(
         run_int(src),
         4_000_040,
@@ -90,7 +99,7 @@ fn self_recursion_survives_tail_call_frame_replacement() {
         (defn deep-sum [n step] \
           (letrec [go (fn [m acc] (if (%lt m 1) acc (go (%sub m 1) (%add acc step))))] \
             (go n 0))) \
-        (%add (deep-sum 100000 1) (deep-sum 50000 3))";
+        (+ (deep-sum 100000 1) (deep-sum 50000 3))";
     assert_eq!(
         run_int(src),
         250_000,
@@ -109,7 +118,9 @@ fn self_recursion_survives_tail_call_frame_replacement() {
 fn self_recursion_preserves_identity_to_base_case_after_tail_calls() {
     let src = "\
         (defn descend [n] \
-          (letrec [go (fn [m] (if (%lt m 1) go (go (%sub m 1))))] \
+          (letrec [go (fn [m] \
+                        (when (%not (%int? m)) (error :m)) \
+                        (if (%lt m 1) go (go (%sub m 1))))] \
             (go n))) \
         (defn counting [n] \
           (letrec [go (fn [m] (if (%lt m 1) 0 (%add 1 (go (%sub m 1)))))] \
@@ -135,14 +146,19 @@ fn self_recursion_preserves_identity_to_base_case_after_tail_calls() {
 fn self_recursion_correct_in_value_position() {
     let src = "\
         (defn make-countup [] \
-          (letrec [go (fn [m] (if (%lt m 1) 0 (%add 1 (go (%sub m 1)))))] go)) \
+          (letrec [go (fn [m] \
+                        (when (%not (%int? m)) (error :m)) \
+                        (if (%lt m 1) 0 (%add 1 (go (%sub m 1)))))] go)) \
         (defn stepper [inc] \
-          (letrec [go (fn [m acc] (if (%lt m 1) acc (go (%sub m 1) (%add acc inc))))] go)) \
+          (letrec [go (fn [m acc] \
+                        (when (%not (%int? m)) (error :m)) \
+                        (when (%not (%int? acc)) (error :acc)) \
+                        (if (%lt m 1) acc (go (%sub m 1) (%add acc inc))))] go)) \
         (def f (make-countup)) \
         (def s2 (stepper 2)) \
         (def s5 (stepper 5)) \
         (assert (= (f 7) 7) \"returned self-recursive closure counts to 7\") \
-        (%add (s2 4 0) (%mul 100 (s5 4 0)))";
+        (+ (s2 4 0) (* 100 (s5 4 0)))";
     assert_eq!(
         run_int(src),
         2008,
@@ -167,11 +183,11 @@ fn self_recursion_survives_jit_to_interpreter_boundary() {
         (def go \
           (letrec [g (fn [ls] (if (empty? ls) 0 (%add 1 (g (rest ls)))))] \
             g)) \
-        (defn caller [xs] (%add 100 (go xs))) \
+        (defn caller [xs] (+ 100 (go xs))) \
         (defn tail-caller [xs] (go xs)) \
         (def nontail (compile/run-on :jit caller (list 1 2 3))) \
         (def tail (compile/run-on :jit tail-caller (list 1 2 3 4))) \
-        (%add nontail (%mul 1000 tail))";
+        (+ nontail (* 1000 tail))";
     assert_eq!(
         run_int(src),
         103 + 1000 * 4,
@@ -206,7 +222,9 @@ fn self_recursion_survives_forced_bytecode_tier_entry() {
 fn self_recursion_as_fiber_body() {
     let src = "\
         (def f \
-          (letrec [count-down (fn [m] (if (%lt m 1) 0 (%add 1 (count-down (%sub m 1)))))] \
+          (letrec [count-down (fn [m] \
+                                (when (%not (%int? m)) (error :m)) \
+                                (if (%lt m 1) 0 (%add 1 (count-down (%sub m 1)))))] \
             (fiber/new count-down |:error|))) \
         (fiber/resume f 3)";
     assert_eq!(
@@ -252,6 +270,8 @@ fn self_reference_from_nested_lambda_names_the_enclosing_binding() {
     let src = "\
         (defn make [] \
           (letrec [loop (fn [m acc] \
+                          (when (%not (%int? m)) (error :m)) \
+                          (when (%not (%int? acc)) (error :acc)) \
                           (if (%lt m 1) acc \
                             (let [g (fn [] loop)] ((g) (%sub m 1) (%add acc 1)))))] \
             (loop 5 0))) \

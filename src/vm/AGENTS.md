@@ -137,11 +137,14 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    return `()` (not `Result`). VM bugs (stack underflow, bad bytecode) panic
    immediately. Primitives and stdlib wrappers produce catchable errors via
    `fiber.signal = (SIG_ERROR, error_val(kind, msg))`. Intrinsic bytecode
-   ops (Add, Sub, Mul, Div, Lt, etc.) are **unchecked** — wrong types produce
-   garbage, not crashes or signals. This matches WASM/SPIR-V semantics and
-   makes their compile-time `Silent` signal truthful. Under `--checked-intrinsics`,
-   the compiler routes %-calls through NativeFn primitives that validate types
-   and panic on mismatch (belt-and-suspenders in `call.rs`).
+   ops (Add, Sub, Mul, Div, Lt, etc.) trust their operands — wrong types
+   produce garbage, not crashes or signals. This matches WASM/SPIR-V
+   semantics, and it is sound because a call-position `%`-op only compiles
+   when its operand contract is proven (prove-or-reject,
+   `hir/typeinfer/contract.rs`) — which is what makes the ops'
+   compile-time `Silent` signal truthful. A `%`-op called dynamically as a
+   value routes through its registered NativeFn, which validates arguments
+   at runtime.
    See `set_error()` in `call.rs` and `fiber.rs` for the signal-based helper.
 
 ## Key VM fields

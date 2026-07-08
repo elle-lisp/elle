@@ -17,7 +17,6 @@ else
   CARGO_PROFILE :=
 endif
 TIMEOUT ?= 30s
-TIMEOUT_CHECKED ?= 120s
 LISP_FILES := $(shell find stdlib.lisp prelude.lisp lib/ tests/ demos/ -name '*.lisp' 2>/dev/null)
 
 all: elle docs  ## Build everything
@@ -96,7 +95,7 @@ ELLE_TEST_SKIP :=
 
 # Per-pass skip lists for the DIRECT-RUN tier targets only (smoke-vm/jit/noffi).
 # jit-rejections    — requires JIT active (tests rejection tracking)
-# gpu-eligible,mlir — test inline intrinsic compilation (bypassed by --checked-intrinsics)
+# gpu-eligible,mlir — require the MLIR tier active
 ELLE_SKIP_VM  := -e jit-rejections.lisp -e gpu-eligible.lisp -e mlir.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
 ELLE_SKIP_MLIR := -e NOMATCH_PLACEHOLDER
@@ -122,14 +121,6 @@ smoke-vm: elle
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --jit=off --mlir=off {}' \
 		|| { echo "FAILED: elle tests VM-only pass (no JIT)"; exit 1; }
-
-smoke-checked: elle
-	@echo "=== elle tests (checked intrinsics) ==="
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_JIT) | \
-		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT_CHECKED) $(ELLE) --checked-intrinsics {}' \
-		|| { echo "FAILED: elle tests checked-intrinsics pass"; exit 1; }
 
 elle-noffi:           ## Build elle with no features (for smoke-noffi)
 	@echo "=== build elle with no features ==="

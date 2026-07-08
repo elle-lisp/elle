@@ -1,4 +1,5 @@
 use super::*;
+use crate::syntax::ScopeId;
 
 /// The fault-barrier transform (see `compile_barrier_module`). Runs on the
 /// macro-EXPANDED top-level forms — so binding macros like `defn`/`def-` have
@@ -18,17 +19,30 @@ use super::*;
 /// (but not invoked) when the module runs on the bytecode tier, then run by the
 /// runner on each tier. Setup forms run eagerly, so a later test form — and a
 /// later thunk — sees earlier defs.
-pub(super) fn barrier_transform(expanded: Vec<Syntax>) -> Vec<Syntax> {
+pub(super) fn barrier_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) -> Vec<Syntax> {
     let sp = Span::synthetic();
     let sym = |s: &str| Syntax::new(SyntaxKind::Symbol(s.to_string()), sp.clone());
     let slist = |items: Vec<Syntax>| Syntax::new(SyntaxKind::List(items), sp.clone());
+    // The accumulator is compiler-injected, not written by the user. Scope-stamp
+    // every occurrence with a fresh scope so it is *hygienic*: a reference the
+    // user writes (which never carries this scope) can never resolve to it, so
+    // `(environment)` excludes it — the same scope-subset rule that hides
+    // macro-introduced bindings — and a test file that binds its own
+    // `__test-out` does not collide with the harness.
+    let acc = |s: &str| {
+        Syntax::with_scopes(
+            SyntaxKind::Symbol(s.to_string()),
+            sp.clone(),
+            vec![acc_scope],
+        )
+    };
+    let acc_name = "__test-out";
 
-    let acc = "__test-out";
     let mut out: Vec<Syntax> = Vec::with_capacity(expanded.len() + 2);
     // (def __test-out (@array))
     out.push(slist(vec![
         sym("def"),
-        sym(acc),
+        acc(acc_name),
         slist(vec![sym("@array")]),
     ]));
 
@@ -53,11 +67,11 @@ pub(super) fn barrier_transform(expanded: Vec<Syntax>) -> Vec<Syntax> {
                 thunk,
             ]);
             // (push __test-out pair)
-            out.push(slist(vec![sym("push"), sym(acc), pair]));
+            out.push(slist(vec![sym("push"), acc(acc_name), pair]));
         }
     }
     // __test-out  (the letrec body → the module's return value)
-    out.push(sym(acc));
+    out.push(acc(acc_name));
     out
 }
 
@@ -83,12 +97,20 @@ pub(super) fn barrier_transform(expanded: Vec<Syntax>) -> Vec<Syntax> {
 /// (push __test-out (array 0 (fn () (%file-body form1 form2 … formN))))
 /// __test-out
 /// ```
-pub(super) fn whole_module_transform(expanded: Vec<Syntax>) -> Vec<Syntax> {
+pub(super) fn whole_module_transform(expanded: Vec<Syntax>, acc_scope: ScopeId) -> Vec<Syntax> {
     let sp = Span::synthetic();
     let sym = |s: &str| Syntax::new(SyntaxKind::Symbol(s.to_string()), sp.clone());
     let slist = |items: Vec<Syntax>| Syntax::new(SyntaxKind::List(items), sp.clone());
+    // Hygienic accumulator symbol (see `barrier_transform`).
+    let acc = |s: &str| {
+        Syntax::with_scopes(
+            SyntaxKind::Symbol(s.to_string()),
+            sp.clone(),
+            vec![acc_scope],
+        )
+    };
+    let acc_name = "__test-out";
 
-    let acc = "__test-out";
     // (fn () (%file-body form1 … formN)) — all forms become the thunk body,
     // analyzed with file-scope letrec semantics. An empty file yields a thunk
     // whose body is nil.
@@ -107,11 +129,11 @@ pub(super) fn whole_module_transform(expanded: Vec<Syntax>) -> Vec<Syntax> {
 
     vec![
         // (def __test-out (@array))
-        slist(vec![sym("def"), sym(acc), slist(vec![sym("@array")])]),
+        slist(vec![sym("def"), acc(acc_name), slist(vec![sym("@array")])]),
         // (push __test-out (array 0 thunk))
         slist(vec![
             sym("push"),
-            sym(acc),
+            acc(acc_name),
             slist(vec![
                 sym("array"),
                 Syntax::new(SyntaxKind::Int(0), sp.clone()),
@@ -119,7 +141,7 @@ pub(super) fn whole_module_transform(expanded: Vec<Syntax>) -> Vec<Syntax> {
             ]),
         ]),
         // __test-out  (the module's return value)
-        sym(acc),
+        acc(acc_name),
     ]
 }
 

@@ -154,7 +154,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
                      (def @acc 0) (def @i 0) \
                      (while (%lt i 3) \
                        (def @s @[10]) \
-                       (let [cl (fn [] (s 0))] (assign acc (%add acc (cl)))) \
+                       (let [cl (fn [] (s 0))] (assign acc (cl))) \
                        (assign i (%add i 1))) \
                      acc)";
     let mut symbols = SymbolTable::new();

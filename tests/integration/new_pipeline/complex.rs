@@ -9,15 +9,22 @@ fn test_closure_capture() {
 
 #[test]
 fn test_mutual_recursion_setup() {
+    // `f` is the letrec's value (a value-position use), so call-site forwarding
+    // cannot prove its param — the diverging guard does. `g` stays callee-only
+    // and is proven by forwarding from f's `(g (%sub n 1))`.
     assert!(compiles(
-        "(letrec [f (fn (n) (if (%eq n 0) 0 (g (%sub n 1)))) g (fn (n) (f n))] f)"
+        "(letrec [f (fn (n) (when (%not (%int? n)) (error :n)) \
+                      (if (%eq n 0) 0 (g (%sub n 1)))) \
+                  g (fn (n) (f n))] f)"
     ));
 }
 
 #[test]
 fn test_nested_lets_and_lambdas() {
+    // x/y are proven Int by their literal inits; `(numeric!)` proves the
+    // lambda's own param z for the %add operand contract.
     assert!(compiles(
-        "(let [x 1] (let [y 2] (fn (z) (%add x (%add y z)))))"
+        "(let [x 1] (let [y 2] (fn (z) (numeric!) (%add x (%add y z)))))"
     ));
 }
 
@@ -206,7 +213,11 @@ fn test_lambda_many_params() {
 
 #[test]
 fn test_lambda_with_nested_lambda() {
-    assert!(compiles("(fn (x) (fn (y) (%add x y)))"));
+    // The inner %add sees the capture x and the param y, both unproven; a
+    // diverging type guard proves them (numeric! can't cover a capture).
+    assert!(compiles(
+        "(fn (x) (fn (y) (when (%not (and (%int? x) (%int? y))) (error :nan)) (%add x y)))"
+    ));
 }
 
 // ============ Control Flow Edge Cases ============

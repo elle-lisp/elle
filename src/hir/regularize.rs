@@ -11,7 +11,7 @@ use crate::hir::typeinfer::{infer_and_rewrite, prune_typeof_match_arms, TypeInfo
 use crate::symbol::SymbolTable;
 
 /// Mark tail calls, prune dead `(type-of x)` arms, functionalize, ANF-lift, and
-/// run type inference / intrinsic rewriting. Returns the inference result (`Err`
+/// run type inference and the intrinsic operand proofs. Returns the inference result (`Err`
 /// is the monomorphization proof obligation; see `typeinfer`).
 ///
 /// **Order is load-bearing.** Dead-arm pruning runs *before* `functionalize`: a

@@ -114,27 +114,20 @@ fn get_intrinsic_passes_through_collection_region() {
 
 #[test]
 fn put_intrinsic_gets_a_call_result_region() {
-    // %put is a conditionally-allocating native: a mutable arg is mutated in
-    // place (pass-through), an immutable arg yields a fresh copy. Like a Call,
-    // its result gets its OWN call-result region — the handler mints a fresh
-    // region and pass-through-retains, and the lowerer emits a value-based
-    // `DecrefValueRegion` at the decref_point (freeing the minted region for a
-    // fresh copy, or arg 0's region for the in-place case). It is NOT
-    // region-transparent. (Counterfactual: were %put to pass through arg[0] and
-    // manufacture no region, the freshly-copied immutable result would have no
-    // region of its own to release — it must be born in its own call-result
-    // region so the lowerer can free it.)
-    let (hir, _arena, _symbols, info) = analyze_with_hir("(let [m @{:a 1}] (%put m :b 2))");
-    let put_id = find_first(&hir, |h| {
-        matches!(
-            &h.kind,
-            HirKind::Intrinsic {
-                op: crate::hir::expr::IntrinsicOp::Put,
-                ..
-            }
-        )
-    })
-    .expect("expected a %put node");
+    // %put is a conditionally-allocating store: a mutable arg is mutated in
+    // place (pass-through), an immutable arg yields a fresh copy. It compiles
+    // as a native funnel `Call`, so its result gets its OWN call-result region —
+    // the handler mints a fresh region and pass-through-retains, and the lowerer
+    // emits a value-based `DecrefValueRegion` at the decref_point (freeing the
+    // minted region for a fresh copy, or arg 0's region for the in-place case).
+    // It is NOT region-transparent. (Counterfactual: were %put to pass through
+    // arg[0] and manufacture no region, the freshly-copied immutable result
+    // would have no region of its own to release — it must be born in its own
+    // call-result region so the lowerer can free it.)
+    let (hir, arena, symbols, info) = analyze_with_hir("(let [m @{:a 1}] (%put m :b 2))");
+    let puts = find_calls_to_primitive(&hir, "%put", &arena, &symbols);
+    assert_eq!(puts.len(), 1, "expected one %put funnel call");
+    let put_id = puts[0];
     let put_region = info
         .alloc_region
         .get(&put_id)
@@ -143,7 +136,7 @@ fn put_intrinsic_gets_a_call_result_region() {
     assert!(
         info.call_result_regions.contains(&put_region),
         "%put's region r{} must be a call-result region (value-based DecrefValueRegion), \
-         like a native call — not a static-slot alloc",
+         like any native call — not a static-slot alloc",
         put_region.0,
     );
 }
@@ -187,38 +180,27 @@ fn typeof_and_length_have_no_region() {
 
 #[test]
 fn freeze_and_thaw_get_a_real_region() {
-    // %freeze and %thaw produce a new heap copy. Their lowering
-    // uses emit_alloc, so the regions walk must assign each its
-    // own alloc_region. (This complements the negative tests
-    // above: these two intrinsics ARE allocating.)
-    let (hir, _arena, _symbols, info) =
+    // %freeze and %thaw produce a new heap copy. They compile as native funnel
+    // `Call`s (the copying ops route through the escape-correct native path), so
+    // each result is born in its own call-result region and released by value
+    // (`DecrefValueRegion`). (This complements the negative tests above: these
+    // two ops ARE allocating.)
+    let (hir, arena, symbols, info) =
         analyze_with_hir("(let [m @[1 2]] (let [f (%freeze m)] (%thaw f)))");
-    let freeze_id = find_first(&hir, |h| {
-        matches!(
-            &h.kind,
-            HirKind::Intrinsic {
-                op: crate::hir::expr::IntrinsicOp::Freeze,
-                ..
-            }
-        )
-    })
-    .expect("expected a %freeze node");
-    let thaw_id = find_first(&hir, |h| {
-        matches!(
-            &h.kind,
-            HirKind::Intrinsic {
-                op: crate::hir::expr::IntrinsicOp::Thaw,
-                ..
-            }
-        )
-    })
-    .expect("expected a %thaw node");
-    assert!(
-        info.alloc_region.contains_key(&freeze_id),
-        "%freeze must have an alloc_region — it really allocates"
-    );
-    assert!(
-        info.alloc_region.contains_key(&thaw_id),
-        "%thaw must have an alloc_region — it really allocates"
-    );
+    let freezes = find_calls_to_primitive(&hir, "%freeze", &arena, &symbols);
+    assert_eq!(freezes.len(), 1, "expected one %freeze funnel call");
+    let thaws = find_calls_to_primitive(&hir, "%thaw", &arena, &symbols);
+    assert_eq!(thaws.len(), 1, "expected one %thaw funnel call");
+    for (name, id) in [("%freeze", freezes[0]), ("%thaw", thaws[0])] {
+        let r =
+            info.alloc_region.get(&id).copied().unwrap_or_else(|| {
+                panic!("{name} @{} must have an alloc_region — it allocates", id.0)
+            });
+        assert!(
+            info.call_result_regions.contains(&r),
+            "{name}'s region r{} must be a call-result region (freed by value), like \
+             any native call — not a static-slot alloc",
+            r.0,
+        );
+    }
 }

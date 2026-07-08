@@ -77,9 +77,9 @@
 ## it first guarantees the worker has finished (success, rejection, or panic)
 ## before we ask `(jit? f)`.
 ## These compilation checks are only meaningful when a JIT policy is
-## active. Under --jit=off and --checked-intrinsics (which forces JIT
-## off) nothing compiles, so (jit? f) is always false; the behavioral
-## %bytes-push assertions above already cover those modes.
+## active. Under --jit=off nothing compiles, so (jit? f) is always
+## false; the behavioral %bytes-push assertions above already cover
+## that configuration.
 (when (not (= (vm/config :jit) :off))
   (jit/rejections)
   (assert (not (has-rejection? "IntrBytesPush"))

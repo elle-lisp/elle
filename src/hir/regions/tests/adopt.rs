@@ -4,17 +4,19 @@ use super::*;
 //
 // `regions::ownership::compute_adopt_edges` is the map the lowerer consumes: for each
 // externally-unique Owned subtree (the lifetime obligation + no merge overlap), it
-// emits one `AdoptRegion(owner, member)` per non-root member at the member's
-// `member → owner` containment store site. Each member is adopted by its **actual
-// parent**: the root when a direct `member → root` edge exists (a flat star, the common
-// case — an interior member↔member cycle among root's direct children rides along,
-// reclaimed by the root's subtree drop with no adopt of its own), else the single
-// interior container that holds it (multi-level nesting `root ⊇ a ⊇ b`: `a` adopts `b`,
-// the root adopts `a`, and the root's recursive subtree drop frees the whole chain). A
-// member with NO interior `cross_region_refs` container edge (capture/funnel-recovered
-// containment, no store site) or with two-or-more non-root containers and no root edge
-// (an ambiguous single owner) refuses the whole subtree to Shared (the always-legal
-// baseline). These pins are written from that definition.
+// emits one `AdoptRegion(owner, member)` per non-root member. A `%`-store is an opaque
+// `Funnel` native call recording NO `cross_region_refs` edge — its containment reaches
+// the walk as site-keyed funnel-recovered `containment_edges`, and the store adopt is
+// keyed at that funnel CALL site (region/adopt.md § The funnel adopt); a capture member
+// is keyed at its closure's Lambda. Each member is adopted by its **actual parent**:
+// the root when a direct `member → root` edge exists (a flat star, the common case — an
+// interior member↔member cycle among root's direct children rides along, reclaimed by
+// the root's subtree drop with no adopt of its own), else the single interior container
+// that holds it (multi-level nesting `root ⊇ a ⊇ b`: `a` adopts `b`, the root adopts
+// `a`, and the root's recursive subtree drop frees the whole chain). A member with no
+// containment edge naming an owner, or with two-or-more non-root containers and no root
+// edge (an ambiguous single owner), refuses the whole subtree to Shared (the
+// always-legal baseline). These pins are written from that definition.
 
 // ── ownership inference: the lifetime obligation is STRUCTURAL, not numeric ──────
 //
@@ -129,6 +131,17 @@ fn adopt_edges_claims_interior_cycle_member_by_root() {
                          (%array-push root a) (%array-push root b) nil)) \
                 nil)",
     );
+    // Precondition: the stores are genuinely funnel calls — they record no
+    // `cross_region_refs` containment; only `containment_edges` carries it.
+    assert!(
+        !info
+            .cross_region_refs
+            .iter()
+            .any(|(site, _, _)| !info.hard_edge_sites.contains(site)),
+        "precondition: the funnel stores record no cross_region_refs containment; \
+         got {:?}",
+        info.cross_region_refs,
+    );
     let (root, members) = container_root_and_members(&info);
     let non_root: Vec<Region> = members.into_iter().filter(|m| *m != root).collect();
     assert_eq!(
@@ -164,6 +177,22 @@ fn adopt_edges_claims_interior_cycle_member_by_root() {
             child.0, parent.0, root.0, adopts,
         );
     }
+    // Each adopt is keyed at a funnel call site — the site the value-resolved
+    // `AdoptRegion` emits at (`emit_increfs_for` on that Call node; no store opcode
+    // exists to key it on).
+    for site in edges.store.keys() {
+        assert!(
+            info.funnel_store_sites.contains_key(site),
+            "adopt site {site:?} must be a funnel store call site; funnel sites: {:?}",
+            info.funnel_store_sites.keys(),
+        );
+    }
+    // No capture edges in this shape.
+    assert!(
+        edges.capture.is_empty(),
+        "a pure store shape emits no capture adopts; got {:?}",
+        edges.capture,
+    );
 }
 
 #[test]
@@ -184,15 +213,12 @@ fn adopt_edges_claims_deep_nesting_by_actual_parent() {
                   (begin (%array-push a b) (%array-push root a) nil)) \
                 nil)",
     );
-    // Identify the three regions by their edge roles among the non-hard containment
-    // edges: root is target-only (`root ⊇ a`), `a` is both a target (`a ⊇ b`) and a
-    // source (`root ⊇ a`), `b` is source-only (`a ⊇ b`).
+    // Identify the three regions by their edge roles among the funnel-recovered
+    // containment edges: root is target-only (`root ⊇ a`), `a` is both a target
+    // (`a ⊇ b`) and a source (`root ⊇ a`), `b` is source-only (`a ⊇ b`).
     let mut srcs = rustc_hash::FxHashSet::default();
     let mut dsts = rustc_hash::FxHashSet::default();
-    for &(site, src, dst) in &info.cross_region_refs {
-        if info.hard_edge_sites.contains(&site) {
-            continue;
-        }
+    for &(_site, src, dst) in &info.containment_edges {
         srcs.insert(src);
         dsts.insert(dst);
     }
@@ -247,109 +273,6 @@ fn adopt_edges_refuses_ambiguous_multiparent() {
         "a member held by two non-root containers (ambiguous owner) must emit no adopt — \
          the subtree stays Shared; got {:?}",
         adopts,
-    );
-}
-
-#[test]
-fn adopt_edges_claims_funnel_recovered_subtree_checked_on() {
-    // The funnel face of the store-keyed adopt (region/adopt.md § "The funnel adopt —
-    // the checked-on store face"). On the checked-on (native-Call) production path the
-    // interior-cycle shape's stores are opaque `Funnel` calls recording NO
-    // `cross_region_refs` edge — the containment reaches the walk only as site-keyed
-    // funnel-recovered `containment_edges` — and the cut must admit it exactly as the
-    // intrinsic path does: every member adopted directly by the container root (the
-    // flat star), each adopt keyed at the funnel CALL site that stored it (the
-    // value-resolved emit needs no store opcode).
-    //
-    // Counterfactual: before the funnel face, a funnel-only member had no emittable
-    // owner edge, `compute_adopt_edges` refused the whole subtree to Shared, and the
-    // store map was empty — the containment assertions below were RED.
-    let (_, info, edges) = adopt_edges_checked_on(
-        "(begin (let [root (@array) a (@array) b (@array)] \
-                  (begin (%array-push a b) (%array-push b a) \
-                         (%array-push root a) (%array-push root b) nil)) \
-                nil)",
-    );
-    // Precondition: genuinely the funnel path — the stores record no non-hard
-    // `cross_region_refs` containment; only `containment_edges` carries it.
-    assert!(
-        !info
-            .cross_region_refs
-            .iter()
-            .any(|(site, _, _)| !info.hard_edge_sites.contains(site)),
-        "precondition: checked-on, the funnel stores record no cross_region_refs \
-         containment; got {:?}",
-        info.cross_region_refs,
-    );
-    assert!(
-        !info.containment_edges.is_empty(),
-        "precondition: the containment is funnel-recovered",
-    );
-    // Identify the regions by their containment-edge roles: root is target-only,
-    // a and b are sources (the funnel analog of `container_root_and_members`).
-    let mut srcs = rustc_hash::FxHashSet::default();
-    let mut dsts = rustc_hash::FxHashSet::default();
-    for &(_site, src, dst) in &info.containment_edges {
-        srcs.insert(src);
-        dsts.insert(dst);
-    }
-    let roots: Vec<Region> = dsts.iter().copied().filter(|r| !srcs.contains(r)).collect();
-    assert_eq!(
-        roots.len(),
-        1,
-        "the shape has one container root; got {roots:?}"
-    );
-    let root = roots[0];
-    let members: Vec<Region> = srcs.iter().copied().filter(|r| *r != root).collect();
-    assert_eq!(members.len(), 2, "two members a, b; got {members:?}");
-    let adopts: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
-    for m in &members {
-        assert!(
-            adopts.contains(&(*m, root)),
-            "member r{} must be adopted directly by the container root r{} on the \
-             checked-on path; adopts={adopts:?}",
-            m.0,
-            root.0,
-        );
-    }
-    // Each adopt is keyed at a funnel call site — the site the value-resolved
-    // `AdoptRegion` emits at (`emit_increfs_for` on that Call node).
-    for site in edges.store.keys() {
-        assert!(
-            info.funnel_store_sites.contains_key(site),
-            "adopt site {site:?} must be a funnel store call site; funnel sites: {:?}",
-            info.funnel_store_sites.keys(),
-        );
-    }
-    // No capture edges in this shape.
-    assert!(
-        edges.capture.is_empty(),
-        "a pure store shape emits no capture adopts; got {:?}",
-        edges.capture,
-    );
-}
-
-#[test]
-fn adopt_edges_refuses_loop_enclosed_member_checked_on() {
-    // The lifetime obligation holds on the funnel face: the same loop-enclosed shape
-    // `adopt_edges_refuses_loop_enclosed_member` pins on the intrinsic path must refuse
-    // checked-on too — the root's free re-runs every iteration and a funnel-adopted
-    // member keeps its own decref (store-adopted semantics), the cross-iteration UAF
-    // the `EmitMode::Adopt` loop clause exists for. An admission here would be a
-    // soundness regression the funnel face must not introduce.
-    let (_, info, edges) = adopt_edges_checked_on(
-        "(let [c 1] (while c (let [root (@array) a (@array)] \
-           (begin (%array-push root a) (%array-push root 7) nil))))",
-    );
-    assert!(
-        !info.containment_edges.is_empty(),
-        "precondition: the loop-enclosed containment is funnel-recovered",
-    );
-    let adopts: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
-    assert!(
-        adopts.is_empty(),
-        "a funnel member whose owner's free is re-run by an enclosing loop must emit \
-         no adopt — the subtree stays Shared; got {adopts:?}",
     );
 }
 
@@ -608,7 +531,7 @@ fn adopt_edges_chains_store_and_capture_in_one_subtree() {
     // Combined probe: a Fresh container `root` holds a local capturing closure `c`, and
     // `c` captures the pair `p`. One externally-unique Owned subtree {root, c, p} chains
     // the two emit modes — `c` is adopted by `root` through a STORE edge
-    // (`%array-push root c` records a `cross_region_refs` containment edge `root ⊇ c`),
+    // (`%array-push root c` funnel-records the containment edge `root ⊇ c`),
     // and `p` is adopted by `c` through a re-derived CAPTURE edge `c ⊇ p`. The owner
     // assignment must thread both kinds: `c`'s actual parent is the root (direct store
     // edge), `p`'s actual parent is the non-root container `c`. The root's recursive
@@ -628,11 +551,11 @@ fn adopt_edges_chains_store_and_capture_in_one_subtree() {
     );
     let p = sole_pair_region(&hir, &info);
     let c = sole_closure_region(&hir, &info);
-    // The container root: the target of the non-hard store edge whose source is `c`.
+    // The container root: the target of the funnel containment edge whose source is `c`.
     let root = info
-        .cross_region_refs
+        .containment_edges
         .iter()
-        .find(|(site, src, _)| !info.hard_edge_sites.contains(site) && *src == c)
+        .find(|(_, src, _)| *src == c)
         .map(|&(_, _, dst)| dst)
         .expect("precondition: a store edge root ⊇ c");
     let store: Vec<(Region, Region)> = edges.store.values().flatten().copied().collect();
@@ -688,12 +611,12 @@ fn adopt_edges_chains_deep_nesting_with_capture_leaf() {
     );
     let p = sole_pair_region(&hir, &info);
     let c = sole_closure_region(&hir, &info);
-    // mid = the target of the store edge sourced at `c`; root = the target of the store
-    // edge sourced at `mid` (both non-hard).
+    // mid = the target of the funnel containment edge sourced at `c`; root = the target
+    // of the one sourced at `mid`.
     let store_target_of = |src: Region| -> Region {
-        info.cross_region_refs
+        info.containment_edges
             .iter()
-            .find(|(site, s, _)| !info.hard_edge_sites.contains(site) && *s == src)
+            .find(|(_, s, _)| *s == src)
             .map(|&(_, _, dst)| dst)
             .unwrap_or_else(|| panic!("precondition: a store edge sourced at r{}", src.0))
     };
@@ -847,7 +770,7 @@ fn adopt_edges_capture_root_with_store_child() {
     // Spec: capture adopt (m→c); store adopt (v→m).
     let (hir, info, edges) = adopt_edges(
         "(begin (let [v (@array) m (@array)] \
-                  (let [c (fn [] (%first m))] \
+                  (let [c (fn [] (length m))] \
                     (begin (%array-push m v) (c) nil))) \
                 nil)",
     );
@@ -929,14 +852,13 @@ fn adopt_edges_refuses_captured_store_member_on_lifetime() {
                       nil)";
     let (hir, info, edges) = adopt_edges(src);
     // `m` is the @array that is BOTH a store source (`m → root`) and a store target
-    // (`c → m`); `root` is target-only, `c` source-only.
+    // (`c → m`) among the funnel containment edges; `root` is target-only, `c`
+    // source-only.
     let mut srcs = rustc_hash::FxHashSet::default();
     let mut dsts = rustc_hash::FxHashSet::default();
-    for &(site, s, d) in &info.cross_region_refs {
-        if !info.hard_edge_sites.contains(&site) {
-            srcs.insert(s);
-            dsts.insert(d);
-        }
+    for &(_site, s, d) in &info.containment_edges {
+        srcs.insert(s);
+        dsts.insert(d);
     }
     let m = *srcs
         .iter()
@@ -1199,7 +1121,7 @@ fn owned_subtrees_admits_local_capture_cell_clique() {
         "(defn build [n] \
            (letrec [drive (fn [m] (leaf m)) \
                     leaf (fn [m] m)] \
-             (%add (drive n) 0)))",
+             (begin (drive n) 0)))",
     );
     let (cell, content) = sole_cell_and_content(&info);
     let subtree = owned
@@ -1255,7 +1177,7 @@ fn owned_subtrees_refuses_two_sibling_captured_cell() {
            (letrec [a (fn [m] (leaf m)) \
                     b (fn [m] (leaf m)) \
                     leaf (fn [m] m)] \
-             (%add (%add (a n) (b n)) 0)))",
+             (begin (a n) (b n) 0)))",
     );
     let (cell, _content) = sole_cell_and_content(&info);
     assert!(
@@ -1372,7 +1294,7 @@ fn restorable_compiled_cell_records_content_edge_but_is_not_adopted() {
     let (_hir, arena, info, edges) = capture_edges(
         "(def @acc (list 1 2)) \
          (def reader (fn [] acc)) \
-         (%add (%length (reader)) 0)",
+         (length (reader))",
     );
     // Precondition: `@acc` is a re-storable compiled cell.
     let restorable_cells: Vec<(Binding, Region)> = info
@@ -1455,19 +1377,22 @@ fn activation_adopts_capture_back_edge_scc() {
                 nil)",
     );
     let c = sole_closure_region(&hir, &info);
+    // Precondition: the `m ⊇ c` store is an opaque funnel call — the containment is
+    // funnel-recovered (no `cross_region_refs` edge exists at the store site), and the
+    // signature's store half must count it (the emit needs no store opcode: the adopt
+    // is value-resolved at the enclosing-scope site).
+    let m = info
+        .containment_edges
+        .iter()
+        .find(|(_, s, _)| *s == c)
+        .map(|&(_, _, d)| d)
+        .expect("precondition: a funnel-recovered store edge m ⊇ c");
     let members = sole_activation_site(&info);
     assert!(
         members.contains(&c),
         "the capturing closure r{} must be an activation-adopt member; got {members:?}",
         c.0,
     );
-    // `m` is the store target of the interior `m ⊇ c` edge.
-    let m = info
-        .cross_region_refs
-        .iter()
-        .find(|(site, s, _)| !info.hard_edge_sites.contains(site) && *s == c)
-        .map(|&(_, _, d)| d)
-        .expect("precondition: a store edge m ⊇ c");
     assert!(
         members.contains(&m),
         "the captured container r{} must be an activation-adopt member; got {members:?}",
@@ -1484,9 +1409,9 @@ fn activation_adopts_capture_back_edge_scc() {
     }
     // The hull container `root` keeps its baseline: not a member, not suppressed.
     let root = info
-        .cross_region_refs
+        .containment_edges
         .iter()
-        .find(|(site, s, _)| !info.hard_edge_sites.contains(site) && *s == m)
+        .find(|(_, s, _)| *s == m)
         .map(|&(_, _, d)| d)
         .expect("precondition: a store edge root ⊇ m");
     assert!(
@@ -1503,39 +1428,16 @@ fn activation_adopts_capture_back_edge_scc() {
                 nil)",
     );
     let c = sole_closure_region(&hir, &info);
-    let members = sole_activation_site(&info);
-    assert!(
-        members.contains(&c) && members.len() == 2,
-        "the bare m↔c SCC must be admitted whole; got {members:?}",
-    );
-}
-
-#[test]
-fn activation_adopts_funnel_recovered_scc_checked_on() {
-    // The F-b face: on the checked-on (native-Call) production path the store
-    // `m ⊇ c` is an opaque `Funnel` call recording NO `cross_region_refs` edge —
-    // the containment reaches the inference only as a funnel-recovered
-    // `containment_edges` entry. The signature's store half must count it, and
-    // the emit needs no store site (the adopt is value-resolved), so the SCC is
-    // admitted exactly as on the intrinsic path.
-    let (hir, info) = analyze_full_checked_on(
-        "(begin (let [m (@array)] \
-                  (let [c (fn [] (length m))] \
-                    (begin (%array-push m c) (c) nil))) \
-                nil)",
-    );
-    let c = sole_closure_region(&hir, &info);
     assert!(
         info.containment_edges.iter().any(|&(_, s, _)| s == c),
-        "precondition: checked-on, the m ⊇ c store must be funnel-recovered \
-         containment (no cross_region_refs edge); containment={:?}",
+        "precondition: the m ⊇ c store must be funnel-recovered containment (no \
+         cross_region_refs edge); containment={:?}",
         info.containment_edges,
     );
     let members = sole_activation_site(&info);
     assert!(
         members.contains(&c) && members.len() == 2,
-        "the funnel-recovered m↔c SCC must be admitted on the checked-on path; \
-         got {members:?}",
+        "the bare m↔c SCC must be admitted whole; got {members:?}",
     );
 }
 
@@ -1626,16 +1528,10 @@ fn activation_adopt_refuses_escaping_hull() {
 // (the lowerer's view), so they pin the wiring — not just the walk.
 
 /// The two mutually-referencing cycle regions of a compiled shape — the
-/// endpoints of its non-hard `cross_region_refs` edges (intrinsic face) or its
-/// funnel-recovered `containment_edges` (checked-on face).
+/// endpoints of its funnel-recovered `containment_edges` (the `%`-stores are
+/// opaque funnel calls, so no `cross_region_refs` edge names them).
 fn cycle_pair(info: &RegionInfo) -> rustc_hash::FxHashSet<Region> {
     let mut endpoints: rustc_hash::FxHashSet<Region> = rustc_hash::FxHashSet::default();
-    for &(site, s, d) in &info.cross_region_refs {
-        if !info.hard_edge_sites.contains(&site) {
-            endpoints.insert(s);
-            endpoints.insert(d);
-        }
-    }
     for &(_site, s, d) in &info.containment_edges {
         endpoints.insert(s);
         endpoints.insert(d);
@@ -1645,13 +1541,21 @@ fn cycle_pair(info: &RegionInfo) -> rustc_hash::FxHashSet<Region> {
 
 #[test]
 fn transfer_adopts_returned_cycle_to_consumer() {
-    // The call face, intrinsic (`--checked-intrinsics=off` test default) path:
-    // a let-bound producer returning an a↔b cycle, one discarded consumer site.
+    // The call face: a let-bound producer returning an a↔b cycle, one discarded
+    // consumer site. The interior stores are opaque funnel calls, so the
+    // containment is funnel-recovered and the interior adopt is keyed at the
+    // funnel CALL site (the value-resolved adopt needs no store opcode).
     let (_, info) = analyze_full(
         "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) a)))] \
                   (begin (mk) nil)) \
                 nil)",
+    );
+    assert!(
+        !info.containment_edges.is_empty(),
+        "precondition: the interior stores are funnel-recovered containment; \
+         containment={:?}",
+        info.containment_edges,
     );
     assert_eq!(
         info.transfer_adopt_regions.len(),
@@ -1694,40 +1598,6 @@ fn transfer_adopts_returned_cycle_to_consumer() {
 }
 
 #[test]
-fn transfer_adopts_returned_cycle_checked_on() {
-    // The F-b face: checked-on, the interior store is an opaque `Funnel` call —
-    // the containment is funnel-recovered and the interior adopt is keyed at
-    // the funnel CALL site (the value-resolved adopt needs no store opcode), so
-    // the cut admits the production path exactly as the intrinsic path.
-    let (_, info) = analyze_full_checked_on(
-        "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
-                  (begin (%array-push a b) (%array-push b a) a)))] \
-                  (begin (mk) nil)) \
-                nil)",
-    );
-    assert!(
-        !info.containment_edges.is_empty(),
-        "precondition: checked-on, the interior stores are funnel-recovered \
-         containment; containment={:?}",
-        info.containment_edges,
-    );
-    assert_eq!(
-        info.transfer_adopt_regions.len(),
-        1,
-        "the consumer site must be transfer-adopted on the checked-on path; got {:?}",
-        info.transfer_adopt_regions,
-    );
-    let adopts: Vec<(Region, Region)> =
-        info.owned_adopt_edges.values().flatten().copied().collect();
-    assert_eq!(
-        adopts.len(),
-        1,
-        "the interior owner edge must be emittable at its funnel call site; got \
-         {adopts:?}",
-    );
-}
-
-#[test]
 fn transfer_adopts_fiber_terminal_cycle() {
     // The fiber face: a silent body's terminal value is the returned cycle; the
     // completing resume hands it to the consumer, whose site is gated exactly
@@ -1760,16 +1630,18 @@ fn transfer_adopt_refuses_unsafe_shapes() {
     let shapes = [
         // (a) a USED consumer: the holder is read outside the Immediate-native
         // allowance (an extraction alias could outlive the node's horizon).
-        // The read feeds a branch condition so it cannot be eliminated.
+        // The read feeds a branch condition so it cannot be eliminated; the
+        // `%type-of` match arm proves `r`'s container family for the `%get`
+        // (prove-or-reject, typeinfer/contract.rs).
         "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) (%array-push b a) a)))] \
-           (let [r (mk)] (if (%first r) 1 2))) \
+           (let [r (mk)] (match (%type-of r) :@array (if (%get r 0) 1 2) _ 2))) \
          nil)",
         // (a') the same read as a bare statement — the result-flow holder gate
         // must see the intrinsic read regardless of what consumes its value.
         "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) (%array-push b a) a)))] \
-           (let [r (mk)] (begin (%first r) nil))) \
+           (let [r (mk)] (begin (match (%type-of r) :@array (%get r 0) _ nil) nil))) \
          nil)",
         // (b) a RETURNED consumer: the site's result crosses the return
         // frontier (the tail call in `outer`), refusing every site of mk.

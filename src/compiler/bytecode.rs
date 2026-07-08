@@ -452,8 +452,8 @@ pub struct Bytecode {
     /// can mint-or-reuse them. The per-lambda equivalent rides
     /// `ClosureTemplate.merged_slots`; this is the entry-function path
     /// (`Bytecode → Code`), which would otherwise read empty. Empty unless a merge
-    /// fired (`--checked-intrinsics=off` with a builder idiom), so inert on the
-    /// default path.
+    /// fired (a builder idiom seeded by a nested `%pair` literal), so inert when
+    /// no merge exists.
     pub merged_slots: std::rc::Rc<rustc_hash::FxHashSet<u32>>,
 }
 

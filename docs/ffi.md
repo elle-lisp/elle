@@ -64,12 +64,20 @@ per-worker teardown is required**.
 
 Teardown is **optional and explicit**. A program may declare a library's ordered
 teardown — a zero-arg C symbol to call (e.g. `git_libgit2_shutdown`) — and run all
-declared teardowns when *it* decides it is safe (its worker threads have quiesced):
+declared teardowns when *it* decides it is safe (its worker threads have quiesced).
+`ffi/on-unload` resolves the symbol immediately, so a typo errors at declaration
+rather than silently at shutdown; `ffi/run-teardowns` calls every declared symbol
+in reverse load order:
 
 ```lisp
-(ffi/on-unload git-lib "git_libgit2_shutdown")  # declare the teardown destructor
-...
-(ffi/run-teardowns)                              # run them (reverse load order)
+# Guarded because libgit2 may not be installed; when it is, this loads it,
+# declares its shutdown hook, and runs it for real.
+(def [have-git? git-lib] (protect (ffi/native "libgit2.so")))
+(if (not have-git?)
+  (println "SKIP: libgit2 not installed")
+  (do
+    (ffi/on-unload git-lib "git_libgit2_shutdown")  # declare the teardown destructor
+    (ffi/run-teardowns)))                           # run them (reverse load order)
 ```
 
 The runtime never runs teardowns automatically (a teardown like

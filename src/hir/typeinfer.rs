@@ -1,27 +1,30 @@
-//! Bidirectional type inference and stdlib-to-intrinsic rewriting.
+//! Bidirectional type inference and the intrinsic operand proofs.
 //!
 //! Post-functionalize pass that:
 //! 1. Infers types from literals, known return types, and type guards
 //! 2. Propagates types through call sites (forward flow)
-//! 3. Rewrites stdlib arithmetic/comparison calls to intrinsics when
-//!    argument types prove ⊑ Number
-//! 4. Updates signals for rewritten nodes (intrinsics are silent)
-//! 5. Narrows signals on primitive calls with provably typed args
+//! 3. Checks every call-position %-intrinsic against its operand contract
+//!    (prove-or-reject; `contract.rs`)
+//! 4. Narrows signals on primitive calls with provably typed args
 //!    (delegates to `narrow.rs`)
-//! 6. Re-propagates signals bottom-up after narrowing
+//! 5. Re-propagates signals bottom-up after narrowing
 //!
-//! The pass iterates to a fixed point: type refinements enable rewrites,
-//! which change signals, which enable further refinements.
+//! A stdlib wrapper call (`+`, `<`, `not`, …) is NEVER rewritten to its
+//! intrinsic: the wrapper is the programmer's explicit request for the
+//! validating, signaling, polymorphic surface, and substituting the silent
+//! opcode would change both the failure mode and the site's signal profile.
+//! The fast path is spelled `%add` — and proven.
 
 use super::arena::BindingArena;
 use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind, IntrinsicOp};
 use super::types::{TyId, TypeInterner};
-use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 
 use std::collections::HashMap;
 
+mod contract;
+mod guard;
 mod infer;
 use infer::*;
 mod prune;
@@ -33,77 +36,20 @@ pub struct TypeInfo {
     pub hir_types: HashMap<HirId, TyId>,
 }
 
-/// Which stdlib function maps to which intrinsic, and what type constraint.
-struct RewriteRule {
-    op: IntrinsicOp,
-    arity: (usize, usize),
-    /// Required type for all arguments (None = always valid)
-    constraint: Option<TyId>,
-}
-
-/// Build the rewrite table mapping function names to intrinsic rewrites.
-fn build_rewrite_table() -> HashMap<&'static str, RewriteRule> {
-    let mut table = HashMap::new();
-    let number = Some(TypeInterner::NUMBER);
-
-    let mut add =
-        |name: &'static str, op: IntrinsicOp, arity: (usize, usize), constraint: Option<TyId>| {
-            table.insert(
-                name,
-                RewriteRule {
-                    op,
-                    arity,
-                    constraint,
-                },
-            );
-        };
-
-    // Arithmetic (require Number)
-    // Note: / , rem, mod have division-by-zero checks in stdlib that %div/%rem/%mod bypass.
-    // Only rewrite operations that are total on Number.
-    add("+", IntrinsicOp::Add, (2, 2), number);
-    add("-", IntrinsicOp::Sub, (1, 2), number);
-    add("*", IntrinsicOp::Mul, (2, 2), number);
-
-    // Comparison (require Number — stdlib also accepts strings/keywords
-    // but we only rewrite when we know it's numeric)
-    add("<", IntrinsicOp::Lt, (2, 2), number);
-    add(">", IntrinsicOp::Gt, (2, 2), number);
-    add("<=", IntrinsicOp::Le, (2, 2), number);
-    add(">=", IntrinsicOp::Ge, (2, 2), number);
-
-    // Equality (always valid)
-    add("=", IntrinsicOp::Eq, (2, 2), None);
-
-    // Logical (always valid)
-    add("not", IntrinsicOp::Not, (1, 1), None);
-
-    table
-}
-
 const MAX_ITERS: usize = 10;
 
 /// Run type inference and stdlib-to-intrinsic rewriting on functionalized HIR.
 ///
-/// `Err` is the monomorphization proof obligation firing (see
-/// `check_monomorphic_proof_obligations`): a silent monomorphic container op
-/// whose container is not statically proven. Only the silent path can raise it —
-/// the checked path early-returns before inference runs.
+/// `Err` is the intrinsic operand proof obligation firing (see
+/// `contract::check_intrinsic_operand_proofs`): a call-position `%`-intrinsic
+/// whose operands are provably wrong or unprovable. Prove-or-reject is the
+/// language — the check runs on every compile.
 pub fn infer_and_rewrite(
     hir: &mut Hir,
     arena: &BindingArena,
     symbols: &SymbolTable,
 ) -> Result<TypeInfo, String> {
-    // When --checked-intrinsics is active, intrinsics route through
-    // type-checked NativeFn paths. Don't rewrite to bypass those checks.
-    if crate::config::get().checked_intrinsics {
-        return Ok(TypeInfo {
-            hir_types: HashMap::new(),
-        });
-    }
-
     let interner = TypeInterner::new();
-    let rewrite_table = build_rewrite_table();
     // Build name lookup: SymbolId → name string, for matching callees
     let symbol_names = symbols.all_names();
     let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
@@ -113,13 +59,43 @@ pub fn infer_and_rewrite(
     // Collect parameter info for lambdas: which bindings are params of which lambda
     let mut lambda_params: HashMap<Binding, Vec<Binding>> = HashMap::new();
     let mut lambda_body_type: HashMap<Binding, TyId> = HashMap::new();
-    collect_lambda_info(hir, arena, &mut lambda_params);
+    let mut declared_numeric = std::collections::HashSet::new();
+    collect_lambda_info(hir, arena, &mut lambda_params, &mut declared_numeric);
+    // A parameter mutated in its body has flow the per-pass recomputation
+    // cannot see; it never receives call-site proofs (guards only).
+    let mutated_params = collect_mutated_bindings(hir);
+    // Bindings read anywhere but callee position — their param joins are
+    // not proofs (see `collect_value_position_uses`).
+    let mut value_used = std::collections::HashSet::new();
+    collect_value_position_uses(hir, &mut value_used);
+    // Kleene start: every parameter that CAN be proven by complete call-site
+    // enumeration (callee-only binding, unmutated param) begins at BOTTOM, so
+    // an identity-passed argument in a self/mutual recursion contributes
+    // nothing on the way up instead of reading the Top default and pinning
+    // itself there. Parameters of value-used bindings stay ABSENT (read as
+    // Top): their callers are not enumerable, so optimism there would let the
+    // checker pass on ⊥. A never-called callee-only function's params stay ⊥
+    // — its %-sites can never execute, so nothing unsound compiles.
+    for (b, params) in &lambda_params {
+        if value_used.contains(b) {
+            continue;
+        }
+        for p in params {
+            if !mutated_params.contains(p) {
+                binding_types.insert(*p, TypeInterner::BOTTOM);
+            }
+        }
+    }
 
+    // Inference to a fixpoint. Convergence is judged on the whole type
+    // environment, not the root node's type: a call site visited late in a
+    // pass joins into a callee parameter whose occurrences were recorded
+    // earlier, so the refinement only reaches them on the next pass.
     for _ in 0..MAX_ITERS {
-        let mut changed = false;
-
-        // Forward type inference
-        changed |= infer_types(
+        let before_hir = hir_types.clone();
+        let before_bindings = binding_types.clone();
+        let mut param_joins: HashMap<Binding, TyId> = HashMap::new();
+        infer_types(
             hir,
             &interner,
             arena,
@@ -129,27 +105,32 @@ pub fn infer_and_rewrite(
             &mut lambda_body_type,
             &symbol_names,
             &mut binding_min_length,
+            &value_used,
+            &mut param_joins,
         );
-
-        // Rewrite stdlib calls to intrinsics where types prove it's safe
-        changed |= rewrite_calls(
-            hir,
-            &interner,
-            arena,
-            &rewrite_table,
-            &symbol_names,
-            &binding_types,
-            &hir_types,
-        );
-
-        if !changed {
+        // REPLACE each contributed parameter's type with this pass's complete
+        // join (Top included). A `(numeric!)` declaration floors the result at
+        // Number (meet: callers can refine to Int/Float, never widen past the
+        // declared contract); a mutated parameter never receives proofs.
+        for (param, joined) in param_joins {
+            if mutated_params.contains(&param) {
+                continue;
+            }
+            let ty = if declared_numeric.contains(&param) {
+                interner.meet(joined, TypeInterner::NUMBER)
+            } else {
+                joined
+            };
+            binding_types.insert(param, ty);
+        }
+        if before_hir == hir_types && before_bindings == binding_types {
             break;
         }
     }
 
-    // Proof obligation: a silent monomorphic container op must have its container
-    // statically proven (no runtime guard exists on this path to catch a mismatch).
-    check_monomorphic_proof_obligations(hir, &hir_types)?;
+    // The prove-or-reject gate: every call-position %-intrinsic must discharge
+    // its operand contract from the (narrowed, per-occurrence) inferred types.
+    contract::check_intrinsic_operand_proofs(hir, &hir_types, arena, &symbol_names)?;
 
     // Signal narrowing: strip SIG_ERROR from calls with provably typed args
     super::narrow::narrow_signals(
@@ -209,6 +190,7 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterne
         return match def.ret {
             RetType::Unknown => TypeInterner::TOP,
             RetType::Int => TypeInterner::INT,
+            RetType::Float => TypeInterner::FLOAT,
             RetType::Bool => TypeInterner::BOOL,
             RetType::String => TypeInterner::STRING,
             RetType::MutableString => TypeInterner::MUTABLE_STRING,
@@ -229,6 +211,14 @@ fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterne
         // stdlib.lisp closures (not primitives): mutating pass-throughs
         // that return their first argument.
         "push" | "put" => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
+        // The arithmetic wrappers validate their operands and raise on
+        // anything non-numeric, so on every path that RETURNS the result is a
+        // Number — the same stable-name authority the guard recognition uses
+        // for the predicates. This is what lets `(%lt (- b a) 2)`-style
+        // measurement code prove its operands without a hand guard.
+        "+" | "-" | "*" | "/" | "rem" | "mod" | "abs" | "min" | "max" | "inc" | "dec" | "sum"
+        | "product" => TypeInterner::NUMBER,
+        "floor" | "ceil" | "round" => TypeInterner::NUMBER,
         _ => TypeInterner::TOP,
     }
 }
@@ -307,8 +297,9 @@ fn intrinsic_return_type(
         IntrinsicOp::PutArray => TypeInterner::ARRAY,
         IntrinsicOp::PutArrayMut => TypeInterner::MUTABLE_ARRAY,
 
-        // Pair
-        IntrinsicOp::Pair => TypeInterner::TOP,
+        // Pair: the constructor pins its result type (feeds the %first/%rest
+        // operand contract); element types are untracked, so First/Rest stay Top.
+        IntrinsicOp::Pair => TypeInterner::PAIR,
         IntrinsicOp::First | IntrinsicOp::Rest => TypeInterner::TOP,
 
         // Bitwise: return Int
@@ -330,137 +321,9 @@ fn intrinsic_return_type(
     }
 }
 
-/// Extract type guard information from an If condition.
-/// Returns `(binding, narrowed_type)` if the condition is a type predicate.
-fn extract_type_guard(cond: &Hir, _arena: &BindingArena) -> Option<(Binding, TyId)> {
-    match &cond.kind {
-        // Direct type predicate: (%int? x), (%float? x), etc.
-        HirKind::Intrinsic { op, args } if args.len() == 1 => {
-            let binding = match &args[0].kind {
-                HirKind::Var(b) => *b,
-                HirKind::DerefCell { cell } => {
-                    if let HirKind::Var(b) = &cell.kind {
-                        *b
-                    } else {
-                        return None;
-                    }
-                }
-                _ => return None,
-            };
-            let ty = match op {
-                IntrinsicOp::IsInt => TypeInterner::INT,
-                IntrinsicOp::IsFloat => TypeInterner::FLOAT,
-                IntrinsicOp::IsString => TypeInterner::STRING,
-                IntrinsicOp::IsKeyword => TypeInterner::KEYWORD,
-                IntrinsicOp::IsSymbol => TypeInterner::SYMBOL,
-                IntrinsicOp::IsBool => TypeInterner::BOOL,
-                IntrinsicOp::IsNil => TypeInterner::NIL,
-                _ => return None,
-            };
-            Some((binding, ty))
-        }
-        // Call to type predicate: (number? x), (integer? x), etc.
-        // These haven't been rewritten to intrinsics yet since they're stdlib calls
-        // Stdlib type predicate calls are handled after they get rewritten to intrinsics
-        HirKind::Call { .. } => None,
-        _ => None,
-    }
-}
-
-/// Rewrite stdlib calls to intrinsics where types prove it's safe.
-/// Returns true if any rewrites were applied.
-fn rewrite_calls(
-    hir: &mut Hir,
-    interner: &TypeInterner,
-    arena: &BindingArena,
-    rewrite_table: &HashMap<&str, RewriteRule>,
-    symbol_names: &HashMap<u32, String>,
-    binding_types: &HashMap<Binding, TyId>,
-    hir_types: &HashMap<HirId, TyId>,
-) -> bool {
-    let mut changed = false;
-
-    // First, try to rewrite this node
-    if let HirKind::Call { func, args, .. } = &hir.kind {
-        if let HirKind::Var(callee_binding) = &func.kind {
-            let callee_sym = arena.get(*callee_binding).name;
-            // Look up name from SymbolId
-            if let Some(name) = symbol_names.get(&callee_sym.0) {
-                if let Some(rule) = rewrite_table.get(name.as_str()) {
-                    let arg_count = args.len();
-                    if arg_count >= rule.arity.0 && arg_count <= rule.arity.1 {
-                        // Check type constraint
-                        let types_ok = match rule.constraint {
-                            None => true,
-                            Some(constraint_ty) => args.iter().all(|arg| {
-                                let arg_ty = hir_types
-                                    .get(&arg.expr.id)
-                                    .copied()
-                                    .unwrap_or(TypeInterner::TOP);
-                                interner.subtype(arg_ty, constraint_ty)
-                            }),
-                        };
-
-                        if types_ok {
-                            // Extract args and replace Call with Intrinsic
-                            let intrinsic_args: Vec<Hir> =
-                                if let HirKind::Call { args, .. } = &hir.kind {
-                                    args.iter().map(|a| a.expr.clone()).collect()
-                                } else {
-                                    unreachable!()
-                                };
-                            let op = rule.op;
-                            hir.kind = HirKind::Intrinsic {
-                                op,
-                                args: intrinsic_args,
-                            };
-                            hir.signal = Signal::silent();
-                            changed = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Recurse into children (must use mutable access)
-    changed |= rewrite_children(
-        hir,
-        interner,
-        arena,
-        rewrite_table,
-        symbol_names,
-        binding_types,
-        hir_types,
-    );
-
-    changed
-}
-
-/// Recursively rewrite children of a HIR node.
-fn rewrite_children(
-    hir: &mut Hir,
-    interner: &TypeInterner,
-    arena: &BindingArena,
-    rewrite_table: &HashMap<&str, RewriteRule>,
-    symbol_names: &HashMap<u32, String>,
-    binding_types: &HashMap<Binding, TyId>,
-    hir_types: &HashMap<HirId, TyId>,
-) -> bool {
-    let mut changed = false;
-    hir.for_each_child_mut(|child| {
-        changed |= rewrite_calls(
-            child,
-            interner,
-            arena,
-            rewrite_table,
-            symbol_names,
-            binding_types,
-            hir_types,
-        );
-    });
-    changed
-}
+// Guard recognition lives in `guard.rs` (`cond_facts`): intrinsic and
+// Call-form predicates alike, `%not`/`not` negation, and the zero-tests that
+// feed the div-family nonzero obligation.
 
 #[cfg(test)]
 mod tests;

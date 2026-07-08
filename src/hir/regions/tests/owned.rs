@@ -3,7 +3,8 @@ use super::*;
 // ── ownership inference: externally-unique Owned subtrees (step 2) ─────────
 //
 // `regions::ownership::compute_owned_subtrees` consumes the Shared-seed set and walks
-// the region containment graph (`cross_region_refs`, target ⊇ source) outward from each
+// the region containment graph (`cross_region_refs` plus the funnel-recovered
+// `containment_edges`, target ⊇ source) outward from each
 // candidate root, reporting the subtrees that free as a unit: no interior region crosses
 // a frontier (none is a Shared seed) and nothing outside references inside. These pins
 // are written from that definition. The positives claim the discarded builder idiom (the
@@ -247,13 +248,12 @@ fn owned_region_groups_claims_bare_cycle() {
     let src = "(begin (let [a (@array) b (@array)] \
                         (begin (%array-push a b) (%array-push b a) nil)) nil)";
     let (_, info, groups) = owned_region_groups(src);
-    // The two cycle members are the regions of the non-hard containment edges.
+    // The two cycle members are the endpoints of the funnel-recovered containment
+    // edges (the pushes are opaque funnel calls — no cross_region_refs edge).
     let mut members = rustc_hash::FxHashSet::default();
-    for &(site, src_r, dst_r) in &info.cross_region_refs {
-        if !info.hard_edge_sites.contains(&site) {
-            members.insert(src_r);
-            members.insert(dst_r);
-        }
+    for &(_site, src_r, dst_r) in &info.containment_edges {
+        members.insert(src_r);
+        members.insert(dst_r);
     }
     assert_eq!(
         members.len(),
@@ -328,7 +328,7 @@ fn owned_region_groups_drop_site_post_dominates_pass_through_aliases() {
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let mut checked = 0;
-    for &(site, src_r, dst_r) in &info.cross_region_refs {
+    for &(site, src_r, dst_r) in &info.containment_edges {
         if !(member_set.contains(&src_r) && member_set.contains(&dst_r)) {
             continue;
         }
@@ -363,69 +363,28 @@ fn owned_region_groups_drop_site_post_dominates_pass_through_aliases() {
 fn owned_subtree_claims_mutable_container_over_call_result() {
     // The production-path shape (and the scheduler's mutable cell in miniature): a
     // mutable container and its stored value are both `Fresh` native CALL results —
-    // bare `@array`/`array` are ordinary calls, not %-intrinsics, so their regions
-    // are `call_result` placeholders, not static allocations. A `Fresh` call-result
-    // is nonetheless a genuinely caller-owned fresh allocation, so it must be an
-    // Owned candidate, not refused like a pass-through/opaque call-result borrow.
-    // The `%array-push` records the containment edge (value -> container), so the
-    // container is an Owned root whose subtree includes the stored value.
+    // bare `@array`/`array` are ordinary calls, so their regions are `call_result`
+    // placeholders, not static allocations. A `Fresh` call-result is nonetheless a
+    // genuinely caller-owned fresh allocation, so it must be an Owned candidate, not
+    // refused like a pass-through/opaque call-result borrow. `%array-push` is an
+    // opaque `Funnel` CALL that records NO `cross_region_refs` edge (the funnel
+    // counts the store at runtime — a compile-time edge would double-count); the
+    // alloc-type recovery re-supplies the containment edge `value -> container` from
+    // the container's RetType (MutableArray), so the container is an Owned root
+    // whose subtree includes the funnel-stored value.
     //
-    // Counterfactual: before `Fresh` call-results are admitted as ownable, both
-    // regions are refused (`call_result_regions`) and `owned` is empty for them, so
-    // the root lookup panics. The real primitive classification is required so
-    // `@array`/`array` resolve to their declared `Fresh` effect (the default empty
-    // classification treats them as opaque user fns).
+    // Counterfactuals: before `Fresh` call-results were admitted as ownable, both
+    // regions were refused (`call_result_regions`) and the root lookup panics;
+    // without the alloc-type recovery, `containment_edges` is empty (the Funnel
+    // store records nothing), so the container is at most a singleton and the value
+    // is not in its subtree. The real primitive classification is required so
+    // `@array`/`array` resolve to their declared `Fresh` effect and `%array-push` to
+    // `Funnel` (the default empty classification treats them as opaque user fns).
     let (_, info, owned) =
         owned_subtrees_with_effects("(begin (%array-push (@array) (array 1 2)) nil)");
-    let edges: Vec<(Region, Region)> = info
-        .cross_region_refs
-        .iter()
-        .filter(|(site, _, _)| !info.hard_edge_sites.contains(site))
-        .map(|&(_, src, dst)| (src, dst))
-        .collect();
-    assert_eq!(
-        edges.len(),
-        1,
-        "the push records exactly one containment edge (value -> container); got {:?}",
-        edges
-    );
-    let (value, container) = edges[0];
-    let subtree = owned.get(&container).unwrap_or_else(|| {
-        panic!(
-            "the mutable container r{} (a Fresh call-result) must be an Owned root; \
-             owned={:?}",
-            container.0, owned
-        )
-    });
-    assert!(
-        subtree.contains(&container) && subtree.contains(&value),
-        "the Owned subtree at r{} must contain the container and the stored value \
-         r{}; got {:?}",
-        container.0,
-        value.0,
-        subtree,
-    );
-}
-
-#[test]
-fn owned_subtree_recovers_funnel_containment_on_checked_path() {
-    // The production (checked-on) path: `%array-push` is an opaque `Funnel` CALL
-    // that records NO `cross_region_refs` edge (the funnel counts the store at
-    // runtime — a compile-time edge would double-count). The container (`@array`,
-    // a Fresh call-result, RetType MutableArray) and the stored value (`array`,
-    // Fresh) are both ownable; the alloc-type recovery re-supplies the containment
-    // edge `value -> container` from the container's RetType, so the container is
-    // an Owned root whose subtree includes the funnel-stored value.
-    //
-    // Counterfactual: without the recovery, `containment_edges` is empty on this
-    // path (the Funnel store records nothing), so the container is at most a
-    // singleton and the value is not in its subtree — the length assert fails.
-    let (_, info, owned) =
-        owned_subtrees_checked_on("(begin (%array-push (@array) (array 1 2)) nil)");
     assert!(
         info.cross_region_refs.is_empty(),
-        "precondition: on the checked path the Funnel store records no \
-         cross_region_refs edge; got {:?}",
+        "precondition: the Funnel store records no cross_region_refs edge; got {:?}",
         info.cross_region_refs
     );
     assert_eq!(
@@ -438,7 +397,7 @@ fn owned_subtree_recovers_funnel_containment_on_checked_path() {
     let (_site, value, container) = info.containment_edges[0];
     let subtree = owned.get(&container).unwrap_or_else(|| {
         panic!(
-            "the mutable container r{} must be an Owned root on the checked path; \
+            "the mutable container r{} (a Fresh call-result) must be an Owned root; \
              owned={:?}",
             container.0, owned
         )
@@ -454,7 +413,7 @@ fn owned_subtree_recovers_funnel_containment_on_checked_path() {
 }
 
 #[test]
-fn owned_subtree_no_funnel_containment_for_immutable_container_on_checked_path() {
+fn owned_subtree_no_funnel_containment_for_immutable_container() {
     // Soundness gate (counterfactual): pushing into an IMMUTABLE `array` returns a
     // fresh copy — arg0 does NOT gain the value (arg0 ⊉ value). `array` is RetType
     // Array, not MutableArray, so it is not a mutable retaining container and the
@@ -462,7 +421,7 @@ fn owned_subtree_no_funnel_containment_for_immutable_container_on_checked_path()
     // a use-after-free (subtree-dropping the immutable array would free a value it
     // never retained), so the mutable-only gate is load-bearing, not an optimization.
     let (_, info, _owned) =
-        owned_subtrees_checked_on("(begin (%array-push (array 1 2) (array 3 4)) nil)");
+        owned_subtrees_with_effects("(begin (%array-push (array 1 2) (array 3 4)) nil)");
     assert!(
         info.containment_edges.is_empty(),
         "an immutable-array funnel store must record no containment edge (arg0 \

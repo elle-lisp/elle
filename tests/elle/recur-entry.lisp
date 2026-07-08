@@ -27,8 +27,12 @@
                  0
                  (%add 1 (g (rest ls)))))]
     g))
+## `go` is bound to a letrec EXPRESSION's escaping lambda, so calls through it
+## type as unknown; the allocation-free coerce-guard on the result discharges
+## the %add operand contract (docs/intrinsics.md § The contract).
 (defn caller [xs]
-  (%add 100 (go xs)))
+  (let [r (go xs)]
+    (if (%int? r) (%add 100 r) -1)))
 (assert (= (compile/run-on :jit caller (list 1 2 3)) 103)
         "non-tail: a JIT caller's interpreter-fallback callee recurses as itself")
 
@@ -47,8 +51,11 @@
 
 ## 4. Fiber body. The fiber's first resume enters the body of the closure the
 ## fiber was created from; here that closure is itself self-recursive.
+## `count-down` is passed to fiber/new as a value, so call-site forwarding
+## cannot prove `m`; the diverging guard does (the fiber mask admits :error).
 (def f
   (letrec [count-down (fn [m]
+                        (when (%not (%int? m)) (error :m))
                         (if (%lt m 1)
                           0
                           (%add 1 (count-down (%sub m 1)))))]

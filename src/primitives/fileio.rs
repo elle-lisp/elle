@@ -284,6 +284,27 @@ primitive! {
         aliases: &["delete-directory"],
         effect: RegionEffect::Immediate,
     }
+    "file/delete-dir-all" => prim_delete_directory_all {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Delete a directory and everything under it (need not be empty)",
+        params: &["path"],
+        category: "file",
+        example: "(file/delete-dir-all \"scratch\")",
+        aliases: &["delete-directory-all"],
+        effect: RegionEffect::Immediate,
+    }
+    "file/mktempdir" => prim_make_temp_directory {
+        signal: Signal::errors(),
+        arity: Arity::Exact(0),
+        doc: "Create a uniquely-named directory under the platform temp root \
+              (TMPDIR on Unix, %TEMP% on Windows) and return its path",
+        params: &[],
+        category: "file",
+        example: "(file/mktempdir)",
+        aliases: &["make-temp-directory"],
+        effect: RegionEffect::Fresh,
+    }
     "file/mkdir" => prim_create_directory {
         signal: Signal::errors(),
         arity: Arity::Exact(1),

@@ -54,18 +54,18 @@ pub(in crate::hir::regions) struct AdoptEdges {
 /// (`closure ⊇ captured`) has no store site (the RC double-count fix records no
 /// `cross_region_refs` edge), so its adopt rides `AdoptEdges::capture` keyed by the
 /// closure's construction HirId, consumed at `MakeClosure` in `lower_lambda_expr`. A
-/// **funnel-recovered** containment edge (`RegionInfo::containment_edges` — the
-/// checked-on production path, where the store is an opaque `Funnel` call recording no
-/// `cross_region_refs` edge) carries its funnel **call-site** HirId and rides
+/// **funnel-recovered** containment edge (`RegionInfo::containment_edges` — the storing
+/// ops lower as opaque `Funnel` native calls recording no `cross_region_refs` edge)
+/// carries its funnel **call-site** HirId and rides
 /// `AdoptEdges::store` keyed there: the value-resolved adopt reloads both endpoints from
 /// their binding slots, so it needs no store opcode — the same F-b face the activation
-/// and transfer cuts carry (region/adopt.md § "The funnel adopt — the checked-on store
-/// face"). A funnel edge is emittable only at a **retaining-store** site recording the
+/// and transfer cuts carry (region/adopt.md § "The funnel adopt"). A funnel edge is
+/// emittable only at a **retaining-store** site recording the
 /// member as its stored value (`funnel_store_sites`; a `%del`/key read retains nothing
 /// and stays unemittable). All three feed owner assignment, so a value captured by a
 /// *local* Owned closure is adopted by the closure (the per-call closure↔capture knot
-/// the forest exists to reclaim) and a funnel-built subtree reclaims identically
-/// checked-on and checked-off.
+/// the forest exists to reclaim) and a funnel-built subtree reclaims exactly like a
+/// constructor-built one.
 ///
 /// Three filters beyond the external-uniqueness walk (checked in this order — the
 /// lifetime obligation reads the owner assignment, so it runs *after* it):
@@ -189,7 +189,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
             .copied()
             .filter(|(_lambda, src, dst)| members.contains(src) && members.contains(dst))
             .collect();
-        // FUNNEL edges (the checked-on store face) carry their funnel call-site HirId;
+        // FUNNEL edges (the funnel store face) carry their funnel call-site HirId;
         // emittable only where the site is a retaining store recording the member as
         // its stored value — a `%del`/key containment edge retains nothing and must
         // not key an adopt. The emit is value-resolved at that Call node, riding the

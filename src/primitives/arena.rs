@@ -1,6 +1,6 @@
 //! Heap arena and memory management primitives
 
-use crate::primitives::def::RegionEffect;
+use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
@@ -184,6 +184,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "debug/arena-count" => prim_arena_count {
+        ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return current heap object count.",
         category: "debug",
@@ -210,6 +211,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-bytes" => prim_arena_bytes {
+        ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return bytes consumed by the current FiberHeap.",
         category: "debug",
@@ -228,6 +230,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "debug/arena-peak" => prim_arena_peak {
+        ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return peak object count (high-water mark).",
         category: "debug",
@@ -262,6 +265,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-count" => prim_arena_region_count {
+        ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return number of active regions.",
         category: "debug",

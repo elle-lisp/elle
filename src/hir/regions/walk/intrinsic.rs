@@ -64,10 +64,12 @@ impl RegionInference {
         // that frees whatever *runtime* region the result actually
         // landed in (the minted region for a fresh copy, or arg 0's
         // region for the in-place case, balanced by the handler's
-        // retain). This mirrors `dispatch_native_call` and the checked
-        // (`--checked-intrinsics`) path that routes these through a real
-        // native call. The `val→coll` store edge recorded above carries
-        // the in-place value retention.
+        // retain). This mirrors `dispatch_native_call` — call-position
+        // uses of these storing ops lower as native funnel calls
+        // (`IntrinsicOp::routes_native_funnel()`), and this arm keeps
+        // the intrinsic-node shape's accounting aligned with that path.
+        // The `val→coll` store edge recorded above carries the in-place
+        // value retention.
         if matches!(
             op,
             IntrinsicOp::Put

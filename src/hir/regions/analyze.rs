@@ -60,6 +60,33 @@ pub fn analyze_regions_with(
     info.binding_source_regions = inference_binding_regions.clone();
     info.captured_reassigned_bindings = captured_reassigns;
 
+    // Mutated-slot backstop for RE-STORABLE compiled capture cells. A mutable
+    // captured binding's cell content is repointed over time (its RC is owned
+    // by `handle_update_capture`, not the 1-slot-container maps), but a
+    // whole-value read through the cell can still be solved to the CELL's own
+    // compiled region (the Begin pre-pass CaptureCell insertion into
+    // `binding_regions[b]`). That region names the cell, not whatever content
+    // the cell holds at read time, so a static route against it — a coalesced
+    // return/store retain — resolves the slot against repointed content (the
+    // `AssertRegionMatches` mis-coalesce on a `(deref-cell x)` tail read of a
+    // mutated `(var x …)`). Poison exactly the cell regions so
+    // `coalescible_solver_region` refuses and such reads stay value-resolved.
+    // Keyed on `is_restorable_capture_cell` (the re-store predicate), NOT on
+    // `captured_reassigned_bindings` — the latter only sees module-scope
+    // reassigns, and a `(begin (var x …) …)` single-form file reassigned from
+    // inside a sibling closure is neither module-scope-classified nor
+    // fn-local. Deliberately NOT the binding's full source-region set: the
+    // init value's own alloc region stays coalescible — its init-drop in
+    // `store_captured_cell_init` fires while the cell still holds the init
+    // (pinned by `captured_reassign_init_drop_is_slot_resolved`).
+    for cells in info.begin_cell_regions.values() {
+        for (b, cell_region) in cells {
+            if arena.get(*b).is_restorable_capture_cell() {
+                info.mutated_binding_value_regions.insert(*cell_region);
+            }
+        }
+    }
+
     // Populate `region_data.decref_point` from per-HirId last-use analysis.
     // For each region r, `decref_point` is the maximum `last_use[alloc_id]`
     // over all allocation sites that resolved to r. Under unique-per-alloc each
@@ -269,6 +296,27 @@ pub fn analyze_regions_with(
                 // decref of the cell's value is correct (no double-release).
                 for &s in sites {
                     info.drop_on_overwrite_sites.insert(s);
+                }
+                // Static-alloc content (a slot-resolved fresh allocation — a
+                // `%pair` in the assign) DONATES its birth reference to the
+                // cell, exactly like the module-scope container: the
+                // drop-on-overwrite releases each displaced prior at its
+                // overwrite, and the kept scope-exit slot `DecrefRegion`
+                // releases the final (current) mint — per-value balance even
+                // when a loop re-mints the slot's region every iteration. An
+                // incref-on-store would strand every displaced prior at rc 1
+                // (born + store − overwrite = +1). Call-result content keeps
+                // the counted store: its producer claim is released by its own
+                // value-resolved `DecrefValueRegion`, so the donation there
+                // would over-free. All-or-nothing per binding, like the gate.
+                let all_static = !regions.is_empty()
+                    && regions
+                        .iter()
+                        .all(|r| !info.call_result_regions.contains(r));
+                if all_static {
+                    for &s in sites {
+                        info.donated_overwrite_sites.insert(s);
+                    }
                 }
                 for &r in binding_regs {
                     if !regions.contains(&r) {

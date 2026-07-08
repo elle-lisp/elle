@@ -293,8 +293,8 @@ pub struct RegionInfo {
     /// ordinarily refused by the ownership inference as a runtime placeholder
     /// (a possible borrow / opaque result), but a `Fresh` one is a legitimate
     /// Owned candidate — `regions::ownership` admits it, which is what makes a
-    /// mutable container or aggregate built by a native call (`@array`/`array`/
-    /// `@struct`, opaque under `--checked-intrinsics`) ownable. Baseline release
+    /// mutable container or aggregate built by a native call (the `@array`/
+    /// `array`/`@struct` constructors, opaque to the walk) ownable. Baseline release
     /// is unchanged — every `call_result` (Fresh or not) still frees by value
     /// (`DecrefValueRegion`); this set only widens the ownership candidacy.
     pub fresh_result_regions: FxHashSet<Region>,
@@ -303,8 +303,8 @@ pub struct RegionInfo {
     /// store (`%array-push`/`%put`) into a **mutable retaining** container
     /// (`RetType::MutableArray`/`MutableStruct`): the stored value's region is
     /// retained by the container's, so `container ⊇ contained` for subtree
-    /// membership. Under the production (`--checked-intrinsics`) path the funnel
-    /// store is an opaque native call that records NO `cross_region_refs` edge
+    /// membership. The storing ops lower as opaque `Funnel` native calls that
+    /// record NO `cross_region_refs` edge
     /// (the funnel counts the store at runtime — a compile-time edge would
     /// double-count; region/effects.md § `Funnel`). This set re-supplies that
     /// containment for the forest **without** any `IncrefRegion` — it is read
@@ -312,7 +312,7 @@ pub struct RegionInfo {
     /// emission of RC, so the baseline stream is unchanged. The **site** is the
     /// funnel `Call` node, carried exactly as `cross_region_refs` carries its
     /// store site, so an adopt for a funnel-contained member can be keyed at the
-    /// funnel call (the checked-on store face — region/adopt.md § "The funnel
+    /// funnel call (the funnel store face — region/adopt.md § "The funnel
     /// adopt"; the emit is value-resolved, needing no store opcode).
     /// `@string`/`@bytes` containers (which copy bytes, retaining no region) are
     /// excluded by their non-container `RetType`. This vector ALSO carries a `Fresh`
@@ -325,8 +325,8 @@ pub struct RegionInfo {
     /// `Fresh` yet embeds none of its args). `with-traits` declares its `traits`
     /// side-field embed (`&[1]`), so a value it embeds into an escaping result is seen
     /// referenced from outside the capturing closure's subtree and stays Shared. The
-    /// `pair`/`array` CONSTRUCTORS do not declare it: checked-off their embedding is
-    /// the intrinsic `cross_region_refs` edge recorded by the intrinsic walk arm.
+    /// `pair`/`array` CONSTRUCTORS do not declare it: their embedding is
+    /// the `cross_region_refs` edge recorded by the intrinsic walk arm.
     pub containment_edges: Vec<(HirId, Region, Region)>,
     /// Funnel-store call site HirId → the regions of the heap values stored there
     /// (the non-container args of a `Funnel` intrinsic). The runtime mutable-store
@@ -420,8 +420,8 @@ pub struct RegionInfo {
     /// parent, and deeper nests all allocate against, incref, and decref ONE static
     /// slot (the root's), landing in one physical region freed by the root's single
     /// `DecrefRegion` (docs/impl/region/merging.md § Merging). Empty unless a
-    /// builder-idiom merge fired (a nested `%pair` literal under
-    /// `--checked-intrinsics=off`); when empty `merged_root` is the identity and the
+    /// builder-idiom merge fired (a nested `%pair` builder idiom); when empty
+    /// `merged_root` is the identity and the
     /// lowerer's behaviour is the unmerged one-region-per-value baseline.
     pub merged_parent: HashMap<Region, Region>,
     /// Every member region of a letrec closure-cycle merge — the SCC closures

@@ -2,8 +2,8 @@
 
 The interior owner-edges that build an [ownership forest](ownership.md)
 subtree where no single store site names them: the **capture adopt** (a
-closure ⊇ its captures), the **funnel adopt** (the checked-on opaque-store
-face of a container ⊇ its member), the post-dominance + emit-order
+closure ⊇ its captures), the **funnel adopt** (the opaque-store face of a
+container ⊇ its member), the post-dominance + emit-order
 **obligation** the root's single demise must satisfy for a subtree drop to be
 sound, and where the hybrid still keeps per-region RC.
 
@@ -85,9 +85,10 @@ stays Shared (the always-legal baseline). Pinned by
 `closure_web_capture_not_yet_claimed`, and at runtime by
 `runtime::tests::ownership::upvalue_capture_family_runs_sound`.
 
-## The funnel adopt — the checked-on store face
+## The funnel adopt — the store face
 
-Under `--checked-intrinsics` (the production default) a mutable store is an opaque
+A compiled mutable store — every storing/removing/copying `%`-op lowers as a
+native funnel `Call` (`IntrinsicOp::routes_native_funnel()`) — is an opaque
 `Funnel` native call that records **no** `cross_region_refs` edge (the runtime funnel
 counts the store; a compile-time edge would double-count — effects.md § `Funnel`),
 so the store-keyed adopt would find no emittable interior edge and every funnel-built
@@ -99,10 +100,8 @@ stores and captures: the adopt rides the same `owned_adopt_edges` map, keyed at 
 **funnel call site**, and `emit_increfs_for` emits the same value-resolved
 `AdoptRegion(container, member)` there — both endpoints reload from their binding slots,
 so no store opcode is needed. This is the same funnel face the activation and transfer
-cuts carry (their F-b admission); with it, the ownership forest works identically on the
-checked-on production path and the intrinsic path, which is what let the
-`--region-ownership` → `--checked-intrinsics=off` CLI forcing be deleted
-(`config/parse.rs`).
+cuts carry (their F-b admission); funnel-recovered `containment_edges` give the forest
+the same containment facts a constructor-embedding store declares.
 
 The RC composition needs no explicit balancing: by the time the adopt executes, the
 funnel's runtime store-incref has already counted the member, and `adopt_region` moves it
@@ -117,18 +116,17 @@ structurally follows both allocations, so both slots are populated when the adop
 containment edge whose member the adopt cannot key (no owner edge at any site) still
 refuses the subtree to Shared, the always-legal baseline.
 
-What the funnel face deliberately does **not** cover: the builder-idiom MERGE stays
-intrinsic-only. A checked-on `%pair` is a `Fresh` native call whose result region is a
-call-result placeholder no static slot can name, so there is nothing for the
-`merged_slots` mint-or-reuse to ride — and nothing leaks for it: a `Fresh` constructor's
-embedding is alloc-scan counted and cascade-released (effects.md § `Fresh`), so
-the merge's absence checked-on costs region-count locality, never reclamation. Pinned by
-`regions::tests::adopt::adopt_edges_claims_funnel_recovered_subtree_checked_on` (the
-funnel-site adopt edges), `…::adopt_edges_refuses_loop_enclosed_member_checked_on` (the
-obligation holds on the funnel face), and at runtime by the checked-on facets of
+What the funnel face does **not** cover: the builder-idiom MERGE, which is the
+constructor emit's mechanism, not the store's. `%pair` lowers as the inline
+`Intrinsic` opcode whose `emit_alloc` seeds the `merged_slots` mint-or-reuse
+(merging.md § Merging), so the merge rides the `%pair` emit on every compile where a
+builder idiom appears — no funnel edge is involved. Pinned by
+`regions::tests::adopt::adopt_edges_claims_interior_cycle_member_by_root` (the
+funnel-site adopt edges), `…::adopt_edges_refuses_loop_enclosed_member` (the
+obligation holds on the funnel face), and at runtime by
 `runtime::tests::ownership::region_ownership_reclaims_interior_cycle_subtree`,
 `…_reclaims_nested_cycle_subtree`, and `…_reclaims_bare_cycle_group` (bounded flag-on
-beside the leaking flag-off counterfactual, on both `--checked-intrinsics` settings).
+beside the leaking flag-off counterfactual).
 
 ## The lifetime obligation the root carries
 

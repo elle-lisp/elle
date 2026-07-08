@@ -6,7 +6,7 @@
 ## (compile/run-on :bytecode …), which forces JitPolicy::Off — so no function is
 ## ever JIT-compiled or rejected and (jit/rejections) stays empty. That is
 ## correct for a pure-bytecode run, not a bug, so gate each rejection assertion
-## on the live policy (parallel to oracle.lisp's `checked?`). The flat top-level
+## on the live policy. The flat top-level
 ## structure is preserved exactly so the adaptive-JIT call counts that the last
 ## assertion depends on are unperturbed; a direct `make smoke` run (adaptive JIT)
 ## still exercises every assertion.

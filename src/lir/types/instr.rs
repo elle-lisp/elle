@@ -130,7 +130,8 @@ pub enum LirInstr {
         /// out to be a **closure** at runtime (a redefined operator, a foreign
         /// fn) the new activation resolves this slot through its region map and
         /// ADOPTS the arena — `adopted_closures` frees it once at the recursion's
-        /// completion. When the callee is a **native** (`%add`, checked-on) the
+        /// completion. When the callee is a **native** (a `NativeFn` — a funnel
+        /// op like `%array-push`, or a rebound operator's value-position face) the
         /// frame is NOT replaced, this slot is never consumed, and the live
         /// scope-exit `DecrefRegion` frees the arena instead — the two paths are
         /// mutually exclusive per call, so exactly one release fires however the

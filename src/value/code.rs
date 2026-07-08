@@ -65,9 +65,8 @@ pub struct Code {
     /// builder-idiom merge (docs/impl/region/merging.md § Merging). The alloc
     /// dispatch consults it through `runtime_region_for_alloc_slot_maybe_merged`:
     /// a slot here mint-or-reuses (child mints, parent reuses) instead of always
-    /// minting. Empty unless a merge fired (a nested `%pair` literal under
-    /// `--checked-intrinsics=off`), so byte-identical to the plain mint on the
-    /// default path.
+    /// minting. Empty unless a merge fired (a nested `%pair` literal seeding the
+    /// builder idiom), so byte-identical to the plain mint when no merge exists.
     pub merged_slots: Rc<FxHashSet<u32>>,
 }
 

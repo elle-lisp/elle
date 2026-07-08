@@ -57,23 +57,13 @@
 (assert (= (pow 0 0) 1) "pow 0 0")
 
 # ── Integer overflow ───────────────────────────────────────────────────
-# Default mode: %-intrinsics use wrapping arithmetic (WASM/SPIR-V semantics).
-# --checked-intrinsics: NativeFn path uses checked_add → overflow errors.
-(def checked? (vm/config :checked-intrinsics))
-(if checked?
-  (begin
-    (def [add-ok _] (protect (+ 9223372036854775807 1)))
-    (assert (not add-ok) "int add overflow errors (checked)")
-    (def [sub-ok _] (protect (- -9223372036854775808 1)))
-    (assert (not sub-ok) "int sub overflow errors (checked)")
-    (def [mul-ok _] (protect (* 9223372036854775807 2)))
-    (assert (not mul-ok) "int mul overflow errors (checked)"))
-  (begin
-    (assert (= (+ 9223372036854775807 1) -9223372036854775808)
-            "int add overflow wraps")
-    (assert (= (- -9223372036854775808 1) 9223372036854775807)
-            "int sub overflow wraps")
-    (assert (= (* 9223372036854775807 2) -2) "int mul overflow wraps")))
+# Integers are 64-bit two's-complement and wrap on overflow, on every tier
+# (docs/intrinsics.md § Integer overflow).
+(assert (= (+ 9223372036854775807 1) -9223372036854775808)
+        "int add overflow wraps")
+(assert (= (- -9223372036854775808 1) 9223372036854775807)
+        "int sub overflow wraps")
+(assert (= (* 9223372036854775807 2) -2) "int mul overflow wraps")
 
 # ── NaN comparisons ─────────────────────────────────────────────────────
 # Note: (= nan nan) is true in Elle (structural equality, not IEEE 754).

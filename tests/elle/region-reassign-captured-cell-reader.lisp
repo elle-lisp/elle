@@ -40,7 +40,11 @@
   (def @acc 0)
   (var i 0)
   (while (%lt i 300)  # recycle physical ids so a stale read lands on reuse
-    (assign acc (%add acc (step)))
+    # `step` came out of `make-fn-local` as a value, so its result types as
+    # unknown; the coerce-guard proves the %add operand without disturbing the
+    # per-iteration overwrite/read cycle (the pin).
+    (let [n (step)]
+      (assign acc (if (%int? n) (%add acc n) acc)))
     (assign i (%add i 1)))
   (assert (= acc 0) "fn-local reassigned-cell reader was freed by the overwrite"))
 

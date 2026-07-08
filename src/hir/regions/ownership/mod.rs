@@ -78,9 +78,8 @@
 //! carries all of containment:
 //!
 //! 1. the **stores** in `RegionInfo::cross_region_refs` (`target ⊇ source`) — the
-//!    `%pair` car/cdr and the `%array-push`/`%put` edges recorded by the intrinsic
-//!    walk arm (present only when those ops lower as intrinsics, i.e.
-//!    `--checked-intrinsics=off`);
+//!    `%pair` car/cdr edges recorded by the intrinsic walk arm (`%pair` lowers as
+//!    an inline `Intrinsic` opcode, so its embedding is visible to the walk);
 //! 2. **capture edges** (a closure's region ⊇ each value it captures), deliberately
 //!    *absent* from `cross_region_refs` — the RC double-count fix records the runtime
 //!    auto-incref over the closure env instead of a static `IncrefRegion`
@@ -90,12 +89,12 @@
 //!    them a value captured by a *local* closure would be claimed an independent Owned
 //!    singleton while the closure env still references it — a double-free at emit;
 //! 3. **funnel-store containment** in `RegionInfo::containment_edges` — the
-//!    `%array-push`/`%put` containment under the production (`--checked-intrinsics`)
-//!    path, where the op is an opaque `Funnel` native call that records NO
+//!    `%array-push`/`%put` containment: the storing ops lower as opaque `Funnel`
+//!    native calls (`IntrinsicOp::routes_native_funnel()`) that record NO
 //!    `cross_region_refs` edge (the funnel counts the store at runtime; a compile-time
-//!    edge would double-count — region/effects.md § `Funnel`). The walk recovers it
-//!    from the container argument's `RetType` (`MutableArray`/`MutableStruct`), so the
-//!    forest sees the same containment checked-on as checked-off, with no incref. The
+//!    edge would double-count — region/effects.md § `Funnel`). The walk recovers the
+//!    containment from the container argument's `RetType`
+//!    (`MutableArray`/`MutableStruct`), with no incref. The
 //!    same `containment_edges` vector ALSO carries a `Fresh` native's **embed**
 //!    containment `result ⊇ arg` (`PrimitiveDef::embeds`, recorded by the walk's `Fresh`
 //!    arm — `with-traits`'s `traits` side-field), the compile-time analog of the runtime
@@ -118,13 +117,11 @@
 //! constructing function's environment (region/adopt.md § "The capture adopt") — so no
 //! lowerability refusal exists; the lifetime obligation alone bounds admission, and it
 //! refuses the cross-activation (upvalue) family by construction until an owner that
-//! outlives every capturer exists. The store-keyed path carries the same checked-on
-//! face itself — the **funnel adopt**: a funnel-recovered `containment_edges` edge
-//! (site-keyed at its funnel call) is an emittable interior owner-edge wherever the
-//! site is a retaining store recording the member, so a funnel-built subtree adopts
-//! identically on the production path (region/adopt.md § "The funnel adopt — the
-//! checked-on store face"), so the forest reclaims on the checked-on (native-Call)
-//! default as well as the intrinsic path. The owner-node cuts sit beside
+//! outlives every capturer exists. The store-keyed path is the **funnel adopt**: a
+//! funnel-recovered `containment_edges` edge (site-keyed at its funnel call) is an
+//! emittable interior owner-edge wherever the site is a retaining store recording
+//! the member, so a funnel-built subtree adopts just like a constructor-built one
+//! (region/adopt.md § "The funnel adopt"). The owner-node cuts sit beside
 //! these region-rooted modes: the capture-back-edge SCC (`compute_activation_adopts`)
 //! and the transferred returned subtree (`compute_transfer_adopts` — a
 //! callee/fiber-body-built cyclic subtree handed across the return frontier, owned by

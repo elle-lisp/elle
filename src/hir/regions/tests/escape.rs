@@ -10,7 +10,7 @@ fn push_widens_value_past_loop() {
     // Were the pair to share the loop region, it would be freed at
     // rotation → UAF.
     let (hir, _, info) = pipeline(
-        "(def @acc (%pair nil nil))\n(def @i 0)\n\
+        "(def @acc @[])\n(def @i 0)\n\
              (while (%lt i 10) (begin (%array-push acc (%pair i i)) (assign i (%add i 1))))",
     );
     let loops = find_loops(&hir);
@@ -32,7 +32,7 @@ fn push_widens_value_past_loop() {
 fn put_widens_value_past_loop() {
     // Same as push: %put's value arg must outlive the collection.
     let (hir, _, info) = pipeline(
-        "(def @m (%pair nil nil))\n(def @i 0)\n\
+        "(def @m @{})\n(def @i 0)\n\
              (while (%lt i 10) (begin (%put m :k (%pair i i)) (assign i (%add i 1))))",
     );
     let loops = find_loops(&hir);
@@ -54,9 +54,9 @@ fn push_local_collection_stays_loop() {
     // The push constraint is satisfied within the loop scope.
     // Loop should remain reclaimable.
     let (hir, _, info) = pipeline(
-            "(def @i 0)\n\
-             (while (%lt i 10) (begin (%array-push (%pair nil nil) (%pair i i)) (assign i (%add i 1))))",
-        );
+        "(def @i 0)\n\
+             (while (%lt i 10) (begin (%array-push @[] (%pair i i)) (assign i (%add i 1))))",
+    );
     let loops = find_loops(&hir);
     assert!(!loops.is_empty(), "should have a Loop node");
     let any_live = loops.iter().any(|id| info.scope_has_local_allocs(*id));

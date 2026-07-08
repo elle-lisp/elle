@@ -32,9 +32,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// 1. **The signature.** A genuine mutual-reach SCC (≥ 2 members) of the eligible
 ///    containment graph whose interior edges include at least one **capture** AND
 ///    at least one **store** — a non-hard `cross_region_refs` edge, or a
-///    funnel-recovered `containment_edges` edge, so the cut admits the checked-on
-///    production path (where the store is an opaque `Funnel` call) exactly as it
-///    admits the intrinsic path. A capture-only SCC is the letrec closure web
+///    funnel-recovered `containment_edges` edge (the storing ops lower as opaque
+///    `Funnel` native calls), so the cut admits the funnel store face exactly as
+///    it admits an intrinsic-store edge. A capture-only SCC is the letrec closure web
 ///    (the closure-cycle merge's instrument); a store-only SCC is the co-owned
 ///    group's.
 /// 2. **Member gates.** Every member ownable (`not_ownable` false — no frontier

@@ -88,23 +88,6 @@ fn region_ownership_reclaims_interior_cycle_subtree() {
         "the ownership forest must reclaim the interior a↔b cycle by subtree drop — \
          per-run live-region growth {on} must be <= 0 (the discriminator leaks {leak})",
     );
-
-    // The checked-on (native-Call) production face: the stores are opaque `Funnel`
-    // calls whose containment is funnel-recovered, and the adopt is keyed at the
-    // funnel call site (region/adopt.md § "The funnel adopt — the checked-on store
-    // face"); the cut must reclaim identically.
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-    let leak_checked = leak_discriminator();
-    let on_checked = steady_region_growth(SUBJECT);
-    assert!(
-        leak_checked > 0,
-        "gauge live (checked-on): the discriminator must leak (growth {leak_checked})",
-    );
-    assert!(
-        on_checked <= 0,
-        "the funnel-adopt must reclaim the interior cycle on the checked-on path too — \
-         per-run growth {on_checked} must be <= 0 (the discriminator leaks {leak_checked})",
-    );
 }
 
 /// End-to-end soundness of the **capture** ownership cut. A pair `p` captured by a
@@ -202,24 +185,6 @@ fn region_ownership_reclaims_bare_cycle_group() {
          free — per-run live-region growth {on} must be <= 0 (the discriminator leaks \
          {leak})",
     );
-
-    // The checked-on (native-Call) production face: the group walk reads the same
-    // funnel-recovered containment (`ownership_inputs`), and its `FreeRegionGroup`
-    // emit is value-resolved (member slots, no store opcode), so the bare cycle must
-    // reclaim identically on the production path.
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-    let leak_checked = leak_discriminator();
-    let on_checked = steady_region_growth(SUBJECT);
-    assert!(
-        leak_checked > 0,
-        "gauge live (checked-on): the discriminator must leak (growth {leak_checked})",
-    );
-    assert!(
-        on_checked <= 0,
-        "the co-owned group free must reclaim the bare cycle on the checked-on path \
-         too — per-run growth {on_checked} must be <= 0 (the discriminator leaks \
-         {leak_checked})",
-    );
 }
 
 /// End-to-end exercise of the **deep-nesting** cut. A Fresh container `root` holds `a`,
@@ -258,23 +223,6 @@ fn region_ownership_reclaims_nested_cycle_subtree() {
         "the deep-nesting cut must reclaim the nested cycle by adopting `b` through `a` \
          and subtree-dropping from the root — per-run live-region growth {on} must be \
          <= 0 (the discriminator leaks {leak})",
-    );
-
-    // The checked-on (native-Call) production face: the multi-level containment is
-    // funnel-recovered — `b`'s adopt through its actual parent `a` must be keyed at
-    // `(%array-push a b)`'s funnel call site exactly as at the intrinsic store
-    // (region/adopt.md § "The funnel adopt — the checked-on store face").
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-    let leak_checked = leak_discriminator();
-    let on_checked = steady_region_growth(SUBJECT);
-    assert!(
-        leak_checked > 0,
-        "gauge live (checked-on): the discriminator must leak (growth {leak_checked})",
-    );
-    assert!(
-        on_checked <= 0,
-        "the funnel-adopt must reclaim the nested cycle on the checked-on path too — \
-         per-run growth {on_checked} must be <= 0 (the discriminator leaks {leak_checked})",
     );
 }
 
@@ -354,12 +302,10 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
 /// `regionstore/refcount.rs`). This is the counterfactual: `steady_region_growth`
 /// runs the loop and would PANIC on the first double-free before the fix.
 ///
-/// Requires the intrinsic (`--checked-intrinsics=off`) path — the ambient default in
-/// these tests — where `%pair` lowers as an intrinsic freed by a slot-resolved
-/// `DecrefRegion`; checked-on the member is a `Fresh` value-based release that
-/// tolerates the freed case. Bounded growth beside the leaking discriminator confirms
-/// the subtree still reclaims each iteration (the fix reorders releases, it does not
-/// refuse the adopt).
+/// `%pair` lowers as an inline intrinsic freed by a slot-resolved `DecrefRegion`,
+/// which is what puts the member's decref in the shared bucket. Bounded growth
+/// beside the leaking discriminator confirms the subtree still reclaims each
+/// iteration (the fix reorders releases, it does not refuse the adopt).
 #[test]
 fn region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims() {
     // The pushed pair is a store-adopted member of the let-bound container's Owned

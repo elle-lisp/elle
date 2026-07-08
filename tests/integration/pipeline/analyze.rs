@@ -49,9 +49,14 @@ fn test_mutual_recursion_signal_inference() {
     // when they only call each other and pure primitives
     let mut rt = setup();
     let (_, symbols, cctx) = rt.parts();
+    // The trailing define's value is the program result, so `g` has a
+    // value-position use and call-site forwarding cannot prove its param;
+    // the allocation-free, signal-free coerce-guard proves it (a diverging
+    // `error` guard would defeat the purity this test pins). `f` stays
+    // callee-only and is proven by forwarding from g's `(f (%sub n 1))`.
     let source = r#"
 (def f (fn (x) (if (%eq x 0) 1 (g (%sub x 1)))))
-(def g (fn (x) (if (%eq x 0) 2 (f (%sub x 1)))))
+(def g (fn (x) (let [n (if (%int? x) x 0)] (if (%eq n 0) 2 (f (%sub n 1))))))
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
@@ -78,12 +83,15 @@ fn test_mutual_recursion_execution() {
 
 #[test]
 fn test_mutual_recursion_signals_are_pure() {
-    // Test that mutually recursive functions are inferred as Pure
+    // Test that mutually recursive functions are inferred as Pure. The
+    // trailing define's value is the program result (a value-position use of
+    // `g`), so the signal-free coerce-guard proves g's param — a diverging
+    // `error` guard would defeat the may_suspend assertion below.
     let mut rt = setup();
     let (_, symbols, cctx) = rt.parts();
     let source = r#"
 (def f (fn (x) (if (%eq x 0) 1 (g (%sub x 1)))))
-(def g (fn (x) (if (%eq x 0) 2 (f (%sub x 1)))))
+(def g (fn (x) (let [n (if (%int? x) x 0)] (if (%eq n 0) 2 (f (%sub n 1))))))
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
@@ -104,17 +112,27 @@ fn test_mutual_recursion_signals_are_pure() {
 #[test]
 fn test_nqueens_functions_are_pure() {
     // Test that the nqueens functions are inferred as Pure. The source calls
-    // stdlib functions (abs, append, reverse), so it needs the stdlib loaded.
+    // stdlib functions (empty?, first, rest, list), so it needs the stdlib
+    // loaded. abs/append/reverse are rebuilt from intrinsics in-fixture: the
+    // stdlib wrappers for those carry dynamic-dispatch signals that would
+    // (correctly) deny purity, and the point here is the pure nqueens family.
+    // placed-col comes out of `first` untyped, so the diverging guard proves
+    // it for the %sub operand contract. solve-helper is the trailing define
+    // (its value is the program result — a value-position use), so call-site
+    // forwarding cannot prove its params; its own diverging guard does.
     let mut rt = setup_with_stdlib();
     let (_, symbols, cctx) = rt.parts();
     let source = r#"
 (var check-safe-helper
   (fn (col remaining row-offset)
+    (when (%not (and (%int? col) (%int? row-offset))) (error :nqueens))
     (if (empty? remaining)
       true
       (let [placed-col (first remaining)]
+        (when (%not (number? placed-col)) (error :nqueens))
         (if (or (%eq col placed-col)
-                (%eq row-offset (abs (%sub col placed-col))))
+                (%eq row-offset (let [d (%sub col placed-col)]
+                                  (if (%lt d 0) (%sub 0 d) d))))
           false
           (check-safe-helper col (rest remaining) (%add row-offset 1)))))))
 
@@ -128,14 +146,23 @@ fn test_nqueens_functions_are_pure() {
       (list)
       (if (safe? col queens)
         (let [new-queens (%pair col queens)]
-          (append (solve-helper n (%add row 1) new-queens)
-                  (try-cols-helper n (%add col 1) queens row)))
+          (letrec [revonto (fn (zs acc)
+                             (if (empty? zs)
+                               acc
+                               (revonto (rest zs) (%pair (first zs) acc))))]
+            (revonto (revonto (solve-helper n (%add row 1) new-queens) ())
+                     (try-cols-helper n (%add col 1) queens row))))
         (try-cols-helper n (%add col 1) queens row)))))
 
 (var solve-helper
   (fn (n row queens)
+    (when (%not (and (%int? n) (%int? row))) (error :nqueens))
     (if (%eq row n)
-      (list (reverse queens))
+      (letrec [rev (fn (zs acc)
+                     (if (empty? zs)
+                       acc
+                       (rev (rest zs) (%pair (first zs) acc))))]
+        (list (rev queens ())))
       (try-cols-helper n 0 queens row))))
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");

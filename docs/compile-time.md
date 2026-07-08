@@ -28,7 +28,7 @@ examples live in the linked topic docs; this catalog is the map.
 | `when!` / `unless!` / `gate!` *(proposed)* | analysis | silent: elided · loud: emits `:gated` |
 | `emit` (signal keyword), `yield` | signal recorded at compile time | value emitted at runtime |
 | `quote`, quasiquote, `environment` | analysis/expansion | yes (data / list construction) |
-| `%`-intrinsics | lowering | yes (one VM instruction) |
+| `%`-intrinsics | proven at compile time, lowered | yes (one VM instruction; storing ops a native funnel call) |
 | `compile/*` | runtime, over the compile model | n/a (reflective) |
 | `eval`, `read`, `read-all` | runtime (listed for contrast) | yes |
 
@@ -40,9 +40,10 @@ Three prefixes/suffixes signal *when* an operation acts:
   the analyzer checks it and the form evaluates to `nil`. The bang is the
   project's marker for "this is resolved by the compiler, not run." Existing
   members: `silent!`, `numeric!`, `immutable!`, `attune!`.
-- **`%name` — an intrinsic.** Lowers straight to a single VM instruction with no
-  validation, no signal emission, no rest-arg allocation. See
-  [`intrinsics.md`](intrinsics.md).
+- **`%name` — an intrinsic.** Compile-time proven against its operand contract,
+  then lowered to a single VM instruction (storing ops to the native funnel
+  call) — no runtime validation, no signal emission, no rest-arg allocation;
+  an unproven call is a compile error. See [`intrinsics.md`](intrinsics.md).
 - **`compile/name` — a reflective op over the compile-time model**, callable
   from normal runtime code. See [`analysis/portrait.md`](analysis/portrait.md).
 
@@ -185,10 +186,12 @@ agent usage patterns: [`analysis/agent-reasoning.md`](analysis/agent-reasoning.m
 
 ## Intrinsics
 
-`%`-prefixed operations that lower to a single VM instruction (arithmetic,
-comparison, logic, conversion, data access, …). Default mode inlines them with no
-checks; `--checked-intrinsics` routes them through validating `NativeFn`s. The
-complete list and the trade-offs: [`intrinsics.md`](intrinsics.md).
+`%`-prefixed operations, compile-time prove-or-reject: the compiler proves each
+call's operands against the op's soundness contract, and proven operands lower
+to one VM instruction (storing ops to the native funnel call); an unproven call
+is a compile error. In value position an intrinsic is its registered `NativeFn`,
+which validates at runtime when called dynamically. The complete list and the
+trade-offs: [`intrinsics.md`](intrinsics.md).
 
 ## Runtime reflection (for contrast — *not* compile-time)
 

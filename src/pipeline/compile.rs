@@ -256,7 +256,7 @@ fn compile_file_frontend(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> FrontendResult {
-    compile_file_frontend_xform(source, symbols, cctx, source_name, |forms| forms)
+    compile_file_frontend_xform(source, symbols, cctx, source_name, |forms, _scope| forms)
 }
 
 /// Like `compile_file_frontend`, but applies `xform` to the macro-expanded
@@ -273,7 +273,7 @@ fn compile_file_frontend_xform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>) -> Vec<Syntax>,
+    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     with_transient(cctx.heap_ptr(), || {
         let syntaxes = read_syntax_all_for(source, source_name)?;
@@ -293,7 +293,7 @@ fn compile_syntaxes_frontend_xform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>) -> Vec<Syntax>,
+    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     with_transient(cctx.heap_ptr(), || {
         compile_syntaxes_frontend_xform_inner(syntaxes, symbols, cctx, source_name, xform)
@@ -309,7 +309,7 @@ fn compile_syntaxes_frontend_xform_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>) -> Vec<Syntax>,
+    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     intern_primitive_names(symbols);
 
@@ -318,7 +318,7 @@ fn compile_syntaxes_frontend_xform_inner(
         crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
     }
 
-    let (expanded_forms, expander, meta) =
+    let (expanded_forms, mut expander, meta) =
         cctx.with_macro_expansion(|macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
                 syntaxes.into()
@@ -340,7 +340,12 @@ fn compile_syntaxes_frontend_xform_inner(
             Ok::<_, String>((expanded_forms, expander, meta))
         })?;
 
-    let expanded_forms = xform(expanded_forms);
+    // A fresh scope for any accumulator/temporaries `xform` injects, minted after
+    // expansion so it cannot collide with a scope the expander already assigned.
+    // Stamping the injected symbols with it makes them hygienic (invisible to
+    // user references and to `(environment)`); the identity xform ignores it.
+    let acc_scope = expander.fresh_scope();
+    let expanded_forms = xform(expanded_forms, acc_scope);
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
     let span = if expanded_forms.is_empty() {
@@ -507,7 +512,7 @@ fn compile_module_with_transform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>) -> Vec<Syntax>,
+    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CompileResult, String> {
     let frontend = compile_file_frontend_xform(source, symbols, cctx, source_name, xform)?;
     lower_test_frontend(frontend, symbols, cctx)
@@ -522,7 +527,7 @@ fn compile_syntaxes_with_transform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-    xform: impl FnOnce(Vec<Syntax>) -> Vec<Syntax>,
+    xform: impl FnOnce(Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CompileResult, String> {
     let frontend = compile_syntaxes_frontend_xform(syntaxes, symbols, cctx, source_name, xform)?;
     lower_test_frontend(frontend, symbols, cctx)

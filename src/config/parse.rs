@@ -7,13 +7,9 @@ impl Config {
     /// `remaining_args` contains file args and everything after `--`.
     pub fn parse(args: &[String]) -> Result<(Config, Vec<String>), String> {
         // CLI effective defaults (distinct from the struct `Default`, which is
-        // the library/test baseline). The command-line tool runs the sound
-        // native-Call path by default: checked intrinsics ON, which forces the
-        // optimizing tiers OFF (the inlined opcode / JIT accessors are not
-        // escape-correct). Override with `--checked-intrinsics=off` or an
-        // explicit `--jit`/`--mlir`.
+        // the library/test baseline): the optimizing tiers are opt-in
+        // (`--jit`/`--mlir`).
         let mut config = Config {
-            checked_intrinsics: true,
             jit: JitPolicy::Off,
             mlir: MlirPolicy::Off,
             ..Default::default()
@@ -21,14 +17,6 @@ impl Config {
         let mut remaining = Vec::new();
         let mut i = 0;
         let mut eval_exprs: Vec<String> = Vec::new();
-        // Track whether the optimizing tiers / checked-intrinsics were set
-        // *explicitly* on the command line (vs. left at the default). The
-        // post-loop normalization uses this to resolve the checked-vs-jit/mlir
-        // conflict: an explicit `--jit`/`--mlir` enable wins over default-on
-        // checked, while two explicit, contradictory flags still error.
-        let mut jit_explicit = false;
-        let mut mlir_explicit = false;
-        let mut checked_explicit_on = false;
 
         while i < args.len() {
             let arg = &args[i];
@@ -42,7 +30,6 @@ impl Config {
 
             // --key=value style
             if let Some(rest) = arg.strip_prefix("--jit=") {
-                jit_explicit = true;
                 config.jit = match rest {
                     "off" => JitPolicy::Off,
                     "eager" => JitPolicy::Eager,
@@ -69,7 +56,6 @@ impl Config {
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--mlir=") {
-                mlir_explicit = true;
                 config.mlir = match rest {
                     "off" => MlirPolicy::Off,
                     "eager" => MlirPolicy::Eager,
@@ -130,35 +116,6 @@ impl Config {
                         ));
                     }
                 };
-                i += 1;
-                continue;
-            }
-            if let Some(rest) = arg.strip_prefix("--checked-intrinsics=") {
-                match rest {
-                    "on" | "true" | "1" => {
-                        config.checked_intrinsics = true;
-                        checked_explicit_on = true;
-                        // jit/mlir forced off in the post-loop normalization.
-                    }
-                    "off" | "false" | "0" => {
-                        config.checked_intrinsics = false;
-                        // Restore the optimizing-tier defaults this flag would
-                        // otherwise have forced off, unless the user set them
-                        // explicitly (don't clobber an explicit `--jit`/`--mlir`).
-                        if !jit_explicit {
-                            config.jit = JitPolicy::Adaptive { threshold: 10 };
-                        }
-                        if !mlir_explicit {
-                            config.mlir = MlirPolicy::Adaptive { threshold: 10 };
-                        }
-                    }
-                    _ => {
-                        return Err(format!(
-                            "--checked-intrinsics: expected on/off (or true/false, 1/0), got '{}'",
-                            rest
-                        ));
-                    }
-                }
                 i += 1;
                 continue;
             }
@@ -271,11 +228,6 @@ impl Config {
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,
                 "--wasm-no-sparse-spill" => config.wasm_sparse_spill = false,
-                "--checked-intrinsics" => {
-                    config.checked_intrinsics = true;
-                    checked_explicit_on = true;
-                    // jit/mlir forced off in the post-loop normalization.
-                }
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {
@@ -296,38 +248,6 @@ impl Config {
         // They'll be handled specially in main
         for expr in eval_exprs.into_iter().rev() {
             remaining.insert(0, format!("--eval:{}", expr));
-        }
-
-        // Resolve checked-intrinsics vs the optimizing tiers. checked-intrinsics
-        // is now default-ON (the sound native-Call path under move), and it
-        // requires JIT and MLIR off (they would bypass the type checks / inline
-        // escape-incorrect opcodes). Resolution:
-        //  - an explicit `--jit`/`--mlir` *enable* wins over default-on checked
-        //    (turns checked off), so existing `--jit=…` invocations keep working;
-        //  - an explicit `--checked-intrinsics` together with an explicit enabled
-        //    `--jit`/`--mlir` is a genuine contradiction and still errors;
-        //  - otherwise checked (default-on or explicit) forces both tiers off.
-        if jit_explicit && config.jit.enabled() {
-            if checked_explicit_on {
-                return Err(
-                    "--checked-intrinsics is incompatible with --jit (JIT would bypass type checks)"
-                        .to_string(),
-                );
-            }
-            config.checked_intrinsics = false;
-        }
-        if mlir_explicit && config.mlir.enabled() {
-            if checked_explicit_on {
-                return Err(
-                    "--checked-intrinsics is incompatible with --mlir (MLIR would bypass type checks)"
-                        .to_string(),
-                );
-            }
-            config.checked_intrinsics = false;
-        }
-        if config.checked_intrinsics {
-            config.jit = JitPolicy::Off;
-            config.mlir = MlirPolicy::Off;
         }
 
         Ok((config, remaining))

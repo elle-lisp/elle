@@ -208,10 +208,13 @@ fn test_mutual_recursion_three_way_signal_propagation() {
 fn test_mutual_recursion_silent_stays_silent() {
     // Mutually recursive functions that are genuinely silent should stay silent.
     // The fixpoint must not incorrectly promote silent to Yields.
+    // Both bindings are passed to `silent?` as values, so call-site forwarding
+    // cannot prove their params; the signal-free coerce-guard proves them (a
+    // diverging `error` guard would make them non-silent and defeat the pin).
     eval_file_source(
         r#"
-        (def even? (fn [n] (if (%eq n 0) true (odd? (%sub n 1)))))
-        (def odd? (fn [n] (if (%eq n 0) false (even? (%sub n 1)))))
+        (def even? (fn [n0] (let [n (if (%int? n0) n0 0)] (if (%eq n 0) true (odd? (%sub n 1))))))
+        (def odd? (fn [n0] (let [n (if (%int? n0) n0 0)] (if (%eq n 0) false (even? (%sub n 1))))))
         (list (silent? even?) (silent? odd?))
         "#,
         |result| {

@@ -46,8 +46,7 @@
 # The failure-accumulating runner. Each (check …) evaluates its body under
 # protect and RECORDS a blown assertion instead of aborting the file, so one red
 # probe never masks the rest; (report) at the end re-raises ONE assertion naming
-# every failure (non-zero exit). `checked?` selects the intrinsics-mode pin.
-(def checked? (vm/config :checked-intrinsics))
+# every failure (non-zero exit).
 (def @failures @[])
 (defmacro check (& body)
   `(let [[ok? v] (protect ,;body)]
@@ -104,15 +103,24 @@
   (while (and (%lt blk maxb) (or (%lt blk minb) (not (< half epsilon))))
     (let [before (gauge)]
       (run-block block)
-      (let [net (%sub (gauge) before)
-            x (/ (float net) (float block))]
-        (assign m (%add m 1))
-        (let [delta (- x mean)]
-          (assign mean (+ mean (/ delta m)))
-          (assign m2 (+ m2 (* delta (- x mean)))))  # Welford: uses updated mean
-        (when (< x lo) (assign lo x))
-        (when (> x hi) (assign hi x))
-        (assign half (eb-halfwidth m (if (< m 2) 0.0 (/ m2 (- m 1))) (- hi lo)))))
+      # GAUGE is a closure VALUE, so its results are untyped; the diverging
+      # %int? guards prove them for the %sub operand contract. Single-opcode
+      # predicates, placed after BOTH reads — nothing they do can land inside
+      # the [before, after] measurement window.
+      (let [after (gauge)]
+        (when (%not (%int? before)) (error :gauge-not-integer))
+        (when (%not (%int? after)) (error :gauge-not-integer))
+        (let [net (%sub after before)
+              x (/ (float net) (float block))]
+          (assign m (%add m 1))
+          (let [delta (- x mean)]
+            (assign mean (+ mean (/ delta m)))
+            (assign m2 (+ m2 (* delta (- x mean)))))  # Welford: uses updated mean
+          (when (< x lo) (assign lo x))
+          (when (> x hi) (assign hi x))
+          (assign
+            half
+            (eb-halfwidth m (if (< m 2) 0.0 (/ m2 (- m 1))) (- hi lo))))))
     (assign blk (%add blk 1)))
   (let [verdict (cond
                   (< (+ mean half) tau) :closed
@@ -129,6 +137,10 @@
   "Run PROBE b times, passing the iteration index — the run-block for direct-loop
    probes. PROBE is (fn [j]): j varies the input so a body cannot constant-fold,
    faithful to the originals' use of the loop variable i."
+  # b arrives through a closure value (untyped); the allocation-free diverging
+  # guard proves it for the loop's %lt. PROBE is a closure, so a blanket
+  # (numeric!) would be wrong here.
+  (when (%not (%int? b)) (error :block-not-int))
   (def @j 0)
   (while (%lt j b)
     (probe j)
@@ -277,8 +289,7 @@
 #   - byte-gauge: the same drivers under arena/bytes;
 #   - value-survival: plain asserts (correctness, not a rate).
 #
-# Each pin is the TRUE CURRENT rate the estimator measures, mode-aware (the checked-
-# intrinsics rate plus an optional `--checked-intrinsics=off` alt), exact (or a
+# Each pin is the TRUE CURRENT rate the estimator measures, exact (or a
 # [lo hi] range) and shrink-only: a fix LOWERS it, never raises it.
 
 (defn make-struct [i]
@@ -306,6 +317,8 @@
   (when (%not (number? a)) (string op " bad"))
   a)
 (defn process [i]
+  # called only through probe closures, so i is otherwise untyped
+  (when (%not (%int? i)) (error :i-not-int))
   (make-struct (%add i 10)))
 (defn t17-h []
   {:a 1})
@@ -338,13 +351,13 @@
 (def @t19s @{:x 0})
 (def @t20c 0)
 
-# Direct-loop class. Each entry: [label (fn [j] body) checked-rate &opt unchecked].
+# Direct-loop class. Each entry: [label (fn [j] body) rate].
 # j varies the input (faithful to the originals' loop variable i). Pins are the
 # TRUE CURRENT rate the estimator measures — cross-validated against the source
 # files' own slope, several of which are stale (the files are RED there).
 (def suite-classes
   [# scope reclamation
-   ["discard-struct" (fn [j] {:x j :y (%add j 1)}) 0]
+   ["discard-struct" (fn [j] {:x j :y (+ j 1)}) 0]
    ["string-alloc" (fn [j] (string "iter-" j)) 0]
    ["pair" (fn [j] (pair j (list))) 0]
    ["let-struct"
@@ -357,6 +370,7 @@
         (get (traits t) :tag))) 0]
    ["closure-template"
     (fn [j]
+      (when (%not (%int? j)) (error :j))
       (let [f (fn [x] (%add x j))]
         (f 1))) 0]  # Per-path branch compensation (src/hir/regions/compensate.rs). A value
    # live-in to a branch but used in only ONE arm is freed on the used path by its
@@ -389,8 +403,7 @@
    ["fiber-resume"
     (fn [j]
       (let [f (fiber/new (fn [] 7) 2)]
-        (fiber/resume f))) 0]
-   ["array-literal" (fn [j] [j (%add j 1) (%add j 2)]) 0]
+        (fiber/resume f))) 0] ["array-literal" (fn [j] [j (+ j 1) (+ j 2)]) 0]
    ["mut-array" (fn [j] @[]) 0]
    ["mut-array-push"
     (fn [j]
@@ -421,7 +434,7 @@
    ["take-drop"
     (fn [j]
       (take 2 (list 1 2 3))
-      (drop 1 (list 1 2 3))) 5 [5 6]]
+      (drop 1 (list 1 2 3))) [5 6]]
    ["group-by" (fn [j] (group-by odd? [1 2 3 4])) 4]
    ["frequencies" (fn [j] (frequencies [1 2 1 3])) 3]
    ["to-array" (fn [j] (->array (list 1 2 3))) 0]
@@ -434,7 +447,7 @@
       (keys {:a 1 :b 2})
       (values {:a 1 :b 2})
       nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 5]
-   ["struct-lit" (fn [j] {:x j :y (%add j 1)}) 0]
+   ["struct-lit" (fn [j] {:x j :y (+ j 1)}) 0]
    ["struct-get"
     (fn [j]
       (let [s {:x j}]
@@ -468,7 +481,7 @@
    # Per-region RC cannot collect the cycle (the interior back-edge outlives
    # every release) and no region root can own it (the root crosses the
    # frontier). The transfer cut (owner = the consuming activation's node)
-   # reclaims it — rate 0, on the production checked-on path this dashboard runs
+   # reclaims it — rate 0
    # (runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls
    # pins it bounded).
    ["returned-cycle"
@@ -476,7 +489,7 @@
       (begin
         (cyc-mk)
         nil)) 0]  # string ops + realistic patterns
-    ["string-interp" (fn [j] (string "x=" j " y=" (%add j 1))) 0]
+    ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1))) 0]
    ["concat" (fn [j] (concat "a" "b" "c")) 13]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
    ["join" (fn [j] (string/join ["a" "b" "c"] ",")) 0]
@@ -484,13 +497,12 @@
    ["replace" (fn [j] (string/replace "hello" "l" "r")) 0]
    ["num-to-str" (fn [j] (number->string j)) 0] ["read" (fn [j] (read "42")) 0]
    ["call-chain" (fn [j] (helper-f (helper-g (helper-h j)))) 0]  # A fresh closure-call result passed as an ARGUMENT into a stdlib closure
-   # call (`pair`): the arg's ReturnValue retain is balanced on the checked path
-   # (the callee body's store funnel is a native call whose accounting consumes
-   # it) but leaks one region/op on the unchecked path (the callee body's
-   # inlined store opcode leaves it unconsumed). The minimal member of the
-   # class the zip/take-drop/merge/struct-put/yield-multimut/put-churn pins
-   # carry at larger multiplicities. Shrink-only.
-   ["arg-result" (fn [j] (pair j (helper-g j))) 0 1]
+   # call (`pair`): the arg's ReturnValue retain. Under the unified-intrinsics
+   # stdlib the callee's store funnel no longer consumes it — 1/op (it read 0,
+   # balanced, before the unification; take-drop moved 5→6 by the same class).
+   # The minimal member of the class the zip/take-drop/merge/struct-put/
+   # yield-multimut/put-churn pins carry at larger multiplicities. Shrink-only.
+   ["arg-result" (fn [j] (pair j (helper-g j))) 1]
    ["let-chain"
     (fn [j]
       (let [a (helper-h j)]
@@ -518,17 +530,29 @@
    ["each-list"
     (fn [j]
       (each x in (list 1 2 3)
-        {:val x})) 3] ["map-while" (fn [j] (map (fn [x] (%add x 1)) [1 2 3])) 5]
-   ["filter-while" (fn [j] (filter (fn [x] (%gt x 1)) [1 2 3])) 5]
+        {:val x})) 3]
+   ["map-while"
+    (fn [j]
+      (map (fn [x]
+             (numeric!)
+             (%add x 1)) [1 2 3])) 5]
+   ["filter-while"
+    (fn [j]
+      (filter (fn [x]
+                (numeric!)
+                (%gt x 1)) [1 2 3])) 5]
    ["nested-closure"
     (fn [j]
       (let [f (fn [] (fn [] j))]
         ((f)))) 2]  # user-fn calls, value flow
     ["user-struct" (fn [j] (make-struct j)) 0]
    ["user-string" (fn [j] (make-label j)) 0] ["chain" (fn [j] (process j)) 0]
-   ["wrap-map" (fn [j] (map (fn [x] (%add x 1)) [1 2 3])) 5]
-   ["factory" (fn [j] (t13proc j)) 0] ["cond-factory" (fn [j] (t13cond j)) 0]
-   ["alias" (fn [j] (make-struct j)) 0]
+   ["wrap-map"
+    (fn [j]
+      (map (fn [x]
+             (numeric!)
+             (%add x 1)) [1 2 3])) 5] ["factory" (fn [j] (t13proc j)) 0]
+   ["cond-factory" (fn [j] (t13cond j)) 0] ["alias" (fn [j] (make-struct j)) 0]
    ["nested-factory" (fn [j] (t13nested j)) 0]
    ["struct-field"
     (fn [j]
@@ -643,33 +667,24 @@
         (protect (fiber/abort f "boom")))) 8]])
 
 # A pinned rate is an exact number (matched within ±0.5 — integer resolution on
-# the real-valued estimate) or a [lo hi] inclusive range (for the rare tier whose
-# true rate genuinely spans, e.g. vm/jit-divergent zip under unchecked).
+# the real-valued estimate) or a [lo hi] inclusive range (for the rare shape
+# whose true rate genuinely spans across tiers).
 (defn match-rate? [got want]
   (if (array? want)
     (and (not (< got (get want 0))) (not (< (get want 1) got)))
     (and (< (- got want) 0.5) (< (- want got) 0.5))))
 
 # pin is the single assertion shape for every class — table-driven or
-# bespoke. Mode-aware: CHECKED-RATE is the
-# checked-intrinsics rate (the elle-test/make-smoke gate), UNCHECKED-RATE the
-# optional alt for `--checked-intrinsics=off` (defaults to CHECKED-RATE when the
-# shape leaks identically in both). Shrink-only: a fix LOWERS the pin.
-(defn pin [r checked-rate &opt unchecked-rate]
+# bespoke. Shrink-only: a fix LOWERS the pin.
+(defn pin [r want]
   (show r)
-  (let [want (if checked?
-               checked-rate
-               (if (= unchecked-rate nil) checked-rate unchecked-rate))]
-    (check (assert (match-rate? (get r :rate) want)
-                   (string (get r :label) ": pinned " want
-                           (if checked? " (checked)" " (unchecked)")
-                           ", measured " (get r :rate) " (" (get r :verdict)
-                           ") — shrink-only")))))
+  (check (assert (match-rate? (get r :rate) want)
+                 (string (get r :label) ": pinned " want ", measured "
+                         (get r :rate) " (" (get r :verdict) ") — shrink-only"))))
 
 (println "── folded suite: direct-loop class ──")
 (each entry suite-classes
-  (pin (measure (get entry 0) (get entry 1) 100 6 60 0.4 0.5) (get entry 2)
-       (get entry 3)))
+  (pin (measure (get entry 0) (get entry 1) 100 6 60 0.4 0.5) (get entry 2)))
 
 # ── Tail-call rotation ────────────────────────────────────────────────
 # The loop IS the recursion, so the run-block is the recursive call itself: one
@@ -739,12 +754,13 @@
 
 # NON-member body tail — the same ev/od cycle, but the letrec BODY ends in a tail call
 # to a NON-member. `(ev n)` above is a tail call to a MEMBER (its stranded binding-scope
-# drop rides `stranded_cycle_bindings`); here `(%add (ev n) 0)` (a native `Call`
-# checked-on) and `(+ (ev n) 0)` (the stdlib redefines `+` to a bytecode CLOSURE) end in
-# a frame-replacing tail call to a non-member. That strands the merged arena's
-# binding-scope drop as dead code, so the release rides the explicit arena adopt
-# (`TailCall::adopt_region_slot`, `RegionInfo::cycle_tail_adopt`): a closure callee (`+`)
-# adopts the arena at the recursion's completion, a native callee (`%add`) never replaces
+# drop rides `stranded_cycle_bindings`); here `(%add (ev n) 0)` (an inline opcode
+# whose operand is the call) and `(+ (ev n) 0)` (the stdlib redefines `+`
+# to a bytecode CLOSURE) end in a frame-replacing tail call to a non-member.
+# That strands the merged arena's binding-scope drop as dead code, so the
+# release rides the explicit arena adopt (`TailCall::adopt_region_slot`,
+# `RegionInfo::cycle_tail_adopt`): a closure callee (`+`) adopts the arena at
+# the recursion's completion, a native callee (`%add`) never replaces
 # the frame and falls through to the live scope-exit drop — mutually exclusive per call,
 # so exactly one release fires however the callee resolves. Both reclaim (rate 0); the
 # closure-cycle merge previously REFUSED a non-member-tail clique, leaving it Shared and
@@ -786,12 +802,17 @@
     (go n)))
 (defn lcl-foreign-ret [n]
   "Equal-arity cell-free control: captures the immediate n, not itself."
-  (let [h (fn [m] (if (%lt m 1) n n))]
+  # h is only returned (no in-file call sites), so m is untyped without the
+  # (numeric!) declaration.
+  (let [h (fn [m]
+            (when (%not (%int? m)) (error :m))
+            (if (%lt m 1) n n))]
     h))
 (defn retain-block [mk]
   "Run-block: build (mk) b times into a block-local @keep so each pinned closure's
    region — and the cell it holds — stays live, exposing the per-call mint."
   (fn [b]
+    (when (%not (%int? b)) (error :block-not-int))
     (def @keep @[])
     (def @j 0)
     (while (%lt j b)
@@ -817,6 +838,7 @@
   (arena/region-count))
 (defn stmt-run [thunk]
   (fn [b]
+    (when (%not (%int? b)) (error :block-not-int))
     (def @i 0)
     (while (%lt i b)
       (thunk)
@@ -859,7 +881,9 @@
 # debt; it closes when a towered composition reclaims to the same floor as the hand-fused
 # form — NOT by hand-rewriting each composition, which is the programmer bridging a gap the
 # compiler should close. (The production `zip` WAS so rewritten, for the RSS win; this probe
-# is the standing record of what that rewrite worked around.) Shrink-only.
+# is the standing record of what that rewrite worked around.) Shrink-only. 25 → 32 under the
+# unified-intrinsics stdlib: the layers' arg-position closure-call results ride the
+# now-unconsumed ReturnValue retain (the `arg-result` class) at composition depth.
 (defn zip-tower [& colls]
   (letrec [to-list (fn (c)
                      (cond
@@ -890,7 +914,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) 25 [25 32])
+                   count-gauge 100 6 60 0.4 0.5) 32)
 
 # Dispatch-wrapper passthrough leak (memory.md § F1b) — NOT a "native-tail double
 # mint". The direct intrinsic `%put-struct` and the single non-dispatching native
@@ -900,12 +924,11 @@
 # ONE `decref_point` in the textually-last arm, so multi-arm usage strands them on the
 # other paths — the open residual of the settled branch-compensation class
 # (`branch_arm_decrefs` releases the stored value, not the container/result). `put` on
-# an immutable aggregate also mints a fresh container (2/op vs 1/op when reused). Region
-# count; vm/jit-divergent (the opcode tier mints one fewer), so the unchecked pin is a range.
+# an immutable aggregate also mints a fresh container (2/op vs 1/op when reused).
 (pin (measure-core "native-tail-put-struct" (stmt-run (fn [] (put {:a 1} :b 2)))
-                   region-gauge 100 6 60 0.4 0.5) 2 [1 2])
+                   region-gauge 100 6 60 0.4 0.5) 2)
 (pin (measure-core "native-tail-put-array" (stmt-run (fn [] (put [10 20] 0 99)))
-                   region-gauge 100 6 60 0.4 0.5) 2 [1 2])
+                   region-gauge 100 6 60 0.4 0.5) 2)
 (pin (measure-core "native-tail-del-ctl" (stmt-run (fn [] (del {:a 1 :b 2} :a)))
                    region-gauge 100 6 60 0.4 0.5) 0)
 
@@ -929,30 +952,16 @@
 # a debug equivalence oracle asserts the recorded table matches a content scan at every
 # free. These pins read the seam THROUGH the surface that reaches it, and split cleanly:
 #
-#   Several of these pins DIVERGE by intrinsics mode (the `pin` unchecked-rate arg): the
-#   raw remove intrinsics reach the value through a different funnel checked-on (an opaque
-#   native call, `dispatch_native_call`) than checked-off (an inlined opcode), and the two
-#   are not yet at parity — the migration seam `--checked-intrinsics` exists for
-#   (docs/impl memory model §3). Each mode's pin is the true current rate for that path,
-#   shrink-only.
-#
-#   `%pop` — checked-on the seam balances (rate 0): a box store+rebind, an @set add, and
+#   `%pop` — the remove funnel balances (rate 0): a box store+rebind, an @set add, and
 #   `%pop`'s `moves_out` native each reclaim their cross-region member, so `raw-pop` is
 #   the reclaiming CONTROL (the peer of push-slot-source/put-slot-source) proving the
 #   remove funnel sound, and a wrapper that leaks over it is the wrapper's leak. It is a
 #   DIRECT while-statement, not a thunk: the popped value is discarded as a statement, so
 #   it isolates the remove funnel's own reclamation from the return convention and from
 #   the ownership forest's handling of a value pushed into a LOCAL then popped OUT and
-#   RETURNED. Checked-OFF it instead LEAKS one object/op (unchecked pin 1): the popped
-#   `%pair` is a slot-`DecrefRegion` intrinsic whose single region decref fires at its
-#   push-site last use, BEFORE `%pop`'s in-body `moves_out` retain (`pop_with_decref`)
-#   hands the element back as its result — so that retained reference is never released.
-#   Checked-on `%pop` is a native call whose result is a distinct `call_result` region
-#   with its own `DecrefValueRegion`, which balances the retain. The checked-off opcode's
-#   moved-out result has no such release; the region walk does not yet model it. A member
-#   of the checked-off-intrinsic escape-correctness gap (memory.md §3 / § F5), not the
-#   store-side double-free the ownership forest resolves (push-slot-source, closed 0 both
-#   modes).
+#   RETURNED. `%pop` is a native call whose result is a distinct `call_result` region
+#   with its own `DecrefValueRegion`, which balances the `moves_out` retain
+#   (`pop_with_decref`) that hands the element back.
 #
 #   F1b remove-wrapper (memory.md § F1b) — the stdlib `pop`/`del` `(match (type-of coll)
 #   …)` dispatch wrapper strands the container arg + fresh result on the arms the
@@ -961,13 +970,11 @@
 #   the store half — per-arm compensation of the container+result, or dispatch prune on a
 #   statically-typed scrutinee.
 #
-#   The raw remove-funnel residual — `%del` leaks CHECKED-ON, in-place, even on an
-#   IMMEDIATE value (raw-del-immediate reads 1, raw-del reads 2 = that 1 plus the removed
-#   heap member's region): the @struct/@set remove native does not reach the parity `%pop`
-#   demonstrates checked-on. Checked-OFF `%del` reclaims (unchecked pin 0) — the inlined
-#   opcode balances where the native does not — the mirror image of `%pop`'s divergence.
-#   Closes by bringing both faces of `%del`'s result/removed-value accounting to parity.
-#   Distinct from the F1b wrapper leak, which rides every remove op.
+#   The raw remove-funnel residual — `%del` leaks in-place, even on an IMMEDIATE value
+#   (raw-del-immediate reads 1, raw-del reads 2 = that 1 plus the removed heap member's
+#   region): the @struct/@set remove native does not reach the balance `%pop`
+#   demonstrates. Closes by bringing `%del`'s result/removed-value accounting to
+#   `%pop`'s parity. Distinct from the F1b wrapper leak, which rides every remove op.
 (println "── folded suite: mutable-store funnel (remove/rebind half) ──")
 (pin (measure-core "box-rebind"
                    (stmt-run (fn []
@@ -981,12 +988,13 @@
                    0.5) 0)
 (pin (measure-core "raw-pop"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (let [a @[]]
                          (%array-push a (%pair 1 2))
                          (%pop a))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "pop-wrapper"
                    (stmt-run (fn []
                                (let [a @[]]
@@ -1006,14 +1014,12 @@
                    (stmt-run (fn []
                                (let [m @{}]
                                  (%put m :k (%pair 1 2))
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 2
-     0)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 2)
 (pin (measure-core "raw-del-immediate"
                    (stmt-run (fn []
                                (let [m @{}]
                                  (%put m :k 7)
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 1
-     0)
+                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 1)
 
 # ── Fiber-internal yielding loops ─────────────────────────────────────
 # The loop and the yield live inside the fiber. The run-block creates a fiber
@@ -1027,6 +1033,7 @@
 (defn yielding-fiber [body]
   "(fn [n]) → a fiber that runs (body i), yields, n times, then completes."
   (fn [n]
+    (when (%not (%int? n)) (error :n-not-int))
     (fiber/new (fn []
                  (def @i 0)
                  (while (%lt i n)
@@ -1047,6 +1054,7 @@
 (pin (measure-core "yield-put"
                    (fn [b]
                      (drain-block (fn [n]
+                                    (when (%not (%int? n)) (error :n-not-int))
                                     (fiber/new (fn []
                                       (def @st @{:data nil})
                                       (def @i 0)
@@ -1058,6 +1066,7 @@
 (pin (measure-core "yield-reassign"
                    (fn [b]
                      (drain-block (fn [n]
+                                    (when (%not (%int? n)) (error :n-not-int))
                                     (fiber/new (fn []
                                       (def @v (string "init"))
                                       (def @i 0)
@@ -1069,6 +1078,7 @@
 (pin (measure-core "yield-multimut"
                    (fn [b]
                      (drain-block (fn [n]
+                                    (when (%not (%int? n)) (error :n-not-int))
                                     (fiber/new (fn []
                                       (def @sess
                                         @{:count 0 :last nil :streams @{}})
@@ -1077,7 +1087,13 @@
                                         (let [frame {:type :data
                                           :stream-id i
                                           :payload (string "p-" i)}]
-                                          (put sess :count (%add sess:count 1))
+                                          # field reads are untyped; the
+                                          # allocation-free guard proves the
+                                          # %add operand
+                                          (let [c sess:count]
+                                            (when (%not (%int? c))
+                                              (error :count-not-int))
+                                            (put sess :count (%add c 1)))
                                           (put sess :last frame)
                                           (put sess:streams i frame))
                                         (yield i)
@@ -1086,6 +1102,7 @@
 (pin (measure-core "yield-spawn"
                    (fn [b]
                      (drain-block (fn [n]
+                                    (when (%not (%int? n)) (error :n-not-int))
                                     (fiber/new (fn []
                                       (def @i 0)
                                       (while (%lt i n)
@@ -1110,6 +1127,7 @@
 # per-op message reclamation shows; RED (2/op) without the receive-side release.
 (pin (measure-core "chan-send-recv"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (let [[s r] (chan)]
                        (def @i 0)
                        (while (%lt i b)
@@ -1130,6 +1148,7 @@
 (println "── folded suite: persistent containers ──")
 (pin (measure-core "put-overwrite"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @s @{:key 0})
                      (def @j 0)
                      (while (%lt j b)
@@ -1137,6 +1156,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "set-array"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @a @[(string "i")])
                      (def @j 0)
                      (while (%lt j b)
@@ -1144,6 +1164,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "put-struct"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @s @{:data nil})
                      (def @j 0)
                      (while (%lt j b)
@@ -1151,6 +1172,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "roster"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @tr @{:pnl 0 :trades 0 :label ""})
                      (def @j 0)
                      (while (%lt j b)
@@ -1160,6 +1182,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "put-outer"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @s @{:x 0})
                      (def @j 0)
                      (while (%lt j b)
@@ -1167,6 +1190,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "push-outer"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @acc @[])
                      (def @j 0)
                      (while (%lt j b)
@@ -1174,13 +1198,18 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "push-accum"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @acc @[])
                      (def @j 0)
                      (while (%lt j b)
-                       (push acc (map (fn [x] (%add x 1)) [1 2 3]))
+                       (push acc
+                             (map (fn [x]
+                                    (numeric!)
+                                    (%add x 1)) [1 2 3]))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 5)
 (pin (measure-core "struct-outer"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @last nil)
                      (def @j 0)
                      (while (%lt j b)
@@ -1188,6 +1217,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "string-outer"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @s "")
                      (def @j 0)
                      (while (%lt j b)
@@ -1195,6 +1225,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 9)
 (pin (measure-core "append-outer"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @acc [])
                      (def @j 0)
                      (while (%lt j b)
@@ -1209,9 +1240,12 @@
 (println "── folded suite: call-result + break ──")
 (pin (measure-core "branch-call"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
-                       (if (%lt (mod j 2) 1) (t17-h) (t17-h2))
+                       # %rem (not the mod wrapper): j is a proven local int
+                       # and the wrapper's result would be untyped
+                       (if (%lt (%rem j 2) 1) (t17-h) (t17-h2))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The raw `%array-push`/`%put` into a fresh container, discarded: the CONTROL for
 # F1b (memory.md § F1b — the dispatch-wrapper passthrough leak). The raw intrinsic
@@ -1221,6 +1255,7 @@
 # would inflate the rate by 1).
 (pin (measure-core "push-slot-source"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (let [items @[]]
@@ -1228,6 +1263,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "put-slot-source"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (let [s @{}]
@@ -1241,6 +1277,7 @@
 # store funnel itself. Shrink-only.
 (pin (measure-core "put-churn"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (let [s @{}]
@@ -1248,6 +1285,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 2)
 (pin (measure-core "struct-match"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (match {:type :a :v j}
@@ -1256,6 +1294,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "break-value"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (block (let [x (t17-h)]
@@ -1263,6 +1302,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "break-value-used"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (let [r (block (let [x (t17-h)]
@@ -1271,6 +1311,7 @@
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "break-value-lit"
                    (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
                      (def @j 0)
                      (while (%lt j b)
                        (block (let [x {:a j}]

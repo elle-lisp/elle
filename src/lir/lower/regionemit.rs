@@ -335,6 +335,16 @@ impl<'a> Lowerer<'a> {
             Some(edges) => edges.clone(),
             None => return,
         };
+        // A donated 1-slot-container store site holds its content UNCOUNTED:
+        // the producer's birth reference is the cell's reference, released by
+        // drop-on-overwrite (priors) and the container's own demise (final
+        // value). The recorded content edge must not add a count here — in a
+        // loop each iteration's slot-resolved `IncrefRegion` would strand one
+        // region per displaced prior (the only release is the once-per-scope
+        // slot decref). Pinned by `reassign_toplevel_prior_release_is_bounded`.
+        if self.region_info.donated_overwrite_sites.contains(&hir_id) {
+            return;
+        }
         let hard_site = self.region_info.hard_edge_sites.contains(&hir_id);
         for (src, dst) in refs {
             // An interior owned-subtree edge's reference count is replaced by the
@@ -416,10 +426,10 @@ impl<'a> Lowerer<'a> {
     /// from the (root-keyed) `region_to_table`. The runtime-population guard
     /// (`emitted_alloc_regions`, mirroring `coalescible_region`) keeps a slot no
     /// allocation in THIS function stamped out of the set: such a slot has no
-    /// activation mapping to reuse. With no merge (`merged_parent` empty — the
-    /// `--checked-intrinsics=on` default seeds none) this returns immediately and
-    /// `merged_slots` stays empty, so mint-or-reuse is the plain mint and the change
-    /// is behaviour-preserving on that path.
+    /// activation mapping to reuse. With no merge (`merged_parent` empty — a
+    /// compile whose `%pair` allocation nodes seed no builder idiom) this returns
+    /// immediately and `merged_slots` stays empty, so mint-or-reuse is the plain
+    /// mint on that path.
     pub(super) fn record_merged_slots(&mut self) {
         if self.region_info.merged_parent.is_empty() {
             return;

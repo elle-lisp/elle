@@ -15,6 +15,7 @@ pub(crate) use tostring::prim_to_string;
 // Declarative primitive definitions for conversion module.
 primitive! {
     "integer" => prim_to_int {
+        ret: RetType::Int,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert number to integer (i64). Accepts int (identity) or float (truncation). Use parse-int for string→int.",
@@ -25,6 +26,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "float" => prim_to_float {
+        ret: RetType::Float,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert number to float. Accepts int (→ f64) or float (identity). Use parse-float for string→float.",
@@ -34,6 +36,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "parse-int" => prim_parse_int {
+        ret: RetType::Int,
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Parse string or keyword to integer. Optional radix (2–36) for base conversion.",
@@ -43,6 +46,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "parse-float" => prim_parse_float {
+        ret: RetType::Float,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Parse string or keyword to float.",

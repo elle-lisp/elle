@@ -32,8 +32,12 @@
 ## frame replacement of the descent. The returned closure must be the loop's own
 ## `go`, so invoking it once more (`(g 0)`) returns that same closure: a stale
 ## self-identity carried across the replacements would hand back the wrong value.
+## `go` is returned (a value-position use), so call-site forwarding cannot prove
+## `m`; the allocation-free diverging guard does.
 (defn descend-to-self [n]
-  (letrec [go (fn [m] (if (%lt m 1) go (go (%sub m 1))))]
+  (letrec [go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) go (go (%sub m 1))))]
     (go n)))
 (let [g (descend-to-self 100000)]
   (assert (= (g 0) g)

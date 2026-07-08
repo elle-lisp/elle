@@ -14,12 +14,11 @@ use super::*;
 /// decrefs suppressed, and the activation's completion release subtree-drops the cycle —
 /// interior m↔c references reclaiming with the set.
 ///
-/// The flag-off measurement is the built-in counterfactual: per-region RC cannot collect the
-/// m↔c cycle (region/rules.md Rule 8), so the SAME bytecode shape must leak flag-off and be
-/// bounded flag-on — proving the cut, not the shape, reclaims it. Both `--checked-intrinsics`
-/// settings are pinned: checked-off the interior store is a `cross_region_refs` edge;
-/// checked-on it is funnel-recovered `containment_edges` (the value-resolved adopt needs no
-/// store site), so the cut serves the production path identically.
+/// The leaking discriminator is the built-in counterfactual: per-region RC cannot collect
+/// the m↔c cycle (region/rules.md Rule 8), so a bounded reading beside a leaking
+/// discriminator proves the cut, not the shape, reclaims it. The interior store is a native
+/// funnel `Call` whose containment is funnel-recovered `containment_edges` (the
+/// value-resolved adopt needs no store site).
 #[test]
 fn region_ownership_capture_back_edge_cycle_reclaims() {
     // root ⊇ m (store), m ⊇ c (store), c ⊇ m (capture) — the m↔c cycle through a
@@ -45,22 +44,6 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
          completion release — per-run live-region growth {on} must be <= 0 (the \
          discriminator leaks {leak})",
     );
-
-    // The checked-on (native-Call) production face: the interior store is
-    // funnel-recovered containment, and the cut must reclaim identically.
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-    let leak_checked = leak_discriminator();
-    let on_checked = steady_region_growth(SUBJECT);
-    assert!(
-        leak_checked > 0,
-        "gauge live (checked-on): the discriminator must leak (growth {leak_checked})",
-    );
-    assert!(
-        on_checked <= 0,
-        "the activation cut must reclaim the funnel-recovered cycle on the checked-on \
-         path too — per-run growth {on_checked} must be <= 0 (the discriminator leaks \
-         {leak_checked})",
-    );
 }
 
 /// End-to-end reclamation of the **transferred returned cycle** — the
@@ -75,11 +58,10 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
 /// `AdoptIntoActivation`, so the activation's completion release set-drops the
 /// whole cycle.
 ///
-/// The flag-off measurement is the built-in counterfactual: the SAME bytecode
-/// shape must leak flag-off and be bounded flag-on. Both `--checked-intrinsics`
-/// settings are pinned: checked-off the interior store is a `cross_region_refs`
-/// edge; checked-on it is funnel-recovered containment whose adopt is keyed at
-/// the funnel call site (the value-resolved adopt needs no store opcode).
+/// The leaking discriminator is the built-in counterfactual beside the bounded
+/// reading. The interior store is a native funnel `Call` — funnel-recovered
+/// containment whose adopt is keyed at the funnel call site (the value-resolved
+/// adopt needs no store opcode).
 #[test]
 fn region_ownership_reclaims_returned_cycle_across_calls() {
     // A producer `mk` builds an a↔b cycle and returns its root; the top-level consumer
@@ -107,28 +89,14 @@ fn region_ownership_reclaims_returned_cycle_across_calls() {
          release — per-run live-region growth {on} must be <= 0 (the discriminator \
          leaks {leak})",
     );
-
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-    let leak_checked = leak_discriminator();
-    let on_checked = steady_region_growth(SUBJECT);
-    assert!(
-        leak_checked > 0,
-        "gauge live (checked-on): the discriminator must leak (growth {leak_checked})",
-    );
-    assert!(
-        on_checked <= 0,
-        "the transfer cut must reclaim the funnel-recovered returned cycle on the \
-         checked-on path too — per-run growth {on_checked} must be <= 0 (the \
-         discriminator leaks {leak_checked})",
-    );
 }
 
 /// The **fiber face** of the transfer cut: a silent fiber body's terminal value
 /// is the returned cycle, handed across the fiber frontier by the completing
-/// resume and discarded. Flag-off the cycle leaks per run (the fiber machinery
-/// balances its own retains — the cycle is what remains); flag-on the resume
-/// result's release is replaced by `AdoptIntoActivation` and the consuming
-/// activation's completion reclaims it. Both `--checked-intrinsics` settings.
+/// resume and discarded. The fiber machinery balances its own retains — the
+/// cycle is what remains without the cut; the resume result's release is
+/// replaced by `AdoptIntoActivation` and the consuming activation's completion
+/// reclaims it.
 #[test]
 fn region_ownership_reclaims_fiber_terminal_cycle() {
     // A silent fiber body's terminal value is the returned a↔b cycle, handed across the
@@ -150,19 +118,6 @@ fn region_ownership_reclaims_fiber_terminal_cycle() {
         on <= 0,
         "the fiber-terminal cycle must be reclaimed at the consuming activation's \
          completion — per-run growth {on} must be <= 0 (the discriminator leaks {leak})",
-    );
-
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-    let leak_checked = leak_discriminator();
-    let on_checked = steady_region_growth(SUBJECT);
-    assert!(
-        leak_checked > 0,
-        "gauge live (checked-on): the discriminator must leak (growth {leak_checked})",
-    );
-    assert!(
-        on_checked <= 0,
-        "the fiber face must reclaim on the checked-on path too — per-run growth \
-         {on_checked} must be <= 0 (the discriminator leaks {leak_checked})",
     );
 }
 
@@ -354,20 +309,16 @@ fn adopt_into_activation_absorbs_redelivery() {
 /// an over-admission would emit the adopt at o's construction, and the second
 /// construction would re-adopt the already-Owned member, tripping the one-owner debug
 /// assert (or a generation panic). Its region growth is whatever per-region RC yields
-/// (bounded checked-off; a residual leak checked-on, where %pair/%first are native
-/// calls) and is NOT this pin's concern — the reclamation cuts are pinned by the
-/// `reclaims_*` tests above. Both --checked-intrinsics settings are exercised.
+/// (`%pair`/`%first` are inline intrinsics) and is NOT this pin's concern — the
+/// reclamation cuts are pinned by the `reclaims_*` tests above.
 #[test]
 fn upvalue_capture_family_runs_sound() {
     const FAMILY: &str = "(begin (let [m (%pair 1 2)] \
         (letrec [e (fn [k] (let [o (fn [] (if k (e false) (%first m)))] (o)))] \
           (begin (e true) nil))) \
       nil)";
-    // 50 panic-clean runs on the intrinsic (checked-off) path — an over-admission
-    // double-free would detonate the debug one-owner/generation asserts here.
-    let _ = steady_region_growth(FAMILY);
-    // The production checked-on (native-Call) face must be panic-clean too.
-    let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
+    // 50 panic-clean runs — an over-admission double-free would detonate the
+    // debug one-owner/generation asserts here.
     let _ = steady_region_growth(FAMILY);
 }
 
@@ -403,12 +354,8 @@ fn reassign_toplevel_prior_release_is_bounded() {
 
     // Run an Elle program that reassigns a top-level `@acc` 50 then 250 times,
     // sampling `arena/region-count` mid-run at each point, and return the raw
-    // count delta (c250 − c50) the program computes. Compiled on the **checked-on**
-    // (native-Call) path — the production default (`elle FILE`), where the reassign
-    // value is an opaque call-result the 1-slot container model claims; the
-    // `Runtime::new()` test default is checked-off, a distinct region path.
+    // count delta (c250 − c50) the program computes.
     fn region_growth(assign_form: &str) -> i64 {
-        let _ci = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
         let mut rt = Runtime::new();
         let src = format!(
             "(def @acc nil) (var n 0) \
@@ -416,7 +363,7 @@ fn reassign_toplevel_prior_release_is_bounded() {
              (def c50 (arena/region-count)) \
              (while (%lt n 250) {assign_form} (assign n (%add n 1))) \
              (def c250 (arena/region-count)) \
-             (%sub c250 c50)"
+             (- c250 c50)"
         );
         let result = {
             let (_vm, symbols, cctx) = rt.parts();

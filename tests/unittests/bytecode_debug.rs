@@ -30,7 +30,7 @@ fn test_print_raw_bytecode() {
     let (mut symbols, mut _vm) = setup();
 
     let code = r#"(begin
-        (def process (fn (acc x) (begin (var doubled (%mul x 2)) (%add acc doubled))))
+        (def process (fn (acc x) (numeric!) (begin (var doubled (%mul x 2)) (%add acc doubled))))
         (def my-fold (fn (f init lst)
             (if (nil? lst)
                 init

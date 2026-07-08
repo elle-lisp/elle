@@ -5,16 +5,14 @@
 ## **behaviour-preserving** on each tier: immutable inputs return a fresh
 ## collection, mutable inputs mutate in place and return the same value.
 ##
-## It does NOT, by itself, exercise the monomorphization proof obligation
-## (`check_monomorphic_proof_obligations`): the corpus runner is checked-on by
-## default, and the obligation only fires on the silent (unchecked-intrinsics)
-## path (`infer_and_rewrite` early-returns under checked). The obligation's
-## discharge for these exact routed arms is pinned where the routing actually
-## compiles silent: the unchecked stdlib build itself (the
-## `runtime::tests::lifecycle::two_instances_*` Rust tests) plus the unit pins
+## The compile-time side — each routed arm's %-op discharging its operand
+## contract (`check_intrinsic_operand_proofs`, src/hir/typeinfer/contract.rs)
+## through the `match (type-of coll)` arm narrowing — fires on every compile
+## (prove-or-reject covers every call-position %-intrinsic), so the stdlib
+## build itself discharges these exact arms; the narrowing is pinned by
 ## `proven_monomorphic_op_compiles_under_match_narrowing` /
 ## `match_typeof_arm_narrows_authoritatively_over_a_called_param`
-## (`src/hir/typeinfer.rs`).
+## (`src/hir/typeinfer/tests.rs`).
 
 # ── push: array family ───────────────────────────────────────────────
 # Immutable array → fresh array (the `:array → %push-array` arm).

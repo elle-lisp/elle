@@ -77,9 +77,9 @@
 ## panics — no rejection is recorded, but the cache stays empty, so
 ## `(jit? f)` returns false. This is the real counterfactual gate.
 ## These compilation checks are only meaningful when a JIT policy is
-## active. Under --jit=off and --checked-intrinsics (which forces JIT
-## off) nothing compiles, so (jit? f) is always false; the behavioral
-## %string-push assertions above already cover those modes.
+## active. Under --jit=off nothing compiles, so (jit? f) is always
+## false; the behavioral %string-push assertions above already cover
+## that configuration.
 (when (not (= (vm/config :jit) :off))
   (jit/rejections)
   (assert (not (has-rejection? "IntrStringPush"))

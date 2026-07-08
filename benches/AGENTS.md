@@ -53,10 +53,8 @@ nothing — "the win is measured, not asserted") driven by the thread-local
 instrument in `elle::lir::lower::rcstats`, which the lowerer bumps at each
 coalescing-candidate site. It measures three things: the stdlib load, a sweep of
 every `tests/elle/*.lisp` (compile-only, failures skipped), and a deterministic
-builder-idiom witness. Compilation runs under the library-default config
-(`checked_intrinsics = false`), so `%pair` survives as an intrinsic and the
-builder merge — hence transform 2 — can fire; under the CLI default
-(`checked_intrinsics = true`) the merge is inert and self-edges are 0
+builder-idiom witness. `%pair` lowers as the inline intrinsic, so the builder
+merge — hence transform 2 — fires wherever a builder idiom seeds it
 (region/merging.md § Merging).
 
 ```bash

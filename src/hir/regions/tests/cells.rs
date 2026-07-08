@@ -104,7 +104,7 @@ fn walk_records_cell_contains_content_for_compiled_letrec_cell() {
     // container the scan cannot bound through its cell (the invisible-containment hole
     // this modeling closes; region/adopt.md § "The capture adopt").
     let src = "(defn build [n] \
-                 (letrec [drive (fn [m] (if (%le m 0) 0 (begin (leaf m) (drive (%sub m 1))))) \
+                 (letrec [drive (fn [m] (numeric!) (if (%le m 0) 0 (begin (leaf m) (drive (%sub m 1))))) \
                           leaf (fn [m] m)] \
                    (drive n)))";
     let (_hir, _arena, info) = pipeline(src);
@@ -191,7 +191,7 @@ fn capture_edge_points_at_cell_region_not_content() {
         "(defn build [n] \
            (letrec [drive (fn [m] (leaf m)) \
                     leaf (fn [m] m)] \
-             (%add (drive n) 0)))",
+             (begin (drive n) 0)))",
     );
     // The sole compiled cell is `leaf`'s forward cell.
     let cells: Vec<(Binding, Region)> = info

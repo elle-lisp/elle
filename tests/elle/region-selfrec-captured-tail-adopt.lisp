@@ -24,8 +24,11 @@
 
 # `step` is self-recursive (tail body) AND captured by `other` → cell-held.
 (defn make []
-  (defn step [n]
-    (if (%lt n 1) 0 (step (%sub n 1))))
+  ## Entry coerce-guard: `step` is captured by `other` (a value use), so its
+  ## params take no call-site proofs.
+  (defn step [n0]
+    (let [n (if (%int? n0) n0 0)]
+      (if (%lt n 1) 0 (step (%sub n 1)))))
   (defn other [n]
     (step n))
   other)

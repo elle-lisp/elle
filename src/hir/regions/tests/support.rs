@@ -143,73 +143,21 @@ pub(super) fn in_some_owned_subtree(
     owned.values().any(|s| s.contains(&r))
 }
 
-/// Like `owned_subtrees_with_effects`, but compiles on the **checked-on**
-/// (native-Call) production path, where `%`-intrinsics route through their
-/// `NativeFn` primitives — so `%array-push`/`%put` is an opaque `Funnel` CALL that
-/// records NO `cross_region_refs` edge. This is the path the alloc-type containment
-/// recovery (`RegionInfo::containment_edges`) exists for. The thread-local override
-/// keeps the flip scoped to this one compile (the global config is write-once).
-pub(super) fn owned_subtrees_checked_on(
-    source: &str,
-) -> (
-    Hir,
-    RegionInfo,
-    rustc_hash::FxHashMap<Region, rustc_hash::FxHashSet<Region>>,
-) {
-    let mut symbols = SymbolTable::new();
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
-    let cc = pc.call_classification;
-    let (hir, arena) = {
-        let _guard = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-        let (hir, arena, _) = compile_fhir(source, &mut symbols);
-        (hir, arena)
-    };
-    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
-    restore_pre_ownership_view(&mut info);
-    let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
-    let owned = super::ownership::compute_owned_subtrees(&hir, &info, &escape, &arena);
-    (hir, info, owned)
-}
-
 /// Compile, run inference + escape under the REAL primitive classification (so
-/// `@array`/`array` resolve to `Fresh` and `%array-push` records its `cross_region_refs`
-/// containment edge on the default checked-off test path), and compute the adopt-edge
-/// map `compute_adopt_edges` hands the lowerer. Mirrors `owned_subtrees_with_effects`,
-/// threading the `compute_order` index `compute_adopt_edges` needs for the lifetime
-/// obligation.
+/// `@array`/`array` resolve to `Fresh`), and compute the adopt-edge map
+/// `compute_adopt_edges` hands the lowerer. A `%`-store (`%array-push`/`%put`)
+/// is an opaque `Funnel` native call recording NO `cross_region_refs` edge —
+/// its containment reaches the adopt walk as site-keyed funnel-recovered
+/// `containment_edges`, and the emitted adopt is keyed at the funnel call
+/// site (region/adopt.md § The funnel adopt). Mirrors
+/// `owned_subtrees_with_effects`, threading the `compute_order` index
+/// `compute_adopt_edges` needs for the lifetime obligation.
 pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
     let mut symbols = SymbolTable::new();
     let (hir, arena, _) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
     let cc = pc.call_classification;
-    let mut info = analyze_regions_with(&hir, &arena, cc.clone());
-    restore_pre_ownership_view(&mut info);
-    let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
-    let order = compute_order(&hir);
-    let edges = super::ownership::compute_adopt_edges(&hir, &info, &escape, &arena, &order);
-    (hir, info, edges)
-}
-
-/// Like [`adopt_edges`], but compiled on the **checked-on** (native-Call) production
-/// path, where `%array-push`/`%put` is an opaque `Funnel` call recording NO
-/// `cross_region_refs` edge — the containment reaches the adopt walk only as
-/// site-keyed funnel-recovered `containment_edges`, and the emitted adopt is keyed at
-/// the funnel call site (the funnel face of the store-keyed adopt;
-/// region/adopt.md § "The funnel adopt — the checked-on store face").
-pub(super) fn adopt_edges_checked_on(
-    source: &str,
-) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
-    let mut symbols = SymbolTable::new();
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
-    let cc = pc.call_classification;
-    let (hir, arena) = {
-        let _guard = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-        let (hir, arena, _) = compile_fhir(source, &mut symbols);
-        (hir, arena)
-    };
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
@@ -272,35 +220,16 @@ pub(super) fn analyze_full(source: &str) -> (Hir, RegionInfo) {
     (hir, info)
 }
 
-/// Like [`analyze_full`] but compiled on the **checked-on** (native-Call)
-/// production path, where a store is an opaque `Funnel` call recording NO
-/// `cross_region_refs` edge — the containment reaches the inference only through
-/// the funnel-recovered `RegionInfo::containment_edges`. The activation-adopt
-/// cut must admit through that face too (its emit is value-resolved, needing no
-/// store site).
-pub(super) fn analyze_full_checked_on(source: &str) -> (Hir, RegionInfo) {
-    let mut symbols = SymbolTable::new();
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&symbols, &meta);
-    let (hir, arena) = {
-        let _guard = crate::config::test_override::ScopedCheckedIntrinsics::new(true);
-        let (hir, arena, _) = compile_fhir(source, &mut symbols);
-        (hir, arena)
-    };
-    let info = analyze_regions_with(&hir, &arena, pc.call_classification);
-    (hir, info)
-}
-
-/// The container **root** (the region that is the TARGET of a non-hard containment
-/// edge but never a SOURCE — a top container holds members; it is held by nothing) and
-/// the **member** regions (the edge sources) of a discarded shared-container subtree.
+/// The container **root** (the region that is the TARGET of a containment edge but
+/// never a SOURCE — a top container holds members; it is held by nothing) and the
+/// **member** regions (the edge sources) of a discarded shared-container subtree.
+/// Reads the funnel-recovered `containment_edges`: a `%`-store is an opaque `Funnel`
+/// native call recording NO `cross_region_refs` edge, so containment reaches the
+/// ownership walks only through this site-keyed map.
 pub(super) fn container_root_and_members(info: &RegionInfo) -> (Region, Vec<Region>) {
     let mut srcs = rustc_hash::FxHashSet::default();
     let mut dsts = rustc_hash::FxHashSet::default();
-    for &(site, src, dst) in &info.cross_region_refs {
-        if info.hard_edge_sites.contains(&site) {
-            continue;
-        }
+    for &(_site, src, dst) in &info.containment_edges {
         srcs.insert(src);
         dsts.insert(dst);
     }

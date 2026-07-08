@@ -19,11 +19,11 @@
 # (tests/integration/elle_scripts.rs) under the UAF oracle; the emit-order fix is
 # `lir::lower::tests::release::store_adopted_member_release_precedes_owner_in_shared_bucket`.
 #
-# Only `--checked-intrinsics=off` reaches the trigger: there `%pair` is an intrinsic
-# whose member release is a slot-resolved `DecrefRegion` (faults on a freed region),
-# where checked-on it is a `Fresh` value-based release. The `elle test` runner covers
-# both settings (vm=checked-on, jit=checked-off); this file also runs under
-# `--jit=adaptive` (checked-off) as the deterministic-fault oracle.
+# `%pair` lowers as the inline intrinsic, so the pair's member release is a
+# slot-resolved `DecrefRegion` — exactly the release that faults on a freed region;
+# `%array-push` is the native funnel call whose pass-through result doubles the
+# container release. Beyond the `elle test` run, this file also runs under
+# `--jit=adaptive` as the deterministic-fault oracle.
 
 # The trigger shape: the push result is discarded (the `let` is not the loop body's
 # tail), so the container is released by both its binding and the discarded pass-through
@@ -43,7 +43,14 @@
   (let [items @[]]
     (%array-push items (%pair k 0))
     (assert (= 1 (length items)) (string "push lost at k=" k))
-    (assign sum (%add sum (%first (get items 0)))))
+    # `get` returns unknown, so prove the %first/% add operands with a
+    # %pair?/%int? dispatch; the read-back-through-the-container shape (the
+    # pin) is unchanged.
+    (let [p (get items 0)]
+      (when (%not (%pair? p)) (error :not-a-pair))
+      (let [car (%first p)]
+        (when (%not (%int? car)) (error :not-an-int))
+        (assign sum (%add sum car)))))
   (assign k (%add k 1)))
 (assert (= sum 19900) "sum of pushed cars for k in 0..200 must be 19900")
 

@@ -48,9 +48,9 @@
 //! (the match keeps its original arms and still raises `:match-error` for the
 //! impossible runtime type).
 //!
-//! This runs **unconditionally** (both `--checked-intrinsics` settings): it is a
-//! behavior-preserving HIR simplification, not an intrinsic rewrite, and the
-//! downstream region/escape analyses must see the same tree in either mode.
+//! This runs **unconditionally** on every compile: it is a behavior-preserving
+//! HIR simplification, not an intrinsic rewrite, and the downstream
+//! region/escape analyses all see the pruned tree.
 //!
 //! It runs **before** `functionalize` (driven from `hir::regularize`): once
 //! functionalize hoists a prebound/captured arm-local binding (the each macro's
@@ -77,6 +77,7 @@ use crate::symbol::SymbolTable;
 fn keyword_of_rettype(ret: RetType) -> Option<&'static str> {
     Some(match ret {
         RetType::Int => "integer",
+        RetType::Float => "float",
         RetType::Bool => "boolean",
         RetType::String => "string",
         RetType::MutableString => "@string",

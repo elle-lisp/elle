@@ -31,6 +31,10 @@ pub(crate) enum TyKind {
     MutableStruct,
     Set,
     MutableSet,
+    /// A cons cell. Flat (incomparable) like the container types; fed by the
+    /// `%pair` constructor's return type and the `pair?` guards, consumed by
+    /// the `%first`/`%rest` operand contract.
+    Pair,
     Top,
 }
 
@@ -64,6 +68,7 @@ impl TypeInterner {
     pub const MUTABLE_BYTES: TyId = TyId(17);
     pub const SET: TyId = TyId(18);
     pub const MUTABLE_SET: TyId = TyId(19);
+    pub const PAIR: TyId = TyId(20);
 }
 
 impl Default for TypeInterner {
@@ -100,8 +105,39 @@ impl TypeInterner {
             // String/Bytes twins above, so join/meet/subtype need no new cases.
             TyKind::Set,
             TyKind::MutableSet,
+            // Pair at fixed index 20. Flat like the containers.
+            TyKind::Pair,
         ];
         TypeInterner { types: preinterned }
+    }
+
+    /// Human-readable name for compile-error messages (the intrinsic operand
+    /// proofs report what was inferred when they reject a site).
+    pub fn describe(id: TyId) -> &'static str {
+        match id {
+            Self::BOTTOM => "unreachable",
+            Self::TOP => "unknown",
+            Self::NIL => "nil",
+            Self::BOOL => "bool",
+            Self::INT => "int",
+            Self::FLOAT => "float",
+            Self::NUMBER => "number",
+            Self::STRING => "string",
+            Self::KEYWORD => "keyword",
+            Self::SYMBOL => "symbol",
+            Self::EMPTY_LIST => "empty list",
+            Self::BYTES => "bytes",
+            Self::MUTABLE_BYTES => "@bytes",
+            Self::MUTABLE_STRING => "@string",
+            Self::ARRAY => "array",
+            Self::MUTABLE_ARRAY => "@array",
+            Self::STRUCT => "struct",
+            Self::MUTABLE_STRUCT => "@struct",
+            Self::SET => "set",
+            Self::MUTABLE_SET => "@set",
+            Self::PAIR => "pair",
+            _ => "unknown",
+        }
     }
 
     /// Least upper bound (join) of two types.
