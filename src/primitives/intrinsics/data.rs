@@ -297,16 +297,27 @@ pub(crate) fn prim_bytes_push(
 ) -> (SignalBits, Value) {
     let collection = &args[0];
     let value = args[1];
-    let byte = match value.as_int() {
-        Some(i) => i as u8,
-        None => return type_err("%bytes-push value", "integer", &value, ctx),
+    // The pushed value is either a single byte (integer) OR a whole bytes/@bytes
+    // value appended in bulk — the linear binary path core.lisp's push-all uses,
+    // the exact mirror of %string-push bulk-appending a string (string concat ==
+    // UTF-8 byte concat). Read the source into an owned buffer FIRST (like
+    // prim_string_push) so we never hold an @bytes RefCell borrow across a
+    // mutation of `collection`, which may be the same @bytes (e.g. (append b b)).
+    let src: Vec<u8> = if let Some(i) = value.as_int() {
+        vec![i as u8]
+    } else if let Some(data) = value.as_bytes() {
+        data.to_vec()
+    } else if let Some(buf) = value.as_bytes_mut() {
+        buf.borrow().clone()
+    } else {
+        return type_err("%bytes-push value", "integer or bytes", &value, ctx);
     };
     if let Some(buf_ref) = collection.as_bytes_mut() {
-        buf_ref.borrow_mut().push(byte);
+        buf_ref.borrow_mut().extend_from_slice(&src);
         (SIG_OK, *collection)
     } else if let Some(data) = collection.as_bytes() {
         let mut new = data.to_vec();
-        new.push(byte);
+        new.extend_from_slice(&src);
         (SIG_OK, ctx.bytes(new))
     } else {
         type_err("%bytes-push", "bytes", collection, ctx)

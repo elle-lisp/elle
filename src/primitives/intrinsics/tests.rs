@@ -52,6 +52,63 @@ fn push_track_inserts_cross_region_value() {
     });
 }
 
+/// Counterfactual: `%bytes-push` (`prim_bytes_push`) must bulk-append a whole
+/// bytes/@bytes VALUE, not only a single integer byte. This is the linear
+/// binary-append path `core.lisp`'s `push-all` relies on — the mirror of
+/// `%string-push` bulk-appending a whole string. Without it, `push-all` /
+/// `append` / `concat` walk a bytes source one byte at a time through the VM
+/// (O(n) interpreted iterations with a large constant — orders of magnitude
+/// slower than the text bulk path, the HTTP/2 body-copy bottleneck). The
+/// single-integer form must keep working, so both are pinned here.
+#[test]
+fn bytes_push_bulk_appends_bytes_value() {
+    crate::value::arena::with_test_region(|| {
+        let mut vm = crate::vm::VM::new();
+        let vm_ptr: *mut crate::vm::VM = &mut vm as *mut _;
+        let heap_ptr = vm.heap_ptr;
+        let region = unsafe { (*heap_ptr).new_runtime_region() };
+        // @bytes dst = [1,2,3]; immutable bytes src = [4,5,6].
+        let (dst, src) = {
+            let ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
+                region,
+                unsafe { &mut *heap_ptr },
+                vm_ptr,
+            );
+            (ctx.bytes_mut(vec![1, 2, 3]), ctx.bytes(vec![4, 5, 6]))
+        };
+        // Bulk-append the whole bytes value in one shot.
+        let (bits, res) = {
+            let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
+                region,
+                unsafe { &mut *heap_ptr },
+                vm_ptr,
+            );
+            prim_bytes_push(&mut ctx, &[dst, src])
+        };
+        assert_eq!(bits, SIG_OK, "bulk bytes append must succeed");
+        assert_eq!(
+            res.as_bytes_mut().unwrap().borrow().as_slice(),
+            &[1, 2, 3, 4, 5, 6],
+            "every source byte appended in order (@bytes extended in place)"
+        );
+        // The single-byte integer form still works.
+        let (bits2, res2) = {
+            let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(
+                region,
+                unsafe { &mut *heap_ptr },
+                vm_ptr,
+            );
+            prim_bytes_push(&mut ctx, &[dst, Value::int(9)])
+        };
+        assert_eq!(bits2, SIG_OK);
+        assert_eq!(
+            res2.as_bytes_mut().unwrap().borrow().as_slice(),
+            &[1, 2, 3, 4, 5, 6, 9],
+            "single integer byte still appends"
+        );
+    });
+}
+
 /// Counterfactual: `%pop` (the NativeFn `prim_pop` reached under
 /// `--checked-intrinsics`) MOVES the popped element out to the caller. It must do
 /// two things in lockstep: release the container's stored reference

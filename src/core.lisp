@@ -1,4 +1,4 @@
-(elle/epoch 11)
+(elle/epoch 12)
 ## Pre-prelude definitions
 ##
 ## Compiled and executed before the prelude loads.
@@ -41,25 +41,32 @@
         (emit :error {:error :type-error
                       :message (string "push: unsupported type " (type coll))}))))
 
-## Index-based, NOT (first/rest) recursion: `rest` on an array copies the
-## tail, so a (->array src) + rest walk is O(n²) in time and allocates one
-## throwaway array per element — pushing a 16 KiB chunk leaked hundreds of
-## MB. `src` is always an indexable sequence here (array/string/bytes);
-## (get src i) yields the same element ->array would.
+## BULK for byte-family sources (string/@string/bytes/@bytes); index walk only
+## for arrays. `%string-push` and `%bytes-push` each append a whole same-family
+## value's raw bytes in ONE shot (string concat == UTF-8 byte concat; bytes
+## concat == byte concat), so a string OR bytes source bulk-appends in O(n) with
+## a single memcpy. Walking such a source element-by-element instead costs one
+## interpreted push PER BYTE — orders of magnitude slower on binary payloads
+## (the HTTP/2 body-copy path: frame read-exact accumulates the body with
+## `append`). append/concat only ever call push-all with a same-family (dst,
+## src), so a byte-family src always has a byte-family dst core-push can extend.
 ##
-## STRINGS are the exception: `(get s i)` is `s.graphemes(true).nth(i)` =
-## O(i), so a per-grapheme walk is O(n²). `%string-push` already appends a
-## whole string's bytes in one shot (string concat == UTF-8 byte concat),
-## so for a string source we bulk-append once — O(n) — instead of walking.
-## append/concat only ever call push-all with a same-family (dst, src), so
-## a string src always has a string/@string dst that core-push can extend.
+## ARRAYS stay on the index walk: their elements are Values, and core-push →
+## %array-push carries the per-element cross-region RC/edge accounting each one
+## needs. Index-based, NOT (first/rest) recursion — `rest` on an array copies
+## the tail, so a (->array src)+rest walk is O(n²) time and allocates a
+## throwaway array per element. `(get src i)` on an array is O(1).
 (def push-all
   (fn [dst src]
     "Append every element of `src` onto `dst` in place, returning `dst`. A
-     string/@string source is bulk-appended in one pass; other sequences are
-     walked by index. Internal helper for append/concat."
+     byte-family source (string/@string/bytes/@bytes) is bulk-appended in one
+     pass; an array is walked by index. Internal helper for append/concat."
     (let [ts (type-of src)]
-      (if (if (%eq ts :string) true (%eq ts :@string))
+      (if (if (%eq ts :string)
+            true
+            (if (%eq ts :@string)
+              true
+              (if (%eq ts :bytes) true (%eq ts :@bytes))))
         (begin
           (core-push dst src)
           dst)

@@ -482,7 +482,7 @@ primitive! {
     }
     "%bytes-push" => prim_bytes_push {
         arity: Arity::Exact(2),
-        doc: "Append byte to bytes/@bytes",
+        doc: "Append a byte (integer) or all bytes of a bytes value to bytes/@bytes",
         params: &["b", "val"],
         category: "intrinsic",
         // Funnel, not PassThrough: @bytes appends in place (pass-through),

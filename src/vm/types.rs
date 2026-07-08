@@ -438,7 +438,8 @@ pub(crate) fn handle_intr_bytes_push(vm: &mut VM) {
     });
     if bits.contains(crate::value::SIG_ERROR) {
         panic!(
-            "%bytes-push: expected bytes or @bytes (value must be integer), got {} (value {})",
+            "%bytes-push: expected bytes or @bytes (value an integer byte or a bytes value), \
+             got {} (value {})",
             collection.type_name(),
             value.type_name()
         );
