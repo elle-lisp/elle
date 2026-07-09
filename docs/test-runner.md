@@ -539,11 +539,13 @@ keeping the syntax-capture from costing anything at runtime when it isn't needed
 
 ```sql
 CREATE TABLE run (                  -- one row per `elle test` invocation
-  id INTEGER PRIMARY KEY, started_at TEXT, finished_at TEXT,
+  id INTEGER PRIMARY KEY, started_at TEXT,
+  finished_at TEXT,                 -- stamped at completion; NULL = the run was KILLED mid-flight
   git_commit TEXT, git_dirty INT, tree_hash TEXT,        -- correlate results to code state
   elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
-  n_pass INT, n_fail INT, n_skip INT, n_diverge INT,
+  n_selected INT,                   -- files + -e forms planned; written at insert
+  n_pass INT, n_fail INT, n_skip INT, n_diverge INT, n_timeout INT,  -- aggregated at completion only
   wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
@@ -685,6 +687,30 @@ dependency closure just changed run before the rest — so even a run-to-complet
 pass surfaces the most probable failures early in wall-clock. The first run of a
 fresh branch has no history to order by, so it simply runs everything in scan
 order; the prioritization kicks in once results exist.
+
+### Run honesty: a killed run must read as killed
+
+A run that dies mid-flight — the OOM killer is the canonical case: the whole
+corpus in one process can exceed the machine, and SIGKILL leaves no chance to
+write anything at death — must never be readable as green-so-far. The DB records
+enough at each boundary that truncation is self-evident:
+
+- **At insert:** `n_selected` (how many files/`-e` forms the run planned) is
+  written with the row.
+- **Per result:** rows land incrementally (autocommit), so everything up to the
+  kill survives.
+- **At completion only:** the `n_*` tallies are aggregated and `finished_at` is
+  stamped, in the same statement. A run row with `finished_at IS NULL` therefore
+  *is* the kill marker: its stored counters read zero because they were never
+  written, not because nothing failed.
+
+The views refuse to launder that: `--summary` and the post-run summary compute
+their tallies **live** from `result` (never from the stored counters) and label
+a truncated run loudly — `DID NOT COMPLETE — killed after recording results for
+N of M selected files`. The next `elle test` invocation against the same session
+DB prints the same warning about its predecessor, so a killed `make smoke` is
+diagnosed by the very next run instead of reading as an all-pass mystery.
+Pinned by `tests/integration/truncation.rs`.
 
 ### `--rust`: folding in the cargo suite
 

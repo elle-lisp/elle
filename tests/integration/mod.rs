@@ -134,6 +134,9 @@ mod version {
 mod scratch {
     include!("scratch.rs");
 }
+mod truncation {
+    include!("truncation.rs");
+}
 mod spawn_stack {
     include!("spawn_stack.rs");
 }

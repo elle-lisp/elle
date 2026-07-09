@@ -112,7 +112,7 @@ smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + diverg
 	@$(ELLE) test \
 		$(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp) $(wildcard tests/diff/*.lisp)) \
 		--db $(ELLE_TEST_DB) \
-		|| { echo "FAILED: elle test — inspect the session DB $(ELLE_TEST_DB) (see docs/testing.md § Querying a run)"; exit 1; }
+		|| { $(ELLE) test --summary --db $(ELLE_TEST_DB); echo "FAILED: elle test — inspect the session DB $(ELLE_TEST_DB) (see docs/testing.md § Reading a run)"; exit 1; }
 
 smoke-vm: elle
 	@echo "=== elle tests (VM, no JIT) ==="

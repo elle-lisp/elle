@@ -151,6 +151,13 @@ renderings, captured stdout/stderr) live in the CAS at `<db-dir>/cas/<hash>`,
 referenced by `asset` rows — so the LIR of a failing form is a hash lookup, not a
 re-run.
 
+A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
+`finished_at` stays NULL, `--summary` labels it `DID NOT COMPLETE` with the live
+partial tally (computed from `result` rows — the stored counters are written
+only at completion), and the next `elle test` against the same DB warns about
+it. An all-pass result set from a truncated run is partial coverage, not green
+(see [`docs/test-runner.md`](test-runner.md) § Run honesty).
+
 ## Correctness the leak and UAF oracles cannot see
 
 The two automated memory oracles each have a blind spot. `tests/elle/oracle.lisp`

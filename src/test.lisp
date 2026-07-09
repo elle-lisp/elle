@@ -82,9 +82,17 @@
                         (parse-args (rest args) acc)))))))))))))
 
 # ── schema (subset of docs/test-runner.md the v1 runner populates) ───
+# ALTER a column into a table that predates it. On a fresh DB the CREATE
+# already carries the column, so the ALTER fails with "duplicate column
+# name" — that is the no-op path; protect swallows it.
+(defn ensure-column [conn table col decl]
+  (protect (sqlite:exec conn
+                        (string "ALTER TABLE " table " ADD COLUMN " col " " decl)))
+  nil)
+
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), tiers TEXT, selection TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -92,7 +100,22 @@
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)"))
+               "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)")
+  # Run honesty (docs/test-runner.md § Run honesty): finished_at is stamped
+  # only when a run completes, so a NULL is the kill marker. Migrate session
+  # DBs that predate the columns, then backfill the legacy rows (recognizable
+  # by n_selected IS NULL — new rows always set it): one that reached its
+  # final counter aggregation had completed, and one with no results at all is
+  # assumed completed (a zero-result selection is legal; only "results present
+  # but counters never aggregated" is evidence of a kill). started_at is the
+  # best available stamp. New-schema rows are never backfilled — for them the
+  # stamp is authoritative, however empty the run.
+  (ensure-column conn "run" "finished_at" "TEXT")
+  (ensure-column conn "run" "n_selected" "INTEGER")
+  (sqlite:exec conn
+               "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND (n_pass + n_fail + n_skip + n_diverge + n_timeout) > 0")
+  (sqlite:exec conn
+               "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND id NOT IN (SELECT DISTINCT run_id FROM result)"))
 
 # ── label: scavenge the first assert message from a form's syntax ────
 (defn scan-msg [x]
@@ -685,27 +708,69 @@
               (if (get p :line) (string ":" (get p :line)) "") "  ["
               (get p :tier) "]  " (if (get p :reason) (get p :reason) ""))))
 
-# Tally line + the problem rows (only when there are any). To stderr, so it never
+# Count one status's result rows for a run — the LIVE tally, straight from
+# `result`. The stored run counters are written only at completion, so any
+# view that read them would report a killed run as "0 fail"; every reader
+# (the summaries here, the end-of-run aggregation, the gate) counts live.
+(defn count-status [conn run-id st]
+  (get (get (sqlite:query conn
+                          "SELECT count(*) AS c FROM result WHERE run_id = ?1 AND status = ?2"
+                          [run-id st]) 0) :c))
+
+# How many distinct files a run recorded any result for (the "how far did the
+# killed run get" numerator).
+(defn files-recorded [conn run-id]
+  (get (get (sqlite:query conn
+                          "SELECT count(DISTINCT f.file) AS c FROM result r JOIN form f ON f.hash = r.form_hash WHERE r.run_id = ?1"
+                          [run-id]) 0) :c))
+
+# Tally line + the problem rows (only when there are any). Tallies are computed
+# live (count-status); a run without finished_at was KILLED mid-flight (OOM,
+# signal — docs/test-runner.md § Run honesty) and is labelled so, because a
+# partial all-pass result set must never read as green. To stderr, so it never
 # mingles with --query's stdout or a test's captured output.
 (defn print-summary [conn run-id]
-  (let [row (get (sqlite:query conn
-                               (string "SELECT n_pass AS p, n_fail AS f, n_skip AS s, "
-                                       "n_diverge AS d, n_timeout AS t FROM run WHERE id = ?1")
-                               [run-id]) 0)  # The DB is a SESSION: it accumulates every run. Show which run this is of
+  (let [meta (get (sqlite:query conn
+                                "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel FROM run WHERE id = ?1"
+                                [run-id]) 0)  # The DB is a SESSION: it accumulates every run. Show which run this is of
         # how many, so the persistent history is visible (query `run` for the rest).
         nruns (get (get (sqlite:query conn "SELECT count(*) AS c FROM run") 0)
                    :c)
-        bad (+ (get row :f) (get row :d) (get row :t))]
+        np (count-status conn run-id :pass)
+        nf (count-status conn run-id :fail)
+        ns (count-status conn run-id :skip)
+        nd (count-status conn run-id :diverge)
+        nt (count-status conn run-id :timeout)
+        bad (+ nf nd nt)]
     (eprintln "")
-    (eprintln "elle test · run " run-id " of " nruns " · " (get row :p)
-              " pass · " (get row :s) " skip · " (get row :f) " fail · "
-              (get row :d) " diverge · " (get row :t) " timeout")
+    (if (= (get meta :trunc) 1)
+      (eprintln "run " run-id
+                " DID NOT COMPLETE — killed after recording results for "
+                (files-recorded conn run-id) " of "
+                (let [sel (get meta :sel)]
+                  (if sel sel "?"))
+                " selected files; the tally below is partial, not green")
+      nil)
+    (eprintln "elle test · run " run-id " of " nruns " · " np " pass · " ns
+              " skip · " nf " fail · " nd " diverge · " nt " timeout")
     (if (> bad 0)
       (begin
         (eprintln bad " problem" (if (= bad 1) "" "s")
                   " (query the DB for full detail):")
         (print-problems conn run-id))
       nil)))
+
+# Gate honesty at startup: if this session DB's latest run never completed,
+# say so before starting a new one — the killed process could not report
+# anything itself, and its absence of failures must not read as green.
+(defn warn-if-truncated [conn]
+  (let [rows (sqlite:query conn
+                           "SELECT id AS id FROM run WHERE finished_at IS NULL AND id = (SELECT max(id) FROM run)")]
+    (if (empty? rows)
+      nil
+      (begin
+        (eprintln "warning: the previous run in this session DB was killed:")
+        (print-summary conn (get (get rows 0) :id))))))
 
 # --query SQL: run it, print each row, exit. --summary: the latest run's tally.
 (defn run-query [conn sql]
@@ -776,8 +841,13 @@
     (os/exit 0))
   nil)
 
-(sqlite:exec conn "INSERT INTO run (tiers) VALUES (?1)"
-             [(tiers-str active-tiers)])
+(warn-if-truncated conn)
+
+# n_selected lands at insert (everything else about the row is written at
+# completion), so a killed run's row still says how much work was planned.
+(sqlite:exec conn "INSERT INTO run (tiers, n_selected) VALUES (?1, ?2)"
+             [(tiers-str active-tiers)
+              (+ (length (get opts :paths)) (length (get opts :eval)))])
 (def run-id
   (get (get (sqlite:query conn "SELECT last_insert_rowid() AS id") 0) :id))
 
@@ -791,18 +861,17 @@
 (each e in (get opts :eval)
   (process-eval conn run-id e))
 
-(defn count-status [st]
-  (get (get (sqlite:query conn
-                          "SELECT count(*) AS c FROM result WHERE run_id = ?1 AND status = ?2"
-                          [run-id st]) 0) :c))
-(def nfail (count-status :fail))
-(def npass (count-status :pass))
-(def nskip (count-status :skip))
-(def ndiverge (count-status :diverge))
-(def ntimeout (count-status :timeout))
+(def nfail (count-status conn run-id :fail))
+(def npass (count-status conn run-id :pass))
+(def nskip (count-status conn run-id :skip))
+(def ndiverge (count-status conn run-id :diverge))
+(def ntimeout (count-status conn run-id :timeout))
 
+# Counters and finished_at land in ONE statement: the completion stamp. A run
+# row without it was killed mid-flight and reads as truncated everywhere
+# (docs/test-runner.md § Run honesty).
 (sqlite:exec conn
-             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5 WHERE id = ?6"
+             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, finished_at = datetime('now') WHERE id = ?6"
              [npass nfail nskip ndiverge ntimeout run-id])
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
