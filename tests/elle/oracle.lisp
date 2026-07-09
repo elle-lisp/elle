@@ -293,7 +293,12 @@
 # [lo hi] range) and shrink-only: a fix LOWERS it, never raises it.
 
 (defn make-struct [i]
-  {:iter i :val (%add i 1)})
+  # `i` reaches the value position (:iter i), which disables call-site param
+  # joins, so the %add operand is proven by a local coerce-guard instead
+  # (docs/intrinsics.md § The contract). The coerce rebinds i to an int without a
+  # branch-compensation retain, so the success path stays at 0/op.
+  (let [i (if (%int? i) i 0)]
+    {:iter i :val (%add i 1)}))
 (defn make-label [i]
   (string "item-" i))
 (defn t19-store [c v]
@@ -691,25 +696,35 @@
 # call with arg b performs b allocations via tail recursion. Tail-call rotation
 # (not while-scope) is the mechanism that must reclaim them — so it gets its own
 # driver. n varies the input so a body cannot constant-fold.
+# All four recur fns are passed as fn-values into measure-core, so no visible
+# call site can prove `n` and call-site param joins do not fire; a local
+# diverging guard proves each %sub operand instead (docs/intrinsics.md § The
+# contract). Contrast lcl-self below, which is called directly and needs no
+# guard. The guard never fires on the driver's int inputs and holds no heap arg,
+# so the measured tails are undisturbed at 0/op.
 (defn struct-recur [n]
+  (when (%not (%int? n)) (error :struct-recur-nan))
   (if (= n 0)
     nil
     (begin
       {:x n}
       (struct-recur (%sub n 1)))))
 (defn string-recur [n]
+  (when (%not (%int? n)) (error :string-recur-nan))
   (if (= n 0)
     nil
     (begin
       (string "iter-" n)
       (string-recur (%sub n 1)))))
 (defn odd-recur [n]
+  (when (%not (%int? n)) (error :odd-recur-nan))
   (if (= n 0)
     nil
     (begin
       {:parity :odd}
       (even-recur (%sub n 1)))))
 (defn even-recur [n]
+  (when (%not (%int? n)) (error :even-recur-nan))
   (if (= n 0)
     nil
     (begin
@@ -798,7 +813,11 @@
 # runtime::tests::ownership::self_recursive_loop_is_cell_free.
 (defn lcl-self-ret [n]
   "Self-recursive local closure that RETURNS itself (so a retain pins its region)."
-  (letrec [go (fn [m] (if (%lt m 1) go (go (%sub m 1))))]
+  # go is returned (value position), which disables call-site param joins, so a
+  # local diverging guard proves the %lt/%sub operands (as in lcl-foreign-ret).
+  (letrec [go (fn [m]
+                (when (%not (%int? m)) (error :m))
+                (if (%lt m 1) go (go (%sub m 1))))]
     (go n)))
 (defn lcl-foreign-ret [n]
   "Equal-arity cell-free control: captures the immediate n, not itself."
