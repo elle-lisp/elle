@@ -233,10 +233,10 @@
         (emit :error {:error :type-error
                       :message (string "append: type mismatch — " ta " vs "
                                        (type-of b))})
-        ## Dispatch on (type-of a) directly — a keyword arm of a direct
-        ## (type-of x) match narrows `a` authoritatively, which is what
-        ## proves the container arguments of the %-store helpers below.
-        (match (type-of a)
+        ## Dispatch on the `ta` alias of `(type-of a)`: a keyword arm narrows `a`
+        ## authoritatively (the let-alias resolves to `a` — `collect_typeof_aliases`),
+        ## which proves the container arguments of the %-store helpers below.
+        (match ta
           :list (append-list a b)
           :syntax (append-list a b)
           :array

@@ -62,7 +62,7 @@ use std::collections::HashMap;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::infer::typeof_subject_binding;
+use super::infer::{collect_typeof_aliases, typeof_subject_binding};
 use super::unwrap_callee_binding;
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
@@ -127,8 +127,13 @@ pub(crate) fn prune_typeof_match_arms(hir: &mut Hir, arena: &BindingArena, symbo
         return;
     }
 
+    // A `(let [ta (type-of x)] (match ta …))` scrutinee resolves through this map
+    // to `x`, so the aliased dispatch prunes like the inline `(match (type-of x)`.
+    let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
+    collect_typeof_aliases(hir, arena, &symbol_names, &mut typeof_aliases);
+
     // Phase 2 (mutating): drop the dead arms.
-    prune_node(hir, arena, &symbol_names, &concrete);
+    prune_node(hir, arena, &symbol_names, &concrete, &typeof_aliases);
 }
 
 /// Walk every `Let`/`Letrec`/`Define` binding, recording its initializer keyword
@@ -225,9 +230,10 @@ fn prune_node(
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
     concrete: &FxHashMap<Binding, &'static str>,
+    typeof_aliases: &HashMap<Binding, Binding>,
 ) {
     if let HirKind::Match { value, arms } = &mut hir.kind {
-        if let Some(subj) = typeof_subject_binding(value, arena, symbol_names) {
+        if let Some(subj) = typeof_subject_binding(value, arena, symbol_names, typeof_aliases) {
             if let Some(&k) = concrete.get(&subj) {
                 let dead = arms.iter().filter(|(p, _, _)| arm_is_dead(p, k)).count();
                 // Prune only when it removes some — but not all — arms: an
@@ -239,7 +245,7 @@ fn prune_node(
             }
         }
     }
-    hir.for_each_child_mut(|c| prune_node(c, arena, symbol_names, concrete));
+    hir.for_each_child_mut(|c| prune_node(c, arena, symbol_names, concrete, typeof_aliases));
 }
 
 /// Is this arm a *type-keyword* arm whose keyword set excludes `k`? Such an arm

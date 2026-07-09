@@ -207,6 +207,55 @@ fn match_typeof_non_type_keyword_arm_narrows_nothing() {
     );
 }
 
+/// The `(let [ta (type-of c)] (match ta …))` idiom must narrow `c` exactly as
+/// the inline `(match (type-of c) …)` does: the scrutinee `ta` is an immutable
+/// alias of `(type-of c)`, so `typeof_subject_binding` resolves it back to `c`.
+/// The source constructs no array, so the only source of `MUTABLE_ARRAY` in
+/// `hir_types` is the `:@array` arm narrowing the resolved subject `c`.
+/// Counter-factual: without the alias resolution the scrutinee is an opaque
+/// `Var(ta)`, nothing narrows, and `MUTABLE_ARRAY` never appears.
+#[test]
+fn match_typeof_let_aliased_scrutinee_narrows() {
+    assert!(
+        inferred_types("(defn f [c] (let [ta (type-of c)] (match ta :@array c _ nil)))")
+            .contains(&TypeInterner::MUTABLE_ARRAY)
+    );
+}
+
+/// The motivating shape end-to-end: a let-aliased `(type-of c)` dispatch must
+/// discharge the monomorphic `%push-array-mut` obligation in its `:@array` arm,
+/// just like the inline form (`proven_monomorphic_op_compiles_under_match_narrowing`).
+/// Counter-factual: before alias resolution this rejected — the arm proved
+/// nothing about `c`, so the silent op was an unprovable-operand compile error.
+#[test]
+fn let_aliased_typeof_match_discharges_monomorphic_op() {
+    compile_result(
+        "(defn f [c] (let [ta (type-of c)] \
+           (match ta :@array (%push-array-mut c 3) _ nil)))",
+    )
+    .expect("the let-aliased :@array arm proves c mutable-array and discharges the op");
+}
+
+/// Soundness invariant: the alias resolution narrows the subject only while the
+/// subject still holds the value `(type-of …)` measured. A *mutable* subject that
+/// is reassigned between the alias binding and the match no longer does, so the
+/// arm must not narrow it — here `c` is reassigned to an int, so the silent
+/// `%push-array-mut c` stays an unprovable-operand error (`inferred: int`). The
+/// `collect_typeof_aliases` subject-mutation gate enforces this by construction;
+/// this pins the end-to-end guarantee so a future change to either the gate or
+/// the cell-narrowing path cannot silently narrow a stale type onto a live cell.
+#[test]
+fn match_typeof_let_alias_declines_when_subject_reassigned() {
+    compile_result(
+        "(defn f [] \
+           (def @c @[1 2]) \
+           (let [ta (type-of c)] \
+             (assign c 5) \
+             (match ta :@array (%push-array-mut c 3) _ nil)))",
+    )
+    .expect_err("a reassigned mutable subject must not inherit the stale type-of narrowing");
+}
+
 /// Monomorphic `%push-array-mut` pins its result `MutableArray` from the *op*,
 /// not the input: applied to an *immutable* `[1 2]` the result is still
 /// `MutableArray` (the funnel store returns arg0, which the `-mut` variant

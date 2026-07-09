@@ -68,6 +68,11 @@ pub fn infer_and_rewrite(
     // not proofs (see `collect_value_position_uses`).
     let mut value_used = std::collections::HashSet::new();
     collect_value_position_uses(hir, &mut value_used);
+    // Immutable let-bound aliases of `(type-of a)` → subject `a`, so the
+    // `(let [ta (type-of a)] (match ta …))` idiom narrows `a` like the inline
+    // dispatch (`collect_typeof_aliases`).
+    let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
+    collect_typeof_aliases(hir, arena, &symbol_names, &mut typeof_aliases);
     // Kleene start: every parameter that CAN be proven by complete call-site
     // enumeration (callee-only binding, unmutated param) begins at BOTTOM, so
     // an identity-passed argument in a self/mutual recursion contributes
@@ -106,6 +111,7 @@ pub fn infer_and_rewrite(
             &symbol_names,
             &mut binding_min_length,
             &value_used,
+            &typeof_aliases,
             &mut param_joins,
         );
         // REPLACE each contributed parameter's type with this pass's complete

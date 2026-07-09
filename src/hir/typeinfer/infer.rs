@@ -127,6 +127,7 @@ pub(super) fn infer_types(
     symbol_names: &HashMap<u32, String>,
     binding_min_length: &mut HashMap<Binding, usize>,
     value_used: &std::collections::HashSet<Binding>,
+    typeof_aliases: &HashMap<Binding, Binding>,
     param_joins: &mut HashMap<Binding, TyId>,
 ) -> bool {
     let ty = infer_node(
@@ -141,6 +142,7 @@ pub(super) fn infer_types(
         binding_min_length,
         &mut Vec::new(),
         value_used,
+        typeof_aliases,
         param_joins,
     );
     let old = hir_types.insert(hir.id, ty);
@@ -170,6 +172,9 @@ pub(super) fn infer_node(
     // their callers are not all visible, so call-site joins must not prove
     // their parameters.
     value_used: &std::collections::HashSet<Binding>,
+    // Immutable let-bound aliases of `(type-of a)`, mapped to their subject `a`
+    // (`collect_typeof_aliases`), so a match on such an alias narrows `a`.
+    typeof_aliases: &HashMap<Binding, Binding>,
     // This pass's call-site contributions to parameter types. RECOMPUTED per
     // pass (the driver replaces each contributed parameter's binding type
     // wholesale at pass end): a join that only ever accumulates can never
@@ -192,6 +197,7 @@ pub(super) fn infer_node(
                 binding_min_length,
                 selfrec,
                 value_used,
+                typeof_aliases,
                 param_joins,
             )
         };
@@ -336,7 +342,7 @@ pub(super) fn infer_node(
             let val_ty = recurse!(value);
             hir_types.insert(value.id, val_ty);
 
-            let subject = typeof_subject_binding(value, arena, symbol_names);
+            let subject = typeof_subject_binding(value, arena, symbol_names, typeof_aliases);
             let mut arm_join = TypeInterner::BOTTOM;
             for (pat, guard, body) in arms {
                 if let Some(g) = guard {
@@ -689,9 +695,28 @@ pub(super) fn typeof_subject_binding(
     value: &Hir,
     arena: &BindingArena,
     symbol_names: &HashMap<u32, String>,
+    typeof_aliases: &HashMap<Binding, Binding>,
 ) -> Option<Binding> {
     let inner = unwrap_anf_let(value);
-    let subject = match &inner.kind {
+    if let Some(subj) = typeof_call_subject(inner, arena, symbol_names) {
+        return Some(subj);
+    }
+    // The `(let [ta (type-of a)] (match ta …))` idiom: the scrutinee is a plain
+    // immutable alias of an earlier `(type-of a)` rather than the inline call.
+    // `collect_typeof_aliases` has resolved `ta → a`, so narrowing / dead-arm
+    // pruning fires on `a` exactly as for the inline `(match (type-of a) …)`.
+    typeof_aliases.get(&var_of(inner)?).copied()
+}
+
+/// The subject binding of a `(type-of x)` / `(%type-of x)` expression — `x` a
+/// `Var` or `DerefCell{Var}` — else `None`. `h` must already be positioned at the
+/// underlying expression (callers unwrap ANF/cell wrappers first).
+fn typeof_call_subject(
+    h: &Hir,
+    arena: &BindingArena,
+    symbol_names: &HashMap<u32, String>,
+) -> Option<Binding> {
+    let subject = match &h.kind {
         HirKind::Intrinsic {
             op: IntrinsicOp::TypeOf,
             args,
@@ -707,6 +732,49 @@ pub(super) fn typeof_subject_binding(
         _ => return None,
     };
     var_of(subject)
+}
+
+/// Map each immutable, unmutated binding whose initializer is `(type-of a)` to
+/// its subject `a` — provided `a` is itself unmutated, so the `type-of` measured
+/// at the binding still describes `a` at the later match scrutinee. Feeds
+/// `typeof_subject_binding` so the `(let [ta (type-of a)] (match ta …))` idiom
+/// narrows and prunes exactly like the inline `(match (type-of a) …)` form. Both
+/// conditions are soundness requirements, enforced conservatively: the alias must
+/// be a stable single value (a rebindable alias could hold a different value at
+/// the match — the same `is_immutable && !is_mutated` gate `prune.rs`'s
+/// `collect_inits` uses), and the subject must be stable (a reassigned subject
+/// could hold a different type than the arm proves). The subject gate is
+/// belt-and-suspenders — a mutated subject is cell-held and its `DerefCell` reads
+/// are not narrowed by the binding-type override anyway — but it keeps this
+/// resolution self-evidently sound without depending on that distant fact.
+pub(super) fn collect_typeof_aliases(
+    hir: &Hir,
+    arena: &BindingArena,
+    symbol_names: &HashMap<u32, String>,
+    out: &mut HashMap<Binding, Binding>,
+) {
+    let record = |b: Binding, init: &Hir, out: &mut HashMap<Binding, Binding>| {
+        let bi = arena.get(b);
+        if !bi.is_immutable || bi.is_mutated {
+            return;
+        }
+        let inner = unwrap_anf_let(unwrap_make_cell(init));
+        if let Some(subj) = typeof_call_subject(inner, arena, symbol_names) {
+            if !arena.get(subj).is_mutated {
+                out.insert(b, subj);
+            }
+        }
+    };
+    match &hir.kind {
+        HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+            for (b, init) in bindings {
+                record(*b, init, out);
+            }
+        }
+        HirKind::Define { binding, value } => record(*binding, value, out),
+        _ => {}
+    }
+    hir.for_each_child(|c| collect_typeof_aliases(c, arena, symbol_names, out));
 }
 
 /// Apply the `TypeIs` facts to the binding environment (meet with the
