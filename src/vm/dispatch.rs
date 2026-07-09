@@ -15,27 +15,6 @@ use super::{
     arithmetic, capture, closure, comparison, control, data, literals, stack, types, variables,
 };
 
-/// Decrement fuel and return from the dispatch loop if the budget is exhausted.
-///
-/// `$self`      — the `&mut VM` (i.e. `self` inside `execute_bytecode_inner_impl`)
-/// `$resume_ip` — the opcode-start IP to resume from after refueling.
-///                **Must always be `instr_ip`** (not `ip`) so that resume
-///                re-executes the full instruction from scratch.
-///
-/// When fuel is `None` (the common case), the inner `if let` is not taken —
-/// branch predicted not-taken, negligible overhead.
-macro_rules! check_fuel {
-    ($self:expr, $resume_ip:expr) => {
-        if let Some(ref mut fuel) = $self.fiber.fuel {
-            if *fuel == 0 {
-                $self.fiber.signal = Some((SIG_FUEL, Value::NIL));
-                return (SIG_FUEL, $resume_ip);
-            }
-            *fuel -= 1;
-        }
-    };
-}
-
 mod interp;
 mod region;
 

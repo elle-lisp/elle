@@ -205,7 +205,7 @@ impl VM {
         {
             // Use the captured inner stack so that on resume the instruction at
             // result.ip sees the same operand stack it had when it paused. This is
-            // essential for SIG_FUEL: check_fuel! fires before any stack reads, so
+            // essential for SIG_FUEL: charge_fuel fires before any stack reads, so
             // args are still present and must be restored.
             //
             // push_resume_value — SIG_FUEL: re-execute the paused instruction from
