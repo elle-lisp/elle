@@ -22,6 +22,16 @@ use super::inputs::ownership_inputs;
 use super::seeds::compute_shared_seeds;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+mod candidates;
+mod helpers;
+mod summary;
+mod useindex;
+
+use candidates::*;
+use helpers::*;
+use summary::*;
+use useindex::*;
+
 /// The transfer cut's output, computed by the ownership pass in `analyze_regions_with`.
 /// The interior owner edges are merged into the ordinary adopt maps
 /// (`RegionInfo::owned_adopt_edges` / `capture_adopt_edges` — same emission,
@@ -37,286 +47,6 @@ pub(in crate::hir::regions) struct TransferAdopts {
     pub capture: HashMap<HirId, Vec<(Region, Region)>>,
     /// Consumer-site call-result regions to release by `AdoptIntoActivation`.
     pub result_regions: FxHashSet<Region>,
-}
-
-/// How a `Var(b)` occurrence is consumed — the use-form classification the
-/// producer/consumer gates read. Everything the gates cannot prove harmless is
-/// `Other` (a bare read: an alias, a store operand, a return, an intrinsic
-/// argument — each a route a reference could escape the cut's reclamation
-/// horizon through).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum UseForm {
-    /// The callee position of a call: `(f …)`.
-    Callee(HirId),
-    /// Argument 0 of a `fiber/new` call (the body closure).
-    FiberNewArg0(HirId),
-    /// Argument 0 of a `fiber/resume` call (the fiber being driven).
-    ResumeArg0(HirId),
-    /// An argument of a native whose declared `RegionEffect` is `Immediate` —
-    /// the result is an immediate and no argument is stored or aliased, so the
-    /// read is harmless (`fiber/status`, `fiber/set-fuel`).
-    ImmediateArg,
-    /// Any other occurrence.
-    Other,
-}
-
-/// Per-unit facts the gates read repeatedly: every `Var` occurrence classified
-/// by use form, each call site's innermost enclosing Lambda, and each
-/// binding's inits. Child nodes are stored as `*const Hir` — the established
-/// idiom for keeping HIR references across a `for_each_child` walk (the tree
-/// outlives the analysis; see `RegionInference::binding_lambda`).
-struct UseIndex {
-    /// Binding → its classified occurrences, in structural walk order.
-    uses: FxHashMap<Binding, Vec<UseForm>>,
-    /// Binding → EVERY init expression a Let/Letrec/Define/Destructure gives
-    /// it, in walk order. A binding is a producer / fiber-body candidate only
-    /// when it has exactly one init and that init is a Lambda — a sibling
-    /// re-def or a destructure target has no stable binding→lambda identity.
-    inits: FxHashMap<Binding, Vec<*const Hir>>,
-    /// Call-node → innermost enclosing Lambda HirId (`None` = the top level).
-    enclosing: FxHashMap<HirId, Option<HirId>>,
-    /// Call-node → the bindings bound (directly, or through the ANF producer
-    /// wrapper) to that call's value. A call with no entry was consumed at a
-    /// non-binding position: a statement discard (safe), or a tail (a
-    /// region-level return seed the consumer gate refuses independently).
-    bound_to: FxHashMap<HirId, Vec<Binding>>,
-}
-
-/// The declared effect of a call's callee, under the same immutable-unshadowed
-/// condition the region walk applies (`RegionInference::call_effect`).
-fn callee_effect(
-    func: &Hir,
-    arena: &BindingArena,
-    cc: &CallClassification,
-) -> Option<crate::primitives::def::RegionEffect> {
-    callee_symbol(func, arena).and_then(|sym| cc.effects.get(&sym).copied())
-}
-
-/// The callee's SymbolId, when it is an immutable, never-mutated binding.
-fn callee_symbol(func: &Hir, arena: &BindingArena) -> Option<crate::value::SymbolId> {
-    if let HirKind::Var(b) = &unwrap_cell(func).kind {
-        let bi = arena.get(*b);
-        if bi.is_immutable && !bi.is_mutated {
-            return Some(bi.name);
-        }
-    }
-    None
-}
-
-/// Descend the structural/ANF wrappers to the expression a position actually
-/// consumes: the ANF lift names an allocating argument in place —
-/// `(fiber/new (fn …) mask)` becomes `(fiber/new (let [t (fn …)] t) mask)` — so
-/// the value at an arg position sits at the wrapper's tail.
-fn anf_tail(h: &Hir) -> &Hir {
-    match &h.kind {
-        HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => anf_tail(body),
-        HirKind::Begin(es) => es.last().map_or(h, anf_tail),
-        _ => h,
-    }
-}
-
-/// Unwrap the cell wrappers a captured binding's flow wears: `MakeCell` around
-/// its init, `DerefCell` around each read (both lowerer-transparent — the value
-/// identity is unchanged). A captured producer's Define init and its call-site
-/// reads must resolve through them.
-fn unwrap_cell(h: &Hir) -> &Hir {
-    match &h.kind {
-        HirKind::MakeCell { value } => unwrap_cell(value),
-        HirKind::DerefCell { cell } => unwrap_cell(cell),
-        _ => h,
-    }
-}
-
-impl UseIndex {
-    fn build(hir: &Hir, arena: &BindingArena, cc: &CallClassification) -> Self {
-        let mut ix = UseIndex {
-            uses: FxHashMap::default(),
-            inits: FxHashMap::default(),
-            enclosing: FxHashMap::default(),
-            bound_to: FxHashMap::default(),
-        };
-        walk(hir, arena, cc, None, &mut ix);
-        return ix;
-
-        fn classify_arg(
-            call: &Hir,
-            func: &Hir,
-            index: usize,
-            arena: &BindingArena,
-            cc: &CallClassification,
-        ) -> UseForm {
-            let sym = callee_symbol(func, arena);
-            if index == 0 {
-                if sym.is_some() && sym == cc.fiber_new {
-                    return UseForm::FiberNewArg0(call.id);
-                }
-                if sym.is_some() && sym == cc.fiber_resume {
-                    return UseForm::ResumeArg0(call.id);
-                }
-            }
-            if callee_effect(func, arena, cc)
-                == Some(crate::primitives::def::RegionEffect::Immediate)
-            {
-                return UseForm::ImmediateArg;
-            }
-            UseForm::Other
-        }
-
-        /// Record a binding's init: the init list (the binding→lambda
-        /// identity) and, when the init's value is a call, the call→binding
-        /// edge the consumer gate reads (`bound_to`).
-        fn record_binding(ix: &mut UseIndex, b: Binding, init: &Hir) {
-            ix.inits.entry(b).or_default().push(init as *const Hir);
-            let tail = anf_tail(unwrap_cell(init));
-            if matches!(tail.kind, HirKind::Call { .. }) {
-                ix.bound_to.entry(tail.id).or_default().push(b);
-            }
-        }
-
-        /// Walk an argument expression and return the binding its value
-        /// position consumes: a bare `Var`, or the tail `Var` of an ANF
-        /// producer wrapper (whose inits and non-tail statements are walked
-        /// normally — only the tail read itself is classified by the caller
-        /// instead of recorded as `Other`). `None` for any other tail, which
-        /// is walked in full.
-        fn arg_value_binding(
-            h: &Hir,
-            arena: &BindingArena,
-            cc: &CallClassification,
-            lambda: Option<HirId>,
-            ix: &mut UseIndex,
-        ) -> Option<Binding> {
-            match &unwrap_cell(h).kind {
-                HirKind::Var(b) => Some(*b),
-                HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                    for (b, init) in bindings {
-                        record_binding(ix, *b, init);
-                        walk(init, arena, cc, lambda, ix);
-                    }
-                    arg_value_binding(body, arena, cc, lambda, ix)
-                }
-                HirKind::Begin(es) => {
-                    let (last, rest) = es.split_last()?;
-                    for e in rest {
-                        walk(e, arena, cc, lambda, ix);
-                    }
-                    arg_value_binding(last, arena, cc, lambda, ix)
-                }
-                _ => {
-                    walk(h, arena, cc, lambda, ix);
-                    None
-                }
-            }
-        }
-
-        fn walk(
-            h: &Hir,
-            arena: &BindingArena,
-            cc: &CallClassification,
-            lambda: Option<HirId>,
-            ix: &mut UseIndex,
-        ) {
-            match &h.kind {
-                HirKind::Var(b) => {
-                    // A bare Var reached structurally (not intercepted by the
-                    // Call arm below) is an unclassified read.
-                    ix.uses.entry(*b).or_default().push(UseForm::Other);
-                }
-                HirKind::Call { func, args, .. } => {
-                    ix.enclosing.insert(h.id, lambda);
-                    match &unwrap_cell(func).kind {
-                        HirKind::Var(b) => {
-                            ix.uses.entry(*b).or_default().push(UseForm::Callee(h.id))
-                        }
-                        _ => walk(func, arena, cc, lambda, ix),
-                    }
-                    for (i, arg) in args.iter().enumerate() {
-                        // The binding the arg position consumes, descending the
-                        // ANF producer wrapper (whose inits/effects are walked
-                        // normally); a non-binding tail is just walked.
-                        if let Some(a) = arg_value_binding(&arg.expr, arena, cc, lambda, ix) {
-                            let form = classify_arg(h, func, i, arena, cc);
-                            ix.uses.entry(a).or_default().push(form);
-                        }
-                    }
-                }
-                HirKind::Lambda { body, .. } => {
-                    // A capture is not a Var occurrence; only the body's reads
-                    // count (captured bindings are gated separately through
-                    // the structural capture sets).
-                    walk(body, arena, cc, Some(h.id), ix);
-                }
-                HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                    for (b, init) in bindings {
-                        record_binding(ix, *b, init);
-                        walk(init, arena, cc, lambda, ix);
-                    }
-                    // The ANF producer wrapper's self-tail read
-                    // (`(let [t e] t)`) is pure value flow — the position the
-                    // LET occupies is what consumes the value (an arg position
-                    // classifies it through `arg_value_binding`; a statement
-                    // discards it; a returned value is a region-level seed).
-                    // Recording it as a read would mark every ANF-named value
-                    // `Other` and refuse everything.
-                    if let (1, HirKind::Var(v)) = (bindings.len(), &body.kind) {
-                        if *v == bindings[0].0 {
-                            return;
-                        }
-                    }
-                    walk(body, arena, cc, lambda, ix);
-                }
-                HirKind::Define { binding, value } => {
-                    record_binding(ix, *binding, value);
-                    walk(value, arena, cc, lambda, ix);
-                }
-                HirKind::Destructure { pattern, value, .. } => {
-                    // A destructure target's value identity is not a lambda
-                    // init — record the (non-lambda) source as a poisoning
-                    // init for each bound name.
-                    for b in pattern.bindings().bindings {
-                        ix.inits
-                            .entry(b)
-                            .or_default()
-                            .push(value.as_ref() as *const Hir);
-                    }
-                    walk(value, arena, cc, lambda, ix);
-                }
-                _ => {
-                    h.for_each_child(|c| walk(c, arena, cc, lambda, ix));
-                }
-            }
-        }
-    }
-
-    /// The binding's sole Lambda init, when it is immutable, never mutated,
-    /// and has exactly one recorded init that is a Lambda — the stable
-    /// binding→lambda identity every gate below leans on.
-    ///
-    /// SAFETY of the deref: the pointers index nodes of the HIR tree, which
-    /// outlives this analysis (both live for the `analyze_regions_with` call).
-    fn sole_lambda_init(&self, b: Binding, arena: &BindingArena) -> Option<&Hir> {
-        let bi = arena.get(b);
-        if !bi.is_immutable || bi.is_mutated {
-            return None;
-        }
-        match self.inits.get(&b).map(|v| v.as_slice()) {
-            Some([l]) => {
-                let l = unwrap_cell(unsafe { &**l });
-                matches!(l.kind, HirKind::Lambda { .. }).then_some(l)
-            }
-            _ => None,
-        }
-    }
-}
-
-/// One producer summary: interior owner edges by emit site and kind, plus the
-/// returned subtree's root.
-struct Summary {
-    root: Region,
-    /// `(emit site, member, owner)` — store/funnel-site edges.
-    store_edges: Vec<(HirId, Region, Region)>,
-    /// `(closure-construction site, member, owner)` — capture edges.
-    capture_edges: Vec<(HirId, Region, Region)>,
 }
 
 /// Compute the transfer cut (docs/impl/region/owner.md § "Owner nodes" — "The
@@ -626,36 +356,7 @@ pub(in crate::hir::regions) fn compute_transfer_adopts(
     // Lambda init, used ONLY as a callee, every call site consumer-admitted.
     {
         let mut candidates: Vec<(Binding, *const Hir)> = Vec::new();
-        fn collect(
-            h: &Hir,
-            arena: &BindingArena,
-            ix: &UseIndex,
-            out: &mut Vec<(Binding, *const Hir)>,
-        ) {
-            match &h.kind {
-                HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                    for (b, init) in bindings {
-                        if let Some(l) = ix.sole_lambda_init(*b, arena) {
-                            if std::ptr::eq(l, unwrap_cell(init)) {
-                                out.push((*b, l as *const Hir));
-                            }
-                        }
-                        collect(init, arena, ix, out);
-                    }
-                    collect(body, arena, ix, out);
-                }
-                HirKind::Define { binding, value } => {
-                    if let Some(l) = ix.sole_lambda_init(*binding, arena) {
-                        if std::ptr::eq(l, unwrap_cell(value)) {
-                            out.push((*binding, l as *const Hir));
-                        }
-                    }
-                    collect(value, arena, ix, out);
-                }
-                _ => h.for_each_child(|c| collect(c, arena, ix, out)),
-            }
-        }
-        collect(hir, arena, &ix, &mut candidates);
+        collect_producers(hir, arena, &ix, &mut candidates);
 
         for (f, l) in candidates {
             // SAFETY: `l` points into the HIR tree, which outlives this call.
@@ -701,45 +402,6 @@ pub(in crate::hir::regions) fn compute_transfer_adopts(
     // masked-error payload is absorbed by the channel's idempotence, bounded
     // to one activation by the same-function gate).
     {
-        // (fiber binding, fiber/new site, body lambda, the body's own binding
-        // when it came through a Var), in walk order.
-        type FiberCand = (Binding, HirId, *const Hir, Option<Binding>);
-        fn collect_fibers(
-            h: &Hir,
-            ix: &UseIndex,
-            arena: &BindingArena,
-            cc: &CallClassification,
-            out: &mut Vec<FiberCand>,
-        ) {
-            if let HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } = &h.kind {
-                for (b, init) in bindings {
-                    let call = anf_tail(init);
-                    if let HirKind::Call { func, args, .. } = &call.kind {
-                        let sym = callee_symbol(func, arena);
-                        if sym.is_some() && sym == cc.fiber_new {
-                            let body_lambda = args.first().and_then(|a| {
-                                match &unwrap_cell(anf_tail(&a.expr)).kind {
-                                    HirKind::Lambda { .. } => {
-                                        Some((unwrap_cell(anf_tail(&a.expr)) as *const Hir, None))
-                                    }
-                                    HirKind::Var(fb) => ix
-                                        .sole_lambda_init(*fb, arena)
-                                        .map(|l| (l as *const Hir, Some(*fb))),
-                                    _ => None,
-                                }
-                            });
-                            if let Some((l, fb)) = body_lambda {
-                                out.push((*b, call.id, l, fb));
-                            }
-                        }
-                    }
-                    collect_fibers(init, ix, arena, cc, out);
-                }
-                collect_fibers(body, ix, arena, cc, out);
-                return;
-            }
-            h.for_each_child(|c| collect_fibers(c, ix, arena, cc, out));
-        }
         let mut fibers: Vec<FiberCand> = Vec::new();
         collect_fibers(hir, &ix, arena, call_class, &mut fibers);
 
