@@ -1,4 +1,4 @@
-.PHONY: all elle docs docgen smoke test test-git clean space help \
+.PHONY: all elle docs docgen smoke test clean space help \
        smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir smoke-diff \
        doctest elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check

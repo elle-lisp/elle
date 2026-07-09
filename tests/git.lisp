@@ -1,32 +1,47 @@
 (elle/epoch 12)
-# elle-git integration tests
-# Requires: libelle_git.so built at target/release/libelle_git.so
+# Git module write-path tests (lib/git.lisp, FFI to libgit2).
+#
+# Complements tests/elle/git.lisp, which reads the *current* repo (open, head,
+# log, …); this file exercises the write path — init, config, add, commit,
+# status, branches, tags — against a throwaway repo in a scratch temp dir.
+#
+# The module does not (yet) export diff/diff-patch/show/add-all/checkout, so
+# those surfaces are untested here.
 
-(import-file "target/release/libelle_git.so")
+# Gate the whole file on libgit2: if it can't load, re-raise as a loud :gated
+# so `elle test` records a file-level SKIP with a reason (docs § Gating).
+# Never (exit 0): under the runner that would kill the process mid-run.
+(def _libgit2
+  (let [r (protect (ffi/native "libgit2.so"))]
+    (if (get r 0)
+      true
+      (error (struct :error :gated :reason "libgit2.so not installed")))))
+
+(def git ((import "std/git")))
 
 # The repo lives in a subdir of a fresh scratch temp dir; the whole tree
 # is removed at the end.
 (let [scratch (file/mktempdir)
       tmp (path/join scratch "repo")]
-  (let [repo (git/init tmp)]
-    (assert (string? (git/path repo)) "git/path returns string")
-    (assert (string? (git/workdir repo)) "git/workdir returns string")
-    (assert (not (git/bare? repo)) "not bare")
-    (assert (= :clean (git/state repo)) "state is :clean")
+  (let [repo (git:init tmp)]
+    (assert (string? (git:path repo)) "git:path returns string")
+    (assert (string? (git:workdir repo)) "git:workdir returns string")
+    (assert (not (git:bare? repo)) "not bare")
+    (assert (= :clean (git:state repo)) "state is :clean")
 
-    # Config — set before any commits so git/commit can read user identity
-    (git/config-set repo "user.name" "Test User")
-    (git/config-set repo "user.email" "test@example.com")
-    (assert (= "Test User" (git/config-get repo "user.name")) "config roundtrip")
-    (assert (nil? (git/config-get repo "no.such.key"))
+    # Config — set before any commits so git:commit can read user identity
+    (git:config-set repo "user.name" "Test User")
+    (git:config-set repo "user.email" "test@example.com")
+    (assert (= "Test User" (git:config-get repo "user.name")) "config roundtrip")
+    (assert (nil? (git:config-get repo "no.such.key"))
             "config-get nil for missing")
 
     # HEAD on empty repo should signal
-    (let [r (protect (git/head repo))]
+    (let [r (protect (git:head repo))]
       (assert (not (first r)) "head errors on empty repo"))
 
     # Resolve on empty repo should signal
-    (let [r (protect (git/resolve repo "HEAD"))]
+    (let [r (protect (git:resolve repo "HEAD"))]
       (assert (not (first r)) "resolve errors on empty repo"))
 
     # -------------------------------------------------------------------------
@@ -36,142 +51,112 @@
       (spit filepath "hello\n"))
 
     # Status before staging
-    (let [s (git/status repo)]
+    (let [s (git:status repo)]
       (assert (= 1 (length s)) "one untracked file")
-      (assert (= :new (:workdir (first s))) "workdir :new")
-      (assert (nil? (:index (first s))) "index nil"))
-
-    # Diff before staging (workdir vs index) — untracked files don't show in diff
-    (let [d (git/diff repo)]
-      (assert (>= (:files-changed d) 0) "diff returns struct"))
+      (assert (= :new (get (first s) :workdir)) "workdir :new")
+      (assert (nil? (get (first s) :index)) "index nil"))
 
     # Stage the file
-    (git/add repo "hello.txt")
-    (let [s (git/status repo)]
-      (assert (= :new (:index (first s))) "index :new after add"))
-
-    # Cached diff: may error if HEAD is unborn
-    (let [r (protect (git/diff repo {:cached true}))]
-      (assert (or (first r) (not (first r))) "diff cached does not crash"))
+    (git:add repo "hello.txt")
+    (let [s (git:status repo)]
+      (assert (= :new (get (first s) :index)) "index :new after add"))
 
     # -------------------------------------------------------------------------
-    # Chunk 4: First commit
+    # First commit
     # -------------------------------------------------------------------------
-    (let [oid (git/commit repo "initial commit")]
+    (let [oid (git:commit repo "initial commit")]
       (assert (string? oid) "commit returns oid string")
 
       # HEAD now resolves
-      (let [head (git/head repo)]
-        (assert (string? (:oid head)) "head oid is string")
-        (assert (:symbolic head) "head is symbolic"))
+      (let [head (git:head repo)]
+        (assert (string? (get head :oid)) "head oid is string")
+        (assert (get head :symbolic) "head is symbolic"))
 
       # commit-info
-      (let [info (git/commit-info repo oid)]
-        (assert (= oid (:oid info)) "commit-info oid matches")
-        (assert (string? (:message info)) "commit-info message is string")
-        (assert (= 0 (length (:parents info))) "initial commit has no parents"))
+      (let [info (git:commit-info repo oid)]
+        (assert (= oid (get info :oid)) "commit-info oid matches")
+        (assert (string? (get info :message)) "commit-info message is string")
+        (assert (= 0 (length (get info :parents)))
+                "initial commit has no parents"))
 
-      # git/log
-      (let [log (git/log repo {:limit 5})]
+      # git:log
+      (let [log (git:log repo {:limit 5})]
         (assert (= 1 (length log)) "log has 1 commit")
-        (assert (= oid (:oid (first log))) "log first oid matches"))
+        (assert (= oid (get (first log) :oid)) "log first oid matches"))
 
-      # git/show
-      (let [contents (git/show repo "HEAD" "hello.txt")]
-        (assert (= "hello\n" contents) "show returns file contents"))
-      (let [r (protect (git/show repo "HEAD" "nope.txt"))]
-        (assert (not (first r)) "show errors on missing file"))
-
-      # git/resolve
-      (let [resolved (git/resolve repo "HEAD")]
+      # git:resolve
+      (let [resolved (git:resolve repo "HEAD")]
         (assert (string? resolved) "resolve HEAD returns string")
         (assert (= 40 (string/size-of resolved)) "OID is 40 chars"))
 
       # -------------------------------------------------------------------------
       # Status after commit — clean
       # -------------------------------------------------------------------------
-      (let [s (git/status repo)]
+      (let [s (git:status repo)]
         (assert (= 0 (length s)) "status clean after commit"))
 
-      (let [d (git/diff repo)]
-        (assert (= 0 (:files-changed d)) "no diff on clean tree"))
-
       # -------------------------------------------------------------------------
-      # Chunk 3: Branches
+      # Branches
       # -------------------------------------------------------------------------
-      (let [branches (git/branches repo :local)]
+      (let [branches (git:branches repo :local)]
         (assert (= 1 (length branches)) "one local branch")
-        (assert (string? (:name (first branches))) "branch name is string"))
+        (assert (string? (get (first branches) :name)) "branch name is string"))
 
-      (let [branch-oid (git/branch-create repo "feature")]
+      (let [branch-oid (git:branch-create repo "feature")]
         (assert (string? branch-oid) "branch-create returns oid")
-        (assert (= 2 (length (git/branches repo :local))) "two branches now"))
+        (assert (= 2 (length (git:branches repo :local))) "two branches now"))
 
-      (git/branch-delete repo "feature")
-      (assert (= 1 (length (git/branches repo :local))) "back to one branch")
-
-      # Checkout the current branch (no-op, exercises the code path)
-      (git/checkout repo (:name (first (git/branches repo :local))))
+      (git:branch-delete repo "feature")
+      (assert (= 1 (length (git:branches repo :local))) "back to one branch")
 
       # -------------------------------------------------------------------------
-      # Chunk 8: Tags
+      # Tags
       # -------------------------------------------------------------------------
-      (let [tag-oid (git/tag-create repo "v0.1")]
+      (let [tag-oid (git:tag-create repo "v0.1")]
         (assert (string? tag-oid) "tag-create returns oid"))
-      (assert (= 1 (length (git/tags repo))) "one tag")
-      (assert (= "v0.1" (first (git/tags repo))) "tag name is v0.1")
-      (git/tag-delete repo "v0.1")
-      (assert (= 0 (length (git/tags repo))) "no tags after delete")
+      (assert (= 1 (length (git:tags repo))) "one tag")
+      (assert (= "v0.1" (first (git:tags repo))) "tag name is v0.1")
+      (git:tag-delete repo "v0.1")
+      (assert (= 0 (length (git:tags repo))) "no tags after delete")
 
       # Annotated tag
-      (let [tag-oid (git/tag-create repo "v1.0" "HEAD" "Release 1.0")]
+      (let [tag-oid (git:tag-create repo "v1.0" "HEAD" "Release 1.0")]
         (assert (string? tag-oid) "annotated tag-create returns oid"))
-      (git/tag-delete repo "v1.0")
+      (git:tag-delete repo "v1.0")
 
       # -------------------------------------------------------------------------
-      # Chunk 5: Staging with modification
+      # Staging with modification
       # -------------------------------------------------------------------------
       (let [filepath (path/join tmp "hello.txt")]
         (spit filepath "hello world\n"))
 
-      (let [s (git/status repo)]
-        (assert (= :modified (:workdir (first s))) "workdir :modified"))
+      (let [s (git:status repo)]
+        (assert (= :modified (get (first s) :workdir)) "workdir :modified"))
 
-      (let [d (git/diff repo)]
-        (assert (= 1 (:files-changed d)) "one file changed in diff")
-        (assert (string? (:path (first (:files d)))) "file path is string"))
-
-      (let [patch (git/diff-patch repo)]
-        (assert (string? patch) "patch is string")
-        (assert (> (string/size-of patch) 0) "patch is non-empty"))
-
-      # git/add-all
-      (git/add-all repo)
-      (let [s (git/status repo)]
-        (assert (= :modified (:index (first s))) "staged after add-all"))
-
-      # Cached diff: index vs HEAD — should show one modified file
-      (let [d (git/diff repo {:cached true})]
-        (assert (>= (:files-changed d) 1) "cached diff shows staged changes"))
+      (git:add repo "hello.txt")
+      (let [s (git:status repo)]
+        (assert (= :modified (get (first s) :index)) "staged after add"))
 
       # Second commit
-      (let [oid2 (git/commit repo "second commit")]
+      (let [oid2 (git:commit repo "second commit")]
         (assert (string? oid2) "second commit oid")
-        (let [log (git/log repo {:limit 10})]
+        (let [log (git:log repo {:limit 10})]
           (assert (= 2 (length log)) "log has 2 commits")))
 
       # -------------------------------------------------------------------------
-      # Chunk 10: Config (additional coverage)
+      # Config (additional coverage)
       # -------------------------------------------------------------------------
-      (git/config-set repo "core.autocrlf" "false")
-      (assert (= "false" (git/config-get repo "core.autocrlf"))
+      (git:config-set repo "core.autocrlf" "false")
+      (assert (= "false" (git:config-get repo "core.autocrlf"))
               "config-set/get roundtrip")
 
       # -------------------------------------------------------------------------
-      # Chunk 9: Remotes (basic, no network)
+      # Remotes (basic, no network)
       # -------------------------------------------------------------------------
-      (let [remote-list (git/remotes repo)]
-        (assert (= 0 (length remote-list)) "no remotes in fresh repo"))))
+      (let [remote-list (git:remotes repo)]
+        (assert (= 0 (length remote-list)) "no remotes in fresh repo")))
+
+    (git:close repo))
 
   # Cleanup
   (file/delete-dir-all scratch)
