@@ -3,6 +3,11 @@
 //! Core fiber operations: creation, resumption, signaling, status, and
 //! value extraction. Introspection and management primitives (bits, mask,
 //! parent, child, propagate, cancel, fiber?) are in `fiber_introspect.rs`.
+//!
+//! Signal-bits resolution lives in `resolve`; fuel (instruction-budget) ops
+//! live in `fuel`. Both are re-exported so the `primitive!` table below — and
+//! external callers naming `crate::primitives::fibers::resolve_signal_bits` —
+//! resolve the handler paths unchanged.
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
@@ -13,170 +18,12 @@ use crate::value::fiber::{
 use crate::value::types::Arity;
 use crate::value::Value;
 
-/// Return a keyword Value for a FiberStatus.
-fn status_keyword(status: FiberStatus) -> Value {
-    Value::keyword(status.as_str())
-}
+mod fuel;
+mod resolve;
 
-/// Resolve a Value to SignalBits.
-///
-/// Accepts three forms:
-/// - Integer: passthrough as `SignalBits(value as u32)`
-/// - Keyword: lookup in global registry, return `SignalBits(1 << bit_position)`
-/// - Set of keywords: iterate elements, look up each, OR the bits together
-///
-/// `context` is used in error messages (e.g., "fiber/new", "fiber/signal").
-/// Resolve a slice of Values (from array) to SignalBits by OR-ing keyword bits.
-fn resolve_keyword_slice(
-    elems: &[Value],
-    context: &str,
-    ctx: &mut NativeCtx,
-) -> Result<SignalBits, (SignalBits, Value)> {
-    let reg = crate::signals::registry::global_registry().lock().unwrap();
-    let mut bits = SignalBits::EMPTY;
-    for elem in elems {
-        let name = elem.as_keyword_name().ok_or_else(|| {
-            (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "{}: array elements must be keywords, got {}",
-                        context,
-                        elem.type_name()
-                    ),
-                ),
-            )
-        })?;
-        let b = reg.to_signal_bits(&name).ok_or_else(|| {
-            (
-                SIG_ERROR,
-                ctx.error(
-                    "signal-error",
-                    format!("{}: unknown signal keyword :{}", context, name),
-                ),
-            )
-        })?;
-        bits = bits.union(b);
-    }
-    Ok(bits)
-}
-
-pub(crate) fn resolve_signal_bits(
-    val: &Value,
-    context: &str,
-    ctx: &mut NativeCtx,
-) -> Result<SignalBits, (SignalBits, Value)> {
-    // 1. Integer passthrough (existing behavior)
-    if let Some(i) = val.as_int() {
-        return Ok(SignalBits::from_i64(i));
-    }
-
-    // 2. Single keyword
-    if let Some(name) = val.as_keyword_name() {
-        let reg = crate::signals::registry::global_registry().lock().unwrap();
-        return match reg.to_signal_bits(&name) {
-            Some(bits) => Ok(bits),
-            None => Err((
-                SIG_ERROR,
-                ctx.error(
-                    "signal-error",
-                    format!("{}: unknown signal keyword :{}", context, name),
-                ),
-            )),
-        };
-    }
-
-    // 3. Set of keywords
-    if let Some(set) = val.as_set() {
-        let reg = crate::signals::registry::global_registry().lock().unwrap();
-        let mut bits = SignalBits::EMPTY;
-        for elem in set.iter() {
-            let name = elem.as_keyword_name().ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "{}: set elements must be keywords, got {}",
-                            context,
-                            elem.type_name()
-                        ),
-                    ),
-                )
-            })?;
-            let b = reg.to_signal_bits(&name).ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    ctx.error(
-                        "signal-error",
-                        format!("{}: unknown signal keyword :{}", context, name),
-                    ),
-                )
-            })?;
-            bits = bits.union(b);
-        }
-        return Ok(bits);
-    }
-
-    // 4. Array of keywords (immutable [...])
-    if let Some(elems) = val.as_array() {
-        return resolve_keyword_slice(elems, context, ctx);
-    }
-
-    // 5. Mutable array of keywords (@[...])
-    if let Some(arr) = val.as_array_mut() {
-        let elems = arr.borrow();
-        return resolve_keyword_slice(&elems, context, ctx);
-    }
-
-    // 6. List of keywords (pair chain)
-    if val.as_pair().is_some() {
-        let reg = crate::signals::registry::global_registry().lock().unwrap();
-        let mut bits = SignalBits::EMPTY;
-        let mut current = *val;
-        while let Some(pair) = current.as_pair() {
-            let name = pair.first.as_keyword_name().ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!(
-                            "{}: list elements must be keywords, got {}",
-                            context,
-                            pair.first.type_name()
-                        ),
-                    ),
-                )
-            })?;
-            let b = reg.to_signal_bits(&name).ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    ctx.error(
-                        "signal-error",
-                        format!("{}: unknown signal keyword :{}", context, name),
-                    ),
-                )
-            })?;
-            bits = bits.union(b);
-            current = pair.rest;
-        }
-        return Ok(bits);
-    }
-
-    // 7. None of the above
-    Err((
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "{}: expected integer, keyword, or collection of keywords, got {}",
-                context,
-                val.type_name()
-            ),
-        ),
-    ))
-}
+use fuel::*;
+pub(crate) use resolve::resolve_signal_bits;
+use resolve::status_keyword;
 
 /// (fiber/new fn mask [:deny bits]) → fiber
 ///
@@ -384,120 +231,6 @@ pub(crate) fn prim_fiber_value(
 
     let value = handle.with(|fiber| fiber.signal.as_ref().map(|(_, v)| *v).unwrap_or(Value::NIL));
     (SIG_OK, value)
-}
-
-/// (fiber/set-fuel fiber n) → nil
-///
-/// Set the instruction budget on a fiber. `n` must be a non-negative integer.
-/// A fuel of 0 means the very next fuel checkpoint emits `:fuel`.
-pub(crate) fn prim_fiber_set_fuel(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/set-fuel: expected fiber, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
-
-    let fuel = match args[1].as_int() {
-        Some(n) if n >= 0 => n as u32,
-        Some(_) => {
-            return (
-                SIG_ERROR,
-                ctx.error("type-error", "fiber/set-fuel: fuel must be non-negative"),
-            );
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/set-fuel: expected integer, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
-    };
-
-    handle.with_mut(|fiber| {
-        fiber.fuel = Some(fuel);
-    });
-
-    (SIG_OK, Value::NIL)
-}
-
-/// (fiber/fuel fiber) → integer | nil
-///
-/// Read the remaining instruction budget. Returns an integer if fuel is set,
-/// or `nil` if the fiber has unlimited fuel (the default).
-pub(crate) fn prim_fiber_fuel(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!("fiber/fuel: expected fiber, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
-
-    let fuel_val = handle.with(|fiber| {
-        fiber
-            .fuel
-            .map(|f| Value::int(f as i64))
-            .unwrap_or(Value::NIL)
-    });
-
-    (SIG_OK, fuel_val)
-}
-
-/// (fiber/clear-fuel fiber) → nil
-///
-/// Remove the instruction budget, restoring unlimited execution.
-pub(crate) fn prim_fiber_clear_fuel(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let handle = match args[0].as_fiber() {
-        Some(h) => h,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "fiber/clear-fuel: expected fiber, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
-
-    handle.with_mut(|fiber| {
-        fiber.fuel = None;
-    });
-
-    (SIG_OK, Value::NIL)
 }
 
 // Declarative primitive definitions for fiber lifecycle operations
