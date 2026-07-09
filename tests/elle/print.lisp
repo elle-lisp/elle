@@ -20,7 +20,9 @@
 
 # ── *stdout* rebinding ──────────────────────────────────────────────
 
-(def tmp-path "/tmp/elle-print-test-redirect.txt")
+# Scratch dir for the redirect fixture; removed at the bottom of the file.
+(def scratch (file/mktempdir))
+(def tmp-path (path/join scratch "redirect.txt"))
 (def out (port/open tmp-path :write))
 (parameterize ((*stdout* out))
   (println "captured line"))
@@ -32,4 +34,5 @@
 (assert (= (string contents) "captured line\n")
         "println respects *stdout* rebinding")
 
+(file/delete-dir-all scratch)
 (println "all print tests passed")

@@ -261,7 +261,8 @@
 
 # test_import_returns_last_value
 # Write a temp file, import it, check the returned struct
-(def @import-test-path "/tmp/elle-test-import.lisp")
+(def scratch (file/mktempdir))
+(def @import-test-path (path/join scratch "elle-test-import.lisp"))
 (spit import-test-path
       "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (def @import-result (import-file import-test-path))
@@ -269,8 +270,10 @@
 (assert (= (get import-result :double) 84) "import returns last value (:double)")
 
 # test_import_destructuring
-(def @import-destr-path "/tmp/elle-test-import-destr.lisp")
+(def @import-destr-path (path/join scratch "elle-test-import-destr.lisp"))
 (spit import-destr-path
       "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (let [{:answer a} (import-file import-destr-path)]
   (assert (= a 42) "import destructuring"))
+
+(file/delete-dir-all scratch)

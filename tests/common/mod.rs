@@ -188,3 +188,27 @@ pub fn eval_reuse_bare(input: &str) -> Result<Value, String> {
 pub fn eval_reuse(input: &str) -> Result<Value, String> {
     eval_with_cache(input, &FULL_CACHE, true)
 }
+
+/// Uniquely-named scratch directory under the platform temp root, removed
+/// recursively on drop — the panic path included, so a failing test leaves no
+/// litter in `$TMPDIR`. See `tests/AGENTS.md` § Scratch files.
+pub struct ScratchDir(std::path::PathBuf);
+
+#[allow(dead_code)]
+impl ScratchDir {
+    pub fn new(tag: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("elle-{}-{}", tag, std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        ScratchDir(dir)
+    }
+
+    pub fn join(&self, name: &str) -> std::path::PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}

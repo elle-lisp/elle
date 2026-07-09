@@ -131,6 +131,9 @@ mod lsp {
 mod version {
     include!("version.rs");
 }
+mod scratch {
+    include!("scratch.rs");
+}
 mod spawn_stack {
     include!("spawn_stack.rs");
 }

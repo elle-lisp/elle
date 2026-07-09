@@ -94,7 +94,7 @@ fn test_submit_and_wait_write() {
     crate::value::arena::with_test_region(|| {
         let h = crate::primitives::ctx::TestHeap::new();
         let backend = AsyncBackend::new().unwrap();
-        let path = format!("/tmp/elle-test-async-write-{}", std::process::id());
+        let path = temp_path("async-write");
         let port = open_write_port(&path);
 
         let req = IoRequest {

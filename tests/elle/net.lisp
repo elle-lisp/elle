@@ -31,10 +31,12 @@
 
 # === Unix/listen ===
 
-# Create a listener, verify it's a port, then clean up
-(let [p (unix/listen "/tmp/elle-test-net-unix-listen.sock")]
-  (assert (port? p) "unix/listen returns a port")
-  (port/close p))
+# Create a listener, verify it's a port, then clean up. The socket lives in a
+# with-temp-dir scratch dir (short basename: sun_path is capped at 108 bytes).
+(with-temp-dir d
+               (let [p (unix/listen (path/join d "u.sock"))]
+                 (assert (port? p) "unix/listen returns a port")
+                 (port/close p)))
 
 # === port/set-options ===
 

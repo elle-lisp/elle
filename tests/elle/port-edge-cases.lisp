@@ -3,6 +3,9 @@
 
 # Port I/O edge cases: zero-length reads/writes, negative counts, etc.
 
+# Scratch dir for the file-port fixtures; removed in the teardown below.
+(def scratch (file/mktempdir))
+
 # ── Setup: TCP server ───────────────────────────────────────────────
 
 (def listener (tcp/listen "127.0.0.1" 0))
@@ -38,8 +41,9 @@
 
 # 2. port/read 0 on file → empty bytes
 (println "  2. port/read 0 on file...")
-(spit "/tmp/elle-port-edge-test" "abc")
-(let [p (port/open "/tmp/elle-port-edge-test" :read)]
+(def edge-path (path/join scratch "edge"))
+(spit edge-path "abc")
+(let [p (port/open edge-path :read)]
   (let [result (port/read p 0)]
     (assert (= (length result) 0) "file port/read 0 returns empty")
     (assert (bytes? result) "file port/read 0 returns bytes"))
@@ -85,8 +89,9 @@
 
 # 6. port/read-line on empty file → nil (EOF)
 (println "  6. port/read-line on empty file...")
-(spit "/tmp/elle-port-edge-empty" "")
-(let [p (port/open "/tmp/elle-port-edge-empty" :read)]
+(def empty-path (path/join scratch "empty"))
+(spit empty-path "")
+(let [p (port/open empty-path :read)]
   (let [result (port/read-line p)]
     (assert (nil? result) "read-line on empty file is nil"))
   (port/close p))
@@ -96,8 +101,9 @@
 
 # 7. port/read-all on empty file → empty string, not nil
 (println "  7. port/read-all on empty file...")
-(spit "/tmp/elle-port-edge-empty2" "")
-(let [p (port/open "/tmp/elle-port-edge-empty2" :read)]
+(def empty2-path (path/join scratch "empty2"))
+(spit empty2-path "")
+(let [p (port/open empty2-path :read)]
   (let [result (port/read-all p)]
     (assert (not (nil? result)) "read-all on empty file is not nil")
     (assert (string? result) "read-all on empty file is string")
@@ -107,8 +113,9 @@
 
 # 8. port/read-all on empty file (binary) → empty bytes, not nil
 (println "  8. port/read-all on empty file (binary)...")
-(spit "/tmp/elle-port-edge-empty3" "")
-(let [p (port/open-bytes "/tmp/elle-port-edge-empty3" :read)]
+(def empty3-path (path/join scratch "empty3"))
+(spit empty3-path "")
+(let [p (port/open-bytes empty3-path :read)]
   (let [result (port/read-all p)]
     (assert (not (nil? result)) "read-all binary on empty file is not nil")
     (assert (bytes? result) "read-all binary on empty file is bytes")
@@ -143,6 +150,7 @@
 
 (ev/abort server-fiber)
 (port/close listener)
+(file/delete-dir-all scratch)
 
 (println "")
 (println "all port-edge-cases tests passed.")

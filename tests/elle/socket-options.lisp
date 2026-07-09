@@ -7,6 +7,13 @@
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+# Scratch dir for Unix socket paths. Basenames stay short: sun_path is
+# capped at 108 bytes, so the temp root + a terse name must fit.
+(def scratch (file/mktempdir))
+# A path that never has a listener — error tests must fail on option
+# validation, not on connect.
+(def bogus (path/join scratch "x.sock"))
+
 (defn echo-server [listener]
   "Accept one connection, read a chunk, write it back, close."
   (ev/spawn (fn []
@@ -30,7 +37,7 @@
 
 # ── 1. unix/connect :sndbuf — basic roundtrip ────────────────────────
 
-(let [path "/tmp/elle-test-sockopt-sndbuf.sock"
+(let [path (path/join scratch "sndbuf.sock")
       listener (unix/listen path)]
   (echo-server listener)
   (let [conn (unix/connect path :sndbuf 1048576 :timeout 5000)]
@@ -42,7 +49,7 @@
 
 # ── 2. unix/connect :rcvbuf — basic roundtrip ────────────────────────
 
-(let [path "/tmp/elle-test-sockopt-rcvbuf.sock"
+(let [path (path/join scratch "rcvbuf.sock")
       listener (unix/listen path)]
   (echo-server listener)
   (let [conn (unix/connect path :rcvbuf 1048576 :timeout 5000)]
@@ -102,7 +109,7 @@
 
 # ── 7. unix/connect :keepalive — option works on Unix too ────────────
 
-(let [path "/tmp/elle-test-sockopt-keepalive-unix.sock"
+(let [path (path/join scratch "keepalive-unix.sock")
       listener (unix/listen path)]
   (echo-server listener)
   (let [conn (unix/connect path :keepalive true :timeout 5000)]
@@ -114,7 +121,7 @@
 
 # ── 8. Combined — :sndbuf + :timeout on unix ─────────────────────────
 
-(let [path "/tmp/elle-test-sockopt-combined.sock"
+(let [path (path/join scratch "combined.sock")
       listener (unix/listen path)]
   (echo-server listener)
   (let [conn (unix/connect path :sndbuf 1048576 :timeout 5000)]
@@ -139,22 +146,22 @@
 
 # ── 10. Error: :sndbuf with string value ──────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" :sndbuf "foo"))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus :sndbuf "foo"))))]
   (assert (not ok?) ":sndbuf string value signals type error"))
 
 # ── 11. Error: :sndbuf with negative value ────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" :sndbuf -1))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus :sndbuf -1))))]
   (assert (not ok?) ":sndbuf negative value signals error"))
 
 # ── 12. Error: :sndbuf with zero ──────────────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" :sndbuf 0))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus :sndbuf 0))))]
   (assert (not ok?) ":sndbuf zero signals error"))
 
 # ── 13. Error: unknown keyword ────────────────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" :bogus 1))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus :bogus 1))))]
   (assert (not ok?) "unknown keyword :bogus signals error"))
 
 # ── 14. Error: :nodelay with non-boolean ──────────────────────────────
@@ -169,17 +176,17 @@
 
 # ── 16. Error: :rcvbuf with float ─────────────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" :rcvbuf 3.14))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus :rcvbuf 3.14))))]
   (assert (not ok?) ":rcvbuf with float signals type error"))
 
 # ── 17. Error: odd keyword count ──────────────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" :sndbuf))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus :sndbuf))))]
   (assert (not ok?) "odd keyword count signals arity error"))
 
 # ── 18. Error: non-keyword key ───────────────────────────────────────
 
-(let [[ok? err] (protect ((fn [] (unix/connect "/tmp/x.sock" 42 1048576))))]
+(let [[ok? err] (protect ((fn [] (unix/connect bogus 42 1048576))))]
   (assert (not ok?) "non-keyword key signals type error"))
 
 # ── 19. Large unix write — :sndbuf enables 300KB single write ────────
@@ -198,7 +205,7 @@
                 (port/write conn count)
                 (port/close conn)))))
 
-(let [path "/tmp/elle-test-sockopt-large.sock"
+(let [path (path/join scratch "large.sock")
       listener (unix/listen path)
       size 307200
       payload (string/repeat "A" size)]
@@ -226,7 +233,7 @@
                 (port/write conn data)
                 (port/close conn)))))
 
-(let [path "/tmp/elle-test-sockopt-accept-sndbuf.sock"
+(let [path (path/join scratch "accept-sndbuf.sock")
       listener (unix/listen path)
       size 307200
       payload (string/repeat "B" size)]
@@ -257,16 +264,18 @@
 
 # ── 22. accept error: unknown keyword ─────────────────────────────────
 
-(let [listener (unix/listen "/tmp/elle-test-sockopt-accept-err.sock")]
+(let [listener (unix/listen (path/join scratch "accept-err.sock"))]
   (let [[ok? err] (protect ((fn [] (unix/accept listener :bogus 1))))]
     (assert (not ok?) "unix/accept unknown keyword signals error"))
   (port/close listener))
 
 # ── 23. accept error: bad :sndbuf type ────────────────────────────────
 
-(let [listener (unix/listen "/tmp/elle-test-sockopt-accept-err2.sock")]
+(let [listener (unix/listen (path/join scratch "accept-err2.sock"))]
   (let [[ok? err] (protect ((fn [] (unix/accept listener :sndbuf "big"))))]
     (assert (not ok?) "unix/accept :sndbuf string signals type error"))
   (port/close listener))
+
+(file/delete-dir-all scratch)
 
 (println "socket-options: all 23 tests passed")

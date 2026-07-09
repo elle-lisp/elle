@@ -33,11 +33,9 @@ fn write_deep_fixture(path: &std::path::Path, n: usize) {
 
 #[test]
 fn worker_stack_compiles_deep_file_without_overflow() {
-    let dir = std::env::temp_dir().join("elle_spawn_stack_test");
-    std::fs::create_dir_all(&dir).expect("mkdir tempdir");
+    let dir = crate::common::ScratchDir::new("spawn-stack");
     let fixture = dir.join("deep-worker-compile.lisp");
     let db = dir.join("deep-worker-compile.db");
-    let _ = std::fs::remove_file(&db);
     write_deep_fixture(&fixture, 350);
 
     // Clear RUST_MIN_STACK so we exercise the *default* worker stack: before the

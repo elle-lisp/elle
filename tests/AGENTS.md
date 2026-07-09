@@ -204,6 +204,22 @@ Some property test files define local strategies for their domain (e.g.,
 `reader.rs` defines `arb_source()` for generating valid Elle source code,
 `strings.rs` defines `arb_unicode_string()`).
 
+## Scratch files
+
+Tests that need the filesystem must derive their paths from the platform temp
+root and must delete everything they create — including on the failure path
+where practical. Never hardcode `/tmp` (shared, size-limited, and not where
+`TMPDIR` points); never reuse a fixed filename (concurrent runs collide).
+`integration::scratch::no_hardcoded_tmp_paths` enforces the no-`/tmp` half of
+this policy over every `.rs` and `.lisp` file in the tree.
+
+- **Elle scripts**: wrap the test in `(with-temp-dir dir ...)` — it binds a
+  fresh directory from `file/mktempdir` and removes the whole tree afterwards,
+  even when the body errors. Build paths with `(path/join dir "name")`.
+- **Rust tests**: build paths from `std::env::temp_dir()`, made unique with
+  `std::process::id()`, and remove them before the test returns (a
+  `defer`-style guard or explicit `remove_file`/`remove_dir_all` at the end).
+
 ## How to add a new test
 
 ### Adding an integration test

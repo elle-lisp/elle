@@ -39,13 +39,15 @@
 
 # 4) A file/socket port is NOT sendable — its fd is owned and meaningless in
 #    another VM. The spawn fails loudly with a clear message (protect catches it).
-(def fp (port/open "/tmp/elle-send-param-neg.out" :write))
+(def scratch (file/mktempdir))
+(def neg-file (path/join scratch "send-param-neg.out"))
+(def fp (port/open neg-file :write))
 (let [r (protect (os/spawn-vm (fn [] (port? fp))))]
   (assert (not (get r 0)) "spawning a closure capturing a file port must fail")
   (assert (string/contains? (get (get r 1) :message)
                             "Cannot send a file or socket port")
           (string "expected the file-port rejection message, got " (get r 1))))
 (port/close fp)
-(file/delete "/tmp/elle-send-param-neg.out")
+(file/delete-dir-all scratch)
 
 (println "send-param tests passed")

@@ -166,14 +166,14 @@ fn test_format_error_ignores_extra_fields() {
         let h = crate::primitives::ctx::TestHeap::new();
         let err = error_val_extra(
             "io-error",
-            "slurp: failed to read '/tmp/x': not found",
-            &[("path", h.ctx().string("/tmp/x"))],
+            "slurp: failed to read '/nonexistent/x': not found",
+            &[("path", h.ctx().string("/nonexistent/x"))],
         );
         let formatted = format_error(err);
         // format_error reads :error and :message; extra fields are silently ignored
         assert_eq!(
             formatted,
-            "io-error: slurp: failed to read '/tmp/x': not found"
+            "io-error: slurp: failed to read '/nonexistent/x': not found"
         );
     })
 }

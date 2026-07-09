@@ -15,7 +15,7 @@ front end (reader → expander → analyzer → HIR → LIR).
 elle --wasm=full script.lisp
 
 # With disk cache (amortizes Wasmtime compilation)
-elle --wasm=full --cache=/tmp/elle-wasm script.lisp
+elle --wasm=full --cache=target/elle-wasm script.lisp
 
 # Debug output (host call tracing)
 elle --wasm=full --debug-wasm script.lisp

@@ -202,8 +202,8 @@ fn test_absolute_relative_path() {
 
 #[test]
 fn test_absolute_already_absolute() {
-    let abs = absolute("/tmp").unwrap();
-    assert_eq!(abs, "/tmp");
+    let abs = absolute("/usr").unwrap();
+    assert_eq!(abs, "/usr");
 }
 
 #[test]

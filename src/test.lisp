@@ -460,7 +460,7 @@
     (let [tp (first tiers)
           tk (get tp 0)
           ts (get tp 1)
-          base (string tmp-dir "/" run-id "_" h "_" ts)
+          base (string scratch-dir "/" run-id "_" h "_" ts)
           cap (exec-fn tk (string base ".out") (string base ".err"))
           c (classify (get cap :result))
           rid (insert-result conn run-id h ts c)]
@@ -740,22 +740,22 @@
       (string (or (get (sys/env) "ELLE_CACHE") "target") "/elle-tests.db")))
 
 # The CAS lives beside the session DB: <dir-of-db>/cas/<hash> (docs § CAS asset
-# capture). Created up front so cas-put can write into it. `tmp-dir` holds the
-# per-(form × tier) stdout/stderr redirect files (written + slurped + deleted by
-# each worker; the directory is disposable).
+# capture). Created up front so cas-put can write into it. `scratch-dir` holds
+# the per-(form × tier) stdout/stderr redirect files (written + slurped +
+# deleted by each worker; the directory is disposable).
 (def cas-dir (string (path/parent db) "/cas"))
-(def tmp-dir (string (path/parent db) "/tmp"))
+(def scratch-dir (string (path/parent db) "/scratch"))
 
 (if (get opts :reset)
   (begin
     (if (file-exists? db) (file/delete db) nil)
     (if (file-exists? cas-dir) (file/delete-dir cas-dir) nil)
-    (if (file-exists? tmp-dir) (file/delete-dir tmp-dir) nil)
+    (if (file-exists? scratch-dir) (file/delete-dir scratch-dir) nil)
     (os/exit 0))
   nil)
 
 (file/mkdir-all cas-dir)
-(file/mkdir-all tmp-dir)
+(file/mkdir-all scratch-dir)
 
 (def conn (sqlite:open db))
 (ensure-schema conn)

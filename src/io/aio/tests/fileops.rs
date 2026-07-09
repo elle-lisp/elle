@@ -176,7 +176,7 @@ fn test_async_submit_process_wait_uring() {
 #[test]
 fn test_async_open_regular_file_returns_port() {
     crate::value::arena::with_test_region(|| {
-        let path = format!("/tmp/elle-test-async-open-{}", std::process::id());
+        let path = temp_path("async-open");
         std::fs::write(&path, "async open test").unwrap();
 
         let h = crate::primitives::ctx::TestHeap::new();
@@ -300,7 +300,7 @@ fn test_drop_with_inflight_read_cancels_and_drains() {
 #[test]
 fn test_async_open_nonexistent_path_errors() {
     crate::value::arena::with_test_region(|| {
-        let path = "/tmp/elle-test-async-open-nonexistent-dir/nofile";
+        let path = "/nonexistent/elle-test-async-open-dir/nofile";
         let backend = AsyncBackend::new().unwrap();
         let req = IoRequest {
             op: IoOp::Open {
@@ -329,7 +329,7 @@ fn test_async_open_nonexistent_path_errors() {
 #[test]
 fn test_async_open_with_timeout_succeeds_on_regular_file() {
     crate::value::arena::with_test_region(|| {
-        let path = format!("/tmp/elle-test-async-open-timeout-{}", std::process::id());
+        let path = temp_path("async-open-timeout");
         std::fs::write(&path, "timeout test").unwrap();
 
         let h = crate::primitives::ctx::TestHeap::new();

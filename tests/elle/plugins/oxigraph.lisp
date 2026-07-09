@@ -20,7 +20,9 @@
 
 (assert (not (nil? (store-new))) "store-new returns non-nil")
 
-(def tmp-path "/tmp/elle-oxigraph-test-store")
+## Scratch dir created after the plugin gate above, removed at end of file.
+(def scratch (file/mktempdir))
+(def tmp-path (path/join scratch "store"))
 
 (assert (not (nil? (store-open tmp-path)))
         "store-open with temp path returns non-nil")
@@ -412,3 +414,5 @@
   (assert (not ok?) "malformed IRI in quad signals oxigraph-error")
   (assert (= (get err :error) :oxigraph-error)
           "malformed IRI in quad signals oxigraph-error"))
+
+(file/delete-dir-all scratch)

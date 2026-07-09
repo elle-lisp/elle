@@ -8,9 +8,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn write_temp_file(content: &str) -> String {
+/// Unique scratch path under the platform temp root (honors TMPDIR — never
+/// hardcoded /tmp). Callers create the file and remove it before returning.
+fn temp_path(tag: &str) -> String {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = format!("/tmp/elle-test-async-{}-{}", std::process::id(), n);
+    std::env::temp_dir()
+        .join(format!("elle-test-{}-{}-{}", tag, std::process::id(), n))
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+fn write_temp_file(content: &str) -> String {
+    let path = temp_path("async");
     std::fs::write(&path, content).unwrap();
     path
 }

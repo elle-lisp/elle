@@ -11,6 +11,10 @@
 ## - or expression return value corruption in recursive calls
 
 
+# Scratch dir for the port-backed regressions (Bugs 5 and 6); removed at the
+# bottom of the file.
+(def scratch (file/mktempdir))
+
 # ============================================================================
 # Bug 1: StoreCapture stack mismatch (let bindings inside lambdas)
 # ============================================================================
@@ -201,7 +205,7 @@
   (defn do-write (port msg)
     (port/write port msg))
 
-  (let [p (port/open "/tmp/elle_bugfix5_test" :write)]
+  (let [p (port/open (path/join scratch "bugfix5") :write)]
     (do-write p "hello")
     (assert (= (type p) :port)
             "fiber locals not corrupted after yield through nested tail-call-to-native")
@@ -244,7 +248,7 @@
       (port/write port msg)
       (+ a b c d e f g h i j k l m n o p)))
 
-  (let [port (port/open "/tmp/elle_bugfix6_test" :write)]
+  (let [port (port/open (path/join scratch "bugfix6") :write)]
     (let [result (defer
                    (port/close port)
                    (inner-with-many-locals port "hello"))]
@@ -352,3 +356,5 @@
 (assert (= (path/join (cond
                         true "a") "b") "a/b")
         "cond as first arg to path/join (regression guard)")
+
+(file/delete-dir-all scratch)

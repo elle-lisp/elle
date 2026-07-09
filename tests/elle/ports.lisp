@@ -1,6 +1,9 @@
 (elle/epoch 12)
 # Ports — lifecycle, predicates, display, and standard port parameters
 
+# Scratch dir for every file-port fixture below; removed at the bottom of the
+# file (individual cleanup lines are optional under it).
+(def scratch (file/mktempdir))
 
 # === Type predicate ===
 
@@ -32,12 +35,12 @@
 
 # === with macro for resource management ===
 
-(with p (port/open "/tmp/elle-test-ports-with-474" :write) port/close
+(with p (port/open (path/join scratch "with") :write) port/close
       (assert (port/open? p) "port open inside with"))
 
 # === File port open/close lifecycle ===
 
-(let [p (port/open "/tmp/elle-test-ports-lifecycle-474" :write)]
+(let [p (port/open (path/join scratch "lifecycle") :write)]
   (assert (port? p) "file port is a port")
   (assert (port/open? p) "file port is open after open")
   (port/close p)
@@ -45,17 +48,18 @@
 
 # === port/open-bytes ===
 
-(let [p (port/open-bytes "/tmp/elle-test-ports-bytes-474" :write)]
+(let [p (port/open-bytes (path/join scratch "bytes") :write)]
   (assert (port? p) "bytes port is a port")
   (port/close p))
 
 # === Error cases ===
 
 # port/open on nonexistent path — I/O error propagates through protect.
-(let [[ok? _] (protect (port/open "/tmp/elle-nonexistent-dir-474/file" :read))]
+(let [[ok? _] (protect (port/open (path/join scratch "no-such-dir" "file") :read))]
   (assert (not ok?) "port/open on nonexistent path errors"))
 
-(let [[ok? _] (protect ((fn () (port/open "/tmp/elle-test-474" :badmode))))]
+(let [[ok? _] (protect ((fn ()
+                          (port/open (path/join scratch "badmode") :badmode))))]
   (assert (not ok?) "port/open with bad mode errors"))
 
 (let [[ok? _] (protect ((fn () (port/close 42))))]
@@ -82,7 +86,7 @@
 
 # === Parameterize standard ports ===
 
-(let [custom-port (port/open "/tmp/elle-test-ports-param-474" :write)]
+(let [custom-port (port/open (path/join scratch "param") :write)]
   (parameterize ((*stdout* custom-port))
     (assert (port? (*stdout*)) "parameterized *stdout* is a port")
     (assert (port/open? (*stdout*)) "parameterized *stdout* is open"))
@@ -95,12 +99,12 @@
 
 # === Read-write and append modes ===
 
-(let [p (port/open "/tmp/elle-test-ports-readwrite-474" :read-write)]
+(let [p (port/open (path/join scratch "readwrite") :read-write)]
   (assert (port? p) "read-write port is a port")
   (assert (port/open? p) "read-write port is open")
   (port/close p))
 
-(let [p (port/open "/tmp/elle-test-ports-append-474" :append)]
+(let [p (port/open (path/join scratch "append") :append)]
   (assert (port? p) "append port is a port")
   (assert (port/open? p) "append port is open")
   (port/close p))
@@ -108,12 +112,12 @@
 # === :timeout keyword argument ===
 
 # port/open with :timeout on a regular file completes before the timeout expires.
-(let [p (port/open "/tmp/elle-test-ports-timeout-474" :write :timeout 5000)]
+(let [p (port/open (path/join scratch "timeout") :write :timeout 5000)]
   (assert (port/open? p) "port/open with :timeout works on regular file")
   (port/close p))
 
 # port/open-bytes with :timeout on a regular file completes before the timeout expires.
-(let [p (port/open-bytes "/tmp/elle-test-ports-bytes-timeout-474" :write
+(let [p (port/open-bytes (path/join scratch "bytes-timeout") :write
                          :timeout 5000)]
   (assert (port/open? p) "port/open-bytes with :timeout works on regular file")
   (port/close p))
@@ -123,7 +127,7 @@
 # ============================================================================
 
 # port_open_file_display
-(let [p (port/open "/tmp/elle-test-port-display-474" :write)]
+(let [p (port/open (path/join scratch "display") :write)]
   (let [s (string p)]
     (assert (string-starts-with? s "#<port:file")
             "file port display starts with #<port:file")
@@ -132,7 +136,7 @@
   (port/close p))
 
 # port_open_bytes_display
-(let [p (port/open-bytes "/tmp/elle-test-port-bytes-474" :write)]
+(let [p (port/open-bytes (path/join scratch "bytes-display") :write)]
   (let [s (string p)]
     (assert (string-starts-with? s "#<port:file")
             "bytes port display starts with #<port:file")
@@ -146,7 +150,7 @@
 # Seek and Tell on file ports
 # ==============================
 
-(def seek-test-path "/tmp/elle-test-seek-tell-474")
+(def seek-test-path (path/join scratch "seek-tell"))
 
 # --- Basic seek/tell lifecycle ---
 
@@ -227,34 +231,35 @@
 # ==============================
 
 # Text port read returns string
-(spit "/tmp/elle-test-enc-type-474" "hello")
-(let [ts (port/read (port/open "/tmp/elle-test-enc-type-474" :read) 5)
-      tb (port/read (port/open-bytes "/tmp/elle-test-enc-type-474" :read) 5)]
+(def enc-type-path (path/join scratch "enc-type"))
+(spit enc-type-path "hello")
+(let [ts (port/read (port/open enc-type-path :read) 5)
+      tb (port/read (port/open-bytes enc-type-path :read) 5)]
   (assert (string? ts) "text port read returns string")
   (assert (bytes? tb) "binary port read returns bytes")
   (assert (= ts "hello") "text port read content correct"))
 
 # Multi-byte UTF-8 characters: reading N returns N characters
-(spit "/tmp/elle-test-enc-mb-474" "héllo")
-(let [result (port/read (port/open "/tmp/elle-test-enc-mb-474" :read) 6)]
+(def enc-mb-path (path/join scratch "enc-mb"))
+(spit enc-mb-path "héllo")
+(let [result (port/read (port/open enc-mb-path :read) 6)]
   (assert (string? result) "multibyte text read returns string")
   (assert (= result "héllo") "multibyte text read content correct"))
 
 # Binary port read of same multi-byte file returns bytes
-(let [result (port/read (port/open-bytes "/tmp/elle-test-enc-mb-474" :read) 6)]
+(let [result (port/read (port/open-bytes enc-mb-path :read) 6)]
   (assert (bytes? result) "binary port read of multibyte file returns bytes"))
 
 # port/read-all on text port returns string
-(spit "/tmp/elle-test-enc-all-474" "hello world")
-(let [result (port/read-all (port/open "/tmp/elle-test-enc-all-474" :read))]
+(def enc-all-path (path/join scratch "enc-all"))
+(spit enc-all-path "hello world")
+(let [result (port/read-all (port/open enc-all-path :read))]
   (assert (string? result) "text port read-all returns string")
   (assert (= result "hello world") "text port read-all content correct"))
 
 # port/read-all on binary port returns bytes
-(let [result (port/read-all (port/open-bytes "/tmp/elle-test-enc-all-474" :read))]
+(let [result (port/read-all (port/open-bytes enc-all-path :read))]
   (assert (bytes? result) "binary port read-all returns bytes"))
 
-# --- Encoding cleanup ---
-(subprocess/system "rm"
-                   ["-f" "/tmp/elle-test-enc-type-474"
-                    "/tmp/elle-test-enc-mb-474" "/tmp/elle-test-enc-all-474"])
+# --- Cleanup: the whole scratch tree, covering every fixture above ---
+(file/delete-dir-all scratch)

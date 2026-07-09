@@ -60,11 +60,12 @@ Ports are bidirectional file descriptors. Open with `port/open`, close
 with `port/close`.
 
 ```lisp
-(file/write "/tmp/elle-doc-test.txt" "hello from elle")
-(def p (port/open "/tmp/elle-doc-test.txt" :read))
-(defer (port/close p)
-  (port/read-all p))          # => "hello from elle"
-(file/delete "/tmp/elle-doc-test.txt")
+(with-temp-dir dir
+  (let [path (path/join dir "doc-test.txt")]
+    (file/write path "hello from elle")
+    (def p (port/open path :read))
+    (defer (port/close p)
+      (port/read-all p))))    # => "hello from elle"
 ```
 
 ### Port operations
@@ -134,7 +135,7 @@ All output functions are async — they yield to the scheduler.
 # => {:exit 0 :stdout "hello\n" :stderr ""}
 
 # With options
-(subprocess/system "ls" ["-la"] {:cwd "/tmp"})
+(subprocess/system "ls" ["-la"] {:cwd "/usr"})
 (subprocess/system "env" [] {:env {:FOO "bar"}})
 ```
 

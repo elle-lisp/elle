@@ -144,7 +144,11 @@ fn test_unix_echo_roundtrip() {
     // Do expensive VM setup before creating the socket.
     let mut rt = setup_scheduled();
 
-    let sock_path = format!("/tmp/elle-test-net-unix-{}.sock", std::process::id());
+    let sock_path = std::env::temp_dir()
+        .join(format!("elle-test-net-unix-{}.sock", std::process::id()))
+        .to_str()
+        .unwrap()
+        .to_string();
     let _ = std::fs::remove_file(&sock_path);
 
     let path_clone = sock_path.clone();

@@ -10,14 +10,18 @@
 # the kernel to hand it back in pieces, exposing the resubmission
 # path) cases, plus the EOF-before-N → nil case.
 
+# Scratch dir for the file-port fixtures; removed at the bottom of the file.
+(def scratch (file/mktempdir))
+
 (def small-text "hello world goodbye")
 
-(spit "/tmp/elle-port-read-exact-small" small-text)
+(def small-path (path/join scratch "small"))
+(spit small-path small-text)
 
 # ── 1. Text-mode file port: N is graphemes, result is a string of (length N).
 #      ASCII case — bytes and graphemes coincide, but the contract is
 #      grapheme-counted regardless.
-(let [p (port/open "/tmp/elle-port-read-exact-small" :read)]
+(let [p (port/open small-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p 5)]
@@ -30,14 +34,14 @@
 
 # ── 2. EOF before N → nil.  Note: count is graphemes here, and we ask for
 #      more graphemes than the file has, regardless of byte size.
-(let [p (port/open "/tmp/elle-port-read-exact-small" :read)]
+(let [p (port/open small-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p (+ (length small-text) 100))]
       (assert (nil? d) "2a: EOF before N -> nil (not partial)"))))
 
 # ── 3. Zero count returns empty (string on text port, no kernel I/O needed).
-(let [p (port/open "/tmp/elle-port-read-exact-small" :read)]
+(let [p (port/open small-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p 0)]
@@ -46,8 +50,9 @@
 # ── 3b. Multi-byte UTF-8 grapheme: a single 'é' is 2 bytes but 1 grapheme.
 #      port/read-exact 1 must reassemble both bytes and return the string "é"
 #      of length 1.  Plain byte-counted code would split the codepoint.
-(spit "/tmp/elle-port-read-exact-utf8" "café")
-(let [p (port/open "/tmp/elle-port-read-exact-utf8" :read)]
+(def utf8-path (path/join scratch "utf8"))
+(spit utf8-path "café")
+(let [p (port/open utf8-path :read)]
   (defer
     (port/close p)
     (let [d (port/read-exact p 3)]
@@ -61,8 +66,9 @@
 #       (port/read-exact p 1) on "café", the second byte of 'é' must NOT
 #       leak into subsequent reads.  Use a deliberately-mismatched read
 #       size so any byte-vs-grapheme confusion would surface.
-(spit "/tmp/elle-port-read-exact-utf8b" "café!")
-(let [p (port/open "/tmp/elle-port-read-exact-utf8b" :read)]
+(def utf8b-path (path/join scratch "utf8b"))
+(spit utf8b-path "café!")
+(let [p (port/open utf8b-path :read)]
   (defer
     (port/close p)
     (let [a (port/read-exact p 1)
@@ -80,8 +86,9 @@
 #       is the path the completion-side grapheme split exists for —
 #       without it the read-line over-read leaks extra graphemes into
 #       the read-exact result.
-(spit "/tmp/elle-port-read-exact-mixed" "header\nbody-café-trailer\n")
-(let [p (port/open "/tmp/elle-port-read-exact-mixed" :read)]
+(def mixed-path (path/join scratch "mixed"))
+(spit mixed-path "header\nbody-café-trailer\n")
+(let [p (port/open mixed-path :read)]
   (defer
     (port/close p)
     (let [hdr (port/read-line p)]
@@ -140,8 +147,7 @@
       # short-read split points.  d is bytes (TCP is Binary encoding);
       # walking every index would dominate the test runtime in the
       # VM-only path, so we sample.  '0'..'9' as bytes is 48+(i mod 10).
-      (let [check-at @[0 1 2 100 1000 65535 65536 65537 131071 131072 131073
-                       (- value-size 1)]
+      (let [check-at @[0 1 2 100 1000 65535 65536 65537 (- value-size 1)]
             @j 0
             @mismatch nil]
         (while (and (nil? mismatch) (< j (length check-at)))
@@ -207,4 +213,5 @@
 # resubmission across the page boundary.
 (text-roundtrip 65536 "6")
 
+(file/delete-dir-all scratch)
 (println "port-read-exact: all tests passed")

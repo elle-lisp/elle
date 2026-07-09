@@ -38,7 +38,7 @@ fn test_build_inet_v6() {
 
 #[test]
 fn test_build_unix_regular() {
-    let (sun, len) = build_unix("/tmp/test.sock").unwrap();
+    let (sun, len) = build_unix("/nonexistent/test.sock").unwrap();
     assert_eq!(sun.sun_family, libc::AF_UNIX as libc::sa_family_t);
     assert!(len > 0);
 }

@@ -24,12 +24,10 @@ fn elle_binary() -> &'static str {
 
 #[test]
 fn test_calling_exit_does_not_truncate_the_run() {
-    let dir = std::env::temp_dir().join("elle_exit_trap_test");
-    std::fs::create_dir_all(&dir).expect("mkdir");
+    let dir = crate::common::ScratchDir::new("exit-trap");
     let a = dir.join("a-exits.lisp");
     let b = dir.join("b-fails.lisp");
     let db = dir.join("exit-trap.db");
-    let _ = std::fs::remove_file(&db);
     // First file bails out with (exit 0) — the truncating idiom.
     std::fs::write(&a, "(exit 0)\n").unwrap();
     // Second file fails an assertion. If the runner reached it, the run gates

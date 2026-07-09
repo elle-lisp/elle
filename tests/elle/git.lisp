@@ -64,8 +64,10 @@
 (assert (string? (git:workdir repo)) "workdir is string")
 
 ## Init a temp repo, branch, tag, commit
-(def tmp-path "/tmp/elle-git-test")
-(subprocess/system "rm" ["-rf" tmp-path])
+## (scratch is defined after the libgit2 gate above, so a gated run never
+## creates — and thus never leaks — a temp dir; removed at the bottom.)
+(def scratch (file/mktempdir))
+(def tmp-path (path/join scratch "repo"))
 (def tmp (git:init tmp-path))
 (git:config-set tmp "user.name" "Test")
 (git:config-set tmp "user.email" "test@test.com")
@@ -91,7 +93,7 @@
 (git:tag-delete tmp "v1.0")
 
 (git:close tmp)
-(subprocess/system "rm" ["-rf" tmp-path])
+(file/delete-dir-all scratch)
 
 (git:close repo)
 

@@ -4,8 +4,10 @@
 
 (import-file "target/release/libelle_git.so")
 
-(let [tmp (string/concat "/tmp/elle-git-test-"
-                         (number->string (integer (clock/realtime))))]
+# The repo lives in a subdir of a fresh scratch temp dir; the whole tree
+# is removed at the end.
+(let [scratch (file/mktempdir)
+      tmp (path/join scratch "repo")]
   (let [repo (git/init tmp)]
     (assert (string? (git/path repo)) "git/path returns string")
     (assert (string? (git/workdir repo)) "git/workdir returns string")
@@ -30,7 +32,7 @@
     # -------------------------------------------------------------------------
     # Write a file and stage it
     # -------------------------------------------------------------------------
-    (let [filepath (string/concat tmp "/hello.txt")]
+    (let [filepath (path/join tmp "hello.txt")]
       (spit filepath "hello\n"))
 
     # Status before staging
@@ -129,7 +131,7 @@
       # -------------------------------------------------------------------------
       # Chunk 5: Staging with modification
       # -------------------------------------------------------------------------
-      (let [filepath (string/concat tmp "/hello.txt")]
+      (let [filepath (path/join tmp "hello.txt")]
         (spit filepath "hello world\n"))
 
       (let [s (git/status repo)]
@@ -172,5 +174,5 @@
         (assert (= 0 (length remote-list)) "no remotes in fresh repo"))))
 
   # Cleanup
-  (subprocess/system "rm" ["-rf" tmp])
+  (file/delete-dir-all scratch)
   (println "git tests passed"))

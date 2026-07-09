@@ -62,13 +62,13 @@ fn test_new_udp_socket_kind() {
 
 #[test]
 fn test_new_unix_listener_kind() {
-    let p = Port::new_unix_listener(devnull_fd(), "/tmp/test.sock".into());
+    let p = Port::new_unix_listener(devnull_fd(), "/nonexistent/test.sock".into());
     assert_eq!(p.kind(), PortKind::UnixListener);
 }
 
 #[test]
 fn test_new_unix_stream_kind() {
-    let p = Port::new_unix_stream(devnull_fd(), "/tmp/test.sock".into());
+    let p = Port::new_unix_stream(devnull_fd(), "/nonexistent/test.sock".into());
     assert_eq!(p.kind(), PortKind::UnixStream);
     assert_eq!(p.encoding(), Encoding::Binary);
 }

@@ -96,7 +96,7 @@ pub(super) fn prim_port_set_options(
 /// (port/path port) → string or nil
 ///
 /// Returns the path or address the port was opened on:
-/// - File port: the file path string (e.g. "/tmp/foo.txt")
+/// - File port: the file path string (e.g. "data/foo.txt")
 /// - TCP listener: the bound address string (e.g. "127.0.0.1:8080")
 /// - TCP stream: the peer address string (e.g. "127.0.0.1:54321")
 /// - Stdio ports (stdin/stdout/stderr): nil

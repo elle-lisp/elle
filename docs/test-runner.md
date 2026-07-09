@@ -20,7 +20,7 @@ to an agent in specific, mechanical ways:
    run before it completes. This produces the infuriating loop:
 
    ```
-   make smoke > /tmp/smoke.log 2>&1; tail -60 /tmp/smoke.log
+   log=$(mktemp); make smoke > "$log" 2>&1; tail -60 "$log"
    # not enough context — run again with grep
    # still not enough — run again with --trace
    # still not enough — run again with --dump=lir

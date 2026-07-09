@@ -11,6 +11,8 @@
 
 (println "read-after-readline: starting...")
 
+(def scratch (file/mktempdir))
+
 # ── Test 1: single read-line then read ──────────────────────────────
 
 # File contains two RESP-style responses concatenated:
@@ -21,9 +23,10 @@
 # port/read-line reads "$5", may buffer "hello\r\n".
 # port/read 7 must return exactly "hello\r\n" (7 bytes), not a short read.
 
-(spit "/tmp/elle-test-read-after-readline" "+OK\r\n$5\r\nhello\r\n")
+(def resp-file (path/join scratch "read-after-readline"))
+(spit resp-file "+OK\r\n$5\r\nhello\r\n")
 
-(let [p (port/open-bytes "/tmp/elle-test-read-after-readline" :read)]
+(let [p (port/open-bytes resp-file :read)]
   (defer
     (port/close p)
     (let [line1 (port/read-line p)]
@@ -59,9 +62,10 @@
     (assign i (+ i 1)))
   (freeze buf))
 
-(spit "/tmp/elle-test-read-after-readline-multi" (make-bulk-sequence 20))
+(def multi-file (path/join scratch "read-after-readline-multi"))
+(spit multi-file (make-bulk-sequence 20))
 
-(let [p (port/open-bytes "/tmp/elle-test-read-after-readline-multi" :read)]
+(let [p (port/open-bytes multi-file :read)]
   (defer
     (port/close p)
     (def @i 0)
@@ -78,5 +82,7 @@
       (assign i (+ i 1)))))
 
 (println "  20 sequential bulk reads: ok")
+
+(file/delete-dir-all scratch)
 
 (println "read-after-readline: all tests passed")

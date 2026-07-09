@@ -776,108 +776,122 @@
 
 (defn run-internal-tests []
   "Self-tests for RESP encoding and decoding."
+  # Scratch files live in a fresh directory under the platform temp
+  # root (honors TMPDIR); with-temp-dir deletes the whole tree after
+  # the body, even when an assert fails, so runs never litter.
+  (with-temp-dir dir
+                 (defn with-resp-fixture [name payload thunk]
+                   "Spit payload into a scratch file under dir, open it as a binary
+       read port (RESP framing is byte-exact), and run (thunk port).
+       The port is closed even when an assert inside thunk fails."
+                   (let [path (path/join dir name)]
+                     (spit path payload)
+                     (let [p (port/open-bytes path :read)]
+                       (defer
+                         (port/close p)
+                         (thunk p)))))
 
-  # resp-encode
-  (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n") "resp-encode PING")
+                 # resp-encode
+                 (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n")
+                         "resp-encode PING")
 
-  (assert (= (resp-encode "SET" "key" "value")
-             "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
-          "resp-encode SET key value")
+                 (assert (= (resp-encode "SET" "key" "value")
+                            "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
+                         "resp-encode SET key value")
 
-  (assert (= (resp-encode "GET" "mykey") "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
-          "resp-encode GET mykey")
+                 (assert (= (resp-encode "GET" "mykey")
+                            "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
+                         "resp-encode GET mykey")
 
-  # resp-encode with multibyte string
-  (assert (= (resp-encode "SET" "k" "café")
-             "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
-          "resp-encode multibyte uses byte length")
+                 # resp-encode with multibyte string
+                 (assert (= (resp-encode "SET" "k" "café")
+                            "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
+                         "resp-encode multibyte uses byte length")
 
-  # resp-read: simple string
-  (spit "/tmp/elle-redis-test-simple" "+OK\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-simple" :read)]
-    (defer
-      (port/close p)
-      (assert (= (resp-read p) "OK") "resp-read simple string")))
+                 # resp-read: simple string
+                 (with-resp-fixture "simple" "+OK\r\n"
+                                    (fn [p]
+                                      (assert (= (resp-read p) "OK")
+                                      "resp-read simple string")))
 
-  # resp-read: integer
-  (spit "/tmp/elle-redis-test-int" ":42\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-int" :read)]
-    (defer
-      (port/close p)
-      (assert (= (resp-read p) 42) "resp-read integer")))
+                 # resp-read: integer
+                 (with-resp-fixture "int" ":42\r\n"
+                                    (fn [p]
+                                      (assert (= (resp-read p) 42)
+                                      "resp-read integer")))
 
-  # resp-read: bulk string
-  (spit "/tmp/elle-redis-test-bulk" "$5\r\nhello\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-bulk" :read)]
-    (defer
-      (port/close p)
-      (assert (= (resp-read p) "hello") "resp-read bulk string")))
+                 # resp-read: bulk string
+                 (with-resp-fixture "bulk" "$5\r\nhello\r\n"
+                                    (fn [p]
+                                      (assert (= (resp-read p) "hello")
+                                      "resp-read bulk string")))
 
-  # resp-read: nil bulk string
-  (spit "/tmp/elle-redis-test-nil" "$-1\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-nil" :read)]
-    (defer
-      (port/close p)
-      (assert (nil? (resp-read p)) "resp-read nil bulk string")))
+                 # resp-read: nil bulk string
+                 (with-resp-fixture "nil" "$-1\r\n"
+                                    (fn [p]
+                                      (assert (nil? (resp-read p))
+                                      "resp-read nil bulk string")))
 
-  # resp-read: array
-  (spit "/tmp/elle-redis-test-arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-arr" :read)]
-    (defer
-      (port/close p)
-      (let [result (resp-read p)]
-        (assert (= (length result) 2) "resp-read array length")
-        (assert (= (get result 0) "foo") "resp-read array element 0")
-        (assert (= (get result 1) "bar") "resp-read array element 1"))))
+                 # resp-read: array
+                 (with-resp-fixture "arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
+                                    (fn [p]
+                                      (let [result (resp-read p)]
+                                        (assert (= (length result) 2)
+                                        "resp-read array length")
+                                        (assert (= (get result 0) "foo")
+                                        "resp-read array element 0")
+                                        (assert (= (get result 1) "bar")
+                                        "resp-read array element 1"))))
 
-  # resp-read: error
-  (spit "/tmp/elle-redis-test-err" "-ERR unknown command\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-err" :read)]
-    (defer
-      (port/close p)
-      (let [[ok? val] (protect (resp-read p))]
-        (assert (not ok?) "resp-read error signals")
-        (assert (= (get val :error) :redis-error) "resp-read error kind")
-        (assert (= (get val :message) "ERR unknown command")
-                "resp-read error message"))))
+                 # resp-read: error
+                 (with-resp-fixture "err" "-ERR unknown command\r\n"
+                                    (fn [p]
+                                      (let [[ok? val] (protect (resp-read p))]
+                                        (assert (not ok?)
+                                        "resp-read error signals")
+                                        (assert (= (get val :error) :redis-error)
+                                        "resp-read error kind")
+                                        (assert (= (get val :message)
+                                        "ERR unknown command")
+                                        "resp-read error message"))))
 
-  # resp-read-raw: error returns struct instead of signaling
-  (spit "/tmp/elle-redis-test-raw-err" "-ERR bad\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-raw-err" :read)]
-    (defer
-      (port/close p)
-      (let [result (resp-read-raw p)]
-        (assert (struct? result) "resp-read-raw error is struct")
-        (assert (= (get result :error) :redis-error) "resp-read-raw error kind"))))
+                 # resp-read-raw: error returns struct instead of signaling
+                 (with-resp-fixture "raw-err" "-ERR bad\r\n"
+                                    (fn [p]
+                                      (let [result (resp-read-raw p)]
+                                        (assert (struct? result)
+                                        "resp-read-raw error is struct")
+                                        (assert (= (get result :error)
+                                        :redis-error) "resp-read-raw error kind"))))
 
-  # resp-ok?
-  (assert (= (resp-ok? "OK") true) "resp-ok? OK")
-  (assert (= (resp-ok? "QUEUED") "QUEUED") "resp-ok? passthrough")
+                 # resp-ok?
+                 (assert (= (resp-ok? "OK") true) "resp-ok? OK")
+                 (assert (= (resp-ok? "QUEUED") "QUEUED") "resp-ok? passthrough")
 
-  # resp-bool
-  (assert (= (resp-bool 1) true) "resp-bool 1")
-  (assert (= (resp-bool 0) false) "resp-bool 0")
+                 # resp-bool
+                 (assert (= (resp-bool 1) true) "resp-bool 1")
+                 (assert (= (resp-bool 0) false) "resp-bool 0")
 
-  # resp-read: nested array
-  (spit "/tmp/elle-redis-test-nested"
-        "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-nested" :read)]
-    (defer
-      (port/close p)
-      (let [result (resp-read p)]
-        (assert (= (length result) 2) "nested array length")
-        (assert (= (get (get result 0) 0) 1) "nested array [0][0]")
-        (assert (= (get (get result 1) 1) 4) "nested array [1][1]"))))
+                 # resp-read: nested array
+                 (with-resp-fixture "nested"
+                                    "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n"
+                                    (fn [p]
+                                      (let [result (resp-read p)]
+                                        (assert (= (length result) 2)
+                                        "nested array length")
+                                        (assert (= (get (get result 0) 0) 1)
+                                        "nested array [0][0]")
+                                        (assert (= (get (get result 1) 1) 4)
+                                        "nested array [1][1]"))))
 
-  # resp-read: empty array
-  (spit "/tmp/elle-redis-test-empty-arr" "*0\r\n")
-  (let [p (port/open-bytes "/tmp/elle-redis-test-empty-arr" :read)]
-    (defer
-      (port/close p)
-      (let [result (resp-read p)]
-        (assert (= (length result) 0) "empty array"))))
+                 # resp-read: empty array
+                 (with-resp-fixture "empty-arr" "*0\r\n"
+                                    (fn [p]
+                                      (let [result (resp-read p)]
+                                        (assert (= (length result) 0)
+                                        "empty array"))))
 
-  true)
+                 true))
 
 ## ── Exports ───────────────────────────────────────────────────────────
 

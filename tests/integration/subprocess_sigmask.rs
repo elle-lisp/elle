@@ -31,8 +31,7 @@ fn elle_binary() -> &'static str {
 
 #[test]
 fn worker_spawned_child_has_empty_signal_mask() {
-    let dir = std::env::temp_dir().join("elle_subprocess_sigmask_test");
-    std::fs::create_dir_all(&dir).expect("mkdir tempdir");
+    let dir = crate::common::ScratchDir::new("subprocess-sigmask");
     let fixture = dir.join("worker-child-mask.lisp");
 
     // The spawn happens INSIDE an os/spawn worker (which masks all signals) and

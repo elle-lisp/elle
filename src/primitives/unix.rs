@@ -206,7 +206,7 @@ primitive! {
         doc: "Listen on a Unix domain socket. Returns a listener port.",
         params: &["path"],
         category: "unix",
-        example: "(unix/listen \"/tmp/my.sock\")",
+        example: "(unix/listen \"./my.sock\")",
         effect: RegionEffect::Fresh,
     }
     "unix/accept" => prim_unix_accept {
@@ -232,7 +232,7 @@ primitive! {
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],
         category: "unix",
-        example: "(unix/connect \"/tmp/my.sock\")",
+        example: "(unix/connect \"./my.sock\")",
         // Fresh: the stream port is pre-minted in this call's ctx region.
         effect: RegionEffect::Fresh,
     }
