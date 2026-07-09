@@ -54,7 +54,7 @@ fn send(stdin: &mut dyn Write, msg: Value) {
 }
 
 /// Start the LSP server, returning (stdin, bufreader, child).
-fn start_lsp() -> (
+pub(crate) fn start_lsp() -> (
     std::process::ChildStdin,
     BufReader<std::process::ChildStdout>,
     std::process::Child,
@@ -72,8 +72,12 @@ fn start_lsp() -> (
     (stdin, BufReader::new(stdout), child)
 }
 
-/// Send initialize, return capabilities.
-fn init_lsp(stdin: &mut dyn Write, reader: &mut BufReader<std::process::ChildStdout>) -> Value {
+/// Send initialize, return the full initialize result
+/// (`capabilities` + `serverInfo`).
+pub(crate) fn init_lsp(
+    stdin: &mut dyn Write,
+    reader: &mut BufReader<std::process::ChildStdout>,
+) -> Value {
     send(
         stdin,
         json!({
@@ -83,11 +87,11 @@ fn init_lsp(stdin: &mut dyn Write, reader: &mut BufReader<std::process::ChildStd
     );
     let resp = read_response(reader);
     assert_eq!(resp["id"], 1);
-    resp["result"]["capabilities"].clone()
+    resp["result"].clone()
 }
 
 /// Send shutdown + exit, wait for clean exit.
-fn shutdown_lsp(
+pub(crate) fn shutdown_lsp(
     mut stdin: std::process::ChildStdin,
     reader: &mut BufReader<std::process::ChildStdout>,
     child: &mut std::process::Child,
@@ -122,7 +126,7 @@ fn shutdown_lsp(
 fn test_lsp_initialize_shutdown() {
     let (mut stdin, mut reader, mut child) = start_lsp();
 
-    let caps = init_lsp(&mut stdin, &mut reader);
+    let caps = &init_lsp(&mut stdin, &mut reader)["capabilities"];
     assert!(caps["hoverProvider"].is_boolean());
     assert!(caps["completionProvider"].is_object());
     assert_eq!(caps["completionProvider"]["triggerCharacters"][0], "(");

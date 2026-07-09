@@ -128,6 +128,9 @@ mod projection {
 mod lsp {
     include!("lsp.rs");
 }
+mod version {
+    include!("version.rs");
+}
 mod spawn_stack {
     include!("spawn_stack.rs");
 }

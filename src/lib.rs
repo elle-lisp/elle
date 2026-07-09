@@ -69,6 +69,15 @@
 // vecs, mutable collections, Rc boxes) are moderate-throughput enough
 // that the system allocator is sufficient.
 
+/// The elle version. Single source of truth: `[package] version` in the root
+/// `Cargo.toml`. Every user-visible version string (REPL banner, `--help`
+/// header, LSP `serverInfo`, the `(elle/version)` primitive) must derive from
+/// this constant so a release bumps exactly one line.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The user-facing banner line derived from [`VERSION`].
+pub const BANNER: &str = concat!("Elle v", env!("CARGO_PKG_VERSION"));
+
 #[macro_use]
 pub mod trace;
 pub mod arithmetic;

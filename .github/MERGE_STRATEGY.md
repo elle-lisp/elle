@@ -122,7 +122,12 @@ Only project maintainers merge to main. Process:
    git checkout -b release/v1.0.0
    ```
 
-2. **Update version numbers** and CHANGELOG
+2. **Update the version** — edit `version` in the root `Cargo.toml` only,
+   then `cargo build` to refresh `Cargo.lock`. Everything else (REPL banner,
+   `--help` header, LSP `serverInfo`, the `(elle/version)` primitive, tests)
+   derives from it via `elle::VERSION` / `elle::BANNER`, which read
+   `CARGO_PKG_VERSION`. The `elle-plugin` crate is versioned independently;
+   its compatibility contract is the plugin ABI number in `src/plugin_api.rs`.
 
 3. **Create PR to main branch**
 

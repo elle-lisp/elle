@@ -201,7 +201,7 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
                     },
                     "serverInfo": {
                         "name": "Elle Language Server",
-                        "version": "0.1.0"
+                        "version": crate::VERSION
                     }
                 }
             })

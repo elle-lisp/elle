@@ -47,7 +47,7 @@ impl Repl {
 
     /// Run the interactive REPL loop. Returns true if any errors occurred.
     pub fn run(&mut self, vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bool {
-        println!("Elle v1.0.0 (type (help) for commands)");
+        greet();
         let mut had_errors = false;
 
         loop {
@@ -109,7 +109,7 @@ impl Repl {
     pub fn run_fallback(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bool {
         use std::io::{self, BufRead, Write};
 
-        println!("Elle v1.0.0 (type (help) for commands)");
+        greet();
         let mut accumulated = String::new();
         let mut deferred: Vec<DeferredForm> = Vec::new();
         let mut had_errors = false;
@@ -567,8 +567,13 @@ fn extract_signal_arity(value: &Value) -> (Signal, Option<Arity>) {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+/// The greeting shared by the rustyline and fallback REPLs.
+fn greet() {
+    println!("{} (type (help) for commands)", crate::BANNER);
+}
+
 fn print_repl_help() {
-    println!("Elle v1.0.0\n");
+    println!("{}\n", crate::BANNER);
     println!("REPL commands:");
     println!("  (exit)   Exit the REPL");
     println!("  (help)   Show this help");

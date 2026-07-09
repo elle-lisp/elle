@@ -46,7 +46,7 @@ fn dump_keyword_desc(kw: &str) -> &'static str {
 }
 
 pub(super) fn print_help() {
-    println!("Elle v1.0.0\n");
+    println!("{}\n", elle::BANNER);
     println!("Usage: elle [file...] [-- args...]       Run files or start REPL");
     println!("       elle fmt [options] <file...>       Format source files");
     println!("       elle lint [options] <file|dir>... Static analysis");

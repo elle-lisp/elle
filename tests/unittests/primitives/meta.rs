@@ -46,7 +46,7 @@ fn test_package_manager() {
     match call_primitive(&version_fn, &[]).unwrap() {
         v if v.is_string() => {
             let s = v.with_string(|s| s.to_string()).unwrap();
-            assert_eq!(s, "1.0.0")
+            assert_eq!(s, elle::VERSION)
         }
         _ => panic!("Expected string"),
     }
