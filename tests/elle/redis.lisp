@@ -83,18 +83,6 @@
                      (assert (= (redis:setnx "test:redis:setnx" "val2") false)
                              "setnx exists")
 
-                     (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
-                     (let [vals (redis:mget "test:redis:m1" "test:redis:m2"
-                           "test:redis:nonexistent")]
-                       (assert (= (get vals 0) "a") "mget 0")
-                       (assert (= (get vals 1) "b") "mget 1")
-                       (assert (nil? (get vals 2)) "mget nil"))
-
-                     (assert (= (redis:setnx "test:redis:setnx" "val") true)
-                             "setnx new")
-                     (assert (= (redis:setnx "test:redis:setnx" "val2") false)
-                             "setnx exists")
-
                      (assert (= (redis:exists "test:redis:k1") true)
                              "exists true")
                      (assert (= (redis:exists "test:redis:nonexistent") false)
@@ -113,17 +101,6 @@
                              "exists true")
                      (assert (= (redis:exists "test:redis:nonexistent") false)
                              "exists false")
-
-                     (redis:set "test:redis:rename" "val")
-                     (assert (= (redis:rename "test:redis:rename"
-                                "test:redis:renamed") true) "rename")
-                     (assert (= (redis:get "test:redis:renamed") "val")
-                             "get renamed")
-
-                     (assert (>= (redis:del "test:redis:k1" "test:redis:renamed")
-                                 1) "del")
-                     (assert (= (redis:exists "test:redis:k1") false)
-                             "exists after del")
 
                      (redis:set "test:redis:rename" "val")
                      (assert (= (redis:rename "test:redis:rename"
@@ -281,42 +258,6 @@
                                  (concat "get failed at " (string i))))
                        (assign i (+ i 1)))
                      (println "  50 set/get pairs: ok")
-
-                     # Mixed response types
-                     (clear-test-keys)
-                     (redis:set "test:redis:k1" "v1")
-                     (redis:get "test:redis:k1")
-                     (redis:get "test:redis:nonexistent")
-                     (redis:set "test:redis:nx" "first" :nx true)
-                     (redis:get "test:redis:nx")
-                     (redis:set "test:redis:counter" "10")
-                     (redis:incr "test:redis:counter")
-                     (redis:decr "test:redis:counter")
-                     (redis:incrby "test:redis:counter" 5)
-                     (redis:decrby "test:redis:counter" 3)
-                     (redis:set "test:redis:str" "hello")
-                     (redis:append "test:redis:str" " world")
-                     (redis:get "test:redis:str")
-                     (redis:strlen "test:redis:str")
-                     (redis:mset "test:redis:m1" "a" "test:redis:m2" "b")
-                     (redis:mget "test:redis:m1" "test:redis:m2"
-                                 "test:redis:nonexistent")
-                     (redis:setnx "test:redis:setnx" "val")
-                     (redis:setnx "test:redis:setnx" "val2")
-                     (assert (= (redis:exists "test:redis:k1") true)
-                             "stress exists true")
-                     (assert (= (redis:exists "test:redis:nonexistent") false)
-                             "stress exists false")
-                     (println "  mixed commands: ok")
-
-                     # ── ev/spawn inside redis-with ─────────────────────────────────
-                     #
-                     # Regression: redis:with binds *redis-port* via parameterize.
-                     # A fiber spawned with ev/spawn inside the body is resumed
-                     # later by the scheduler, whose own param_frames do not
-                     # contain *redis-port*.  Only creation-time inheritance in
-                     # fiber/new makes the child see the connection.  Without it
-                     # the redis:get call fails with :no-connection.
 
                      # Mixed response types
                      (clear-test-keys)
