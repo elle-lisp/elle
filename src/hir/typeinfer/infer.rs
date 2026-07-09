@@ -540,12 +540,22 @@ pub(super) fn infer_node(
         }
 
         // And/Or — conservative: Top
-        HirKind::And(_) | HirKind::Or(_) => {
-            hir.for_each_child(|child| {
+        // `and`/`or` evaluate to one of their operands — `and` the first falsy
+        // (else the last), `or` the first truthy (else the last) — so the result
+        // type is the JOIN of the operand types, exactly as `If` joins its
+        // branches. Join is sound (a returned value is always ⊑ its operand's
+        // type) and lets a homogeneous `(or a b)`/`(and a b)` of proven numbers
+        // discharge a downstream `%`-intrinsic; a heterogeneous one widens and
+        // correctly fails to prove. (Empty `and`/`or` never reach here — the
+        // analyzer emits a Bool literal for them.)
+        HirKind::And(exprs) | HirKind::Or(exprs) => {
+            let mut join = TypeInterner::BOTTOM;
+            for child in exprs {
                 let ty = recurse!(child);
                 hir_types.insert(child.id, ty);
-            });
-            TypeInterner::TOP
+                join = interner.join(join, ty);
+            }
+            join
         }
 
         // Loop — recurse into body

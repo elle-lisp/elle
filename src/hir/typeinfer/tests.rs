@@ -256,6 +256,52 @@ fn match_typeof_let_alias_declines_when_subject_reassigned() {
     .expect_err("a reassigned mutable subject must not inherit the stale type-of narrowing");
 }
 
+/// `(or a b)` returns one of its operands (the first truthy, else the last), so
+/// its result type is the JOIN of the operand types — exactly as `if` joins its
+/// branches. When both operands are proven `Number`, the `or` is `Number` and can
+/// feed a silent `%add`. Counter-factual: while `or` typed to Top, this rejected
+/// with `operand 1 … not a proven number`. (`(or a b)` here uses two distinct
+/// proven-int calls so no constant-fold/dedup can collapse the `or` first.)
+#[test]
+fn or_result_type_is_the_join_of_its_operands() {
+    compile_result(
+        "(defn g [x] (when (%not (%int? x)) (error :e)) x) \
+         (defn f [x] (when (%not (%int? x)) (error :e)) \
+           (%add (or (g x) (g (%add x 1))) 3))",
+    )
+    .expect("both or-operands prove Number, so the or is Number and %add is silent");
+}
+
+/// `(and a b)` likewise returns one of its operands (the first falsy, else the
+/// last), so its type is the join of the operands. Two proven-`Number` operands
+/// make the `and` `Number`. Counter-factual: rejected while `and` typed to Top.
+#[test]
+fn and_result_type_is_the_join_of_its_operands() {
+    compile_result(
+        "(defn g [x] (when (%not (%int? x)) (error :e)) x) \
+         (defn f [x] (when (%not (%int? x)) (error :e)) \
+           (%add (and (g x) (g (%add x 1))) 3))",
+    )
+    .expect("both and-operands prove Number, so the and is Number and %add is silent");
+}
+
+/// Soundness of the join: it is over ALL operands, not one. `(or (g x) :kw)` types
+/// as `Number ⊔ Keyword` — the join conservatively admits the keyword branch (it
+/// does not reason that an int operand is always truthy and the keyword therefore
+/// dead), so it does not discharge `%add` and the site must reject. Counter-factual
+/// for a mistaken "type of the first (or last) operand only" rule: typing this `or`
+/// as its first operand alone would wrongly prove `Number` and compile — unsound in
+/// general, since a falsy first operand returns the second.
+#[test]
+fn heterogeneous_or_does_not_prove_a_numeric_operand() {
+    compile_result(
+        "(defn g [x] (when (%not (%int? x)) (error :e)) x) \
+         (defn f [x] (when (%not (%int? x)) (error :e)) \
+           (%add (or (g x) :kw) 3))",
+    )
+    .expect_err("or joins all operands, so Number ⊔ Keyword does not prove a number");
+}
+
 /// Monomorphic `%push-array-mut` pins its result `MutableArray` from the *op*,
 /// not the input: applied to an *immutable* `[1 2]` the result is still
 /// `MutableArray` (the funnel store returns arg0, which the `-mut` variant
