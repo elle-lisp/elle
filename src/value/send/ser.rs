@@ -1,5 +1,23 @@
+//! Serialization of a live `Value` into a Send-safe `SendValue`.
+//!
+//! The module root holds the value-tag dispatch (`from_value_inner`) and the
+//! traits-field helper it leans on. Cohesive sub-concerns live in siblings:
+//! `ctx` (the threaded bookkeeping context), `lir` (LIR-for-send rewriting),
+//! `template` (closure blueprint copies), and `closure` (the interning closure
+//! arm). Re-exports keep `ser::from_value_inner` / `ser::SerContext` resolving
+//! for the parent module unchanged.
+
 use super::syntax::syntax_to_send;
 use super::*;
+
+mod closure;
+mod ctx;
+mod lir;
+mod template;
+
+pub(super) use ctx::SerContext;
+
+use closure::send_closure;
 
 /// Send a traits field. Default traitsets (from the registry) are
 /// skipped (sent as NIL) since the receiving thread has its own registry.
@@ -17,148 +35,6 @@ fn send_traits(traits: Value, tag: HeapTag, ctx: &mut SerContext<'_>) -> Result<
     }
     // User-attached traits — send normally
     from_value_inner(traits, ctx)
-}
-
-/// Per-call serialization context for `SendBundle::from_value`.
-pub(super) struct SerContext<'s> {
-    /// Intern table being built; read back by callers after serialization.
-    pub(super) closures: Vec<SendableClosure>,
-    /// Maps `value.payload` (heap pointer address) → intern table index.
-    /// Inserted BEFORE recursing into a closure's fields, so back-references find it.
-    visited: HashMap<u64, usize>,
-    /// The SENDER's symbol table — used to resolve a symbol value's id to its name
-    /// so it crosses the thread boundary by name (ids are per-table). Threaded
-    /// explicitly (docs/impl/region/ctx.md § "Symbols through the ctx").
-    pub(super) symbols: &'s crate::symbol::SymbolTable,
-    /// The SENDER's heap — `send_traits` reads its default-traits table to skip
-    /// registry-default traitsets (the receiver rebuilds them). The value being
-    /// serialized lives on this heap, so it is the right table to compare against.
-    pub(super) heap: &'s crate::value::fiberheap::FiberHeap,
-}
-
-impl<'s> SerContext<'s> {
-    pub(super) fn new(
-        heap: &'s crate::value::fiberheap::FiberHeap,
-        symbols: &'s crate::symbol::SymbolTable,
-    ) -> Self {
-        SerContext {
-            visited: HashMap::new(),
-            closures: Vec::new(),
-            symbols,
-            heap,
-        }
-    }
-}
-
-/// Make a LIR function shippable across a thread boundary, returning the
-/// compound-value pool (or `None` if the LIR must be dropped).
-///
-/// Two passes:
-///   1. Lift each *compound* `ValueConst` operand (quoted list, struct, array,
-///      …) into a serialized `lir_value_pool` entry and rewrite the instruction
-///      to `Const(ValueRef(idx))`. Serialization goes through `ctx`, so any
-///      closures nested in the compound intern into the bundle correctly.
-///   2. Delegate to `LirFunction::convert_value_consts_for_send`, which inlines
-///      scalar operands and rewrites closure operands to `ClosureRef` (keeping
-///      the `lir/closure-value-const-count` accounting). It returns `false` only
-///      when a closure operand isn't in the intern table; we then drop the LIR
-///      and the worker falls back to bytecode.
-///
-/// `patch_lir_value_refs` / `patch_lir_closure_refs` invert this on receipt.
-fn convert_lir_for_send(
-    lir: &mut crate::lir::LirFunction,
-    ctx: &mut SerContext<'_>,
-) -> Result<Option<Vec<SendValue>>, String> {
-    use crate::lir::{value_to_lir_const, LirConst, LirInstr};
-
-    // Pass 1: compound ValueConsts → ValueRef into the pool.
-    let mut pool: Vec<SendValue> = Vec::new();
-    for block in &mut lir.blocks {
-        for si in &mut block.instructions {
-            let (dst, value) = match &si.instr {
-                LirInstr::ValueConst { dst, value } => (*dst, *value),
-                _ => continue,
-            };
-            // Leave scalars, closures, and native fns for pass 2 / as-is.
-            if value.is_native_fn() || value.is_closure() || value_to_lir_const(value).is_some() {
-                continue;
-            }
-            let sv = from_value_inner(value, ctx)?;
-            let idx = pool.len();
-            pool.push(sv);
-            si.instr = LirInstr::Const {
-                dst,
-                value: LirConst::ValueRef(idx),
-            };
-        }
-    }
-
-    // Pass 2: scalars inline + closures → ClosureRef (or signal a drop).
-    if lir.convert_value_consts_for_send(&ctx.visited) {
-        Ok(Some(pool))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Serialize a closure **template** blueprint (`ClosureTemplate.child_protos`
-/// entry) into a `SendableClosure`. Templates have no heap identity to intern,
-/// so they are emitted inline; `env`/`squelch_mask` are empty (a blueprint is a
-/// pure template). Recurses on the template's own `child_protos` so a worker
-/// rebuilds the full nested-lambda tree and every `MakeClosure` resolves.
-fn sendable_from_template(
-    t: &crate::value::ClosureTemplate,
-    ctx: &mut SerContext<'_>,
-) -> Result<SendableClosure, String> {
-    let constants: Vec<SendValue> = t
-        .constants
-        .iter()
-        .map(|v| from_value_inner(*v, ctx))
-        .collect::<Result<_, _>>()?;
-
-    let doc = t.doc.as_deref().map(str::to_string);
-
-    let (lir_function, lir_value_pool) = match t.lir_function.as_ref() {
-        Some(lir) => {
-            let mut lir = (**lir).clone();
-            lir.doc = None;
-            lir.syntax = None;
-            match convert_lir_for_send(&mut lir, ctx)? {
-                Some(pool) => (Some(lir), pool),
-                None => (None, Vec::new()),
-            }
-        }
-        None => (None, Vec::new()),
-    };
-
-    let child_protos: Vec<SendableClosure> = t
-        .child_protos
-        .iter()
-        .map(|p| sendable_from_template(p, ctx))
-        .collect::<Result<_, _>>()?;
-
-    Ok(SendableClosure {
-        bytecode: (*t.bytecode).clone(),
-        arity: t.arity,
-        num_locals: t.num_locals,
-        num_captures: t.num_captures,
-        num_params: t.num_params,
-        constants,
-        signal: t.signal,
-        capture_params_mask: t.capture_params_mask,
-        capture_locals_mask: t.capture_locals_mask.clone(),
-        symbol_names: (*t.symbol_names).clone(),
-        location_map: (*t.location_map).clone(),
-        doc,
-        vararg_kind: t.vararg_kind.clone(),
-        name: t.name.as_ref().map(|s| s.to_string()),
-        squelch_mask: SignalBits::EMPTY,
-        env: Vec::new(),
-        lir_function,
-        lir_value_pool,
-        child_protos,
-        merged_slots: t.merged_slots.iter().copied().collect(),
-    })
 }
 
 /// Recursive worker for serialization. Threads SerContext through all recursive calls.
@@ -330,119 +206,7 @@ pub(super) fn from_value_inner(
         HeapObject::Closure {
             closure: closure_rc,
             traits: _,
-        } => {
-            // Use value.payload as identity key — for heap values, payload IS the pointer.
-            let key = value.payload;
-
-            // Already visited → return Ref to existing intern entry.
-            if let Some(&idx) = ctx.visited.get(&key) {
-                return Ok(SendValue::Ref(idx));
-            }
-
-            // Reserve an index BEFORE recursing so back-references resolve to this entry.
-            let idx = ctx.closures.len();
-            // Push a placeholder (will be overwritten below).
-            ctx.closures.push(SendableClosure {
-                bytecode: Vec::new(),
-                arity: closure_rc.template.arity,
-                num_locals: 0,
-                num_captures: 0,
-                num_params: 0,
-                constants: Vec::new(),
-                signal: closure_rc.template.signal,
-                capture_params_mask: 0,
-                capture_locals_mask: crate::value::CaptureMask::empty(),
-                symbol_names: HashMap::new(),
-                location_map: LocationMap::new(),
-                doc: None,
-                vararg_kind: closure_rc.template.vararg_kind.clone(),
-                name: None,
-                squelch_mask: SignalBits::EMPTY,
-                env: Vec::new(),
-                lir_function: None,
-                lir_value_pool: Vec::new(),
-                child_protos: Vec::new(),
-                merged_slots: Vec::new(), // placeholder; replaced below
-            });
-            ctx.visited.insert(key, idx);
-
-            // Serialize environment (may contain back-references to this closure via LBox).
-            let env: Result<Vec<SendValue>, String> = closure_rc
-                .env
-                .iter()
-                .map(|v| from_value_inner(*v, ctx))
-                .collect();
-            let env = env?;
-
-            // Serialize constants.
-            let constants: Result<Vec<SendValue>, String> = closure_rc
-                .template
-                .constants
-                .iter()
-                .map(|v| from_value_inner(*v, ctx))
-                .collect();
-            let constants = constants?;
-
-            // Serialize doc (optional) — plain string data, not a heap Value.
-            let doc = closure_rc.template.doc.as_deref().map(str::to_string);
-
-            // Clone LIR for JIT in spawned threads. Strip doc (Value/Rc) and
-            // syntax (Rc<Syntax>), then convert every cross-thread-unsafe
-            // ValueConst: scalars inline, closures → ClosureRef, compounds →
-            // ValueRef into `lir_value_pool` (serialized through `ctx` so nested
-            // closures intern correctly). The LIR is preserved unconditionally —
-            // a spawned closure keeps its JIT-able body across the boundary.
-            let (lir_function, lir_value_pool) = match closure_rc.template.lir_function.as_ref() {
-                Some(lir) => {
-                    let mut lir = (**lir).clone();
-                    lir.doc = None;
-                    lir.syntax = None;
-                    match convert_lir_for_send(&mut lir, ctx)? {
-                        Some(pool) => (Some(lir), pool),
-                        // A closure-valued ValueConst couldn't be interned — drop
-                        // the LIR (the closure still runs via bytecode in the worker).
-                        None => (None, Vec::new()),
-                    }
-                }
-                None => (None, Vec::new()),
-            };
-
-            // Serialize the nested-lambda blueprints so the worker's reconstructed
-            // template carries them and `MakeClosure` resolves by index.
-            let child_protos: Vec<SendableClosure> = closure_rc
-                .template
-                .child_protos
-                .iter()
-                .map(|p| sendable_from_template(p, ctx))
-                .collect::<Result<_, _>>()?;
-
-            // Replace placeholder with complete entry.
-            ctx.closures[idx] = SendableClosure {
-                bytecode: (*closure_rc.template.bytecode).clone(),
-                arity: closure_rc.template.arity,
-                num_locals: closure_rc.template.num_locals,
-                num_captures: closure_rc.template.num_captures,
-                num_params: closure_rc.template.num_params,
-                constants,
-                signal: closure_rc.template.signal,
-                capture_params_mask: closure_rc.template.capture_params_mask,
-                capture_locals_mask: closure_rc.template.capture_locals_mask.clone(),
-
-                symbol_names: (*closure_rc.template.symbol_names).clone(),
-                location_map: (*closure_rc.template.location_map).clone(),
-                doc,
-                vararg_kind: closure_rc.template.vararg_kind.clone(),
-                name: closure_rc.template.name.as_ref().map(|s| s.to_string()),
-                squelch_mask: closure_rc.squelch_mask,
-                env,
-                lir_function,
-                lir_value_pool,
-                child_protos,
-                merged_slots: closure_rc.template.merged_slots.iter().copied().collect(),
-            };
-
-            Ok(SendValue::Ref(idx))
-        }
+        } => send_closure(value, closure_rc, ctx),
 
         // (Native-fns are immediates — `Value{TAG_NATIVE_FN, prim_id}` — and
         // serialize via the `Immediate` arm above. The prim_id is stable across
