@@ -38,11 +38,14 @@ pub struct Alloc<'h> {
 
 impl<'h> Alloc<'h> {
     /// Mint the call's fresh result region from `heap` and own it — the
-    /// boundary / WASM-host / trait-dispatch / test constructor. The result
+    /// boundary / WASM-host / signal-payload / test constructor. The result
     /// escapes to the caller (returned / marshaled across an ABI) and is freed
     /// value-based by the consumer's `DecrefValueRegion`, so the ctx holds no
     /// `Drop`. Crate-private: only the dispatch sites enumerated in
-    /// docs/impl/region/ctx.md may mint a ctx.
+    /// docs/impl/region/ctx.md may mint a ctx. (Trait-method dispatch is NOT one:
+    /// it runs the resolved method against the outer call's existing `ctx`, so a
+    /// fresh method result lands in that call's `alloc_region` — see
+    /// `traitregistry::call_method_fn`.)
     pub(crate) fn new(heap: &'h mut FiberHeap) -> Self {
         let region = heap.new_runtime_region();
         Self::with_region(region, heap)
@@ -63,7 +66,7 @@ impl<'h> Alloc<'h> {
     }
 
     /// A ctx for a native-call *boundary* with no compiler-assigned result slot
-    /// — trait-method dispatch and the WASM host trampolines
+    /// — the JIT/WASM host trampolines and the signal-payload builders
     /// (docs/impl/region/ctx.md). It mints its **own** fresh result region,
     /// exactly like [`new`](Self::new); the native's result escapes to the
     /// caller and is freed value-based by the consumer's `DecrefValueRegion`.
@@ -131,8 +134,9 @@ impl<'h> Alloc<'h> {
 /// (docs/impl/region/ctx.md "The capability split"). `Deref`s to `Alloc`, so
 /// every `ctx.string(..)`/`ctx.alloc(..)`/`ctx.error(..)` works unchanged, and
 /// adds [`vm`](Self::vm) for state access and synchronous interpreter re-entry.
-/// Built only where a VM drives the call: bytecode dispatch, the WASM hosts, and
-/// trait-method dispatch. The `PrimFn` signature carries a `&mut NativeCtx`.
+/// Built where a VM drives the call: bytecode dispatch and the JIT/WASM hosts.
+/// (Trait-method dispatch reuses the outer call's `NativeCtx` rather than
+/// building one.) The `PrimFn` signature carries a `&mut NativeCtx`.
 pub struct NativeCtx<'h> {
     alloc: Alloc<'h>,
     /// The driving VM, as a raw pointer guarded by the phantom borrow. Non-null
@@ -176,10 +180,11 @@ impl<'h> NativeCtx<'h> {
         }
     }
 
-    /// A native-call *boundary* with no compiler-assigned result slot — trait
-    /// dispatch and the WASM host trampolines. Mints a fresh result region from
-    /// the VM's own heap and carries the VM. The native's result escapes to the
-    /// caller and is freed value-based by the consumer's `DecrefValueRegion`.
+    /// A native-call *boundary* with no compiler-assigned result slot — the
+    /// JIT/WASM host trampolines and intrinsic re-entry. Mints a fresh result
+    /// region from the VM's own heap and carries the VM. The native's result
+    /// escapes to the caller and is freed value-based by the consumer's
+    /// `DecrefValueRegion`.
     pub(crate) fn boundary_vm(vm: &'h mut VM) -> Self {
         let vm_ptr: *mut VM = vm as *mut VM;
         let heap: &'h mut FiberHeap = unsafe { &mut *vm.heap_ptr };

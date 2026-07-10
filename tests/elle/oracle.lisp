@@ -203,12 +203,14 @@
 (defn declare-root [root labels]
   (each l in labels
     (put root-of l root)))
-(declare-root :f1a ["reduce" "fold" "stdlib-fold" "rest-array-copy" "take-drop"
-                    "map-while" "filter-while" "wrap-map" "zip" "distinct"
-                    "group-by" "frequencies" "merge" "concat" "pipeline"
-                    "each-list" "reverse" "string-outer" "append-outer"
-                    "concat-while" "yield-concat" "nested-closure"
-                    "stdlib-concat" "zip-tower"])
+# `rest-array-copy` is a CLOSED control (the native fresh-result invariant, not F1a
+# stdlib-body scratch) — undeclared like `slice`/`to-array`, so a regression to open
+# trips the completeness gate loudly rather than being silently absorbed as F1a.
+(declare-root :f1a ["reduce" "fold" "stdlib-fold" "take-drop" "map-while"
+                    "filter-while" "wrap-map" "zip" "distinct" "group-by"
+                    "frequencies" "merge" "concat" "pipeline" "each-list"
+                    "reverse" "string-outer" "append-outer" "concat-while"
+                    "yield-concat" "nested-closure" "stdlib-concat" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "pop-wrapper" "del-wrapper"
@@ -492,13 +494,17 @@
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 1]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 3]
    ["zip" (fn [j] (zip [1 2] [3 4])) 10] ["sort" (fn [j] (sort [3 1 2])) 0]
-   ["reverse" (fn [j] (reverse [1 2 3])) 2]  # F1a witness (memory.md § F1). `(rest array)` copies the tail into a fresh
-   # immutable array slice whose call-result region is never reclaimed. This is
-   # the standalone transform-scratch: a discarded `(rest arr)`. `fold`/`reduce`
-   # no longer feed it (Stage 1 dissolved their `first`/`rest` walk into an index
-   # walk — core.lisp fold), so it is now measured on its own. `(rest list)`
-   # shares its tail and reads 0. Shrink-only.
-   ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 1]
+   ["reverse" (fn [j] (reverse [1 2 3])) 2]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
+   # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
+   # native allocates the slice into the outer `rest` call's OWN region (the
+   # `dispatch_native_call` fresh-result invariant — a fresh native result lives
+   # in the call's `alloc_region`, so the consumer's `DecrefValueRegion` frees
+   # it), where minting a separate boundary region stranded it. A CLOSED control
+   # beside `slice`/`to-array`, shrink-only: RED if a boundary region strands the
+   # slice again (runtime::tests::ownership::
+   # region_native_trait_dispatch_fresh_result_reclaims). `(rest list)` shares its
+   # tail (also 0).
+   ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
    ["distinct" (fn [j] (distinct [1 2 1 3])) 3]
    ["take-drop"
     (fn [j]

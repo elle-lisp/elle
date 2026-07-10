@@ -5,6 +5,7 @@ use super::*;
 mod anode;
 mod fnode;
 mod jit;
+mod native;
 mod owner;
 mod selfrec;
 mod subtree;

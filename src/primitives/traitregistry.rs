@@ -158,8 +158,10 @@ pub fn dispatch_trait_method(
 }
 
 /// Call a resolved trait method (NativeFn or Closure). `ctx` is the calling
-/// native's capability — used only to build error values in the call's region;
-/// the native-fn branch mints its own fresh `boundary` region.
+/// native's capability — its `alloc_region` is the outer call's result slot, so
+/// the native-fn branch runs the method against it (a fresh result then lands in
+/// the region `dispatch_native_call` reclaims); the closure branch re-enters the
+/// driving VM through it.
 fn call_method_fn(
     method_fn: &Value,
     protocol: &str,
@@ -167,18 +169,21 @@ fn call_method_fn(
     args: &[Value],
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
 ) -> (SignalBits, Value) {
-    // NativeFn — call directly. A trait-method native is morally a native
-    // call, but this dispatch path has no compiler-assigned result slot, so the
-    // `boundary` ctx mints its own fresh result region (like
-    // `dispatch_native_call`). It carries the calling ctx's driving VM, so the
-    // method can reach VM state / re-enter. The result escapes to the
-    // trait-dispatch caller and is freed value-based by the consumer's
-    // `DecrefValueRegion`.
+    // NativeFn — call directly, against the OUTER call's own `ctx`. A trait
+    // method resolved here is the body of an outer native (`first`/`rest`/`nth`,
+    // `length`, …) that already holds a compiler-assigned result slot; running
+    // the method against that same `ctx` lands its fresh result in the outer
+    // call's `alloc_region`, so `dispatch_native_call` recognises it as fresh and
+    // the consumer's `DecrefValueRegion` reclaims it. Minting a SEPARATE
+    // `boundary` region here instead stranded a genuinely-fresh result — the
+    // tail-copy slice of `(rest [array])` — in a region distinct from
+    // `alloc_region`, which `dispatch_native_call` then mis-read as a pass-through
+    // and over-retained, leaking that region (pinned bounded by
+    // `runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`).
+    // A borrowed-element method (`first`/`nth`) allocates nothing, so its result
+    // still lives in the arg's region and is correctly pass-through-retained.
     if let Some(prim_fn) = method_fn.as_native_fn() {
-        return prim_fn(
-            &mut crate::primitives::ctx::NativeCtx::boundary_vm(ctx.vm()),
-            args,
-        );
+        return prim_fn(ctx, args);
     }
 
     // Closure — call on the driving VM reached through the ctx. Passed as the

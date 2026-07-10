@@ -250,14 +250,24 @@ the error's message and every field are born in one region. See
 
 ## Direct `PrimFn` invocation sites (not via VM dispatch)
 
-These call a primitive's function pointer directly and build a ctx at the flip,
-minting the per-call region exactly as `dispatch_native_call` does:
+These call a primitive's function pointer directly. The host/plugin sites build a
+ctx at the flip, minting the per-call region exactly as `dispatch_native_call`
+does:
 
-- `traitregistry::call_method_fn` — trait-method natives (morally a native call;
-  the closure branch routes through `call_closure`).
 - The WASM hosts: `call_primitive` (full backend) and the tiered linker's
   `rt_call` NativeFn branch (`src/wasm/lazy/env.rs`).
 - `plugin_api::call_plugin` — see Plugins.
+
+`traitregistry::call_method_fn` also calls a native's pointer directly, but does
+**not** mint: it runs the resolved trait-method native against the *outer* call's
+ctx (`prim_fn(ctx, args)`), so a fresh method result — `(rest [array])`'s copied
+tail — lands in that call's `alloc_region` and is recognised as fresh by
+`dispatch_native_call`. A separate `boundary` region here would strand a
+genuinely-fresh result (a region distinct from `alloc_region`), which the
+pass-through accounting then mis-reads as a borrow and over-retains — the region
+never freed (pinned bounded by
+`runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`).
+The closure branch routes through `call_closure`.
 
 The compiler enumerates the rest: a non-conforming caller is a type error.
 
