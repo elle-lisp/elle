@@ -154,16 +154,38 @@
 
 ## ── fold / reduce ──────────────────────────────────────────────────
 
+## Normalize once with `->array`, then walk by INDEX — never (first/rest)
+## recursion (`rest` on an array copies the tail into a fresh slice per step: F1a
+## transform-scratch, O(n²) time + a throwaway slice per element; `(get arr i)` is
+## O(1)). The loop MUST hold the combiner `f` by CAPTURE — a `letrec go` closing
+## over f/arr/n — NOT by a `def @`-cell accumulator (`while` loop) and NOT by
+## threading f as a recursive argument (a top-level `go` helper). Both of those
+## drop per-call scratch to ~0, but they let f's region reach refcount 0 mid-fold:
+## its `DecrefValueRegion` fires and frees the closure, and the next iteration's
+## `UpdateCapture` (cell rebind) / re-read derefs the freed page — a hard UAF
+## (traced under --trace=guardfree to `DecrefValueRegion of closure … context:
+## UpdateCapture`; the over-free twin of the F5 arg-retain gap). NOT pre-prelude
+## specific and NOT specific to `f`=`+`: it is a general closure-lifetime gap for
+## the cell/threaded-arg shape. It is STATE-DEPENDENT — it only faults once region
+## ids recycle onto the freed one, so a short loop looks clean and the full oracle
+## (deep region churn) faults; do not "verify" a rewrite of this with a small run.
+## Capturing f in the letrec keeps its region reachable through go's env for the
+## whole fold, so this is the guardfree-safe form. Its residual — the per-call `go`
+## closure+env (~1 obj/op named, ~3 with a fresh combiner) — is F1a scratch this
+## safe form cannot remove; closing it needs that closure over-free fixed in the
+## region solver, not a .lisp rewrite.
 (def fold
   (fn [f init coll]
     "Left-fold `f` over `coll` from the seed `init`:
      (f (f (f init e0) e1) e2)…. Returns `init` unchanged for an empty
      collection. `f` is called as (f acc element)."
-    (letrec [go (fn [acc xs]
-                  (if (empty? xs)
-                    acc
-                    (go (f acc (first xs)) (rest xs))))]
-      (go init (->array coll)))))
+    (let [arr (->array coll)
+          n (length arr)]
+      (letrec [go (fn [i acc]
+                    (if (%lt i n)
+                      (go (%add i 1) (f acc (get arr i)))
+                      acc))]
+        (go 0 init)))))
 
 (def reduce fold)
 
@@ -172,11 +194,18 @@
     "Left-fold `f` over `coll` using its first element as the seed:
      (f (f e0 e1) e2)…. Signals :argument-error on an empty collection.
      Internal helper (the user-facing reduce/reduce1 live in stdlib)."
-    (let [arr (->array coll)]
-      (if (empty? arr)
+    ## Index walk from element 1, seeded by element 0 — never (rest arr), which
+    ## would mint a throwaway tail slice (the same F1a scratch fold avoids above).
+    (let [arr (->array coll)
+          n (length arr)]
+      (if (%eq n 0)
         (emit :error {:error :argument-error
                       :message "reduce1: empty collection"})
-        (fold f (first arr) (rest arr))))))
+        (letrec [go (fn [i acc]
+                      (if (%lt i n)
+                        (go (%add i 1) (f acc (get arr i)))
+                        acc))]
+          (go 1 (get arr 0)))))))
 
 ## ── append ─────────────────────────────────────────────────────────
 ## :syntax branch handles syntax lists from quasiquote expansion.

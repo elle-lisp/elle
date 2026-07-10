@@ -181,11 +181,74 @@
     (put (put c :alt-rate (get a :rate))
          :verdict (if (agree? a c) (get c :verdict) :contaminated))))
 
+# ── The defect / by-design split — the instrument owns the burndown headline ──
+# memory.md §4 gives every leak class a ROOT (F1a/F1b/F2/F3/F4/F5). A fixed
+# handful of open probes leak BY DESIGN — genuine unbounded growth, or a per-call
+# mint-count axis (assessment §1's "six open-by-design probes") — and are NOT
+# defects. The open/closed split and the defect-vs-by-design breakdown used to be
+# recovered from this dashboard by `grep -c` minus a hand count of the six; the
+# classifier below prints it directly AND refuses to be silently wrong: every
+# probe that MEASURES :open must be declared here (a root, or by-design), or the
+# completeness gate at the end fails. A by-design open probe DISPLAYS :growth so
+# `grep -c '^  open'` counts defects alone; the measured :verdict is untouched, so
+# the gauge-live and B-invariance gates (which read it) are unchanged.
+(def @by-design
+  @{"discriminator (live-growth)" true
+    "sub-integer (1-in-3 retain)" true
+    "push-outer" true
+    "push-accum" true
+    "recur-local-self-mint" true
+    "recur-local-foreign-mint" true})
+(def @root-of @{})
+(defn declare-root [root labels]
+  (each l in labels
+    (put root-of l root)))
+(declare-root :f1a ["reduce" "fold" "stdlib-fold" "rest-array-copy" "take-drop"
+                    "map-while" "filter-while" "wrap-map" "zip" "distinct"
+                    "group-by" "frequencies" "merge" "concat" "pipeline"
+                    "each-list" "reverse" "string-outer" "append-outer"
+                    "concat-while" "yield-concat" "nested-closure"
+                    "stdlib-concat" "zip-tower"])
+(declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
+                    "put-churn" "store-wrapper" "native-tail-put-struct"
+                    "native-tail-put-array" "pop-wrapper" "del-wrapper"
+                    "set-del-wrapper"])
+(declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
+                   "yield-multimut" "protect-while" "denied-discard"
+                   "cancel-discard" "abort-discard"])
+(declare-root :f3 ["io-yield ev/sleep"])
+(declare-root :f4 ["capture-backedge"])
+(declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
+                   "fresh-env-cell" "break-value" "break-value-used"
+                   "break-value-lit" "struct-match" "arg-result"])
+
+(def @n-defects 0)
+(def @n-by-design 0)
+(def @roots-seen @{})
+(def @unclassified @[])
+(defn classify [label verdict]
+  "Fold one probe's MEASURED verdict into the split accumulators and return its
+   DISPLAY verdict. A by-design open probe shows :growth (tallied by-design); a
+   classified defect shows :open (tallied, its root recorded); an open probe in
+   NEITHER table shows :open and is recorded unclassified — the completeness gate
+   fails on it. :closed / :inconclusive pass through untallied."
+  (if (not= verdict :open)
+    verdict
+    (if (get by-design label)
+      (begin
+        (assign n-by-design (%add n-by-design 1))
+        :growth)
+      (begin
+        (assign n-defects (%add n-defects 1))
+        (let [root (get root-of label)]
+          (if (nil? root) (push unclassified label) (put roots-seen root true)))
+        :open))))
+
 (defn show [r]
   "Print one measured class as a dashboard line."
   (let [alt (get r :alt-rate)]
-    (println "  " (get r :verdict) "  " (get r :label) ": rate=" (get r :rate)
-             " ±" (get r :half)
+    (println "  " (classify (get r :label) (get r :verdict)) "  " (get r :label)
+             ": rate=" (get r :rate) " ±" (get r :half)
              (if (nil? alt) "" (string " [B-check " alt "]")) "  (" (get r :ops)
              " ops / " (get r :blocks) " blocks)")))
 
@@ -426,14 +489,15 @@
       (while (%lt k 10)
         {:x j :y k}
         (assign k (%add k 1)))) 0]  # collection ops
-    ["reduce" (fn [j] (reduce + 0 [1 2 3])) 3]
-   ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 5]
+    ["reduce" (fn [j] (reduce + 0 [1 2 3])) 1]
+   ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 3]
    ["zip" (fn [j] (zip [1 2] [3 4])) 10] ["sort" (fn [j] (sort [3 1 2])) 0]
    ["reverse" (fn [j] (reverse [1 2 3])) 2]  # F1a witness (memory.md § F1). `(rest array)` copies the tail into a fresh
-   # immutable array slice whose call-result region is never reclaimed — the
-   # transform-scratch root the whole HOF family rides: `fold`/`reduce` eagerly
-   # `(->array coll)` then walk with `first`/`rest`, so even a list leaks one slice
-   # per element. `(rest list)` shares its tail and reads 0. Shrink-only.
+   # immutable array slice whose call-result region is never reclaimed. This is
+   # the standalone transform-scratch: a discarded `(rest arr)`. `fold`/`reduce`
+   # no longer feed it (Stage 1 dissolved their `first`/`rest` walk into an index
+   # walk — core.lisp fold), so it is now measured on its own. `(rest list)`
+   # shares its tail and reads 0. Shrink-only.
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 1]
    ["distinct" (fn [j] (distinct [1 2 1 3])) 3]
    ["take-drop"
@@ -495,7 +559,7 @@
         (cyc-mk)
         nil)) 0]  # string ops + realistic patterns
     ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1))) 0]
-   ["concat" (fn [j] (concat "a" "b" "c")) 13]
+   ["concat" (fn [j] (concat "a" "b" "c")) 11]
    ["split" (fn [j] (string/split "a,b,c" ",")) 0]
    ["join" (fn [j] (string/join ["a" "b" "c"] ",")) 0]
    ["trim" (fn [j] (string/trim "  x  ")) 0]
@@ -874,16 +938,19 @@
 
 # Stdlib per-call leak (memory.md § F1a — the transform-scratch retain). The leaked
 # objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
-# `recur-local-*` probes read 0) and NOT, mostly, cons cells: `fold`/`reduce` eagerly
-# `(->array coll)` then walk with `first`/`rest`, minting a fresh array slice per
-# element (`rest-array-copy` above), and `concat` builds a fresh accumulator + per-arg
-# combiner closures. All are non-escaping, acyclic call-result regions no static slot
+# `recur-local-*` probes read 0) and NOT, mostly, cons cells. Stage 1 dissolved the
+# first/rest copy-scratch: `fold`/`reduce` now `(->array coll)` once and INDEX-walk
+# (core.lisp), so `stdlib-fold` dropped 5→4 — the residual is fold's per-call `go`
+# closure+env, an F1a scratch closure the guardfree-safe (letrec-capture) form
+# cannot remove (removing it needs the closure-arg over-free fixed, not a .lisp
+# rewrite; see core.lisp fold). `concat` builds a fresh accumulator + per-arg
+# combiner closures. All non-escaping, acyclic call-result regions no static slot
 # can name. Pinned at the exact `(concat "a" "b")` / 2-element `fold` shapes.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
                    count-gauge 100 6 60 0.4 0.5) 10)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
-                   count-gauge 100 6 60 0.4 0.5) 5)
+                   count-gauge 100 6 60 0.4 0.5) 4)
 
 # ── HOF-composition dissolution debt — the zip-tower witness ───────────
 # `zip-tower` is a zip built as a TOWER of higher-order calls: it converts every
@@ -900,9 +967,12 @@
 # debt; it closes when a towered composition reclaims to the same floor as the hand-fused
 # form — NOT by hand-rewriting each composition, which is the programmer bridging a gap the
 # compiler should close. (The production `zip` WAS so rewritten, for the RSS win; this probe
-# is the standing record of what that rewrite worked around.) Shrink-only. 25 → 32 under the
-# unified-intrinsics stdlib: the layers' arg-position closure-call results ride the
-# now-unconsumed ReturnValue retain (the `arg-result` class) at composition depth.
+# is the standing record of what that rewrite worked around.) Shrink-only, pinned as a
+# CROSS-TIER RANGE [25 32]: the layers' arg-position closure-call results ride the
+# now-unconsumed ReturnValue retain (the `arg-result` class, § F5) at composition depth on
+# the VM (32), but the JIT does not hold that retain (25) — a genuine VM/JIT span, so the
+# pin is the [lo hi] range that greens both tiers. Both bounds are shrink-only: a fix lowers
+# them (and collapses the range once the arg-retain gap closes and the tiers reconverge).
 (defn zip-tower [& colls]
   (letrec [to-list (fn (c)
                      (cond
@@ -933,7 +1003,7 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) 32)
+                   count-gauge 100 6 60 0.4 0.5) [25 32])
 
 # Dispatch-wrapper passthrough leak (memory.md § F1b) — NOT a "native-tail double
 # mint". The direct intrinsic `%put-struct` and the single non-dispatching native
@@ -1382,6 +1452,25 @@
                  (string "yield-at-scale last: " (get vals 999)))))
 (check (assert (= (concat [1 2] [3 4]) [1 2 3 4]) "array concat value"))
 (check (assert (= (concat "foo" "bar") "foobar") "string concat value"))
+
+# ── The split headline — the number §1's protocol reads, printed by the tool ──
+# `open defects` is the burndown count; `by-design` is the fixed six; `roots` is
+# how many of memory.md §4's six roots still have an open probe (it falls to 0
+# when the last defect closes). UNCLASSIFIED is appended only when a probe leaked
+# without a declaration — a stale ledger, gated below so it can never pass silently.
+(println "── split ──")
+(println "open defects: " n-defects " across " (length (keys roots-seen))
+         " roots; by-design: " n-by-design
+         (if (= (length unclassified) 0)
+           ""
+           (string "; UNCLASSIFIED: " (length unclassified) " " unclassified)))
+(check (assert (= (length unclassified) 0)
+               (string "unclassified open probe(s): " unclassified
+                       " — every open probe must be a declared root or by-design "
+                       "(the split ledger is stale)")))
+(check (assert (= n-by-design 6)
+               (string "by-design tally " n-by-design
+                       " ≠ 6 — the six growth probes must each read open")))
 
 (report)
 (println "oracle: ok")
