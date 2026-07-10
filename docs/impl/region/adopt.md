@@ -168,11 +168,15 @@ facts make "before" non-trivial for a container root:
   member is `Owned`**; once the subtree drop has reclaimed it, that slot-resolved
   decref faults (`regionstore/refcount.rs`, the phantom/double-free assert).
 
-So the emit orders every store-adopted member's release **first** at each shared
-`decref_point` — the members-first class in `with_region_info`'s bucket sort — ahead of
-the call-result readers and the plain freers. A member's release reads and frees
-nothing while `Owned`, so ordering it before the readers is safe; it then no-ops, and
-whichever root-freeing release fires afterward subtree-drops the member exactly once.
+So the emit orders every adopted member's release **before its owner's** at each shared
+`decref_point`, by topologically sorting the adopt edges (`owned_adopt_edges` ∪
+`capture_adopt_edges`, member → owner) in `with_region_info`. The forest gives each
+member exactly one owner, so the graph is acyclic and the order always exists — and it
+orders *nested* subtrees innermost-first (member ⊂ mid ⊂ root), which a flat
+members-first bucket class could not. A member's release reads and frees nothing while
+`Owned`, so it no-ops; whichever root-freeing release fires afterward subtree-drops the
+member exactly once. Regions no adopt edge relates fall back to the page-read-depth
+tie-break (rules.md Rule 4).
 The invariant this restores is stated positively in ownership.md § "The runtime: a reclamation
 typestate and `owned_children`": a store-adopted member's decref hits the still-frozen
 `Owned` region — a no-op — because it is emitted before the root's drop. The reference

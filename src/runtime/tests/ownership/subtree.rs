@@ -295,12 +295,13 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
 /// store-adopted member whose OWN slot-resolved `DecrefRegion` shares that same
 /// `decref_point`. The member's decref is a structural no-op only while it is still
 /// `Owned`, so it must be emitted before the container's rc-zeroing release; the
-/// members-first bucket sort (`with_region_info`) guarantees it. Pre-fix the sort put
-/// the member's plain `DecrefRegion` LAST, so the container's discarded-pass-through
-/// release subtree-dropped the pair before its own decref — the pair's slot-resolved
-/// `DecrefRegion` then landed on a freed region (the phantom/double-free panic at
+/// topological release order over the adopt edges (`with_region_info::order_releases`)
+/// guarantees it (member before owner). Order the member's plain `DecrefRegion` after
+/// the container's discarded-pass-through release and the container's subtree drop
+/// reclaims the pair before its own decref — the pair's slot-resolved `DecrefRegion`
+/// then lands on a freed region (the phantom/double-free panic at
 /// `regionstore/refcount.rs`). This is the counterfactual: `steady_region_growth`
-/// runs the loop and would PANIC on the first double-free before the fix.
+/// runs the loop and PANICs on the first double-free if the order inverts.
 ///
 /// `%pair` lowers as an inline intrinsic freed by a slot-resolved `DecrefRegion`,
 /// which is what puts the member's decref in the shared bucket. Bounded growth
@@ -311,8 +312,8 @@ fn region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims() {
     // The pushed pair is a store-adopted member of the let-bound container's Owned
     // subtree; the loop rebuilds and reclaims it every iteration. The container's push
     // result is discarded (the `let` precedes `(assign j …)`), so the discarded
-    // pass-through release coincides with the member's decref — the emit order the fix
-    // corrects.
+    // pass-through release coincides with the member's decref — the shared-point emit
+    // order the topological sort must get right.
     const SUBJECT: &str = "(begin (def @j 0) \
                            (while (%lt j 3) \
                              (let [items (@array)] (%array-push items (%pair 1 2))) \

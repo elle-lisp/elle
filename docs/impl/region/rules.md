@@ -93,17 +93,29 @@ is a correctness defect, not a tuning knob.
    region a still-live binding holds is a double-free — the canonical fiber-resume
    defect.
 
-   When several releases land on one `decref_point`, their emission order is
-   **deterministic and dependency-safe**: releases that *read* pages come before
-   releases that *free* pages. Concretely — `DecrefValueRegion` (loads a slot and
-   derefs the value, unwrapping a capture cell to reach the inner value's region)
-   is emitted first; then `DecrefCellRegion` (reads the cell's page header via
-   `region_of`); then plain `DecrefRegion` (no page reads). A page-freeing
-   release ordered before a page-reading release of the same point is the
-   capture-cell over-release UAF: the cell's `DecrefRegion` frees the cell's
-   pages, then the init value's `DecrefValueRegion` unwraps the freed cell. The
-   order must also be deterministic across compiles — release order may never
-   depend on hash-map iteration.
+   When several releases land on one `decref_point`, their emission order is a
+   **topological sort of the ownership adopt edges** — the single-owner
+   Owned-subtree forest (`owned_adopt_edges` ∪ `capture_adopt_edges`, member →
+   owner) — so a store/capture-adopted **member** is released before the release
+   that subtree-drops its **owner**. A member's own `DecrefRegion` is a no-op only
+   while the member is still `Owned`; once the owner's drop has reclaimed it that
+   decref faults, so the member must come first (adopt.md § "The lifetime
+   obligation the root carries"). The forest gives each member exactly one owner,
+   so the edge graph is acyclic and a topological order always exists — including
+   for *nested* subtrees (member ⊂ mid ⊂ root release innermost-first), which a
+   flat members-first bucket could not order.
+
+   Regions no adopt edge relates are tie-broken by **page-read depth** so a
+   release that *reads* pages precedes a release that *frees* them: a value-gated
+   `DecrefValueRegion` (loads a slot and unwraps a capture cell to reach the inner
+   value's region — the deepest read) sorts first, then a `DecrefCellRegion`
+   (reads the cell's page header via `region_of`, then frees the cell), then a
+   plain `DecrefRegion` (frees, reads nothing); region id breaks the final tie.
+   Freeing a cell's pages before the init value's `DecrefValueRegion` unwraps it is
+   the capture-cell over-release UAF (this Shared cell carries no adopt edge — RC
+   balances its accounting, but the physical unwrap read must still precede the
+   free). The order is deterministic across compiles — it never depends on
+   hash-map iteration.
 
 5. **RC tracks every cross-region reference — every escape increfs, every drop
    decrefs.** This is the whole soundness obligation, and it is only as sound as

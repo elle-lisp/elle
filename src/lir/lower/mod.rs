@@ -370,54 +370,128 @@ impl<'a> Lowerer<'a> {
                 .or_default()
                 .push(r);
         }
-        // A store-adopted member (`owned_adopt_edges`: each store site maps to
-        // `(member, owner)` interior edges) keeps its OWN decref, which is a structural
-        // no-op only while the member is still `Owned` — i.e. only before its owner's
-        // subtree drop. So at a shared decref_point it must sort BEFORE every release
-        // that can free the member's owner there (the owner's holder-binding release AND
-        // the discarded pass-through result of a `%array-push`/`%put`, which returns its
-        // container — both value-gated below). Ordering an `Owned` no-op ahead of the
-        // page-reading releases is safe: it reads and frees nothing; it then no-ops, and
-        // the owner's later release subtree-drops the member exactly once. Without this
-        // the readers-before-freers order below sorted the member's plain `DecrefRegion`
-        // LAST, so the owner's release reclaimed the member before its own decref, which
-        // then faulted on the freed region (the emit-order half of the lifetime
-        // obligation — docs/impl/region/adopt.md § "The lifetime obligation the root
-        // carries"; region-array-push-pair-loop-uaf.lisp).
-        let store_adopted_members: rustc_hash::FxHashSet<crate::hir::region::Region> = info
-            .owned_adopt_edges
-            .values()
-            .flatten()
-            .map(|&(member, _owner)| member)
-            .collect();
-        // Release order at a shared decref_point is deterministic and
-        // dependency-safe (docs/impl/region/rules.md Rule 4): a store-adopted member's
-        // `Owned` no-op sorts FIRST (class 0), then releases that READ pages come before
-        // releases that FREE them. Class 1 — `DecrefValueRegion` (loads a slot and
-        // derefs the value, unwrapping a capture cell); class 2 — `DecrefCellRegion`
-        // (reads the cell's page header via `region_of`); class 3 — plain `DecrefRegion`
-        // (frees, reads nothing). Region id breaks ties so the order never depends on
-        // hash iteration (`region_data` is a HashMap; its iteration order is random per
-        // instance — the unsorted order was the flaky capture-cell UAF,
-        // region-capture-cell-noreassign-uaf.lisp).
+        // The **release order** at each shared `decref_point` (docs/impl/region/rules.md
+        // Rule 4). An adopted member keeps its OWN `DecrefRegion`, a structural no-op only
+        // while the member is still `Owned` — once its owner's subtree drop reclaims it,
+        // that decref faults. So a member must be released before its owner. The ownership
+        // adopt maps hold exactly those edges: `owned_adopt_edges` (store-adopted, each
+        // store site → `(member, owner)`) and `capture_adopt_edges` (capture-adopted,
+        // each closure site → `(captured, closure)`). They are DISJOINT per member — a
+        // member is adopted by its single owner through exactly one map (region/info.rs) —
+        // so each region has at most one owner here: the graph is the Owned-subtree
+        // **forest**, acyclic by construction, and `order_releases` topologically sorts
+        // it (member before owner, nested subtrees innermost-first). A single flat
+        // priority class cannot express a transitive member ⊂ mid ⊂ root chain; the
+        // topological sort orders it by construction.
+        let mut adopt_owner: HashMap<crate::hir::region::Region, crate::hir::region::Region> =
+            HashMap::new();
+        for &(member, owner) in info.owned_adopt_edges.values().flatten() {
+            adopt_owner.insert(member, owner);
+        }
+        for &(member, owner) in info.capture_adopt_edges.values().flatten() {
+            adopt_owner.insert(member, owner);
+        }
         for regions in decrefs_by_decref_point.values_mut() {
-            regions.sort_by_key(|r| {
-                let class = if store_adopted_members.contains(r) {
-                    0
-                } else if info.cell_release_regions.contains(r) {
-                    2
-                } else if info.call_result_regions.contains(r) {
-                    1
-                } else {
-                    3
-                };
-                (class, r.0)
-            });
+            Self::order_releases(regions, &adopt_owner, &info);
         }
         self.increfs_by_site = increfs_by_site;
         self.decrefs_by_decref_point = decrefs_by_decref_point;
         self.region_info = info;
         self
+    }
+
+    /// Order the releases sharing one `decref_point` (docs/impl/region/rules.md Rule 4).
+    ///
+    /// A topological sort of the ownership **adopt edges** (`adopt_owner`: member →
+    /// owner — the single-owner Owned-subtree forest), so every store/capture-adopted
+    /// member's own `DecrefRegion` — a no-op only while the member is still `Owned` — is
+    /// emitted before the release that subtree-drops its owner (region/adopt.md § "The
+    /// lifetime obligation the root carries"). Nested subtrees release innermost-first by
+    /// construction — a single flat priority class cannot express a transitive
+    /// member-before-owner chain.
+    ///
+    /// Regions no adopt edge relates are tie-broken by page-read depth: a value-gated
+    /// `DecrefValueRegion` that unwraps a cell to the inner value reads deepest and sorts
+    /// first (class 0), then a `DecrefCellRegion` that reads the cell header and frees the
+    /// cell (class 1), then a plain `DecrefRegion` that frees and reads nothing (class 2);
+    /// region id breaks the final tie, so the order never depends on `HashMap` iteration
+    /// (the flaky capture-cell UAF, region-capture-cell-noreassign-uaf.lisp).
+    ///
+    /// The adopt graph is a forest — each member has exactly one owner (the two adopt maps
+    /// are disjoint per member; region/info.rs) — so it is acyclic and a topological order
+    /// always exists. Were that invariant ever violated, the residual cyclic regions are
+    /// appended in tie-break order (deterministic, never a release-build panic on a legal
+    /// program — resolve a cycle deterministically, never assert it away); a debug assert
+    /// flags it.
+    fn order_releases(
+        regions: &mut Vec<crate::hir::region::Region>,
+        adopt_owner: &HashMap<crate::hir::region::Region, crate::hir::region::Region>,
+        info: &RegionInfo,
+    ) {
+        use crate::hir::region::Region;
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
+        // Page-read depth: lower sorts earlier. `cell_release_regions ⊆
+        // call_result_regions`, so test the cell membership first.
+        let class = |r: Region| -> u8 {
+            if info.cell_release_regions.contains(&r) {
+                1 // DecrefCellRegion: reads the cell page header, frees the cell
+            } else if info.call_result_regions.contains(&r) {
+                0 // DecrefValueRegion: unwraps the cell to the inner value (deepest read)
+            } else {
+                2 // plain DecrefRegion: frees, reads nothing
+            }
+        };
+        let present: rustc_hash::FxHashSet<Region> = regions.iter().copied().collect();
+        // Kahn's algorithm over the member → owner edges restricted to this bucket. An
+        // owner waits on every in-bucket member it owns; `succ` maps a member to the
+        // single owner that waits on it (each member has ≤ 1 owner).
+        let mut indeg: HashMap<Region, u32> = regions.iter().map(|&r| (r, 0)).collect();
+        let mut succ: HashMap<Region, Region> = HashMap::new();
+        for &m in regions.iter() {
+            if let Some(&owner) = adopt_owner.get(&m) {
+                if present.contains(&owner) {
+                    *indeg.get_mut(&owner).expect("owner is in this bucket") += 1;
+                    succ.insert(m, owner);
+                }
+            }
+        }
+        // Min-heap by (class, region id): the deterministic tie-break among the
+        // currently-unblocked regions. `Region` has no `Ord`, so key on the id and
+        // reconstruct — the id is unique within a bucket (`region_data` keys regions).
+        let mut ready: BinaryHeap<Reverse<(u8, u32)>> = BinaryHeap::new();
+        for &r in regions.iter() {
+            if indeg[&r] == 0 {
+                ready.push(Reverse((class(r), r.0)));
+            }
+        }
+        let mut out: Vec<Region> = Vec::with_capacity(regions.len());
+        while let Some(Reverse((_, id))) = ready.pop() {
+            let r = Region(id);
+            out.push(r);
+            if let Some(&owner) = succ.get(&r) {
+                let d = indeg.get_mut(&owner).expect("owner tracked in indeg");
+                *d -= 1;
+                if *d == 0 {
+                    ready.push(Reverse((class(owner), owner.0)));
+                }
+            }
+        }
+        if out.len() != regions.len() {
+            debug_assert!(
+                false,
+                "release-order adopt edges cycled at a shared decref_point: {regions:?}"
+            );
+            let mut rest: Vec<Region> = regions
+                .iter()
+                .copied()
+                .filter(|r| !out.contains(r))
+                .collect();
+            rest.sort_by_key(|r| (class(*r), r.0));
+            out.extend(rest);
+        }
+        *regions = out;
     }
 
     /// Check if a scope has local allocations (reclaimable).

@@ -421,10 +421,11 @@ fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
     // (region-array-push-pair-loop-uaf.lisp): the container is a `Fresh` call-result
     // freed value-based (and, when its push result is discarded, freed a second time by
     // that pass-through result), and the pushed `%pair` is a plain-`DecrefRegion`
-    // member sharing the container's `decref_point`. The pre-fix bucket sort
-    // (readers-before-freers) placed the member's plain `DecrefRegion` LAST, so the
-    // container's rc-zeroing release subtree-dropped the pair before its own decref —
-    // which then faulted on the freed region. The members-first bucket class fixes it.
+    // member sharing the container's `decref_point`. Order the member's plain
+    // `DecrefRegion` after the container's rc-zeroing release and the container's subtree
+    // drop reclaims the pair before its own decref — which then faults on the freed
+    // region. The topological order over the adopt edge (member → owner) keeps the
+    // member first.
     //
     // `%pair` is an inline intrinsic, so the pushed pair is a slot-resolved
     // `DecrefRegion` member; the `%array-push` funnel call's recovered containment
@@ -462,6 +463,56 @@ fn store_adopted_member_release_precedes_owner_in_shared_bucket() {
         "expected the store-adopted member and its owner to share a decref_point \
          bucket (the coincident straight-line case the emit order must handle) — if \
          region analysis changed, update the shape so this test keeps biting",
+    );
+}
+
+#[test]
+fn nested_adopt_members_release_innermost_first() {
+    // A store/capture-adopted member's own `DecrefRegion` is an `Owned` no-op only
+    // while the member is still `Owned`; once its owner's subtree drop reclaims it,
+    // that decref faults. So at a shared `decref_point` a member must be released
+    // before its owner (store_adopted_member_release_precedes_owner_in_shared_bucket).
+    // With NESTED adoption — inner ⊂ mid ⊂ root all sharing one point — the constraint
+    // is transitive: innermost first. A single flat priority key cannot express this: it
+    // would put inner AND mid in one members class tie-broken by region id, so a mid whose
+    // id is smaller than its own member sorts BEFORE it — the member's decref then faults
+    // on the region mid's drop already reclaimed. Only a topological sort over the adopt
+    // edges (region/rules.md Rule 4) orders a chain by construction.
+    //
+    // Injected via the RegionInfo seam because inference does not mint a 3-deep adopt
+    // chain for any small shape. Region ids are chosen to CONTRADICT containment (root
+    // SMALLEST), so an id-only tie-break inverts the order and this assert bites.
+    let inner = crate::hir::region::Region(9003);
+    let mid = crate::hir::region::Region(9002);
+    let root = crate::hir::region::Region(9001);
+    let point = crate::hir::HirId(9_000_001);
+    let site = crate::hir::HirId(9_000_002);
+    let (lowerer, _hir) = make_lowerer_with("42", |info, _hir| {
+        for r in [inner, mid, root] {
+            info.region_data.insert(
+                r,
+                crate::hir::region::RegionData {
+                    decref_point: point,
+                },
+            );
+        }
+        info.owned_adopt_edges
+            .insert(site, vec![(inner, mid), (mid, root)]);
+    });
+    let bucket = lowerer
+        .decrefs_by_decref_point
+        .get(&point)
+        .expect("the injected shared decref_point");
+    let pos = |r| {
+        bucket
+            .iter()
+            .position(|x| *x == r)
+            .expect("region in bucket")
+    };
+    assert!(
+        pos(inner) < pos(mid) && pos(mid) < pos(root),
+        "nested adopt members must release innermost-first (inner ⊂ mid ⊂ root); got {:?}",
+        bucket.iter().map(|r| r.0).collect::<Vec<_>>(),
     );
 }
 

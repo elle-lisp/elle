@@ -196,10 +196,11 @@ fn region_native_tail_mutual_cycle_uaf() {
 // while it is still `Owned`, so it must be emitted before the container's subtree drop.
 // At the let-body the pair and the container share a `decref_point`, and the container
 // is freed by TWO releases there (its binding release and the discarded pass-through
-// result of `%array-push`, which returns its container); the pre-fix bucket sort placed
-// the pair's plain `DecrefRegion` LAST, so the drop reclaimed the pair before its own
-// decref — a phantom/double-free (SIGSEGV under guardfree). The members-first bucket
-// sort (`with_region_info`) orders the member's release ahead of the container's.
+// result of `%array-push`, which returns its container); order the pair's plain
+// `DecrefRegion` after those and the drop reclaims the pair before its own decref — a
+// phantom/double-free (SIGSEGV under guardfree). The topological release order over the
+// adopt edge (`with_region_info::order_releases`, member → owner) keeps the member's
+// release ahead of the container's.
 // docs/impl/region/adopt.md § "The lifetime obligation the root carries".
 #[test]
 fn region_array_push_pair_loop_uaf() {
@@ -300,8 +301,9 @@ fn region_capture_cell_reassign_uaf() {
 //  2. At the shared decref_point, the cell's page-FREEING `DecrefRegion` must
 //     order after the init's page-READING `DecrefValueRegion` (which unwraps
 //     the cell); a freeing-first permutation would tear the page the unwrap
-//     reads. The dependency-safe class sort in `Lowerer::with_region_info`
-//     fixes the order (docs/impl/region/rules.md Rule 4).
+//     reads. The topological release order in `Lowerer::with_region_info`
+//     (`order_releases`) tie-breaks page-reads before page-frees, fixing the
+//     order (docs/impl/region/rules.md Rule 4).
 //
 // A regression would fault only timing-dependently (~⅓ of runs under
 // guardfree), so the guard loops: 25 runs at p≈0.37 witness a regression with

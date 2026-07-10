@@ -34,10 +34,10 @@
 #   2. At the shared decref_point, the emission order of the cell's
 #      page-FREEING DecrefRegion vs the init's page-READING DecrefValueRegion
 #      (which unwraps the cell) came from hash iteration; the freeing-first
-#      permutation tears the page the unwrap reads. Fixed by the
-#      dependency-safe class sort in `Lowerer::with_region_info`
-#      (docs/impl/region/rules.md Rule 4: read-releases before free-releases,
-#      deterministic order always).
+#      permutation tears the page the unwrap reads. Fixed by the topological
+#      release order in `Lowerer::with_region_info` (`order_releases`), whose
+#      page-read-depth tie-break puts read-releases before free-releases
+#      (docs/impl/region/rules.md Rule 4: deterministic order always).
 #
 # Compile-level twins of this guard live in src/lir/lower/tests.rs
 # (`release_order_value_gated_before_plain_in_shared_bucket`,
