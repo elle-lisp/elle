@@ -88,8 +88,6 @@ jobs:
         run: make smoke-vm
       - name: make smoke-jit
         run: make smoke-jit
-      - name: make smoke-diff
-        run: make smoke-diff
 
   tests-combined:
     name: Rust Tests
@@ -135,8 +133,6 @@ jobs:
         run: make doctest
       - name: make smoke-mlir
         run: make smoke-mlir
-      - name: make smoke-diff
-        run: make smoke-diff
 
   wasm:
     name: WASM Tests
@@ -159,8 +155,6 @@ jobs:
         run: make doctest
       - name: make smoke-wasm
         run: make smoke-wasm
-      - name: make smoke-diff
-        run: make smoke-diff
 
   aarch64:
     name: AArch64 Smoke

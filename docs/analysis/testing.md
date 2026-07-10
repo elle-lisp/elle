@@ -13,7 +13,7 @@ Which *kind* of test to write, and where it belongs.
 
 | Tier | What | Purpose |
 |------|------|---------|
-| 1 | `make smoke` → `elle test tests/elle/*.lisp tests/diff/*.lisp` | The Elle corpus (semantics) across the vm and jit policies, in one process, recorded to a session DB |
+| 1 | `make smoke` → `elle test tests/elle/*.lisp` | The Elle corpus (semantics) across the vm and jit policies, in one process, recorded to a session DB |
 | 2 | doctests + the embedding demo | Documentation examples and the C/Rust host |
 | 3 | `cargo test` (fmt, clippy, rustdoc, unit, integration) | Rust tests (compile errors, error messages, type inspection) |
 | 4 | `cargo test property::` | Property tests (invariants across generated inputs) |

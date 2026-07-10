@@ -438,8 +438,8 @@ per-backend `Makefile` smoke targets collapse into a single exhaustive run:
 
 Cross-tier disagreement is its own status. When a form produces different values
 (or different pass/fail) across tiers, the runner records `status=diverge` —
-folding today's `tests/diff/*.lisp` differential tests into the same path and the
-same database instead of a separate harness.
+differential testing lives in the same path and the same database, never in a
+separate harness (docs/impl/differential.md).
 
 **Concretely (v1 representation):**
 
@@ -631,7 +631,7 @@ the runner exactly which forms can be safely skipped. Full run stays the default
 ## CLI surface
 
 ```
-elle test [paths...]            # default: tests/elle + tests/diff, ALL tiers, write DB
+elle test [paths...]            # default: tests/elle, ALL tiers, write DB
                                 # (no --tiers flag — tier coverage is not a dial)
   -e 'FORM'                     # run an ad-hoc form; persist it in the index
   --promote ID [name]           # render ad-hoc syntax to <corpus>/<name>.lisp (flat; name suggested from analysis)

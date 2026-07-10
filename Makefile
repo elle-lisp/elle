@@ -1,5 +1,5 @@
 .PHONY: all elle docs docgen smoke test clean space help \
-       smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir smoke-diff \
+       smoke-elle smoke-vm smoke-noffi smoke-jit smoke-wasm smoke-mlir \
        doctest elle-wasm elle-mlir elle-noffi plugins plugins-all mcp embedding \
        fmt fmt-check
 
@@ -76,12 +76,12 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 
 # The agent-first runner: ONE process, the whole corpus, a SQLite session DB.
 # `elle test` (docs/testing.md, docs/test-runner.md) compiles + runs every file
-# and records each (form × tier) result; the gate is its exit code. It subsumes
-# the default-build smoke split — a multi-form file runs under the :off JIT
-# policy (recorded `vm`) AND :eager (recorded `jit`) — the old smoke-vm +
-# smoke-jit — while single-form files run on every tier with divergence (the old
-# smoke-diff). So no per-pass skip list applies: a test gates itself in-file
-# (gate!/:gated) and a backend the build lacks is dropped, not skip-listed.
+# and records each (form × tier) result; the gate is its exit code. A multi-form
+# file runs under the :off JIT policy (recorded `vm`) AND :eager (recorded
+# `jit`), while single-form files run on every tier with divergence — so one
+# invocation is the whole vm/jit/differential gate. No per-pass skip list
+# applies: a test gates itself in-file (gate!/:gated) and a backend the build
+# lacks is dropped, not skip-listed.
 ELLE_TEST_DB ?= target/elle-tests.db
 
 # Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
@@ -110,7 +110,7 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)
 	@echo "=== elle test (vm + jit policies, cross-tier divergence) ==="
 	@$(ELLE) test \
-		$(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp) $(wildcard tests/diff/*.lisp)) \
+		$(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
 		--db $(ELLE_TEST_DB) \
 		|| { $(ELLE) test --summary --db $(ELLE_TEST_DB); echo "FAILED: elle test — inspect the session DB $(ELLE_TEST_DB) (see docs/testing.md § Reading a run)"; exit 1; }
 
@@ -172,13 +172,6 @@ doctest:   ## Test code examples in documentation (literate mode)
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
-
-smoke-diff:    ## Cross-tier differential agreement tests (compile/run-on)
-	@echo "=== differential tier-agreement tests ==="
-	@printf '%s\n' tests/diff/*.lisp | \
-		parallel -j $(JOBS) --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: differential tests"; exit 1; }
 
 EMBED_TARGET_DIR = $(CURDIR)/target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
 

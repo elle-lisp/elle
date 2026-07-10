@@ -2,9 +2,8 @@
 
 Elle has two test systems:
 
-1. **The Elle corpus** — `.lisp` files under `tests/elle/` and `tests/diff/`, run
-   through the **agent-first runner** (`elle test`). This is what `make smoke`
-   gates on.
+1. **The Elle corpus** — `.lisp` files under `tests/elle/`, run through the
+   **agent-first runner** (`elle test`). This is what `make smoke` gates on.
 2. **The Rust suite** — unit, integration, and property tests under `tests/` and
    inline `#[cfg(test)]` modules, run through `cargo test`. See
    [`tests/AGENTS.md`](../tests/AGENTS.md) for categories, helpers, and how to add
@@ -57,8 +56,8 @@ form-by-form. Two shapes:
 - **A single-form file** (one top-level expression — the durable corpus shape) is
   forced onto **every backend tier** via `compile/run-on` (`vm`, `jit`, and
   `wasm`/`mlir-cpu` when the build carries them). If two tiers return *different*
-  values, the runner records a synthetic `diverge` row — this folds the old
-  `tests/diff/` differential tests into the same path.
+  values, the runner records a synthetic `diverge` row — this *is* the
+  differential (cross-tier) testing path (docs/impl/differential.md).
 - **A legacy multi-form file** (most of `tests/elle/`) is an imperative script, so
   it is wrapped as one whole-file thunk and run under each **JIT policy**: once
   with `jit=off` (recorded tier `vm`) and once with `jit=eager` (recorded tier

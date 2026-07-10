@@ -48,7 +48,7 @@ Design documents, language references, and contributor guides for Elle.
 | `impl/mlir.md` | MLIR/LLVM tier-2 CPU backend |
 | `impl/spirv.md` | SPIR-V emission (compiler-generated + hand-written DSL) |
 | `impl/gpu.md` | End-to-end GPU compute (MLIR + SPIR-V + Vulkan) |
-| `impl/differential.md` | Cross-tier agreement harness (`compile/run-on`) |
+| `impl/differential.md` | Cross-tier agreement: `compile/run-on` + the runner's diverge status |
 | `impl/values.md` | Value representation, tagged union |
 
 ### Reference Material

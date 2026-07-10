@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# tests/diff/string-push-value.lisp — %string-push must accept an @string
+# tests/elle/string-push-value.lisp — %string-push must accept an @string
 # VALUE on the JIT tier, agreeing with the VM (bytecode) tier.
 #
 # Counterfactual for the JIT/VM parity bug: `prim_string_push`
@@ -10,11 +10,11 @@
 # `push-all`/`concat` feed the source collection directly, so an @string
 # source reaches %string-push as the pushed value — fine in the VM, an
 # abort once the function was JIT-compiled (adaptive/default mode only,
-# which `make smoke` never exercises; smoke-diff runs here in default mode
-# and `compile/run-on :jit` forces the tier deterministically).
+# which the runner's policy passes never exercise; this file forces the
+# tier deterministically via `compile/run-on :jit`).
 #
-# `make smoke` (smoke-vm/jit/checked) never ran the value-is-@string case
-# through the JIT, so it hid. This test pins JIT==VM agreement for it.
+# The policy passes never ran the value-is-@string case through the JIT,
+# so it hid. This test pins JIT==VM agreement for it.
 
 # A closure that pushes its second arg onto its first and returns the first.
 (def push-onto
