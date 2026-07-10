@@ -380,6 +380,32 @@ fn region_traits_capture_adopt_uaf() {
     );
 }
 
+// RED (known over-free, not yet fixed) — the closure-arg OVER-FREE, the over-free
+// twin of the F5 arg-retain gap. A fold-shaped helper that holds its combiner `f`
+// by THREADING it as a recursive argument (or by a `def @`-cell accumulator)
+// instead of CAPTURING it in a letrec lets `f`'s region reach refcount 0
+// mid-drive: its `DecrefValueRegion` frees the closure and a later `UpdateCapture`
+// derefs the freed page (SIGSEGV under guardfree, traced to `DecrefValueRegion of
+// closure … context: UpdateCapture`). This is exactly what blocks src/core.lisp
+// `fold`/`reduce` from dissolving their per-call `go` closure to zero — they use
+// the guardfree-safe letrec-CAPTURE form instead, and the SAME drive over that
+// form is clean, so the fixture isolates the threaded-arg / cell-held closure
+// lifetime, not folding in general. It is state-dependent (faults only once region
+// ids recycle onto the freed one), so the fixture discards results and drives
+// ~8000 reps to reach the collision deterministically. #[ignore]'d because it
+// SIGSEGVs today — an uncatchable fault that would take the shared `make smoke`
+// harness down; when the region solver keeps a threaded/cell-held closure's region
+// live across its whole use, this exits 0 under guardfree — un-ignore it then.
+// Full repro + trace in the fixture header; assessment.md Stage 1 § soundness note.
+#[test]
+#[ignore = "RED: closure threaded as recursive-arg / held in a def@ cell is over-freed (DecrefValueRegion of closure -> UpdateCapture); un-ignore when fixed"]
+fn region_fold_closure_arg_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-fold-closure-arg-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `squelch`/`attune` wrapper closure run as a fiber body. The wrapper
 // shares the inner closure's template and env (their backing lives in the INNER
 // closure's region), but the wrapper VALUE itself lives in a fresh region. A fiber
