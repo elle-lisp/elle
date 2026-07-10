@@ -20,7 +20,7 @@ Which *kind* of test to write, and where it belongs.
 
 The Elle corpus is the cheapest full-pipeline check: reader, expander, analyzer,
 lowerer, emitter, VM, JIT, and a broad swath of primitives. If it fails, the
-session DB names every failing form (`elle test --db DB --summary`).
+session DB names every failing form (`elle test --summary`).
 
 Integration tests are slower because they require Rust-level setup (VM
 construction, symbol table initialization, error message inspection).

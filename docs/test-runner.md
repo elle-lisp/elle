@@ -645,7 +645,6 @@ elle test [paths...]            # default: tests/elle, ALL tiers, write DB
   --rust                        # also invoke cargo; fold results into this run
   --format pretty|ndjson|summary  # terminal VIEW only — DB is always written
   --watch                       # stream results live as they land; exit with the gate code at completion
-  --db PATH                     # default $ELLE_CACHE/elle-tests.db
   --reset                       # remove the DB: clears ad-hoc + history
   --query 'SQL'                 # convenience: run SQL against the DB and exit
   --prune POLICY                # explicit history pruning (e.g. --prune adhoc)
@@ -707,9 +706,9 @@ enough at each boundary that truncation is self-evident:
 The views refuse to launder that: `--summary` and the post-run summary compute
 their tallies **live** from `result` (never from the stored counters) and label
 a truncated run loudly — `DID NOT COMPLETE — killed after recording results for
-N of M selected files`. The next `elle test` invocation against the same session
-DB prints the same warning about its predecessor, so a killed `make smoke` is
-diagnosed by the very next run instead of reading as an all-pass mystery.
+N of M selected files`. The next `elle test` invocation prints the same warning
+about its predecessor, so a killed `make smoke` is diagnosed by the very next
+run instead of reading as an all-pass mystery.
 Pinned by `tests/integration/truncation.rs`.
 
 ### `--rust`: folding in the cargo suite

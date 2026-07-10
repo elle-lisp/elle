@@ -68,21 +68,26 @@ fmt-check: elle  ## Check Elle formatting (exit 1 on diff)
 #   make test     smoke + rust fmt/clippy/rustdoc/unit/integration
 #   cargo test    ~60min full suite (unit + integration + property)
 #
-# The default-build elle scripts now run through the agent-first runner
+# The default-build elle scripts run through the agent-first runner
 # (`smoke-elle`, see docs/testing.md): ONE `elle test` invocation covers the vm
-# and jit policies and cross-tier divergence. The tier-specific direct-run
-# targets below (smoke-vm/smoke-jit/smoke-noffi/smoke-wasm/smoke-mlir) are kept
-# for debugging a single backend and for the non-default feature builds.
+# and jit policies and cross-tier divergence. The featured builds run the SAME
+# corpus through the runner (smoke-mlir/smoke-wasm — the binary's extra tier
+# joins the matrix and its divergence rows land in the session DB), plus one
+# whole-file pass in the process-global mode the runner cannot vary per file
+# (--mlir=eager / --wasm=full). smoke-vm/smoke-jit/smoke-noffi are direct-run
+# debug targets for isolating a single backend.
 
-# The agent-first runner: ONE process, the whole corpus, a SQLite session DB.
+# The agent-first runner: ONE process, the whole corpus, ONE SQLite session DB.
 # `elle test` (docs/testing.md, docs/test-runner.md) compiles + runs every file
 # and records each (form × tier) result; the gate is its exit code. A multi-form
 # file runs under the :off JIT policy (recorded `vm`) AND :eager (recorded
 # `jit`), while single-form files run on every tier with divergence — so one
 # invocation is the whole vm/jit/differential gate. No per-pass skip list
 # applies: a test gates itself in-file (gate!/:gated) and a backend the build
-# lacks is dropped, not skip-listed.
-ELLE_TEST_DB ?= target/elle-tests.db
+# lacks is dropped, not skip-listed. The session DB is the runner's default
+# ($ELLE_CACHE/elle-tests.db) — every run, make-driven or not, accumulates in
+# the one history that `--summary`/`--query` and the regression-archaeology
+# queries read. Never point a run at a private DB.
 
 # Quarantine list for the gate — known HARNESS bugs (NOT test failures) get
 # parked here with a tracked reason. Currently empty.
@@ -98,21 +103,28 @@ ELLE_TEST_SKIP :=
 # gpu-eligible,mlir — require the MLIR tier active
 ELLE_SKIP_VM  := -e jit-rejections.lisp -e gpu-eligible.lisp -e mlir.lisp
 ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
-ELLE_SKIP_MLIR := -e NOMATCH_PLACEHOLDER
 
 # FFI skip list: tests requiring libffi (skipped when built --no-default-features)
 ELLE_SKIP_FFI := -e ffi.lisp -e compress.lisp -e sqlite.lisp -e zmq.lisp -e git.lisp -e http.lisp
 
-# WASM backend skip list: tests requiring features not yet in WASM backend
-# (eval = dynamic compilation)
+# Skip list for the whole-file --wasm=full pass only (eval = dynamic
+# compilation, not in the WASM backend). The runner needs no list: a form a
+# tier cannot host is recorded :ineligible→skip per form.
 WASM_SKIP := -e eval.lisp -e eval-env.lisp
+
+# One corpus pass through the agent-first runner. Shared by smoke-elle and the
+# featured-build targets: the runner probes the tiers the binary carries, so
+# the same invocation gains the mlir-cpu / wasm tier — and its divergence
+# rows — when $(ELLE) was built with that feature.
+define RUN_CORPUS
+	@$(ELLE) test \
+		$(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
+		|| { $(ELLE) test --summary; echo "FAILED: elle test — query the session DB (docs/testing.md § Reading a run)"; exit 1; }
+endef
 
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)
 	@echo "=== elle test (vm + jit policies, cross-tier divergence) ==="
-	@$(ELLE) test \
-		$(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
-		--db $(ELLE_TEST_DB) \
-		|| { $(ELLE) test --summary --db $(ELLE_TEST_DB); echo "FAILED: elle test — inspect the session DB $(ELLE_TEST_DB) (see docs/testing.md § Reading a run)"; exit 1; }
+	$(RUN_CORPUS)
 
 smoke-vm: elle
 	@echo "=== elle tests (VM, no JIT) ==="
@@ -146,10 +158,11 @@ elle-mlir:   ## Build elle with MLIR support (for smoke-mlir)
 	@echo "=== build elle with MLIR ==="
 	cargo build $(CARGO_PROFILE) -p elle --features mlir -q
 
-smoke-mlir: elle-mlir
-	@echo "=== elle tests (eager MLIR) ==="
+smoke-mlir: elle-mlir  ## Corpus via elle test (+ mlir-cpu tier) + whole-file --mlir=eager pass
+	@echo "=== elle test (mlir build: + mlir-cpu tier, cross-tier divergence) ==="
+	$(RUN_CORPUS)
+	@echo "=== elle tests (eager MLIR, whole-file) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_MLIR) | \
 		parallel -j $(JOBS) --tag \
 			'timeout $(TIMEOUT) $(ELLE) --mlir=eager {}' \
 		|| { echo "FAILED: elle tests MLIR pass (eager)"; exit 1; }
@@ -158,8 +171,10 @@ elle-wasm:   ## Build elle with WASM support (for smoke-wasm)
 	@echo "=== build elle with WASM ==="
 	cargo build $(CARGO_PROFILE) -p elle --features wasm -q
 
-smoke-wasm: elle-wasm
-	@echo "=== elle tests (WASM) ==="
+smoke-wasm: elle-wasm  ## Corpus via elle test (+ wasm tier) + whole-file --wasm=full pass
+	@echo "=== elle test (wasm build: + wasm tier, cross-tier divergence) ==="
+	$(RUN_CORPUS)
+	@echo "=== elle tests (WASM, whole-file) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j $(WASM_JOBS) --tag \
