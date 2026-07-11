@@ -412,6 +412,29 @@ primitive! {
         effect: RegionEffect::Funnel,
         ret: RetType::MutableArray,
     }
+    // Monomorphic set-add twins. Same runtime body (prim_add_set → sets::prim_add)
+    // as the polymorphic set `add`; the NativeFn registration makes them the funnel
+    // natives compiled call-position uses lower to (`routes_native_funnel`) and bare
+    // callable values. RetType is the monomorphization win: %add-set is a fresh
+    // immutable Set, %add-set-mut its mutable arg0. Effect stays Funnel (the same
+    // NativeFn serves dynamic value-position calls, where no compile-time proof
+    // constrains the input mutability), like the %put/%push mut twins.
+    "%add-set" => prim_add_set {
+        arity: Arity::Exact(2),
+        doc: "Add to an immutable set, returning a fresh set (monomorphic immutable set add)",
+        params: &["set", "value"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::Set,
+    }
+    "%add-set-mut" => prim_add_set {
+        arity: Arity::Exact(2),
+        doc: "Add to a mutable @set in place, returning it (monomorphic @set add)",
+        params: &["set", "value"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        ret: RetType::MutableSet,
+    }
     "%del" => prim_del {
         arity: Arity::Exact(2),
         doc: "Dissoc/delete key",

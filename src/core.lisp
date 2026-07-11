@@ -91,9 +91,23 @@
                       (go (rest ks)))))]
       (go (keys src)))))
 
+(def core-add
+  (fn [coll val]
+    "Add one element to a set (mutable or immutable), dispatching to the
+     %-primitive for its type. Internal pre-prelude helper; the user-facing
+     `add` lives in stdlib. A mutable @set inserts in place and increfs the
+     inserted element's region (Rule 5 mutable-store RC); an immutable set
+     returns a fresh copy."
+    (match (type-of coll)
+      :@set (%add-set-mut coll val)
+      :set (%add-set coll val)
+      _
+        (emit :error {:error :type-error
+                      :message (string "add: expected set, got " (type coll))}))))
+
 ## In-place set union: add every element of `src` into the mutable set `dst`,
 ## returning `dst`. The set analog of `merge-into` (struct) and `push-all`
-## (array/string/bytes). `add` inserts into a mutable @set in place and
+## (array/string/bytes). `core-add` inserts into a mutable @set in place and
 ## increfs the inserted element's region (Rule 5 mutable-store RC), so a
 ## displaced/shared element is reference-counted correctly. `append`'s `:@set`
 ## branch uses this so a mutable first argument is mutated in place rather than
@@ -108,7 +122,7 @@
       (letrec [go (fn [i]
                     (if (%lt i n)
                       (begin
-                        (add dst (get arr i))
+                        (core-add dst (get arr i))
                         (go (%add i 1)))
                       dst))]
         (go 0)))))

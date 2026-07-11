@@ -214,7 +214,7 @@
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
                     "native-tail-put-array" "pop-wrapper" "del-wrapper"
-                    "set-del-wrapper"])
+                    "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
                    "cancel-discard" "abort-discard"])
@@ -493,7 +493,7 @@
         (assign k (%add k 1)))) 0]  # collection ops
     ["reduce" (fn [j] (reduce + 0 [1 2 3])) 1]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3])) 3]
-   ["zip" (fn [j] (zip [1 2] [3 4])) 10] ["sort" (fn [j] (sort [3 1 2])) 0]
+   ["zip" (fn [j] (zip [1 2] [3 4])) 9] ["sort" (fn [j] (sort [3 1 2])) 0]
    ["reverse" (fn [j] (reverse [1 2 3])) 2]  # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
    # native allocates the slice into the outer `rest` call's OWN region (the
@@ -505,7 +505,7 @@
    # region_native_trait_dispatch_fresh_result_reclaims). `(rest list)` shares its
    # tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5])) 0]
-   ["distinct" (fn [j] (distinct [1 2 1 3])) 3]
+   ["distinct" (fn [j] (distinct [1 2 1 3])) 2]
    ["take-drop"
     (fn [j]
       (take 2 (list 1 2 3))
@@ -601,7 +601,7 @@
     (fn [j]
       (string/join (filter (fn [x] (not= x ""))
                            (map string/trim (string/split "a , b , c" ","))) ","))
-    13]
+    11]
    ["each-list"
     (fn [j]
       (each x in (list 1 2 3)
@@ -610,12 +610,12 @@
     (fn [j]
       (map (fn [x]
              (numeric!)
-             (%add x 1)) [1 2 3])) 5]
+             (%add x 1)) [1 2 3])) 4]
    ["filter-while"
     (fn [j]
       (filter (fn [x]
                 (numeric!)
-                (%gt x 1)) [1 2 3])) 5]
+                (%gt x 1)) [1 2 3])) 4]
    ["nested-closure"
     (fn [j]
       (let [f (fn [] (fn [] j))]
@@ -626,7 +626,7 @@
     (fn [j]
       (map (fn [x]
              (numeric!)
-             (%add x 1)) [1 2 3])) 5] ["factory" (fn [j] (t13proc j)) 0]
+             (%add x 1)) [1 2 3])) 4] ["factory" (fn [j] (t13proc j)) 0]
    ["cond-factory" (fn [j] (t13cond j)) 0] ["alias" (fn [j] (make-struct j)) 0]
    ["nested-factory" (fn [j] (t13nested j)) 0]
    ["struct-field"
@@ -1047,7 +1047,7 @@
 # a debug equivalence oracle asserts the recorded table matches a content scan at every
 # free. These pins read the seam THROUGH the surface that reaches it, and split cleanly:
 #
-#   `%pop` — the remove funnel balances (rate 0): a box store+rebind, an @set add, and
+#   `%pop` — the remove funnel balances (rate 0): a box store+rebind and
 #   `%pop`'s `moves_out` native each reclaim their cross-region member, so `raw-pop` is
 #   the reclaiming CONTROL (the peer of push-slot-source/put-slot-source) proving the
 #   remove funnel sound, and a wrapper that leaks over it is the wrapper's leak. It is a
@@ -1076,11 +1076,18 @@
                                (let [b (box (list 1 2))]
                                  (rebox b (list 3 4))))) count-gauge 100 6 60
                    0.4 0.5) 0)
+# F1b (memory.md § F1b) — the stdlib `add` `(match (type-of coll) …)` dispatch
+# wrapper strands its owned @set container on the pass-through arm exactly as the
+# store wrappers (put/push) do, so a discarded fresh @set + its stored heap member
+# leak (3/op). The raw @set add FUNNEL (`set_add_with_incref`) still reclaims — the
+# seam is sound (proven by `set-array`/`put-slot-source`); it is the wrapper over it
+# that leaks. Closes with the F1b container compensation that closes
+# mut-array-push/struct-put.
 (pin (measure-core "set-add"
                    (stmt-run (fn []
                                (let [s @||]
                                  (add s (list 1 2))))) count-gauge 100 6 60 0.4
-                   0.5) 0)
+                   0.5) 3)
 (pin (measure-core "raw-pop"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1301,7 +1308,7 @@
                              (map (fn [x]
                                     (numeric!)
                                     (%add x 1)) [1 2 3]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 5)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 4)
 (pin (measure-core "struct-outer"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1363,6 +1370,18 @@
                      (while (%lt j b)
                        (let [s @{}]
                          (%put s :k (%pair 1 2)))
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+# The raw `%add-set-mut` into a fresh @set, discarded — the set-family CONTROL
+# for F1b, the peer of push-slot-source/put-slot-source. The raw silent intrinsic
+# reclaims the container (rate 0), so the `set-add` over-keep (3/op) rides the
+# stdlib `add` type-dispatch WRAPPER, not the set-add funnel (`set_add_with_incref`).
+(pin (measure-core "set-add-slot-source"
+                   (fn [b]
+                     (when (%not (%int? b)) (error :block-not-int))
+                     (def @j 0)
+                     (while (%lt j b)
+                       (let [s @||]
+                         (%add-set-mut s (%pair 1 2)))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 # put-churn mints a FRESH container per op and hands it through the stdlib
 # `put`; the container's region survives the discard and cascades its stored

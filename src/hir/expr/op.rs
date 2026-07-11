@@ -65,6 +65,15 @@ pub enum IntrinsicOp {
     /// contract).
     PutStructMut,
     PutArrayMut,
+    /// Monomorphic set add: `%add-set` inserts into an immutable set, returning a
+    /// fresh `Set`; `%add-set-mut` inserts into a mutable `@set` in place, returning
+    /// it. Both share the polymorphic `add`/`prim_add` runtime body (which freezes
+    /// the element and dispatches on the container's runtime mutability); the precise
+    /// `Set`/`MutableSet` return is the monomorphization win. These are the silent
+    /// funnel natives the stdlib `add` type-dispatch wrapper lowers to on a proven
+    /// set — the set-family peer of `%put-*`/`%push-*`.
+    AddSet,
+    AddSetMut,
     Del,
     Has,
     Push,
@@ -141,6 +150,8 @@ impl IntrinsicOp {
             Self::PutArray => "%put-array",
             Self::PutStructMut => "%put-struct-mut",
             Self::PutArrayMut => "%put-array-mut",
+            Self::AddSet => "%add-set",
+            Self::AddSetMut => "%add-set-mut",
             Self::Del => "%del",
             Self::Has => "%has?",
             Self::Push => "%array-push",
@@ -206,6 +217,8 @@ impl IntrinsicOp {
             "%put-array" => Some(Self::PutArray),
             "%put-struct-mut" => Some(Self::PutStructMut),
             "%put-array-mut" => Some(Self::PutArrayMut),
+            "%add-set" => Some(Self::AddSet),
+            "%add-set-mut" => Some(Self::AddSetMut),
             "%del" => Some(Self::Del),
             "%has?" => Some(Self::Has),
             "%array-push" => Some(Self::Push),
@@ -275,6 +288,8 @@ impl IntrinsicOp {
             | Self::Push
             | Self::PushArray
             | Self::PushArrayMut
+            | Self::AddSet
+            | Self::AddSetMut
             | Self::StringPush
             | Self::BytesPush
             | Self::Identical => (2, 2),
@@ -315,6 +330,8 @@ impl IntrinsicOp {
                 | Self::PutArray
                 | Self::PutStructMut
                 | Self::PutArrayMut
+                | Self::AddSet
+                | Self::AddSetMut
                 | Self::Push
                 | Self::PushArray
                 | Self::PushArrayMut
@@ -348,6 +365,8 @@ impl IntrinsicOp {
                 | Self::PutArray
                 | Self::PutStructMut
                 | Self::PutArrayMut
+                | Self::AddSet
+                | Self::AddSetMut
                 | Self::Del
                 | Self::StringPush
                 | Self::Push

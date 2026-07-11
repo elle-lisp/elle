@@ -25,6 +25,21 @@ impl RegionInference {
                 }
             }
         }
+        // %add-set(set, val): val flows into set — the set-family store edge,
+        // exactly like %array-push's val→coll. The stored element is frozen by the
+        // runtime body, but its region is what the container retains.
+        if matches!(
+            *op,
+            crate::hir::expr::IntrinsicOp::AddSet | crate::hir::expr::IntrinsicOp::AddSetMut
+        ) {
+            if let (Some(set_rs), Some(val_rs)) = (arg_regions.first(), arg_regions.get(1)) {
+                for &set in set_rs {
+                    for &val in val_rs {
+                        self.record_edge(hir.id, val, set);
+                    }
+                }
+            }
+        }
         // %put(obj, key, val): val flows into obj. Monomorphic %put-struct /
         // %put-array (+ -mut) share this type-blind edge for now; the precise
         // split is the funnel_store_edges slice.
@@ -77,6 +92,8 @@ impl RegionInference {
                 | IntrinsicOp::PutArray
                 | IntrinsicOp::PutStructMut
                 | IntrinsicOp::PutArrayMut
+                | IntrinsicOp::AddSet
+                | IntrinsicOp::AddSetMut
                 | IntrinsicOp::Del
                 | IntrinsicOp::StringPush
                 | IntrinsicOp::Push

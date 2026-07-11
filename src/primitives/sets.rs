@@ -374,15 +374,6 @@ primitive! {
         example: "(string-contains? \"hello world\" \"world\") #=> true",
         effect: RegionEffect::Immediate,
     }
-    "add" => prim_add {
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Add an element to a set. For immutable sets, returns a new set. For mutable sets, modifies in place.",
-        params: &["set", "value"],
-        category: "set",
-        example: "(add (set 1 2) 3) #=> |1 2 3|",
-        effect: RegionEffect::Funnel,
-    }
     "del" => prim_del {
         signal: Signal::errors(),
         arity: Arity::Exact(2),

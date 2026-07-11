@@ -27,6 +27,7 @@ mod contract;
 mod guard;
 mod infer;
 use infer::*;
+mod monomorphize;
 mod prune;
 pub(crate) use prune::prune_typeof_match_arms;
 
@@ -133,6 +134,20 @@ pub fn infer_and_rewrite(
             break;
         }
     }
+
+    // Collapse container-dispatch wrapper calls (`(put s :x j)` with `s` a proven
+    // concrete container → `(%put-struct-mut s :x j)`) so the multi-arm dispatch and
+    // the container over-keep it strands cease to exist (`monomorphize.rs`; the F1b
+    // close). Runs after the inference fixpoint (types are known) and before the
+    // operand proofs, so each rewritten op is contract-checked by the same proof that
+    // selected it.
+    monomorphize::monomorphize_dispatch_wrappers(
+        hir,
+        &hir_types,
+        arena,
+        &symbol_names,
+        &typeof_aliases,
+    );
 
     // The prove-or-reject gate: every call-position %-intrinsic must discharge
     // its operand contract from the (narrowed, per-occurrence) inferred types.

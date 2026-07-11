@@ -10,6 +10,7 @@ pub(super) const ARRAY_FAMILY: &[TyId] = &[TypeInterner::ARRAY, TypeInterner::MU
 pub(super) const STRUCT_FAMILY: &[TyId] = &[TypeInterner::STRUCT, TypeInterner::MUTABLE_STRUCT];
 const STRING_FAMILY: &[TyId] = &[TypeInterner::STRING, TypeInterner::MUTABLE_STRING];
 const BYTES_FAMILY: &[TyId] = &[TypeInterner::BYTES, TypeInterner::MUTABLE_BYTES];
+const SET_FAMILY: &[TyId] = &[TypeInterner::SET, TypeInterner::MUTABLE_SET];
 
 /// What an op's lowering trusts its operands to satisfy. One row per shape;
 /// `op_contract` maps every `IntrinsicOp` onto a row (exhaustively — a new op
@@ -122,6 +123,12 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
         Push | PushArray | PushArrayMut => Contract::Container {
             families: ARRAY_FAMILY,
             what: "array",
+        },
+        // Set add pins the set family; the immutable-vs-mutable split is the
+        // runtime dispatch's business, like the put/push monomorphic variants.
+        AddSet | AddSetMut => Contract::Container {
+            families: SET_FAMILY,
+            what: "set",
         },
         Del => Contract::Container {
             families: DEL_DOMAIN,

@@ -563,6 +563,20 @@
           :@struct (%put-struct-mut coll key val)
           _ (dynamic-put coll key val))))))
 
+## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
+## delegating to a polymorphic fallback native. The two container arms route to
+## the silent monomorphic `%add-set`/`%add-set-mut`, which the region solver
+## collapses when the container type is statically proven (else the runtime match
+## dispatches). Freezing the element is the funnel body's job (prim_add).
+(defn add [coll val]
+  "Add val to a set. For an immutable set, returns a new set with the element added. For a mutable @set, modifies in place and returns the set."
+  (match (type-of coll)
+    :@set (%add-set-mut coll val)
+    :set (%add-set coll val)
+    _
+      (error {:error :type-error
+              :message (string "add: expected set, got " (type coll))})))
+
 ## ── Higher-order functions ──────────────────────────────────────────
 
 (defn map [f coll]
@@ -2502,6 +2516,7 @@
    :pair pair
    :push push
    :put put
+   :add add
    :map map
    :filter filter
    :fold fold

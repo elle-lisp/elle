@@ -445,6 +445,27 @@ fn region_mutable_reassign_param_uaf() {
     run_elle_script_with_args("region-mutable-reassign-param", &["--trace=guardfree"]);
 }
 
+// Guard — a mutable @set del of a HEAP member must release the STORED member's
+// region, not the caller's lookup value. `(del s x)` removes the element
+// value-EQUAL to `x`; for a heap member the stored element and `x` are two
+// distinct allocations in distinct regions, and the add half recorded the
+// outgoing edge / incref against the stored member's region. A set remove that
+// resolves the un-record + decref from `x` (a bare `BTreeSet::remove` yields no
+// element) un-records an edge that was never recorded — outgoing-edge accounting
+// drift the debug equivalence oracle detonates on — and over-frees the caller's
+// live region under guardfree, while the stored member leaks. `set_del_with_decref`
+// resolves both from the member `take` hands back, mirroring the @struct/@array
+// removes. Quarantined as a subprocess because a regression ABORTS (oracle panic /
+// guardfree fault) and would take the shared smoke harness down. Full repro +
+// invariant in the fixture.
+#[test]
+fn region_set_del_heap_member_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-set-del-heap-member-uaf.lisp",
+        &["--trace=guardfree"],
+    );
+}
+
 // Guard — a leaf helper called many times from a driver. The callee closure lives
 // in a letrec forward-reference cell the driver captures BY INDIRECTION (an
 // uncounted cell store the ownership scan cannot see). The forest must treat that

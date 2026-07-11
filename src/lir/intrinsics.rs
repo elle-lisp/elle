@@ -55,8 +55,10 @@ impl PrimitiveClassification {
             "%put-array",
             "%put-array-mut",
             "%array-push",
-            "%add",
-            "%set-add",
+            "%push-array",
+            "%push-array-mut",
+            "%add-set",
+            "%add-set-mut",
         ]
         .iter()
         .filter_map(|name| symbols.get(name))

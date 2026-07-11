@@ -141,7 +141,11 @@ pub(in crate::hir::escape) fn collect_flow(
                     tail_sources(ctx, a, other_seeds);
                 }
             }
-            IntrinsicOp::Push | IntrinsicOp::PushArray | IntrinsicOp::PushArrayMut => {
+            IntrinsicOp::Push
+            | IntrinsicOp::PushArray
+            | IntrinsicOp::PushArrayMut
+            | IntrinsicOp::AddSet
+            | IntrinsicOp::AddSetMut => {
                 if let Some(v) = args.get(1) {
                     tail_sources(ctx, v, other_seeds);
                 }

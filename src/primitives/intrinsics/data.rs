@@ -205,6 +205,20 @@ pub(super) fn prim_del(
     crate::primitives::lstruct::prim_del(ctx, args)
 }
 
+/// The `%add-set`/`%add-set-mut` runtime body — the set-add funnel. Delegates to
+/// the polymorphic `sets::prim_add` (which freezes the element and dispatches on
+/// the container's runtime mutability: a mutable `@set` stores in place through the
+/// arena funnel, an immutable set returns a fresh copy). The monomorphic twins
+/// differ only in their static `Set`/`MutableSet` return type — the same
+/// shared-body pattern as `prim_put`/`prim_push`. Named `_set` to avoid the
+/// arithmetic `%add` (`num::prim_add`).
+pub(super) fn prim_add_set(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    crate::primitives::sets::prim_add(ctx, args)
+}
+
 pub(super) fn prim_has(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],

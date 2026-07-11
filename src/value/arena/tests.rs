@@ -297,6 +297,66 @@ fn overwrite_removes_old_edge() {
     let _ = rid_a;
 }
 
+/// A mutable-set del of a HEAP member un-records and decrefs the STORED member's
+/// region, not the caller's lookup value. The stored member and the lookup are
+/// distinct allocations in distinct regions that merely compare equal (set
+/// membership is by value); resolving the un-record/decref from the lookup drifts
+/// the outgoing-edge table (a plain `BTreeSet::remove` hands back no element) and
+/// over-frees the caller's live region. RED against the pre-`take` seam, which
+/// un-recorded `region(lookup)` — an edge never recorded.
+#[test]
+fn set_del_releases_stored_member_not_lookup_value() {
+    let heap_ptr = crate::value::arena::leaked_test_heap();
+    // The stored member — region A.
+    let heap = unsafe { &mut *heap_ptr };
+    let (member, rid_a) =
+        alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    // A distinct, structurally-equal lookup value — region C.
+    let heap = unsafe { &mut *heap_ptr };
+    let (lookup, rid_c) =
+        alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+    assert_ne!(rid_a, rid_c);
+    // The set — region B.
+    let heap = unsafe { &mut *heap_ptr };
+    let (set, rid_b) = alloc_in_fresh_region(
+        heap,
+        HeapObject::LSetMut {
+            data: std::rc::Rc::new(std::cell::RefCell::new(std::collections::BTreeSet::new())),
+            traits: Value::NIL,
+        },
+    );
+    // Add the member: records B → A, increfs A.
+    let heap = unsafe { &mut *heap_ptr };
+    assert!(crate::value::arena::set_add_with_incref(heap, set, member));
+    let rc_a_stored = region_rc(unsafe { &*heap_ptr }, rid_a);
+    let rc_c_before = region_rc(unsafe { &*heap_ptr }, rid_c);
+    assert_eq!(
+        unsafe { (*heap_ptr).outgoing_edges(rid_b) },
+        vec![(rid_a.get(), 1)],
+        "add records the edge B → A (the stored member's region)"
+    );
+    // Del by the distinct-but-equal lookup value.
+    let heap = unsafe { &mut *heap_ptr };
+    assert!(
+        crate::value::arena::set_del_with_decref(heap, set, &lookup),
+        "the value-equal member is found and removed"
+    );
+    assert!(
+        unsafe { (*heap_ptr).outgoing_edges(rid_b) }.is_empty(),
+        "del un-records the STORED member's edge B → A"
+    );
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_a),
+        rc_a_stored - 1,
+        "del decrefs the stored member's region"
+    );
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_c),
+        rc_c_before,
+        "del does NOT touch the caller's lookup-value region"
+    );
+}
+
 #[test]
 fn deref_accepts_consistent_tag_and_object() {
     // Sanity: a Value constructed via the safe constructor has

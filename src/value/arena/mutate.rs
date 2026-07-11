@@ -258,13 +258,24 @@ pub fn set_del_with_decref(heap: &mut FiberHeap, collection: Value, frozen: &Val
     let set_ref = collection
         .as_set_mut_raw()
         .expect("set_del_with_decref: expected @set");
-    let removed = set_ref.borrow_mut().remove(frozen);
-    if removed {
+    // `take` HANDS BACK the stored member — a plain `remove` yields only a bool. For
+    // a heap member the stored element and the caller's `frozen` are DISTINCT
+    // allocations in distinct regions that merely compare equal, and the add half
+    // (`set_add_with_incref`) recorded the outgoing edge and incref against the
+    // STORED member's region. Resolving the un-record and decref from `frozen`
+    // instead un-records an edge that was never recorded (outgoing-edge accounting
+    // drift) and decrefs a live region the caller still owns (an over-free). Resolve
+    // them from the removed member, mirroring `struct_remove_with_decref` — whose
+    // `BTreeMap::remove` already returns the stored value.
+    let removed = set_ref.borrow_mut().take(frozen);
+    if let Some(member) = removed {
         // Un-record before decref (the decref may free the region — see `pop`).
-        unrecord_store(heap, collection, *frozen);
-        decref_removed_element(heap, *frozen);
+        unrecord_store(heap, collection, member);
+        decref_removed_element(heap, member);
+        true
+    } else {
+        false
     }
-    removed
 }
 
 /// Store into a user box (`(box v)`), swapping the tracked refs (old-region
