@@ -62,9 +62,25 @@ impl RegionInference {
             self.binding_regions.insert(*rp, Vec::new());
             self.binding_region.insert(*rp, self.current_region);
         }
+        // Mark the caller's arg regions live for this inline so a `Return`
+        // reached in the body does not extend a caller region's `decref_point`
+        // to a callee node (see `inline_bound_regions`). Track only those we
+        // newly add — a region an OUTER inline already marked must stay marked
+        // when this one exits.
+        let mut newly_bound: Vec<Region> = Vec::new();
+        for regions in arg_regions {
+            for &r in regions {
+                if self.inline_bound_regions.insert(r) {
+                    newly_bound.push(r);
+                }
+            }
+        }
         self.inline_depth += 1;
         let result = self.walk(body);
         self.inline_depth -= 1;
+        for r in newly_bound {
+            self.inline_bound_regions.remove(&r);
+        }
         // Restore saved param region sets.
         for (p, prev) in saved {
             match prev {

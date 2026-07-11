@@ -332,7 +332,28 @@ impl RegionInference {
                 // their DecrefRegion after the `IncrefValueRegion` the
                 // lowerer emits for this node. No alloc, no edge.
                 let regions = self.walk(value);
-                self.return_sites.push((hir.id, regions.clone()));
+                // Record the returned regions for the post-pass `decref_point`
+                // extension — but never a CALLER arg region reached inside an
+                // inline re-walk. `try_inline_call` binds the inlined callee's
+                // params to the caller's arg regions, so a `Return` here can name
+                // a caller region; extending its `decref_point` to this callee
+                // node is wrong (the caller owns that region's release). For a
+                // self-tail-recursive callee whose accumulator arg the tail call
+                // transfers forward — stdlib `fold`'s `go` threading the reducer
+                // result — pinning the arg to the base-case (sibling) arm makes
+                // the branch-union release over-free it under self-tail-call frame
+                // reuse. Outside an inline `inline_bound_regions` is empty, so the
+                // structural walk records every return unchanged; the callee's own
+                // structural walk still records its genuine body-result returns
+                // (those are not arg regions), so the call site loses nothing.
+                let owned: Vec<Region> = regions
+                    .iter()
+                    .copied()
+                    .filter(|r| !self.inline_bound_regions.contains(r))
+                    .collect();
+                if !owned.is_empty() {
+                    self.return_sites.push((hir.id, owned));
+                }
                 regions
             }
 

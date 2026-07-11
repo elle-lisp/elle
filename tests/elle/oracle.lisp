@@ -946,17 +946,23 @@
 # objects are INTERMEDIATE scratch, NOT the recursive helper (which reclaims — the
 # `recur-local-*` probes read 0) and NOT, mostly, cons cells. Stage 1 dissolved the
 # first/rest copy-scratch: `fold`/`reduce` now `(->array coll)` once and INDEX-walk
-# (core.lisp), so `stdlib-fold` dropped 5→4 — the residual is fold's per-call `go`
-# closure+env, an F1a scratch closure the guardfree-safe (letrec-capture) form
-# cannot remove (removing it needs the closure-arg over-free fixed, not a .lisp
-# rewrite; see core.lisp fold). `concat` builds a fresh accumulator + per-arg
-# combiner closures. All non-escaping, acyclic call-result regions no static slot
-# can name. Pinned at the exact `(concat "a" "b")` / 2-element `fold` shapes.
+# (core.lisp). `stdlib-fold`'s residual is fold's per-call `go` closure+env plus the
+# heap accumulator element the reducer threads forward — F1a scratch the guardfree-
+# safe (letrec-capture) form cannot remove (removing the go closure needs the
+# closure-arg over-free fixed, not a .lisp rewrite; see core.lisp fold). This rate
+# is the SOUND one: `go` releases the tail-transferred accumulator exactly once. A
+# transiently-lower reading came from a latent double-free of that accumulator (the
+# same over-free that SIGSEGVs stdlib `compose`/`comp` — pinned by
+# tests/integration/fixtures/region-compose-closure-acc-uaf.lisp); it decremented
+# one extra region per fold, an unsound reclamation, not a real one. `concat` builds
+# a fresh accumulator + per-arg combiner closures. All non-escaping, acyclic
+# call-result regions no static slot can name. Pinned at the exact `(concat "a" "b")`
+# / 2-element `fold` shapes.
 (pin (measure-core "stdlib-concat" (stmt-run (fn [] (concat "a" "b")))
                    count-gauge 100 6 60 0.4 0.5) 10)
 (pin (measure-core "stdlib-fold"
                    (stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y"))))
-                   count-gauge 100 6 60 0.4 0.5) 4)
+                   count-gauge 100 6 60 0.4 0.5) 5)
 
 # ── HOF-composition dissolution debt — the zip-tower witness ───────────
 # `zip-tower` is a zip built as a TOWER of higher-order calls: it converts every

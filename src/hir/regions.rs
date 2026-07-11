@@ -146,6 +146,21 @@ struct RegionInference {
     binding_lambda: HashMap<Binding, *const Hir>,
     /// Depth counter to prevent infinite recursion during inlining.
     inline_depth: u32,
+    /// Regions currently bound to an inlined callee's params — i.e. the CALLER's
+    /// arg regions, live across an active `try_inline_call`. A `Return` reached
+    /// during an inline re-walk names whatever `binding_regions` its value
+    /// resolves to; when that is a param, it is one of these caller regions, and
+    /// pushing it into `return_sites` would extend the caller region's
+    /// `decref_point` to a node inside the callee body. For a self-tail-recursive
+    /// callee whose accumulator arg the tail call transfers forward (stdlib
+    /// `fold`'s `go`), that pins the arg's release onto the base-case (sibling)
+    /// arm, and under self-tail-call frame reuse the branch-union release
+    /// over-frees the value the tail call already moved into the next
+    /// accumulator. The caller's own structural walk owns an arg region's release
+    /// (including its own `return_sites` if the caller returns it), so the inline
+    /// filters these out — while still propagating the callee's genuine
+    /// body-result regions, which the call site needs. Empty outside an inline.
+    inline_bound_regions: rustc_hash::FxHashSet<Region>,
     /// Lambda nesting depth — incremented around lambda body walks.
     /// Used to mirror the lowerer's `!self.in_lambda` predicate: inside
     /// a lambda body, MakeCaptureCell is not emitted by `lower_begin` /
@@ -185,6 +200,7 @@ impl RegionInference {
             arena: arena as *const BindingArena,
             binding_lambda: HashMap::new(),
             inline_depth: 0,
+            inline_bound_regions: rustc_hash::FxHashSet::default(),
             in_lambda_depth: 0,
         }
     }

@@ -408,6 +408,34 @@ fn region_fold_closure_arg_uaf() {
     );
 }
 
+// Guard — stdlib `compose`/`comp` compose correctly, no over-free. A
+// self-tail-recursive HOF (stdlib `fold`'s letrec `go`) reached from >= 2 call
+// sites in a unit must not over-free a value its tail call transferred forward.
+// The region walk's callee inline (`try_inline_call`, whose sole job is to
+// surface a callee body's cross-region EDGES at the call site) binds the
+// callee's params to the CALLER's arg regions; a `Return` reached inside that
+// re-walk names the arg region, not the value the callee structurally returns.
+// Recording it in `return_sites` pins the transferred arg's `decref_point` to
+// the callee's base-case (sibling) arm, and under self-tail-call frame reuse the
+// branch-union release over-frees the reducer result the tail call already moved
+// into the next accumulator. The interprocedural return facet is escape.rs's
+// authority (a summary, not a re-walk), so the inline records return-frontier
+// extensions only on the structural walk — mirroring the `inline_depth == 0`
+// gate the Letrec/Let cell mint already uses. `compose`/`comp` fold `identity`
+// with a closure-returning reducer, so the composed closure is exactly such a
+// transferred accumulator; this exercises the full user-visible surface plus the
+// isolated single-step fold. Armed under guardfree so any regression faults
+// deterministically at the freeing decref. The corpus witness is
+// tests/elle/functional.lisp's compose section, surfaced by the batched smoke
+// gate. Full mechanism in the fixture header.
+#[test]
+fn region_compose_closure_acc_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-compose-closure-acc-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a `squelch`/`attune` wrapper closure run as a fiber body. The wrapper
 // shares the inner closure's template and env (their backing lives in the INNER
 // closure's region), but the wrapper VALUE itself lives in a fresh region. A fiber
