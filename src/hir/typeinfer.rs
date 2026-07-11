@@ -207,6 +207,20 @@ fn unwrap_to_call(hir: &Hir) -> Option<usize> {
 fn primitive_return_type(name: &str, arg_types: &[TyId], _interner: &TypeInterner) -> TyId {
     use crate::primitives::def::RetType;
 
+    // %thaw/thaw and %freeze/freeze map a container to its mutable/immutable
+    // twin. The native's own RetType is polymorphic (Unknown), but the result
+    // is a function of the operand — a fact inference can carry. This proves a
+    // mutable-collection literal's type (`@"..."` desugars through `%thaw` of a
+    // string literal), so it can flow into a %-store op's proven container
+    // contract (e.g. `(%string-push @"" "x")`), and types explicit
+    // `thaw`/`freeze` calls on a proven container likewise.
+    let arg0 = || arg_types.first().copied().unwrap_or(TypeInterner::TOP);
+    match name {
+        "%thaw" | "thaw" => return mutable_twin(arg0()),
+        "%freeze" | "freeze" => return immutable_twin(arg0()),
+        _ => {}
+    }
+
     if let Some(def) = crate::primitives::registration::def_by_name(name) {
         return match def.ret {
             RetType::Unknown => TypeInterner::TOP,
@@ -323,6 +337,10 @@ fn intrinsic_return_type(
         IntrinsicOp::Pair => TypeInterner::PAIR,
         IntrinsicOp::First | IntrinsicOp::Rest => TypeInterner::TOP,
 
+        // Freeze/Thaw are copying ops that route through the native funnel Call
+        // (`routes_native_funnel`), so they are typed by `primitive_return_type`
+        // by name, not here.
+
         // Bitwise: return Int
         IntrinsicOp::BitAnd
         | IntrinsicOp::BitOr
@@ -339,6 +357,43 @@ fn intrinsic_return_type(
 
         // Everything else
         _ => TypeInterner::TOP,
+    }
+}
+
+/// The mutable counterpart of a container type (`%thaw`'s result). An
+/// already-mutable or immutable container maps to its mutable twin; a
+/// non-container type has no twin and stays Top.
+fn mutable_twin(ty: TyId) -> TyId {
+    if ty == TypeInterner::STRING || ty == TypeInterner::MUTABLE_STRING {
+        TypeInterner::MUTABLE_STRING
+    } else if ty == TypeInterner::ARRAY || ty == TypeInterner::MUTABLE_ARRAY {
+        TypeInterner::MUTABLE_ARRAY
+    } else if ty == TypeInterner::BYTES || ty == TypeInterner::MUTABLE_BYTES {
+        TypeInterner::MUTABLE_BYTES
+    } else if ty == TypeInterner::STRUCT || ty == TypeInterner::MUTABLE_STRUCT {
+        TypeInterner::MUTABLE_STRUCT
+    } else if ty == TypeInterner::SET || ty == TypeInterner::MUTABLE_SET {
+        TypeInterner::MUTABLE_SET
+    } else {
+        TypeInterner::TOP
+    }
+}
+
+/// The immutable counterpart of a container type (`%freeze`'s result). The
+/// inverse of [`mutable_twin`].
+fn immutable_twin(ty: TyId) -> TyId {
+    if ty == TypeInterner::STRING || ty == TypeInterner::MUTABLE_STRING {
+        TypeInterner::STRING
+    } else if ty == TypeInterner::ARRAY || ty == TypeInterner::MUTABLE_ARRAY {
+        TypeInterner::ARRAY
+    } else if ty == TypeInterner::BYTES || ty == TypeInterner::MUTABLE_BYTES {
+        TypeInterner::BYTES
+    } else if ty == TypeInterner::STRUCT || ty == TypeInterner::MUTABLE_STRUCT {
+        TypeInterner::STRUCT
+    } else if ty == TypeInterner::SET || ty == TypeInterner::MUTABLE_SET {
+        TypeInterner::SET
+    } else {
+        TypeInterner::TOP
     }
 }
 

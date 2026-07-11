@@ -92,6 +92,28 @@ pub(crate) fn prim_fiber_new(
     // body's executing-closure register (see `Fiber::closure_value`).
     fiber.closure_value = args[0];
     fiber.withheld = deny_bits;
+
+    // Snapshot the creating fiber's dynamic parameter bindings into the child at
+    // CREATION time — Racket-style thread-parameterization: the child observes
+    // each parameter's value at the moment it is created, not at resume. Doing
+    // it here rather than at resume is what makes `ev/spawn` correct: the
+    // spawner's `parameterize` blocks unwind long before the scheduler resumes
+    // the child, so a resume-time snapshot would capture the resumer's (the
+    // scheduler's) bindings instead of the ones the creator meant to propagate.
+    // Frames are flattened into one (innermost wins) so lookup is O(1) and the
+    // resolved value is frozen. The resume-time inheritance in `do_fiber_resume`
+    // stays a no-op fallback for fibers built outside `fiber/new` — it skips a
+    // child whose `param_frames` is already seeded (non-empty) here.
+    let parent_frames = ctx.vm().fiber.param_frames.clone();
+    if !parent_frames.is_empty() {
+        let flat = crate::vm::fiber::flatten_param_frames(&parent_frames);
+        #[cfg(debug_assertions)]
+        {
+            fiber.param_borrows = crate::vm::fiber::record_param_borrows(&flat, ctx.heap_mut());
+        }
+        fiber.param_frames = vec![flat];
+    }
+
     (SIG_OK, ctx.fiber(fiber))
 }
 

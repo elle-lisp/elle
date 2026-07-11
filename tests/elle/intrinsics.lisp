@@ -277,10 +277,14 @@
 (assert (= (manual-sum '(1 2 3 4 5)) 15) "manual sum with %add as a value")
 
 # test_manual_map_with_intrinsics
+# The `%pair?` guard narrows `xs` to a proven pair on the recursive branch, so
+# `%first`/`%rest` discharge their operand contract (docs/intrinsics.md § The
+# contract). `(empty? xs)` proves only non-emptiness, not pair-ness — a
+# non-empty array is empty?=false yet not a valid %first operand.
 (defn manual-map [f xs]
-  (if (empty? xs)
-    ()
-    (%pair (f (%first xs)) (manual-map f (%rest xs)))))
+  (if (%pair? xs)
+    (%pair (f (%first xs)) (manual-map f (%rest xs)))
+    ()))
 (assert (= (manual-map (fn [x] (if (%int? x) (%mul x x) 0)) '(1 2 3)) '(1 4 9))
         "manual map with %pair/%first/%rest and a guarded callback")
 

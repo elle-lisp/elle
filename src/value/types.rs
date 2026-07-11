@@ -207,6 +207,33 @@ impl TableKey {
         }
     }
 
+    /// Visit every heap `Value` this key holds — the cross-region references a
+    /// struct key contributes to its owning struct's region.
+    ///
+    /// A `Heap` key stores a `Value` pointing into the region the key value was
+    /// born in; an `Array` key can nest `Heap` keys among its elements. Scalar
+    /// keys (nil/bool/int/symbol/string/keyword/empty-list) carry no region
+    /// reference. The region scan (`find_object_cross_refs`) walks these so a
+    /// struct increfs and records the edge to each heap key's region at alloc,
+    /// balanced by the free-time cascade — the same accounting struct VALUES get.
+    pub fn for_each_heap_value(&self, f: &mut impl FnMut(&Value)) {
+        match self {
+            TableKey::Heap(v) => f(v),
+            TableKey::Array(keys) => {
+                for k in keys {
+                    k.for_each_heap_value(f);
+                }
+            }
+            TableKey::Nil
+            | TableKey::Bool(_)
+            | TableKey::Int(_)
+            | TableKey::Symbol(_)
+            | TableKey::String(_)
+            | TableKey::Keyword(_)
+            | TableKey::EmptyList => {}
+        }
+    }
+
     /// Whether this key can be safely sent across thread boundaries.
     ///
     /// Heap keys contain `Rc` data that is not thread-safe.

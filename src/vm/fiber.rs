@@ -51,6 +51,6 @@ pub(crate) use owned::{kill_fiber, parked_owner_nodes, release_fiber_owned, take
 use refcount::{incref_signal_region, release_completed_resume_carrier};
 pub(crate) use refcount::{is_terminal_signal, release_parked_signal};
 
-use param::flatten_param_frames;
+pub(crate) use param::flatten_param_frames;
 #[cfg(debug_assertions)]
 pub(crate) use param::{first_stale_borrow, record_param_borrows};

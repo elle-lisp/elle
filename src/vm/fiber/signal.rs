@@ -31,8 +31,14 @@ impl VM {
     /// - withheld capabilities (monotonic OR, so `with_child_fiber`'s later
     ///   parent→child OR is harmless on top).
     fn seed_child_inheritance(&mut self, handle: &FiberHandle, fiber_value: Value) {
-        let child_is_new = handle.with(|f| f.status == FiberStatus::New);
-        if child_is_new && !self.fiber.param_frames.is_empty() {
+        // Skip a child already seeded at CREATION (`fiber/new` snapshots the
+        // creator's parameter bindings into `param_frames`): overwriting it here
+        // with THIS fiber's current frames would install the resumer's bindings
+        // instead of the creator's — the exact ev/spawn bug creation-time capture
+        // fixes. Seed only a still-unseeded New child, from a non-empty baseline.
+        let (child_is_new, child_unseeded) =
+            handle.with(|f| (f.status == FiberStatus::New, f.param_frames.is_empty()));
+        if child_is_new && child_unseeded && !self.fiber.param_frames.is_empty() {
             let flat = flatten_param_frames(&self.fiber.param_frames);
             #[cfg(debug_assertions)]
             let borrows = record_param_borrows(&flat, self.heap());

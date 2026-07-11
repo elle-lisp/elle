@@ -49,7 +49,12 @@
 (while (%lt i 300)
   (let [p (%pair (%pair i (%add i 1)) (%add i 2))
         _junk (%pair (%pair 0 0) 0)]
-    (assert (= (%first (%first p)) i)
+    # Read the nested car with the `first` wrapper: `%first`'s result type is
+    # Top (pair element types are untracked), so nesting raw `%first` cannot
+    # prove the inner operand is a pair. The reads only verify the values; the
+    # `%pair` MERGE seed under test is the construction above and the region
+    # measurement below, both still using the bare intrinsic.
+    (assert (= (first (first p)) i)
             (string "builder inner car corrupted at i=" i))
     (assert (= (%rest p) (%add i 2))
             (string "builder outer cdr corrupted at i=" i)))

@@ -19,8 +19,11 @@
 # every arm. GREEN once the per-call growth is bounded.
 
 (defn bounded? [d100 d10k limit]
-  "True if both deltas are under limit and 10000 is not ~100x 100."
-  (and (%lt d100 limit) (%lt d10k limit) (or (= d100 0) (%lt d10k (* d100 10)))))
+  "True if both deltas are under limit and 10000 is not ~100x 100. A
+  non-positive d100 means no per-iteration growth (net reclamation), so the
+  leak-scaling check is vacuous — reclaiming MORE than the baseline is bounded."
+  (and (%lt d100 limit) (%lt d10k limit)
+       (or (%le d100 0) (%lt d10k (* d100 10)))))
 
 # ── subject: the put-shaped match dispatch, value stored in every arm ──────────
 # `coll` is a PARAMETER, so its type is not statically known here and the off-type

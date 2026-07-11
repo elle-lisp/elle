@@ -116,10 +116,22 @@ WASM_SKIP := -e eval.lisp -e eval-env.lisp
 # featured-build targets: the runner probes the tiers the binary carries, so
 # the same invocation gains the mlir-cpu / wasm tier — and its divergence
 # rows — when $(ELLE) was built with that feature.
+#
+# The corpus runs in BATCHES of $(CORPUS_BATCH) files per `elle test` process,
+# not one process over the whole corpus. The runner holds every file's compiled
+# module and region heap for the process's lifetime, so a single all-files
+# invocation grows without bound and is OOM-killed partway through — silently
+# truncating coverage to whatever ran before the kill. Bounding files per process
+# bounds peak memory; `xargs` runs every batch, so a batch that fails a test (exit
+# 1–125) or is OOM-killed (a signal, which halts xargs) drives a non-zero exit and
+# fails the gate loud. Divergence is a within-file, cross-tier property, so
+# batching by file does not weaken it, and every batch appends to the one session
+# DB that `--query`/`--summary` read (docs/testing.md § Reading a run).
+CORPUS_BATCH ?= 25
 define RUN_CORPUS
-	@$(ELLE) test \
-		$(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
-		|| { $(ELLE) test --summary; echo "FAILED: elle test — query the session DB (docs/testing.md § Reading a run)"; exit 1; }
+	@printf '%s\n' $(filter-out $(ELLE_TEST_SKIP),$(wildcard tests/elle/*.lisp)) \
+		| xargs -n $(CORPUS_BATCH) $(ELLE) test \
+		|| { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md § Reading a run)"; exit 1; }
 endef
 
 smoke-elle: elle  ## Run the whole corpus through `elle test` (vm + jit + divergence)

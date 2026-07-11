@@ -362,6 +362,10 @@ primitive! {
         effect: RegionEffect::Funnel,
     }
     "%put" => prim_put {
+        // Result is the same container type as arg0: the immutable path returns
+        // a fresh copy of that type, the mutable path returns the container. This
+        // lets a nested `(%get (%put s k v) …)` prove its operand.
+        ret: RetType::FirstArg,
         arity: Arity::Range(2, 3),
         doc: "Assoc/set element",
         params: &["coll", "key", "val"],
@@ -436,6 +440,8 @@ primitive! {
         ret: RetType::MutableSet,
     }
     "%del" => prim_del {
+        // Same container type as arg0 (fresh copy immutable, container mutable).
+        ret: RetType::FirstArg,
         arity: Arity::Exact(2),
         doc: "Dissoc/delete key",
         params: &["coll", "key"],
@@ -450,6 +456,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "%array-push" => prim_push {
+        // Same array type as arg0 (fresh copy immutable, container mutable).
+        ret: RetType::FirstArg,
         arity: Arity::Exact(2),
         doc: "Append element",
         params: &["arr", "val"],
@@ -497,6 +505,9 @@ primitive! {
         moves_out: true,
     }
     "%string-push" => prim_string_push {
+        // Same string type as arg0: @string appends in place (@string result),
+        // immutable string returns a fresh string of the same type.
+        ret: RetType::FirstArg,
         arity: Arity::Exact(2),
         doc: "Append string to string/@string",
         params: &["s", "val"],
@@ -510,6 +521,8 @@ primitive! {
         effect: RegionEffect::Funnel,
     }
     "%bytes-push" => prim_bytes_push {
+        // Same bytes type as arg0 (fresh copy immutable, container mutable).
+        ret: RetType::FirstArg,
         arity: Arity::Exact(2),
         doc: "Append a byte (integer) or all bytes of a bytes value to bytes/@bytes",
         params: &["b", "val"],

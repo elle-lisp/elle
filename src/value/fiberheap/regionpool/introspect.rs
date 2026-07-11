@@ -127,7 +127,8 @@ impl RegionPool {
             }
             HeapObject::LStructMut { data, .. } => {
                 if let Ok(borrowed) = data.try_borrow() {
-                    for v in borrowed.values() {
+                    for (k, v) in borrowed.iter() {
+                        k.for_each_heap_value(&mut check);
                         check(v);
                     }
                 }
@@ -191,7 +192,13 @@ impl RegionPool {
                 }
             }
             HeapObject::LStruct { data, .. } => {
-                for (_, v) in data.iter() {
+                // A heap-valued key (`TableKey::Heap`/nested in an `Array` key) is
+                // a cross-region reference just like the value — enumerate both so
+                // the key's region is increfed/recorded at alloc and cascade-decrefed
+                // at free (else the key's region frees while the struct still points
+                // into it; see region-struct-heap-key-uaf.lisp).
+                for (k, v) in data.iter() {
+                    k.for_each_heap_value(&mut check);
                     check(v);
                 }
             }

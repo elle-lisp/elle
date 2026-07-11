@@ -10,7 +10,7 @@ use crate::value::Value;
 /// Flatten dynamic parameter frames into a single baseline frame, later
 /// frames overriding earlier ones. Used when a child fiber inherits its
 /// parent's dynamic bindings on first resume.
-pub(super) fn flatten_param_frames(frames: &[Vec<(u32, Value)>]) -> Vec<(u32, Value)> {
+pub(crate) fn flatten_param_frames(frames: &[Vec<(u32, Value)>]) -> Vec<(u32, Value)> {
     let mut flat: Vec<(u32, Value)> = Vec::new();
     for frame in frames {
         for &(id, val) in frame {

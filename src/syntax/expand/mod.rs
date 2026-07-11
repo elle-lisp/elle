@@ -341,10 +341,14 @@ impl Expander {
                 ))
             }
             SyntaxKind::StringMut(s) => {
-                // @"..." desugars to (thaw "...") at expansion time.
-                // The thaw symbol carries ScopeId(0) (primitive scope).
+                // @"..." desugars to (%thaw "...") at expansion time — the
+                // intrinsic, not the `thaw` wrapper, so inference proves the
+                // result is a mutable string (the wrapper is polymorphic and
+                // types Top). `%thaw` is Total (never rejects) and lowers to the
+                // same funnel native as the wrapper, so the runtime is identical.
+                // The op symbol carries ScopeId(0) (primitive scope).
                 let thaw_sym = Syntax::with_scopes(
-                    SyntaxKind::Symbol("thaw".into()),
+                    SyntaxKind::Symbol("%thaw".into()),
                     syntax.span.clone(),
                     vec![ScopeId(0)],
                 );

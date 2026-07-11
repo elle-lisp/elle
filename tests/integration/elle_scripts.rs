@@ -466,6 +466,28 @@ fn region_set_del_heap_member_uaf() {
     );
 }
 
+// Guard — a struct storing a HEAP-valued key (a list/bytes/set/struct used as a
+// key, held as `TableKey::Heap(Value)`) records the outgoing content edge
+// `region(struct) → region(key)` and increfs the key's region, exactly as it
+// does for a struct VALUE. The key value is built in the caller's region and
+// pointed at from the struct's region — a cross-region reference the alloc-time
+// scan (`find_object_cross_refs`) must enumerate so the free-time cascade
+// balances it. Enumerating only the values (the old struct arms) left the key's
+// region reclaimed at its constructor's decref_point while the struct still
+// pointed into it: a stale key comparison on the next `get`/`put` (binary search)
+// derefs the freed page, and — because the drifted region gets reused — reads
+// live-but-wrong data, silently collapsing distinct compound keys onto one slot.
+// Quarantined as a subprocess because a regression ABORTS (guardfree fault /
+// oracle panic) and would take the shared smoke harness down. Full repro +
+// invariant in the fixture.
+#[test]
+fn region_struct_heap_key_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-struct-heap-key-uaf.lisp",
+        &["--trace=guardfree"],
+    );
+}
+
 // Guard — a leaf helper called many times from a driver. The callee closure lives
 // in a letrec forward-reference cell the driver captures BY INDIRECTION (an
 // uncounted cell store the ownership scan cannot see). The forest must treat that

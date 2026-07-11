@@ -239,6 +239,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-reset-peak" => prim_arena_reset_peak {
+        ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Reset peak to current count. Returns previous peak.",
         category: "debug",
@@ -247,6 +248,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-of" => prim_arena_region_of {
+        ret: RetType::Int,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return region ID for a heap value (0 for non-heap).",
