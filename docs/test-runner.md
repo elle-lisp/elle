@@ -1,7 +1,19 @@
 # Agent-First Test Runner
 
-> Status: **design**. This document is the specification. Tests come next, then
-> code (see [CLAUDE.md house process](../AGENTS.md)). Nothing here is built yet.
+> Status: **partially built** — this document is the specification, and its core
+> is now implemented in [`src/test.lisp`](../src/test.lisp) as the `elle test`
+> subcommand (the `smoke-elle` corpus gate). Built (v1): per-file compilation,
+> the per-form fault barrier and the whole-file mode, worker-thread isolation,
+> the vm/jit tier matrix with cross-tier divergence, the persistent SQLite index
+> (a **subset** of the § Schema below — see the note there), the on-disk CAS for
+> stdout/stderr, run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
+> skips, and the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/
+> `--corpus`/`--db` flags. Still design (not built): semantic selection
+> (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
+> `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run git/RSS/CPU capture,
+> `--dump`/`--trace` asset capture, `changed_file` population, and the
+> predicate-carrying `assert` macro. A section marked "(v1, implemented)" /
+> "(implemented)" / "**Resolved (v1)**" is built; the rest is the target.
 
 ## The problem this solves
 
@@ -541,12 +553,12 @@ keeping the syntax-capture from costing anything at runtime when it isn't needed
 CREATE TABLE run (                  -- one row per `elle test` invocation
   id INTEGER PRIMARY KEY, started_at TEXT,
   finished_at TEXT,                 -- stamped at completion; NULL = the run was KILLED mid-flight
-  git_commit TEXT, git_dirty INT, tree_hash TEXT,        -- correlate results to code state
-  elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,
+  git_commit TEXT, git_dirty INT, tree_hash TEXT,        -- correlate results to code state (v1: deferred)
+  elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, tiers TEXT,   -- (v1: only `tiers` created)
   selection TEXT,                   -- the filter predicate; NULL = full run (the gate)
   n_selected INT,                   -- files + -e forms planned; written at insert
   n_pass INT, n_fail INT, n_skip INT, n_diverge INT, n_timeout INT,  -- aggregated at completion only
-  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);
+  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage (v1: deferred)
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
   run_id INT REFERENCES run(id), path TEXT, status TEXT, blob_hash TEXT);
@@ -576,6 +588,19 @@ CREATE TABLE asset (                -- artifact attached to a result; bytes live
 The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
 only metadata and hashes; artifact bytes live in the on-disk CAS, so the file
 stays small and merge/diff concerns never arise (it is gitignored regardless).
+
+**v1 implemented subset (`src/test.lisp` `ensure-schema`).** The runner creates
+`form`, `result`, and `asset` with the columns above; `run` and `changed_file`
+are subsets:
+
+- `run` is exactly `id, started_at, finished_at, tiers, selection, n_selected,
+  n_pass, n_fail, n_skip, n_diverge, n_timeout` — the code-state
+  (`git_commit`/`git_dirty`/`tree_hash`/`elle_version`/`build_profile`/`host`/
+  `argv`) and resource (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`)
+  columns are deferred. So the regression-archaeology query below
+  (`min(run.git_commit)`) and any resource query are design-only until those
+  columns land; a `SELECT` of a deferred column errors with `no such column`.
+- `changed_file` is created but never populated (no `--changed`/git capture yet).
 
 ## The agent workflow, as SQL
 

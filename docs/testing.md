@@ -145,10 +145,13 @@ elle test --query \
 ```
 
 The schema (`run`, `form`, `result`, `asset`, `changed_file`) is documented in
-[`docs/test-runner.md`](test-runner.md) § Schema. Artifact bytes (`--dump`
-renderings, captured stdout/stderr) live in the CAS at `<db-dir>/cas/<hash>`,
-referenced by `asset` rows — so the LIR of a failing form is a hash lookup, not a
-re-run.
+[`docs/test-runner.md`](test-runner.md) § Schema (with the v1 implemented-subset
+note — the `run` code-state/resource columns are deferred). Captured stdout/stderr
+live in the CAS at `<db-dir>/cas/<hash>`, referenced by `asset` rows. `--dump`
+artifact capture (the LIR-as-a-hash-lookup path) is currently **omitted** — it
+OOMs the corpus run and does not dedup (test-runner.md § CAS asset capture) — so
+today only stdout/stderr assets exist; the LIR of a failing form still needs a
+re-run until that capture is re-enabled.
 
 A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
 `finished_at` stays NULL, `--summary` labels it `DID NOT COMPLETE` with the live
