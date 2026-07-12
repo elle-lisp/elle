@@ -190,7 +190,7 @@ pub(in crate::hir::regions) fn compute_transfer_adopts(
         }
         // External uniqueness: nothing inside references out (the return
         // itself records no edge).
-        if inputs.outside_ref_in(info, &subtree) {
+        if inputs.outside_ref_in(&subtree) {
             return None;
         }
         // The subtree must contain an interior cycle: an acyclic returned

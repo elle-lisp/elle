@@ -87,7 +87,7 @@ pub(in crate::hir::regions) fn compute_owned_subtrees(
         if subtree.iter().any(|&m| inputs.not_ownable(info, m)) {
             continue;
         }
-        if inputs.outside_ref_in(info, &subtree) {
+        if inputs.outside_ref_in(&subtree) {
             continue;
         }
         owned.insert(r, subtree);
@@ -201,7 +201,7 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
             continue;
         }
         // Externally unique: nothing outside holds a member (a source SCC).
-        if inputs.outside_ref_in(info, &scc) {
+        if inputs.outside_ref_in(&scc) {
             continue;
         }
         // Drop site = the innermost structural scope enclosing every member's allocation

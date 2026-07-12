@@ -129,10 +129,12 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
     // Built once, queried per member below.
     let pd = PostDom::new(hir, order);
     // A region collapsed by a builder-idiom MERGE (as child or parent) is owned by
-    // that mechanism, never adopted.
-    let is_merged = |r: Region| -> bool {
-        info.merged_parent.contains_key(&r) || info.merged_parent.values().any(|&p| p == r)
-    };
+    // that mechanism, never adopted. The parent side is the `merged_parent` VALUE set,
+    // precomputed once so the per-member test below is O(1) — scanning `.values()` per
+    // member made the merge-overlap filter O(members × merges) over the whole-stdlib letrec.
+    let merged_parents: FxHashSet<Region> = info.merged_parent.values().copied().collect();
+    let is_merged =
+        |r: Region| -> bool { info.merged_parent.contains_key(&r) || merged_parents.contains(&r) };
     // Compiled capture-cell region → its binding, and the set of all such regions. A
     // `cell ⊇ content` containment edge is one whose CONTAINER is a cell region; it is
     // an emittable owner-edge only for an IMMUTABLE letrec cell — a re-storable cell's
@@ -149,6 +151,73 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
             .get(&cell_r)
             .is_some_and(|&b| !arena.get(b).is_restorable_capture_cell())
     };
+
+    // Interior-edge index. The accepted Owned subtrees PARTITION the regions (subtree.rs:
+    // a region reached from two roots fails external uniqueness for both, so no region is a
+    // member of two subtrees), so each interior region maps to exactly one root. Inverting
+    // `owned` into `root_of` once, then bucketing every eligible edge under its (unique)
+    // interior root in a single pass, replaces the per-root re-scan of EVERY
+    // cross_region_refs / capture / containment edge — which was O(roots × edges), quadratic
+    // on the stdlib's one giant letrec — with O(edges). An edge is interior to root R iff
+    // BOTH endpoints are members of R's subtree, i.e. `root_of[src] == root_of[dst] == R`.
+    let mut root_of: FxHashMap<Region, Region> = FxHashMap::default();
+    for (&root, members) in &owned {
+        for &m in members {
+            let prev = root_of.insert(m, root);
+            debug_assert!(
+                prev.is_none(),
+                "owned subtrees must be disjoint, but region r{} appears in two subtrees",
+                m.0
+            );
+        }
+    }
+    let interior_root = |src: Region, dst: Region| -> Option<Region> {
+        match (root_of.get(&src), root_of.get(&dst)) {
+            (Some(&rs), Some(&rd)) if rs == rd => Some(rs),
+            _ => None,
+        }
+    };
+    // Per-root interior edge lists, built in source-list order so the emitted adopt order
+    // is identical to the pre-index per-root filter. Funnel and cell edges both come from
+    // `containment_edges` and are bucketed in one pass (an edge can qualify for both, exactly
+    // as the two independent per-root filters admitted).
+    type EdgeList = Vec<(HirId, Region, Region)>;
+    let mut store_by_root: FxHashMap<Region, EdgeList> = FxHashMap::default();
+    for &(site, src, dst) in &info.cross_region_refs {
+        if info.hard_edge_sites.contains(&site) {
+            continue;
+        }
+        if let Some(r) = interior_root(src, dst) {
+            store_by_root.entry(r).or_default().push((site, src, dst));
+        }
+    }
+    let mut capture_by_root: FxHashMap<Region, EdgeList> = FxHashMap::default();
+    for &(lambda, src, dst) in &all_captures {
+        if let Some(r) = interior_root(src, dst) {
+            capture_by_root
+                .entry(r)
+                .or_default()
+                .push((lambda, src, dst));
+        }
+    }
+    let mut funnel_by_root: FxHashMap<Region, EdgeList> = FxHashMap::default();
+    let mut cell_by_root: FxHashMap<Region, EdgeList> = FxHashMap::default();
+    for &(site, src, dst) in &info.containment_edges {
+        let Some(r) = interior_root(src, dst) else {
+            continue;
+        };
+        if info
+            .funnel_store_sites
+            .get(&site)
+            .is_some_and(|stored| stored.contains(&src))
+        {
+            funnel_by_root.entry(r).or_default().push((site, src, dst));
+        }
+        if adoptable_cell(dst) {
+            cell_by_root.entry(r).or_default().push((site, src, dst));
+        }
+    }
+    let no_edges: EdgeList = Vec::new();
 
     let mut out = AdoptEdges {
         store: HashMap::new(),
@@ -170,58 +239,19 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         if members.iter().any(|&m| is_merged(m)) {
             continue;
         }
-        // Interior containment edges with an emit site. STORE edges carry their
-        // `cross_region_refs` store-site HirId (orientation `(site, src=child,
-        // dst=parent)` — `target ⊇ source`), non-hard (a hard may-store does not build
-        // the subtree). CAPTURE edges carry the Lambda's HirId as their site.
-        let interior_store: Vec<(HirId, Region, Region)> = info
-            .cross_region_refs
-            .iter()
-            .copied()
-            .filter(|(site, src, dst)| {
-                !info.hard_edge_sites.contains(site)
-                    && members.contains(src)
-                    && members.contains(dst)
-            })
-            .collect();
-        let interior_capture: Vec<(HirId, Region, Region)> = all_captures
-            .iter()
-            .copied()
-            .filter(|(_lambda, src, dst)| members.contains(src) && members.contains(dst))
-            .collect();
-        // FUNNEL edges (the funnel store face) carry their funnel call-site HirId;
-        // emittable only where the site is a retaining store recording the member as
-        // its stored value — a `%del`/key containment edge retains nothing and must
-        // not key an adopt. The emit is value-resolved at that Call node, riding the
-        // same `owned_adopt_edges` map as an intrinsic store site.
-        let interior_funnel: Vec<(HirId, Region, Region)> = info
-            .containment_edges
-            .iter()
-            .copied()
-            .filter(|(site, src, dst)| {
-                members.contains(src)
-                    && members.contains(dst)
-                    && info
-                        .funnel_store_sites
-                        .get(site)
-                        .is_some_and(|stored| stored.contains(src))
-            })
-            .collect();
-        // CELL edges (`cell ⊇ content`): a `containment_edges` entry whose CONTAINER is a
-        // compiled capture-cell region (`begin_cell_regions`), recorded by the walk at the
-        // cell's mint scope. Emittable only for an IMMUTABLE letrec cell (`adoptable_cell`
-        // — the re-storable loop hazard is refused, §3); the adopt is value-resolved at the
-        // cell store as `AdoptCellRegion(cell, content)`, keyed by the cell's binding. A
-        // funnel/embed containment edge never targets a cell region, so the two are
-        // disjoint by construction.
-        let interior_cell: Vec<(HirId, Region, Region)> = info
-            .containment_edges
-            .iter()
-            .copied()
-            .filter(|(_site, src, dst)| {
-                members.contains(src) && members.contains(dst) && adoptable_cell(*dst)
-            })
-            .collect();
+        // Interior containment edges with an emit site, looked up from the per-root index
+        // built above. STORE edges carry their `cross_region_refs` store-site HirId
+        // (orientation `(site, src=child, dst=parent)` — `target ⊇ source`), non-hard (a hard
+        // may-store does not build the subtree). CAPTURE edges carry the Lambda's HirId as
+        // their site. FUNNEL edges carry their funnel call-site HirId — bucketed only where
+        // the site is a retaining store recording the member as its stored value (a `%del`/key
+        // containment edge retains nothing). CELL edges (`cell ⊇ content`) are the immutable
+        // letrec cells (`adoptable_cell`), value-resolved at the cell store as
+        // `AdoptCellRegion(cell, content)` keyed by the cell's binding.
+        let interior_store = store_by_root.get(&root).unwrap_or(&no_edges);
+        let interior_capture = capture_by_root.get(&root).unwrap_or(&no_edges);
+        let interior_funnel = funnel_by_root.get(&root).unwrap_or(&no_edges);
+        let interior_cell = cell_by_root.get(&root).unwrap_or(&no_edges);
         // Assign each non-root member its single owner — its **actual parent** in the
         // containment graph (store + capture edges both count). The in-subtree containers
         // of `m` are the targets of interior edges sourced at `m`. Prefer the root when it
@@ -384,7 +414,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
                 out.store.entry(site).or_default().push((src, dst));
             }
         }
-        for &(lambda, src, dst) in &interior_capture {
+        for &(lambda, src, dst) in interior_capture {
             if owner_of.get(&src) == Some(&dst) && adopted.insert(src) {
                 out.capture.entry(lambda).or_default().push((src, dst));
             }
@@ -393,7 +423,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         // `cross_region_refs` node), keyed by the cell's binding: the lowerer emits
         // `AdoptCellRegion(cell, content)` there. The cell (dst) is itself capture-adopted
         // into the holding closure via `interior_capture` above, so the chain frees as one.
-        for &(_site, src, dst) in &interior_cell {
+        for &(_site, src, dst) in interior_cell {
             if owner_of.get(&src) == Some(&dst) && adopted.insert(src) {
                 if let Some(&binding) = cell_binding_of.get(&dst) {
                     out.cell_content.push(binding);

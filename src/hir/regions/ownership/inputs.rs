@@ -19,15 +19,18 @@ pub(super) struct OwnershipInputs {
     pub(super) contained: FxHashSet<Region>,
     /// The Shared-seed set (`compute_shared_seeds`): regions that cross a frontier.
     shared: FxHashSet<Region>,
-    /// Re-derived capture containment edges `(lambda, captured, closure)` — absent from
-    /// `cross_region_refs` (the RC double-count fix), carried here for both the subtree
-    /// build and the external-uniqueness scan.
-    capture_edges: Vec<(HirId, Region, Region)>,
     /// Region → distinct user holders, for the sole-held check.
     region_holders: super::super::holders::RegionHolders,
     /// Real allocations (`alloc_region` sites + pre-allocated capture cells) — the
     /// candidate region set both walks iterate.
     pub(super) alloc_regions: FxHashSet<Region>,
+    /// `source → targets` over ALL edges the external-uniqueness scan reads (every
+    /// `cross_region_refs` store — hard edges INCLUDED — plus the capture and funnel
+    /// containment edges). Indexing by source once lets [`Self::outside_ref_in`] examine
+    /// only the edges leaving a subtree's own members, instead of re-scanning every edge in
+    /// the compilation unit per candidate subtree (which was O(subtrees × edges), quadratic
+    /// on the whole-stdlib letrec).
+    out_edges_by_src: FxHashMap<Region, Vec<Region>>,
 }
 
 /// Build the [`OwnershipInputs`] for a compilation unit (the containment graph and the
@@ -79,13 +82,26 @@ pub(super) fn ownership_inputs(
                 .flat_map(|v| v.iter().map(|(_, r)| *r)),
         )
         .collect();
+    // Source-indexed edges for the external-uniqueness scan. Unlike `children_of` (subtree
+    // BUILD, hard edges excluded), this includes HARD `cross_region_refs` stores — a
+    // may-store from outside still breaks external uniqueness (see `outside_ref_in`).
+    let mut out_edges_by_src: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
+    for &(_site, src, dst) in &info.cross_region_refs {
+        out_edges_by_src.entry(src).or_default().push(dst);
+    }
+    for &(_lambda, src, dst) in &capture_edges {
+        out_edges_by_src.entry(src).or_default().push(dst);
+    }
+    for &(_site, src, dst) in &info.containment_edges {
+        out_edges_by_src.entry(src).or_default().push(dst);
+    }
     OwnershipInputs {
         children_of,
         contained,
         shared,
-        capture_edges,
         region_holders,
         alloc_regions,
+        out_edges_by_src,
     }
 }
 
@@ -147,18 +163,13 @@ impl OwnershipInputs {
     /// External-uniqueness failure: some edge — over ALL `cross_region_refs` (hard edges
     /// included), the capture edges, and the funnel containment — has its source INSIDE
     /// `set` and its target OUTSIDE it (an outside container holding an interior region,
-    /// which freeing `set` as a unit would dangle).
-    pub(super) fn outside_ref_in(&self, info: &RegionInfo, set: &FxHashSet<Region>) -> bool {
-        info.cross_region_refs
-            .iter()
-            .any(|&(_, src, dst)| set.contains(&src) && !set.contains(&dst))
-            || self
-                .capture_edges
-                .iter()
-                .any(|&(_lambda, src, dst)| set.contains(&src) && !set.contains(&dst))
-            || info
-                .containment_edges
-                .iter()
-                .any(|&(_site, src, dst)| set.contains(&src) && !set.contains(&dst))
+    /// which freeing `set` as a unit would dangle). Reads the source-indexed `out_edges_by_src`
+    /// so only edges LEAVING `set`'s own members are examined (not every edge in the unit).
+    pub(super) fn outside_ref_in(&self, set: &FxHashSet<Region>) -> bool {
+        set.iter().any(|m| {
+            self.out_edges_by_src
+                .get(m)
+                .is_some_and(|dsts| dsts.iter().any(|d| !set.contains(d)))
+        })
     }
 }
