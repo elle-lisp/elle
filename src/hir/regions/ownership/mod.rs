@@ -137,11 +137,15 @@ mod seeds;
 mod subtree;
 mod transfer;
 
-// The forest emit (`analyze_regions_with`) consumes these four.
-pub(super) use activation::compute_activation_adopts;
-pub(super) use adopt::compute_adopt_edges;
-pub(super) use subtree::compute_owned_region_groups;
-pub(super) use transfer::compute_transfer_adopts;
+// The forest emit (`analyze_regions_with`) consumes these four. Each takes the shared
+// `OwnershipInputs` (the containment graph + candidate set + capture edges) by reference,
+// built ONCE per compile in `apply_ownership` (`ownership_inputs`) rather than rebuilt per
+// pass — the inputs derive only from fields unchanged across the ownership passes.
+pub(in crate::hir::regions) use activation::compute_activation_adopts;
+pub(in crate::hir::regions) use adopt::compute_adopt_edges;
+pub(in crate::hir::regions) use inputs::ownership_inputs;
+pub(in crate::hir::regions) use subtree::compute_owned_region_groups;
+pub(in crate::hir::regions) use transfer::compute_transfer_adopts;
 // The Shared-seed set (frontier crossings: return / emit / send — NOT capture) is the
 // closure-cycle merge's non-escape gate: a captured-but-not-frontier-crossing closure
 // is mergeable, which `lambda_escapes_definition` (which also folds in the capture facet

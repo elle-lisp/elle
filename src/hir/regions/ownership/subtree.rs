@@ -1,6 +1,6 @@
 use super::super::*;
 use super::capture::closure_regions;
-use super::inputs::ownership_inputs;
+use super::inputs::OwnershipInputs;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The externally-unique Owned subtrees of a compilation unit — the consumer of
@@ -67,12 +67,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// dying together) is exactly the builder-idiom MERGE
 /// (`regions::merge`); this generalizes it to multi-edge components.
 pub(in crate::hir::regions) fn compute_owned_subtrees(
-    hir: &Hir,
+    inputs: &OwnershipInputs,
     info: &RegionInfo,
-    escape: &crate::hir::EscapeInfo,
-    arena: &BindingArena,
 ) -> FxHashMap<Region, FxHashSet<Region>> {
-    let inputs = ownership_inputs(hir, info, escape, arena);
     let mut owned: FxHashMap<Region, FxHashSet<Region>> = FxHashMap::default();
     for &r in &inputs.alloc_regions {
         // Candidate root: a sole-held, non-frontier TOP container (not the child of any
@@ -128,13 +125,11 @@ pub(in crate::hir::regions) fn compute_owned_subtrees(
 /// not a source), so the container-rooted subtrees and the co-owned groups never overlap.
 /// Run by the ownership pass in `analyze_regions_with`.
 pub(in crate::hir::regions) fn compute_owned_region_groups(
+    inputs: &OwnershipInputs,
     hir: &Hir,
     info: &RegionInfo,
-    escape: &crate::hir::EscapeInfo,
-    arena: &BindingArena,
     order: &HashMap<HirId, u32>,
 ) -> HashMap<HirId, Vec<Region>> {
-    let inputs = ownership_inputs(hir, info, escape, arena);
     // Closure regions — refused below: the group free is the STORE-ONLY-cycle mechanism, and
     // a closure-involving cycle belongs to a different owner. A `letrec` cell↔closure clique
     // goes to the closure-cycle MERGE (which collapses it to one arena); a capture-back-edge
@@ -163,15 +158,11 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
             continue;
         }
         // The SCC of `r`: the regions mutually reachable with it (`r ∈ reach(m)` and
-        // `m ∈ reach(r)`). Size ≥ 2 is a genuine cycle; a lone region (no self-edge) has
-        // SCC `{r}` and is skipped. Which member of an SCC the iteration reaches first is
-        // irrelevant — the SCC set, and everything derived from it, is the same.
-        let reach_r = inputs.reach(r);
-        let scc: FxHashSet<Region> = reach_r
-            .iter()
-            .copied()
-            .filter(|&m| inputs.reach(m).contains(&r))
-            .collect();
+        // `m ∈ reach(r)`). Read from the one shared Tarjan pass (`scc_of`). Size ≥ 2 is a
+        // genuine cycle; a lone region (no self-edge) has SCC `{r}` and is skipped. Which
+        // member of an SCC the iteration reaches first is irrelevant — the SCC set, and
+        // everything derived from it, is the same.
+        let scc = inputs.scc_of(r);
         if scc.len() < 2 {
             continue;
         }
@@ -197,11 +188,11 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
         // (`reach(SCC) ⊋ SCC`) is refused here (the smallest-cut restriction), staying on
         // the always-legal per-region-RC baseline.
         let reach_scc: FxHashSet<Region> = scc.iter().flat_map(|&m| inputs.reach(m)).collect();
-        if reach_scc != scc {
+        if reach_scc != *scc {
             continue;
         }
         // Externally unique: nothing outside holds a member (a source SCC).
-        if inputs.outside_ref_in(&scc) {
+        if inputs.outside_ref_in(scc) {
             continue;
         }
         // Drop site = the innermost structural scope enclosing every member's allocation
@@ -229,7 +220,7 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
         #[cfg(debug_assertions)]
         {
             let drop_ord = ord(drop_site);
-            for &m in &scc {
+            for &m in scc {
                 if let Some(d) = info.region_data.get(&m) {
                     debug_assert!(
                         ord(d.decref_point) <= drop_ord,
@@ -255,12 +246,15 @@ pub(in crate::hir::regions) fn compute_owned_region_groups(
                 }
             }
         }
-        for &m in &scc {
+        for &m in scc {
             claimed.insert(m);
         }
         // Merge into the drop-site entry (two independent cycles sharing one enclosing
         // scope free together — sound, all dead at scope exit). Sorted once below.
-        groups.entry(drop_site).or_default().extend(scc);
+        groups
+            .entry(drop_site)
+            .or_default()
+            .extend(scc.iter().copied());
     }
     // Deterministic member order per group, for byte-identical bytecode across compiles.
     // The key is each member's **allocation program order** (`compute_order` of its alloc

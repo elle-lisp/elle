@@ -1,6 +1,6 @@
 use super::super::postdom::{EmitMode, PostDom};
 use super::super::*;
-use super::capture::capture_containment_edges;
+use super::inputs::OwnershipInputs;
 use super::subtree::compute_owned_subtrees;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -113,17 +113,18 @@ pub(in crate::hir::regions) struct AdoptEdges {
 ///    already-Owned region on the next call. Such a member is ownable only by an owner
 ///    that outlives every capturer (the activation/fiber owner node).
 pub(in crate::hir::regions) fn compute_adopt_edges(
+    inputs: &OwnershipInputs,
     hir: &Hir,
     info: &RegionInfo,
-    escape: &crate::hir::EscapeInfo,
     arena: &BindingArena,
     order: &HashMap<HirId, u32>,
 ) -> AdoptEdges {
-    let owned = compute_owned_subtrees(hir, info, escape, arena);
+    let owned = compute_owned_subtrees(inputs, info);
     // Capture containment edges `(lambda_id, captured, closure)` — re-derived (capture
     // records no `cross_region_refs` edge), so they are a second source of interior
     // owner-edges, emitted at the closure's construction site rather than a store node.
-    let all_captures = capture_containment_edges(hir, info, arena);
+    // Read from the shared inputs (the ONE re-derivation for the whole ownership pass).
+    let all_captures = inputs.capture_edges();
     // Structural post-dominance over the scope tree — the lifetime obligation's
     // authority (region/adopt.md § "The lifetime obligation the root carries").
     // Built once, queried per member below.
@@ -192,7 +193,7 @@ pub(in crate::hir::regions) fn compute_adopt_edges(
         }
     }
     let mut capture_by_root: FxHashMap<Region, EdgeList> = FxHashMap::default();
-    for &(lambda, src, dst) in &all_captures {
+    for &(lambda, src, dst) in all_captures {
         if let Some(r) = interior_root(src, dst) {
             capture_by_root
                 .entry(r)

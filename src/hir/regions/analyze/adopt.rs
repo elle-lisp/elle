@@ -32,8 +32,14 @@ pub(super) fn apply_ownership(
     // every backend"); a subtree the inference cannot prove externally unique
     // simply stays Shared (the always-legal per-region-RC baseline), so no adopt
     // edge is emitted for it and its emission is the RC baseline by construction.
-    let mut adopt =
-        super::super::ownership::compute_adopt_edges(hir, info, escape_info, arena, order);
+    // The containment graph + candidate set + re-derived capture edges every ownership
+    // pass reads. Built ONCE here and threaded by reference: its inputs derive only from
+    // `info`/`escape`/`arena` fields that are NOT mutated across the ownership passes (the
+    // one field that IS — `suppressed_decref_regions` — is read live through
+    // `OwnershipInputs::not_ownable(info, r)` at query time, never cached here), so a single
+    // build is identical to the four per-pass builds it replaces.
+    let inputs = super::super::ownership::ownership_inputs(hir, info, escape_info, arena);
+    let mut adopt = super::super::ownership::compute_adopt_edges(&inputs, hir, info, arena, order);
     // The transferred-returned-subtree cut (docs/impl/region/owner.md
     // § "Owner nodes" — "The transferred returned subtree"): a producer's
     // externally-unique returned cycle is owned by its CONSUMING activation. Its
@@ -46,6 +52,7 @@ pub(super) fn apply_ownership(
     // the seed-poisoned subtree walk, and a transfer member reached from any outside
     // container fails external uniqueness.
     let transfer = super::super::ownership::compute_transfer_adopts(
+        &inputs,
         hir,
         info,
         escape_info,
@@ -86,8 +93,7 @@ pub(super) fn apply_ownership(
     // symmetrically as one `FreeRegionGroup` at its collective last use, disjoint
     // from the container-rooted adopt subtrees above. `owned_group_members` is the
     // flat union, the O(1) decref-skip set the lowerer consults.
-    let groups =
-        super::super::ownership::compute_owned_region_groups(hir, info, escape_info, arena, order);
+    let groups = super::super::ownership::compute_owned_region_groups(&inputs, hir, info, order);
     info.owned_group_members = groups.values().flatten().copied().collect();
     info.owned_region_groups = groups;
 
@@ -100,8 +106,7 @@ pub(super) fn apply_ownership(
     // — the node's release is the members' sole demise (the suppress ⊆ adopt
     // contract) — and every decref-emit site re-checks `suppressed_decref_regions`,
     // so no other release path can reach a member.
-    let activation =
-        super::super::ownership::compute_activation_adopts(hir, info, escape_info, arena, order);
+    let activation = super::super::ownership::compute_activation_adopts(&inputs, hir, info, order);
     for members in activation.values() {
         for &m in members {
             info.suppressed_decref_regions.insert(m);

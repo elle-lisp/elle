@@ -16,8 +16,7 @@
 //! references reclaim with the set, no cascade.
 
 use super::super::*;
-use super::capture::capture_containment_edges;
-use super::inputs::ownership_inputs;
+use super::inputs::OwnershipInputs;
 use super::subtree::innermost_enclosing_scope;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -69,14 +68,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// aliases that deref a member after the adopt site read a live `Owned` region
 /// (their decrefs are structural no-ops).
 pub(in crate::hir::regions) fn compute_activation_adopts(
+    inputs: &OwnershipInputs,
     hir: &Hir,
     info: &RegionInfo,
-    escape: &crate::hir::EscapeInfo,
-    arena: &BindingArena,
     order: &HashMap<HirId, u32>,
 ) -> HashMap<HirId, Vec<Region>> {
-    let inputs = ownership_inputs(hir, info, escape, arena);
-    let capture_edges = capture_containment_edges(hir, info, arena);
+    let capture_edges = inputs.capture_edges();
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
 
     // Region → allocation site (real allocations + prebound capture cells), the
@@ -122,15 +119,10 @@ pub(in crate::hir::regions) fn compute_activation_adopts(
         if taken.contains(&r) {
             continue;
         }
-        // The SCC of `r` over the eligible containment graph (mutual reach) —
-        // the same SCC computation as the co-owned group walk; which member the
-        // iteration reaches first is irrelevant.
-        let reach_r = inputs.reach(r);
-        let scc: FxHashSet<Region> = reach_r
-            .iter()
-            .copied()
-            .filter(|&m| inputs.reach(m).contains(&r))
-            .collect();
+        // The SCC of `r` over the eligible containment graph (mutual reach) — read from the
+        // one shared Tarjan pass (`scc_of`), the same SCC the co-owned group walk reads;
+        // which member the iteration reaches first is irrelevant.
+        let scc = inputs.scc_of(r);
         if scc.len() < 2 {
             continue;
         }
@@ -160,7 +152,7 @@ pub(in crate::hir::regions) fn compute_activation_adopts(
         }
         // Gate 4 — the hull: every transitive holder of a member, over ALL edge
         // kinds, must itself be ownable (die within the activation).
-        let mut hull: FxHashSet<Region> = scc.clone();
+        let mut hull: FxHashSet<Region> = (*scc).clone();
         let mut changed = true;
         while changed {
             changed = false;
@@ -169,7 +161,7 @@ pub(in crate::hir::regions) fn compute_activation_adopts(
                     changed = true;
                 }
             }
-            for &(_l, s, d) in &capture_edges {
+            for &(_l, s, d) in capture_edges {
                 if hull.contains(&s) && hull.insert(d) {
                     changed = true;
                 }
@@ -207,7 +199,7 @@ pub(in crate::hir::regions) fn compute_activation_adopts(
         if loop_seam {
             continue;
         }
-        for &m in &scc {
+        for &m in scc {
             taken.insert(m);
         }
         out.entry(site).or_default().extend(scc.iter().copied());

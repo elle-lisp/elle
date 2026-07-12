@@ -105,7 +105,8 @@ pub(super) fn owned_subtrees(
     let mut info = analyze_regions(&hir, &arena);
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &CallClassification::default());
-    let owned = super::ownership::compute_owned_subtrees(&hir, &info, &escape, &arena);
+    let inputs = super::ownership::ownership_inputs(&hir, &info, &escape, &arena);
+    let owned = super::ownership::compute_owned_subtrees(&inputs, &info);
     (hir, info, owned)
 }
 
@@ -131,7 +132,8 @@ pub(super) fn owned_subtrees_with_effects(
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
-    let owned = super::ownership::compute_owned_subtrees(&hir, &info, &escape, &arena);
+    let inputs = super::ownership::ownership_inputs(&hir, &info, &escape, &arena);
+    let owned = super::ownership::compute_owned_subtrees(&inputs, &info);
     (hir, info, owned)
 }
 
@@ -162,7 +164,8 @@ pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::A
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let order = compute_order(&hir);
-    let edges = super::ownership::compute_adopt_edges(&hir, &info, &escape, &arena, &order);
+    let inputs = super::ownership::ownership_inputs(&hir, &info, &escape, &arena);
+    let edges = super::ownership::compute_adopt_edges(&inputs, &hir, &info, &arena, &order);
     (hir, info, edges)
 }
 
@@ -201,8 +204,8 @@ pub(super) fn owned_region_groups(source: &str) -> (Hir, RegionInfo, HashMap<Hir
     restore_pre_ownership_view(&mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let order = compute_order(&hir);
-    let groups =
-        super::ownership::compute_owned_region_groups(&hir, &info, &escape, &arena, &order);
+    let inputs = super::ownership::ownership_inputs(&hir, &info, &escape, &arena);
+    let groups = super::ownership::compute_owned_region_groups(&inputs, &hir, &info, &order);
     (hir, info, groups)
 }
 

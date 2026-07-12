@@ -17,9 +17,7 @@
 
 use super::super::escape::captured_bindings;
 use super::super::*;
-use super::capture::capture_containment_edges;
-use super::inputs::ownership_inputs;
-use super::seeds::compute_shared_seeds;
+use super::inputs::OwnershipInputs;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 mod candidates;
@@ -55,6 +53,7 @@ pub(in crate::hir::regions) struct TransferAdopts {
 /// could alias a member out of the node's reclamation horizon refuses the
 /// whole callee — one inadmissible site refuses every site.
 pub(in crate::hir::regions) fn compute_transfer_adopts(
+    inputs: &OwnershipInputs,
     hir: &Hir,
     info: &RegionInfo,
     escape: &crate::hir::EscapeInfo,
@@ -67,9 +66,8 @@ pub(in crate::hir::regions) fn compute_transfer_adopts(
         capture: HashMap::new(),
         result_regions: FxHashSet::default(),
     };
-    let inputs = ownership_inputs(hir, info, escape, arena);
-    let shared = compute_shared_seeds(info, escape);
-    let capture_edges = capture_containment_edges(hir, info, arena);
+    let shared = inputs.shared();
+    let capture_edges = inputs.capture_edges();
     let captured = captured_bindings(hir);
     let ix = UseIndex::build(hir, arena, call_class);
     let low = compute_subtree_low(hir, order);
