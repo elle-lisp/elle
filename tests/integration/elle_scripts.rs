@@ -496,6 +496,29 @@ fn region_mutable_reassign_param_uaf() {
     run_elle_script_with_args("region-mutable-reassign-param", &["--trace=guardfree"]);
 }
 
+// Guard — the BORROWED tail-arg retain must see THROUGH a branch/phi. A borrowed
+// upvalue hidden behind an `(or borrowed fresh)` (or any `and`/`if`/`cond`/`match`)
+// passed as a tail-call argument to an owned-param callee must still be recognized
+// as borrowed, so the callee is handed a fresh owning reference instead of pure-
+// moving the capture. `tail_arg_is_borrowed` (src/lir/lower/control.rs) sees a bare
+// `Var`/`DerefCell(Var)` upvalue; a naive predicate returns false for an `Or` node,
+// so the borrowed short-circuit operand is pure-moved and the owned-param callee's
+// release drains the capture RC to a premature free (SIGSEGV under guardfree,
+// `DecrefValueRegion of struct … context UpdateCapture`). The retain and the operand
+// releases are value-gated, so a single retain balances BOTH arms; the fixture's
+// subjects B/C guard that balance from below (no over-free on the borrow arm's
+// mutable-store escape) and above (no over-incref leak when the FRESH arm is taken).
+// Canonical shape: tests/elle/region-or-tail-move-borrow-uaf.lisp (the phi sibling of
+// region-tail-move-borrow-uaf.lisp), plus the faithful `(protect (te (or state @{})))`
+// form. Runs under guardfree so a regression faults deterministically.
+#[test]
+fn region_or_tail_move_borrow_uaf() {
+    run_elle_script_with_args(
+        "region-or-tail-move-borrow-uaf",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a mutable @set del of a HEAP member must release the STORED member's
 // region, not the caller's lookup value. `(del s x)` removes the element
 // value-EQUAL to `x`; for a heap member the stored element and `x` are two

@@ -38,18 +38,67 @@ impl<'a> Lowerer<'a> {
     /// captured upvalue, so we look THROUGH the `DerefCell` wrapper to the `Var`
     /// (matching only the bare `Var` let a cell-backed top-level binding tail-pass
     /// without the fresh incref — region-tail-move-toplevel-uaf.lisp).
+    ///
+    /// An argument can also be a BRANCH/PHI compound (`or`/`and`/`if`/`cond`/
+    /// `match`) whose runtime value is one of its value-producing leaves — and a
+    /// short-circuit `(or borrowed-upvalue fresh)` selects the borrowed operand at
+    /// runtime, so the value handed to the callee is the borrowed capture even
+    /// though the fresh operand looks owned. Missing this pure-moves the capture
+    /// into an owned-param callee, whose release drains the env's capture RC to a
+    /// premature free (region-or-tail-move-borrow-uaf.lisp — the phi sibling of
+    /// region-tail-move-borrow-uaf.lisp). So look through each compound to its
+    /// value-producing leaves and treat the argument as borrowed iff ANY leaf is.
+    /// The retain and the operand releases are value-gated
+    /// (`IncrefValueRegion`/`DecrefValueRegion` resolve the runtime value's
+    /// region), so the single retain balances every arm — it matches the callee's
+    /// release on the borrow arm, and on an owned arm it cancels against that
+    /// operand's own value-gated release. Precision is preserved: a leaf is
+    /// borrowed only when it is a genuine captured upvalue, so an all-owned
+    /// compound stays a pure move (never the contracts.lisp owned-escaping
+    /// double-release the base case avoids by not using `EscapeInfo`).
     fn tail_arg_is_borrowed(&self, arg: &Hir) -> bool {
         if !self.in_lambda {
             return false;
         }
-        // Look through the `DerefCell` wrapper `functionalize` adds around a
-        // needs-capture binding read; the borrowed atom underneath is a `Var`.
-        let inner = match &arg.kind {
-            HirKind::DerefCell { cell } => cell,
-            _ => arg,
-        };
-        match &inner.kind {
+        self.arg_leaf_is_borrowed(arg)
+    }
+
+    /// Whether ANY value-producing leaf of `arg` is a borrowed captured upvalue —
+    /// the phi-transparent core of [`Self::tail_arg_is_borrowed`]. A branch/phi
+    /// compound routes tail position (and thus the returned value) to specific
+    /// children; recurse into exactly those, mirroring `mark_tail_calls` /
+    /// `return_incref`'s notion of a value-producing leaf: every `or`/`and`
+    /// operand (any can short-circuit), both `if` branches, each `cond`/`match`
+    /// body (never the test/scrutinee/guard). A non-compound leaf is borrowed iff
+    /// it is a bare `Var`/`DerefCell(Var)` naming a captured upvalue.
+    fn arg_leaf_is_borrowed(&self, arg: &Hir) -> bool {
+        match &arg.kind {
+            // Look through the `DerefCell` wrapper `functionalize` adds around a
+            // needs-capture binding read; the borrowed atom underneath is a `Var`.
+            HirKind::DerefCell { cell } => self.arg_leaf_is_borrowed(cell),
             HirKind::Var(binding) => self.upvalue_bindings.contains(binding),
+            HirKind::Or(exprs) | HirKind::And(exprs) => {
+                exprs.iter().any(|e| self.arg_leaf_is_borrowed(e))
+            }
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => self.arg_leaf_is_borrowed(then_branch) || self.arg_leaf_is_borrowed(else_branch),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .any(|(_, body)| self.arg_leaf_is_borrowed(body))
+                    || else_branch
+                        .as_ref()
+                        .is_some_and(|e| self.arg_leaf_is_borrowed(e))
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .any(|(_, _, body)| self.arg_leaf_is_borrowed(body)),
             _ => false,
         }
     }
