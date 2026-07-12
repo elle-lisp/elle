@@ -21,6 +21,19 @@
 //!    every-arm-uses-it shape stdlib `put`/`set` take: `(match (type-of coll) …)`
 //!    passes the stored value to a different store intrinsic in each arm.
 //!
+//! The `tail` release covers two duals of the store-wrapper shape, each guarded by
+//! a store on the same node so the per-arm decref provably cannot over-free:
+//!  - the **stored value** — a `put`/`push`/`add` funnel raises the value's RC, so
+//!    releasing the wrapper's own reference to it leaves the container's reference
+//!    live (`funnel_store_sites`);
+//!  - the **`-mut` container** — a mutable-container funnel returns arg0 in place,
+//!    so the wrapper's mutable arm hands the container back pass-through and never
+//!    releases the owned-param reference it holds. The funnel's `pass_through_retain`
+//!    raised the RETURNED value's RC, so releasing that stranded owned-param
+//!    reference leaves the live returned container ≥ 1 (`funnel_container_sites`).
+//!    Freeing the container promptly cascades its stored heap members through the
+//!    outgoing-edge table, so one per-arm release reclaims the whole subtree.
+//!
 //! Soundness rests on structural facts about region `r` and a branch `C` one of
 //! whose arms holds `r`'s `decref_point`:
 //!  - **the leak is real and in-arm**: `r`'s `decref_point` is inside an arm of
@@ -38,7 +51,10 @@
 //! compensating would double-free: escaping regions (the return frontier projected
 //! from escape — the caller frees them), merge children (the root's single decref
 //! frees them), co-owned-group members, capture cells, mutated-slot 1-slot
-//! containers, and the already-`suppressed_decref_regions`.
+//! containers, and the already-`suppressed_decref_regions`. The one exception is a
+//! `-mut` funnel container: it is return-escaping yet holds a *distinct* stranded
+//! owned-param reference no return covers, so it is admitted through the
+//! return-frontier gate (only) to receive the container compensation above.
 //!
 //! `head` compensation handles only the two-armed `If` (the dominant `when`/
 //! `unless`/`and`/`or`-of-two shape). `tail` compensation handles `If` AND `Match`;
@@ -53,6 +69,10 @@ use crate::hir::region::Region;
 pub(super) struct BranchComp {
     pub head: HashMap<HirId, Vec<Region>>,
     pub tail: HashMap<HirId, Vec<Region>>,
+    /// Funnel sites where a CONTAINER (not a stored value) was released by the tail
+    /// compensation — the lowerer drops the redundant tail ReturnValue retain here.
+    /// See `RegionInfo::container_release_sites`.
+    pub container_release_sites: std::collections::HashSet<HirId>,
 }
 
 /// A branch (`If` or `Match`) with its whole-node post-order interval and each
@@ -99,6 +119,7 @@ pub(super) fn compute_branch_compensation(
         return BranchComp {
             head: HashMap::new(),
             tail: HashMap::new(),
+            container_release_sites: std::collections::HashSet::new(),
         };
     }
 
@@ -157,13 +178,41 @@ pub(super) fn compute_branch_compensation(
         &info.alloc_region,
         &info.binding_source_regions,
     );
+
+    // The CONTAINER compensation input: a `-mut` retaining store returns its
+    // container (arg0) pass-through, so a dispatch wrapper's mutable arm hands the
+    // container back and never releases the owned-param reference it holds — a leak
+    // on the container's own region (and, by the outgoing-edge cascade, every heap
+    // member stored into it). The funnel's `pass_through_retain` raised the RETURNED
+    // value's RC, so a per-arm decref of the container here releases only that
+    // stranded owned-param reference and can never drop the live returned container
+    // to zero — the exact dual of the stored-value guard below. Because the container
+    // is return-escaping, the ordinary return-frontier exclusion would suppress this
+    // compensation, so the container is admitted through that gate
+    // (`mut_container_regions`) while every other exclusion still applies.
+    let mut container_at_site: HashMap<HirId, std::collections::HashSet<Region>> = HashMap::new();
+    let mut mut_container_regions: std::collections::HashSet<Region> =
+        std::collections::HashSet::new();
+    for (&site, containers) in &info.funnel_container_sites {
+        container_at_site
+            .entry(site)
+            .or_default()
+            .extend(containers.iter().copied());
+        mut_container_regions.extend(containers.iter().copied());
+    }
+
     let excluded = |r: Region| -> bool {
         info.suppressed_decref_regions.contains(&r)
             || info.owned_group_members.contains(&r)
             || info.cell_release_regions.contains(&r)
             || info.mutated_binding_value_regions.contains(&r)
             || info.merged_root(r) != r
-            || tail_regions.contains(&r)
+            // A `-mut` funnel container is return-escaping (it is handed back
+            // pass-through) yet holds a DISTINCT stranded owned-param reference the
+            // wrapper never releases. Admit it through the return-frontier gate so
+            // the container compensation below can free that reference; every other
+            // exclusion still binds it.
+            || (tail_regions.contains(&r) && !mut_container_regions.contains(&r))
             || tainted.contains(&r)
     };
 
@@ -192,6 +241,8 @@ pub(super) fn compute_branch_compensation(
 
     let mut head: HashMap<HirId, Vec<Region>> = HashMap::new();
     let mut tail: HashMap<HirId, Vec<Region>> = HashMap::new();
+    let mut container_release_sites: std::collections::HashSet<HirId> =
+        std::collections::HashSet::new();
     for (&r, uses) in &region_uses {
         if uses.is_empty() || excluded(r) {
             continue;
@@ -265,10 +316,40 @@ pub(super) fn compute_branch_compensation(
                     Some(node)
                         if info.call_result_regions.contains(&r)
                             && holder_count.get(&r).copied().unwrap_or(0) == 1
-                            && store_value_at_site
+                            && (store_value_at_site
                                 .get(&node)
-                                .is_some_and(|s| s.contains(&r)) =>
+                                .is_some_and(|s| s.contains(&r))
+                                // The container dual: `node` is a monomorphic funnel
+                                // whose container (arg0) is `r`. A `-mut` funnel returns
+                                // the container pass-through (its `pass_through_retain`
+                                // keeps the returned value's RC ≥ 1 after this per-arm
+                                // release of the stranded owned-param reference); an
+                                // immutable funnel returns a fresh copy, so the container
+                                // is genuinely dead in the arm. Recording the site drives
+                                // the lowerer's tail-ReturnValue suppression, closing the
+                                // wrapper's redundant retain over the returned value
+                                // (pinned by `set-add`/`struct-put`/`del-wrapper`/
+                                // `native-tail-put-*` and the container-compensation
+                                // guardfree fixture).
+                                || container_at_site
+                                    .get(&node)
+                                    .is_some_and(|s| s.contains(&r))) =>
                     {
+                        // Record the site for the lowerer's ReturnValue suppression
+                        // ONLY when the funnel is a `-mut` PASS-THROUGH (the result IS
+                        // this container, whose reference the caller already owns). An
+                        // immutable funnel's container is compensated above but its FRESH
+                        // result keeps its ReturnValue retain — the caller's move/reassign
+                        // reference, whose suppression would over-free a result stored
+                        // into a reassigned slot.
+                        if container_at_site.get(&node).is_some_and(|s| s.contains(&r))
+                            && info
+                                .funnel_passthrough_sites
+                                .get(&node)
+                                .is_some_and(|s| s.contains(&r))
+                        {
+                            container_release_sites.insert(node);
+                        }
                         tail.entry(node).or_default().push(r)
                     }
                     Some(_) => {}
@@ -285,7 +366,11 @@ pub(super) fn compute_branch_compensation(
         regions.sort_by_key(|r| r.0);
         regions.dedup();
     }
-    BranchComp { head, tail }
+    BranchComp {
+        head,
+        tail,
+        container_release_sites,
+    }
 }
 
 /// Collect every `If`/`Match` (with its arms' intervals) and every `While`/`Loop`

@@ -195,6 +195,17 @@ pub fn struct_put_with_rebind(
     key: crate::value::heap::TableKey,
     val: Value,
 ) -> Option<Value> {
+    // A heap-valued KEY (fiber/closure/list) is a cross-region reference the struct
+    // holds, exactly like the value — the free-time content scan enumerates it
+    // (`find_object_cross_refs`'s `LStructMut` arm walks keys). So a NEW key must be
+    // increfed and its outgoing edge recorded here, symmetric with the alloc-scan
+    // that does it for a struct BUILT with keys (region-struct-heap-key-uaf.lisp);
+    // otherwise the recorded edge table and the free scan disagree (a missed
+    // store-funnel edge the equivalence oracle detonates on). Captured before
+    // `insert` moves the key. A rebind (`Some(old)`) keeps the pre-existing key
+    // (BTreeMap::insert does not replace an equal key), so its edge is untouched.
+    let mut key_heap_vals: Vec<Value> = Vec::new();
+    key.for_each_heap_value(&mut |kv| key_heap_vals.push(*kv));
     let map_ref = collection
         .as_struct_mut_raw()
         .expect("struct_put_with_rebind: expected @struct");
@@ -210,6 +221,10 @@ pub fn struct_put_with_rebind(
         None => {
             incref_inserted_element(heap, val);
             record_store(heap, collection, val);
+            for kv in &key_heap_vals {
+                incref_inserted_element(heap, *kv);
+                record_store(heap, collection, *kv);
+            }
         }
     }
     old
@@ -226,13 +241,23 @@ pub fn struct_remove_with_decref(
     let map_ref = collection
         .as_struct_mut_raw()
         .expect("struct_remove_with_decref: expected @struct");
-    let removed = map_ref.borrow_mut().remove(key);
-    if let Some(v) = removed {
+    // `remove_entry` hands back the STORED key, not the caller's lookup key — for a
+    // value-equal-but-distinct heap key (a list) they are two allocations in two
+    // regions, and the edge was recorded against the STORED one (mirrors the @set
+    // del fix). Release the stored key's heap edges symmetrically with the incref/
+    // record `struct_put_with_rebind` added.
+    let removed = map_ref.borrow_mut().remove_entry(key);
+    if let Some((stored_key, v)) = removed {
         // Un-record before decref (the decref may free `v`'s region — see `pop`).
         unrecord_store(heap, collection, v);
         decref_removed_element(heap, v);
+        stored_key.for_each_heap_value(&mut |kv| {
+            unrecord_store(heap, collection, *kv);
+            decref_removed_element(heap, *kv);
+        });
+        return Some(v);
     }
-    removed
+    None
 }
 
 /// Insert into a mutable @set, tracking the stored ref — only when actually

@@ -153,6 +153,7 @@ pub fn analyze_regions_with(
     );
     info.branch_compensation = branch_comp.head;
     info.branch_arm_decrefs = branch_comp.tail;
+    info.container_release_sites = branch_comp.container_release_sites.into_iter().collect();
 
     // The builder-idiom merge seed (docs/impl/region/merging.md § Merging). Runs
     // LAST: its coincident-decref_point gate reads the final `region_data`, so it

@@ -134,6 +134,16 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
             families: DEL_DOMAIN,
             what: "struct or set",
         },
+        // The monomorphic del variants pin the family; the immutable-vs-mutable
+        // split is the runtime dispatch's business, like the put/push/add variants.
+        DelStruct | DelStructMut => Contract::Container {
+            families: STRUCT_FAMILY,
+            what: "struct",
+        },
+        DelSet | DelSetMut => Contract::Container {
+            families: SET_FAMILY,
+            what: "set",
+        },
         Pop => Contract::Container {
             families: POP_DOMAIN,
             what: "@array",

@@ -408,6 +408,29 @@ fn region_fold_closure_arg_uaf() {
     );
 }
 
+// RED — a `moves_out` REMOVE (`%pop`) in TAIL position over-frees the removed HEAP
+// element when that element was stored through a push FUNNEL. `(%array-push a
+// (list …))` increfs the list's region and records the outgoing edge; `%pop` moves
+// it back out. In NON-tail position this balances (`raw-pop` reads 0), but the
+// native-tail path emits an extra ReturnValue `IncrefValueRegion` over the popped
+// element that double-counts against the funnel accounting, freeing the list's
+// region while a live reference remains — a later deref of the recycled page faults
+// (stale-region-deref / generation mismatch). State-dependent (faults once ids
+// recycle), so the fixture primes id churn then drives the raw tail-pop loop. This
+// is `pop`'s remaining Stage-4 work: the moved-out element's tail-position retain
+// must balance as it does in statement position (the container half is already
+// balanced — `region_mut_container_compensation_uaf`). #[ignore]'d because it
+// SIGSEGVs today; un-ignore when `pop`'s moved-out accounting is fixed. Full repro
+// in the fixture header.
+#[test]
+#[ignore = "RED: %pop in tail position over-frees a heap element pushed via a funnel (native-tail ReturnValue double-counts moves_out); un-ignore when pop's moved-out accounting balances in tail position"]
+fn region_pop_tail_moves_out_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-pop-tail-moves-out-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — stdlib `compose`/`comp` compose correctly, no over-free. A
 // self-tail-recursive HOF (stdlib `fold`'s letrec `go`) reached from >= 2 call
 // sites in a unit must not over-free a value its tail call transferred forward.
@@ -494,6 +517,30 @@ fn region_set_del_heap_member_uaf() {
     );
 }
 
+// Guard — the F1b container compensation must release ONLY the store wrapper's
+// stranded owned-param reference, never a live container. A polymorphic
+// `push`/`put`/`add` reached as a value runs its `(match (type-of coll) …)` body,
+// whose mutable arm tail-calls a `-mut` funnel returning the container arg0
+// pass-through; the wrapper leaks its owned-param reference to that return-escaping
+// container (1/op). The close balances it with a per-arm release in the wrapper
+// body (`regions::compensate`, `funnel_container_sites`) plus suppressing the
+// redundant tail ReturnValue retain (`lir::lower::control::call`). Because the
+// funnel's `pass_through_retain` already handed the caller one owning reference,
+// releasing the owned-param reference can never drop the live container to zero —
+// but an over-aggressive release would free a container the caller still holds. The
+// fixture builds ESCAPING array/set accumulators and a nested pass-through wrapper,
+// reading every stored element back across an id-recycling loop, so such an
+// over-free faults under guardfree. Quarantined as a subprocess because a
+// regression ABORTS (guardfree fault / oracle panic) and would take the shared
+// smoke harness down. Full repro + invariant in the fixture.
+#[test]
+fn region_mut_container_compensation_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-mut-container-compensation-uaf.lisp",
+        &["--jit=adaptive", "--mlir=off", "--trace=guardfree"],
+    );
+}
+
 // Guard — a struct storing a HEAP-valued key (a list/bytes/set/struct used as a
 // key, held as `TableKey::Heap(Value)`) records the outgoing content edge
 // `region(struct) → region(key)` and increfs the key's region, exactly as it
@@ -512,6 +559,23 @@ fn region_set_del_heap_member_uaf() {
 fn region_struct_heap_key_uaf() {
     run_elle_file_with_args(
         "tests/integration/fixtures/region-struct-heap-key-uaf.lisp",
+        &["--trace=guardfree"],
+    );
+}
+
+// Guard — the MUTABLE-@struct twin of the above: an in-place `put` that ADDS a
+// heap-valued key records the `region(struct) → region(key)` edge and increfs the
+// key, and a `del` un-records + decrefs it (`struct_put_with_rebind` /
+// `struct_remove_with_decref`). The alloc-scan handles keys present at
+// construction, but an in-place put adds a key AFTER allocation, so the store
+// funnel must record it — enumerating only the value left the free-time content
+// scan (which walks keys) disagreeing with the recorded edge table, a missed
+// store-funnel edge the equivalence oracle detonates on. Quarantined as a
+// subprocess because a regression ABORTS. Full repro + invariant in the fixture.
+#[test]
+fn region_struct_mut_put_heap_key_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-struct-mut-put-heap-key-uaf.lisp",
         &["--trace=guardfree"],
     );
 }

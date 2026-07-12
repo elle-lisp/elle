@@ -448,6 +448,45 @@ primitive! {
         category: "intrinsic",
         effect: RegionEffect::Funnel,
     }
+    // Monomorphic del twins — the remove-half peers of the %put/%add-set mut
+    // twins. Same runtime body (prim_del, which dispatches struct-vs-set and
+    // mutable-vs-immutable on the runtime container) as the polymorphic %del; the
+    // precise RetType is the monomorphization win: the immutable variants return a
+    // fresh Struct/Set, the `-mut` variants return their mutable arg0 in place.
+    // Effect stays Funnel (the same NativeFn serves dynamic value-position calls,
+    // where no compile-time proof constrains the input mutability), like %put/%add.
+    "%del-struct" => prim_del {
+        ret: RetType::Struct,
+        arity: Arity::Exact(2),
+        doc: "Delete a key from an immutable struct, returning a fresh struct (monomorphic immutable struct del)",
+        params: &["coll", "key"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+    }
+    "%del-struct-mut" => prim_del {
+        ret: RetType::MutableStruct,
+        arity: Arity::Exact(2),
+        doc: "Delete a key from a mutable @struct in place, returning it (monomorphic @struct del)",
+        params: &["coll", "key"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+    }
+    "%del-set" => prim_del {
+        ret: RetType::Set,
+        arity: Arity::Exact(2),
+        doc: "Delete an element from an immutable set, returning a fresh set (monomorphic immutable set del)",
+        params: &["coll", "value"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+    }
+    "%del-set-mut" => prim_del {
+        ret: RetType::MutableSet,
+        arity: Arity::Exact(2),
+        doc: "Delete an element from a mutable @set in place, returning it (monomorphic @set del)",
+        params: &["coll", "value"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+    }
     "%has?" => prim_has {
         arity: Arity::Exact(2),
         doc: "Key/element exists?",

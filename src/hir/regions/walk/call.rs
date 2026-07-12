@@ -145,7 +145,7 @@ impl RegionInference {
                     // `containment_edge` is built (a parameter container, the
                     // `put`/`set` dispatch case). A non-retaining `Funnel` (`%del`
                     // removes/decrefs; `%string-push` byte-copies) records nothing:
-                    // a per-arm decref there would double-free or over-free.
+                    // a per-arm decref of the stored value there would double-free.
                     if self.is_retaining_store(func) {
                         if let Some(value_regions) = arg_regions.last() {
                             let stored: Vec<Region> = value_regions
@@ -157,6 +157,58 @@ impl RegionInference {
                                 self.funnel_store_sites.insert(hir.id, stored);
                             }
                         }
+                    }
+                    // A MONOMORPHIC store/remove funnel (`%put-*`/`%add-set*`/
+                    // `%push-array*`/`%del-*`, either mutability) is the target of a
+                    // dispatch wrapper's `(match (type-of coll) …)` arm, and `coll` is
+                    // used in EVERY arm (the scrutinee + each arm's funnel call) while
+                    // its single `decref_point` sits in ONE arm — so the owned-param
+                    // reference the wrapper holds to the container leaks on every OTHER
+                    // arm's path. Record the container (arg0) site-keyed so
+                    // `regions::compensate` places the balancing per-arm release. This
+                    // is sound for both container flavours:
+                    //   - a `-mut` funnel RETURNS the container pass-through, so the
+                    //     container is return-escaping; the funnel's `pass_through_retain`
+                    //     leaves the returned value's RC ≥ 1, so releasing the owned-param
+                    //     reference can never drop the live result to zero (the
+                    //     return-frontier exclusion is lifted for it in `compensate`);
+                    //   - an IMMUTABLE funnel returns a FRESH copy, so the container is
+                    //     genuinely dead in the arm — the ordinary owned-param release
+                    //     the branch structure otherwise strands.
+                    // Keyed on a recognized monomorphic container RetType (NOT the
+                    // polymorphic `FirstArg`, whose container mutability is unproven).
+                    use crate::primitives::def::RetType;
+                    let rettype = self.call_rettype(func);
+                    if matches!(
+                        rettype,
+                        Some(
+                            RetType::Struct
+                                | RetType::MutableStruct
+                                | RetType::Array
+                                | RetType::MutableArray
+                                | RetType::Set
+                                | RetType::MutableSet
+                        )
+                    ) {
+                        self.funnel_container_sites
+                            .insert(hir.id, container_regions.to_vec());
+                    }
+                    // The `-mut` PASS-THROUGH subset: the funnel returns the container
+                    // (arg0) ITSELF, so the container IS the result and the caller
+                    // already owns a reference to it. Recorded separately so the
+                    // lowerer's ReturnValue suppression fires ONLY here (via
+                    // `container_release_sites`, gated on this in `compensate`): an
+                    // IMMUTABLE funnel returns a FRESH copy whose ReturnValue retain is
+                    // the caller's move/reassign reference — suppressing it over-frees a
+                    // result stored into a reassigned slot (the container is still
+                    // compensated by `funnel_container_sites`, so its owned-param leak
+                    // still closes; only the redundant-retain drop is withheld).
+                    if matches!(
+                        rettype,
+                        Some(RetType::MutableStruct | RetType::MutableArray | RetType::MutableSet)
+                    ) {
+                        self.funnel_passthrough_sites
+                            .insert(hir.id, container_regions.to_vec());
                     }
                 }
             }

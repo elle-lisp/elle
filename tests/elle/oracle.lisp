@@ -182,23 +182,28 @@
          :verdict (if (agree? a c) (get c :verdict) :contaminated))))
 
 # ── The defect / by-design split — the instrument owns the burndown headline ──
-# memory.md §4 gives every leak class a ROOT (F1a/F1b/F2/F3/F4/F5). A fixed
-# handful of open probes leak BY DESIGN — genuine unbounded growth, or a per-call
-# mint-count axis (assessment §1's "six open-by-design probes") — and are NOT
-# defects. The open/closed split and the defect-vs-by-design breakdown used to be
-# recovered from this dashboard by `grep -c` minus a hand count of the six; the
+# memory.md §4 gives every leak class a ROOT (F1a/F1b/F2/F3/F4/F5). A small fixed set
+# of probes read open BY DESIGN — the module-level live-growth discriminator, the
+# sub-integer estimator self-test, and `push-accum` (whose residual is genuine per-op
+# `map` scratch it retains, § F1a) — and are NOT counted as defects. The open/closed
+# split and the defect-vs-by-design breakdown used to be
+# recovered from this dashboard by `grep -c` minus a hand count of them; the
 # classifier below prints it directly AND refuses to be silently wrong: every
 # probe that MEASURES :open must be declared here (a root, or by-design), or the
 # completeness gate at the end fails. A by-design open probe DISPLAYS :growth so
 # `grep -c '^  open'` counts defects alone; the measured :verdict is untouched, so
 # the gauge-live and B-invariance gates (which read it) are unchanged.
+# `push-outer` and `recur-local-foreign-mint` are NOT here: their apparent growth
+# was the F1b push-container over-keep of a BLOCK-LOCAL accumulator (freed at the
+# block's return once the wrapper stops stranding its owned-param reference), not
+# genuine unbounded retention — the real gauge-live discriminator (`probe-disc`)
+# uses a MODULE-LEVEL sink and is unaffected. They are now CLOSED controls
+# (undeclared, like `rest-array-copy`), so a regression to open trips the
+# completeness gate as an F1b defect rather than being absorbed as growth.
 (def @by-design
   @{"discriminator (live-growth)" true
     "sub-integer (1-in-3 retain)" true
-    "push-outer" true
-    "push-accum" true
-    "recur-local-self-mint" true
-    "recur-local-foreign-mint" true})
+    "push-accum" true})
 (def @root-of @{})
 (defn declare-root [root labels]
   (each l in labels
@@ -213,13 +218,20 @@
                     "yield-concat" "nested-closure" "stdlib-concat" "zip-tower"])
 (declare-root :f1b ["mut-array-push" "mut-string" "struct-put" "push-churn"
                     "put-churn" "store-wrapper" "native-tail-put-struct"
-                    "native-tail-put-array" "pop-wrapper" "del-wrapper"
-                    "set-del-wrapper" "set-add"])
+                    "native-tail-put-array" "native-tail-del-ctl" "pop-wrapper"
+                    "del-wrapper" "set-del-wrapper" "set-add"])
 (declare-root :f2 ["fiber-nested" "multi-resume" "yield-discard"
                    "yield-multimut" "protect-while" "denied-discard"
                    "cancel-discard" "abort-discard"])
 (declare-root :f3 ["io-yield ev/sleep"])
-(declare-root :f4 ["capture-backedge"])
+# `recur-local-self-mint` is F4 (cyclic refusal-to-Shared): a self-recursive local
+# closure that RETURNS ITSELF is a genuine reference cycle RC cannot collect, so it
+# stays Shared when its holder frees. Its acyclic control `recur-local-foreign-mint`
+# (captures an immediate, not itself) now reclaims to 0, isolating the residual to
+# the self-reference cycle — the "mint-count" gap the pair was built to expose,
+# unmasked once the F1b container over-keep on their shared block-local `@keep`
+# accumulator closed.
+(declare-root :f4 ["capture-backedge" "recur-local-self-mint"])
 (declare-root :f5 ["raw-del" "raw-del-immediate" "yield-reassign" "struct-outer"
                    "fresh-env-cell" "break-value" "break-value-used"
                    "break-value-lit" "struct-match" "arg-result"])
@@ -479,7 +491,7 @@
     (fn [j]
       (let [a @[]]
         (push a j)
-        a)) 1] ["mut-struct" (fn [j] @{:x j}) 0]
+        a)) 0] ["mut-struct" (fn [j] @{:x j}) 0]
    ["mut-string"
     (fn [j]
       (let [s @""]
@@ -521,7 +533,7 @@
     (fn [j]
       (keys {:a 1 :b 2})
       (values {:a 1 :b 2})
-      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 5]
+      nil) 0] ["merge" (fn [j] (merge {:a 1} {:b 2})) 4]
    ["struct-lit" (fn [j] {:x j :y (+ j 1)}) 0]
    ["struct-get"
     (fn [j]
@@ -530,11 +542,11 @@
    ["struct-put"
     (fn [j]
       (let [s @{:x 0}]
-        (put s :x j))) 1]
+        (put s :x j))) 0]
    ["push-churn"
     (fn [j]
       (let [items @[]]
-        (push items {:k j}))) 2]  # The capture-back-edge cycle: a container captured by a closure it holds
+        (push items {:k j}))) 0]  # The capture-back-edge cycle: a container captured by a closure it holds
    # (`m ⊇ c` store, `c ⊇ m` capture). Per-region RC cannot collect the m↔c
    # cycle, and no region root can own it (the captured member's live decref
    # over-extends past the closure), so it leaks per op. The activation-owner cut
@@ -551,7 +563,7 @@
           (push m c)
           (c)
           (push root m)
-          nil))) 4]  # The transferred returned cycle: a helper builds an a<->b cycle and hands
+          nil))) 3]  # The transferred returned cycle: a helper builds an a<->b cycle and hands
    # its root back across the return frontier; the consumer discards it.
    # Per-region RC cannot collect the cycle (the interior back-edge outlives
    # every release) and no region root can own it (the root crosses the
@@ -864,23 +876,22 @@
 (pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
               0.5) 0)
 
-# ── The per-call object MINT (a second axis: mint count, not leak rate) ──
-# `recur-local-self` above pins the LEAK rate (0 — the cell-free closure is reclaimed
-# per call). These two pin the orthogonal axis: how many heap objects a self-recursive
-# local closure MINTS per enclosing call. A leak-rate probe is blind to per-call minting
-# that reclaims; it is made visible by RETAINING each closure in a block-local @keep and
-# reading object growth.
+# ── Retained-closure reclamation (a self-reference cycle, memory.md § F4) ──
+# `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a
+# LOOP (0 — cell-free, reclaimed per call). These two RETAIN each returned closure in
+# a block-local @keep, so the question becomes whether the closure's own region
+# reclaims when @keep is freed at the block's return.
 #
-# A retained self-recursive closure pins TWO objects/call — the closure and its one-entry
-# env — with NO forward cell: the self-edge does not mark the binding captured, so a
-# self-recursive `loop` is cell-free, its self-reference resolving to the executing
-# closure (docs/impl/selfrec.md). The equal-arity foreign-capture CONTROL (captures the
-# immediate n, not itself) also pins TWO — likewise cell-free. Their gap is therefore ~0:
-# no per-call forward cell distinguishes them. Both shrink-only; a gap near 200 would mean
-# a per-call cell was reintroduced for pure self-recursion. Object growth, not region
-# growth, is the gauge (closure + env share one region, so region count is identical). The
-# deterministic flip-gate is
-# runtime::tests::ownership::self_recursive_loop_is_cell_free.
+# The foreign-capture CONTROL (`lcl-foreign-ret` captures the immediate n, not itself)
+# is acyclic and reclaims to 0: its closure+env free with @keep. The self-returning
+# closure (`lcl-self-ret` returns `go`, which references itself) is a genuine reference
+# cycle — `go`'s reachability includes `go` — so RC cannot collect it and it stays
+# Shared even after @keep frees (F4 cyclic refusal-to-Shared), pinning its closure+env
+# at 2/op. The gap (self 2, foreign 0) isolates the self-reference cycle; it was masked
+# while the F1b `push` over-keep held @keep itself alive across the block, reading both
+# at 2. Object growth, not region growth, is the gauge (closure + env share one region).
+# The self-recursive LOOP being cell-free is a distinct property, pinned deterministically
+# by runtime::tests::ownership::self_recursive_loop_is_cell_free.
 (defn lcl-self-ret [n]
   "Self-recursive local closure that RETURNS itself (so a retain pins its region)."
   # go is returned (value position), which disables call-site param joins, so a
@@ -912,7 +923,7 @@
                    0.4 0.5) 2)
 (pin (measure-core "recur-local-foreign-mint"
                    (retain-block (fn [] (lcl-foreign-ret 3))) count-gauge 100 6
-                   60 0.4 0.5) 2)
+                   60 0.4 0.5) 0)
 
 # ── Stdlib / native-tail / discarded-tail leak classes ────────────────
 # Three more leak classes pinned in the one dashboard (memory.md §5 — leak state
@@ -1015,23 +1026,28 @@
              result (zip-lists lists)]
         (from-list result (first colls))))))
 (pin (measure-core "zip-tower" (stmt-run (fn [] (zip-tower [1 2] [3 4])))
-                   count-gauge 100 6 60 0.4 0.5) [25 32])
+                   count-gauge 100 6 60 0.4 0.5) [24 32])
 
-# Dispatch-wrapper passthrough leak (memory.md § F1b) — NOT a "native-tail double
-# mint". The direct intrinsic `%put-struct` and the single non-dispatching native
-# `del` both reclaim a fresh copy at 0/op (the CONTROLS: `native-tail-del-ctl` below,
-# `put-slot-source` above), so the fresh copy is a red herring. The leak is the stdlib
-# `put`/`push` `(match (type-of coll) …)` WRAPPER: its container arg + fresh result get
-# ONE `decref_point` in the textually-last arm, so multi-arm usage strands them on the
-# other paths — the open residual of the settled branch-compensation class
-# (`branch_arm_decrefs` releases the stored value, not the container/result). `put` on
-# an immutable aggregate also mints a fresh container (2/op vs 1/op when reused).
+# Dispatch-wrapper IMMUTABLE-input residual (memory.md § F1b). `put`/`del` on an
+# immutable aggregate route through the wrapper's immutable arm to a FRESH-copy funnel
+# (`%put-struct`/`%put-array`/`%del-struct`), so `coll` is used in EVERY arm (the
+# scrutinee + each arm's funnel call) with a single `decref_point` in one arm,
+# stranding the wrapper's owned-param CONTAINER reference on the other paths, PLUS the
+# wrapper's redundant tail ReturnValue retain over the fresh result (2/op). The
+# container compensation (`regions::compensate`, `funnel_container_sites`) releases the
+# owned-param reference per-arm — closing the container half (2 → 1). The remaining
+# 1/op is the fresh-result ReturnValue surplus, which is NOT suppressed for an
+# immutable funnel: unlike a `-mut` pass-through (whose result IS the caller-owned
+# container), a fresh result's ReturnValue retain is the caller's MOVE/reassign
+# reference — dropping it over-frees a result stored into a reassigned slot
+# (region-mut-container-compensation-uaf / `resource.lisp`). So the immutable residual
+# closes only when the fresh-result surplus is closed by a distinct mechanism.
 (pin (measure-core "native-tail-put-struct" (stmt-run (fn [] (put {:a 1} :b 2)))
-                   region-gauge 100 6 60 0.4 0.5) 2)
+                   region-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "native-tail-put-array" (stmt-run (fn [] (put [10 20] 0 99)))
-                   region-gauge 100 6 60 0.4 0.5) 2)
+                   region-gauge 100 6 60 0.4 0.5) 1)
 (pin (measure-core "native-tail-del-ctl" (stmt-run (fn [] (del {:a 1 :b 2} :a)))
-                   region-gauge 100 6 60 0.4 0.5) 0)
+                   region-gauge 100 6 60 0.4 0.5) 1)
 
 # Discarded tail-return: a function whose tail is a call (native pass-through
 # `first`, or a closure), invoked for effect with the result DISCARDED. The
@@ -1083,17 +1099,17 @@
                                  (rebox b (list 3 4))))) count-gauge 100 6 60
                    0.4 0.5) 0)
 # F1b (memory.md § F1b) — the stdlib `add` `(match (type-of coll) …)` dispatch
-# wrapper strands its owned @set container on the pass-through arm exactly as the
-# store wrappers (put/push) do, so a discarded fresh @set + its stored heap member
-# leak (3/op). The raw @set add FUNNEL (`set_add_with_incref`) still reclaims — the
-# seam is sound (proven by `set-array`/`put-slot-source`); it is the wrapper over it
-# that leaks. Closes with the F1b container compensation that closes
-# mut-array-push/struct-put.
+# wrapper reclaims its owned @set container AND its stored heap member (rate 0): the
+# `:@set` arm's `%add-set-mut` returns the container pass-through, and the wrapper's
+# per-arm container release (`regions::compensate`, `funnel_container_sites`) frees
+# the stranded owned-param reference, cascading the stored list through the outgoing
+# edge table. A CLOSED control beside the reclaiming raw funnel `set-add-slot-source`
+# — RED if the container compensation regresses.
 (pin (measure-core "set-add"
                    (stmt-run (fn []
                                (let [s @||]
                                  (add s (list 1 2))))) count-gauge 100 6 60 0.4
-                   0.5) 3)
+                   0.5) 0)
 (pin (measure-core "raw-pop"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1103,21 +1119,30 @@
                          (%array-push a (%pair 1 2))
                          (%pop a))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+# The `push` half now reclaims its container (F1b container compensation), so this
+# shrank from 3 to the residual 2 — the stdlib `pop` REMOVE wrapper's own leak (its
+# container pass-through + the moved-out element), which closes when `pop` becomes a
+# type-dispatch wrapper over a `-mut` remove funnel the same compensation covers.
 (pin (measure-core "pop-wrapper"
                    (stmt-run (fn []
                                (let [a @[]]
                                  (push a (list 1 2))
-                                 (pop a)))) count-gauge 100 6 60 0.4 0.5) 3)
+                                 (pop a)))) count-gauge 100 6 60 0.4 0.5) 2)
+# The stdlib `del` REMOVE wrapper reclaims (rate 0), the remove-half peer of the
+# store wrappers: its `:@struct`/`:@set` arms route to the `-mut` remove funnels
+# (`%del-struct-mut`/`%del-set-mut`) that return the container pass-through, and the
+# wrapper's container compensation frees the stranded owned-param reference — a
+# CLOSED control beside the reclaiming raw funnel `put-slot-source`.
 (pin (measure-core "del-wrapper"
                    (stmt-run (fn []
                                (let [m @{}]
                                  (put m :k (list 1 2))
-                                 (del m :k)))) count-gauge 100 6 60 0.4 0.5) 1)
+                                 (del m :k)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "set-del-wrapper"
                    (stmt-run (fn []
                                (let [s @||]
                                  (add s 7)
-                                 (del s 7)))) count-gauge 100 6 60 0.4 0.5) 1)
+                                 (del s 7)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "raw-del"
                    (stmt-run (fn []
                                (let [m @{}]
@@ -1206,7 +1231,7 @@
                                           (put sess:streams i frame))
                                         (yield i)
                                         (assign i (%add i 1)))) |:yield|)) b))
-                   count-gauge 100 6 60 0.4 0.5) 2)
+                   count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "yield-spawn"
                    (fn [b]
                      (drain-block (fn [n]
@@ -1247,9 +1272,13 @@
 # ── Persistent fn-local containers ────────────────────────────────────
 # The container is `def`'d fn-local INSIDE the run-block (the faithful shape — a
 # captured let-local or module binding hits a different region path) and reused
-# across the block's ops. `push-outer`/`push-accum` are GENUINE growth — the
-# accumulator retains every prior (a live-growth discriminator, not a defect; do not
-# "fix" it). `struct-outer` is the fn-local reassign-1-slot over-keep (memory.md § F5).
+# across the block's ops. `push-outer` reclaims (rate 0): a block-local accumulator
+# is freed at the block's return once the `push` wrapper stops stranding its
+# owned-param reference (F1b container compensation) — its earlier per-op growth was
+# that over-keep, not genuine retention (the gauge-live discriminator uses a
+# MODULE-level sink, `probe-disc`, and is unaffected). `push-accum` still leaks: its
+# residual is the per-op `map` scratch (§ F1a), which the accumulator's release does
+# not reach. `struct-outer` is the fn-local reassign-1-slot over-keep (memory.md § F5).
 # `string-outer`/`append-outer` are the `concat`/`append` per-call scratch leak
 # (§ F1a), NOT accumulator growth — flat per-iter (minus the 1 the self-reassign
 # reclaims), so they shrink when F1a closes, not when the loop ends.
@@ -1303,7 +1332,7 @@
                      (def @j 0)
                      (while (%lt j b)
                        (push acc {:x j})
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 1)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "push-accum"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1389,12 +1418,12 @@
                        (let [s @||]
                          (%add-set-mut s (%pair 1 2)))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# put-churn mints a FRESH container per op and hands it through the stdlib
-# `put`; the container's region survives the discard and cascades its stored
-# struct — 2/op in BOTH intrinsics modes, every tier (pure interpreter
-# included). The slot-source probes above show the raw-%put container
-# reclaiming, so the over-keep rides the stdlib-put dispatch route, not the
-# store funnel itself. Shrink-only.
+# put-churn mints a FRESH @struct container per op and hands it through the stdlib
+# `put`; its `:@struct` arm's `%put-struct-mut` returns the container pass-through,
+# and the wrapper's per-arm container release (`regions::compensate`,
+# `funnel_container_sites`) frees the stranded owned-param reference, cascading the
+# stored struct — rate 0 in both intrinsics modes, every tier. A CLOSED control
+# beside `put-slot-source`; RED if the container compensation regresses.
 (pin (measure-core "put-churn"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1402,7 +1431,7 @@
                      (while (%lt j b)
                        (let [s @{}]
                          (put s :k {:v j}))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 2)
+                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
 (pin (measure-core "struct-match"
                    (fn [b]
                      (when (%not (%int? b)) (error :block-not-int))
@@ -1485,7 +1514,7 @@
 (check (assert (= (concat "foo" "bar") "foobar") "string concat value"))
 
 # ── The split headline — the number §1's protocol reads, printed by the tool ──
-# `open defects` is the burndown count; `by-design` is the fixed six; `roots` is
+# `open defects` is the burndown count; `by-design` is the fixed growth set; `roots` is
 # how many of memory.md §4's six roots still have an open probe (it falls to 0
 # when the last defect closes). UNCLASSIFIED is appended only when a probe leaked
 # without a declaration — a stale ledger, gated below so it can never pass silently.
@@ -1499,9 +1528,11 @@
                (string "unclassified open probe(s): " unclassified
                        " — every open probe must be a declared root or by-design "
                        "(the split ledger is stale)")))
-(check (assert (= n-by-design 6)
+(check (assert (= n-by-design 3)
                (string "by-design tally " n-by-design
-                       " ≠ 6 — the six growth probes must each read open")))
+                       " ≠ 3 — the growth probes (live-growth discriminator, "
+                       "sub-integer estimator self-test, push-accum map-scratch "
+                       "accumulator) must each read open")))
 
 (report)
 (println "oracle: ok")

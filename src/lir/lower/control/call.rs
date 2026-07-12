@@ -316,7 +316,28 @@ impl<'a> Lowerer<'a> {
                 // operand-stack top, which is exactly the native's pushed result.
                 //
                 // This is the tail-position twin of `lower_return`'s return mint.
-                self.emit(LirInstr::IncrefValueRegion { src: dst });
+                //
+                // EXCEPT a `-mut` PASS-THROUGH store/remove funnel whose wrapper released
+                // the CONTAINER owned-param reference at this site
+                // (`container_release_sites`, set by the per-arm container compensation
+                // only for the `-mut` pass-through subset). There the result IS arg0 —
+                // the container the caller passed in and already owns a reference to —
+                // and the wrapper no longer holds it after the arm, so a second
+                // `ReturnValue` retain would out-count the caller's single result release
+                // (the over-keep the compensation closes: `set-add`/`struct-put`/
+                // `del-wrapper` probes). Two gates keep it sound: (1) a RAW (non-wrapper)
+                // funnel is not compensated (no branch), so it retains its ReturnValue;
+                // (2) an IMMUTABLE funnel's FRESH result is excluded from
+                // `container_release_sites` (only `-mut` sites qualify) — dropping its
+                // ReturnValue would over-free a result stored into a reassigned slot,
+                // whose move consumes that retain (`resource.lisp` struct-assoc). A
+                // `first`/`rest`/`get` borrow is never a container site.
+                let container_released_here = self
+                    .current_hir_id
+                    .is_some_and(|id| self.region_info.container_release_sites.contains(&id));
+                if !container_released_here {
+                    self.emit(LirInstr::IncrefValueRegion { src: dst });
+                }
                 Ok(dst)
             } else {
                 let dst = self.fresh_reg();

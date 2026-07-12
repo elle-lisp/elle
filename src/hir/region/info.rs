@@ -152,6 +152,45 @@ pub struct RegionInfo {
     /// is statically unknown (a parameter container — the `put`/`set` dispatch),
     /// where `containment_edges` records nothing.
     pub funnel_store_sites: HashMap<HirId, Vec<Region>>,
+    /// Pass-through funnel-store call site HirId → the region(s) of the CONTAINER
+    /// argument (arg0) stored into there, recorded only for a `-mut` store whose
+    /// declared return is a mutable container (`MutableStruct`/`MutableArray`/
+    /// `MutableSet` — the funnel returns arg0 in place, not a fresh copy). A
+    /// polymorphic dispatch wrapper's mutable arm tail-calls such a funnel and
+    /// returns its container pass-through, so the container is return-escaping and
+    /// the wrapper never releases the owning reference it holds as an owned param —
+    /// yet the funnel's `pass_through_retain` leaves the returned value's RC ≥ 1.
+    /// A per-arm decref placed at such a site (`regions::compensate`) therefore
+    /// releases only that stranded owned-param reference and can never drop the
+    /// live returned container to zero. Recorded even for a parameter container
+    /// (the `put`/`push`/`add` dispatch), where `containment_edges` records nothing.
+    pub funnel_container_sites: HashMap<HirId, Vec<Region>>,
+    /// The `-mut` PASS-THROUGH subset of `funnel_container_sites` — sites whose funnel
+    /// returns arg0 (the container) IN PLACE (`%put-*-mut`/`%add-set-mut`/
+    /// `%push-array-mut`/`%del-*-mut`, a mutable-container RetType). Here the result IS
+    /// the container the caller passed in, so the caller already owns a reference to it
+    /// and the tail ReturnValue retain is redundant — the compensation gates its
+    /// `container_release_sites` (the lowerer's suppression trigger) on this. An
+    /// IMMUTABLE funnel is ABSENT: its FRESH result's ReturnValue retain is the
+    /// caller's move/reassign reference, so suppressing it over-frees a result stored
+    /// into a reassigned slot (the container's own owned-param leak still closes via
+    /// `funnel_container_sites`; only the redundant-retain drop is withheld).
+    pub funnel_passthrough_sites: HashMap<HirId, Vec<Region>>,
+    /// Monomorphic store/remove funnel call sites where the per-arm CONTAINER
+    /// compensation (`regions::compensate`) released the wrapper's owned-param
+    /// reference to the container AND the funnel is a `-mut` pass-through (so the
+    /// result IS that container). At exactly these sites the lowerer DROPS the
+    /// redundant tail `IncrefValueRegion` (ReturnValue) retain
+    /// (`lir::lower::control::call`): the wrapper no longer holds the container after
+    /// the arm, and the funnel already handed the caller one owning reference (arg0
+    /// pass-through via `pass_through_retain`, or a fresh copy owned by the caller's
+    /// binding), so a second ReturnValue retain would out-count the caller's single
+    /// release. A RAW (non-wrapper) funnel tail call is absent from this set (no
+    /// branch, no compensation), so it KEEPS its ReturnValue retain — dropping it
+    /// there over-frees a fresh result whose sole owning reference is that retain
+    /// (`region_native_tail_return_uaf`). Set from the compensation pass, so it
+    /// reflects exactly where locus A fired.
+    pub container_release_sites: FxHashSet<HirId>,
     /// Subset of `call_result_regions` that are CAPTURE-CELL placeholders: a
     /// captured (env-allocated) binding's per-value env cell (an `@x` lbox, a
     /// captured-mutable local cell). The lowerer releases these with
@@ -399,6 +438,9 @@ impl RegionInfo {
             fresh_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
+            funnel_container_sites: HashMap::new(),
+            funnel_passthrough_sites: HashMap::new(),
+            container_release_sites: FxHashSet::default(),
             cell_release_regions: FxHashSet::default(),
             hard_edge_sites: FxHashSet::default(),
             suppressed_decref_regions: FxHashSet::default(),

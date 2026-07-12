@@ -577,6 +577,24 @@
       (error {:error :type-error
               :message (string "add: expected set, got " (type coll))})))
 
+## Remove is struct+set only (an array/string has no key-remove), so — like
+## `add` — the `_` arm ERRORS. The container arms route to the silent monomorphic
+## `%del-struct`/`%del-struct-mut`/`%del-set`/`%del-set-mut`, which the region
+## solver collapses when the container type is statically proven (else the runtime
+## match dispatches on the funnel body, `prim_del`). The `-mut` arms return their
+## container pass-through; the wrapper's container compensation reclaims the
+## owned-param reference they strand (like `add`/`put`/`push`).
+(defn del [coll key]
+  "Delete a key from a struct or an element from a set. For an immutable struct/set, returns a new collection without the key/element. For a mutable @struct/@set, modifies in place and returns it."
+  (match (type-of coll)
+    :@struct (%del-struct-mut coll key)
+    :struct (%del-struct coll key)
+    :@set (%del-set-mut coll key)
+    :set (%del-set coll key)
+    _
+      (error {:error :type-error
+              :message (string "del: expected struct or set, got " (type coll))})))
+
 ## ── Higher-order functions ──────────────────────────────────────────
 
 (defn map [f coll]
@@ -2517,6 +2535,7 @@
    :push push
    :put put
    :add add
+   :del del
    :map map
    :filter filter
    :fold fold

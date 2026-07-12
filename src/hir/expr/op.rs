@@ -75,6 +75,21 @@ pub enum IntrinsicOp {
     AddSet,
     AddSetMut,
     Del,
+    /// Monomorphic struct/set remove, immutable input: fresh immutable twin without
+    /// the key/element (`%del-struct` / `%del-set`, `Struct`/`Set`). The immutable
+    /// case of the polymorphic `%del`, made a distinct op so it carries a precise
+    /// return type — its container is genuinely dead in the arm (a fresh copy is
+    /// returned), so it gets its ordinary `decref_point`.
+    DelStruct,
+    DelSet,
+    /// Monomorphic struct/set remove, mutable input: in-place remove returning arg0
+    /// (`%del-struct-mut` / `%del-set-mut`, `MutableStruct`/`MutableSet`). The `-mut`
+    /// variant is valid only on a proven mutable container (the monomorphization
+    /// contract). It returns its container pass-through, the remove-half peer of
+    /// `%put-*-mut`/`%add-set-mut`, so the dispatch wrapper's container compensation
+    /// covers it (`RegionInfo::funnel_container_sites`).
+    DelStructMut,
+    DelSetMut,
     Has,
     Push,
     /// Monomorphic array push, immutable input: `%push-array` — returns a fresh
@@ -153,6 +168,10 @@ impl IntrinsicOp {
             Self::AddSet => "%add-set",
             Self::AddSetMut => "%add-set-mut",
             Self::Del => "%del",
+            Self::DelStruct => "%del-struct",
+            Self::DelSet => "%del-set",
+            Self::DelStructMut => "%del-struct-mut",
+            Self::DelSetMut => "%del-set-mut",
             Self::Has => "%has?",
             Self::Push => "%array-push",
             Self::PushArray => "%push-array",
@@ -220,6 +239,10 @@ impl IntrinsicOp {
             "%add-set" => Some(Self::AddSet),
             "%add-set-mut" => Some(Self::AddSetMut),
             "%del" => Some(Self::Del),
+            "%del-struct" => Some(Self::DelStruct),
+            "%del-set" => Some(Self::DelSet),
+            "%del-struct-mut" => Some(Self::DelStructMut),
+            "%del-set-mut" => Some(Self::DelSetMut),
             "%has?" => Some(Self::Has),
             "%array-push" => Some(Self::Push),
             "%push-array" => Some(Self::PushArray),
@@ -284,6 +307,10 @@ impl IntrinsicOp {
             | Self::Shr
             | Self::Get
             | Self::Del
+            | Self::DelStruct
+            | Self::DelSet
+            | Self::DelStructMut
+            | Self::DelSetMut
             | Self::Has
             | Self::Push
             | Self::PushArray
@@ -338,6 +365,10 @@ impl IntrinsicOp {
                 | Self::StringPush
                 | Self::BytesPush
                 | Self::Del
+                | Self::DelStruct
+                | Self::DelSet
+                | Self::DelStructMut
+                | Self::DelSetMut
                 | Self::Pop
                 | Self::Freeze
                 | Self::Thaw
@@ -368,6 +399,10 @@ impl IntrinsicOp {
                 | Self::AddSet
                 | Self::AddSetMut
                 | Self::Del
+                | Self::DelStruct
+                | Self::DelSet
+                | Self::DelStructMut
+                | Self::DelSetMut
                 | Self::StringPush
                 | Self::Push
                 | Self::PushArray

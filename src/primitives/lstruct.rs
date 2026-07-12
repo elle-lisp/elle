@@ -31,15 +31,6 @@ primitive! {
         example: "(get [1 2 3] 0)",
         effect: RegionEffect::Funnel,
     }
-    "del" => prim_del {
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Delete a key from a struct or element from a set. For immutable structs: returns a new struct without the key. For mutable @struct: mutates in place and returns the same reference. For sets: delegates to set del.",
-        params: &["collection", "key"],
-        category: "struct",
-        example: "(del (@struct :a 1) :a)",
-        effect: RegionEffect::Funnel,
-    }
     "keys" => prim_keys {
         signal: Signal::errors(),
         arity: Arity::Exact(1),

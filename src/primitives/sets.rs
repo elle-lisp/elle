@@ -374,15 +374,6 @@ primitive! {
         example: "(string-contains? \"hello world\" \"world\") #=> true",
         effect: RegionEffect::Immediate,
     }
-    "del" => prim_del {
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Remove an element from a set. For immutable sets, returns a new set. For mutable sets, modifies in place.",
-        params: &["set", "value"],
-        category: "set",
-        example: "(del (set 1 2 3) 2) #=> |1 3|",
-        effect: RegionEffect::Funnel,
-    }
     "union" => prim_union {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
