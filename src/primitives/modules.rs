@@ -293,12 +293,18 @@ pub(crate) fn prim_import_file(
         );
         let empty_env = std::rc::Rc::new(vec![]);
 
-        let exec_result = vm.execute_bytecode_saving_stack(&code, &empty_env);
+        // Drive the module's top-level forms to completion, draining any
+        // nested fiber/resume SIG_SWITCH trampoline — a module's forms run as
+        // part of the CURRENT fiber's execution (like `eval`'s thunk), so a
+        // top-level `protect`/`fiber/resume` returns SIG_SWITCH that must be
+        // drained here rather than leaked out of the import boundary. Using the
+        // raw executor reported that internal signal as "unexpected".
+        let bits = vm.run_thunk_to_completion(&code, &empty_env);
 
         // Unmark loading regardless of outcome
         vm.unmark_module_loading(&path);
 
-        match exec_result.bits {
+        match bits {
             SIG_OK => {
                 let (_, value) = vm
                     .fiber
