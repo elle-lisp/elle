@@ -29,8 +29,23 @@
 ## Use %string-push on an @string; it must mutate in place and return the
 ## same collection. The function below is called >15 times so the JIT
 ## compiles it; if IntrStringPush is unimplemented the JIT panics.
+##
+## `%string-push` is a call-position intrinsic, so its container operand must be
+## a statically-proven string (the contract table's `StringPush` row; STRING or
+## MUTABLE_STRING — docs/intrinsics.md § The contract). `buf` arrives as an
+## unguarded parameter — `push-mut-hot` is applied indirectly through `repeat2`,
+## so no call site proves its type. A `%string?` guard cannot narrow it: it proves
+## the UNION {STRING, MUTABLE_STRING}, which the flat type lattice cannot name, so
+## it pins no single point (`typeinfer::guard`). The authoritative narrowing is a
+## `match (type-of …)` keyword arm — inside `:@string`, `buf` IS a mutable string;
+## inside `:string`, an immutable one — each a single lattice point that discharges
+## the contract. This mirrors the stdlib string-push wrapper in stdlib.lisp — the
+## exact shape the error message points a dynamic container at.
 (defn push-mut-hot (buf s)
-  (%string-push buf s))
+  (match (type-of buf)
+    :string (%string-push buf s)
+    :@string (%string-push buf s)
+    _ (error {:error :type-error :message "push-mut-hot: string required"})))
 
 (def @hot-buf @"")
 (repeat2 30 push-mut-hot hot-buf "ab")
@@ -42,8 +57,13 @@
         "mutable @string-push: bytes are appended correctly")
 
 ## Identity-preservation: push must return the same @string we passed in.
+## Same `match (type-of …)` narrowing as above — `buf` is an indirectly-applied
+## parameter, narrowed to a single string point per arm before the intrinsic.
 (defn push-returns-same? (buf s)
-  (%identical? (%string-push buf s) buf))
+  (match (type-of buf)
+    :string (%identical? (%string-push buf s) buf)
+    :@string (%identical? (%string-push buf s) buf)
+    _ (error {:error :type-error :message "push-returns-same?: string required"})))
 
 (def @id-buf @"x")
 (repeat2 20 push-returns-same? id-buf "y")
@@ -52,9 +72,14 @@
 
 ## ===== Immutable string path =====
 ## %string-push on an immutable string allocates a new string with the
-## concatenation; the original is untouched.
+## concatenation; the original is untouched. Same `match (type-of …)` narrowing —
+## the `:string` arm proves the immutable point, so the immutable-copy path of the
+## intrinsic stays exercised under JIT.
 (defn push-imm-hot (s suffix)
-  (%string-push s suffix))
+  (match (type-of s)
+    :string (%string-push s suffix)
+    :@string (%string-push s suffix)
+    _ (error {:error :type-error :message "push-imm-hot: string required"})))
 
 (def orig "hello")
 (repeat2 30 push-imm-hot orig "!")
