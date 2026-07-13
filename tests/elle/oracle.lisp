@@ -492,11 +492,18 @@
       (let [a @[]]
         (push a j)
         a)) 0] ["mut-struct" (fn [j] @{:x j}) 0]
+   ## The stdlib `push` wrapper's `:@string` arm reclaims (rate 0). Two strands close:
+   ## the `-mut` CONTAINER via `%string-push-mut` (a `MutableString` pass-through — per-arm
+   ## container release + tail-retain suppression, like the `@array`/`@struct`/`@set` arms),
+   ## and the byte-copy pushed-VALUE (`@string` copies the value's bytes rather than
+   ## retaining its region, so `val` strands across the wrapper's arms; the compensation
+   ## releases it per-arm from `funnel_bytecopy_value_sites`, sound because the byte-copy
+   ## touched neither `val`'s incref nor its decref).
    ["mut-string"
     (fn [j]
       (let [s @""]
         (push s "x")
-        s)) 2]
+        s)) 0]
    ["nested-loop"
     (fn [j]
       (def @k 0)
@@ -1119,15 +1126,18 @@
                          (%array-push a (%pair 1 2))
                          (%pop a))
                        (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-# The `push` half now reclaims its container (F1b container compensation), so this
-# shrank from 3 to the residual 2 — the stdlib `pop` REMOVE wrapper's own leak (its
-# container pass-through + the moved-out element), which closes when `pop` becomes a
-# type-dispatch wrapper over a `-mut` remove funnel the same compensation covers.
+# The stdlib `pop` REMOVE-of-ELEMENT wrapper reclaims (rate 0). Its `:@array`/
+# `:@string`/`:@bytes` arms route to the monomorphic moves-out funnels
+# `%pop`/`%pop-string`/`%pop-bytes`; the container compensation frees the wrapper's
+# stranded owned-param container per-arm (recorded for a moves-out funnel even though
+# it returns the ELEMENT, not the container), and the moved-out @array element's
+# redundant tail ReturnValue retain is suppressed (`moves_out_release_sites`) — so
+# both halves of the earlier leak close.
 (pin (measure-core "pop-wrapper"
                    (stmt-run (fn []
                                (let [a @[]]
                                  (push a (list 1 2))
-                                 (pop a)))) count-gauge 100 6 60 0.4 0.5) 2)
+                                 (pop a)))) count-gauge 100 6 60 0.4 0.5) 0)
 # The stdlib `del` REMOVE wrapper reclaims (rate 0), the remove-half peer of the
 # store wrappers: its `:@struct`/`:@set` arms route to the `-mut` remove funnels
 # (`%del-struct-mut`/`%del-set-mut`) that return the container pass-through, and the

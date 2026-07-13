@@ -335,7 +335,19 @@ impl<'a> Lowerer<'a> {
                 let container_released_here = self
                     .current_hir_id
                     .is_some_and(|id| self.region_info.container_release_sites.contains(&id));
-                if !container_released_here {
+                // AND a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`): the
+                // native body already escape-retained the moved-out element in place
+                // (`arena::pop_with_decref`), and `dispatch_native_call` skipped its
+                // own pass-through retain (`def.moves_out`) — so that in-body retain is
+                // the caller's single owning reference. A second ReturnValue retain
+                // here double-counts and frees the element under a live reference
+                // (`region_pop_tail_moves_out_uaf`). Recorded only for the PassThrough
+                // subset (`moves_out_release_sites`), so a FRESH-result moves-out pop
+                // (`@string` grapheme / `@bytes` int) is absent and KEEPS its retain.
+                let moves_out_here = self
+                    .current_hir_id
+                    .is_some_and(|id| self.region_info.moves_out_release_sites.contains(&id));
+                if !container_released_here && !moves_out_here {
                     self.emit(LirInstr::IncrefValueRegion { src: dst });
                 }
                 Ok(dst)

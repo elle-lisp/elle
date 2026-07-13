@@ -53,18 +53,33 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
 /// Returns the popped value.
 ///
 /// Unlike the other remove funnels (`struct_remove`/`set_del`/`remove_at`), which
-/// DISCARD the removed value, `pop` hands it back as the call's result. So it must
-/// hold the caller's owning reference (the pass-through retain) BEFORE releasing
-/// the container's: `decref_removed_element` alone would take a sole-owned
-/// element's region to rc 0 and free it while the returned Value still points into
-/// it — the free-before-retain UAF the `raw-pop` oracle probe and the
-/// `mutable_array_push_keeps_region_alive` unit test pin. The retain here is what a
-/// pass-through result normally receives from `dispatch_native_call`; `%pop`/`pop`
-/// declare `moves_out` so dispatch SKIPS its own `pass_through_retain` (applying it
-/// twice would leak one region per op). The un-record + decref stay paired (the
-/// two-ledger co-location invariant, docs/impl/region/ownership.md § "The outgoing edge
-/// table"): the container's outgoing edge and its incoming RC drop together, only
-/// now the incoming RC never transiently reaches zero.
+/// DISCARD the removed value, `pop` hands it back as the call's result — so the
+/// moved-out element must survive the container's release, and it takes one of two
+/// paths depending on how the element was held.
+///
+/// **Owned element (adopted).** When the element was stored into a container the
+/// ownership forest made Owned, an `AdoptRegion` moved the element into the
+/// container's subtree (`Owned`, RC frozen). `incref`/`decref` are then inert
+/// (docs/impl/region/ownership.md § "The runtime: a reclamation typestate"), so the
+/// escape-retain path below cannot keep the element alive — and, left interior, the
+/// element would be reclaimed by the container's subtree drop while the returned
+/// Value still points into it (the moves-out-of-owned-subtree UAF the
+/// `region_pop_tail_moves_out_uaf` fixture pins). So EXTRACT it: un-record the
+/// container's outgoing edge and move the element back to `Counted(1)` — the
+/// caller's one owning reference — via `extract_owned_region`. External uniqueness
+/// (the adoption precondition) guarantees the container was its only referrer, so
+/// one reference is exact.
+///
+/// **Counted element (not adopted — the common path).** The element carries an
+/// ordinary RC. Hold the caller's reference FIRST (the pass-through retain a native
+/// result normally receives from `dispatch_native_call`; `%pop`/`pop` declare
+/// `moves_out` so dispatch SKIPS its own, applying it twice would leak one region
+/// per op), THEN un-record the container's edge co-located with its RC decref:
+/// `decref_removed_element` alone would take a sole-owned element's region to rc 0
+/// and free it under the returned Value (the free-before-retain UAF the `raw-pop`
+/// oracle probe and the `mutable_array_push_keeps_region_alive` unit test pin). The
+/// un-record + decref stay paired (the two-ledger co-location invariant), only now
+/// the incoming RC never transiently reaches zero.
 pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
     let vec_ref = collection
         .as_array_mut_raw()
@@ -73,13 +88,23 @@ pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
         .borrow_mut()
         .pop()
         .expect("pop_with_decref: empty @array");
-    // Hold the caller's reference first (the popped value is the call result), so
-    // the region survives the container's release below.
-    incref_for_escape(heap, region_of(heap, popped), EscapeSite::NativeCallResult);
-    // Release the container's reference — un-record the edge co-located with the RC
-    // decref. Both resolve `popped`'s region, which the retain above kept live.
-    unrecord_store(heap, collection, popped);
-    decref_removed_element(heap, popped);
+    let popped_region = region_of(heap, popped);
+    if popped_region.is_some_and(|r| heap.region_is_owned(r)) {
+        // The element leaves the container's Owned subtree: drop the container's
+        // edge to it, then move it to a caller-owned `Counted(1)`.
+        unrecord_store(heap, collection, popped);
+        if let Some(r) = popped_region {
+            heap.extract_owned_region(r);
+        }
+    } else {
+        // Hold the caller's reference first (the popped value is the call result),
+        // so the region survives the container's release below.
+        incref_for_escape(heap, popped_region, EscapeSite::NativeCallResult);
+        // Release the container's reference — un-record the edge co-located with the
+        // RC decref. Both resolve `popped`'s region, which the retain above kept live.
+        unrecord_store(heap, collection, popped);
+        decref_removed_element(heap, popped);
+    }
     popped
 }
 

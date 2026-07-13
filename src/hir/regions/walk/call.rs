@@ -136,16 +136,15 @@ impl RegionInference {
                             }
                         }
                     }
-                    // A value-RETAINING store funnel (`%put`/`%array-push`/`%add`,
-                    // not `%del`/`%string-push`) increfs the stored value at runtime
-                    // whether or not arg0's container type is statically recognized.
-                    // Record the stored value — the LAST arg (the value; the key, if
-                    // any, sits between container and value) — site-keyed for
-                    // `regions::compensate`'s per-arm decref safety gate, even when no
-                    // `containment_edge` is built (a parameter container, the
-                    // `put`/`set` dispatch case). A non-retaining `Funnel` (`%del`
-                    // removes/decrefs; `%string-push` byte-copies) records nothing:
-                    // a per-arm decref of the stored value there would double-free.
+                    // A value-RETAINING store funnel (`%put`/`%array-push`/`%add`)
+                    // increfs the stored value at runtime whether or not arg0's
+                    // container type is statically recognized. Record the stored value —
+                    // the LAST arg (the value; the key, if any, sits between container
+                    // and value) — site-keyed for `regions::compensate`'s per-arm decref
+                    // safety gate, even when no `containment_edge` is built (a parameter
+                    // container, the `put`/`set` dispatch case). A per-arm decref there
+                    // releases only the wrapper's stranded owned reference; the
+                    // container's retain keeps the value's RC ≥ 1.
                     if self.is_retaining_store(func) {
                         if let Some(value_regions) = arg_regions.last() {
                             let stored: Vec<Region> = value_regions
@@ -155,6 +154,27 @@ impl RegionInference {
                                 .collect();
                             if !stored.is_empty() {
                                 self.funnel_store_sites.insert(hir.id, stored);
+                            }
+                        }
+                    }
+                    // A BYTE-COPY store funnel (`%string-push`/`%string-push-mut`/
+                    // `%bytes-push`) COPIES the value's bytes into the container and
+                    // touches NEITHER its incref NOR its decref. So a dispatch wrapper's
+                    // `val` param — used across arms, freed in one — strands on the
+                    // sibling arms exactly as a retaining store's does, and the per-arm
+                    // release is `val`'s TRUE last use (not a redundant strand, and not
+                    // the `%del` double-free: `%del` decrefs in-body and is excluded).
+                    // Recorded separately (`funnel_bytecopy_value_sites`) so the
+                    // compensation's guard documents the distinct invariant.
+                    if self.is_bytecopy_store(func) {
+                        if let Some(value_regions) = arg_regions.last() {
+                            let stored: Vec<Region> = value_regions
+                                .iter()
+                                .copied()
+                                .filter(|&v| !container_regions.contains(&v))
+                                .collect();
+                            if !stored.is_empty() {
+                                self.funnel_bytecopy_value_sites.insert(hir.id, stored);
                             }
                         }
                     }
@@ -188,6 +208,7 @@ impl RegionInference {
                                 | RetType::MutableArray
                                 | RetType::Set
                                 | RetType::MutableSet
+                                | RetType::MutableString
                         )
                     ) {
                         self.funnel_container_sites
@@ -205,7 +226,12 @@ impl RegionInference {
                     // still closes; only the redundant-retain drop is withheld).
                     if matches!(
                         rettype,
-                        Some(RetType::MutableStruct | RetType::MutableArray | RetType::MutableSet)
+                        Some(
+                            RetType::MutableStruct
+                                | RetType::MutableArray
+                                | RetType::MutableSet
+                                | RetType::MutableString
+                        )
                     ) {
                         self.funnel_passthrough_sites
                             .insert(hir.id, container_regions.to_vec());
@@ -277,6 +303,45 @@ impl RegionInference {
                 // slot-based no-op here; this drops the alloc-region
                 // leak that remained — docs/impl/region/effects.md
                 // "What the solver derives", the user-functions case.)
+            }
+        }
+
+        // A moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) removes a
+        // pre-existing heap element from a container and escape-retains it IN-BODY
+        // (`arena::pop_with_decref` increfs before releasing the container), and
+        // `dispatch_native_call` skips its own pass-through retain (`def.moves_out`).
+        // So in TAIL position the lowerer's extra ReturnValue `IncrefValueRegion`
+        // double-counts against that in-body retain and frees the element under a
+        // live reference (`region_pop_tail_moves_out_uaf`). Record the site so the
+        // lowerer drops that redundant retain — the moves-out analogue of
+        // `container_release_sites`. Gated to `PassThrough` (`call_moves_out_passthrough`)
+        // so a moves-out native with a FRESH result (`@string` grapheme / `@bytes`
+        // int pop, `Funnel`/`Immediate`) is EXCLUDED: its result is born rc=1 with no
+        // in-body retain and NEEDS the tail retain to survive the caller's read.
+        if self.call_moves_out_passthrough(func) {
+            self.moves_out_release_sites.insert(hir.id);
+        }
+
+        // A moves-out REMOVE funnel (`%pop`/`%pop-string`/`%pop-bytes`) is dispatched
+        // from a `pop` wrapper's `(match (type-of coll) …)` arm, and `coll` (the
+        // container, arg0) is used in EVERY arm — scrutinee + each arm's funnel call —
+        // while its single `decref_point` sits in ONE arm, so the owned-param reference
+        // the wrapper holds strands on every OTHER arm's path (the F1b container strand
+        // `add`/`del` have). Record arg0 as a container site so `regions::compensate`
+        // places the balancing per-arm release. Recorded into `funnel_container_sites`
+        // ONLY — NOT `funnel_passthrough_sites`: `pop` returns the ELEMENT, not the
+        // container, so the container is genuinely DEAD in the arm (the immutable-funnel
+        // treatment — a per-arm owned-param release, and NO tail-retain suppression on
+        // the container's account; the element's own redundant tail retain is handled
+        // separately by `moves_out_release_sites`). Keyed off the moves-out fact, not a
+        // container RetType (pop's RetType is the element), so it covers the PassThrough
+        // `%pop` arm and the fresh-result `%pop-string`/`%pop-bytes` arms alike.
+        if self.call_moves_out(func) {
+            if let Some(container_regions) = arg_regions.first() {
+                if !container_regions.is_empty() {
+                    self.funnel_container_sites
+                        .insert(hir.id, container_regions.to_vec());
+                }
             }
         }
 

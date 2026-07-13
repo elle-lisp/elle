@@ -60,6 +60,62 @@ impl RegionInference {
         }
     }
 
+    /// Is the callee a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) whose
+    /// non-fresh moved-out element is escape-retained IN-BODY? Under the same
+    /// unshadowed-immutable-primitive condition as [`call_effect`]. The walk records
+    /// such a call site so the lowerer suppresses the redundant tail ReturnValue
+    /// retain over the moved-out element (`region_pop_tail_moves_out_uaf`). A
+    /// moves-out native with a fresh result (`@string`/`@bytes` pop) is absent from
+    /// the set (it keeps its tail retain).
+    pub(super) fn call_moves_out_passthrough(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return false;
+            }
+            self.call_class.moves_out_passthrough.contains(&bi.name)
+        } else {
+            false
+        }
+    }
+
+    /// Is the callee a BYTE-COPY store funnel (`%string-push`/`%string-push-mut`/
+    /// `%bytes-push`)? Under the same unshadowed-immutable-primitive condition as
+    /// [`call_effect`]. The walk records such a call's stored value so the
+    /// compensation releases a dispatch wrapper's stranded `val` param per-arm — the
+    /// byte-copy value strand (sound because the byte-copy neither increfs nor decrefs
+    /// the value, so the per-arm release is its true last use, not a double-free).
+    pub(super) fn is_bytecopy_store(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return false;
+            }
+            self.call_class.bytecopy_store_funnels.contains(&bi.name)
+        } else {
+            false
+        }
+    }
+
+    /// Is the callee ANY moves-out REMOVE native (`%pop`/`%pop-string`/`%pop-bytes`),
+    /// regardless of effect? Under the same unshadowed-immutable-primitive condition as
+    /// [`call_effect`]. The walk records such a call's container arg0 as a
+    /// `funnel_container_sites` site so the compensation releases the `pop` wrapper's
+    /// stranded owned-param container per-arm — the F1b container strand. Distinct from
+    /// [`call_moves_out_passthrough`] (the element tail-retain suppression), which is
+    /// the PassThrough subset.
+    pub(super) fn call_moves_out(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            let bi = self.arena().get(*binding);
+            if !bi.is_immutable || bi.is_mutated {
+                return false;
+            }
+            self.call_class.moves_out.contains(&bi.name)
+        } else {
+            false
+        }
+    }
+
     /// The callee's declared [`RetType`](crate::primitives::def::RetType), under
     /// the same unshadowed-immutable-primitive condition as [`call_effect`].
     /// `None` for an unknown/shadowed callee or an empty classification. The

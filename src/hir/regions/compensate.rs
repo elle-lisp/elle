@@ -238,6 +238,17 @@ pub(super) fn compute_branch_compensation(
             .or_default()
             .extend(vals.iter().copied());
     }
+    // The byte-copy dual: a `%string-push`/`%bytes-push` funnel copies the value's
+    // bytes and touches neither its incref nor its decref, so the wrapper's stranded
+    // `val` per-arm release is the value's TRUE last use — sound at the same tail
+    // sites as a retaining store's (and `%del`'s in-body decref is excluded upstream,
+    // so no double-free reaches here).
+    for (&site, vals) in &info.funnel_bytecopy_value_sites {
+        store_value_at_site
+            .entry(site)
+            .or_default()
+            .extend(vals.iter().copied());
+    }
 
     let mut head: HashMap<HirId, Vec<Region>> = HashMap::new();
     let mut tail: HashMap<HirId, Vec<Region>> = HashMap::new();

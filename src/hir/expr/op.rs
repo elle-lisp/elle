@@ -102,8 +102,20 @@ pub enum IntrinsicOp {
     /// only valid on a proven `@array`.
     PushArrayMut,
     Pop,
+    /// Monomorphic `@string` pop: `%pop-string` — remove and return the last
+    /// grapheme (a FRESH string) from a mutable `@string`. `Funnel`, not the
+    /// `@array` `Pop`'s `PassThrough`: the result is fresh, so it keeps its tail
+    /// ReturnValue retain.
+    PopString,
+    /// Monomorphic `@bytes` pop: `%pop-bytes` — remove and return the last byte (an
+    /// immediate int) from a mutable `@bytes`.
+    PopBytes,
     /// Append string to @string (or create new string).
     StringPush,
+    /// Monomorphic `@string` push: `%string-push-mut` — append in place, returning
+    /// arg0 (`MutableString`). The `-mut` pass-through twin of `%string-push`, so the
+    /// `push` wrapper's `:@string` arm reaches the container compensation.
+    StringPushMut,
     /// Append byte to @bytes (or create new bytes).
     BytesPush,
     // Mutability
@@ -177,7 +189,10 @@ impl IntrinsicOp {
             Self::PushArray => "%push-array",
             Self::PushArrayMut => "%push-array-mut",
             Self::Pop => "%pop",
+            Self::PopString => "%pop-string",
+            Self::PopBytes => "%pop-bytes",
             Self::StringPush => "%string-push",
+            Self::StringPushMut => "%string-push-mut",
             Self::BytesPush => "%bytes-push",
             Self::Freeze => "%freeze",
             Self::Thaw => "%thaw",
@@ -248,7 +263,10 @@ impl IntrinsicOp {
             "%push-array" => Some(Self::PushArray),
             "%push-array-mut" => Some(Self::PushArrayMut),
             "%pop" => Some(Self::Pop),
+            "%pop-string" => Some(Self::PopString),
+            "%pop-bytes" => Some(Self::PopBytes),
             "%string-push" => Some(Self::StringPush),
+            "%string-push-mut" => Some(Self::StringPushMut),
             "%bytes-push" => Some(Self::BytesPush),
             "%freeze" => Some(Self::Freeze),
             "%thaw" => Some(Self::Thaw),
@@ -285,6 +303,8 @@ impl IntrinsicOp {
             | Self::TypeOf
             | Self::Length
             | Self::Pop
+            | Self::PopString
+            | Self::PopBytes
             | Self::Freeze
             | Self::Thaw => (1, 1),
             Self::Sub => (1, 2),
@@ -318,6 +338,7 @@ impl IntrinsicOp {
             | Self::AddSet
             | Self::AddSetMut
             | Self::StringPush
+            | Self::StringPushMut
             | Self::BytesPush
             | Self::Identical => (2, 2),
             Self::Put
@@ -363,6 +384,7 @@ impl IntrinsicOp {
                 | Self::PushArray
                 | Self::PushArrayMut
                 | Self::StringPush
+                | Self::StringPushMut
                 | Self::BytesPush
                 | Self::Del
                 | Self::DelStruct
@@ -370,6 +392,8 @@ impl IntrinsicOp {
                 | Self::DelStructMut
                 | Self::DelSetMut
                 | Self::Pop
+                | Self::PopString
+                | Self::PopBytes
                 | Self::Freeze
                 | Self::Thaw
         )
@@ -404,6 +428,7 @@ impl IntrinsicOp {
                 | Self::DelStructMut
                 | Self::DelSetMut
                 | Self::StringPush
+                | Self::StringPushMut
                 | Self::Push
                 | Self::PushArray
                 | Self::PushArrayMut

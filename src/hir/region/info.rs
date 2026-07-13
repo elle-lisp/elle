@@ -152,6 +152,18 @@ pub struct RegionInfo {
     /// is statically unknown (a parameter container — the `put`/`set` dispatch),
     /// where `containment_edges` records nothing.
     pub funnel_store_sites: HashMap<HirId, Vec<Region>>,
+    /// Byte-copy funnel call site HirId → the region(s) of the pushed VALUE
+    /// (`%string-push`/`%string-push-mut`/`%bytes-push` — a `Funnel` that copies the
+    /// value's bytes into the container instead of retaining its region). A dispatch
+    /// wrapper stores the value through such a funnel in ONE arm while its `val` param
+    /// is used across arms, so `val`'s owned reference strands on the sibling arms — the
+    /// byte-copy dual of the retaining `funnel_store_sites` strand. `regions::compensate`
+    /// places a per-arm release from here. Sound BECAUSE the byte-copy touched neither
+    /// the value's incref nor its decref: the per-arm release is the value's true
+    /// last-use release, NOT a redundant strand (as for a retaining store, whose
+    /// container keeps the value alive) and NOT a double-free (as `%del` would be — it
+    /// decrefs the value in-body, so it is deliberately EXCLUDED from this set).
+    pub funnel_bytecopy_value_sites: HashMap<HirId, Vec<Region>>,
     /// Pass-through funnel-store call site HirId → the region(s) of the CONTAINER
     /// argument (arg0) stored into there, recorded only for a `-mut` store whose
     /// declared return is a mutable container (`MutableStruct`/`MutableArray`/
@@ -176,6 +188,24 @@ pub struct RegionInfo {
     /// into a reassigned slot (the container's own owned-param leak still closes via
     /// `funnel_container_sites`; only the redundant-retain drop is withheld).
     pub funnel_passthrough_sites: HashMap<HirId, Vec<Region>>,
+    /// Call sites of a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) — a
+    /// non-fresh element REMOVED from a container and escape-retained IN-BODY
+    /// (`arena::pop_with_decref` increfs the element before releasing the container;
+    /// `dispatch_native_call` then skips its own pass-through retain via
+    /// `def.moves_out`). At exactly these sites the lowerer DROPS the tail
+    /// `IncrefValueRegion` (ReturnValue) retain in TAIL position
+    /// (`lir::lower::control::call`): the in-body escape retain already handed the
+    /// caller one owning reference, so a second ReturnValue retain double-counts and
+    /// frees the moved-out element under a live reference
+    /// (`region_pop_tail_moves_out_uaf`). Gated to `PassThrough` at recording time
+    /// (`RegionInference::call_moves_out_passthrough`) so a moves-out native with a
+    /// FRESH result (`@string` grapheme / `@bytes` int pop) is ABSENT and KEEPS its
+    /// tail retain — its result is born rc=1 with no in-body retain and would
+    /// over-free if suppressed. The moves-out analogue of `container_release_sites`;
+    /// unlike it, this is set by the region walk (an intrinsic property of the
+    /// callee), not the branch compensation. In NON-tail position no such retain is
+    /// emitted, so this set is consulted only on the tail path.
+    pub moves_out_release_sites: FxHashSet<HirId>,
     /// Monomorphic store/remove funnel call sites where the per-arm CONTAINER
     /// compensation (`regions::compensate`) released the wrapper's owned-param
     /// reference to the container AND the funnel is a `-mut` pass-through (so the
@@ -438,8 +468,10 @@ impl RegionInfo {
             fresh_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
+            funnel_bytecopy_value_sites: HashMap::new(),
             funnel_container_sites: HashMap::new(),
             funnel_passthrough_sites: HashMap::new(),
+            moves_out_release_sites: FxHashSet::default(),
             container_release_sites: FxHashSet::default(),
             cell_release_regions: FxHashSet::default(),
             hard_edge_sites: FxHashSet::default(),

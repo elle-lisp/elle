@@ -525,9 +525,12 @@
 ## an arm whose container is unproven). Routing is the *legality* vehicle: the
 ## arms type-check as silent leaves. It is not, on its own, a reclamation win
 ## at a `push`/`put` caller — the closure call convention is the residue there.
-## The string/bytes arms keep the
-## polymorphic `%string-push`/`%bytes-push` (no monomorphic byte-copy variant
-## exists yet); the `_` fallbacks keep the polymorphic `%array-push`/`%put`.
+## The `:@string` arm routes to the monomorphic `%string-push-mut` (a `-mut`
+## pass-through, so its stranded owned-param container is compensated like the
+## `@array`/`@struct`/`@set` `-mut` arms); the immutable `:string` and both `:bytes`
+## arms keep the polymorphic `%string-push`/`%bytes-push` (no monomorphic `@bytes`
+## byte-copy variant exists yet); the `_` fallbacks keep the polymorphic
+## `%array-push`/`%put`.
 
 (defn push [coll val]
   "Append val to coll. Mutates @array/@string/@bytes in place; returns new collection for immutable types."
@@ -535,7 +538,7 @@
     :array (%push-array coll val)
     :@array (%push-array-mut coll val)
     :string (%string-push coll val)
-    :@string (%string-push coll val)
+    :@string (%string-push-mut coll val)
     :bytes (%bytes-push coll val)
     :@bytes (%bytes-push coll val)
     _
@@ -594,6 +597,25 @@
     _
       (error {:error :type-error
               :message (string "del: expected struct or set, got " (type coll))})))
+
+## Pop is a `moves_out` REMOVE that mutates in place and returns the removed ELEMENT
+## (not the container), so — unlike `push`/`add`/`del` — it is MUTABLE-only: an
+## immutable array/string/bytes has nothing to remove-in-place, so the `_` arm ERRORS
+## (there is no polymorphic fallback). The three container arms route to the silent
+## monomorphic funnels `%pop`/`%pop-string`/`%pop-bytes`, which the region solver
+## reaches on a proven container. The @array arm's `%pop` moves out a pre-existing heap
+## element (its tail retain is suppressed as redundant); the @string/@bytes arms return
+## a FRESH grapheme / immediate byte and keep theirs.
+(defn pop [coll]
+  "Remove and return the last element from a mutable @array, @string, or @bytes, mutating it in place. For @array returns the element; for @string the last grapheme (a string); for @bytes the last byte (an int). Errors on an immutable or empty collection."
+  (match (type-of coll)
+    :@array (%pop coll)
+    :@string (%pop-string coll)
+    :@bytes (%pop-bytes coll)
+    _
+      (error {:error :type-error
+              :message (string "pop: expected a mutable @array, @string, or @bytes, got "
+                               (type coll))})))
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
@@ -2536,6 +2558,7 @@
    :put put
    :add add
    :del del
+   :pop pop
    :map map
    :filter filter
    :fold fold

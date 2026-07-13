@@ -59,6 +59,47 @@ impl RegionStore {
             .is_some_and(|e| matches!(e.reclaim, Reclaim::Owned { .. }))
     }
 
+    /// Extract `child` from its owner's subtree — the moves-out counterpart of
+    /// [`Self::adopt_region`] (docs/impl/region/ownership.md § "Adoption and subtree
+    /// drop"). When a `moves_out` funnel (`%pop`) removes an element that was
+    /// adopted into its container's Owned subtree, the element LEAVES the container
+    /// and becomes the call's result — so it must no longer be reclaimed by the
+    /// container's subtree drop. **Moves** `child` from `Owned` back to `Counted(1)`
+    /// — the single owning reference is now the caller's (the moves-out result,
+    /// whose `DecrefValueRegion` reclaims it) — and unlinks it from its owner's
+    /// `owned_children`. The forward/back edges stay consistent (the child recorded
+    /// its owner; we remove it from exactly that owner's set). A `Counted` child is
+    /// left untouched (an idempotent no-op): a non-adopted element takes the
+    /// ordinary RC moves-out path (escape-retain + un-record + decref), not this.
+    ///
+    /// Why `Counted(1)` and not the container's remaining structure: adoption
+    /// requires external uniqueness, so an Owned child is referenced ONLY through
+    /// its owner — removing it from the container leaves exactly the caller's one
+    /// reference. On an Owned region `incref`/`decref` are inert (RC frozen), so the
+    /// escape-retain the Counted path uses cannot establish that reference here; the
+    /// move to `Counted(1)` IS the retain.
+    pub(crate) fn extract_owned_region(&mut self, child: RuntimeRegion) {
+        let entry = match self
+            .regions
+            .get_mut(child.get() as usize)
+            .and_then(|s| s.as_mut())
+        {
+            Some(e) => e,
+            None => return,
+        };
+        let Reclaim::Owned { owner } = entry.reclaim else {
+            return; // Counted (or absent) — the ordinary RC moves-out path owns it.
+        };
+        entry.reclaim = Reclaim::Counted(1);
+        if let Some(owner_entry) = self
+            .regions
+            .get_mut(owner.get() as usize)
+            .and_then(|s| s.as_mut())
+        {
+            owner_entry.owned_children.retain(|&c| c != child);
+        }
+    }
+
     /// Hand `from`'s whole direct `owned_children` set to `to` — the ownership-
     /// **transfer** primitive of the forest (docs/impl/region/ownership.md § "The
     /// runtime: a reclamation typestate"). Each child is re-stamped

@@ -357,22 +357,10 @@ primitive! {
         example: "(array/new 3 0) #=> [0 0 0]",
         effect: RegionEffect::Fresh,
     }
-    "pop" => prim_pop {
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Remove and return last element from array. Mutates in place.",
-        params: &["arr"],
-        category: "array",
-        example: "(pop @[1 2 3]) #=> 3",
-        // The @array path returns the removed element (moved out of the
-        // container via `arena::pop_with_decref`); the @string path returns a
-        // fresh cluster, @bytes an immediate. moves_out so dispatch skips the
-        // pass-through retain the body already took for the moved @array element
-        // (a fresh/immediate result's retain is a no-op, so the skip is safe
-        // there too — see `moves_out`).
-        effect: RegionEffect::Funnel,
-        moves_out: true,
-    }
+    // `pop` is a stdlib `(match (type-of coll) …)` wrapper (src/stdlib.lisp) over the
+    // monomorphic funnel intrinsics `%pop`/`%pop-string`/`%pop-bytes`, so the region
+    // solver reaches each on a proven container (the pop-family peer of the
+    // `push`/`add`/`del` wrappers). No polymorphic `pop` native remains.
     "popn" => prim_popn {
         signal: Signal::errors(),
         arity: Arity::Exact(2),

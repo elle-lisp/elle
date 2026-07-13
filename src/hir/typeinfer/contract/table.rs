@@ -83,6 +83,11 @@ const DEL_DOMAIN: &[TyId] = &[
 ];
 
 const POP_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_ARRAY];
+// `pop` mutates in place, so every monomorphic pop arm is a MUTABLE container only
+// (an immutable array/string/bytes has nothing to remove-in-place — the wrapper's
+// `_` arm type-errors, matching the native `pop`'s domain).
+const POP_STRING_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_STRING];
+const POP_BYTES_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_BYTES];
 
 pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
     use IntrinsicOp::*;
@@ -148,6 +153,16 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
             families: POP_DOMAIN,
             what: "@array",
         },
+        // The monomorphic pop twins for the other two mutable containers; the stdlib
+        // `pop` wrapper routes to each on a proven `@string`/`@bytes`.
+        PopString => Contract::Container {
+            families: POP_STRING_DOMAIN,
+            what: "@string",
+        },
+        PopBytes => Contract::Container {
+            families: POP_BYTES_DOMAIN,
+            what: "@bytes",
+        },
         // The storing ops' compile gate owns the *container* (the operand the
         // region system and the opcode's dispatch trust); the pushed value's
         // legality is the funnel native's runtime validation, which signals
@@ -155,6 +170,12 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
         StringPush => Contract::Container {
             families: STRING_FAMILY,
             what: "string",
+        },
+        // The monomorphic `@string` push twin pins the mutable string; the `push`
+        // wrapper's `:@string` arm routes here on a proven `@string`.
+        StringPushMut => Contract::Container {
+            families: POP_STRING_DOMAIN,
+            what: "@string",
         },
         BytesPush => Contract::Container {
             families: BYTES_FAMILY,

@@ -49,6 +49,37 @@ pub struct CallClassification {
     /// raised, the invariant `regions::compensate` needs to place a per-arm decref
     /// that cannot over-free. Populated by `PrimitiveClassification::new`.
     pub retaining_store_funnels: FxHashSet<SymbolId>,
+    /// SymbolIds of the BYTE-COPY store funnels (`%string-push`/`%string-push-mut`/
+    /// `%bytes-push`) — `Funnel` ops that copy the pushed value's bytes rather than
+    /// retaining its region. Neither retaining (no member incref) nor removing (no
+    /// in-body decref). A dispatch wrapper's `val` param strands across arms exactly
+    /// as a retaining store's does, but here the per-arm release is `val`'s ACTUAL
+    /// last use (the byte-copy touched neither its incref nor its decref), so it is
+    /// sound to compensate — the `%del` in-body-decref double-free hazard the
+    /// compensation excludes does NOT apply. `regions::compensate` releases the
+    /// stranded `val` per-arm from `funnel_bytecopy_value_sites`. Populated by
+    /// `PrimitiveClassification::new`.
+    pub bytecopy_store_funnels: FxHashSet<SymbolId>,
+    /// SymbolIds of the moves-out natives whose result is a genuinely non-fresh
+    /// PASS-THROUGH element removed from a container (`%pop`/`%pop-array*`): the
+    /// native body escape-retains the moved-out element in place (before releasing
+    /// the container), so in TAIL position the lowerer's extra ReturnValue retain
+    /// double-counts and over-frees it (`region_pop_tail_moves_out_uaf`). The walk
+    /// records these sites (`moves_out_release_sites`) so the lowerer suppresses
+    /// that redundant retain. Restricted to the `PassThrough` subset of moves-out
+    /// natives: a fresh grapheme (`@string` pop) / immediate byte is NOT
+    /// escape-retained in body and NEEDS its tail retain, so it is excluded here.
+    /// Populated by `PrimitiveClassification::new`.
+    pub moves_out_passthrough: FxHashSet<SymbolId>,
+    /// SymbolIds of ALL moves-out REMOVE natives (`%pop`/`%pop-string`/`%pop-bytes`),
+    /// regardless of effect. A `pop` dispatch wrapper uses its container arg0 in every
+    /// `(match (type-of coll) …)` arm but frees it in ONE, so the owned-param reference
+    /// strands on every other arm — the F1b container strand `add`/`del` have. The walk
+    /// records arg0 as a `funnel_container_sites` container so `regions::compensate`
+    /// releases it per-arm. Distinct from `moves_out_passthrough` (the PassThrough
+    /// subset, for the ELEMENT's tail-retain suppression): the CONTAINER strand affects
+    /// the fresh-result (`Funnel`) arms too. Populated by `PrimitiveClassification::new`.
+    pub moves_out: FxHashSet<SymbolId>,
     /// The SymbolId of `fiber/new`, when the symbol table carries it — the
     /// transferred-returned-subtree cut (`regions::ownership::transfer`) must
     /// recognize a fiber-body producer structurally. `None` under the default

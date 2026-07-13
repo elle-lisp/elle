@@ -182,6 +182,84 @@ fn mutable_array_push_keeps_region_alive() {
     );
 }
 
+#[test]
+fn pop_extracts_moved_out_element_from_owned_subtree() {
+    // The moves-out-of-Owned-subtree case (region_pop_tail_moves_out_uaf): when the
+    // popped element was ADOPTED into its container's Owned subtree — a heap value
+    // pushed into a LOCAL Owned @array, where the ownership forest emits an
+    // `AdoptRegion` at the push site — `incref`/`decref` on it are inert (RC frozen).
+    // So `pop` must EXTRACT it (Owned → Counted(1)); otherwise it stays interior and
+    // the container's subtree drop frees it under the returned Value. This pins the
+    // extract path beside `mutable_array_push_keeps_region_alive`'s Counted path.
+    let heap_ptr = crate::value::arena::leaked_test_heap();
+    let heap = unsafe { &mut *heap_ptr };
+    let (val, rid_a) =
+        alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
+
+    let heap = unsafe { &mut *heap_ptr };
+    let (arr, rid_b) = alloc_in_fresh_region(
+        heap,
+        HeapObject::LArrayMut {
+            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
+            traits: Value::NIL,
+        },
+    );
+    assert_ne!(rid_a, rid_b);
+
+    // Push val into the @array (records the edge + increfs), drop the initial
+    // reference so the array's stored reference is val's sole holder, then ADOPT
+    // val's region into the array's Owned subtree — the runtime shape of a heap
+    // element pushed into a local Owned @array.
+    {
+        let mut ctx = crate::primitives::ctx::Alloc::with_region(rid_b, unsafe { &mut *heap_ptr });
+        let _ = crate::primitives::seq::seq_push(&arr, val, &mut ctx);
+    }
+    decref_if_present(unsafe { &mut *heap_ptr }, rid_a);
+    let heap = unsafe { &mut *heap_ptr };
+    heap.adopt_region(rid_b, rid_a);
+    assert!(
+        heap.region_is_owned(rid_a),
+        "val's region is adopted into the @array's Owned subtree"
+    );
+
+    // Pop moves val OUT — the extract must move it back to a caller-owned Counted(1).
+    let popped = {
+        let mut ctx = crate::primitives::ctx::Alloc::with_region(rid_b, unsafe { &mut *heap_ptr });
+        crate::primitives::seq::seq_pop(&arr, &mut ctx).expect("pop of a non-empty @array")
+    };
+    let heap = unsafe { &mut *heap_ptr };
+    assert!(
+        !heap.region_is_owned(rid_a),
+        "pop extracts the moved-out element from the container's Owned subtree"
+    );
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_a),
+        1,
+        "the extracted element carries the caller's single owning reference"
+    );
+    assert_eq!(
+        region_of(unsafe { &mut *heap_ptr }, popped),
+        Some(rid_a),
+        "the popped value still lives in its (now Counted) region"
+    );
+
+    // Freeing the CONTAINER's subtree must NOT reclaim the extracted element.
+    decref_if_present(unsafe { &mut *heap_ptr }, rid_b);
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_a),
+        1,
+        "the container's subtree drop no longer reclaims the moved-out element"
+    );
+
+    // The caller releasing the popped value is what finally frees it.
+    decref_if_present(unsafe { &mut *heap_ptr }, rid_a);
+    assert_eq!(
+        region_rc(unsafe { &*heap_ptr }, rid_a),
+        0,
+        "releasing the moved-out value frees its region"
+    );
+}
+
 // ── The outgoing edge table: the mutable-store seam ──────────────────────────
 //
 // docs/impl/region/ownership.md § "The outgoing edge table". A post-alloc store into a

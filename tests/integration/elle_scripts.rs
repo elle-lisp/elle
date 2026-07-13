@@ -465,25 +465,63 @@ fn region_capture_cell_member_cascade_uaf() {
     );
 }
 
-// RED — a `moves_out` REMOVE (`%pop`) in TAIL position over-frees the removed HEAP
-// element when that element was stored through a push FUNNEL. `(%array-push a
-// (list …))` increfs the list's region and records the outgoing edge; `%pop` moves
-// it back out. In NON-tail position this balances (`raw-pop` reads 0), but the
-// native-tail path emits an extra ReturnValue `IncrefValueRegion` over the popped
-// element that double-counts against the funnel accounting, freeing the list's
-// region while a live reference remains — a later deref of the recycled page faults
-// (stale-region-deref / generation mismatch). State-dependent (faults once ids
-// recycle), so the fixture primes id churn then drives the raw tail-pop loop. This
-// is `pop`'s remaining Stage-4 work: the moved-out element's tail-position retain
-// must balance as it does in statement position (the container half is already
-// balanced — `region_mut_container_compensation_uaf`). #[ignore]'d because it
-// SIGSEGVs today; un-ignore when `pop`'s moved-out accounting is fixed. Full repro
-// in the fixture header.
+// A `moves_out` REMOVE (`%pop`) returns a HEAP element that was pushed into a
+// LOCAL OWNED container via a funnel. `(%array-push a (list …))` on a local `@[]`
+// the ownership forest made Owned emits an `AdoptRegion` moving the list into `a`'s
+// Owned subtree (RC frozen). `%pop` moving it back out must EXTRACT it — un-record
+// the container edge and move it `Owned → Counted(1)` (`extract_owned_region`) — or
+// the list stays interior and `a`'s subtree drop frees it while the returned Value
+// still points into it (a stale-region-deref UAF; state-dependent, so the fixture
+// primes id churn then drives the raw tail-pop loop). Separately, the native-tail
+// path's ReturnValue `IncrefValueRegion` over the moved-out element is redundant
+// (the element already carries its one caller reference), so it is suppressed for a
+// moves_out ∩ PassThrough site (`RegionInfo::moves_out_release_sites`) — without
+// that, tail `%pop` leaks 1 region/op. Green proves both: no over-free and no
+// per-op growth. Full repro in the fixture header.
 #[test]
-#[ignore = "RED: %pop in tail position over-frees a heap element pushed via a funnel (native-tail ReturnValue double-counts moves_out); un-ignore when pop's moved-out accounting balances in tail position"]
 fn region_pop_tail_moves_out_uaf() {
     run_elle_file_with_args(
         "tests/integration/fixtures/region-pop-tail-moves-out-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
+// GREEN guard — the stdlib `pop` wrapper (`%pop`/`%pop-string`/`%pop-bytes`) stays
+// balanced across all three mutable container types. The @array arm suppresses its
+// moved-out element's redundant tail retain (and extracts an Owned element); the
+// @string/@bytes arms return a FRESH grapheme / immediate that must KEEP their tail
+// retain — over-suppressing them over-frees the returned grapheme (the Q1 hazard).
+// The wrapper's owned-param container also strands across the match arms and is freed
+// per-arm by the container compensation. Runs clean; a regression that unbalances any
+// arm SIGSEGVs here. Full detail in the fixture header.
+#[test]
+fn region_pop_wrapper_types() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-pop-wrapper-types.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
+// RED (known over-free, not yet fixed) — the general container-READ-escape sibling
+// of the (fixed) pop moves-out UAF. A heap element pushed into a LOCAL Owned @array
+// via a raw `%array-push` is adopted into the container's Owned subtree, but reading
+// it back out with `first`/`get`/`rest` and RETURNING the result escapes it — the
+// forest never saw that escape (the read result is a fresh value-flow node not
+// linked to the pushed element), so it adopted it anyway, and the container's
+// subtree drop frees it under the returned Value (SIGSEGV once region ids recycle).
+// DISTINCT from the pop case: a read BORROWS (the element stays in the container),
+// so the fix is not `pop`'s extract — it is escape propagating through a container
+// read (a read result that escapes makes the container's contents escape, refusing
+// the adopt). Only RAW `%array-push` triggers it; the stdlib `push` wrapper is clean
+// (opaque param flow). #[ignore]'d because it SIGSEGVs today — an uncatchable fault
+// that would take the shared `make smoke` harness down; when escape refuses the
+// adopt for a read-out-and-returned element, this exits 0 under guardfree —
+// un-ignore it then. Full repro + trace in the fixture header.
+#[test]
+#[ignore = "RED: a heap element pushed into a local Owned @array via raw %array-push and read back out (first/get) then returned is over-freed by the container's subtree drop; un-ignore when escape refuses the adopt for a read-out-and-returned element"]
+fn region_container_read_escape_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-container-read-escape-uaf.lisp",
         &["--jit=off", "--trace=guardfree"],
     );
 }

@@ -21,6 +21,12 @@ mod num;
 pub(crate) use data::*;
 use num::*;
 
+// The `%pop` @array intrinsic uses the local @array-only `prim_pop` (data.rs).
+// `%pop-string`/`%pop-bytes` need the type-dispatching body (the @string grapheme /
+// @bytes int arms), which is `array::prim_pop` (→ `seq_pop`); their contract
+// restricts arg0 so only the intended arm runs.
+use crate::primitives::array::prim_pop as prim_pop_seq;
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 fn type_err(name: &str, expected: &str, got: &Value, ctx: &mut NativeCtx) -> (SignalBits, Value) {
@@ -543,6 +549,34 @@ primitive! {
         effect: RegionEffect::PassThrough,
         moves_out: true,
     }
+    // Monomorphic pop twins for the OTHER two mutable containers `pop` dispatches
+    // on (`@string`/`@bytes`), so the stdlib `pop` wrapper's `(match (type-of coll)
+    // …)` arms route to a silent funnel native on a proven container — the pop-family
+    // peer of the `%put-*`/`%add-set*`/`%del-*` monomorphic twins. Same runtime body
+    // (`prim_pop` → `seq_pop`, which dispatches on the runtime container) as `%pop`.
+    // Unlike `%pop`'s @array element move-out (`PassThrough`), these produce a
+    // genuinely FRESH result — a grapheme string / an immediate byte — so they are
+    // `Funnel` (conditionally allocating, like `%string-push`/`%bytes-push`), NOT
+    // `PassThrough`: a fresh result is born rc=1 and KEEPS its tail ReturnValue
+    // retain (absent from `moves_out_passthrough`, which suppresses that retain only
+    // for the non-fresh @array move-out). `moves_out` still holds (dispatch skips its
+    // own pass-through retain — a no-op on a fresh/immediate result).
+    "%pop-string" => prim_pop_seq {
+        arity: Arity::Exact(1),
+        doc: "Remove and return the last grapheme from a mutable @string in place (monomorphic @string pop)",
+        params: &["s"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        moves_out: true,
+    }
+    "%pop-bytes" => prim_pop_seq {
+        arity: Arity::Exact(1),
+        doc: "Remove and return the last byte (as an int) from a mutable @bytes in place (monomorphic @bytes pop)",
+        params: &["b"],
+        category: "intrinsic",
+        effect: RegionEffect::Funnel,
+        moves_out: true,
+    }
     "%string-push" => prim_string_push {
         // Same string type as arg0: @string appends in place (@string result),
         // immutable string returns a fresh string of the same type.
@@ -557,6 +591,23 @@ primitive! {
         // this call's own region. Declaring PassThrough would trip the
         // dispatch_native_call declaration oracle on the immutable case,
         // since the op routes as a real native Call.
+        effect: RegionEffect::Funnel,
+    }
+    // Monomorphic `@string` push twin — the string peer of `%push-array-mut`. Same
+    // runtime body (`prim_string_push`) as the polymorphic `%string-push`, but the
+    // `MutableString` RetType is the monomorphization win: it marks the funnel as a
+    // `-mut` PASS-THROUGH (it appends in place and returns arg0), so the stdlib `push`
+    // wrapper's `:@string` arm reaches the container compensation — the wrapper's
+    // stranded owned-param `@string` is released per-arm and the redundant tail
+    // ReturnValue retain (the result IS the caller-owned `@string`) is suppressed,
+    // exactly as the `@array`/`@struct`/`@set` `-mut` arms are. Effect stays `Funnel`,
+    // like every other monomorphic store twin.
+    "%string-push-mut" => prim_string_push {
+        ret: RetType::MutableString,
+        arity: Arity::Exact(2),
+        doc: "Append a string to a mutable @string in place, returning it (monomorphic @string push)",
+        params: &["s", "val"],
+        category: "intrinsic",
         effect: RegionEffect::Funnel,
     }
     "%bytes-push" => prim_bytes_push {

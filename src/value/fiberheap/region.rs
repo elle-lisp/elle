@@ -123,6 +123,17 @@ impl FiberHeap {
         self.region_store.reparent_owned_children(from, to);
     }
 
+    /// Extract `child`'s region from its owner's subtree — the moves-out
+    /// counterpart of `adopt_region` (docs/impl/region/ownership.md § "Adoption and
+    /// subtree drop"). A `moves_out` funnel (`%pop`) removing an element that was
+    /// adopted into its container's Owned subtree calls this so the element — now
+    /// the call's escaping result — is no longer reclaimed by the container's
+    /// subtree drop. Moves `child` from `Owned` to `Counted(1)` (the caller's one
+    /// reference); a `Counted`/absent child is a no-op (the ordinary RC path).
+    pub fn extract_owned_region(&mut self, child: RuntimeRegion) {
+        self.region_store.extract_owned_region(child);
+    }
+
     /// Free a co-owned region group as one unit — the runtime `FreeRegionGroup` of the
     /// ownership forest. A mutual reference cycle
     /// with no container parent has no owner among its members, so all are freed

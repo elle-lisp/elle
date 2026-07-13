@@ -419,6 +419,14 @@ pub struct PrimitiveMeta {
     /// `Fresh` arm reads this (through `CallClassification::embeds`) to record a
     /// `result ⊇ arg` containment edge for each embedded argument.
     pub embeds: HashMap<SymbolId, &'static [usize]>,
+    /// Primitive SymbolId → [`PrimitiveDef::moves_out`]. Aliases get the same entry.
+    /// A moves-out native's heap result is an element REMOVED from a container arg,
+    /// escape-retained IN-BODY before the container release (`%pop`); the region
+    /// walk reads this (through `CallClassification::moves_out`) to suppress the
+    /// redundant tail ReturnValue retain — but only when the effect is also
+    /// `PassThrough` (a genuinely non-fresh move-out), so a fresh grapheme/byte
+    /// result keeps its retain.
+    pub moves_out: HashMap<SymbolId, bool>,
 }
 
 impl PrimitiveMeta {
@@ -431,6 +439,7 @@ impl PrimitiveMeta {
             effects: HashMap::new(),
             ret_types: HashMap::new(),
             embeds: HashMap::new(),
+            moves_out: HashMap::new(),
         }
     }
 }

@@ -64,12 +64,57 @@ impl PrimitiveClassification {
         .filter_map(|name| symbols.get(name))
         .collect();
 
+        // The BYTE-COPY store funnels — `Funnel` ops that COPY the pushed value's
+        // bytes into the container rather than retaining its region
+        // (`%string-push`/`%bytes-push`). Neither retaining (no member incref — absent
+        // from `retaining_store_funnels`) NOR removing (no in-body decref — unlike
+        // `%del`). A dispatch wrapper stores the value through such a funnel in ONE arm
+        // but its `val` param is used across arms, so `val`'s owned reference strands on
+        // the sibling arms. Because the byte-copy neither increfs nor decrefs `val`, a
+        // per-arm release there is the value's ACTUAL last-use release (not a redundant
+        // strand, not a double-free — the `%del` in-body decref hazard the compensation
+        // excludes does NOT apply). See `CallClassification::bytecopy_store_funnels`.
+        let bytecopy_store_funnels = ["%string-push", "%string-push-mut", "%bytes-push"]
+            .iter()
+            .filter_map(|name| symbols.get(name))
+            .collect();
+
+        // The moves-out ∩ PassThrough natives (`%pop`/`%pop-array*`): a non-fresh
+        // element removed from a container, escape-retained in-body — so its tail
+        // ReturnValue retain is redundant (`CallClassification::moves_out_passthrough`).
+        // Derived from the def flags so a new monomorphic pop variant classifies by
+        // declaring `moves_out: true` + `effect: PassThrough`, no name-list edit. A
+        // moves-out native with a FRESH result (`@string`/`@bytes` pop, `Funnel`/
+        // `Immediate`) is excluded — its result needs the tail retain.
+        let moves_out_passthrough = meta
+            .moves_out
+            .iter()
+            .filter(|(id, &mo)| {
+                mo && meta.effects.get(id)
+                    == Some(&crate::primitives::def::RegionEffect::PassThrough)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+
+        // ALL moves-out natives, regardless of effect — the `pop` wrapper's container
+        // strand (`CallClassification::moves_out`) affects the fresh-result `%pop-string`/
+        // `%pop-bytes` arms too, not just the PassThrough `%pop` arm.
+        let moves_out = meta
+            .moves_out
+            .iter()
+            .filter(|(_, &mo)| mo)
+            .map(|(id, _)| *id)
+            .collect();
+
         let call_classification = crate::hir::CallClassification {
             intrinsic_ops: intrinsics.keys().copied().collect(),
             effects: meta.effects.iter().map(|(k, v)| (*k, *v)).collect(),
             ret_types: meta.ret_types.iter().map(|(k, v)| (*k, *v)).collect(),
             embeds: meta.embeds.iter().map(|(k, v)| (*k, *v)).collect(),
             retaining_store_funnels,
+            bytecopy_store_funnels,
+            moves_out_passthrough,
+            moves_out,
             // The two natives the transferred-returned-subtree cut recognizes
             // structurally: a fiber-body producer and its resume consumer.
             fiber_new: symbols.get("fiber/new"),

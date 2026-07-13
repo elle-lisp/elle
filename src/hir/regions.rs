@@ -106,6 +106,9 @@ struct RegionInference {
     /// the only place a sibling-arm release cannot over-free. See
     /// `RegionInfo::funnel_store_sites`.
     funnel_store_sites: HashMap<HirId, Vec<Region>>,
+    /// Byte-copy funnel call site → the stored value's regions. See
+    /// `RegionInfo::funnel_bytecopy_value_sites`.
+    funnel_bytecopy_value_sites: HashMap<HirId, Vec<Region>>,
     /// Pass-through funnel-store call site → the CONTAINER argument (arg0) regions,
     /// recorded only for a `-mut` store whose declared return is a mutable container
     /// (the funnel returns arg0 in place). A dispatch wrapper's mutable arm returns
@@ -118,6 +121,10 @@ struct RegionInference {
     /// the result IS the owned container; an immutable fresh result keeps its retain.
     /// See `RegionInfo::funnel_passthrough_sites`.
     funnel_passthrough_sites: HashMap<HirId, Vec<Region>>,
+    /// Call sites of a moves-out ∩ PassThrough native (`%pop`/`%pop-array*`) whose
+    /// moved-out element is escape-retained in-body. See
+    /// `RegionInfo::moves_out_release_sites`.
+    moves_out_release_sites: rustc_hash::FxHashSet<HirId>,
     /// Subset of `call_result_regions` that are capture-cell placeholders for
     /// captured (env-allocated) bindings — released with `DecrefCellRegion`
     /// (`region_of` the cell), not `DecrefValueRegion` (`result_region_of` the
@@ -202,8 +209,10 @@ impl RegionInference {
             mutable_container_regions: rustc_hash::FxHashSet::default(),
             containment_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
+            funnel_bytecopy_value_sites: HashMap::new(),
             funnel_container_sites: HashMap::new(),
             funnel_passthrough_sites: HashMap::new(),
+            moves_out_release_sites: rustc_hash::FxHashSet::default(),
             cell_release_regions: rustc_hash::FxHashSet::default(),
             return_sites: Vec::new(),
             destructure_sites: Vec::new(),

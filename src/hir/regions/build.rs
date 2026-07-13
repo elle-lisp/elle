@@ -99,8 +99,10 @@ impl RegionInference {
             fresh_result_regions: self.fresh_result_regions,
             containment_edges,
             funnel_store_sites: self.funnel_store_sites,
+            funnel_bytecopy_value_sites: self.funnel_bytecopy_value_sites,
             funnel_container_sites: self.funnel_container_sites,
             funnel_passthrough_sites: self.funnel_passthrough_sites,
+            moves_out_release_sites: self.moves_out_release_sites,
             // Populated by the branch-compensation pass in `analyze_regions_with`
             // (the `-mut` sites where locus A released a container). Empty here.
             container_release_sites: rustc_hash::FxHashSet::default(),
