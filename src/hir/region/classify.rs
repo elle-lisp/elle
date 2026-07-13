@@ -80,6 +80,15 @@ pub struct CallClassification {
     /// subset, for the ELEMENT's tail-retain suppression): the CONTAINER strand affects
     /// the fresh-result (`Funnel`) arms too. Populated by `PrimitiveClassification::new`.
     pub moves_out: FxHashSet<SymbolId>,
+    /// SymbolIds of the container element-READ natives (`first`/`rest`/`get`/`pop`
+    /// and their `%`-op peers) — the ops whose result is a value read OUT of the
+    /// container passed as arg0. Escape uses this to add a **read-result →
+    /// container-contents** flow edge: a value stored into a container and then read
+    /// back out and escaped must not be adopted into the container's Owned subtree
+    /// (else the container's subtree drop frees a value that flows out — the
+    /// container-read-escape face, `memory.md` § F1b / the `region_container_read_escape_uaf`
+    /// pin). Populated by `PrimitiveClassification::new`.
+    pub container_read_funnels: FxHashSet<SymbolId>,
     /// The SymbolId of `fiber/new`, when the symbol table carries it — the
     /// transferred-returned-subtree cut (`regions::ownership::transfer`) must
     /// recognize a fiber-body producer structurally. `None` under the default

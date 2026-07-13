@@ -306,3 +306,37 @@ fn store_escape_spec() {
     // a value consumed by a non-storing op does NOT escape.
     assert_binding_escape("(let [s \"hi\"] (length s))", &[("s", false, false)]);
 }
+
+/// Container-read escape (the read-result → container-contents flow edge). A value
+/// stored into a container and then read back OUT (`first`/`rest`/`get`/`pop`) and
+/// ESCAPED must be marked escaping too: the ownership forest would otherwise adopt it
+/// into the container's Owned subtree (a `%array-push` records `content ⊇ container`),
+/// and the container's scope-exit subtree drop would then free a value that flows out
+/// (`region_container_read_escape_uaf`, the UAF face; `store-wrapper`, the leak face).
+///
+/// The mark is PRECISE, not "every read escapes": the container's stored contents are
+/// pulled into a facet ONLY when the read result itself reaches that facet, through the
+/// ordinary fixpoint. A read whose result is consumed LOCALLY leaves the contents
+/// interior — so a container that is merely read/indexed keeps its Owned reclamation.
+#[test]
+fn container_read_escape_spec() {
+    // Pushed into a LOCAL container, read back out, and RETURNED: `v` escapes via the
+    // read-through (the returned read result pulls the container's contents into the
+    // return facet), so its region is a Shared seed and adoption is refused.
+    assert_binding_escape(
+        "(def f (fn (v) (let [a @[]] (%array-push a v) (first a)))) (f (list 1 2))",
+        &[("v", true, true)],
+    );
+    // The SAME push, but the read result is consumed LOCALLY (`length`, non-escaping):
+    // `v` stays interior — the precise gate, not "every element-read escapes".
+    assert_binding_escape(
+        "(def g (fn (v) (let [a @[]] (%array-push a v) (length (first a))))) (g (list 1 2))",
+        &[("v", false, false)],
+    );
+    // `get` reads the same way: a value put into a local struct, read back by key and
+    // returned, escapes; the container `m` (a store target) does not.
+    assert_binding_escape(
+        "(def h (fn (v) (let [m @{}] (%put m :k v) (get m :k)))) (h (list 1 2))",
+        &[("v", true, true), ("m", false, false)],
+    );
+}

@@ -666,7 +666,7 @@
       (block (let [a {:k j}]
                (let [b {:a j}]
                  (break))))) 0]
-   ["store-wrapper" (fn [j] (t19-store t19s (string "v" j))) 1]
+   ["store-wrapper" (fn [j] (t19-store t19s (string "v" j))) 0]
    ["fresh-env-cell" (fn [j] (t20-make-cell)) 1]
    ["shared-env-cell"
     (fn [j]

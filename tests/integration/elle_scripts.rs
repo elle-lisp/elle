@@ -502,26 +502,41 @@ fn region_pop_wrapper_types() {
     );
 }
 
-// RED (known over-free, not yet fixed) — the general container-READ-escape sibling
-// of the (fixed) pop moves-out UAF. A heap element pushed into a LOCAL Owned @array
-// via a raw `%array-push` is adopted into the container's Owned subtree, but reading
-// it back out with `first`/`get`/`rest` and RETURNING the result escapes it — the
-// forest never saw that escape (the read result is a fresh value-flow node not
-// linked to the pushed element), so it adopted it anyway, and the container's
-// subtree drop frees it under the returned Value (SIGSEGV once region ids recycle).
-// DISTINCT from the pop case: a read BORROWS (the element stays in the container),
-// so the fix is not `pop`'s extract — it is escape propagating through a container
-// read (a read result that escapes makes the container's contents escape, refusing
-// the adopt). Only RAW `%array-push` triggers it; the stdlib `push` wrapper is clean
-// (opaque param flow). #[ignore]'d because it SIGSEGVs today — an uncatchable fault
-// that would take the shared `make smoke` harness down; when escape refuses the
-// adopt for a read-out-and-returned element, this exits 0 under guardfree —
-// un-ignore it then. Full repro + trace in the fixture header.
+// Guard — the general container-READ-escape sibling of the pop moves-out UAF. A heap
+// element pushed into a LOCAL Owned @array via a raw `%array-push` is adopted into the
+// container's Owned subtree, so reading it back out with `first`/`get`/`rest` and
+// letting the result ESCAPE must NOT leave it interior — else the container's
+// scope-exit subtree drop frees it under the escaped reference (a stale-region deref
+// once ids recycle). Escape propagates through the container read (`analyze_escape`'s
+// read-result → container-contents edge): an escaping element-read marks the
+// container's stored contents escaping, so the ownership forest refuses to adopt them
+// and the ordinary RC path keeps them live across the caller's read. DISTINCT from the
+// pop case (a read BORROWS — the element stays in the container — so the fix is escape
+// marking, not pop's extract). Runs clean; a regression that re-admits the adopt
+// SIGSEGVs here. Full repro + trace in the fixture header.
 #[test]
-#[ignore = "RED: a heap element pushed into a local Owned @array via raw %array-push and read back out (first/get) then returned is over-freed by the container's subtree drop; un-ignore when escape refuses the adopt for a read-out-and-returned element"]
 fn region_container_read_escape_uaf() {
     run_elle_file_with_args(
         "tests/integration/fixtures/region-container-read-escape-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
+// Guard — the variadic TAIL-FORWARD reference balance. Forwarding a heap value into a
+// `& rest` variadic through a tail call builds the callee env as a MOVE
+// (`own_params = false`): the caller's owning reference transfers, but a rest arg
+// lives in the collected rest-list (its own `alloc_obj` incref), so the moved-in
+// reference is surplus and must be released (`args_to_list`'s caller in `vm::env`),
+// applied only to a value appearing exactly once across all arg positions. Under-
+// release leaks (the `store-wrapper` oracle probe); OVER-release (an aliased/borrowed
+// arg) faults under guardfree once the freed page recycles. This drives both the
+// minimal forward and the stdlib-`put` store-wrapper shape past a priming loop, then
+// asserts region-count bounded — so a regression in either direction is loud. Full
+// mechanism in the fixture header.
+#[test]
+fn region_variadic_tail_forward_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-variadic-tail-forward-uaf.lisp",
         &["--jit=off", "--trace=guardfree"],
     );
 }

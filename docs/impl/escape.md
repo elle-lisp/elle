@@ -200,6 +200,18 @@ unit test asserting escape's own spec.
    stored *value*, never the *container* `obj`/`acc` (writing into a container is not
    the container escaping). Escape marks only the value; the projection acts per
    region, so the value's region is marked exactly once.
+3. **Container-read escape.** A value stored into a container and then read back OUT
+   (`first`/`rest`/`get`/`pop`) and ESCAPED must be marked escaping too: the ownership
+   forest records `content ⊇ container` at the store (a `%array-push` funnel), so it
+   would adopt the content into the container's Owned subtree and free it at the
+   container's scope-exit subtree drop — under the escaped read reference (a
+   use-after-free; pinned by `region_container_read_escape_uaf`). A per-container
+   **stored-contents map** (built in `collect_flow` from the `push`/`put`/`add` store
+   sites) plus a **read-result → container-contents flow edge** at each element-read
+   makes an escaping read result pull the container's stored contents into its own
+   facet through the ordinary fixpoint. It is PRECISE, not "every read escapes": the
+   contents are marked ONLY when the read result itself reaches a facet, so a container
+   merely read/indexed with the result consumed locally keeps its Owned reclamation.
 3. **Lexical capture is not escape.** A value captured by a closure that is *called
    in place* (never escapes) does not escape via capture — the capture facet marks it
    only when its capturing closure escapes, where `is_captured` marks every captured

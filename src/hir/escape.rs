@@ -175,7 +175,10 @@ use super::binding::Binding;
 use super::expr::{Hir, HirId};
 
 mod flow;
-use flow::{collect_flow, compute_arg_return, record_frontier_sites, return_atoms, Atom, TailCtx};
+use flow::{
+    collect_container_contents, collect_flow, compute_arg_return, record_frontier_sites,
+    return_atoms, Atom, TailCtx,
+};
 
 /// Authoritative escape facts for a compilation unit.
 ///
@@ -349,6 +352,12 @@ pub fn analyze_escape(
         arena,
         arg_return: &arg_return,
     };
+    // The per-container stored-contents map: which values were stored into which
+    // named container. Built in one pre-pass so the read-result → container-contents
+    // edge (`collect_flow`) sees every store regardless of its position relative to
+    // the read. The store half of the container-read-escape flow.
+    let mut container_contents: FxHashMap<Binding, Vec<Atom>> = FxHashMap::default();
+    collect_container_contents(&ctx, hir, call_class, &mut container_contents);
     // The top-level expression is the entry function's return value (return facet) —
     // both the atoms and the region-level allocation sites it reaches.
     return_atoms(&ctx, hir, &mut return_seeds);
@@ -357,6 +366,7 @@ pub fn analyze_escape(
         &ctx,
         hir,
         call_class,
+        &container_contents,
         &mut edges,
         &mut return_seeds,
         &mut fiber_seeds,

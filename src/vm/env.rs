@@ -198,7 +198,28 @@ impl VM {
                     &[]
                 };
                 let collected = match &closure.template.vararg_kind {
-                    crate::hir::VarargKind::List => Self::args_to_list(rest_args, heap),
+                    crate::hir::VarargKind::List => {
+                        let list = Self::args_to_list(rest_args, heap);
+                        // On a MOVE (`own_params = false`: a tail call / FFI callback),
+                        // the caller's owning reference to each arg transferred to us. A
+                        // fixed param lands that reference in its env slot; a rest arg
+                        // instead lives in the collected list, which `args_to_list`'s
+                        // `alloc_obj` gave its OWN incref. So a rest arg's moved-in
+                        // reference is surplus — release it, or it leaks one region per
+                        // rest arg per call (the variadic tail-forward leak: `(defn g [&
+                        // rest] …) (defn f [x] (g x))`; `store-wrapper` in the oracle).
+                        // An OWNED call keeps the caller's reference (freed at the arg's
+                        // last use), so it must NOT be released. Only release when the
+                        // value appears EXACTLY ONCE across all arg positions: an aliased
+                        // arg (same value in a fixed slot and/or another rest position)
+                        // shares one transferred reference that a fixed slot / earlier
+                        // cons already consumes, so a second release would over-free
+                        // (a UAF — leak-safe conservatism, never mis-free).
+                        if !own_params {
+                            Self::release_moved_rest_args(rest_args, args, heap);
+                        }
+                        list
+                    }
                     crate::hir::VarargKind::Struct => {
                         match Self::collect_struct_in_own_region(fiber, heap, rest_args, None) {
                             Some(v) => v,
@@ -352,6 +373,32 @@ impl VM {
             list = new_cons;
         }
         list
+    }
+
+    /// Release the moved-in reference of each rest arg on a MOVE call
+    /// (`own_params = false`). See the caller (`populate_env`, the `List` vararg
+    /// arm) for why: the rest arg lives in the collected list (its own incref), so
+    /// the caller's transferred reference is surplus. Released ONLY for a value that
+    /// appears exactly once across ALL arg positions (`all_args`) — an aliased value
+    /// shares one transferred reference a fixed slot / earlier cons already consumes,
+    /// so a second release would over-free (leak-safe: never mis-free).
+    fn release_moved_rest_args(
+        rest_args: &[Value],
+        all_args: &[Value],
+        heap: &mut crate::value::fiberheap::FiberHeap,
+    ) {
+        for arg in rest_args {
+            let Some(arg_region) = crate::value::arena::region_of(heap, *arg) else {
+                continue; // an immediate carries no region
+            };
+            let occurrences = all_args
+                .iter()
+                .filter(|a| crate::value::arena::region_of(heap, **a) == Some(arg_region))
+                .count();
+            if occurrences == 1 {
+                heap.decref_region(arg_region);
+            }
+        }
     }
 
     /// Collect alternating keyword args into a struct in its OWN fresh region.

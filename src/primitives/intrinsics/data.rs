@@ -257,7 +257,11 @@ pub(super) fn prim_pop(
         return type_err("%pop", "@array", &args[0], ctx);
     };
     if arr.borrow().is_empty() {
-        return (SIG_ERROR, ctx.error("type-error", "%pop: empty @array"));
+        // Popping an empty container is an argument error, not a type error — the
+        // container's type is fine, its length is not. Aligned with the other two
+        // pop-empty paths (`seq::mutate::seq_pop`, `vm::types::intrinsic`) and the
+        // `pop empty @array` error-keyword pin in `tests/elle/errors.lisp`.
+        return (SIG_ERROR, ctx.error("argument-error", "pop: empty @array"));
     }
     (
         SIG_OK,

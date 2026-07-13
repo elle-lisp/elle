@@ -106,6 +106,27 @@ impl PrimitiveClassification {
             .map(|(id, _)| *id)
             .collect();
 
+        // The container element-READ natives — `first`/`rest`/`get`/`pop` and their
+        // `%`-op peers. Their result is a value read OUT of the container passed as
+        // arg0; escape adds a read-result → container-contents flow edge so a value
+        // read back out and escaped is refused adoption into the container's subtree
+        // (`CallClassification::container_read_funnels`).
+        let container_read_funnels = [
+            "first",
+            "rest",
+            "get",
+            "pop",
+            "%first",
+            "%rest",
+            "%get",
+            "%pop",
+            "%pop-string",
+            "%pop-bytes",
+        ]
+        .iter()
+        .filter_map(|name| symbols.get(name))
+        .collect();
+
         let call_classification = crate::hir::CallClassification {
             intrinsic_ops: intrinsics.keys().copied().collect(),
             effects: meta.effects.iter().map(|(k, v)| (*k, *v)).collect(),
@@ -113,6 +134,7 @@ impl PrimitiveClassification {
             embeds: meta.embeds.iter().map(|(k, v)| (*k, *v)).collect(),
             retaining_store_funnels,
             bytecopy_store_funnels,
+            container_read_funnels,
             moves_out_passthrough,
             moves_out,
             // The two natives the transferred-returned-subtree cut recognizes

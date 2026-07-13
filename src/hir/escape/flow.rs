@@ -18,6 +18,6 @@ mod sources;
 mod summary;
 
 pub(super) use atom::{Atom, TailCtx};
-pub(super) use collect::collect_flow;
+pub(super) use collect::{collect_container_contents, collect_flow};
 pub(super) use sources::{record_frontier_sites, return_atoms};
 pub(super) use summary::compute_arg_return;
