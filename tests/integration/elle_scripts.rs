@@ -408,6 +408,63 @@ fn region_fold_closure_arg_uaf() {
     );
 }
 
+// RED (known over-free, not yet fixed) — the STRING sibling of
+// region_fold_closure_arg_uaf. A helper accumulates a string by reassigning a
+// `@`-capture cell in a loop (`(assign out (string out …))`) and RETURNS `out`;
+// the returned string's region reaches refcount 0 as the activation unwinds, so
+// its `DecrefValueRegion` frees it, and the caller — which reads the returned
+// value one form later — derefs the freed page (SIGSEGV under guardfree, traced
+// to `DecrefValueRegion of string … context: UpdateCapture`, same context as the
+// closure sibling). Dropping any one ingredient makes it clean: the accumulation
+// must be a LOOP over the cell (a single `(assign out …)` is clean), the builder
+// must be a FUNCTION whose result a CALLER consumes (inlined at top level is
+// clean), and the returned string must be READ after return. This is mu's
+// `_safe-uri` (lib/cont/repo.lisp) / `_slug` (lib/cont/config.lisp): guardfree on
+// the mu suites points at the identical free site for dial-owner-git, repo, and
+// adopt-config, and without guardfree the freed region is silently reused (the
+// slug reads back as garbage — adopt-config saw an empty `:branch`). When the
+// region solver keeps a loop-reassigned capture cell's returned region live across
+// the caller's read, this exits 0 under guardfree. Distinct from the fixed struct
+// write-path over-free (`struct_put_with_rebind`); this is the capture-cell string
+// return path. Full repro + trace in the fixture header.
+// NOT #[ignore]'d (unlike the older RED pins): a fixture runs as a guardfree
+// SUBPROCESS via `run_elle_file_with_args`, so its SIGSEGV fails THIS test cleanly
+// and cannot take the harness process down (that hazard is the tests/elle/*.lisp
+// glob's shared process, not this one). ACTIVE RED — fails today, flips green when
+// the over-free is fixed.
+#[test]
+fn region_capture_cell_string_accum_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-capture-cell-string-accum-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
+// RED (known cascade over-free, not yet fixed) — the CASCADE / stored-member twin
+// of region_capture_cell_string_accum_uaf. A server fiber reads a request off a
+// socket, stores a MEMBER of the parsed request (`(get req :params)`) into a
+// module-level `@`-capture cell, then reads a SIBLING member (`(get req :id)`) to
+// frame the reply. The sibling read is `req`'s last use, so the solver frees
+// `req`'s region — and the stored `:params` member, a CHILD region, CASCADE-frees
+// under the still-live cell (SIGSEGV under guardfree, `freed via cascade(…) …
+// context: UpdateCapture`). Dropping any one ingredient is clean: the cell must
+// store a MEMBER (not the whole `req`), a SIBLING member must be read AFTER the
+// store, and the value must arrive OVER A SOCKET into a spawned fiber (an
+// in-process literal / json/parse of a literal string is clean). This is mu's
+// lib/cont/ipc.lisp driver callbacks (`(assign got-X params)` of an RPC request's
+// params while the same dispatch reads its id to frame the reply); guardfree on
+// the mu suites detonates here for ipc, ipc-roundtrip, spawn-agent, and
+// adopt-grant, all of which PASS the normal gate — a latent corruption the smoke
+// run reads past. Fixed when a member stored into a captured cell pins its region
+// live independent of its parent. NOT #[ignore]'d (see the note above); ACTIVE RED.
+#[test]
+fn region_capture_cell_member_cascade_uaf() {
+    run_elle_file_with_args(
+        "tests/integration/fixtures/region-capture-cell-member-cascade-uaf.lisp",
+        &["--jit=off", "--trace=guardfree"],
+    );
+}
+
 // RED — a `moves_out` REMOVE (`%pop`) in TAIL position over-frees the removed HEAP
 // element when that element was stored through a push FUNNEL. `(%array-push a
 // (list …))` increfs the list's region and records the outgoing edge; `%pop` moves
